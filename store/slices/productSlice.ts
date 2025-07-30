@@ -5,8 +5,12 @@ export interface Product {
   name: string
   description: string
   price: number
+  wholesale_price: number
+  msp: number
   imageUrl: string
+  image_url: string
   category: string
+  shelf: string
   currency: string
   [key: string]: any // allows for dynamic properties
 }

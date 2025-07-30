@@ -12,8 +12,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { useToast } from "@/components/ui/use-toast"
 import { updateProduct } from "@/app/actions/product-actions"
 import { getCategories, createCategory } from "@/app/actions/category-actions"
-import { printBarcodeSticker } from "@/lib/barcode-utils"
-import { AlertCircle, Check, ChevronRight, Loader2, Plus, Search, Tag, X } from "lucide-react"
+import { AlertCircle, Check, ChevronRight, Loader2, Plus, Search, Tag, X, ImageIcon } from "lucide-react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { getDeviceCurrency } from "@/app/actions/dashboard-actions"
@@ -25,21 +24,41 @@ interface Category {
   description?: string
 }
 
+interface Product {
+  id: number
+  name: string
+  company_name?: string
+  category?: string
+  category_id?: number
+  description?: string
+  price: number
+  wholesale_price?: number
+  msp?: number
+  stock: number
+  shelf?: string
+  barcode?: string
+  image_url?: string
+  created_by?: number
+}
+
 interface EditProductModalProps {
   isOpen: boolean
   onClose: () => void
-  product: any
   onSuccess?: (product: any) => void
+  product: Product | null
   userId?: number
 }
 
-export default function EditProductModal({ isOpen, onClose, product, onSuccess, userId }: EditProductModalProps) {
+export default function EditProductModal({ isOpen, onClose, onSuccess, product, userId }: EditProductModalProps) {
   const { toast } = useToast()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [currency, setCurrency] = useState("QAR") // Default currency
+  const [selectedImage, setSelectedImage] = useState<File | null>(null)
+  const [imagePreview, setImagePreview] = useState<string | null>(null)
+  const [currentImageUrl, setCurrentImageUrl] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [formData, setFormData] = useState({
-    id: 0,
     name: "",
     companyName: "",
     category: "",
@@ -47,7 +66,9 @@ export default function EditProductModal({ isOpen, onClose, product, onSuccess, 
     description: "",
     price: "",
     wholesalePrice: "",
+    msp: "",
     stock: "",
+    shelf: "",
     barcode: "",
   })
 
@@ -86,11 +107,10 @@ export default function EditProductModal({ isOpen, onClose, product, onSuccess, 
     }
   }, [fieldErrors])
 
-  // Initialize form data when product changes
+  // Reset form when modal opens or product changes
   useEffect(() => {
-    if (product) {
+    if (isOpen && product) {
       setFormData({
-        id: product.id,
         name: product.name || "",
         companyName: product.company_name || "",
         category: product.category || "",
@@ -98,28 +118,28 @@ export default function EditProductModal({ isOpen, onClose, product, onSuccess, 
         description: product.description || "",
         price: product.price?.toString() || "",
         wholesalePrice: product.wholesale_price?.toString() || "",
-        stock: product.stock?.toString() || "0",
+        msp: product.msp?.toString() || "",
+        stock: product.stock?.toString() || "",
+        shelf: product.shelf || "",
         barcode: product.barcode || "",
       })
 
-      // Set selected category if available
-      if (product.category_id && product.category) {
-        setSelectedCategory({
-          id: product.category_id,
-          name: product.category,
-        })
+      // Set current image
+      setCurrentImageUrl(product.image_url || null)
+      setImagePreview(null)
+      setSelectedImage(null)
+
+      // Find and set selected category
+      if (product.category_id) {
+        const category = categories.find((cat) => cat.id === product.category_id)
+        setSelectedCategory(category || null)
       } else {
         setSelectedCategory(null)
       }
-    }
-  }, [product])
 
-  // Fetch categories when modal opens
-  useEffect(() => {
-    if (isOpen) {
-      fetchCategories()
       setError(null)
       setFieldErrors({})
+      fetchCategories()
 
       // Fetch currency
       const fetchCurrency = async () => {
@@ -132,7 +152,7 @@ export default function EditProductModal({ isOpen, onClose, product, onSuccess, 
       }
       fetchCurrency()
     }
-  }, [isOpen, userId])
+  }, [isOpen, product, userId])
 
   // Filter categories based on search query
   useEffect(() => {
@@ -170,6 +190,13 @@ export default function EditProductModal({ isOpen, onClose, product, onSuccess, 
       if (result.success) {
         setCategories(result.data)
         setFilteredCategories(result.data)
+
+        // Update selected category if product has category_id
+        if (product?.category_id) {
+          const category = result.data.find((cat) => cat.id === product.category_id)
+          setSelectedCategory(category || null)
+        }
+
         console.log("Categories loaded for userId:", userId, result.data)
       } else {
         toast({
@@ -193,6 +220,48 @@ export default function EditProductModal({ isOpen, onClose, product, onSuccess, 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target
     setFormData((prev) => ({ ...prev, [name]: value }))
+  }
+
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      // Validate file type
+      if (!file.type.startsWith("image/")) {
+        toast({
+          title: "Error",
+          description: "Please select a valid image file",
+          variant: "destructive",
+        })
+        return
+      }
+
+      // Validate file size (max 5MB)
+      if (file.size > 5 * 1024 * 1024) {
+        toast({
+          title: "Error",
+          description: "Image size should be less than 5MB",
+          variant: "destructive",
+        })
+        return
+      }
+
+      setSelectedImage(file)
+
+      // Create preview
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        setImagePreview(e.target?.result as string)
+      }
+      reader.readAsDataURL(file)
+    }
+  }
+
+  const removeImage = () => {
+    setSelectedImage(null)
+    setImagePreview(null)
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ""
+    }
   }
 
   const handleAddNewCategory = async () => {
@@ -275,9 +344,14 @@ export default function EditProductModal({ isOpen, onClose, product, onSuccess, 
     })
   }
 
-  // Update the handleSubmit function to handle field-specific errors
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+
+    if (!product) {
+      setError("No product selected for editing")
+      return
+    }
+
     setIsSubmitting(true)
     setError(null)
     setFieldErrors({})
@@ -293,20 +367,31 @@ export default function EditProductModal({ isOpen, onClose, product, onSuccess, 
         return
       }
 
-      // Update product
-      const result = await updateProduct({
-        id: formData.id,
-        name: formData.name,
-        company_name: formData.companyName,
-        category: formData.category,
-        category_id: formData.categoryId,
-        description: formData.description,
-        price: Number.parseFloat(formData.price),
-        wholesale_price: Number.parseFloat(formData.wholesalePrice || "0"),
-        stock: Number.parseInt(formData.stock || "0"),
-        barcode: formData.barcode,
-        user_id: userId,
-      })
+      // Create FormData object
+      const submitFormData = new FormData()
+      submitFormData.append("id", product.id.toString())
+      submitFormData.append("name", formData.name)
+      submitFormData.append("company_name", formData.companyName)
+      submitFormData.append("category", formData.category)
+      if (formData.categoryId) {
+        submitFormData.append("category_id", formData.categoryId.toString())
+      }
+      submitFormData.append("description", formData.description)
+      submitFormData.append("price", formData.price)
+      submitFormData.append("wholesale_price", formData.wholesalePrice || "0")
+      submitFormData.append("msp", formData.msp || "0")
+      submitFormData.append("stock", formData.stock || "0")
+      submitFormData.append("shelf", formData.shelf)
+      submitFormData.append("barcode", formData.barcode)
+      if (userId) {
+        submitFormData.append("user_id", userId.toString())
+      }
+      if (selectedImage) {
+        submitFormData.append("image", selectedImage)
+      }
+
+      // Update product with FormData
+      const result = await updateProduct(submitFormData)
 
       if (result && result.success) {
         toast({
@@ -324,9 +409,9 @@ export default function EditProductModal({ isOpen, onClose, product, onSuccess, 
       } else {
         // Handle field-specific errors
         if (result?.field) {
-          setFieldErrors({ [result.field]: result.message })
+          setFieldErrors({ [result.field]: result.error || result.message })
         } else {
-          setError(result?.message || "Failed to update product. Please try again.")
+          setError(result?.error || result?.message || "Failed to update product. Please try again.")
         }
       }
     } catch (error) {
@@ -338,10 +423,8 @@ export default function EditProductModal({ isOpen, onClose, product, onSuccess, 
     }
   }
 
-  const handlePrintPriceTag = () => {
-    if (product) {
-      printBarcodeSticker(product)
-    }
+  if (!product) {
+    return null
   }
 
   return (
@@ -355,8 +438,52 @@ export default function EditProductModal({ isOpen, onClose, product, onSuccess, 
 
             <form onSubmit={handleSubmit} className="space-y-4 mt-4">
               <div className="grid gap-4">
-                {/* Update the form fields to show field-specific errors */}
-                {/* For example, update the name input field: */}
+                {/* Product Image Upload */}
+                <div className="grid gap-2">
+                  <Label className="text-gray-700 dark:text-gray-300">Product Image</Label>
+                  <div className="flex flex-col gap-2">
+                    {imagePreview || currentImageUrl ? (
+                      <div className="relative">
+                        <img
+                          src={imagePreview || currentImageUrl || "/placeholder.svg"}
+                          alt="Product preview"
+                          className="w-full h-32 object-cover rounded-md border border-gray-300 dark:border-gray-600"
+                        />
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          size="sm"
+                          onClick={removeImage}
+                          className="absolute top-2 right-2"
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                        {imagePreview && (
+                          <div className="absolute bottom-2 left-2 bg-blue-600 text-white text-xs px-2 py-1 rounded">
+                            New Image
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div
+                        onClick={() => fileInputRef.current?.click()}
+                        className="w-full h-32 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-md flex flex-col items-center justify-center cursor-pointer hover:border-gray-400 dark:hover:border-gray-500 transition-colors"
+                      >
+                        <ImageIcon className="h-8 w-8 text-gray-400 dark:text-gray-500 mb-2" />
+                        <p className="text-sm text-gray-500 dark:text-gray-400">Click to upload image</p>
+                        <p className="text-xs text-gray-400 dark:text-gray-500">Max 5MB</p>
+                      </div>
+                    )}
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handleImageSelect}
+                      className="hidden"
+                    />
+                  </div>
+                </div>
+
                 <div className="grid gap-2">
                   <Label htmlFor="name" className="text-gray-700 dark:text-gray-300">
                     Product Name *
@@ -387,7 +514,7 @@ export default function EditProductModal({ isOpen, onClose, product, onSuccess, 
                   />
                 </div>
 
-                {/* Redesigned Category Selection */}
+                {/* Category Selection */}
                 <div className="grid gap-2">
                   <Label htmlFor="category" className="text-gray-700 dark:text-gray-300">
                     Category *
@@ -411,7 +538,7 @@ export default function EditProductModal({ isOpen, onClose, product, onSuccess, 
                     </Button>
                   </div>
                   {selectedCategory && (
-                    <p className="text-xs text-gray-500">
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
                       Selected:{" "}
                       <Badge
                         variant="outline"
@@ -438,7 +565,8 @@ export default function EditProductModal({ isOpen, onClose, product, onSuccess, 
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                {/* Price Fields */}
+                <div className="grid grid-cols-1 gap-4">
                   <div className="grid gap-2">
                     <Label htmlFor="wholesalePrice" className="text-gray-700 dark:text-gray-300">
                       Wholesale Price ({currency})
@@ -456,7 +584,23 @@ export default function EditProductModal({ isOpen, onClose, product, onSuccess, 
                     />
                   </div>
 
-                  {/* Update the price input field: */}
+                  <div className="grid gap-2">
+                    <Label htmlFor="msp" className="text-gray-700 dark:text-gray-300">
+                      MSP - Minimum Selling Price ({currency})
+                    </Label>
+                    <Input
+                      id="msp"
+                      name="msp"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={formData.msp}
+                      onChange={handleChange}
+                      placeholder="0.00"
+                      className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400"
+                    />
+                  </div>
+
                   <div className="grid gap-2">
                     <Label htmlFor="price" className="text-gray-700 dark:text-gray-300">
                       MRP ({currency}) *
@@ -477,24 +621,39 @@ export default function EditProductModal({ isOpen, onClose, product, onSuccess, 
                   </div>
                 </div>
 
-                <div className="grid gap-2">
-                  <Label htmlFor="stock" className="text-gray-700 dark:text-gray-300">
-                    Stock
-                  </Label>
-                  <Input
-                    id="stock"
-                    name="stock"
-                    type="number"
-                    min="0"
-                    value={formData.stock}
-                    onChange={handleChange}
-                    onFocus={(e) => e.target.select()}
-                    placeholder="0"
-                    className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400"
-                  />
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="stock" className="text-gray-700 dark:text-gray-300">
+                      Stock
+                    </Label>
+                    <Input
+                      id="stock"
+                      name="stock"
+                      type="number"
+                      min="0"
+                      value={formData.stock}
+                      onChange={handleChange}
+                      onFocus={(e) => e.target.select()}
+                      placeholder="0"
+                      className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400"
+                    />
+                  </div>
+
+                  <div className="grid gap-2">
+                    <Label htmlFor="shelf" className="text-gray-700 dark:text-gray-300">
+                      Shelf
+                    </Label>
+                    <Input
+                      id="shelf"
+                      name="shelf"
+                      value={formData.shelf}
+                      onChange={handleChange}
+                      placeholder="Enter shelf name"
+                      className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400"
+                    />
+                  </div>
                 </div>
 
-                {/* Update the barcode input field: */}
                 <div className="grid gap-2">
                   <Label htmlFor="barcode" className="text-gray-700 dark:text-gray-300">
                     Barcode
@@ -508,7 +667,7 @@ export default function EditProductModal({ isOpen, onClose, product, onSuccess, 
                     className={`bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400 ${fieldErrors.barcode ? "border-red-500 dark:border-red-400" : ""}`}
                   />
                   <FormError message={fieldErrors.barcode || ""} />
-                  <p className="text-xs text-gray-500">Enter a barcode or scan a product to update.</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Enter a barcode or scan a product to add.</p>
                 </div>
               </div>
 
@@ -534,14 +693,6 @@ export default function EditProductModal({ isOpen, onClose, product, onSuccess, 
                   Cancel
                 </Button>
                 <Button
-                  type="button"
-                  variant="outline"
-                  onClick={handlePrintPriceTag}
-                  className="w-full sm:w-auto border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 bg-transparent"
-                >
-                  Print Price Tag
-                </Button>
-                <Button
                   type="submit"
                   disabled={isSubmitting}
                   className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600"
@@ -549,10 +700,10 @@ export default function EditProductModal({ isOpen, onClose, product, onSuccess, 
                   {isSubmitting ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Saving...
+                      Updating...
                     </>
                   ) : (
-                    "Save Changes"
+                    "Update Product"
                   )}
                 </Button>
               </DialogFooter>

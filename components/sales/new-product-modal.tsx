@@ -12,7 +12,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { useToast } from "@/components/ui/use-toast"
 import { createProduct } from "@/app/actions/product-actions"
 import { getCategories, createCategory } from "@/app/actions/category-actions"
-import { AlertCircle, Check, ChevronRight, Loader2, Plus, Search, Tag, X } from "lucide-react"
+import { AlertCircle, Check, ChevronRight, Loader2, Plus, Search, Tag, X, ImageIcon } from "lucide-react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { getDeviceCurrency } from "@/app/actions/dashboard-actions"
@@ -36,6 +36,9 @@ export default function NewProductModal({ isOpen, onClose, onSuccess, userId }: 
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [currency, setCurrency] = useState("QAR") // Default currency
+  const [selectedImage, setSelectedImage] = useState<File | null>(null)
+  const [imagePreview, setImagePreview] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [formData, setFormData] = useState({
     name: "",
     companyName: "",
@@ -44,7 +47,9 @@ export default function NewProductModal({ isOpen, onClose, onSuccess, userId }: 
     description: "",
     price: "",
     wholesalePrice: "",
+    msp: "",
     stock: "",
+    shelf: "",
     barcode: "",
   })
 
@@ -83,49 +88,28 @@ export default function NewProductModal({ isOpen, onClose, onSuccess, userId }: 
     }
   }, [fieldErrors])
 
-useEffect(() => {
-  const initializeForm = async () => {
-    setFormData({
-      name: "",
-      companyName: "",
-      category: "",
-      categoryId: null,
-      description: "",
-      price: "",
-      wholesalePrice: "",
-      stock: "",
-      barcode: "",
-    })
-    setSelectedCategory(null)
-    setError(null)
-    setFieldErrors({})
-
-    setIsLoadingCategories(true)
-
-    try {
-      // Fetch categories
-      const result = await getCategories(userId)
-      if (result.success) {
-        setCategories(result.data)
-        setFilteredCategories(result.data)
-        console.log("Categories loaded for userId:", userId, result.data)
-      } else {
-        toast({
-          title: "Error",
-          description: result.message || "Failed to load categories",
-          variant: "destructive",
-        })
-      }
-    } catch (error) {
-      console.error("Error fetching categories:", error)
-      toast({
-        title: "Error",
-        description: "Failed to load categories",
-        variant: "destructive",
+  // Reset form when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setFormData({
+        name: "",
+        companyName: "",
+        category: "",
+        categoryId: null,
+        description: "",
+        price: "",
+        wholesalePrice: "",
+        msp: "",
+        stock: "",
+        shelf: "",
+        barcode: "",
       })
-    } finally {
-      setIsLoadingCategories(false)
-    }
+      setSelectedCategory(null)
+      setSelectedImage(null)
+      setImagePreview(null)
+      setError(null)
+      setFieldErrors({})
+      fetchCategories()
 
     // Fetch currency
     try {
@@ -170,10 +154,79 @@ useEffect(() => {
     }
   }, [isAddingNewCategory])
 
+  const fetchCategories = async () => {
+    setIsLoadingCategories(true)
+    setCategorySearchQuery("")
+    try {
+      const result = await getCategories(userId)
+      if (result.success) {
+        setCategories(result.data)
+        setFilteredCategories(result.data)
+        console.log("Categories loaded for userId:", userId, result.data)
+      } else {
+        toast({
+          title: "Error",
+          description: result.message || "Failed to load categories",
+          variant: "destructive",
+        })
+      }
+    } catch (error) {
+      console.error("Error fetching categories:", error)
+      toast({
+        title: "Error",
+        description: "Failed to load categories",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoadingCategories(false)
+    }
+  }
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target
     setFormData((prev) => ({ ...prev, [name]: value }))
+  }
+
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      // Validate file type
+      if (!file.type.startsWith("image/")) {
+        toast({
+          title: "Error",
+          description: "Please select a valid image file",
+          variant: "destructive",
+        })
+        return
+      }
+
+      // Validate file size (max 5MB)
+      if (file.size > 5 * 1024 * 1024) {
+        toast({
+          title: "Error",
+          description: "Image size should be less than 5MB",
+          variant: "destructive",
+        })
+        return
+      }
+
+      setSelectedImage(file)
+
+      // Create preview
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        setImagePreview(e.target?.result as string)
+      }
+      reader.readAsDataURL(file)
+    }
+  }
+
+  const removeImage = () => {
+    setSelectedImage(null)
+    setImagePreview(null)
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ""
+    }
   }
 
   const handleAddNewCategory = async () => {
@@ -268,19 +321,30 @@ useEffect(() => {
         return
       }
 
-      // Create product
-      const result = await createProduct({
-        name: formData.name,
-        company_name: formData.companyName,
-        category: formData.category,
-        category_id: formData.categoryId,
-        description: formData.description,
-        price: Number.parseFloat(formData.price),
-        wholesale_price: Number.parseFloat(formData.wholesalePrice || "0"),
-        stock: Number.parseInt(formData.stock || "0"),
-        barcode: formData.barcode,
-        user_id: userId,
-      })
+      // Create FormData object
+      const submitFormData = new FormData()
+      submitFormData.append("name", formData.name)
+      submitFormData.append("company_name", formData.companyName)
+      submitFormData.append("category", formData.category)
+      if (formData.categoryId) {
+        submitFormData.append("category_id", formData.categoryId.toString())
+      }
+      submitFormData.append("description", formData.description)
+      submitFormData.append("price", formData.price)
+      submitFormData.append("wholesale_price", formData.wholesalePrice || "0")
+      submitFormData.append("msp", formData.msp || "0")
+      submitFormData.append("stock", formData.stock || "0")
+      submitFormData.append("shelf", formData.shelf)
+      submitFormData.append("barcode", formData.barcode)
+      if (userId) {
+        submitFormData.append("user_id", userId.toString())
+      }
+      if (selectedImage) {
+        submitFormData.append("image", selectedImage)
+      }
+
+      // Create product with FormData
+      const result = await createProduct(submitFormData)
 
       if (result && result.success) {
         toast({
@@ -323,6 +387,47 @@ useEffect(() => {
 
             <form onSubmit={handleSubmit} className="space-y-4 mt-4">
               <div className="grid gap-4">
+                {/* Product Image Upload */}
+                <div className="grid gap-2">
+                  <Label className="text-gray-700 dark:text-gray-300">Product Image (Optional)</Label>
+                  <div className="flex flex-col gap-2">
+                    {imagePreview ? (
+                      <div className="relative">
+                        <img
+                          src={imagePreview || "/placeholder.svg"}
+                          alt="Product preview"
+                          className="w-full h-32 object-cover rounded-md border border-gray-300 dark:border-gray-600"
+                        />
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          size="sm"
+                          onClick={removeImage}
+                          className="absolute top-2 right-2"
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <div
+                        onClick={() => fileInputRef.current?.click()}
+                        className="w-full h-32 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-md flex flex-col items-center justify-center cursor-pointer hover:border-gray-400 dark:hover:border-gray-500 transition-colors"
+                      >
+                        <ImageIcon className="h-8 w-8 text-gray-400 dark:text-gray-500 mb-2" />
+                        <p className="text-sm text-gray-500 dark:text-gray-400">Click to upload image</p>
+                        <p className="text-xs text-gray-400 dark:text-gray-500">Max 5MB</p>
+                      </div>
+                    )}
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handleImageSelect}
+                      className="hidden"
+                    />
+                  </div>
+                </div>
+
                 <div className="grid gap-2">
                   <Label htmlFor="name" className="text-gray-700 dark:text-gray-300">
                     Product Name *
@@ -404,7 +509,8 @@ useEffect(() => {
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                {/* Price Fields */}
+                <div className="grid grid-cols-1 gap-4">
                   <div className="grid gap-2">
                     <Label htmlFor="wholesalePrice" className="text-gray-700 dark:text-gray-300">
                       Wholesale Price ({currency})
@@ -416,6 +522,23 @@ useEffect(() => {
                       step="0.01"
                       min="0"
                       value={formData.wholesalePrice}
+                      onChange={handleChange}
+                      placeholder="0.00"
+                      className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400"
+                    />
+                  </div>
+
+                  <div className="grid gap-2">
+                    <Label htmlFor="msp" className="text-gray-700 dark:text-gray-300">
+                      MSP - Minimum Selling Price ({currency})
+                    </Label>
+                    <Input
+                      id="msp"
+                      name="msp"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={formData.msp}
                       onChange={handleChange}
                       placeholder="0.00"
                       className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400"
@@ -442,21 +565,37 @@ useEffect(() => {
                   </div>
                 </div>
 
-                <div className="grid gap-2">
-                  <Label htmlFor="stock" className="text-gray-700 dark:text-gray-300">
-                    Stock
-                  </Label>
-                  <Input
-                    id="stock"
-                    name="stock"
-                    type="number"
-                    min="0"
-                    value={formData.stock}
-                    onChange={handleChange}
-                    onFocus={(e) => e.target.select()}
-                    placeholder="0"
-                    className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400"
-                  />
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="stock" className="text-gray-700 dark:text-gray-300">
+                      Stock
+                    </Label>
+                    <Input
+                      id="stock"
+                      name="stock"
+                      type="number"
+                      min="0"
+                      value={formData.stock}
+                      onChange={handleChange}
+                      onFocus={(e) => e.target.select()}
+                      placeholder="0"
+                      className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400"
+                    />
+                  </div>
+
+                  <div className="grid gap-2">
+                    <Label htmlFor="shelf" className="text-gray-700 dark:text-gray-300">
+                      Shelf
+                    </Label>
+                    <Input
+                      id="shelf"
+                      name="shelf"
+                      value={formData.shelf}
+                      onChange={handleChange}
+                      placeholder="Enter shelf name"
+                      className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400"
+                    />
+                  </div>
                 </div>
 
                 <div className="grid gap-2">

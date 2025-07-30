@@ -5,7 +5,7 @@ import type React from "react"
 import { useEffect, useState, useCallback, useMemo } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Plus, Search, X, RefreshCw, Package, Download, Building2, Filter } from "lucide-react"
+import { Plus, Search, X, RefreshCw, Package, Download, Building2, Filter, Eye, EyeOff } from "lucide-react"
 import { getProducts, deleteProduct } from "@/app/actions/product-actions"
 import {
   AlertDialog,
@@ -65,6 +65,7 @@ export default function ProductTab({ userId, isAddModalOpen = false, onModalClos
   const [selectedCategory, setSelectedCategory] = useState<string>("All")
   const [selectedCompany, setSelectedCompany] = useState<string>("All")
   const [filterSearch, setFilterSearch] = useState<string>("")
+  const [privacyMode, setPrivacyMode] = useState<boolean>(true) // Default to privacy ON
   const [popupState, setPopupState] = useState<{
     isOpen: boolean
     product: any | null
@@ -166,6 +167,7 @@ export default function ProductTab({ userId, isAddModalOpen = false, onModalClos
           product.category?.toLowerCase().includes(searchLower) ||
           product.company_name?.toLowerCase().includes(searchLower) ||
           product.barcode?.toLowerCase().includes(searchLower) ||
+          product.shelf?.toLowerCase().includes(searchLower) ||
           product.id.toString().includes(searchLower),
       )
     }
@@ -348,6 +350,19 @@ export default function ProductTab({ userId, isAddModalOpen = false, onModalClos
               <h1 className="text-lg sm:text-xl font-semibold">Product Management</h1>
             </div>
             <div className="flex flex-wrap gap-2">
+              <Button
+                onClick={() => setPrivacyMode(!privacyMode)}
+                size="sm"
+                variant="secondary"
+                className={`${
+                  privacyMode
+                    ? "bg-red-500/20 hover:bg-red-500/30 text-red-100 border-red-300/30"
+                    : "bg-green-500/20 hover:bg-green-500/30 text-green-100 border-green-300/30"
+                } backdrop-blur-sm transition-all`}
+              >
+                {privacyMode ? <EyeOff className="h-4 w-4 mr-1" /> : <Eye className="h-4 w-4 mr-1" />}
+                {privacyMode ? "Privacy On" : "Privacy Off"}
+              </Button>
               <Button
                 onClick={() =>
                   exportProductsToPDF(
@@ -585,6 +600,9 @@ export default function ProductTab({ userId, isAddModalOpen = false, onModalClos
                           <div className="text-xs text-gray-500 dark:text-gray-400">
                             {product.company_name || "No company"}
                           </div>
+                          {product.shelf && (
+                            <div className="text-xs text-gray-400 dark:text-gray-500">Shelf: {product.shelf}</div>
+                          )}
                           <div className="text-xs text-gray-400 dark:text-gray-500">
                             {product.barcode || product.id}
                           </div>
@@ -599,21 +617,33 @@ export default function ProductTab({ userId, isAddModalOpen = false, onModalClos
                         {currency} {Number(product.price).toFixed(2)}
                       </td>
                       <td className="p-3 text-sm font-medium text-gray-900 dark:text-gray-100">
-                        {currency} {Number(product.wholesale_price || 0).toFixed(2)}
+                        {privacyMode ? (
+                          <span className="text-gray-400 dark:text-gray-500">***</span>
+                        ) : (
+                          `${currency} ${Number(product.wholesale_price || 0).toFixed(2)}`
+                        )}
                       </td>
-                      <td className="p-3 text-sm font-medium text-gray-900 dark:text-gray-100">{product.stock}</td>
+                      <td className="p-3 text-sm font-medium text-gray-900 dark:text-gray-100">
+                        {privacyMode ? <span className="text-gray-400 dark:text-gray-500">***</span> : product.stock}
+                      </td>
                       <td className="p-3">
-                        <span
-                          className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                            product.stock === 0
-                              ? "bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200"
-                              : product.stock <= 5
-                                ? "bg-orange-100 dark:bg-orange-900 text-orange-800 dark:text-orange-200"
-                                : "bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200"
-                          }`}
-                        >
-                          {product.stock === 0 ? "Out of Stock" : product.stock <= 5 ? "Low Stock" : "In Stock"}
-                        </span>
+                        {privacyMode ? (
+                          <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400">
+                            *** Status
+                          </span>
+                        ) : (
+                          <span
+                            className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                              product.stock === 0
+                                ? "bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200"
+                                : product.stock <= 5
+                                  ? "bg-orange-100 dark:bg-orange-900 text-orange-800 dark:text-orange-200"
+                                  : "bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200"
+                            }`}
+                          >
+                            {product.stock === 0 ? "Out of Stock" : product.stock <= 5 ? "Low Stock" : "In Stock"}
+                          </span>
+                        )}
                       </td>
                     </tr>
                   ))
@@ -828,6 +858,7 @@ export default function ProductTab({ userId, isAddModalOpen = false, onModalClos
             setIsAdjustStockModalOpen(true)
           }}
           currency={currency}
+          privacyMode={privacyMode}
         />
       )}
 
