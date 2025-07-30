@@ -331,6 +331,7 @@ interface CreateProductParams {
   user_id?: number
 }
 
+
 // Update the createProduct function to check for duplicates within user's products
 export async function createProduct(formData: any) {
   const name = formData.name as string
