@@ -336,18 +336,18 @@ export default function ProductTab({ userId, isAddModalOpen = false, onModalClos
     dispatch(setSearchTerm(value))
   }
 
-  return (
-    <div className="flex h-full gap-4">
-      {/* Main Products Area - 75% */}
+ return (
+    <div className="flex flex-col lg:flex-row h-full gap-4">
+      {/* Main Products Area - Full width on mobile, 75% on desktop */}
       <div className="flex-1 space-y-4">
         {/* Header with Search */}
         <div className="bg-gradient-to-r from-blue-600 to-blue-700 dark:from-blue-700 dark:to-blue-800 rounded-xl p-4 text-white shadow-lg">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
             <div className="flex items-center gap-3">
-              <Package className="h-6 w-6" />
-              <h1 className="text-xl font-semibold">Product Management</h1>
+              <Package className="h-6 w-6 flex-shrink-0" />
+              <h1 className="text-lg sm:text-xl font-semibold">Product Management</h1>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button
                 onClick={() =>
                   exportProductsToPDF(
@@ -358,34 +358,44 @@ export default function ProductTab({ userId, isAddModalOpen = false, onModalClos
                 }
                 size="sm"
                 variant="secondary"
-                className="bg-white/10 hover:bg-white/20 text-white border-white/20 backdrop-blur-sm"
+                className="bg-white/10 hover:bg-white/20 text-white border-white/20 backdrop-blur-sm text-xs sm:text-sm"
                 disabled={filteredProducts.length === 0}
               >
-                <Download className="h-4 w-4 mr-1" />
-                Export
+                <Download className="h-4 w-4 mr-1 flex-shrink-0" />
+                <span className="hidden sm:inline">Export</span>
               </Button>
               <Button
                 onClick={handleRefresh}
                 size="sm"
                 variant="secondary"
-                className="bg-white/10 hover:bg-white/20 text-white border-white/20 backdrop-blur-sm"
+                className="bg-white/10 hover:bg-white/20 text-white border-white/20 backdrop-blur-sm text-xs sm:text-sm"
                 disabled={isLoading}
               >
-                <RefreshCw className={`h-4 w-4 mr-1 ${isLoading ? "animate-spin" : ""}`} />
-                Refresh
+                <RefreshCw className={`h-4 w-4 mr-1 flex-shrink-0 ${isLoading ? "animate-spin" : ""}`} />
+                <span className="hidden sm:inline">Refresh</span>
+              </Button>
+              {/* Mobile Add Product Button */}
+              <Button
+                onClick={() => setIsProductModalOpen(true)}
+                size="sm"
+                variant="secondary"
+                className="bg-white/10 hover:bg-white/20 text-white border-white/20 backdrop-blur-sm text-xs sm:text-sm lg:hidden"
+              >
+                <Plus className="h-4 w-4 mr-1 flex-shrink-0" />
+                <span className="hidden sm:inline">Add Product</span>
               </Button>
             </div>
           </div>
 
           {/* Search in Header */}
-          <div className="relative max-w-md">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/70" />
+          <div className="relative max-w-full sm:max-w-md">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/70 flex-shrink-0" />
             <Input
               type="text"
               placeholder="Search products..."
               value={searchTerm}
               onChange={(e) => handleSearchChange(e.target.value)}
-              className="pl-10 pr-10 h-9 text-sm bg-white/10 border-white/20 text-white placeholder:text-white/70 focus:bg-white/20 backdrop-blur-sm"
+              className="pl-10 pr-10 h-9 text-sm bg-white/10 border-white/20 text-white placeholder:text-white/70 focus:bg-white/20 backdrop-blur-sm w-full"
             />
             {searchTerm && (
               <button
@@ -395,6 +405,92 @@ export default function ProductTab({ userId, isAddModalOpen = false, onModalClos
                 <X className="h-4 w-4" />
               </button>
             )}
+          </div>
+        </div>
+
+        {/* Mobile Filter Section */}
+        <div className="lg:hidden bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 shadow-sm">
+          {/* Filter Mode Tabs */}
+          <div className="flex bg-gray-100 dark:bg-gray-700 rounded-lg p-1 mb-4">
+            <button
+              onClick={() => handleFilterModeChange("category")}
+              className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-md text-sm font-medium transition-all ${
+                filterMode === "category"
+                  ? "bg-white dark:bg-gray-800 text-blue-600 dark:text-blue-400 shadow-sm"
+                  : "text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100"
+              }`}
+            >
+              <Filter className="h-4 w-4 flex-shrink-0" />
+              <span className="hidden sm:inline">Categories</span>
+              <span className="sm:hidden">Cat.</span>
+            </button>
+            <button
+              onClick={() => handleFilterModeChange("company")}
+              className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-md text-sm font-medium transition-all ${
+                filterMode === "company"
+                  ? "bg-white dark:bg-gray-800 text-blue-600 dark:text-blue-400 shadow-sm"
+                  : "text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100"
+              }`}
+            >
+              <Building2 className="h-4 w-4 flex-shrink-0" />
+              <span className="hidden sm:inline">Companies</span>
+              <span className="sm:hidden">Co.</span>
+            </button>
+          </div>
+
+          {/* Filter Search */}
+          <div className="relative mb-4">
+            <Search className="absolute left-3 top-1/2 h-3 w-3 -translate-y-1/2 text-gray-400 dark:text-gray-500 flex-shrink-0" />
+            <Input
+              type="text"
+              placeholder={`Search ${filterMode === "category" ? "categories" : "companies"}...`}
+              value={filterSearch}
+              onChange={(e) => setFilterSearch(e.target.value)}
+              className="pl-8 pr-8 h-8 text-xs border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400"
+            />
+            {filterSearch && (
+              <button
+                onClick={() => setFilterSearch("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+
+          {/* Filter Items - Horizontal Scrollable on Mobile */}
+          <div className="flex gap-2 overflow-x-auto pb-2">
+            {filteredItems.map((item) => {
+              const count = getItemCount(item)
+              const isSelected = filterMode === "category" ? selectedCategory === item : selectedCompany === item
+
+              return (
+                <button
+                  key={item}
+                  onClick={() => handleItemSelect(item)}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap flex-shrink-0 ${
+                    isSelected
+                      ? "bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 text-blue-700 dark:text-blue-300"
+                      : "bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600"
+                  }`}
+                >
+                  <span className="truncate max-w-24">
+                    {item === "All"
+                      ? `All ${filterMode === "category" ? "Cat." : "Co."}`
+                      : item || `No ${filterMode === "category" ? "Cat." : "Co."}`}
+                  </span>
+                  <span
+                    className={`text-xs px-1.5 py-0.5 rounded-full ${
+                      isSelected
+                        ? "bg-blue-100 dark:bg-blue-800 text-blue-600 dark:text-blue-200"
+                        : "bg-gray-100 dark:bg-gray-600 text-gray-600 dark:text-gray-300"
+                    }`}
+                  >
+                    {count}
+                  </span>
+                </button>
+              )
+            })}
           </div>
         </div>
 
@@ -417,9 +513,10 @@ export default function ProductTab({ userId, isAddModalOpen = false, onModalClos
           />
         )}
 
-        {/* Products Table */}
+        {/* Products Table/List - Responsive */}
         <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden shadow-sm">
-          <div className="overflow-x-auto">
+          {/* Desktop Table */}
+          <div className="hidden lg:block overflow-x-auto">
             <table className="w-full">
               <thead className="bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
                 <tr>
@@ -524,11 +621,100 @@ export default function ProductTab({ userId, isAddModalOpen = false, onModalClos
               </tbody>
             </table>
           </div>
+
+          {/* Mobile List View */}
+          <div className="lg:hidden">
+            {isLoading && products.length === 0 ? (
+              <div className="space-y-4 p-4">
+                {[1, 2, 3, 4, 5].map((i) => (
+                  <div key={i} className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+                    <div className="flex justify-between items-start mb-2">
+                      <Skeleton className="h-5 w-32" />
+                      <Skeleton className="h-6 w-20" />
+                    </div>
+                    <div className="space-y-2">
+                      <Skeleton className="h-4 w-24" />
+                      <Skeleton className="h-4 w-20" />
+                      <div className="flex justify-between">
+                        <Skeleton className="h-4 w-16" />
+                        <Skeleton className="h-4 w-16" />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : filteredProducts.length === 0 ? (
+              <div className="p-8 text-center text-gray-500 dark:text-gray-400">
+                {searchTerm || selectedCategory !== "All" || selectedCompany !== "All"
+                  ? "No products found"
+                  : "No products available"}
+              </div>
+            ) : (
+              <div className="divide-y divide-gray-200 dark:divide-gray-700">
+                {filteredProducts.map((product) => (
+                  <div
+                    key={product.id}
+                    className="p-4 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer transition-colors"
+                    onClick={(e) => handleProductClick(product, e)}
+                  >
+                    <div className="flex justify-between items-start mb-3">
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-medium text-gray-900 dark:text-gray-100 text-sm truncate">
+                          {product.name}
+                        </h3>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                          {product.company_name || "No company"}
+                        </p>
+                        <p className="text-xs text-gray-400 dark:text-gray-500">
+                          {product.barcode || product.id}
+                        </p>
+                      </div>
+                      <div className="flex flex-col items-end gap-2 ml-4">
+                        <span
+                          className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                            product.stock === 0
+                              ? "bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200"
+                              : product.stock <= 5
+                                ? "bg-orange-100 dark:bg-orange-900 text-orange-800 dark:text-orange-200"
+                                : "bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200"
+                          }`}
+                        >
+                          {product.stock === 0 ? "Out of Stock" : product.stock <= 5 ? "Low Stock" : "In Stock"}
+                        </span>
+                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200">
+                          {product.category || "Uncategorized"}
+                        </span>
+                      </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-3 gap-4 text-sm">
+                      <div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Retail</p>
+                        <p className="font-medium text-gray-900 dark:text-gray-100">
+                          {currency} {Number(product.price).toFixed(2)}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Wholesale</p>
+                        <p className="font-medium text-gray-900 dark:text-gray-100">
+                          {currency} {Number(product.wholesale_price || 0).toFixed(2)}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Stock</p>
+                        <p className="font-medium text-gray-900 dark:text-gray-100">{product.stock}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Sidebar - 25% */}
-      <div className="w-80">
+      {/* Desktop Sidebar - Hidden on mobile */}
+      <div className="hidden lg:block w-80">
         <Card className="border-gray-200 dark:border-gray-700 shadow-sm h-full bg-white dark:bg-gray-800">
           <CardContent className="p-4 space-y-4">
             {/* Add Product Button */}
@@ -684,6 +870,7 @@ export default function ProductTab({ userId, isAddModalOpen = false, onModalClos
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      
       {/* Product Action Popup */}
       <ProductActionPopup
         isOpen={popupState.isOpen}

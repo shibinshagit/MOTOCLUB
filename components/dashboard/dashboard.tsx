@@ -17,6 +17,10 @@ import {
   Calculator,
   Plus,
   Power,
+  Menu,
+  X,
+  ChevronUp,
+  ChevronDown,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/components/ui/use-toast"
@@ -78,6 +82,8 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
   const [dbError, setDbError] = useState<string | null>(null)
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
   const [isHeaderSaleModalOpen, setIsHeaderSaleModalOpen] = useState(false)
+  const [isFooterExpanded, setIsFooterExpanded] = useState(false)
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const router = useRouter()
   const { toast } = useToast()
   const [selectedCompany, setSelectedCompany] = useState<string | null>(null)
@@ -110,6 +116,8 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
     (tab: TabType) => {
       setActiveTab(tab)
       setIsAddModalOpen(false) // Reset modal state when changing tabs
+      setIsMobileMenuOpen(false) // Close mobile menu when changing tabs
+      setIsFooterExpanded(false) // Close footer expansion when changing tabs
 
       // Update URL without full page reload
       const url = new URL(window.location.href)
@@ -274,8 +282,24 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
     }
   }
 
+  // Navigation items configuration
+  const navItems = [
+    { id: "home", icon: <Home className="h-4 w-4" />, label: "Home" },
+    { id: "sale", icon: <ShoppingCart className="h-4 w-4" />, label: "Sale" },
+    { id: "purchase", icon: <Receipt className="h-4 w-4" />, label: "Purchase" },
+    { id: "product", icon: <Package className="h-4 w-4" />, label: "Product" },
+    { id: "customer", icon: <User className="h-4 w-4" />, label: "Customer" },
+    { id: "supplier", icon: <Truck className="h-4 w-4" />, label: "Supplier" },
+    { id: "stock", icon: <BarChart2 className="h-4 w-4" />, label: "Stock" },
+    { id: "accounting", icon: <Calculator className="h-4 w-4" />, label: "Accounting" },
+  ]
+
+  // Primary tabs for bottom navigation (most used)
+  const primaryTabs = ["home", "sale", "purchase", "product"]
+  const secondaryTabs = ["customer", "supplier", "stock", "accounting"]
+
   return (
-    <div className="flex min-h-screen flex-col bg-gray-50 dark:bg-gray-900">
+    <div className="flex h-screen flex-col overflow-hidden bg-gray-50 dark:bg-gray-900">
       {dbError && (
         <div className="mb-4 p-4 border border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/20 rounded-md">
           <p className="text-red-700 dark:text-red-400 flex items-center">
@@ -284,10 +308,11 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
           </p>
         </div>
       )}
+      
       {/* Top Navbar */}
       <header className="sticky top-0 z-10 flex h-16 items-center justify-between border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-4 shadow-sm">
-        <div className="flex items-center">
-          <div className="relative mr-3 h-10 w-10">
+        <div className="flex items-center flex-1 min-w-0">
+          <div className="relative mr-3 h-8 w-8 sm:h-10 sm:w-10 flex-shrink-0">
             {company?.logo_url ? (
               <Image
                 src={company.logo_url || "/placeholder.svg"}
@@ -300,52 +325,109 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
               <Image src="/images/ap-logo.png" alt="Default Logo" fill className="object-contain" priority />
             )}
           </div>
-          <div className="flex flex-col">
-            <span className="text-xl font-bold text-gray-800 dark:text-gray-200 font-serif tracking-wide">
+          <div className="flex flex-col min-w-0 flex-1">
+            <span className="text-lg sm:text-xl font-bold text-gray-800 dark:text-gray-200 font-serif tracking-wide truncate">
               {company?.name || "AL ANEEQ"}
             </span>
             <div className="flex items-center">
-              <div className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></div>
-              <span className="text-xs text-gray-500 dark:text-gray-400">
+              <div className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse flex-shrink-0"></div>
+              <span className="text-xs text-gray-500 dark:text-gray-400 truncate">
                 {device?.name || "Device"} - {device?.currency || "AED"}
               </span>
             </div>
           </div>
         </div>
 
-        <div className="flex items-center space-x-4">
-          {/* Animated Theme Toggle */}
-          <AnimatedThemeToggle />
-
-          {/* Add Sale Button */}
+        <div className="flex items-center space-x-2 sm:space-x-4 flex-shrink-0">
+          {/* Mobile Menu Button */}
           <Button
-            onClick={handleHeaderSaleClick}
-            variant="outline"
-            size="sm"
-            className="flex items-center gap-2 border-blue-300 dark:border-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
-          >
-            <Plus className="h-4 w-4" />
-            <span className="hidden sm:inline">Add Sale</span>
-          </Button>
-
-          {/* Staff Dropdown */}
-          <StaffHeaderDropdown deviceId={device?.id || null} userId={user?.id || null} />
-
-          {/* Direct Logout Button */}
-          <Button
-            onClick={handleLogout}
+            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
             variant="ghost"
             size="sm"
-            className="flex items-center gap-2 hover:bg-red-50 dark:hover:bg-red-900/20 text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300"
-            title="Logout"
+            className="sm:hidden flex items-center gap-2"
           >
-            <Power className="h-4 w-4" />
+            {isMobileMenuOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
           </Button>
+
+          {/* Desktop Controls */}
+          <div className="hidden sm:flex items-center space-x-4">
+            {/* Animated Theme Toggle */}
+            <AnimatedThemeToggle />
+
+            {/* Add Sale Button */}
+            <Button
+              onClick={handleHeaderSaleClick}
+              variant="outline"
+              size="sm"
+              className="flex items-center gap-2 border-blue-300 dark:border-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
+            >
+              <Plus className="h-4 w-4" />
+              <span>Add Sale</span>
+            </Button>
+
+            {/* Staff Dropdown */}
+            <StaffHeaderDropdown deviceId={device?.id || null} userId={user?.id || null} />
+
+            {/* Direct Logout Button */}
+            <Button
+              onClick={handleLogout}
+              variant="ghost"
+              size="sm"
+              className="flex items-center gap-2 hover:bg-red-50 dark:hover:bg-red-900/20 text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300"
+              title="Logout"
+            >
+              <Power className="h-4 w-4" />
+            </Button>
+          </div>
+
+          {/* Mobile Controls */}
+          <div className="flex sm:hidden items-center space-x-2">
+            <AnimatedThemeToggle />
+            <Button
+              onClick={handleLogout}
+              variant="ghost"
+              size="sm"
+              className="flex items-center hover:bg-red-50 dark:hover:bg-red-900/20 text-red-600 dark:text-red-400"
+              title="Logout"
+            >
+              <Power className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       </header>
 
+      {/* Mobile Dropdown Menu */}
+      {isMobileMenuOpen && (
+        <div className="sm:hidden bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 shadow-lg z-20">
+          <div className="px-4 py-3 space-y-3">
+            {/* Add Sale Button */}
+            <Button
+              onClick={handleHeaderSaleClick}
+              variant="outline"
+              size="sm"
+              className="w-full flex items-center justify-center gap-2 border-blue-300 dark:border-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-blue-600 dark:text-blue-400"
+            >
+              <Plus className="h-4 w-4" />
+              Add Sale
+            </Button>
+            
+            {/* Staff Dropdown Section */}
+            <div className="pt-2 border-t border-gray-200 dark:border-gray-700">
+              <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
+                Account
+              </p>
+              <div className="space-y-2">
+                <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-2">
+                  <StaffHeaderDropdown deviceId={device?.id || null} userId={user?.id || null} />
+                </div>
+              </div>
+            </div> 
+          </div>
+        </div>
+      )}
+
       {/* Main Content */}
-      <main className="flex-1 px-4 pb-20 pt-6">
+      <main className="flex-1 overflow-y-auto px-4 pt-6 pb-4 sm:pb-20">
         {/* Database Error Alert */}
         {dbError && (
           <Alert variant="destructive" className="mb-6">
@@ -356,54 +438,94 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
         )}
 
         {/* Tab Content */}
-        <div className="pb-4">{renderTabContent()}</div>
+        <div className="pb-4 mb-20 sm:mb-0">{renderTabContent()}</div>
       </main>
 
-      {/* Bottom Navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 z-10 flex h-16 items-center justify-around rounded-t-xl border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg">
-        <NavItem icon={<Home />} label="Home" isActive={activeTab === "home"} onClick={() => handleTabChange("home")} />
-        <NavItem
-          icon={<ShoppingCart />}
-          label="Sale"
-          isActive={activeTab === "sale"}
-          onClick={() => handleTabChange("sale")}
-        />
-        <NavItem
-          icon={<Receipt />}
-          label="Purchase"
-          isActive={activeTab === "purchase"}
-          onClick={() => handleTabChange("purchase")}
-        />
-        <NavItem
-          icon={<Package />}
-          label="Product"
-          isActive={activeTab === "product"}
-          onClick={() => handleTabChange("product")}
-        />
-        <NavItem
-          icon={<User />}
-          label="Customer"
-          isActive={activeTab === "customer"}
-          onClick={() => handleTabChange("customer")}
-        />
-        <NavItem
-          icon={<Truck />}
-          label="Supplier"
-          isActive={activeTab === "supplier"}
-          onClick={() => handleTabChange("supplier")}
-        />
-        <NavItem
-          icon={<BarChart2 />}
-          label="Stock"
-          isActive={activeTab === "stock"}
-          onClick={() => handleTabChange("stock")}
-        />
-        <NavItem
-          icon={<Calculator />}
-          label="Accounting"
-          isActive={activeTab === "accounting"}
-          onClick={() => handleTabChange("accounting")}
-        />
+      {/* Bottom Navigation - Always visible mobile footer */}
+      <div className="sm:hidden">
+        {/* Mobile Footer Container - Fixed at bottom */}
+        <div className="fixed inset-x-0 bottom-0 z-50">
+          {/* Expanded Drawer - Secondary Items */}
+          <div className={`bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 transition-all duration-300 ease-in-out ${
+            isFooterExpanded 
+              ? 'translate-y-0 opacity-100' 
+              : 'translate-y-full opacity-0 pointer-events-none'
+          }`}>
+            <div className="grid grid-cols-4 h-14 border-b border-gray-100 dark:border-gray-700 safe-area-inset-bottom">
+              {secondaryTabs.map((tabId) => {
+                const item = navItems.find(nav => nav.id === tabId)
+                if (!item) return null
+                
+                return (
+                  <MobileNavItem
+                    key={item.id}
+                    icon={item.icon}
+                    label={item.label}
+                    isActive={activeTab === item.id}
+                    onClick={() => handleTabChange(item.id as TabType)}
+                  />
+                )
+              })}
+            </div>
+          </div>
+
+          {/* Main Footer - Primary Items + Expand Button */}
+          <div className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 shadow-lg pb-safe">
+            <div className="grid grid-cols-5 h-16">
+              {/* First 4 primary tabs */}
+              {primaryTabs.map((tabId) => {
+                const item = navItems.find(nav => nav.id === tabId)
+                if (!item) return null
+                
+                return (
+                  <MobileNavItem
+                    key={item.id}
+                    icon={item.icon}
+                    label={item.label}
+                    isActive={activeTab === item.id}
+                    onClick={() => handleTabChange(item.id as TabType)}
+                  />
+                )
+              })}
+              
+              {/* Expand/Collapse Button */}
+              <button
+                onClick={() => setIsFooterExpanded(!isFooterExpanded)}
+                className={`flex flex-col items-center justify-center h-16 transition-all duration-200 ${
+                  isFooterExpanded 
+                    ? "text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20" 
+                    : "text-gray-500 dark:text-gray-400"
+                }`}
+              >
+                <div className="mb-1">
+                  {isFooterExpanded ? (
+                    <ChevronDown className="h-4 w-4" />
+                  ) : (
+                    <ChevronUp className="h-4 w-4" />
+                  )}
+                </div>
+                <span className="text-xs font-medium leading-none">
+                  {isFooterExpanded ? "Less" : "More"}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Desktop: Sticky navigation */}
+      <nav className="hidden sm:block sticky bottom-0">
+        <div className="flex h-16 items-center justify-around bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 shadow-lg">
+          {navItems.map((item) => (
+            <NavItem
+              key={item.id}
+              icon={item.icon}
+              label={item.label}
+              isActive={activeTab === item.id}
+              onClick={() => handleTabChange(item.id as TabType)}
+            />
+          ))}
+        </div>
       </nav>
 
       {/* Header Sale Modal */}
@@ -427,13 +549,41 @@ interface NavItemProps {
 function NavItem({ icon, label, isActive, onClick }: NavItemProps) {
   return (
     <button
-      className={`flex flex-1 flex-col items-center justify-center transition-all duration-200 ${
+      className={`flex flex-1 flex-col items-center justify-center transition-all duration-200 py-2 ${
         isActive ? "text-blue-600 dark:text-blue-400" : "text-gray-500 dark:text-gray-400"
       }`}
       onClick={onClick}
     >
       <div className="mb-1">{icon}</div>
-      <span className="text-xs font-medium">{label}</span>
+      <span className="text-xs font-medium leading-tight">{label}</span>
+    </button>
+  )
+}
+
+function SecondaryNavItem({ icon, label, isActive, onClick }: NavItemProps) {
+  return (
+    <button
+      className={`flex flex-1 flex-row items-center justify-center gap-1 transition-all duration-200 py-2 ${
+        isActive ? "text-blue-600 dark:text-blue-400" : "text-gray-500 dark:text-gray-400"
+      }`}
+      onClick={onClick}
+    >
+      <div className="flex-shrink-0">{icon}</div>
+      <span className="text-xs font-medium truncate">{label}</span>
+    </button>
+  )
+}
+
+function MobileNavItem({ icon, label, isActive, onClick }: NavItemProps) {
+  return (
+    <button
+      className={`flex flex-col items-center justify-center h-full transition-all duration-200 ${
+        isActive ? "text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20" : "text-gray-500 dark:text-gray-400"
+      }`}
+      onClick={onClick}
+    >
+      <div className="mb-1">{icon}</div>
+      <span className="text-xs font-medium leading-none truncate max-w-full px-0.5">{label}</span>
     </button>
   )
 }

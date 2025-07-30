@@ -446,10 +446,10 @@ export default function PurchaseTab({
         <CardContent className="p-0">
           {/* Search and Filter Section */}
           <div className="p-4 space-y-4">
-            {/* Search Bar and Action Buttons Row */}
-            <div className="flex items-center gap-4 mb-4">
-              {/* Search Bar - Half Width */}
-              <div className="relative flex-1 max-w-md">
+            {/* Search Bar and Action Buttons Row - Mobile Responsive */}
+            <div className="flex flex-col lg:flex-row lg:items-center gap-4 mb-4">
+              {/* Search Bar - Full width on mobile, half width on desktop */}
+              <div className="relative flex-1 lg:max-w-md">
                 <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
                   type="search"
@@ -460,18 +460,19 @@ export default function PurchaseTab({
                 />
               </div>
 
-              {/* Action Buttons - Similar to Filter Buttons */}
-              <div className="flex items-center gap-2">
+              {/* Action Buttons - Responsive grid */}
+              <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
                 {/* Last Updated Status */}
                 {lastUpdated && (
                   <Button
                     variant="outline"
                     size="sm"
-                    className="flex items-center gap-2 text-red-600 dark:text-red-400 border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-900/20 bg-transparent"
+                    className="flex items-center gap-2 text-red-600 dark:text-red-400 border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-900/20 bg-transparent text-xs sm:text-sm whitespace-nowrap"
                     disabled
                   >
-                    <Clock className="h-4 w-4" />
-                    <span>{getLastUpdatedText()}</span>
+                    <Clock className="h-4 w-4 flex-shrink-0" />
+                    <span className="hidden sm:inline">{getLastUpdatedText()}</span>
+                    <span className="sm:hidden">Updated</span>
                     {isBackgroundRefreshing && <Loader2 className="h-3 w-3 animate-spin ml-1" />}
                   </Button>
                 )}
@@ -481,10 +482,10 @@ export default function PurchaseTab({
                   size="sm"
                   onClick={handleRefresh}
                   disabled={isLoading}
-                  className="flex items-center gap-2 text-red-600 dark:text-red-400 border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-900/20 bg-transparent"
+                  className="flex items-center gap-2 text-red-600 dark:text-red-400 border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-900/20 bg-transparent text-xs sm:text-sm whitespace-nowrap"
                 >
-                  <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
-                  <span>Refresh</span>
+                  <RefreshCw className={`h-4 w-4 flex-shrink-0 ${isLoading ? "animate-spin" : ""}`} />
+                  <span className="hidden sm:inline">Refresh</span>
                 </Button>
 
                 <Button
@@ -741,55 +742,56 @@ export default function PurchaseTab({
 
                     printWindow.document.close()
                   }}
-                  className="flex items-center gap-2 text-red-600 dark:text-red-400 border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-900/20"
+                  className="flex items-center gap-2 text-red-600 dark:text-red-400 border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-900/20 text-xs sm:text-sm whitespace-nowrap"
                 >
-                  <FileText className="h-4 w-4" />
-                  <span>Print</span>
+                  <FileText className="h-4 w-4 flex-shrink-0" />
+                  <span className="hidden sm:inline">Print</span>
                 </Button>
 
                 <Button
                   onClick={() => setShowAddModal(true)}
                   variant="outline"
                   size="sm"
-                  className="flex items-center gap-2 text-red-600 dark:text-red-400 border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-900/20"
+                  className="flex items-center gap-2 text-red-600 dark:text-red-400 border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-900/20 text-xs sm:text-sm whitespace-nowrap"
                 >
-                  <Plus className="h-4 w-4" />
-                  <span>Add Purchase</span>
+                  <Plus className="h-4 w-4 flex-shrink-0" />
+                  <span className="hidden sm:inline">Add Purchase</span>
+                  <span className="sm:hidden">Add</span>
                 </Button>
               </div>
             </div>
 
-            {/* Filter Buttons */}
-            <div className="flex flex-wrap gap-2 mb-4">
+            {/* Filter Buttons - Mobile Responsive Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:flex lg:flex-wrap gap-2 mb-4">
               {/* Date Filters */}
               <Button
                 onClick={handleTodayFilter}
                 variant={filters.dateRangeFilter === "today" ? "default" : "outline"}
                 size="sm"
-                className="flex items-center gap-2 dark:text-blue-400"
+                className="flex items-center justify-center gap-1 sm:gap-2 dark:text-blue-400 text-xs sm:text-sm min-w-0"
               >
-                <CalendarDays className="h-4 w-4" />
-                <span>Today</span>
+                <CalendarDays className="h-4 w-4 flex-shrink-0" />
+                <span className="truncate">Today</span>
               </Button>
 
               <Button
                 onClick={handleThisWeekFilter}
                 variant={filters.dateRangeFilter === "thisweek" ? "default" : "outline"}
                 size="sm"
-                className="flex items-center gap-2 dark:text-blue-400"
+                className="flex items-center justify-center gap-1 sm:gap-2 dark:text-blue-400 text-xs sm:text-sm min-w-0"
               >
-                <CalendarDays className="h-4 w-4" />
-                <span>This Week</span>
+                <CalendarDays className="h-4 w-4 flex-shrink-0" />
+                <span className="truncate">This Week</span>
               </Button>
 
               <Button
                 onClick={handleThisMonthFilter}
                 variant={filters.dateRangeFilter === "thismonth" ? "default" : "outline"}
                 size="sm"
-                className="flex items-center gap-2 dark:text-blue-400"
+                className="flex items-center justify-center gap-1 sm:gap-2 dark:text-blue-400 text-xs sm:text-sm min-w-0"
               >
-                <CalendarDays className="h-4 w-4" />
-                <span>This Month</span>
+                <CalendarDays className="h-4 w-4 flex-shrink-0" />
+                <span className="truncate">This Month</span>
               </Button>
 
               {/* Custom Date Range Button */}
@@ -797,12 +799,12 @@ export default function PurchaseTab({
                 onClick={openDateFilterModal}
                 variant={filters.dateFromFilter || filters.dateToFilter ? "default" : "outline"}
                 size="sm"
-                className="flex items-center gap-2 dark:text-blue-400"
+                className="flex items-center justify-center gap-1 sm:gap-2 dark:text-blue-400 text-xs sm:text-sm min-w-0 col-span-2 sm:col-span-1"
               >
-                <CalendarDays className="h-4 w-4" />
-                <span>Custom Range</span>
+                <CalendarDays className="h-4 w-4 flex-shrink-0" />
+                <span className="truncate">Custom Range</span>
                 {(filters.dateFromFilter || filters.dateToFilter) && (
-                  <Badge variant="secondary" className="ml-1 text-xs">
+                  <Badge variant="secondary" className="ml-1 text-xs hidden sm:inline-block">
                     {filters.dateFromFilter && filters.dateToFilter
                       ? `${format(new Date(filters.dateFromFilter), "MMM d")} - ${format(new Date(filters.dateToFilter), "MMM d")}`
                       : filters.dateFromFilter
@@ -817,12 +819,12 @@ export default function PurchaseTab({
                 onClick={() => setIsAmountFilterModalOpen(true)}
                 variant={filters.minAmountFilter || filters.maxAmountFilter ? "default" : "outline"}
                 size="sm"
-                className="flex items-center gap-2 dark:text-blue-400"
+                className="flex items-center justify-center gap-1 sm:gap-2 dark:text-blue-400 text-xs sm:text-sm min-w-0"
               >
-                <DollarSign className="h-4 w-4" />
-                <span>Amount</span>
+                <DollarSign className="h-4 w-4 flex-shrink-0" />
+                <span className="truncate">Amount</span>
                 {(filters.minAmountFilter || filters.maxAmountFilter) && (
-                  <Badge variant="secondary" className="ml-1 text-xs">
+                  <Badge variant="secondary" className="ml-1 text-xs hidden lg:inline-block">
                     {filters.minAmountFilter && filters.maxAmountFilter
                       ? `${filters.minAmountFilter} - ${filters.maxAmountFilter}`
                       : filters.minAmountFilter
@@ -838,11 +840,11 @@ export default function PurchaseTab({
                   <Button
                     variant={filters.statusFilter !== "all" ? "default" : "outline"}
                     size="sm"
-                    className="flex items-center gap-2 dark:text-blue-400"
+                    className="flex items-center justify-center gap-1 sm:gap-2 dark:text-blue-400 text-xs sm:text-sm min-w-0"
                   >
-                    <CheckCircle className="h-4 w-4" />
-                    <span>{getStatusDisplayText()}</span>
-                    <ChevronDown className="h-4 w-4" />
+                    <CheckCircle className="h-4 w-4 flex-shrink-0" />
+                    <span className="truncate">{getStatusDisplayText()}</span>
+                    <ChevronDown className="h-4 w-4 flex-shrink-0" />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start" className="w-48">
@@ -879,11 +881,11 @@ export default function PurchaseTab({
                   <Button
                     variant={filters.paymentMethodFilter !== "all" ? "default" : "outline"}
                     size="sm"
-                    className="flex items-center gap-2 dark:text-blue-400"
+                    className="flex items-center justify-center gap-1 sm:gap-2 dark:text-blue-400 text-xs sm:text-sm min-w-0"
                   >
-                    <CreditCard className="h-4 w-4" />
-                    <span>{getPaymentMethodDisplayText()}</span>
-                    <ChevronDown className="h-4 w-4" />
+                    <CreditCard className="h-4 w-4 flex-shrink-0" />
+                    <span className="truncate">{getPaymentMethodDisplayText()}</span>
+                    <ChevronDown className="h-4 w-4 flex-shrink-0" />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start" className="w-48">
@@ -920,11 +922,11 @@ export default function PurchaseTab({
                   <Button
                     variant={filters.deliveryStatusFilter !== "all" ? "default" : "outline"}
                     size="sm"
-                    className="flex items-center gap-2 dark:text-blue-400"
+                    className="flex items-center justify-center gap-1 sm:gap-2 dark:text-blue-400 text-xs sm:text-sm min-w-0"
                   >
-                    <Truck className="h-4 w-4" />
-                    <span>{getDeliveryStatusDisplayText()}</span>
-                    <ChevronDown className="h-4 w-4" />
+                    <Truck className="h-4 w-4 flex-shrink-0" />
+                    <span className="truncate">{getDeliveryStatusDisplayText()}</span>
+                    <ChevronDown className="h-4 w-4 flex-shrink-0" />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start" className="w-48">
@@ -955,11 +957,11 @@ export default function PurchaseTab({
                   <Button
                     variant={filters.supplierFilter !== "all" ? "default" : "outline"}
                     size="sm"
-                    className="flex items-center gap-2 dark:text-blue-400"
+                    className="flex items-center justify-center gap-1 sm:gap-2 dark:text-blue-400 text-xs sm:text-sm min-w-0 col-span-2 sm:col-span-1"
                   >
-                    <Building className="h-4 w-4" />
-                    <span>{filters.supplierFilter === "all" ? "All Suppliers" : filters.supplierFilter}</span>
-                    <ChevronDown className="h-4 w-4" />
+                    <Building className="h-4 w-4 flex-shrink-0" />
+                    <span className="truncate">{filters.supplierFilter === "all" ? "All Suppliers" : filters.supplierFilter}</span>
+                    <ChevronDown className="h-4 w-4 flex-shrink-0" />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start" className="w-64">
@@ -1008,16 +1010,16 @@ export default function PurchaseTab({
                   onClick={() => dispatch(clearAllFilters())}
                   variant="outline"
                   size="sm"
-                  className="flex items-center gap-2 text-red-600 border-red-200 hover:bg-red-50 dark:text-red-400 dark:border-red-800 dark:hover:bg-red-900/20"
+                  className="flex items-center justify-center gap-1 sm:gap-2 text-red-600 border-red-200 hover:bg-red-50 dark:text-red-400 dark:border-red-800 dark:hover:bg-red-900/20 text-xs sm:text-sm min-w-0 col-span-2 sm:col-span-1"
                 >
-                  <X className="h-4 w-4" />
-                  <span>Clear All</span>
+                  <X className="h-4 w-4 flex-shrink-0" />
+                  <span className="truncate">Clear All</span>
                 </Button>
               )}
             </div>
           </div>
 
-          {/* Table Content */}
+          {/* Table Content - Mobile Responsive */}
           {isLoading && purchases.length === 0 ? (
             <div className="p-4">
               <div className="space-y-4">
@@ -1046,19 +1048,19 @@ export default function PurchaseTab({
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full">
+              <table className="w-full min-w-[800px]">
                 <thead>
                   <tr className="border-b bg-gray-50 dark:bg-gray-700 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-300 dark:border-gray-600">
-                    <th className="px-6 py-3 dark:text-gray-300">No</th>
-                    <th className="px-6 py-3 dark:text-gray-300">Purchase ID</th>
-                    <th className="px-6 py-3 dark:text-gray-300">Supplier</th>
-                    <th className="px-6 py-3 dark:text-gray-300">Date</th>
-                    <th className="px-6 py-3 dark:text-gray-300">Amount</th>
-                    <th className="px-6 py-3 dark:text-gray-300">Payed</th>
-                    <th className="px-6 py-3 dark:text-gray-300">Remaining</th>
-                    <th className="px-6 py-3 dark:text-gray-300">Payment</th>
-                    <th className="px-6 py-3 dark:text-gray-300">Status</th>
-                    <th className="px-6 py-3 dark:text-gray-300">Delivery</th>
+                    <th className="px-3 sm:px-6 py-3 dark:text-gray-300">No</th>
+                    <th className="px-3 sm:px-6 py-3 dark:text-gray-300">Purchase ID</th>
+                    <th className="px-3 sm:px-6 py-3 dark:text-gray-300">Supplier</th>
+                    <th className="px-3 sm:px-6 py-3 dark:text-gray-300">Date</th>
+                    <th className="px-3 sm:px-6 py-3 dark:text-gray-300">Amount</th>
+                    <th className="px-3 sm:px-6 py-3 dark:text-gray-300">Payed</th>
+                    <th className="px-3 sm:px-6 py-3 dark:text-gray-300">Remaining</th>
+                    <th className="px-3 sm:px-6 py-3 dark:text-gray-300">Payment</th>
+                    <th className="px-3 sm:px-6 py-3 dark:text-gray-300">Status</th>
+                    <th className="px-3 sm:px-6 py-3 dark:text-gray-300">Delivery</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 dark:divide-gray-600 bg-white dark:bg-gray-800">
@@ -1073,29 +1075,34 @@ export default function PurchaseTab({
                         className="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer"
                         onClick={() => handleView(purchase.id)}
                       >
-                        <td className="whitespace-nowrap px-6 py-4 text-sm font-medium text-gray-900 dark:text-gray-100">
+                        <td className="whitespace-nowrap px-3 sm:px-6 py-4 text-sm font-medium text-gray-900 dark:text-gray-100">
                           {index + 1}
                         </td>
-                        <td className="whitespace-nowrap px-6 py-4 text-sm font-medium text-blue-600">
+                        <td className="whitespace-nowrap px-3 sm:px-6 py-4 text-sm font-medium text-blue-600">
                           #{purchase.id}
                         </td>
-                        <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-500 dark:text-gray-400">
+                        <td className="whitespace-nowrap px-3 sm:px-6 py-4 text-sm text-gray-500 dark:text-gray-400">
+                          <span className="block sm:hidden text-xs text-gray-400 uppercase">Supplier:</span>
                           {purchase.supplier}
                         </td>
-                        <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-500 dark:text-gray-400">
+                        <td className="whitespace-nowrap px-3 sm:px-6 py-4 text-sm text-gray-500 dark:text-gray-400">
+                          <span className="block sm:hidden text-xs text-gray-400 uppercase">Date:</span>
                           {new Date(purchase.purchase_date).toLocaleDateString()}
                         </td>
-                        <td className="whitespace-nowrap px-6 py-4 text-sm font-medium">
+                        <td className="whitespace-nowrap px-3 sm:px-6 py-4 text-sm font-medium">
+                          <span className="block sm:hidden text-xs text-gray-400 uppercase">Amount:</span>
                           {formatCurrency(totalAmount)}
                         </td>
-                        <td className="whitespace-nowrap px-6 py-4 text-sm">
+                        <td className="whitespace-nowrap px-3 sm:px-6 py-4 text-sm">
+                          <span className="block sm:hidden text-xs text-gray-400 uppercase">Paid:</span>
                           {purchase.status?.toLowerCase() === "cancelled" ? (
                             <span className="text-gray-400">-</span>
                           ) : (
                             <span className="text-green-600 font-medium">{formatCurrency(receivedAmount)}</span>
                           )}
                         </td>
-                        <td className="whitespace-nowrap px-6 py-4 text-sm">
+                        <td className="whitespace-nowrap px-3 sm:px-6 py-4 text-sm">
+                          <span className="block sm:hidden text-xs text-gray-400 uppercase">Remaining:</span>
                           {purchase.status?.toLowerCase() === "cancelled" ||
                           purchase.status?.toLowerCase() === "paid" ? (
                             <span className="text-gray-400">0</span>
@@ -1105,20 +1112,23 @@ export default function PurchaseTab({
                             <span className="text-red-600 font-medium">{formatCurrency(remainingAmount)}</span>
                           )}
                         </td>
-                        <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-500 dark:text-gray-400">
+                        <td className="whitespace-nowrap px-3 sm:px-6 py-4 text-sm text-gray-500 dark:text-gray-400">
+                          <span className="block sm:hidden text-xs text-gray-400 uppercase">Payment:</span>
                           {getStatusBadge(purchase.status)}
                         </td>
-                        <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-500 dark:text-gray-400">
+                        <td className="whitespace-nowrap px-3 sm:px-6 py-4 text-sm text-gray-500 dark:text-gray-400">
+                          <span className="block sm:hidden text-xs text-gray-400 uppercase">Status:</span>
                           {purchase.status?.toLowerCase() === "paid" ? (
-                            <>
+                            <div className="flex items-center">
                               {getPaymentMethodIcon(purchase.payment_method)}
                               <span className="ml-1 text-xs">{purchase.payment_method || "Cash"}</span>
-                            </>
+                            </div>
                           ) : (
                             <span className="text-xs text-gray-400">N/A</span>
                           )}
                         </td>
-                        <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-500 dark:text-gray-400">
+                        <td className="whitespace-nowrap px-3 sm:px-6 py-4 text-sm text-gray-500 dark:text-gray-400">
+                          <span className="block sm:hidden text-xs text-gray-400 uppercase">Delivery:</span>
                           {getPurchaseStatusBadge(purchase.purchase_status)}
                         </td>
                       </tr>
@@ -1204,15 +1214,15 @@ export default function PurchaseTab({
       {/* Date Filter Modal */}
       {isDateFilterModalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg max-w-md w-full">
-            <div className="p-6">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg max-w-md w-full mx-4">
+            <div className="p-4 sm:p-6">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Select Date Range</h3>
+                <h3 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-white">Select Date Range</h3>
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={() => setIsDateFilterModalOpen(false)}
-                  className="text-gray-500 hover:text-gray-700"
+                  className="text-gray-500 hover:text-gray-700 p-1"
                 >
                   <X className="h-4 w-4" />
                 </Button>
@@ -1238,7 +1248,7 @@ export default function PurchaseTab({
                   />
                 </div>
 
-                <div className="flex gap-2 pt-4">
+                <div className="flex flex-col sm:flex-row gap-2 pt-4">
                   <Button onClick={handleDateFilterApply} className="flex-1">
                     Apply Filter
                   </Button>
@@ -1255,15 +1265,15 @@ export default function PurchaseTab({
       {/* Amount Filter Modal */}
       {isAmountFilterModalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg max-w-md w-full">
-            <div className="p-6">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg max-w-md w-full mx-4">
+            <div className="p-4 sm:p-6">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Filter by Amount</h3>
+                <h3 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-white">Filter by Amount</h3>
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={() => setIsAmountFilterModalOpen(false)}
-                  className="text-gray-500 hover:text-gray-700"
+                  className="text-gray-500 hover:text-gray-700 p-1"
                 >
                   <X className="h-4 w-4" />
                 </Button>
@@ -1295,7 +1305,7 @@ export default function PurchaseTab({
                   />
                 </div>
 
-                <div className="flex gap-2 pt-4">
+                <div className="flex flex-col sm:flex-row gap-2 pt-4">
                   <Button onClick={handleAmountFilterApply} className="flex-1">
                     Apply Filter
                   </Button>
@@ -1311,3 +1321,4 @@ export default function PurchaseTab({
     </div>
   )
 }
+

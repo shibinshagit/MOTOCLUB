@@ -231,18 +231,18 @@ export default function SupplierTab({
     }
   }, [dispatch])
 
-  return (
+return (
     <div className="h-full flex flex-col bg-gray-50 dark:bg-gray-900">
       {/* Header with stats and controls */}
-      <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4">
-        <div className="flex items-center justify-between">
+      <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 sm:px-6 py-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center space-x-4">
             <div>
               <div className="flex items-center space-x-2">
-                <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">Suppliers</h1>
-                {isRefreshing && <RefreshCw className="h-4 w-4 animate-spin text-blue-600" />}
+                <h1 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-gray-100">Suppliers</h1>
+                {isRefreshing && <RefreshCw className="h-4 w-4 animate-spin text-blue-600 flex-shrink-0" />}
               </div>
-              <p className="text-sm text-gray-500 dark:text-gray-400">
+              <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">
                 {stats.total > 0
                   ? `${stats.total} suppliers • ${formatCurrency(stats.totalAmount)} total • ${formatCurrency(stats.totalBalance)} balance`
                   : "No suppliers found"}
@@ -250,34 +250,38 @@ export default function SupplierTab({
             </div>
           </div>
 
-          <div className="flex items-center space-x-3">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
             {/* Search */}
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <div className="relative flex-1 sm:flex-initial">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400 flex-shrink-0" />
               <Input
                 placeholder="Search suppliers..."
                 value={searchTerm}
                 onChange={(e) => handleSearch(e.target.value)}
-                className="pl-10 w-64 h-9"
+                className="pl-10 w-full sm:w-64 h-9 text-sm"
               />
             </div>
 
-            {/* Refresh button */}
-            <Button variant="outline" size="sm" onClick={handleRefresh} disabled={isLoading} className="h-9">
-              <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
-            </Button>
+            <div className="flex items-center gap-2">
+              {/* Refresh button */}
+              <Button variant="outline" size="sm" onClick={handleRefresh} disabled={isLoading} className="h-9 flex-shrink-0">
+                <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
+                <span className="hidden sm:inline ml-2">Refresh</span>
+              </Button>
 
-            {/* Add button */}
-            <Button onClick={handleAdd} size="sm" className="bg-blue-600 hover:bg-blue-700 text-white h-9">
-              <Plus className="h-4 w-4 mr-2" />
-              Add Supplier
-            </Button>
+              {/* Add button */}
+              <Button onClick={handleAdd} size="sm" className="bg-blue-600 hover:bg-blue-700 text-white h-9 flex-shrink-0">
+                <Plus className="h-4 w-4 mr-2 flex-shrink-0" />
+                <span className="hidden sm:inline">Add Supplier</span>
+                <span className="sm:hidden">Add</span>
+              </Button>
+            </div>
           </div>
         </div>
       </div>
 
       {/* Content Area */}
-      <div className="flex-1 overflow-auto p-6 dark:bg-gray-900">
+      <div className="flex-1 overflow-auto p-4 sm:p-6 dark:bg-gray-900">
         {isLoading && allSuppliers.length === 0 ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="h-6 w-6 animate-spin mr-2 text-blue-600" />
@@ -319,59 +323,62 @@ export default function SupplierTab({
                   key={supplier.id}
                   className="bg-white dark:bg-gray-800 hover:shadow-md transition-shadow dark:border-gray-700"
                 >
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      {/* Left: Supplier Info */}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-start justify-between mb-3">
-                          <div className="flex-1 min-w-0">
-                            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-1 truncate">
-                              {supplier.name}
-                            </h3>
-                            <div className="flex items-center space-x-4 text-sm text-gray-600 dark:text-gray-300">
-                              <div className="flex items-center">
-                                <Phone className="h-3 w-3 mr-1 text-green-600" />
-                                <span className="truncate">{supplier.phone}</span>
-                              </div>
-                              {supplier.email && (
-                                <div className="flex items-center">
-                                  <Mail className="h-3 w-3 mr-1 text-blue-600" />
-                                  <span className="truncate max-w-32">{supplier.email}</span>
-                                </div>
-                              )}
-                              {supplier.address && (
-                                <div className="flex items-center">
-                                  <MapPin className="h-3 w-3 mr-1 text-gray-500" />
-                                  <span className="truncate max-w-32">{supplier.address}</span>
-                                </div>
-                              )}
+                  <CardContent className="p-3 sm:p-4">
+                    <div className="flex flex-col space-y-3">
+                      {/* Header Section */}
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1 min-w-0">
+                          <h3 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2 truncate">
+                            {supplier.name}
+                          </h3>
+                          
+                          {/* Contact Info - Mobile Responsive */}
+                          <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-4 space-y-1 sm:space-y-0 text-xs sm:text-sm text-gray-600 dark:text-gray-300">
+                            <div className="flex items-center">
+                              <Phone className="h-3 w-3 mr-1 text-green-600 flex-shrink-0" />
+                              <span className="truncate">{supplier.phone}</span>
                             </div>
-                          </div>
-
-                          {/* Action Buttons */}
-                          <div className="flex space-x-1 ml-4">
-                            {/* Pay Credit Button - Only show if supplier has credit balance */}
-                            {(supplier.balance_amount || 0) > 0 && (
-                              <Button
-                                size="sm"
-                                className="h-7 px-2 bg-green-600 hover:bg-green-700 text-white text-xs"
-                                onClick={() =>
-                                  handlePayCredit({
-                                    id: supplier.id,
-                                    name: supplier.name,
-                                    balance_amount: supplier.balance_amount || 0,
-                                  })
-                                }
-                              >
-                                <CreditCard className="h-3 w-3 mr-1" />
-                                Pay Credit
-                              </Button>
+                            {supplier.email && (
+                              <div className="flex items-center">
+                                <Mail className="h-3 w-3 mr-1 text-blue-600 flex-shrink-0" />
+                                <span className="truncate max-w-48 sm:max-w-32">{supplier.email}</span>
+                              </div>
                             )}
+                            {supplier.address && (
+                              <div className="flex items-center">
+                                <MapPin className="h-3 w-3 mr-1 text-gray-500 flex-shrink-0" />
+                                <span className="truncate max-w-48 sm:max-w-32">{supplier.address}</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
 
+                        {/* Action Buttons - Mobile Stack */}
+                        <div className="flex flex-col sm:flex-row gap-1 ml-2 sm:ml-4 flex-shrink-0">
+                          {/* Pay Credit Button - Only show if supplier has credit balance */}
+                          {(supplier.balance_amount || 0) > 0 && (
+                            <Button
+                              size="sm"
+                              className="h-7 px-2 bg-green-600 hover:bg-green-700 text-white text-xs whitespace-nowrap"
+                              onClick={() =>
+                                handlePayCredit({
+                                  id: supplier.id,
+                                  name: supplier.name,
+                                  balance_amount: supplier.balance_amount || 0,
+                                })
+                              }
+                            >
+                              <CreditCard className="h-3 w-3 mr-1 flex-shrink-0" />
+                              <span className="hidden sm:inline">Pay Credit</span>
+                              <span className="sm:hidden">Pay</span>
+                            </Button>
+                          )}
+
+                          <div className="flex space-x-1">
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="h-7 w-7 p-0 text-blue-600 hover:bg-blue-50"
+                              className="h-7 w-7 p-0 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20"
                               onClick={() => handleView(supplier.id)}
                             >
                               <Eye className="h-3 w-3" />
@@ -379,7 +386,7 @@ export default function SupplierTab({
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="h-7 w-7 p-0 text-amber-600 hover:bg-amber-50"
+                              className="h-7 w-7 p-0 text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20"
                               onClick={() => handleEdit(supplier.id)}
                             >
                               <Edit className="h-3 w-3" />
@@ -387,41 +394,46 @@ export default function SupplierTab({
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="h-7 w-7 p-0 text-red-600 hover:bg-red-50"
+                              className="h-7 w-7 p-0 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
                               onClick={() => handleDelete(supplier.id, supplier.name)}
                             >
                               <Trash2 className="h-3 w-3" />
                             </Button>
                           </div>
                         </div>
+                      </div>
 
-                        {/* Financial Stats */}
-                        <div className="flex items-center justify-between pt-2 border-t border-gray-100 dark:border-gray-700">
-                          <div className="flex items-center space-x-6 text-sm">
+                      {/* Financial Stats - Mobile Responsive Layout */}
+                      <div className="pt-2 border-t border-gray-100 dark:border-gray-700">
+                        {/* Mobile: Stack vertically, Desktop: Side by side */}
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-3 sm:space-y-0 text-xs sm:text-sm">
+                          {/* Purchase Stats */}
+                          <div className="flex items-center justify-between sm:justify-start sm:space-x-6">
                             <div className="flex items-center">
-                              <TrendingUp className="h-3 w-3 text-blue-600 mr-1" />
+                              <TrendingUp className="h-3 w-3 text-blue-600 mr-1 flex-shrink-0" />
                               <span className="font-medium text-gray-900 dark:text-gray-100">
                                 {supplier.total_purchases}
                               </span>
                               <span className="text-gray-500 dark:text-gray-400 ml-1">purchases</span>
                             </div>
                             <div className="flex items-center">
-                              <DollarSign className="h-3 w-3 text-green-600 mr-1" />
+                              <DollarSign className="h-3 w-3 text-green-600 mr-1 flex-shrink-0" />
                               <span className="font-medium text-gray-900 dark:text-gray-100">
                                 {formatCurrency(supplier.total_amount || 0)}
                               </span>
-                              <span className="text-gray-500 dark:text-gray-400 ml-1">total</span>
+                              <span className="text-gray-500 dark:text-gray-400 ml-1 hidden sm:inline">total</span>
                             </div>
                           </div>
 
-                          <div className="flex items-center space-x-4 text-sm">
-                            <div className="text-right">
+                          {/* Financial Stats */}
+                          <div className="flex items-center justify-between sm:justify-end sm:space-x-4">
+                            <div className="text-center sm:text-right">
                               <div className="font-medium text-green-600">
                                 {formatCurrency(supplier.paid_amount || 0)}
                               </div>
                               <div className="text-xs text-gray-500">Paid</div>
                             </div>
-                            <div className="text-right">
+                            <div className="text-center sm:text-right">
                               <div
                                 className={`font-medium ${(supplier.balance_amount || 0) > 0 ? "text-orange-600" : "text-green-600"}`}
                               >

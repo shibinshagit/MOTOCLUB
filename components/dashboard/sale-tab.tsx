@@ -1245,7 +1245,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
     return () => clearInterval(interval)
   }, [deviceId, needsRefresh, isLoading, isRefreshing, isSilentRefreshing, fetchSalesFromAPI])
 
-  // Skeleton loading component
+ // Skeleton loading component
   const SalesTableSkeleton = () => (
     <div className="space-y-2">
       {[...Array(3)].map((_, i) => (
@@ -1375,724 +1375,908 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
   }
 
   return (
-    <div className="flex gap-3 h-[calc(100vh-100px)] bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
-      {/* Left side - Add Sale Form (75% width) */}
-      <div className="w-3/4 flex flex-col">
-        {/* Add Sale Form */}
-        <Card className="flex-1 overflow-hidden bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
-          <CardContent className="p-0 h-full">
-            {/* Header with edit mode indicator */}
-            {isEditMode && (
-              <div className="p-2 bg-orange-50 dark:bg-orange-900/30 border-b border-orange-200 dark:border-orange-600">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Edit className="h-4 w-4 text-orange-600 dark:text-orange-400" />
-                    <span className="text-sm font-medium text-orange-800 dark:text-orange-200">
-                      Editing Sale #{editingSaleId}
-                    </span>
-                  </div>
-                  <Button
-                    onClick={resetAddSaleForm}
-                    variant="ghost"
-                    size="sm"
-                    className="text-orange-600 dark:text-orange-400 hover:bg-orange-100 dark:hover:bg-orange-900/50"
-                  >
-                    Cancel Edit
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            {/* Alerts */}
-            {(formAlert || barcodeAlert) && (
-              <div className="p-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
-                {formAlert && <FormAlert type={formAlert.type} message={formAlert.message} />}
-                {barcodeAlert && <FormAlert type={barcodeAlert.type} message={barcodeAlert.message} />}
-              </div>
-            )}
-
-            <div className="flex h-full">
-              {/* Products section (70%) */}
-              <div className="w-[70%] flex flex-col border-r border-gray-200 dark:border-gray-700">
-                {/* Barcode scanner */}
-                <div className="p-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-                  <div className="flex items-center gap-2">
-                    <div className="relative flex-1">
-                      <Barcode className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-400" />
-                      <Input
-                        placeholder="Scan barcode or search product..."
-                        className={`pl-8 h-9 bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 transition-all duration-200 ${
-                          scanStatus === "processing"
-                            ? "border-yellow-500 bg-yellow-50 dark:bg-yellow-900/20"
-                            : scanStatus === "success"
-                              ? "border-green-500 bg-green-50 dark:bg-green-900/20"
-                              : scanStatus === "error"
-                                ? "border-red-500 bg-red-50 dark:bg-red-900/20"
-                                : "border-gray-300 dark:border-gray-600 focus:border-blue-500 dark:focus:border-blue-400"
-                        }`}
-                        value={barcodeInput}
-                        onChange={(e) => {
-                          setBarcodeInput(e.target.value)
-                          if (e.target.value.trim() && !isBarcodeProcessing) {
-                            setTimeout(() => {
-                              handleBarcodeInput(e.target.value)
-                            }, 300)
-                          }
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault()
-                            if (barcodeInput.trim()) {
-                              handleBarcodeInput(e.target.value)
-                            }
-                          }
-                        }}
-                      />
-                      {scanStatus === "processing" && (
-                        <Loader2 className="absolute right-2.5 top-2.5 h-4 w-4 animate-spin text-yellow-500" />
-                      )}
-                      {scanStatus === "success" && (
-                        <CheckCircle2 className="absolute right-2.5 top-2.5 h-4 w-4 text-green-500" />
-                      )}
-                      {scanStatus === "error" && (
-                        <XCircle className="absolute right-2.5 top-2.5 h-4 w-4 text-red-500" />
-                      )}
+    <div className="min-h-[calc(100vh-100px)] bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 p-2 sm:p-3">
+      {/* Mobile-first layout that wraps on smaller screens */}
+      <div className="flex flex-col xl:flex-row gap-3 h-full">
+        
+        {/* Main Sale Form Section */}
+        <div className="flex-1 xl:w-3/4 flex flex-col min-h-0">
+          {/* Add Sale Form */}
+          <Card className="flex-1 overflow-hidden bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
+            <CardContent className="p-0 h-full">
+              {/* Header with edit mode indicator */}
+              {isEditMode && (
+                <div className="p-2 bg-orange-50 dark:bg-orange-900/30 border-b border-orange-200 dark:border-orange-600">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Edit className="h-4 w-4 text-orange-600 dark:text-orange-400" />
+                      <span className="text-sm font-medium text-orange-800 dark:text-orange-200">
+                        Editing Sale #{editingSaleId}
+                      </span>
                     </div>
                     <Button
-                      type="button"
-                      onClick={() => {
-                        if (barcodeInput.trim()) {
-                          handleBarcodeInput(barcodeInput)
-                        }
-                      }}
-                      disabled={isBarcodeProcessing || !barcodeInput}
+                      onClick={resetAddSaleForm}
+                      variant="ghost"
                       size="sm"
-                      className="bg-blue-600 hover:bg-blue-700 text-white h-9"
+                      className="text-orange-600 dark:text-orange-400 hover:bg-orange-100 dark:hover:bg-orange-900/50"
                     >
-                      Add
+                      Cancel Edit
                     </Button>
                   </div>
                 </div>
+              )}
 
-                {/* Products table header */}
-                <div className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-                  <h3 className="font-medium text-sm text-gray-800 dark:text-gray-200">Products & Services</h3>
-                  <div className="flex gap-1">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setIsNewServiceModalOpen(true)}
-                      className="flex items-center gap-1 text-green-600 dark:text-green-400 border-green-300 dark:border-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 h-7 text-xs"
-                    >
-                      <Wrench className="h-3 w-3" /> Service
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setIsNewProductModalOpen(true)}
-                      className="flex items-center gap-1 text-blue-600 dark:text-blue-400 border-blue-300 dark:border-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 h-7 text-xs"
-                    >
-                      <Plus className="h-3 w-3" /> Product
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={addProductRow}
-                      className="flex items-center gap-1 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 h-7 text-xs bg-transparent"
-                    >
-                      <Plus className="h-3 w-3" /> Row
-                    </Button>
-                  </div>
+              {/* Alerts */}
+              {(formAlert || barcodeAlert) && (
+                <div className="p-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+                  {formAlert && <FormAlert type={formAlert.type} message={formAlert.message} />}
+                  {barcodeAlert && <FormAlert type={barcodeAlert.type} message={barcodeAlert.message} />}
                 </div>
+              )}
 
-                {/* Products table */}
-                <div className="flex-1 overflow-y-auto">
-                  <div className="sticky top-0 z-10 grid grid-cols-12 gap-1 p-2 bg-gray-100 dark:bg-gray-700 font-medium text-xs text-gray-700 dark:text-gray-200 border-b border-gray-200 dark:border-gray-600">
-                    <div className="col-span-3">Product/Service</div>
-                    <div className="col-span-2">Notes</div>
-                    <div className="col-span-1 text-center">Qty</div>
-                    <div className="col-span-2 text-center">Price</div>
-                    <div className="col-span-2 text-center">{privacyMode ? "****" : "Cost"}</div>
-                    <div className="col-span-1 text-center">Total</div>
-                    <div className="col-span-1"></div>
-                  </div>
-
-                  {products.map((product, index) => (
-                    <div
-                      key={product.id}
-                      className={`grid grid-cols-12 gap-1 p-2 items-center border-b border-gray-200 dark:border-gray-700 ${
-                        index % 2 === 0 ? "bg-white dark:bg-gray-800" : "bg-gray-50 dark:bg-gray-700"
-                      } hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors duration-150`}
-                    >
-                      <div className="col-span-3">
-                        {product.productId && product.productName ? (
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2 flex-1">
-                              {product.isService ? (
-                                <Wrench className="h-4 w-4 text-green-600 dark:text-green-400 flex-shrink-0" />
-                              ) : (
-                                <div className="h-4 w-4 flex-shrink-0" />
-                              )}
-                              <span className="truncate flex-1 font-medium text-xs text-gray-900 dark:text-gray-200">
-                                {product.productName}
-                              </span>
-                            </div>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-6 w-6 p-0 text-gray-400 hover:text-blue-500 dark:hover:text-blue-400"
-                              onClick={() => {
-                                updateProductRow(product.id, {
-                                  productId: null,
-                                  productName: "",
-                                  price: 0,
-                                  cost: 0,
-                                  stock: 0,
-                                  total: 0,
-                                  notes: "",
-                                  isService: false,
-                                  serviceId: undefined,
-                                })
-                              }}
-                            >
-                              <ChevronsUpDown className="h-3 w-3" />
-                            </Button>
-                          </div>
-                        ) : (
-                          <ProductSelectSimple
-                            id={`product-select-${product.id}`}
-                            value={product.productId}
-                            onChange={(productId, productName, price, wholesalePrice, stock) =>
-                              handleProductSelect(product.id, productId, productName, price, wholesalePrice, stock)
-                            }
-                            onAddNew={() => setIsNewProductModalOpen(true)}
-                            onAddNewService={() => setIsNewServiceModalOpen(true)}
-                            userId={userId}
-                          />
-                        )}
-                      </div>
-                      <div className="col-span-2">
+              {/* Responsive layout for products and sale details */}
+              <div className="flex flex-col lg:flex-row h-full">
+                
+                {/* Products section */}
+                <div className="flex-1 lg:w-[70%] flex flex-col border-b lg:border-b-0 lg:border-r border-gray-200 dark:border-gray-700">
+                  {/* Barcode scanner */}
+                  <div className="p-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                      <div className="relative flex-1">
+                        <Barcode className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-400" />
                         <Input
-                          placeholder="Notes..."
-                          value={product.notes || ""}
-                          onChange={(e) => updateProductRow(product.id, { notes: e.target.value })}
-                          className="text-xs h-7 bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100"
-                        />
-                      </div>
-                      <div className="col-span-1">
-                        <Input
-                          type="number"
-                          min="1"
-                          value={product.quantity}
+                          placeholder="Scan barcode or search product..."
+                          className={`pl-8 h-9 bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 transition-all duration-200 ${
+                            scanStatus === "processing"
+                              ? "border-yellow-500 bg-yellow-50 dark:bg-yellow-900/20"
+                              : scanStatus === "success"
+                                ? "border-green-500 bg-green-50 dark:bg-green-900/20"
+                                : scanStatus === "error"
+                                  ? "border-red-500 bg-red-50 dark:bg-red-900/20"
+                                  : "border-gray-300 dark:border-gray-600 focus:border-blue-500 dark:focus:border-blue-400"
+                          }`}
+                          value={barcodeInput}
                           onChange={(e) => {
-                            const newQuantity = Number.parseInt(e.target.value) || 0
-                            if (product.stock !== undefined && newQuantity > product.stock) {
-                              setBarcodeAlert({
-                                type: "warning",
-                                message: `Only ${product.stock} units available for ${product.productName}`,
-                              })
-                              updateProductRow(product.id, { quantity: product.stock })
-                            } else {
-                              updateProductRow(product.id, { quantity: newQuantity })
+                            setBarcodeInput(e.target.value)
+                            if (e.target.value.trim() && !isBarcodeProcessing) {
+                              setTimeout(() => {
+                                handleBarcodeInput(e.target.value)
+                              }, 300)
                             }
                           }}
-                          className="text-center h-7 text-xs bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100"
-                        />
-                      </div>
-                      <div className="col-span-2">
-                        <Input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={product.price}
-                          onChange={(e) =>
-                            updateProductRow(product.id, {
-                              price: Number.parseFloat(e.target.value) || 0,
-                            })
-                          }
-                          className="text-center h-7 text-xs bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100"
-                        />
-                      </div>
-                      <div className="col-span-2">
-                        {privacyMode ? (
-                          <div className="flex items-center justify-center h-7">
-                            <EyeOff className="h-3 w-3 text-gray-400" />
-                          </div>
-                        ) : (
-                          <Input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            value={product.cost || 0}
-                            onChange={(e) =>
-                              updateProductRow(product.id, {
-                                cost: Number.parseFloat(e.target.value) || 0,
-                              })
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault()
+                              if (barcodeInput.trim()) {
+                                handleBarcodeInput(e.target.value)
+                              }
                             }
-                            className="text-center h-7 text-xs bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100"
-                          />
+                          }}
+                        />
+                        {scanStatus === "processing" && (
+                          <Loader2 className="absolute right-2.5 top-2.5 h-4 w-4 animate-spin text-yellow-500" />
+                        )}
+                        {scanStatus === "success" && (
+                          <CheckCircle2 className="absolute right-2.5 top-2.5 h-4 w-4 text-green-500" />
+                        )}
+                        {scanStatus === "error" && (
+                          <XCircle className="absolute right-2.5 top-2.5 h-4 w-4 text-red-500" />
                         )}
                       </div>
-                      <div className="col-span-1 flex items-center justify-center font-medium text-xs text-gray-900 dark:text-gray-200">
-                        {deviceCurrencyState} {product.total.toFixed(2)}
-                      </div>
-                      <div className="col-span-1 flex justify-center">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => removeProductRow(product.id)}
-                          disabled={products.length === 1}
-                          className="h-6 w-6 p-0 text-gray-400 hover:text-red-500 dark:hover:text-red-400"
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Sale details section (30%) */}
-              <div className="w-[30%] flex flex-col bg-white dark:bg-gray-800">
-                <div className="p-3 border-b border-gray-200 dark:border-gray-700">
-                  <div className="space-y-3">
-                    {/* Customer */}
-                    <div className="space-y-1">
-                      <Label className="text-xs font-medium flex items-center text-gray-900 dark:text-gray-200">
-                        <User className="h-3 w-3 mr-1 text-blue-500 dark:text-blue-400" />
-                        Customer
-                      </Label>
-                      <CustomerSelectSimple
-                        value={customerId}
-                        onChange={(value, name) => {
-                          setCustomerId(value)
-                          if (name) setCustomerName(name)
+                      <Button
+                        type="button"
+                        onClick={() => {
+                          if (barcodeInput.trim()) {
+                            handleBarcodeInput(barcodeInput)
+                          }
                         }}
-                        onAddNew={() => setIsNewCustomerModalOpen(true)}
-                        userId={userId}
-                      />
-                    </div>
-
-                    {/* Status - Full width under customer */}
-                    <div className="space-y-1">
-                      <Label htmlFor="status" className="text-xs font-medium text-gray-900 dark:text-gray-200">
-                        Status
-                      </Label>
-                      <select
-                        id="status"
-                        className="flex h-8 w-full items-center justify-between rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1 text-xs text-gray-900 dark:text-gray-100"
-                        value={status}
-                        onChange={(e) => setStatus(e.target.value)}
+                        disabled={isBarcodeProcessing || !barcodeInput}
+                        size="sm"
+                        className="bg-blue-600 hover:bg-blue-700 text-white h-9 px-4 sm:px-6"
                       >
-                        <option value="Completed">Completed</option>
-                        <option value="Credit">Credit</option>
-                        <option value="Pending">Pending</option>
-                        <option value="Cancelled">Cancelled</option>
-                      </select>
+                        Add
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Products table header */}
+                  <div className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+                    <h3 className="font-medium text-sm text-gray-800 dark:text-gray-200">Products & Services</h3>
+                    <div className="flex flex-wrap gap-1">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setIsNewServiceModalOpen(true)}
+                        className="flex items-center gap-1 text-green-600 dark:text-green-400 border-green-300 dark:border-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 h-7 text-xs"
+                      >
+                        <Wrench className="h-3 w-3" /> 
+                        <span className="hidden sm:inline">Service</span>
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setIsNewProductModalOpen(true)}
+                        className="flex items-center gap-1 text-blue-600 dark:text-blue-400 border-blue-300 dark:border-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 h-7 text-xs"
+                      >
+                        <Plus className="h-3 w-3" /> 
+                        <span className="hidden sm:inline">Product</span>
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={addProductRow}
+                        className="flex items-center gap-1 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 h-7 text-xs bg-transparent"
+                      >
+                        <Plus className="h-3 w-3" /> 
+                        <span className="hidden sm:inline">Row</span>
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Products table - responsive */}
+                  <div className="flex-1 overflow-x-auto overflow-y-auto">
+                    {/* Desktop table header */}
+                    <div className="hidden lg:block sticky top-0 z-10 min-w-[800px]">
+                      <div className="grid grid-cols-12 gap-1 p-2 bg-gray-100 dark:bg-gray-700 font-medium text-xs text-gray-700 dark:text-gray-200 border-b border-gray-200 dark:border-gray-600">
+                        <div className="col-span-3">Product/Service</div>
+                        <div className="col-span-2">Notes</div>
+                        <div className="col-span-1 text-center">Qty</div>
+                        <div className="col-span-2 text-center">Price</div>
+                        <div className="col-span-2 text-center">{privacyMode ? "****" : "Cost"}</div>
+                        <div className="col-span-1 text-center">Total</div>
+                        <div className="col-span-1"></div>
+                      </div>
                     </div>
 
-                    {/* Staff and Date in a row - half width each */}
-                    <div className="flex gap-2">
-                      <div className="flex flex-col space-y-1" style={{ minWidth: 140, flexShrink: 0 }}>
-                        <Label className="text-xs font-medium flex items-center text-gray-900 dark:text-gray-200">
-                          <Users className="h-3 w-3 mr-1 text-green-500 dark:text-green-400" />
-                          Staff *
-                        </Label>
-                        <StaffHeaderDropdown userId={userId} showInSaleModal={true} />
-                      </div>
-
-                      <div className="flex-1 flex flex-col space-y-1">
-                        <Label className="text-xs font-medium flex items-center text-gray-900 dark:text-gray-200">
-                          <Calendar className="h-3 w-3 mr-1 text-blue-500 dark:text-blue-400" />
-                          Date
-                        </Label>
-                        <div className="[&_button]:text-gray-900 [&_button]:dark:text-gray-100 [&_button]:bg-white [&_button]:dark:bg-gray-700 [&_button]:border-gray-300 [&_button]:dark:border-gray-600">
-                          <div className="dark:text-white">
-                            <DatePickerField date={date} onDateChange={setDate} />
+                    {/* Desktop table rows */}
+                    <div className="hidden lg:block min-w-[800px]">
+                      {products.map((product, index) => (
+                        <div
+                          key={product.id}
+                          className={`grid grid-cols-12 gap-1 p-2 items-center border-b border-gray-200 dark:border-gray-700 ${
+                            index % 2 === 0 ? "bg-white dark:bg-gray-800" : "bg-gray-50 dark:bg-gray-700"
+                          } hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors duration-150`}
+                        >
+                          <div className="col-span-3">
+                            {product.productId && product.productName ? (
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2 flex-1">
+                                  {product.isService ? (
+                                    <Wrench className="h-4 w-4 text-green-600 dark:text-green-400 flex-shrink-0" />
+                                  ) : (
+                                    <div className="h-4 w-4 flex-shrink-0" />
+                                  )}
+                                  <span className="truncate flex-1 font-medium text-xs text-gray-900 dark:text-gray-200">
+                                    {product.productName}
+                                  </span>
+                                </div>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 w-6 p-0 text-gray-400 hover:text-blue-500 dark:hover:text-blue-400"
+                                  onClick={() => {
+                                    updateProductRow(product.id, {
+                                      productId: null,
+                                      productName: "",
+                                      price: 0,
+                                      cost: 0,
+                                      stock: 0,
+                                      total: 0,
+                                      notes: "",
+                                      isService: false,
+                                      serviceId: undefined,
+                                    })
+                                  }}
+                                >
+                                  <ChevronsUpDown className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            ) : (
+                              <ProductSelectSimple
+                                id={`product-select-${product.id}`}
+                                value={product.productId}
+                                onChange={(productId, productName, price, wholesalePrice, stock) =>
+                                  handleProductSelect(product.id, productId, productName, price, wholesalePrice, stock)
+                                }
+                                onAddNew={() => setIsNewProductModalOpen(true)}
+                                onAddNewService={() => setIsNewServiceModalOpen(true)}
+                                userId={userId}
+                              />
+                            )}
+                          </div>
+                          <div className="col-span-2">
+                            <Input
+                              placeholder="Notes..."
+                              value={product.notes || ""}
+                              onChange={(e) => updateProductRow(product.id, { notes: e.target.value })}
+                              className="text-xs h-7 bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100"
+                            />
+                          </div>
+                          <div className="col-span-1">
+                            <Input
+                              type="number"
+                              min="1"
+                              value={product.quantity}
+                              onChange={(e) => {
+                                const newQuantity = Number.parseInt(e.target.value) || 0
+                                if (product.stock !== undefined && newQuantity > product.stock) {
+                                  setBarcodeAlert({
+                                    type: "warning",
+                                    message: `Only ${product.stock} units available for ${product.productName}`,
+                                  })
+                                  updateProductRow(product.id, { quantity: product.stock })
+                                } else {
+                                  updateProductRow(product.id, { quantity: newQuantity })
+                                }
+                              }}
+                              className="text-center h-7 text-xs bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100"
+                            />
+                          </div>
+                          <div className="col-span-2">
+                            <Input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={product.price}
+                              onChange={(e) =>
+                                updateProductRow(product.id, {
+                                  price: Number.parseFloat(e.target.value) || 0,
+                                })
+                              }
+                              className="text-center h-7 text-xs bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100"
+                            />
+                          </div>
+                          <div className="col-span-2">
+                            {privacyMode ? (
+                              <div className="flex items-center justify-center h-7">
+                                <EyeOff className="h-3 w-3 text-gray-400" />
+                              </div>
+                            ) : (
+                              <Input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={product.cost || 0}
+                                onChange={(e) =>
+                                  updateProductRow(product.id, {
+                                    cost: Number.parseFloat(e.target.value) || 0,
+                                  })
+                                }
+                                className="text-center h-7 text-xs bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100"
+                              />
+                            )}
+                          </div>
+                          <div className="col-span-1 flex items-center justify-center font-medium text-xs text-gray-900 dark:text-gray-200">
+                            {deviceCurrencyState} {product.total.toFixed(2)}
+                          </div>
+                          <div className="col-span-1 flex justify-center">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => removeProductRow(product.id)}
+                              disabled={products.length === 1}
+                              className="h-6 w-6 p-0 text-gray-400 hover:text-red-500 dark:hover:text-red-400"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
                           </div>
                         </div>
-                      </div>
+                      ))}
                     </div>
 
-                    {/* Received Amount for Credit */}
-                    {status === "Credit" && (
-                      <div className="space-y-1">
-                        <Label
-                          htmlFor="received_amount"
-                          className="text-xs font-medium text-gray-900 dark:text-gray-200"
+                    {/* Mobile card layout */}
+                    <div className="lg:hidden">
+                      {products.map((product, index) => (
+                        <div
+                          key={product.id}
+                          className={`p-3 border-b border-gray-200 dark:border-gray-700 ${
+                            index % 2 === 0 ? "bg-white dark:bg-gray-800" : "bg-gray-50 dark:bg-gray-700"
+                          }`}
                         >
-                          Received Amount
-                        </Label>
-                        <Input
-                          id="received_amount"
-                          type="number"
-                          min="0"
-                          max={totalAmount}
-                          step="0.01"
-                          value={receivedAmount}
-                          onChange={(e) => setReceivedAmount(Number.parseFloat(e.target.value) || 0)}
-                          className="h-8 text-xs bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100"
-                          placeholder="0.00"
-                        />
-                        <p className="text-xs text-gray-500 dark:text-gray-400">
-                          Remaining: {deviceCurrencyState} {(totalAmount - receivedAmount).toFixed(2)}
-                        </p>
-                      </div>
-                    )}
+                          {/* Product Selection */}
+                          <div className="mb-3">
+                            <Label className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1 block">
+                              Product/Service
+                            </Label>
+                            {product.productId && product.productName ? (
+                              <div className="flex items-center justify-between p-2 bg-gray-100 dark:bg-gray-600 rounded">
+                                <div className="flex items-center gap-2">
+                                  {product.isService && (
+                                    <Wrench className="h-4 w-4 text-green-600 dark:text-green-400" />
+                                  )}
+                                  <span className="text-sm font-medium text-gray-900 dark:text-gray-200">
+                                    {product.productName}
+                                  </span>
+                                </div>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 w-6 p-0"
+                                  onClick={() => {
+                                    updateProductRow(product.id, {
+                                      productId: null,
+                                      productName: "",
+                                      price: 0,
+                                      cost: 0,
+                                      stock: 0,
+                                      total: 0,
+                                      notes: "",
+                                      isService: false,
+                                      serviceId: undefined,
+                                    })
+                                  }}
+                                >
+                                  <ChevronsUpDown className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            ) : (
+                              <ProductSelectSimple
+                                id={`product-select-mobile-${product.id}`}
+                                value={product.productId}
+                                onChange={(productId, productName, price, wholesalePrice, stock) =>
+                                  handleProductSelect(product.id, productId, productName, price, wholesalePrice, stock)
+                                }
+                                onAddNew={() => setIsNewProductModalOpen(true)}
+                                onAddNewService={() => setIsNewServiceModalOpen(true)}
+                                userId={userId}
+                              />
+                            )}
+                          </div>
 
-                    {/* Payment Method for Completed */}
-                    {status === "Completed" && (
-                      <div className="space-y-1">
-                        <Label className="text-xs font-medium flex items-center text-gray-900 dark:text-gray-200">
-                          <CreditCard className="h-3 w-3 mr-1 text-blue-500 dark:text-blue-400" />
-                          Payment Method
-                        </Label>
-                        <RadioGroup
-                          value={paymentMethod}
-                          onValueChange={setPaymentMethod}
-                          className="grid grid-cols-3 gap-1"
-                        >
-                          <div className="flex items-center space-x-1 bg-gray-50 dark:bg-gray-700 p-1 rounded-md border border-gray-200 dark:border-gray-600">
-                            <RadioGroupItem value="Cash" id="cash" className="h-3 w-3" />
-                            <Label htmlFor="cash" className="cursor-pointer text-xs text-gray-900 dark:text-gray-200">
-                              Cash
+                          {/* Notes */}
+                          <div className="mb-3">
+                            <Label className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1 block">
+                              Notes
                             </Label>
+                            <Input
+                              placeholder="Notes..."
+                              value={product.notes || ""}
+                              onChange={(e) => updateProductRow(product.id, { notes: e.target.value })}
+                              className="text-sm h-8"
+                            />
                           </div>
-                          <div className="flex items-center space-x-1 bg-gray-50 dark:bg-gray-700 p-1 rounded-md border border-gray-200 dark:border-gray-600">
-                            <RadioGroupItem value="Card" id="card" className="h-3 w-3" />
-                            <Label htmlFor="card" className="cursor-pointer text-xs text-gray-900 dark:text-gray-200">
-                              Card
-                            </Label>
+
+                          {/* Quantity, Price, Cost row */}
+                          <div className="grid grid-cols-3 gap-2 mb-3">
+                            <div>
+                              <Label className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1 block">
+                                Qty
+                              </Label>
+                              <Input
+                                type="number"
+                                min="1"
+                                value={product.quantity}
+                                onChange={(e) => {
+                                  const newQuantity = Number.parseInt(e.target.value) || 0
+                                  if (product.stock !== undefined && newQuantity > product.stock) {
+                                    setBarcodeAlert({
+                                      type: "warning",
+                                      message: `Only ${product.stock} units available for ${product.productName}`,
+                                    })
+                                    updateProductRow(product.id, { quantity: product.stock })
+                                  } else {
+                                    updateProductRow(product.id, { quantity: newQuantity })
+                                  }
+                                }}
+                                className="text-center h-8 text-sm"
+                              />
+                            </div>
+                            <div>
+                              <Label className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1 block">
+                                Price
+                              </Label>
+                              <Input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={product.price}
+                                onChange={(e) =>
+                                  updateProductRow(product.id, {
+                                    price: Number.parseFloat(e.target.value) || 0,
+                                  })
+                                }
+                                className="text-center h-8 text-sm"
+                              />
+                            </div>
+                            <div>
+                              <Label className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1 block">
+                                {privacyMode ? "****" : "Cost"}
+                              </Label>
+                              {privacyMode ? (
+                                <div className="flex items-center justify-center h-8 bg-gray-100 dark:bg-gray-600 rounded border">
+                                  <EyeOff className="h-3 w-3 text-gray-400" />
+                                </div>
+                              ) : (
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  value={product.cost || 0}
+                                  onChange={(e) =>
+                                    updateProductRow(product.id, {
+                                      cost: Number.parseFloat(e.target.value) || 0,
+                                    })
+                                  }
+                                  className="text-center h-8 text-sm"
+                                />
+                              )}
+                            </div>
                           </div>
-                          <div className="flex items-center space-x-1 bg-gray-50 dark:bg-gray-700 p-1 rounded-md border border-gray-200 dark:border-gray-600">
-                            <RadioGroupItem value="Online" id="online" className="h-3 w-3" />
-                            <Label htmlFor="online" className="cursor-pointer text-xs text-gray-900 dark:text-gray-200">
-                              Online
-                            </Label>
+
+                          {/* Total and Delete */}
+                          <div className="flex items-center justify-between">
+                            <div className="text-sm font-medium text-gray-900 dark:text-gray-200">
+                              Total: {deviceCurrencyState} {product.total.toFixed(2)}
+                            </div>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => removeProductRow(product.id)}
+                              disabled={products.length === 1}
+                              className="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                            >
+                              <Trash2 className="h-4 w-4 mr-1" />
+                              Remove
+                            </Button>
                           </div>
-                        </RadioGroup>
-                      </div>
-                    )}
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
 
-                {/* Sale summary */}
-                <div className="flex-1 p-3 flex flex-col">
-                  <div className="bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600 shadow-sm flex flex-col">
-                    <div className="p-3 space-y-2">
-                      <div className="flex justify-between items-center py-1">
-                        <span className="font-medium text-xs text-gray-900 dark:text-gray-200">Subtotal:</span>
-                        <span className="text-sm text-gray-900 dark:text-gray-100">
-                          {deviceCurrencyState} {(typeof subtotal === "number" ? subtotal : 0).toFixed(2)}
-                        </span>
+                {/* Sale details section */}
+                <div className="w-full lg:w-[30%] flex flex-col bg-white dark:bg-gray-800 min-h-0 max-h-[600px] lg:max-h-none">
+                  <div className="p-3 border-b border-gray-200 dark:border-gray-700 overflow-y-auto flex-1">
+                    <div className="space-y-3">
+                      {/* Customer */}
+                      <div className="space-y-1">
+                        <Label className="text-xs font-medium flex items-center text-gray-900 dark:text-gray-200">
+                          <User className="h-3 w-3 mr-1 text-blue-500 dark:text-blue-400" />
+                          Customer
+                        </Label>
+                        <CustomerSelectSimple
+                          value={customerId}
+                          onChange={(value, name) => {
+                            setCustomerId(value)
+                            if (name) setCustomerName(name)
+                          }}
+                          onAddNew={() => setIsNewCustomerModalOpen(true)}
+                          userId={userId}
+                        />
                       </div>
 
-                      <div className="flex justify-between items-center py-1 border-t border-gray-200 dark:border-gray-600">
-                        <span className="font-medium text-xs text-gray-900 dark:text-gray-200">Discount:</span>
-                        <div className="w-20">
+                      {/* Status */}
+                      <div className="space-y-1">
+                        <Label htmlFor="status" className="text-xs font-medium text-gray-900 dark:text-gray-200">
+                          Status
+                        </Label>
+                        <select
+                          id="status"
+                          className="flex h-8 w-full items-center justify-between rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1 text-xs text-gray-900 dark:text-gray-100"
+                          value={status}
+                          onChange={(e) => setStatus(e.target.value)}
+                        >
+                          <option value="Completed">Completed</option>
+                          <option value="Credit">Credit</option>
+                          <option value="Pending">Pending</option>
+                          <option value="Cancelled">Cancelled</option>
+                        </select>
+                      </div>
+
+                      {/* Staff and Date - responsive layout */}
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <div className="flex flex-col space-y-1 flex-1">
+                          <Label className="text-xs font-medium flex items-center text-gray-900 dark:text-gray-200">
+                            <Users className="h-3 w-3 mr-1 text-green-500 dark:text-green-400" />
+                            Staff *
+                          </Label>
+                          <StaffHeaderDropdown userId={userId} showInSaleModal={true} />
+                        </div>
+
+                        <div className="flex flex-col space-y-1 flex-1">
+                          <Label className="text-xs font-medium flex items-center text-gray-900 dark:text-gray-200">
+                            <Calendar className="h-3 w-3 mr-1 text-blue-500 dark:text-blue-400" />
+                            Date
+                          </Label>
+                          <div className="[&_button]:text-gray-900 [&_button]:dark:text-gray-100 [&_button]:bg-white [&_button]:dark:bg-gray-700 [&_button]:border-gray-300 [&_button]:dark:border-gray-600">
+                            <div className="dark:text-white">
+                              <DatePickerField date={date} onDateChange={setDate} />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Received Amount for Credit */}
+                      {status === "Credit" && (
+                        <div className="space-y-1">
+                          <Label
+                            htmlFor="received_amount"
+                            className="text-xs font-medium text-gray-900 dark:text-gray-200"
+                          >
+                            Received Amount
+                          </Label>
                           <Input
+                            id="received_amount"
                             type="number"
                             min="0"
+                            max={totalAmount}
                             step="0.01"
-                            value={discountAmount}
-                            onChange={(e) => setDiscountAmount(Number.parseFloat(e.target.value) || 0)}
-                            className="text-right h-7 text-xs bg-white dark:bg-gray-600 border-gray-300 dark:border-gray-500 text-gray-900 dark:text-gray-100"
+                            value={receivedAmount}
+                            onChange={(e) => setReceivedAmount(Number.parseFloat(e.target.value) || 0)}
+                            className="h-8 text-xs bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100"
+                            placeholder="0.00"
                           />
+                          <p className="text-xs text-gray-500 dark:text-gray-400">
+                            Remaining: {deviceCurrencyState} {(totalAmount - receivedAmount).toFixed(2)}
+                          </p>
                         </div>
-                      </div>
+                      )}
 
-                      <div className="flex justify-between items-center py-2 border-t border-gray-200 dark:border-gray-600 bg-blue-50 dark:bg-blue-900/30 p-2 rounded-md">
-                        <span className="font-bold text-blue-700 dark:text-blue-300 text-sm">Total:</span>
-                        <div className="font-bold text-blue-700 dark:text-blue-300 text-lg">
-                          {deviceCurrencyState} {(typeof totalAmount === "number" ? totalAmount : 0).toFixed(2)}
+                      {/* Payment Method for Completed - responsive grid */}
+                      {status === "Completed" && (
+                        <div className="space-y-1">
+                          <Label className="text-xs font-medium flex items-center text-gray-900 dark:text-gray-200">
+                            <CreditCard className="h-3 w-3 mr-1 text-blue-500 dark:text-blue-400" />
+                            Payment Method
+                          </Label>
+                          <RadioGroup
+                            value={paymentMethod}
+                            onValueChange={setPaymentMethod}
+                            className="grid grid-cols-1 sm:grid-cols-3 gap-1"
+                          >
+                            <div className="flex items-center space-x-1 bg-gray-50 dark:bg-gray-700 p-1 rounded-md border border-gray-200 dark:border-gray-600">
+                              <RadioGroupItem value="Cash" id="cash" className="h-3 w-3" />
+                              <Label htmlFor="cash" className="cursor-pointer text-xs text-gray-900 dark:text-gray-200">
+                                Cash
+                              </Label>
+                            </div>
+                            <div className="flex items-center space-x-1 bg-gray-50 dark:bg-gray-700 p-1 rounded-md border border-gray-200 dark:border-gray-600">
+                              <RadioGroupItem value="Card" id="card" className="h-3 w-3" />
+                              <Label htmlFor="card" className="cursor-pointer text-xs text-gray-900 dark:text-gray-200">
+                                Card
+                              </Label>
+                            </div>
+                            <div className="flex items-center space-x-1 bg-gray-50 dark:bg-gray-700 p-1 rounded-md border border-gray-200 dark:border-gray-600">
+                              <RadioGroupItem value="Online" id="online" className="h-3 w-3" />
+                              <Label htmlFor="online" className="cursor-pointer text-xs text-gray-900 dark:text-gray-200">
+                                Online
+                              </Label>
+                            </div>
+                          </RadioGroup>
                         </div>
-                      </div>
+                      )}
                     </div>
                   </div>
 
-                  {/* Complete Sale button */}
-                  <div className="mt-3">
-                    <Button
-                      onClick={handleSubmitSale}
-                      disabled={isSubmitting}
-                      className="w-full bg-blue-600 hover:bg-blue-700 text-white h-auto py-2"
-                    >
-                      {isSubmitting ? (
-                        <span className="flex items-center justify-center">
-                          <Loader2 className="h-4 w-4 animate-spin mr-2" /> Processing...
-                        </span>
-                      ) : (
-                        <span className="flex items-center justify-center">
-                          <Save className="h-4 w-4 mr-2" /> {isEditMode ? "Update Sale" : "Complete Sale"}
-                        </span>
-                      )}
-                    </Button>
+                  {/* Sale summary */}
+                  <div className="p-3 flex flex-col">
+                    <div className="bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600 shadow-sm flex flex-col">
+                      <div className="p-3 space-y-2">
+                        <div className="flex justify-between items-center py-1">
+                          <span className="font-medium text-xs text-gray-900 dark:text-gray-200">Subtotal:</span>
+                          <span className="text-sm text-gray-900 dark:text-gray-100">
+                            {deviceCurrencyState} {(typeof subtotal === "number" ? subtotal : 0).toFixed(2)}
+                          </span>
+                        </div>
+
+                        <div className="flex justify-between items-center py-1 border-t border-gray-200 dark:border-gray-600">
+                          <span className="font-medium text-xs text-gray-900 dark:text-gray-200">Discount:</span>
+                          <div className="w-20">
+                            <Input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={discountAmount}
+                              onChange={(e) => setDiscountAmount(Number.parseFloat(e.target.value) || 0)}
+                              className="text-right h-7 text-xs bg-white dark:bg-gray-600 border-gray-300 dark:border-gray-500 text-gray-900 dark:text-gray-100"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex justify-between items-center py-2 border-t border-gray-200 dark:border-gray-600 bg-blue-50 dark:bg-blue-900/30 p-2 rounded-md">
+                          <span className="font-bold text-blue-700 dark:text-blue-300 text-sm">Total:</span>
+                          <div className="font-bold text-blue-700 dark:text-blue-300 text-lg">
+                            {deviceCurrencyState} {(typeof totalAmount === "number" ? totalAmount : 0).toFixed(2)}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Complete Sale button */}
+                    <div className="mt-3">
+                      <Button
+                        onClick={handleSubmitSale}
+                        disabled={isSubmitting}
+                        className="w-full bg-blue-600 hover:bg-blue-700 text-white h-auto py-2"
+                      >
+                        {isSubmitting ? (
+                          <span className="flex items-center justify-center">
+                            <Loader2 className="h-4 w-4 animate-spin mr-2" /> Processing...
+                          </span>
+                        ) : (
+                          <span className="flex items-center justify-center">
+                            <Save className="h-4 w-4 mr-2" /> {isEditMode ? "Update Sale" : "Complete Sale"}
+                          </span>
+                        )}
+                      </Button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Right side - Summary and Sales List (25% width) */}
-      <div className="w-1/4 flex flex-col space-y-3">
-        {/* Summary Cards - 3x2 Grid with Privacy Mode */}
-        <div className="grid grid-cols-3 gap-2">
-          <Card className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
-            <CardContent className="p-2">
-              <div className="text-center">
-                <div className="text-sm font-bold text-gray-900 dark:text-gray-100">
-                  {privacyMode
-                    ? getPrivacyValue()
-                    : formatCurrency(filteredSales.reduce((sum, sale) => sum + Number(sale.total_amount), 0))}
-                </div>
-                <div className="text-xs text-gray-500 dark:text-gray-400">Total Sales</div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
-            <CardContent className="p-2">
-              <div className="text-center">
-                <div className="text-sm font-bold text-green-600 dark:text-green-400">
-                  {privacyMode
-                    ? getPrivacyValue()
-                    : formatCurrency(
-                        filteredSales.reduce((sum, sale) => {
-                          if (sale.status === "Credit") {
-                            return sum + Number(sale.received_amount || 0)
-                          } else if (sale.status === "Completed") {
-                            return sum + Number(sale.total_amount)
-                          }
-                          return sum
-                        }, 0),
-                      )}
-                </div>
-                <div className="text-xs text-gray-500 dark:text-gray-400">Received</div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
-            <CardContent className="p-2">
-              <div className="text-center">
-                <div className="text-sm font-bold text-orange-600 dark:text-orange-400">
-                  {privacyMode
-                    ? getPrivacyValue()
-                    : formatCurrency(
-                        filteredSales.reduce((sum, sale) => {
-                          if (sale.status === "Credit") {
-                            return sum + getRemainingAmount(sale)
-                          }
-                          return sum
-                        }, 0),
-                      )}
-                </div>
-                <div className="text-xs text-gray-500 dark:text-gray-400">Remaining</div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
-            <CardContent className="p-2">
-              <div className="text-center">
-                <div className="text-sm font-bold text-blue-600 dark:text-blue-400">
-                  {privacyMode
-                    ? getPrivacyValue()
-                    : formatCurrency(
-                        filteredSales.reduce((sum, sale) => {
-                          // Calculate profit as total - cost (assuming cost is available in sale data)
-                          const saleProfit = Number(sale.total_amount) - (Number(sale.total_cost) || 0)
-                          return sum + saleProfit
-                        }, 0),
-                      )}
-                </div>
-                <div className="text-xs text-gray-500 dark:text-gray-400">Profit</div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
-            <CardContent className="p-2">
-              <div className="text-center">
-                <div className="text-sm font-bold text-purple-600 dark:text-purple-400">
-                  {privacyMode
-                    ? getPrivacyValue()
-                    : formatCurrency(
-                        filteredSales.reduce((sum, sale) => {
-                          // Calculate COGS (Cost of Goods Sold)
-                          return sum + (Number(sale.total_cost) || 0)
-                        }, 0),
-                      )}
-                </div>
-                <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center justify-center gap-1">
-                  <Settings className="h-3 w-3" />
-                  COGS
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
-            <CardContent className="p-2">
-              <div className="text-center">
-                <Button
-                  onClick={() => setPrivacyMode(!privacyMode)}
-                  variant="ghost"
-                  size="sm"
-                  className="w-full h-full flex flex-col items-center justify-center gap-1 hover:bg-gray-50 dark:hover:bg-gray-700"
-                >
-                  {privacyMode ? (
-                    <EyeOff className="h-4 w-4 text-gray-600 dark:text-gray-400" />
-                  ) : (
-                    <Eye className="h-4 w-4 text-gray-600 dark:text-gray-400" />
-                  )}
-                  <div className="text-xs text-gray-500 dark:text-gray-400">Privacy</div>
-                </Button>
               </div>
             </CardContent>
           </Card>
         </div>
 
-        {/* Search and Controls */}
-        <Card className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
-          <CardContent className="p-2">
-            <div className="space-y-2">
-              <div className="relative">
-                <Search className="absolute left-2.5 top-2.5 h-3 w-3 text-gray-400" />
-                <Input
-                  type="search"
-                  placeholder="Search sales..."
-                  className="pl-7 h-7 text-xs bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400"
-                  value={searchTerm}
-                  onChange={(e) => dispatch(setSearchTerm(e.target.value))}
-                />
+        {/* Right side - Summary and Sales List - wraps below on smaller screens */}
+        <div className="w-full xl:w-1/4 flex flex-col space-y-3 min-h-0">
+          {/* Summary Cards - responsive grid */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-3 gap-2">
+            <Card className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
+              <CardContent className="p-2">
+                <div className="text-center">
+                  <div className="text-sm font-bold text-gray-900 dark:text-gray-100">
+                    {privacyMode
+                      ? getPrivacyValue()
+                      : formatCurrency(filteredSales.reduce((sum, sale) => sum + Number(sale.total_amount), 0))}
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">Total Sales</div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
+              <CardContent className="p-2">
+                <div className="text-center">
+                  <div className="text-sm font-bold text-green-600 dark:text-green-400">
+                    {privacyMode
+                      ? getPrivacyValue()
+                      : formatCurrency(
+                          filteredSales.reduce((sum, sale) => {
+                            if (sale.status === "Credit") {
+                              return sum + Number(sale.received_amount || 0)
+                            } else if (sale.status === "Completed") {
+                              return sum + Number(sale.total_amount)
+                            }
+                            return sum
+                          }, 0),
+                        )}
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">Received</div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
+              <CardContent className="p-2">
+                <div className="text-center">
+                  <div className="text-sm font-bold text-orange-600 dark:text-orange-400">
+                    {privacyMode
+                      ? getPrivacyValue()
+                      : formatCurrency(
+                          filteredSales.reduce((sum, sale) => {
+                            if (sale.status === "Credit") {
+                              return sum + getRemainingAmount(sale)
+                            }
+                            return sum
+                          }, 0),
+                        )}
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">Remaining</div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
+              <CardContent className="p-2">
+                <div className="text-center">
+                  <div className="text-sm font-bold text-blue-600 dark:text-blue-400">
+                    {privacyMode
+                      ? getPrivacyValue()
+                      : formatCurrency(
+                          filteredSales.reduce((sum, sale) => {
+                            // Calculate profit as total - cost (assuming cost is available in sale data)
+                            const saleProfit = Number(sale.total_amount) - (Number(sale.total_cost) || 0)
+                            return sum + saleProfit
+                          }, 0),
+                        )}
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">Profit</div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
+              <CardContent className="p-2">
+                <div className="text-center">
+                  <div className="text-sm font-bold text-purple-600 dark:text-purple-400">
+                    {privacyMode
+                      ? getPrivacyValue()
+                      : formatCurrency(
+                          filteredSales.reduce((sum, sale) => {
+                            // Calculate COGS (Cost of Goods Sold)
+                            return sum + (Number(sale.total_cost) || 0)
+                          }, 0),
+                        )}
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center justify-center gap-1">
+                    <Settings className="h-3 w-3" />
+                    COGS
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
+              <CardContent className="p-2">
+                <div className="text-center">
+                  <Button
+                    onClick={() => setPrivacyMode(!privacyMode)}
+                    variant="ghost"
+                    size="sm"
+                    className="w-full h-full flex flex-col items-center justify-center gap-1 hover:bg-gray-50 dark:hover:bg-gray-700"
+                  >
+                    {privacyMode ? (
+                      <EyeOff className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+                    ) : (
+                      <Eye className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+                    )}
+                    <div className="text-xs text-gray-500 dark:text-gray-400">Privacy</div>
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Search and Controls */}
+          <Card className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
+            <CardContent className="p-2">
+              <div className="space-y-2">
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-2.5 h-3 w-3 text-gray-400" />
+                  <Input
+                    type="search"
+                    placeholder="Search sales..."
+                    className="pl-7 h-7 text-xs bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400"
+                    value={searchTerm}
+                    onChange={(e) => dispatch(setSearchTerm(e.target.value))}
+                  />
+                </div>
+
+                {/* Control buttons - responsive layout */}
+                <div className="flex flex-col sm:flex-row xl:flex-col gap-1">
+                  <div className="flex gap-1">
+                    <Button
+                      onClick={handleForcedRefresh}
+                      variant="outline"
+                      size="sm"
+                      className="flex-1 text-xs bg-transparent border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 h-7"
+                      disabled={isRefreshing || isLoading}
+                    >
+                      <RefreshCw className={`h-3 w-3 mr-1 ${isRefreshing || isLoading ? "animate-spin" : ""}`} />
+                      <span className="hidden sm:inline xl:inline">Refresh</span>
+                    </Button>
+
+                    <Button
+                      onClick={handleStatusFilter}
+                      variant="outline"
+                      size="sm"
+                      className={`flex-1 text-xs h-7 hover:bg-gray-50 dark:hover:bg-gray-700 bg-transparent ${
+                        statusFilter !== "all"
+                          ? "border-blue-500 dark:border-blue-400 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400"
+                          : "border-gray-300 dark:border-gray-600"
+                      }`}
+                    >
+                      <Filter className="h-3 w-3 mr-1" />
+                      <span className="hidden sm:inline xl:inline">
+                        {statusFilter === "all" ? "All" : statusFilter?.charAt(0).toUpperCase() + statusFilter?.slice(1)}
+                      </span>
+                    </Button>
+                  </div>
+
+                  {/* Quick date filters - responsive layout */}
+                  <div className="flex gap-1">
+                    <Button
+                      onClick={handleTodayFilter}
+                      variant="outline"
+                      size="sm"
+                      className={`flex-1 text-xs h-6 hover:bg-gray-50 dark:hover:bg-gray-700 bg-transparent ${
+                        isTodayFilterActive()
+                          ? "border-green-500 dark:border-green-400 bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400"
+                          : "border-gray-300 dark:border-gray-600"
+                      }`}
+                    >
+                      Today
+                    </Button>
+                    <Button
+                      onClick={handleCustomDateRange}
+                      variant="outline"
+                      size="sm"
+                      className={`flex-1 text-xs h-6 hover:bg-gray-50 dark:hover:bg-gray-700 bg-transparent ${
+                        isCustomDateRangeActive()
+                          ? "border-purple-500 dark:border-purple-400 bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400"
+                          : "border-gray-300 dark:border-gray-600"
+                      }`}
+                    >
+                      <CalendarDays className="h-3 w-3 mr-1" />
+                      <span className="hidden sm:inline xl:inline">
+                        {isCustomDateRangeActive() ? getCustomDateRangeText() : "Custom"}
+                      </span>
+                    </Button>
+                    <Button
+                      onClick={handlePaymentMethodFilter}
+                      variant="outline"
+                      size="sm"
+                      className={`flex-1 text-xs h-6 hover:bg-gray-50 dark:hover:bg-gray-700 bg-transparent ${
+                        paymentMethodFilter !== "all"
+                          ? "border-orange-500 dark:border-orange-400 bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400"
+                          : "border-gray-300 dark:border-gray-600"
+                      }`}
+                    >
+                      <span className="hidden sm:inline xl:inline">
+                        {paymentMethodFilter === "all"
+                          ? "All Pay"
+                          : paymentMethodFilter?.charAt(0).toUpperCase() + paymentMethodFilter?.slice(1)}
+                      </span>
+                      <span className="sm:hidden xl:hidden">Pay</span>
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Sales List - responsive height */}
+          <Card className="flex-1 overflow-hidden bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 min-h-[300px] xl:min-h-0">
+            <CardContent className="p-0 h-full flex flex-col">
+              {/* Fixed Header */}
+              <div className="p-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex-shrink-0">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-gray-900 dark:text-gray-200">
+                    {filteredSales.length} {filteredSales.length === 1 ? "Sale" : "Sales"}
+                  </span>
+                  {lastUpdated && (
+                    <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+                      <span className="hidden sm:inline">Updated: {format(new Date(lastUpdated), "HH:mm")}</span>
+                      {(isRefreshing || isSilentRefreshing) && <Loader2 className="h-3 w-3 animate-spin" />}
+                    </div>
+                  )}
+                </div>
               </div>
 
-              <div className="flex gap-1">
-                <Button
-                  onClick={handleForcedRefresh}
-                  variant="outline"
-                  size="sm"
-                  className="flex-1 text-xs bg-transparent border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 h-7"
-                  disabled={isRefreshing || isLoading}
-                >
-                  <RefreshCw className={`h-3 w-3 mr-1 ${isRefreshing || isLoading ? "animate-spin" : ""}`} />
-                  Refresh
-                </Button>
-
-                <Button
-                  onClick={handleStatusFilter}
-                  variant="outline"
-                  size="sm"
-                  className={`flex-1 text-xs h-7 hover:bg-gray-50 dark:hover:bg-gray-700 bg-transparent ${
-                    statusFilter !== "all"
-                      ? "border-blue-500 dark:border-blue-400 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400"
-                      : "border-gray-300 dark:border-gray-600"
-                  }`}
-                >
-                  <Filter className="h-3 w-3 mr-1" />
-
-                  {statusFilter === "all" ? "All" : statusFilter?.charAt(0).toUpperCase() + statusFilter?.slice(1)}
-                </Button>
-              </div>
-
-              {/* Quick date filters */}
-              <div className="flex gap-1">
-                <Button
-                  onClick={handleTodayFilter}
-                  variant="outline"
-                  size="sm"
-                  className={`flex-1 text-xs h-6 hover:bg-gray-50 dark:hover:bg-gray-700 bg-transparent ${
-                    isTodayFilterActive()
-                      ? "border-green-500 dark:border-green-400 bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400"
-                      : "border-gray-300 dark:border-gray-600"
-                  }`}
-                >
-                  Today
-                </Button>
-                <Button
-                  onClick={handleCustomDateRange}
-                  variant="outline"
-                  size="sm"
-                  className={`flex-1 text-xs h-6 hover:bg-gray-50 dark:hover:bg-gray-700 bg-transparent ${
-                    isCustomDateRangeActive()
-                      ? "border-purple-500 dark:border-purple-400 bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400"
-                      : "border-gray-300 dark:border-gray-600"
-                  }`}
-                >
-                  <CalendarDays className="h-3 w-3 mr-1" />
-                  {isCustomDateRangeActive() ? getCustomDateRangeText() : "Custom"}
-                </Button>
-                <Button
-                  onClick={handlePaymentMethodFilter}
-                  variant="outline"
-                  size="sm"
-                  className={`flex-1 text-xs h-6 hover:bg-gray-50 dark:hover:bg-gray-700 bg-transparent ${
-                    paymentMethodFilter !== "all"
-                      ? "border-orange-500 dark:border-orange-400 bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400"
-                      : "border-gray-300 dark:border-gray-600"
-                  }`}
-                >
-                  {paymentMethodFilter === "all"
-                    ? "All Pay"
-                    : paymentMethodFilter?.charAt(0).toUpperCase() + paymentMethodFilter?.slice(1)}
-                </Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Sales List - Compact with Fixed Header */}
-        <Card className="flex-1 overflow-hidden bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
-          <CardContent className="p-0 h-full flex flex-col">
-            {/* Fixed Header */}
-            <div className="p-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex-shrink-0">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-medium text-gray-900 dark:text-gray-200">
-                  {filteredSales.length} {filteredSales.length === 1 ? "Sale" : "Sales"}
-                </span>
-                {lastUpdated && (
-                  <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-                    <span>Updated: {format(new Date(lastUpdated), "HH:mm")}</span>
-                    {(isRefreshing || isSilentRefreshing) && <Loader2 className="h-3 w-3 animate-spin" />}
+              {/* Scrollable Content */}
+              <div className="flex-1 overflow-y-auto">
+                {isLoading && sales.length === 0 ? (
+                  <div className="p-3">
+                    <SalesTableSkeleton />
+                  </div>
+                ) : error ? (
+                  <div className="text-center py-4 text-red-500 dark:text-red-400 text-xs p-3">
+                    <div className="flex items-center justify-center gap-1">
+                      <AlertCircle className="h-4 w-4" />
+                      <span>{error}</span>
+                    </div>
+                  </div>
+                ) : filteredSales.length === 0 ? (
+                  <div className="text-center py-4 text-gray-500 dark:text-gray-400 text-xs p-3">
+                    {hasActiveFilters ? "No sales found matching your filters" : "No sales found"}
+                  </div>
+                ) : (
+                  <div className="p-2">
+                    {filteredSales.slice(0, 20).map((sale, index) => (
+                      <SaleCard key={sale.id} sale={sale} index={index} />
+                    ))}
                   </div>
                 )}
               </div>
-            </div>
-
-            {/* Scrollable Content */}
-            <div className="flex-1 overflow-y-auto">
-              {isLoading && sales.length === 0 ? (
-                <div className="p-3">
-                  <SalesTableSkeleton />
-                </div>
-              ) : error ? (
-                <div className="text-center py-4 text-red-500 dark:text-red-400 text-xs p-3">
-                  <div className="flex items-center justify-center gap-1">
-                    <AlertCircle className="h-4 w-4" />
-                    <span>{error}</span>
-                  </div>
-                </div>
-              ) : filteredSales.length === 0 ? (
-                <div className="text-center py-4 text-gray-500 dark:text-gray-400 text-xs p-3">
-                  {hasActiveFilters ? "No sales found matching your filters" : "No sales found"}
-                </div>
-              ) : (
-                <div className="p-2">
-                  {filteredSales.slice(0, 20).map((sale, index) => (
-                    <SaleCard key={sale.id} sale={sale} index={index} />
-                  ))}
-                </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        </div>
       </div>
 
       {/* Date Range Modal */}
