@@ -1,7 +1,15 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Users, ChevronDown, Plus, Edit, Trash2, MoreVertical, UserCheck } from "lucide-react"
+import {
+  Users,
+  ChevronDown,
+  Plus,
+  Edit,
+  Trash2,
+  MoreVertical,
+  UserCheck,
+} from "lucide-react"
 import { useSelector, useDispatch } from "react-redux"
 import {
   selectStaff,
@@ -11,7 +19,6 @@ import {
   setStaff,
   activateStaff as activateStaffAction,
 } from "@/store/slices/staffSlice"
-import { selectDeviceId } from "@/store/slices/deviceSlice"
 import { getDeviceStaff, activateStaff } from "@/app/actions/staff-actions"
 import NewStaffModal from "../staff/new-staff-modal"
 import EditStaffModal from "../staff/edit-staff-modal"
@@ -28,41 +35,32 @@ import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/components/ui/use-toast"
 
 interface StaffHeaderDropdownProps {
-  userId: number
-  /*  Show a more compact style when used inside a Sale modal             */
+  userId: number 
+  deviceId: number
   showInSaleModal?: boolean
-  /*  (Optional) externally-controlled staff selection (for Sale forms)   */
   selectedStaffId?: number | null
   onStaffChange?: (staffId: number | null) => void
 }
 
-/**
- * Re-usable dropdown for viewing / activating / creating staff.
- * If `selectedStaffId` + `onStaffChange` are supplied, it behaves like a
- * controlled component (good for forms such as “New / Edit Sale”).
- */
 export default function StaffHeaderDropdown({
   userId,
+  deviceId,
   showInSaleModal = false,
   selectedStaffId,
   onStaffChange,
 }: StaffHeaderDropdownProps) {
   const dispatch = useDispatch()
-  const deviceId = useSelector(selectDeviceId)
   const allStaff = useSelector(selectStaff)
   const activeStaff = useSelector(selectActiveStaff)
   const staffLoading = useSelector(selectStaffLoading)
   const { toast } = useToast()
 
-  /* Internal dropdown state */
   const [isDropdownOpen, setIsDropdownOpen] = useState(false)
   const [isNewModalOpen, setIsNewModalOpen] = useState(false)
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [editingStaff, setEditingStaff] = useState<any | null>(null)
 
-  /*  ---------------- Side-effects ---------------- */
   useEffect(() => {
-    /* Load staff only once per device */
     if (deviceId && allStaff.length === 0) {
       loadStaff()
     }
@@ -73,8 +71,11 @@ export default function StaffHeaderDropdown({
     dispatch(setLoading(true))
     try {
       const res = await getDeviceStaff(deviceId)
-      if (res.success) dispatch(setStaff(res.data))
-      else console.error(res.message)
+      if (res.success) {
+        dispatch(setStaff(res.data))
+      } else {
+        console.error(res.message)
+      }
     } catch (err) {
       console.error("Error loading staff:", err)
     } finally {
@@ -82,9 +83,9 @@ export default function StaffHeaderDropdown({
     }
   }
 
-  /*  ---------------- Helpers ---------------- */
-  /* Determine which staff name to display */
-  const resolvedStaff = selectedStaffId ? (allStaff.find((s) => s.id === selectedStaffId) ?? null) : activeStaff
+  const resolvedStaff = selectedStaffId
+    ? allStaff.find((s) => s.id === selectedStaffId) ?? null
+    : activeStaff
 
   const displayName = resolvedStaff ? resolvedStaff.name : "No Active Staff"
   const displayPos = resolvedStaff?.position
@@ -95,13 +96,11 @@ export default function StaffHeaderDropdown({
 
   const handleActivate = async (staffId: number) => {
     if (onStaffChange) {
-      /* Sale modal use-case → just return the chosen staff */
       onStaffChange(staffId)
       setIsDropdownOpen(false)
       return
     }
 
-    /* Dashboard use-case → activate globally */
     if (!deviceId) return
     try {
       const res = await activateStaff(staffId, deviceId)
@@ -110,16 +109,24 @@ export default function StaffHeaderDropdown({
           activateStaffAction({
             staffId,
             allStaff: res.allStaff,
-          }),
+          })
         )
         toast({ title: "Success", description: res.message })
         setIsDropdownOpen(false)
       } else {
-        toast({ title: "Error", description: res.message, variant: "destructive" })
+        toast({
+          title: "Error",
+          description: res.message,
+          variant: "destructive",
+        })
       }
     } catch (err) {
       console.error(err)
-      toast({ title: "Error", description: "Failed to activate staff", variant: "destructive" })
+      toast({
+        title: "Error",
+        description: "Failed to activate staff",
+        variant: "destructive",
+      })
     }
   }
 
@@ -129,12 +136,37 @@ export default function StaffHeaderDropdown({
     setIsDropdownOpen(false)
   }
 
-  /*  ---------------- Render ---------------- */
+  const handleOpenNewStaffModal = () => {
+    if (userId && deviceId) {
+      console.log("🚀 Opening NewStaffModal with:", { userId, deviceId })
+      setIsNewModalOpen(true)
+      setIsDropdownOpen(false)
+    } else {
+      console.warn("❌ Cannot open modal: Missing userId or deviceId", {
+        userId,
+        deviceId,
+      })
+    }
+  }
+
+  if (!userId || !deviceId) {
+    return (
+      <div className="flex items-center gap-2 px-3 py-2 bg-gray-100 dark:bg-gray-800 rounded-lg">
+        <Users className="h-4 w-4 text-gray-500 dark:text-gray-400" />
+        <span className="text-sm text-gray-600 dark:text-gray-300">
+          Loading account... (Device: {deviceId}, User: {userId})
+        </span>
+      </div>
+    )
+  }
+
   if (staffLoading) {
     return (
       <div className="flex items-center gap-2 px-3 py-2 bg-gray-100 dark:bg-gray-800 rounded-lg">
         <Users className="h-4 w-4 text-gray-500 dark:text-gray-400" />
-        <span className="text-sm text-gray-600 dark:text-gray-300">Loading staff...</span>
+        <span className="text-sm text-gray-600 dark:text-gray-300">
+          Loading staff...
+        </span>
       </div>
     )
   }
@@ -150,7 +182,11 @@ export default function StaffHeaderDropdown({
             <Users className="h-4 w-4 text-blue-600 dark:text-blue-400" />
             <div className="flex flex-col items-start">
               <span className="text-sm font-medium">{displayName}</span>
-              {displayPos && <span className="text-xs text-gray-500 dark:text-gray-400">{displayPos}</span>}
+              {displayPos && (
+                <span className="text-xs text-gray-500 dark:text-gray-400">
+                  {displayPos}
+                </span>
+              )}
             </div>
             <ChevronDown className="h-4 w-4 text-gray-500 dark:text-gray-400" />
           </Button>
@@ -160,17 +196,15 @@ export default function StaffHeaderDropdown({
           align="end"
           className="w-80 bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 shadow-lg"
         >
-          <DropdownMenuLabel className="text-gray-900 dark:text-gray-100">Staff Management</DropdownMenuLabel>
+          <DropdownMenuLabel className="text-gray-900 dark:text-gray-100">
+            Staff Management
+          </DropdownMenuLabel>
           <DropdownMenuSeparator className="bg-gray-200 dark:bg-gray-700" />
 
-          {/* Add New Staff (hide inside Sale modal) */}
           {!showInSaleModal && (
             <>
               <DropdownMenuItem
-                onClick={() => {
-                  setIsNewModalOpen(true)
-                  setIsDropdownOpen(false)
-                }}
+                onClick={handleOpenNewStaffModal}
                 className="flex items-center gap-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 cursor-pointer"
               >
                 <Plus className="h-4 w-4" />
@@ -180,13 +214,14 @@ export default function StaffHeaderDropdown({
             </>
           )}
 
-          {/* Staff List */}
           <div className="max-h-64 overflow-y-auto">
             {allStaff.length === 0 ? (
               <div className="p-4 text-center text-gray-500 dark:text-gray-400">
                 <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
                 <p className="text-sm">No staff members found</p>
-                <p className="text-xs">Add your first staff member to get started</p>
+                <p className="text-xs">
+                  Add your first staff member to get started
+                </p>
               </div>
             ) : (
               allStaff.map((staff) => (
@@ -200,7 +235,9 @@ export default function StaffHeaderDropdown({
                   >
                     <div className="flex-1">
                       <div className="flex items-center gap-2">
-                        <span className="font-medium text-gray-900 dark:text-gray-100">{staff.name}</span>
+                        <span className="font-medium text-gray-900 dark:text-gray-100">
+                          {staff.name}
+                        </span>
                         {staff.is_active && !selectedStaffId && (
                           <Badge className="bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 text-xs">
                             Active
@@ -272,10 +309,9 @@ export default function StaffHeaderDropdown({
         </DropdownMenuContent>
       </DropdownMenu>
 
-      {/* New Staff Modal (dashboard only) */}
-      {!showInSaleModal && (
+      {isNewModalOpen && (
         <NewStaffModal
-          isOpen={isNewModalOpen}
+          isOpen={true}
           onClose={() => setIsNewModalOpen(false)}
           onStaffAdded={loadStaff}
           userId={userId}
@@ -283,7 +319,7 @@ export default function StaffHeaderDropdown({
         />
       )}
 
-      {/* Edit Staff Modal (dashboard only) */}
+
       {editingStaff && !showInSaleModal && (
         <EditStaffModal
           isOpen={isEditModalOpen}

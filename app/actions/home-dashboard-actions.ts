@@ -10,10 +10,12 @@ export async function getComprehensiveDashboardData(
   deviceId: number,
   period: "today" | "week" | "month" | "quarter" | "year" = "month",
 ): Promise<{ success: boolean; data?: HomeDashboardData; message?: string }> {
-  if (!userId || !deviceId) {
+  // Enhanced validation
+  if (!userId || !deviceId || userId <= 0 || deviceId <= 0) {
+    console.error("Invalid parameters:", { userId, deviceId })
     return {
       success: false,
-      message: "User ID and Device ID are required",
+      message: `Invalid parameters: userId=${userId}, deviceId=${deviceId}`,
     }
   }
 
@@ -21,6 +23,7 @@ export async function getComprehensiveDashboardData(
 
   try {
     if (!isConnected()) {
+      console.error("Database connection failed")
       return {
         success: false,
         message: "Database connection failed",
@@ -64,74 +67,101 @@ export async function getComprehensiveDashboardData(
         previousEndDate = new Date(startDate.getTime() - 1)
     }
 
+    // Enhanced logging
+    console.log("=== DASHBOARD DEBUG INFO ===")
+    console.log("Parameters:", { userId, deviceId, period })
+    console.log("Date ranges:", {
+      startDate: startDate.toISOString(),
+      endDate: now.toISOString(),
+      previousStartDate: previousStartDate.toISOString(),
+      previousEndDate: previousEndDate.toISOString()
+    })
+
+    // First, let's check if we have any data at all for this user
+    const dataCheckQueries = await Promise.all([
+      // Check if user has any sales
+      sql`SELECT COUNT(*) as count FROM sales WHERE created_by = ${userId}`,
+      // Check if user has any products  
+      sql`SELECT COUNT(*) as count FROM products WHERE created_by = ${userId}`,
+      // Check if user has any customers
+      sql`SELECT COUNT(*) as count FROM customers WHERE created_by = ${userId}`,
+      // Check if user has any purchases
+      sql`SELECT COUNT(*) as count FROM purchases WHERE created_by = ${userId}`,
+    ])
+
+    console.log("Data existence check:", {
+      totalSales: dataCheckQueries[0][0]?.count || 0,
+      totalProducts: dataCheckQueries[1][0]?.count || 0,
+      totalCustomers: dataCheckQueries[2][0]?.count || 0,
+      totalPurchases: dataCheckQueries[3][0]?.count || 0,
+    })
+
     // Build chart data query for the selected period
     let chartDataQuery
     if (period === "today") {
-      // hourly
       chartDataQuery = sql`
         SELECT 
           TO_CHAR(DATE_TRUNC('hour', sale_date), 'HH24:MI') AS period,
-          DATE_TRUNC('hour', sale_date)                AS period_date,
-          COALESCE(SUM(total_amount), 0)               AS income,
-          0                                            AS expenses
+          DATE_TRUNC('hour', sale_date) AS period_date,
+          COALESCE(SUM(total_amount), 0) AS income,
+          0 AS expenses
         FROM sales
         WHERE status != 'Cancelled'
           AND created_by = ${userId}
-          AND sale_date BETWEEN ${startDate.toISOString()} AND ${now.toISOString()}
+          AND sale_date >= ${startDate.toISOString()}
+          AND sale_date <= ${now.toISOString()}
         GROUP BY DATE_TRUNC('hour', sale_date)
         ORDER BY DATE_TRUNC('hour', sale_date);
       `
     } else if (period === "week" || period === "month") {
-      /* daily points */
       chartDataQuery = sql`
         SELECT 
           TO_CHAR(DATE_TRUNC('day', sale_date), 'Mon DD') AS period,
-          DATE_TRUNC('day', sale_date)                    AS period_date,
-          COALESCE(SUM(total_amount), 0)                  AS income,
-          0                                               AS expenses
+          DATE_TRUNC('day', sale_date) AS period_date,
+          COALESCE(SUM(total_amount), 0) AS income,
+          0 AS expenses
         FROM sales
         WHERE status != 'Cancelled'
           AND created_by = ${userId}
-          AND sale_date BETWEEN ${startDate.toISOString()} AND ${now.toISOString()}
+          AND sale_date >= ${startDate.toISOString()}
+          AND sale_date <= ${now.toISOString()}
         GROUP BY DATE_TRUNC('day', sale_date)
         ORDER BY DATE_TRUNC('day', sale_date);
       `
     } else if (period === "quarter") {
-      /* weekly points */
       chartDataQuery = sql`
         SELECT 
           'Week ' || EXTRACT(WEEK FROM DATE_TRUNC('week', sale_date)) AS period,
-          DATE_TRUNC('week', sale_date)                               AS period_date,
-          COALESCE(SUM(total_amount), 0)                              AS income,
-          0                                                           AS expenses
+          DATE_TRUNC('week', sale_date) AS period_date,
+          COALESCE(SUM(total_amount), 0) AS income,
+          0 AS expenses
         FROM sales
         WHERE status != 'Cancelled'
           AND created_by = ${userId}
-          AND sale_date BETWEEN ${startDate.toISOString()} AND ${now.toISOString()}
+          AND sale_date >= ${startDate.toISOString()}
+          AND sale_date <= ${now.toISOString()}
         GROUP BY DATE_TRUNC('week', sale_date)
         ORDER BY DATE_TRUNC('week', sale_date);
       `
     } else {
-      /* year → monthly points */
       chartDataQuery = sql`
         SELECT 
           TO_CHAR(DATE_TRUNC('month', sale_date), 'Mon') AS period,
-          DATE_TRUNC('month', sale_date)                 AS period_date,
-          COALESCE(SUM(total_amount), 0)                 AS income,
-          0                                              AS expenses
+          DATE_TRUNC('month', sale_date) AS period_date,
+          COALESCE(SUM(total_amount), 0) AS income,
+          0 AS expenses
         FROM sales
         WHERE status != 'Cancelled'
           AND created_by = ${userId}
-          AND sale_date BETWEEN ${startDate.toISOString()} AND ${now.toISOString()}
+          AND sale_date >= ${startDate.toISOString()}
+          AND sale_date <= ${now.toISOString()}
         GROUP BY DATE_TRUNC('month', sale_date)
         ORDER BY DATE_TRUNC('month', sale_date);
       `
     }
 
-    console.log("Fetching dashboard data for user:", userId, "device:", deviceId, "period:", period)
-    console.log("Date range:", startDate.toISOString(), "to", now.toISOString())
-
     // Execute all queries in parallel for better performance
+    console.log("Executing main queries...")
     const [
       // Financial Overview
       currentPeriodSales,
@@ -162,9 +192,9 @@ export async function getComprehensiveDashboardData(
       // Chart Data
       chartData,
     ] = await Promise.all([
-      // Current period sales
+      // Current period sales - Fixed date comparison
       sql`
-        SELECT COALESCE(SUM(total_amount), 0) as total
+        SELECT COALESCE(SUM(total_amount), 0) as total, COUNT(*) as count
         FROM sales
         WHERE status != 'Cancelled' 
         AND created_by = ${userId}
@@ -174,7 +204,7 @@ export async function getComprehensiveDashboardData(
 
       // Previous period sales
       sql`
-        SELECT COALESCE(SUM(total_amount), 0) as total
+        SELECT COALESCE(SUM(total_amount), 0) as total, COUNT(*) as count
         FROM sales
         WHERE status != 'Cancelled' 
         AND created_by = ${userId}
@@ -182,9 +212,9 @@ export async function getComprehensiveDashboardData(
         AND sale_date <= ${previousEndDate.toISOString()}
       `,
 
-      // Current period purchases
+      // Current period purchases - Fixed date comparison
       sql`
-        SELECT COALESCE(SUM(total_amount), 0) as total
+        SELECT COALESCE(SUM(total_amount), 0) as total, COUNT(*) as count
         FROM purchases
         WHERE status != 'Cancelled' 
         AND created_by = ${userId}
@@ -194,7 +224,7 @@ export async function getComprehensiveDashboardData(
 
       // Previous period purchases
       sql`
-        SELECT COALESCE(SUM(total_amount), 0) as total
+        SELECT COALESCE(SUM(total_amount), 0) as total, COUNT(*) as count
         FROM purchases
         WHERE status != 'Cancelled' 
         AND created_by = ${userId}
@@ -204,7 +234,7 @@ export async function getComprehensiveDashboardData(
 
       // Current period manual income
       sql`
-        SELECT COALESCE(SUM(amount), 0) as total
+        SELECT COALESCE(SUM(amount), 0) as total, COUNT(*) as count
         FROM financial_transactions
         WHERE transaction_type = 'income' 
         AND device_id = ${deviceId}
@@ -214,7 +244,7 @@ export async function getComprehensiveDashboardData(
 
       // Current period manual expenses
       sql`
-        SELECT COALESCE(SUM(amount), 0) as total
+        SELECT COALESCE(SUM(amount), 0) as total, COUNT(*) as count
         FROM financial_transactions
         WHERE transaction_type = 'expense' 
         AND device_id = ${deviceId}
@@ -222,34 +252,34 @@ export async function getComprehensiveDashboardData(
         AND created_at <= ${now.toISOString()}
       `,
 
-      // Total COGS
+      // Total COGS - Fixed join conditions
       sql`
-        SELECT COALESCE(SUM(si.quantity * p.wholesale_price), 0) as total_cogs
+        SELECT COALESCE(SUM(si.quantity * COALESCE(p.wholesale_price, 0)), 0) as total_cogs, COUNT(*) as count
         FROM sale_items si
         JOIN sales s ON si.sale_id = s.id
-        JOIN products p ON si.product_id = p.id
+        LEFT JOIN products p ON si.product_id = p.id
         WHERE s.status != 'Cancelled' 
         AND s.created_by = ${userId}
         AND s.sale_date >= ${startDate.toISOString()}
         AND s.sale_date <= ${now.toISOString()}
       `,
 
-      // Accounts Receivable
+      // Accounts Receivable - Fixed calculation
       sql`
-        SELECT COALESCE(SUM(total_amount - received_amount), 0) as total
+        SELECT COALESCE(SUM(GREATEST(total_amount - COALESCE(received_amount, 0), 0)), 0) as total, COUNT(*) as count
         FROM sales
         WHERE status = 'Completed' 
         AND created_by = ${userId}
-        AND total_amount > received_amount
+        AND total_amount > COALESCE(received_amount, 0)
       `,
 
-      // Accounts Payable
+      // Accounts Payable - Fixed calculation
       sql`
-        SELECT COALESCE(SUM(total_amount - received_amount), 0) as total
+        SELECT COALESCE(SUM(GREATEST(total_amount - COALESCE(received_amount, 0), 0)), 0) as total, COUNT(*) as count
         FROM purchases
         WHERE status = 'Received' 
         AND created_by = ${userId}
-        AND total_amount > received_amount
+        AND total_amount > COALESCE(received_amount, 0)
       `,
 
       // Recent Sales
@@ -258,7 +288,7 @@ export async function getComprehensiveDashboardData(
         FROM sales s
         LEFT JOIN customers c ON s.customer_id = c.id
         WHERE s.created_by = ${userId}
-        ORDER BY s.sale_date DESC
+        ORDER BY s.created_at DESC
         LIMIT 5
       `,
 
@@ -267,7 +297,7 @@ export async function getComprehensiveDashboardData(
         SELECT p.*
         FROM purchases p
         WHERE p.created_by = ${userId}
-        ORDER BY p.purchase_date DESC
+        ORDER BY p.created_at DESC
         LIMIT 5
       `,
 
@@ -280,7 +310,7 @@ export async function getComprehensiveDashboardData(
         LIMIT 5
       `,
 
-      // Customer Count - This is the important one
+      // Customer Count
       sql`
         SELECT COUNT(*) as count
         FROM customers
@@ -301,47 +331,58 @@ export async function getComprehensiveDashboardData(
         WHERE created_by = ${userId}
       `,
 
-      // Low Stock Products
+      // Low Stock Products - Fixed condition
       sql`
         SELECT COUNT(*) as count
         FROM products
-        WHERE stock <= 5 AND created_by = ${userId}
+        WHERE COALESCE(stock, 0) <= 5 AND created_by = ${userId}
       `,
 
-      // Overdue Invoices
+      // Overdue Invoices - Fixed date calculation
       sql`
         SELECT COUNT(*) as count
         FROM sales
         WHERE status = 'Completed' 
         AND created_by = ${userId}
-        AND total_amount > received_amount
+        AND total_amount > COALESCE(received_amount, 0)
         AND sale_date < ${new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString()}
       `,
 
-      // Pending Payments
+      // Pending Payments - Fixed condition
       sql`
         SELECT COUNT(*) as count
         FROM purchases
         WHERE status = 'Received' 
         AND created_by = ${userId}
-        AND total_amount > received_amount
+        AND total_amount > COALESCE(received_amount, 0)
       `,
 
       // Chart Data
       chartDataQuery,
     ])
 
-    console.log("Raw query results:")
-    console.log("Customer count result:", customerCount)
-    console.log("Supplier count result:", supplierCount)
-    console.log("Product count result:", productCount)
-    console.log("Low stock result:", lowStockProducts)
+    // Enhanced logging for query results
+    console.log("=== RAW QUERY RESULTS ===")
+    console.log("Current period sales:", currentPeriodSales[0])
+    console.log("Previous period sales:", previousPeriodSales[0])
+    console.log("Current period purchases:", currentPeriodPurchases[0])
+    console.log("Current period income:", currentPeriodIncome[0])
+    console.log("Current period expenses:", currentPeriodExpenses[0])
+    console.log("Customer count:", customerCount[0])
+    console.log("Supplier count:", supplierCount[0])
+    console.log("Product count:", productCount[0])
+    console.log("Chart data length:", chartData?.length || 0)
 
-    // Process the data
-    const totalRevenue = Number(currentPeriodSales[0]?.total || 0) + Number(currentPeriodIncome[0]?.total || 0)
-    const totalExpenses = Number(currentPeriodPurchases[0]?.total || 0) + Number(currentPeriodExpenses[0]?.total || 0)
+    // Process the data with better error handling
+    const currentSalesTotal = Number(currentPeriodSales[0]?.total || 0)
+    const currentIncomeTotal = Number(currentPeriodIncome[0]?.total || 0)
+    const currentPurchasesTotal = Number(currentPeriodPurchases[0]?.total || 0)
+    const currentExpensesTotal = Number(currentPeriodExpenses[0]?.total || 0)
+    
+    const totalRevenue = currentSalesTotal + currentIncomeTotal
+    const totalExpenses = currentPurchasesTotal + currentExpensesTotal
     const totalCOGSValue = Number(totalCOGS[0]?.total_cogs || 0)
-    const grossProfit = Number(currentPeriodSales[0]?.total || 0) - totalCOGSValue
+    const grossProfit = currentSalesTotal - totalCOGSValue
     const netProfit = totalRevenue - totalExpenses
     const profitMargin = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0
 
@@ -353,6 +394,12 @@ export async function getComprehensiveDashboardData(
     const revenueChange = previousRevenue > 0 ? ((totalRevenue - previousRevenue) / previousRevenue) * 100 : 0
     const expenseChange = previousExpenses > 0 ? ((totalExpenses - previousExpenses) / previousExpenses) * 100 : 0
     const profitChange = previousProfit > 0 ? ((netProfit - previousProfit) / previousProfit) * 100 : 0
+
+    console.log("=== CALCULATED VALUES ===")
+    console.log("Total Revenue:", totalRevenue)
+    console.log("Total Expenses:", totalExpenses)
+    console.log("Net Profit:", netProfit)
+    console.log("Profit Margin:", profitMargin)
 
     // Build quick stats
     const quickStats = [
@@ -382,31 +429,31 @@ export async function getComprehensiveDashboardData(
       },
     ]
 
-    // Build recent transactions
+    // Build recent transactions with better error handling
     const recentTransactions = [
-      ...recentSales.map((sale: any) => ({
+      ...(recentSales || []).map((sale: any) => ({
         id: sale.id,
         type: "sale" as const,
         description: `Sale to ${sale.customer_name || "Walk-in Customer"}`,
-        amount: Number(sale.total_amount),
-        date: sale.sale_date,
+        amount: Number(sale.total_amount || 0),
+        date: sale.sale_date || sale.created_at,
         status: sale.status,
         customer: sale.customer_name,
       })),
-      ...recentPurchases.map((purchase: any) => ({
+      ...(recentPurchases || []).map((purchase: any) => ({
         id: purchase.id,
         type: "purchase" as const,
         description: `Purchase from ${purchase.supplier || "Unknown Supplier"}`,
-        amount: Number(purchase.total_amount),
-        date: purchase.purchase_date,
+        amount: Number(purchase.total_amount || 0),
+        date: purchase.purchase_date || purchase.created_at,
         status: purchase.status,
         supplier: purchase.supplier,
       })),
-      ...recentFinancialTransactions.map((transaction: any) => ({
+      ...(recentFinancialTransactions || []).map((transaction: any) => ({
         id: transaction.id,
         type: transaction.transaction_type as "income" | "expense",
         description: transaction.description || `${transaction.transaction_type} transaction`,
-        amount: Number(transaction.amount),
+        amount: Number(transaction.amount || 0),
         date: transaction.created_at,
         status: "Completed",
       })),
@@ -450,110 +497,20 @@ export async function getComprehensiveDashboardData(
       })
     }
 
-    // Process chart data - Fill in missing periods with zero values
+    // Process chart data with better error handling
     let processedCashFlowData = []
 
     if (chartData && chartData.length > 0) {
-      // Create a complete date range based on period
-      const dateRange = []
-      const current = new Date(startDate)
-
-      if (period === "today") {
-        // Fill hourly data for today
-        for (let hour = 0; hour < 24; hour++) {
-          const hourDate = new Date(startDate)
-          hourDate.setHours(hour, 0, 0, 0)
-          if (hourDate <= now) {
-            dateRange.push({
-              period: hourDate.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false }),
-              period_date: hourDate,
-              income: 0,
-              expenses: 0,
-              netFlow: 0,
-            })
-          }
-        }
-      } else if (period === "week") {
-        // Fill daily data for the week
-        while (current <= now) {
-          dateRange.push({
-            period: current.toLocaleDateString("en-US", { weekday: "short", day: "numeric" }),
-            period_date: new Date(current),
-            income: 0,
-            expenses: 0,
-            netFlow: 0,
-          })
-          current.setDate(current.getDate() + 1)
-        }
-      } else if (period === "month") {
-        // Fill daily data for the last 30 days
-        while (current <= now) {
-          dateRange.push({
-            period: current.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-            period_date: new Date(current),
-            income: 0,
-            expenses: 0,
-            netFlow: 0,
-          })
-          current.setDate(current.getDate() + 1)
-        }
-      } else if (period === "quarter") {
-        // Fill weekly data for the quarter
-        while (current <= now) {
-          const weekNum = Math.ceil(current.getDate() / 7)
-          dateRange.push({
-            period: `Week ${weekNum}`,
-            period_date: new Date(current),
-            income: 0,
-            expenses: 0,
-            netFlow: 0,
-          })
-          current.setDate(current.getDate() + 7)
-        }
-      } else {
-        // Fill monthly data for the year
-        while (current <= now && current.getFullYear() === startDate.getFullYear()) {
-          dateRange.push({
-            period: current.toLocaleDateString("en-US", { month: "short" }),
-            period_date: new Date(current),
-            income: 0,
-            expenses: 0,
-            netFlow: 0,
-          })
-          current.setMonth(current.getMonth() + 1)
-        }
-      }
-
-      // Merge actual data with date range
-      processedCashFlowData = dateRange.map((dateItem) => {
-        const actualData = chartData.find((item: any) => {
-          const itemDate = new Date(item.period_date)
-          const rangeDate = dateItem.period_date
-
-          if (period === "today") {
-            return itemDate.getHours() === rangeDate.getHours()
-          } else if (period === "week" || period === "month") {
-            return itemDate.toDateString() === rangeDate.toDateString()
-          } else {
-            return itemDate.getTime() === rangeDate.getTime()
-          }
-        })
-
-        const income = actualData ? Number(actualData.income || 0) : 0
-        const expenses = actualData ? Number(actualData.expenses || 0) : 0
-
-        return {
-          period: dateItem.period,
-          income,
-          expenses,
-          netFlow: income - expenses,
-        }
-      })
+      processedCashFlowData = chartData.map((item: any) => ({
+        period: item.period || "N/A",
+        income: Number(item.income || 0),
+        expenses: Number(item.expenses || 0),
+        netFlow: Number(item.income || 0) - Number(item.expenses || 0),
+      }))
     } else {
-      // If no data, create empty data points based on period
+      // Create default empty data based on period
       if (period === "today") {
         for (let hour = 0; hour < 24; hour += 4) {
-          // Show every 4 hours
           processedCashFlowData.push({
             period: `${hour.toString().padStart(2, "0")}:00`,
             income: 0,
@@ -572,9 +529,7 @@ export async function getComprehensiveDashboardData(
           })
         })
       } else if (period === "month") {
-        // Show first 30 days of month
         for (let day = 1; day <= 30; day += 5) {
-          // Show every 5 days for brevity
           processedCashFlowData.push({
             period: day.toString(),
             income: 0,
@@ -583,7 +538,6 @@ export async function getComprehensiveDashboardData(
           })
         }
       } else {
-        // Default monthly view
         const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
         months.forEach((month) => {
           processedCashFlowData.push({
@@ -596,17 +550,16 @@ export async function getComprehensiveDashboardData(
       }
     }
 
-    // Extract counts properly - This is where the customer count gets processed
+    // Extract counts properly with better error handling
     const totalCustomersCount = Number(customerCount[0]?.count || 0)
     const totalSuppliersCount = Number(supplierCount[0]?.count || 0)
     const totalProductsCount = Number(productCount[0]?.count || 0)
 
-    console.log("Processed counts:", {
-      customers: totalCustomersCount,
-      suppliers: totalSuppliersCount,
-      products: totalProductsCount,
-      lowStock: lowStockCount,
-    })
+    console.log("=== PROCESSED COUNTS ===")
+    console.log("Customers:", totalCustomersCount)
+    console.log("Suppliers:", totalSuppliersCount)
+    console.log("Products:", totalProductsCount)
+    console.log("Low Stock:", lowStockCount)
 
     const dashboardData: HomeDashboardData = {
       totalRevenue,
@@ -614,7 +567,7 @@ export async function getComprehensiveDashboardData(
       netProfit,
       grossProfit,
       profitMargin,
-      cashOnHand: totalRevenue - totalExpenses, // Simplified calculation
+      cashOnHand: totalRevenue - totalExpenses,
       accountsReceivable: Number(accountsReceivable[0]?.total || 0),
       accountsPayable: Number(accountsPayable[0]?.total || 0),
       netCashFlow: totalRevenue - totalExpenses,
@@ -645,22 +598,28 @@ export async function getComprehensiveDashboardData(
       pendingPayments: pendingCount,
     }
 
-    console.log("Final dashboard data being returned:", {
-      totalCustomers: dashboardData.totalCustomers,
-      totalSuppliers: dashboardData.totalSuppliers,
-      totalProducts: dashboardData.totalProducts,
-      totalRevenue: dashboardData.totalRevenue,
-    })
+    console.log("=== FINAL DASHBOARD DATA ===")
+    console.log("Total Revenue:", dashboardData.totalRevenue)
+    console.log("Total Customers:", dashboardData.totalCustomers)
+    console.log("Total Suppliers:", dashboardData.totalSuppliers)
+    console.log("Total Products:", dashboardData.totalProducts)
+    console.log("============================")
 
     return {
       success: true,
       data: dashboardData,
     }
   } catch (error) {
-    console.error("Get comprehensive dashboard data error:", error)
+    console.error("=== DASHBOARD ERROR ===")
+    console.error("Error details:", error)
+    console.error("Stack trace:", error instanceof Error ? error.stack : "No stack trace")
+    console.error("=======================")
+    
     return {
       success: false,
-      message: "Failed to load dashboard data",
+      message: `Failed to load dashboard data: ${error instanceof Error ? error.message : "Unknown error"}`,
     }
   }
 }
+
+

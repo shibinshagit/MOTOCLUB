@@ -1,20 +1,8 @@
 "use client"
-
-import type React from "react"
-import { useEffect, useCallback, useState } from "react"
+import React, { useEffect, useCallback, useState, useMemo, useRef } from "react"
 import {
-  TrendingUp,
-  DollarSign,
-  Package,
-  Users,
-  AlertCircle,
-  CheckCircle,
-  ArrowUpRight,
-  ArrowDownRight,
-  RefreshCw,
-  Target,
-  BarChart3,
-  PieChart,
+  TrendingUp, DollarSign, Package, Users, AlertCircle, CheckCircle,
+  ArrowUpRight, ArrowDownRight, RefreshCw, Target, BarChart3, PieChart,
 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -27,45 +15,99 @@ import { getDeviceCurrency } from "@/app/actions/dashboard-actions"
 import { getComprehensiveDashboardData } from "@/app/actions/home-dashboard-actions"
 import { useAppSelector, useAppDispatch } from "@/store/hooks"
 import {
-  selectHomeDashboardData,
-  selectHomeDashboardLoading,
-  selectHomeDashboardBackgroundLoading,
-  selectHomeDashboardError,
-  selectHomeDashboardLastUpdated,
-  selectHomeDashboardPeriod,
-  setDashboardData,
-  setLoading,
-  setBackgroundLoading,
-  setError,
-  setPeriod,
+  selectHomeDashboardData, selectHomeDashboardLoading,
+  selectHomeDashboardBackgroundLoading, selectHomeDashboardError,
+  selectHomeDashboardLastUpdated, selectHomeDashboardPeriod,
+  setDashboardData, setLoading, setBackgroundLoading, setError, setPeriod,
 } from "@/store/slices/homeDashboardSlice"
-import { selectDeviceCurrency } from "@/store/slices/deviceSlice"
+import { selectDeviceCurrency, selectUser, selectDevice } from "@/store/slices/deviceSlice"
 
 interface HomeTabProps {
-  userId: number
-  deviceId: number
+  userId?: number
+  deviceId?: number
 }
 
-export default function HomeTab({ userId, deviceId }: HomeTabProps) {
+export default function HomeTab({ userId: propUserId, deviceId: propDeviceId }: HomeTabProps) {
   const dispatch = useAppDispatch()
   const dashboardData = useAppSelector(selectHomeDashboardData)
   const isLoading = useAppSelector(selectHomeDashboardLoading)
   const isBackgroundLoading = useAppSelector(selectHomeDashboardBackgroundLoading)
   const error = useAppSelector(selectHomeDashboardError)
-  const lastUpdated = useAppSelector(selectHomeDashboardLastUpdated)
   const selectedPeriod = useAppSelector(selectHomeDashboardPeriod)
   const deviceCurrency = useAppSelector(selectDeviceCurrency)
+  const user = useAppSelector(selectUser)
+  const device = useAppSelector(selectDevice)
 
+  const userId = propUserId || user?.id
+  const deviceId = propDeviceId || device?.id
   const [currency, setCurrency] = useState(deviceCurrency || "INR")
 
-  // Format currency with the device's currency
-  const formatCurrency = useCallback((amount: number) => formatCurrencySync(amount, currency), [currency])
+  const lastUpdated = useAppSelector(selectHomeDashboardLastUpdated)
 
-  // Fetch dashboard data
-  const fetchDashboardData = useCallback(
-    async (showLoading = true) => {
-      if (!userId || !deviceId) return
+  // Track fetch state to prevent duplicates
+  const fetchStateRef = useRef({
+    isInitialized: false,
+    currentFetch: null as Promise<void> | null,
+    lastFetchParams: "",
+    autoRefreshInterval: null as NodeJS.Timeout | null
+  })
 
+  const formatCurrency = useCallback((amount: number) => {
+    if (typeof amount !== "number" || isNaN(amount)) {
+      return formatCurrencySync(0, currency)
+    }
+    return formatCurrencySync(amount, currency)
+  }, [currency])
+
+  const currentFetchParams = useMemo(() =>
+    `${userId}-${deviceId}-${selectedPeriod}`, [userId, deviceId, selectedPeriod])
+
+  const needsCurrencyFetch = !deviceCurrency && deviceId
+
+  const fetchDashboardData = useCallback(async (showLoading = true, forceFetch = false) => {
+    // Debug logging (remove in production)
+    if (process.env.NODE_ENV === 'development') {
+      console.log('🔄 fetchDashboardData called:', { 
+        showLoading, 
+        forceFetch, 
+        currentParams: currentFetchParams,
+        lastParams: fetchStateRef.current.lastFetchParams,
+        hasCurrentFetch: !!fetchStateRef.current.currentFetch
+      })
+    }
+
+    // Prevent duplicate calls
+    if (fetchStateRef.current.currentFetch && !forceFetch) {
+      if (process.env.NODE_ENV === 'development') {
+        console.log('⏳ Fetch already in progress, skipping...')
+      }
+      return fetchStateRef.current.currentFetch
+    }
+
+    // Check if we need to fetch
+    if (!forceFetch && currentFetchParams === fetchStateRef.current.lastFetchParams) {
+      if (process.env.NODE_ENV === 'development') {
+        console.log('✅ Same params, skipping fetch')
+      }
+      return
+    }
+
+    if (!userId || !deviceId) {
+      const missing = []
+      if (!userId) missing.push("User ID")
+      if (!deviceId) missing.push("Device ID")
+      dispatch(setError(`${missing.join(" and ")} ${missing.length > 1 ? "are" : "is"} required`))
+      dispatch(setLoading(false))
+      dispatch(setBackgroundLoading(false))
+      return
+    }
+
+    if (process.env.NODE_ENV === 'development') {
+      console.log('🚀 Starting fetch with params:', { userId, deviceId, selectedPeriod })
+    }
+
+    // Create the fetch promise
+    const fetchPromise = (async () => {
       try {
         if (showLoading) {
           dispatch(setLoading(true))
@@ -73,67 +115,106 @@ export default function HomeTab({ userId, deviceId }: HomeTabProps) {
           dispatch(setBackgroundLoading(true))
         }
 
-        // Fetch currency and dashboard data in parallel
-        const [deviceCurrencyResult, dashboardResult] = await Promise.all([
-          getDeviceCurrency(deviceId),
-          getComprehensiveDashboardData(userId, deviceId, selectedPeriod),
-        ])
+        fetchStateRef.current.lastFetchParams = currentFetchParams
 
-        // Update currency
-        if (deviceCurrencyResult) {
-          setCurrency(deviceCurrencyResult)
+        const fetches = [getComprehensiveDashboardData(userId, deviceId, selectedPeriod)]
+        if (needsCurrencyFetch) {
+          fetches.unshift(getDeviceCurrency(deviceId))
         }
 
-        // Update dashboard data
-        if (dashboardResult.success && dashboardResult.data) {
-          dispatch(setDashboardData(dashboardResult.data))
+        const results = await Promise.all(fetches)
+        const [currencyRes, dataRes] = needsCurrencyFetch ? results : [null, results[0]]
+
+        if (currencyRes) setCurrency(currencyRes)
+
+        if (dataRes.success && dataRes.data) {
+          dispatch(setDashboardData(dataRes.data))
+          dispatch(setError(null))
+          if (process.env.NODE_ENV === 'development') {
+            console.log('✅ Fetch successful')
+          }
         } else {
-          dispatch(setError(dashboardResult.message || "Failed to load dashboard data"))
+          dispatch(setError(dataRes.message || "Failed to load dashboard data"))
+          if (process.env.NODE_ENV === 'development') {
+            console.log('❌ Fetch failed:', dataRes.message)
+          }
         }
-      } catch (error) {
-        console.error("Error fetching dashboard data:", error)
+      } catch (err) {
+        console.error("Dashboard fetch error:", err)
         dispatch(setError("Failed to load dashboard data"))
+      } finally {
+        dispatch(setLoading(false))
+        dispatch(setBackgroundLoading(false))
+        fetchStateRef.current.currentFetch = null
       }
-    },
-    [userId, deviceId, selectedPeriod, dispatch],
-  )
+    })()
 
-  // Initial load
-  useEffect(() => {
-    fetchDashboardData(true)
-  }, [fetchDashboardData])
+    fetchStateRef.current.currentFetch = fetchPromise
+    return fetchPromise
+  }, [userId, deviceId, selectedPeriod, currentFetchParams, dispatch, needsCurrencyFetch])
 
-  // Background refresh when period changes
+  // Auto-refresh effect
   useEffect(() => {
-    if (dashboardData) {
-      fetchDashboardData(false)
+    // Clear existing interval
+    if (fetchStateRef.current.autoRefreshInterval) {
+      clearInterval(fetchStateRef.current.autoRefreshInterval)
+      fetchStateRef.current.autoRefreshInterval = null
     }
-  }, [selectedPeriod])
 
-  // Auto-refresh every 5 minutes
-  useEffect(() => {
-    const interval = setInterval(
-      () => {
-        if (dashboardData) {
-          fetchDashboardData(false)
+    // Set up new interval only if we have valid data
+    if (userId && deviceId && dashboardData && fetchStateRef.current.isInitialized) {
+      if (process.env.NODE_ENV === 'development') {
+        console.log('⏰ Setting up auto-refresh')
+      }
+      fetchStateRef.current.autoRefreshInterval = setInterval(() => {
+        if (process.env.NODE_ENV === 'development') {
+          console.log('🔄 Auto-refresh triggered')
         }
-      },
-      5 * 60 * 1000,
-    ) // 5 minutes
+        fetchDashboardData(false, true)
+      }, 5 * 60 * 1000) // 5 minutes
+    }
 
-    return () => clearInterval(interval)
-  }, [fetchDashboardData, dashboardData])
+    // Cleanup function
+    return () => {
+      if (fetchStateRef.current.autoRefreshInterval) {
+        clearInterval(fetchStateRef.current.autoRefreshInterval)
+        fetchStateRef.current.autoRefreshInterval = null
+      }
+    }
+  }, [dashboardData, userId, deviceId, fetchDashboardData])
+
+  // ----------- FIXED: SINGLE FETCH EFFECT -----------
+  useEffect(() => {
+    const fetchKey = `${userId}-${deviceId}-${selectedPeriod}`;
+    if (
+      userId &&
+      deviceId &&
+      fetchKey !== fetchStateRef.current.lastFetchParams
+    ) {
+      fetchStateRef.current.isInitialized = true;
+      fetchDashboardData(true, true);
+      fetchStateRef.current.lastFetchParams = fetchKey;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, deviceId, selectedPeriod]);
+  // --------------------------------------------------
 
   const handlePeriodChange = (period: "today" | "week" | "month" | "quarter" | "year") => {
+    if (process.env.NODE_ENV === 'development') {
+      console.log('📅 Period changed to:', period)
+    }
     dispatch(setPeriod(period))
   }
 
   const handleRefresh = () => {
-    fetchDashboardData(false)
+    if (process.env.NODE_ENV === 'development') {
+      console.log('🔄 Manual refresh triggered')
+    }
+    fetchDashboardData(false, true)
   }
-
-  // Calculate business insights
-  const getBusinessInsights = () => {
+  
+  // Memoize business insights calculation to prevent unnecessary recalculations
+  const businessInsights = useMemo(() => {
     if (!dashboardData) return []
 
     const insights = []
@@ -144,14 +225,14 @@ export default function HomeTab({ userId, deviceId }: HomeTabProps) {
       const revenueGrowth = ((currentPeriod.revenue - previousPeriod.revenue) / previousPeriod.revenue) * 100
       if (revenueGrowth > 10) {
         insights.push({
-          type: "success",
+          type: "success" as const,
           title: "Strong Revenue Growth",
           message: `Revenue increased by ${revenueGrowth.toFixed(1)}% compared to last period`,
           action: "Keep up the momentum!",
         })
       } else if (revenueGrowth < -5) {
         insights.push({
-          type: "warning",
+          type: "warning" as const,
           title: "Revenue Decline",
           message: `Revenue decreased by ${Math.abs(revenueGrowth).toFixed(1)}% compared to last period`,
           action: "Consider marketing strategies",
@@ -162,14 +243,14 @@ export default function HomeTab({ userId, deviceId }: HomeTabProps) {
     // Profit margin insight
     if (profitMargin > 20) {
       insights.push({
-        type: "success",
+        type: "success" as const,
         title: "Healthy Profit Margin",
         message: `Your profit margin of ${profitMargin.toFixed(1)}% is excellent`,
         action: "Consider expanding operations",
       })
     } else if (profitMargin < 10) {
       insights.push({
-        type: "warning",
+        type: "warning" as const,
         title: "Low Profit Margin",
         message: `Profit margin of ${profitMargin.toFixed(1)}% needs improvement`,
         action: "Review pricing and costs",
@@ -179,7 +260,7 @@ export default function HomeTab({ userId, deviceId }: HomeTabProps) {
     // Cash flow insight
     if (accountsReceivable > currentPeriod.revenue * 0.3) {
       insights.push({
-        type: "info",
+        type: "info" as const,
         title: "High Receivables",
         message: "You have significant pending payments from customers",
         action: "Follow up on outstanding invoices",
@@ -189,7 +270,7 @@ export default function HomeTab({ userId, deviceId }: HomeTabProps) {
     // Stock insight
     if (lowStockCount > 0) {
       insights.push({
-        type: "warning",
+        type: "warning" as const,
         title: "Stock Alert",
         message: `${lowStockCount} products are running low`,
         action: "Reorder inventory soon",
@@ -197,10 +278,10 @@ export default function HomeTab({ userId, deviceId }: HomeTabProps) {
     }
 
     return insights.slice(0, 3) // Show max 3 insights
-  }
+  }, [dashboardData])
 
-  // Get time since last update
-  const getTimeSinceUpdate = () => {
+  // Memoize time since update calculation
+  const timeSinceUpdate = useMemo(() => {
     if (!lastUpdated) return ""
     const now = new Date()
     const updated = new Date(lastUpdated)
@@ -213,6 +294,20 @@ export default function HomeTab({ userId, deviceId }: HomeTabProps) {
     if (diffHours < 24) return `${diffHours}h ago`
     const diffDays = Math.floor(diffHours / 24)
     return `${diffDays}d ago`
+  }, [lastUpdated])
+
+  // Show error if missing required parameters
+  if (!userId || !deviceId) {
+    return (
+      <div className="space-y-6 bg-gray-50 dark:bg-gray-900 min-h-screen p-4">
+        <Alert variant="destructive" className="rounded-xl">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>
+            Unable to load dashboard: {!userId && "User ID"} {!userId && !deviceId && " and "} {!deviceId && "Device ID"} missing.
+          </AlertDescription>
+        </Alert>
+      </div>
+    )
   }
 
   // Loading skeleton
@@ -264,8 +359,6 @@ export default function HomeTab({ userId, deviceId }: HomeTabProps) {
     )
   }
 
-  const businessInsights = getBusinessInsights()
-
   return (
     <div className="space-y-6 bg-gray-50 dark:bg-gray-900 min-h-screen p-4">
       {/* Header */}
@@ -273,7 +366,7 @@ export default function HomeTab({ userId, deviceId }: HomeTabProps) {
         <div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Business Overview</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            {lastUpdated && `Updated ${getTimeSinceUpdate()}`}
+            {lastUpdated && `Updated ${timeSinceUpdate}`}
             {isBackgroundLoading && (
               <span className="ml-2 inline-flex items-center">
                 <RefreshCw className="h-3 w-3 animate-spin mr-1" />
@@ -501,7 +594,7 @@ export default function HomeTab({ userId, deviceId }: HomeTabProps) {
   )
 }
 
-// Helper Components
+// Memoized Helper Components for better performance
 interface MetricCardProps {
   title: string
   value: string
@@ -510,7 +603,7 @@ interface MetricCardProps {
   color: "green" | "blue" | "purple" | "orange"
 }
 
-function MetricCard({ title, value, change, icon, color }: MetricCardProps) {
+const MetricCard = React.memo(function MetricCard({ title, value, change, icon, color }: MetricCardProps) {
   const colorClasses = {
     green: "from-green-500 to-green-600",
     blue: "from-blue-500 to-blue-600",
@@ -541,7 +634,7 @@ function MetricCard({ title, value, change, icon, color }: MetricCardProps) {
       </CardContent>
     </Card>
   )
-}
+})
 
 interface HealthIndicatorProps {
   label: string
@@ -549,7 +642,7 @@ interface HealthIndicatorProps {
   value: string
 }
 
-function HealthIndicator({ label, status, value }: HealthIndicatorProps) {
+const HealthIndicator = React.memo(function HealthIndicator({ label, status, value }: HealthIndicatorProps) {
   const statusConfig = {
     good: { color: "text-green-600 dark:text-green-400", bg: "bg-green-100 dark:bg-green-900/30", icon: CheckCircle },
     warning: {
@@ -574,7 +667,7 @@ function HealthIndicator({ label, status, value }: HealthIndicatorProps) {
       <span className="text-sm font-semibold text-gray-900 dark:text-white">{value}</span>
     </div>
   )
-}
+})
 
 interface QuickStatProps {
   label: string
@@ -582,7 +675,7 @@ interface QuickStatProps {
   icon: React.ReactNode
 }
 
-function QuickStat({ label, value, icon }: QuickStatProps) {
+const QuickStat = React.memo(function QuickStat({ label, value, icon }: QuickStatProps) {
   return (
     <Card className="rounded-xl shadow-sm border-0 bg-white dark:bg-gray-800">
       <CardContent className="p-4">
@@ -596,4 +689,4 @@ function QuickStat({ label, value, icon }: QuickStatProps) {
       </CardContent>
     </Card>
   )
-}
+})

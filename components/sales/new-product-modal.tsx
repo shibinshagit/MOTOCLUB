@@ -88,28 +88,32 @@ export default function NewProductModal({ isOpen, onClose, onSuccess, userId }: 
     }
   }, [fieldErrors])
 
-  // Reset form when modal opens
-  useEffect(() => {
-    if (isOpen) {
-      setFormData({
-        name: "",
-        companyName: "",
-        category: "",
-        categoryId: null,
-        description: "",
-        price: "",
-        wholesalePrice: "",
-        msp: "",
-        stock: "",
-        shelf: "",
-        barcode: "",
-      })
-      setSelectedCategory(null)
-      setSelectedImage(null)
-      setImagePreview(null)
-      setError(null)
-      setFieldErrors({})
-      fetchCategories()
+useEffect(() => {
+  if (!isOpen) return
+
+  const initializeForm = async () => {
+    // Reset form
+    setFormData({
+      name: "",
+      companyName: "",
+      category: "",
+      categoryId: null,
+      description: "",
+      price: "",
+      wholesalePrice: "",
+      msp: "",
+      stock: "",
+      shelf: "",
+      barcode: "",
+    })
+    setSelectedCategory(null)
+    setSelectedImage(null)
+    setImagePreview(null)
+    setError(null)
+    setFieldErrors({})
+
+    // Fetch categories
+    fetchCategories()
 
     // Fetch currency
     try {
@@ -120,10 +124,9 @@ export default function NewProductModal({ isOpen, onClose, onSuccess, userId }: 
     }
   }
 
-  if (isOpen) {
-    initializeForm()
-  }
+  initializeForm()
 }, [isOpen, userId])
+
 
 
   // Filter categories based on search query

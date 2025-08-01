@@ -78,6 +78,14 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
   const user = useAppSelector(selectUser)
   const company = useAppSelector(selectCompany)
   const device = useAppSelector(selectDevice)
+
+  // 🔍 DEBUG CODE
+  console.log("🔍 DASHBOARD DEBUG:")
+  console.log("- user:", user)
+  console.log("- device:", device)
+  console.log("- device?.id:", device?.id)
+  console.log("- company:", company)
+
   const [isLoading, setIsLoading] = useState(true)
   const [dbError, setDbError] = useState<string | null>(null)
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
@@ -98,6 +106,16 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
       setTheme("light")
     }
   }, [theme, setTheme])
+
+  // 📱 Monitor device changes
+  useEffect(() => {
+    console.log("📱 Device state changed:", device)
+    if (device) {
+      console.log("✅ Device ID available:", device.id)
+    } else {
+      console.log("❌ No device in state")
+    }
+  }, [device])
 
   // Update active tab when URL changes
   useEffect(() => {
@@ -221,7 +239,7 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
   // Render the appropriate tab content with error handling
   const renderTabContent = () => {
     try {
-      const deviceId = device.id
+      const deviceId = device?.id
       const companyId = company?.id || 1
 
       switch (activeTab) {
@@ -365,8 +383,14 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
               <span>Add Sale</span>
             </Button>
 
-            {/* Staff Dropdown */}
-            <StaffHeaderDropdown deviceId={device?.id || null} userId={user?.id || null} />
+            {device?.id && user?.id ? (
+                      <StaffHeaderDropdown
+                        userId={user.id}
+                        deviceId={device.id}
+                      />
+                    ) : (
+                      <p>Loading Staff Controls...</p>
+                    )}
 
             {/* Direct Logout Button */}
             <Button
@@ -418,7 +442,14 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
               </p>
               <div className="space-y-2">
                 <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-2">
-                  <StaffHeaderDropdown deviceId={device?.id || null} userId={user?.id || null} />
+                 {device?.id && user?.id ? (
+                    <StaffHeaderDropdown
+                      userId={user.id}
+                      deviceId={device.id}
+                    />
+                  ) : (
+                    <p>Loading Staff Controls...</p>
+                  )}
                 </div>
               </div>
             </div> 

@@ -16,16 +16,16 @@ interface NewStaffModalProps {
   isOpen: boolean
   onClose: () => void
   onStaffAdded: (newStaff: any) => void
-  userId: number | null | undefined
-  deviceId: number | null | undefined
+  userId: number 
+  deviceId: number 
 }
 
 export default function NewStaffModal({
   isOpen,
   onClose,
   onStaffAdded,
-  userId = null,
-  deviceId = null,
+  userId ,
+  deviceId,
 }: NewStaffModalProps) {
   const [formData, setFormData] = useState({
     name: "",
