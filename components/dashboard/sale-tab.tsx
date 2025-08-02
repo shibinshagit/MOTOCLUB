@@ -1,7 +1,6 @@
 "use client"
 
 import type React from "react"
-
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -107,7 +106,7 @@ interface ProductRow {
   stock?: number
   total: number
   notes?: string
-  originalItemId?: number // For tracking existing items during edit
+  originalItemId?: number
   isService?: boolean
   serviceId?: number
 }
@@ -214,7 +213,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
   const [isMobile, setIsMobile] = useState(false)
   const [expandedCards, setExpandedCards] = useState<Set<number>>(new Set())
 
-  // FIXED: Use refs to track fetch state and prevent duplicate calls
+  // Use refs to track fetch state and prevent duplicate calls
   const initializationRef = useRef({
     hasInitialized: false,
     currentDeviceId: null as number | null,
@@ -230,18 +229,14 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
     const checkMobile = () => {
       setIsMobile(window.innerWidth < 768)
     }
-
     checkMobile()
     window.addEventListener("resize", checkMobile)
     return () => window.removeEventListener("resize", checkMobile)
   }, [])
 
-  // FIXED: Better device change handling
+  // Device change handling
   useEffect(() => {
     if (deviceId && deviceId !== initializationRef.current.currentDeviceId) {
-      console.log('Device changed, resetting state:', { oldDevice: initializationRef.current.currentDeviceId, newDevice: deviceId })
-      
-      // Reset all state for new device
       dispatch(resetSalesState())
       initializationRef.current = {
         hasInitialized: false,
@@ -274,13 +269,10 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
       const productTotal = typeof product.total === "number" ? product.total : 0
       return sum + productTotal
     }, 0)
-
     setSubtotal(newSubtotal)
     const discount = typeof discountAmount === "number" ? discountAmount : 0
     const finalTotal = Math.max(0, newSubtotal - discount)
     setTotalAmount(finalTotal)
-
-    // Auto-set received amount based on status
     if (status === "Completed") {
       setReceivedAmount(finalTotal)
     } else if (status === "Cancelled") {
@@ -320,75 +312,53 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
   useEffect(() => {
     const today = new Date()
     const formattedDate = format(today, "yyyy-MM-dd")
-
-    // Only set if not already set
     if (!dateFromFilter && !dateToFilter) {
       dispatch(setDateFromFilter(formattedDate))
       dispatch(setDateToFilter(formattedDate))
     }
   }, [dateFromFilter, dateToFilter, dispatch])
 
-  // FIXED: Centralized fetch function with proper duplicate prevention
+  // Centralized fetch function with proper duplicate prevention
   const fetchSalesFromAPI = useCallback(
     async (silent = false) => {
       if (!deviceId) {
         dispatch(setError("Device ID not found"))
         return
       }
-
-      // Prevent duplicate calls
       if (initializationRef.current.isCurrentlyFetching) {
-        console.log('Fetch already in progress, skipping...')
         return
       }
-
-      // Debounce rapid calls (within 1 second)
       const now = Date.now()
       if (now - initializationRef.current.lastFetchTime < 1000) {
-        console.log('Fetch called too quickly, debouncing...')
         return
       }
-
-      console.log('Starting sales fetch:', { deviceId, silent, timestamp: new Date().toISOString() })
-
       try {
         initializationRef.current.isCurrentlyFetching = true
         initializationRef.current.lastFetchTime = now
-
         if (!silent) {
           dispatch(setLoading(true))
         } else {
           dispatch(setSilentRefreshing(true))
         }
-
         dispatch(setError(null))
-
         const result = await getUserSales(deviceId)
-
         if (result.success) {
-          // FIXED: Ensure we serialize the data properly to avoid Redux warnings
           const serializedData = result.data.map((sale: any) => ({
             ...sale,
-            // Convert any Date objects to ISO strings
             sale_date: typeof sale.sale_date === 'object' ? sale.sale_date.toISOString() : sale.sale_date,
             created_at: typeof sale.created_at === 'object' ? sale.created_at.toISOString() : sale.created_at,
             updated_at: typeof sale.updated_at === 'object' ? sale.updated_at.toISOString() : sale.updated_at,
           }))
-
           if (silent) {
             dispatch(updateSalesData(serializedData))
           } else {
             dispatch(setSales(serializedData))
           }
-
           initializationRef.current.hasInitialized = true
-          console.log('Sales fetch successful:', serializedData.length, 'sales loaded')
         } else {
           dispatch(setError(result.message || "Failed to load sales"))
-          console.error('Sales fetch failed:', result.message)
         }
       } catch (error) {
-        console.error("Error fetching sales:", error)
         dispatch(setError("An error occurred while loading sales"))
       } finally {
         dispatch(setLoading(false))
@@ -399,39 +369,36 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
     [deviceId, dispatch],
   )
 
-  // FIXED: Single initialization effect
+  // Single initialization effect (optimized)
   useEffect(() => {
     if (
-      deviceId && 
-      !initializationRef.current.hasInitialized && 
-      !initializationRef.current.isCurrentlyFetching &&
+      deviceId &&
+      !initializationRef.current.hasInitialized &&
       initializationRef.current.currentDeviceId === deviceId
     ) {
-      console.log('Initializing sales data for device:', deviceId)
+      initializationRef.current.hasInitialized = true // Set before fetch to prevent double fetch
       fetchSalesFromAPI(false)
     }
   }, [deviceId, fetchSalesFromAPI])
 
-  // FIXED: Simplified silent refresh effect
+  // Silent refresh effect (unchanged)
   useEffect(() => {
     if (
-      deviceId && 
-      initializationRef.current.hasInitialized && 
-      isDataStale && 
-      !isSilentRefreshing && 
+      deviceId &&
+      initializationRef.current.hasInitialized &&
+      isDataStale &&
+      !isSilentRefreshing &&
       !isLoading &&
       !initializationRef.current.isCurrentlyFetching
     ) {
       const now = Date.now()
-      // Only auto-refresh every 2 minutes minimum
       if (now - initializationRef.current.lastFetchTime > 120000) {
-        console.log('Data is stale, performing silent refresh...')
         fetchSalesFromAPI(true)
       }
     }
   }, [deviceId, isDataStale, isSilentRefreshing, isLoading, fetchSalesFromAPI])
 
-  // Client-side filtering function - ENHANCED WITH DATE FILTERING
+  // Client-side filtering function
   const applyClientSideFilters = useCallback(() => {
     if (!sales || sales.length === 0) {
       dispatch(setFilteredSales([]))
@@ -440,7 +407,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
 
     let filtered = [...sales]
 
-    // Date filtering - apply first
+    // Date filtering
     if (dateFromFilter || dateToFilter) {
       filtered = filtered.filter((sale) => {
         const saleDate = new Date(sale.sale_date)
@@ -515,7 +482,6 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
     dispatch,
   ])
 
-  // Apply filters whenever sales data or filter criteria change
   useEffect(() => {
     applyClientSideFilters()
   }, [applyClientSideFilters])
@@ -1300,8 +1266,6 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
       description: `Showing ${nextMethod === "all" ? "all" : nextMethod} payments`,
     })
   }
-
-  // REMOVED: The problematic auto-refresh effect that was causing multiple calls
 
   // Skeleton loading component
   const SalesTableSkeleton = () => (

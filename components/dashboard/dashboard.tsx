@@ -1,10 +1,6 @@
-"use client"
-
-import type React from "react"
-
-import { useState, useEffect, useCallback } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import Image from "next/image"
+import React, { useState, useEffect, useCallback, useRef } from "react"
 import {
   Home,
   ShoppingCart,
@@ -79,45 +75,52 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
   const company = useAppSelector(selectCompany)
   const device = useAppSelector(selectDevice)
 
-  // 🔍 DEBUG CODE
-  console.log("🔍 DASHBOARD DEBUG:")
-  console.log("- user:", user)
-  console.log("- device:", device)
-  console.log("- device?.id:", device?.id)
-  console.log("- company:", company)
-
   const [isLoading, setIsLoading] = useState(true)
   const [dbError, setDbError] = useState<string | null>(null)
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
   const [isHeaderSaleModalOpen, setIsHeaderSaleModalOpen] = useState(false)
   const [isFooterExpanded, setIsFooterExpanded] = useState(false)
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+  const [mounted, setMounted] = useState(false)
+  
   const router = useRouter()
   const { toast } = useToast()
-  const [selectedCompany, setSelectedCompany] = useState<string | null>(null)
-  const [mounted, setMounted] = useState(false)
-  const { theme, setTheme, resolvedTheme, systemTheme } = useTheme()
+  const { theme, setTheme } = useTheme()
 
+  // Refs for stable references
+  const routerRef = useRef(router)
+  const dispatchRef = useRef(dispatch)
+  
+  // Update refs when values change
+  useEffect(() => {
+    routerRef.current = router
+    dispatchRef.current = dispatch
+  })
+
+  // Mount effect - runs once
   useEffect(() => {
     setMounted(true)
-    // Force set theme to light on first mount if it's not set
-    if (!theme || theme === "system") {
-      console.log("Setting initial theme to light")
+  }, [])
+
+  // Theme initialization - runs once on mount, only if no theme is set
+  useEffect(() => {
+    if (mounted && !theme) {
       setTheme("light")
     }
-  }, [theme, setTheme])
+  }, [mounted, theme, setTheme])
 
-  // 📱 Monitor device changes
+  // Authentication effect - with stabilized dependencies
   useEffect(() => {
-    console.log("📱 Device state changed:", device)
-    if (device) {
-      console.log("✅ Device ID available:", device.id)
-    } else {
-      console.log("❌ No device in state")
+    if (mounted && !user?.id) {
+      routerRef.current.push("/")
+      return
     }
-  }, [device])
+    if (mounted && user?.id) {
+      setIsLoading(false)
+    }
+  }, [mounted, user?.id])
 
-  // Update active tab when URL changes
+  // Tab parameter synchronization
   useEffect(() => {
     if (
       tabParam &&
@@ -133,38 +136,29 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
   const handleTabChange = useCallback(
     (tab: TabType) => {
       setActiveTab(tab)
-      setIsAddModalOpen(false) // Reset modal state when changing tabs
-      setIsMobileMenuOpen(false) // Close mobile menu when changing tabs
-      setIsFooterExpanded(false) // Close footer expansion when changing tabs
+      setIsAddModalOpen(false)
+      setIsMobileMenuOpen(false)
+      setIsFooterExpanded(false)
 
       // Update URL without full page reload
       const url = new URL(window.location.href)
       url.searchParams.set("tab", tab)
-      router.replace(url.pathname + url.search)
+      routerRef.current.replace(url.pathname + url.search)
     },
-    [router],
+    [],
   )
 
-  useEffect(() => {
-    // If no user in Redux, redirect to login
-    if (!user?.id) {
-      router.push("/")
-      return
-    }
-    setIsLoading(false)
-  }, [user, router])
-
-  const handleLogout = async () => {
+  const handleLogout = useCallback(async () => {
     try {
-      // Clear Redux store
-      dispatch(clearDeviceData())
+      // Clear Redux store first
+      dispatchRef.current(clearDeviceData())
 
       if (!mockMode) {
         await logout()
       }
 
       // Redirect to home page
-      router.push("/")
+      routerRef.current.push("/")
     } catch (error) {
       toast({
         title: "Error",
@@ -173,59 +167,37 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
       })
 
       // Even if server logout fails, clear Redux and redirect
-      dispatch(clearDeviceData())
-      router.push("/")
+      dispatchRef.current(clearDeviceData())
+      routerRef.current.push("/")
     }
-  }
+  }, [mockMode, toast])
 
-  const handleAddButtonClick = (tab?: TabType) => {
+  const handleAddButtonClick = useCallback((tab?: TabType) => {
     if (tab === "sale") {
-      // For sales, navigate to the new sale tab instead of opening a modal
       handleTabChange("newsale")
       return
     }
 
     setIsAddModalOpen(true)
-    // If a specific tab is passed, switch to that tab first
     if (tab && tab !== activeTab) {
       handleTabChange(tab)
     }
-    // Otherwise just open the modal for the current tab
-  }
+  }, [activeTab, handleTabChange])
 
-  // Handle header sale button click
-  const handleHeaderSaleClick = () => {
+  const handleHeaderSaleClick = useCallback(() => {
     setIsHeaderSaleModalOpen(true)
-  }
+  }, [])
 
-  // Handle header sale modal close
-  const handleHeaderSaleModalClose = () => {
+  const handleHeaderSaleModalClose = useCallback(() => {
     setIsHeaderSaleModalOpen(false)
     // Refresh sales data if we're on the sales tab
     if (activeTab === "sale") {
-      // Force refresh the sales tab
       window.location.reload()
     }
-  }
+  }, [activeTab])
 
-  // Handle theme toggle - Simplified approach
-  const toggleTheme = () => {
-    const newTheme = theme === "dark" ? "light" : "dark"
-    console.log("All theme values:", { theme, resolvedTheme, systemTheme })
-    console.log("Switching from", theme, "to", newTheme)
-
-    setTheme(newTheme)
-
-    // Force update after a short delay to ensure the change takes effect
-    setTimeout(() => {
-      console.log("Theme after change:", { theme, resolvedTheme, systemTheme })
-    }, 100)
-  }
-
-  // Get the current theme for display purposes - simplified
-  const currentTheme = theme === "light" ? "light" : "dark"
-
-  if (isLoading) {
+  // Don't render anything until mounted (prevents hydration issues)
+  if (!mounted || isLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-50 dark:bg-gray-900">
         <div className="text-center">
@@ -369,10 +341,8 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
 
           {/* Desktop Controls */}
           <div className="hidden sm:flex items-center space-x-4">
-            {/* Animated Theme Toggle */}
             <AnimatedThemeToggle />
 
-            {/* Add Sale Button */}
             <Button
               onClick={handleHeaderSaleClick}
               variant="outline"
@@ -384,15 +354,14 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
             </Button>
 
             {device?.id && user?.id ? (
-                      <StaffHeaderDropdown
-                        userId={user.id}
-                        deviceId={device.id}
-                      />
-                    ) : (
-                      <p>Loading Staff Controls...</p>
-                    )}
+              <StaffHeaderDropdown
+                userId={user.id}
+                deviceId={device.id}
+              />
+            ) : (
+              <div className="h-8 w-8 animate-spin rounded-full border-2 border-blue-600 border-t-transparent"></div>
+            )}
 
-            {/* Direct Logout Button */}
             <Button
               onClick={handleLogout}
               variant="ghost"
@@ -424,7 +393,6 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
       {isMobileMenuOpen && (
         <div className="sm:hidden bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 shadow-lg z-20">
           <div className="px-4 py-3 space-y-3">
-            {/* Add Sale Button */}
             <Button
               onClick={handleHeaderSaleClick}
               variant="outline"
@@ -435,7 +403,6 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
               Add Sale
             </Button>
             
-            {/* Staff Dropdown Section */}
             <div className="pt-2 border-t border-gray-200 dark:border-gray-700">
               <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
                 Account
@@ -448,7 +415,7 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
                       deviceId={device.id}
                     />
                   ) : (
-                    <p>Loading Staff Controls...</p>
+                    <div className="h-6 w-24 animate-pulse bg-gray-300 dark:bg-gray-600 rounded"></div>
                   )}
                 </div>
               </div>
@@ -459,7 +426,6 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
 
       {/* Main Content */}
       <main className="flex-1 overflow-y-auto px-4 pt-6 pb-4 sm:pb-20">
-        {/* Database Error Alert */}
         {dbError && (
           <Alert variant="destructive" className="mb-6">
             <AlertTriangle className="h-4 w-4" />
@@ -468,15 +434,13 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
           </Alert>
         )}
 
-        {/* Tab Content */}
         <div className="pb-4 mb-20 sm:mb-0">{renderTabContent()}</div>
       </main>
 
-      {/* Bottom Navigation - Always visible mobile footer */}
+      {/* Bottom Navigation - Mobile */}
       <div className="sm:hidden">
-        {/* Mobile Footer Container - Fixed at bottom */}
         <div className="fixed inset-x-0 bottom-0 z-50">
-          {/* Expanded Drawer - Secondary Items */}
+          {/* Secondary tabs drawer */}
           <div className={`bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 transition-all duration-300 ease-in-out ${
             isFooterExpanded 
               ? 'translate-y-0 opacity-100' 
@@ -500,10 +464,9 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
             </div>
           </div>
 
-          {/* Main Footer - Primary Items + Expand Button */}
+          {/* Primary tabs */}
           <div className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 shadow-lg pb-safe">
             <div className="grid grid-cols-5 h-16">
-              {/* First 4 primary tabs */}
               {primaryTabs.map((tabId) => {
                 const item = navItems.find(nav => nav.id === tabId)
                 if (!item) return null
@@ -519,7 +482,6 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
                 )
               })}
               
-              {/* Expand/Collapse Button */}
               <button
                 onClick={() => setIsFooterExpanded(!isFooterExpanded)}
                 className={`flex flex-col items-center justify-center h-16 transition-all duration-200 ${
@@ -544,7 +506,7 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
         </div>
       </div>
 
-      {/* Desktop: Sticky navigation */}
+      {/* Desktop Navigation */}
       <nav className="hidden sm:block sticky bottom-0">
         <div className="flex h-16 items-center justify-around bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 shadow-lg">
           {navItems.map((item) => (
@@ -570,6 +532,7 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
   )
 }
 
+// Memoized navigation components for better performance
 interface NavItemProps {
   icon: React.ReactNode
   label: string
@@ -577,7 +540,7 @@ interface NavItemProps {
   onClick: () => void
 }
 
-function NavItem({ icon, label, isActive, onClick }: NavItemProps) {
+const NavItem = React.memo(function NavItem({ icon, label, isActive, onClick }: NavItemProps) {
   return (
     <button
       className={`flex flex-1 flex-col items-center justify-center transition-all duration-200 py-2 ${
@@ -589,23 +552,9 @@ function NavItem({ icon, label, isActive, onClick }: NavItemProps) {
       <span className="text-xs font-medium leading-tight">{label}</span>
     </button>
   )
-}
+})
 
-function SecondaryNavItem({ icon, label, isActive, onClick }: NavItemProps) {
-  return (
-    <button
-      className={`flex flex-1 flex-row items-center justify-center gap-1 transition-all duration-200 py-2 ${
-        isActive ? "text-blue-600 dark:text-blue-400" : "text-gray-500 dark:text-gray-400"
-      }`}
-      onClick={onClick}
-    >
-      <div className="flex-shrink-0">{icon}</div>
-      <span className="text-xs font-medium truncate">{label}</span>
-    </button>
-  )
-}
-
-function MobileNavItem({ icon, label, isActive, onClick }: NavItemProps) {
+const MobileNavItem = React.memo(function MobileNavItem({ icon, label, isActive, onClick }: NavItemProps) {
   return (
     <button
       className={`flex flex-col items-center justify-center h-full transition-all duration-200 ${
@@ -617,7 +566,6 @@ function MobileNavItem({ icon, label, isActive, onClick }: NavItemProps) {
       <span className="text-xs font-medium leading-none truncate max-w-full px-0.5">{label}</span>
     </button>
   )
-}
+})
 
-// Add default export
 export default Dashboard

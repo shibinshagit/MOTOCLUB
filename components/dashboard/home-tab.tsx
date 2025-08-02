@@ -27,71 +27,38 @@ interface HomeTabProps {
   deviceId?: number
 }
 
-export default function HomeTab({ userId: propUserId, deviceId: propDeviceId }: HomeTabProps) {
+// Global request deduplication cache
+const requestCache = new Map<string, Promise<any>>()
+const CACHE_DURATION = 30 * 1000 // 30 seconds
+const requestTimestamps = new Map<string, number>()
+
+// Custom hook with enhanced request deduplication
+function useDashboardData(userId?: number, deviceId?: number, selectedPeriod?: string) {
   const dispatch = useAppDispatch()
-  const dashboardData = useAppSelector(selectHomeDashboardData)
-  const isLoading = useAppSelector(selectHomeDashboardLoading)
-  const isBackgroundLoading = useAppSelector(selectHomeDashboardBackgroundLoading)
-  const error = useAppSelector(selectHomeDashboardError)
-  const selectedPeriod = useAppSelector(selectHomeDashboardPeriod)
   const deviceCurrency = useAppSelector(selectDeviceCurrency)
-  const user = useAppSelector(selectUser)
-  const device = useAppSelector(selectDevice)
-
-  const userId = propUserId || user?.id
-  const deviceId = propDeviceId || device?.id
   const [currency, setCurrency] = useState(deviceCurrency || "INR")
-
-  const lastUpdated = useAppSelector(selectHomeDashboardLastUpdated)
-
-  // Track fetch state to prevent duplicates
+  
+  // Enhanced fetch state management
   const fetchStateRef = useRef({
-    isInitialized: false,
-    currentFetch: null as Promise<void> | null,
-    lastFetchParams: "",
+    lastSuccessfulFetch: 0,
+    consecutiveErrors: 0,
+    isComponentMounted: true,
     autoRefreshInterval: null as NodeJS.Timeout | null
   })
 
-  const formatCurrency = useCallback((amount: number) => {
-    if (typeof amount !== "number" || isNaN(amount)) {
-      return formatCurrencySync(0, currency)
+  // Cleanup on unmount
+  useEffect(() => {
+    fetchStateRef.current.isComponentMounted = true
+    return () => {
+      fetchStateRef.current.isComponentMounted = false
+      if (fetchStateRef.current.autoRefreshInterval) {
+        clearInterval(fetchStateRef.current.autoRefreshInterval)
+        fetchStateRef.current.autoRefreshInterval = null
+      }
     }
-    return formatCurrencySync(amount, currency)
-  }, [currency])
-
-  const currentFetchParams = useMemo(() =>
-    `${userId}-${deviceId}-${selectedPeriod}`, [userId, deviceId, selectedPeriod])
-
-  const needsCurrencyFetch = !deviceCurrency && deviceId
+  }, [])
 
   const fetchDashboardData = useCallback(async (showLoading = true, forceFetch = false) => {
-    // Debug logging (remove in production)
-    if (process.env.NODE_ENV === 'development') {
-      console.log('🔄 fetchDashboardData called:', { 
-        showLoading, 
-        forceFetch, 
-        currentParams: currentFetchParams,
-        lastParams: fetchStateRef.current.lastFetchParams,
-        hasCurrentFetch: !!fetchStateRef.current.currentFetch
-      })
-    }
-
-    // Prevent duplicate calls
-    if (fetchStateRef.current.currentFetch && !forceFetch) {
-      if (process.env.NODE_ENV === 'development') {
-        console.log('⏳ Fetch already in progress, skipping...')
-      }
-      return fetchStateRef.current.currentFetch
-    }
-
-    // Check if we need to fetch
-    if (!forceFetch && currentFetchParams === fetchStateRef.current.lastFetchParams) {
-      if (process.env.NODE_ENV === 'development') {
-        console.log('✅ Same params, skipping fetch')
-      }
-      return
-    }
-
     if (!userId || !deviceId) {
       const missing = []
       if (!userId) missing.push("User ID")
@@ -102,21 +69,61 @@ export default function HomeTab({ userId: propUserId, deviceId: propDeviceId }: 
       return
     }
 
-    if (process.env.NODE_ENV === 'development') {
-      console.log('🚀 Starting fetch with params:', { userId, deviceId, selectedPeriod })
+    // Create cache key
+    const cacheKey = `dashboard-${userId}-${deviceId}-${selectedPeriod}`
+    const now = Date.now()
+    
+    // Check if we should skip this request
+    if (!forceFetch) {
+      // Skip if recent successful fetch (within 10 seconds)
+      if (now - fetchStateRef.current.lastSuccessfulFetch < 10000) {
+        console.log('⏭️ Skipping fetch - too recent')
+        return
+      }
+
+      // Check cache timestamp
+      const lastRequestTime = requestTimestamps.get(cacheKey) || 0
+      if (now - lastRequestTime < 3000) { // 3 second minimum between requests
+        console.log('⏭️ Skipping fetch - rate limited')
+        return
+      }
     }
 
-    // Create the fetch promise
+    // Check for existing request in cache
+    if (requestCache.has(cacheKey) && !forceFetch) {
+      console.log('⏳ Using existing request promise')
+      return requestCache.get(cacheKey)
+    }
+
+    // Exponential backoff for consecutive errors
+    if (fetchStateRef.current.consecutiveErrors > 0 && !forceFetch) {
+      const backoffTime = Math.min(1000 * Math.pow(2, fetchStateRef.current.consecutiveErrors), 30000)
+      if (now - (requestTimestamps.get(cacheKey) || 0) < backoffTime) {
+        console.log(`⏸️ Backing off for ${backoffTime}ms due to errors`)
+        return
+      }
+    }
+
+    console.log('🚀 Starting dashboard fetch:', { userId, deviceId, selectedPeriod, forceFetch })
+    
+    // Create and cache the request promise
     const fetchPromise = (async () => {
       try {
+        // Check if component is still mounted
+        if (!fetchStateRef.current.isComponentMounted) {
+          console.log('⚠️ Component unmounted, aborting fetch')
+          return
+        }
+
         if (showLoading) {
           dispatch(setLoading(true))
         } else {
           dispatch(setBackgroundLoading(true))
         }
 
-        fetchStateRef.current.lastFetchParams = currentFetchParams
+        requestTimestamps.set(cacheKey, now)
 
+        const needsCurrencyFetch = !deviceCurrency && deviceId
         const fetches = [getComprehensiveDashboardData(userId, deviceId, selectedPeriod)]
         if (needsCurrencyFetch) {
           fetches.unshift(getDeviceCurrency(deviceId))
@@ -125,95 +132,145 @@ export default function HomeTab({ userId: propUserId, deviceId: propDeviceId }: 
         const results = await Promise.all(fetches)
         const [currencyRes, dataRes] = needsCurrencyFetch ? results : [null, results[0]]
 
+        // Check if component is still mounted after async operation
+        if (!fetchStateRef.current.isComponentMounted) {
+          console.log('⚠️ Component unmounted during fetch, discarding results')
+          return
+        }
+
         if (currencyRes) setCurrency(currencyRes)
 
         if (dataRes.success && dataRes.data) {
           dispatch(setDashboardData(dataRes.data))
           dispatch(setError(null))
-          if (process.env.NODE_ENV === 'development') {
-            console.log('✅ Fetch successful')
-          }
+          fetchStateRef.current.lastSuccessfulFetch = now
+          fetchStateRef.current.consecutiveErrors = 0
+          console.log('✅ Dashboard fetch successful')
         } else {
+          fetchStateRef.current.consecutiveErrors++
           dispatch(setError(dataRes.message || "Failed to load dashboard data"))
-          if (process.env.NODE_ENV === 'development') {
-            console.log('❌ Fetch failed:', dataRes.message)
-          }
+          console.log('❌ Dashboard fetch failed:', dataRes.message)
         }
       } catch (err) {
+        fetchStateRef.current.consecutiveErrors++
         console.error("Dashboard fetch error:", err)
-        dispatch(setError("Failed to load dashboard data"))
+        if (fetchStateRef.current.isComponentMounted) {
+          dispatch(setError("Failed to load dashboard data"))
+        }
       } finally {
-        dispatch(setLoading(false))
-        dispatch(setBackgroundLoading(false))
-        fetchStateRef.current.currentFetch = null
+        // Remove from cache after completion
+        requestCache.delete(cacheKey)
+        
+        if (fetchStateRef.current.isComponentMounted) {
+          dispatch(setLoading(false))
+          dispatch(setBackgroundLoading(false))
+        }
       }
     })()
 
-    fetchStateRef.current.currentFetch = fetchPromise
-    return fetchPromise
-  }, [userId, deviceId, selectedPeriod, currentFetchParams, dispatch, needsCurrencyFetch])
+    // Cache the promise
+    requestCache.set(cacheKey, fetchPromise)
+    
+    // Clean up cache after completion
+    fetchPromise.finally(() => {
+      setTimeout(() => {
+        requestCache.delete(cacheKey)
+      }, CACHE_DURATION)
+    })
 
-  // Auto-refresh effect
+    return fetchPromise
+  }, [userId, deviceId, selectedPeriod, dispatch, deviceCurrency]) // Stable dependencies
+
+  return {
+    fetchDashboardData,
+    currency,
+    fetchStateRef
+  }
+}
+
+export default function HomeTab({ userId: propUserId, deviceId: propDeviceId }: HomeTabProps) {
+  const dispatch = useAppDispatch()
+  const dashboardData = useAppSelector(selectHomeDashboardData)
+  const isLoading = useAppSelector(selectHomeDashboardLoading)
+  const isBackgroundLoading = useAppSelector(selectHomeDashboardBackgroundLoading)
+  const error = useAppSelector(selectHomeDashboardError)
+  const selectedPeriod = useAppSelector(selectHomeDashboardPeriod)
+  const user = useAppSelector(selectUser)
+  const device = useAppSelector(selectDevice)
+  const lastUpdated = useAppSelector(selectHomeDashboardLastUpdated)
+
+  const userId = propUserId || user?.id
+  const deviceId = propDeviceId || device?.id
+
+  const { fetchDashboardData, currency, fetchStateRef } = useDashboardData(userId, deviceId, selectedPeriod)
+
+  // Track component initialization to prevent multiple initial fetches
+  const initRef = useRef({
+    hasInitialized: false,
+    initParams: ""
+  })
+
+  const formatCurrency = useCallback((amount: number) => {
+    if (typeof amount !== "number" || isNaN(amount)) {
+      return formatCurrencySync(0, currency)
+    }
+    return formatCurrencySync(amount, currency)
+  }, [currency])
+
+  // Single initialization effect - runs only once per unique param set
   useEffect(() => {
-    // Clear existing interval
+    const currentParams = `${userId}-${deviceId}-${selectedPeriod}`
+    
+    if (userId && deviceId && !initRef.current.hasInitialized) {
+      console.log('🔄 Initializing dashboard data fetch')
+      initRef.current.hasInitialized = true
+      initRef.current.initParams = currentParams
+      fetchDashboardData(true, true)
+    } else if (currentParams !== initRef.current.initParams && userId && deviceId) {
+      console.log('🔄 Parameters changed, refetching')
+      initRef.current.initParams = currentParams
+      fetchDashboardData(true, true)
+    }
+  }, [userId, deviceId, selectedPeriod]) // Remove fetchDashboardData from deps
+
+  // Controlled auto-refresh effect with better cleanup
+  useEffect(() => {
+    // Clear any existing interval
     if (fetchStateRef.current.autoRefreshInterval) {
       clearInterval(fetchStateRef.current.autoRefreshInterval)
       fetchStateRef.current.autoRefreshInterval = null
     }
 
-    // Set up new interval only if we have valid data
-    if (userId && deviceId && dashboardData && fetchStateRef.current.isInitialized) {
-      if (process.env.NODE_ENV === 'development') {
-        console.log('⏰ Setting up auto-refresh')
-      }
+    // Only set up auto-refresh if we have data and valid params
+    if (userId && deviceId && dashboardData && initRef.current.hasInitialized) {
+      console.log('⏰ Setting up auto-refresh (5 minutes)')
       fetchStateRef.current.autoRefreshInterval = setInterval(() => {
-        if (process.env.NODE_ENV === 'development') {
-          console.log('🔄 Auto-refresh triggered')
-        }
+        console.log('🔄 Auto-refresh triggered')
         fetchDashboardData(false, true)
       }, 5 * 60 * 1000) // 5 minutes
     }
 
-    // Cleanup function
     return () => {
       if (fetchStateRef.current.autoRefreshInterval) {
         clearInterval(fetchStateRef.current.autoRefreshInterval)
         fetchStateRef.current.autoRefreshInterval = null
       }
     }
-  }, [dashboardData, userId, deviceId, fetchDashboardData])
+  }, [dashboardData, userId, deviceId]) // Stable dependencies only
 
-  // ----------- FIXED: SINGLE FETCH EFFECT -----------
-  useEffect(() => {
-    const fetchKey = `${userId}-${deviceId}-${selectedPeriod}`;
-    if (
-      userId &&
-      deviceId &&
-      fetchKey !== fetchStateRef.current.lastFetchParams
-    ) {
-      fetchStateRef.current.isInitialized = true;
-      fetchDashboardData(true, true);
-      fetchStateRef.current.lastFetchParams = fetchKey;
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId, deviceId, selectedPeriod]);
-  // --------------------------------------------------
-
-  const handlePeriodChange = (period: "today" | "week" | "month" | "quarter" | "year") => {
-    if (process.env.NODE_ENV === 'development') {
-      console.log('📅 Period changed to:', period)
-    }
+  const handlePeriodChange = useCallback((period: "today" | "week" | "month" | "quarter" | "year") => {
+    console.log('📅 Period changed to:', period)
     dispatch(setPeriod(period))
-  }
+    // Reset initialization to allow fetch with new period
+    initRef.current.hasInitialized = false
+  }, [dispatch])
 
-  const handleRefresh = () => {
-    if (process.env.NODE_ENV === 'development') {
-      console.log('🔄 Manual refresh triggered')
-    }
+  const handleRefresh = useCallback(() => {
+    console.log('🔄 Manual refresh triggered')
     fetchDashboardData(false, true)
-  }
+  }, [fetchDashboardData])
   
-  // Memoize business insights calculation to prevent unnecessary recalculations
+  // Memoize business insights calculation
   const businessInsights = useMemo(() => {
     if (!dashboardData) return []
 
@@ -277,7 +334,7 @@ export default function HomeTab({ userId: propUserId, deviceId: propDeviceId }: 
       })
     }
 
-    return insights.slice(0, 3) // Show max 3 insights
+    return insights.slice(0, 3)
   }, [dashboardData])
 
   // Memoize time since update calculation
@@ -594,7 +651,7 @@ export default function HomeTab({ userId: propUserId, deviceId: propDeviceId }: 
   )
 }
 
-// Memoized Helper Components for better performance
+// Memoized Helper Components
 interface MetricCardProps {
   title: string
   value: string
@@ -606,7 +663,7 @@ interface MetricCardProps {
 const MetricCard = React.memo(function MetricCard({ title, value, change, icon, color }: MetricCardProps) {
   const colorClasses = {
     green: "from-green-500 to-green-600",
-    blue: "from-blue-500 to-blue-600",
+    blue: "from-blue-500 to-blue-600", 
     purple: "from-purple-500 to-purple-600",
     orange: "from-orange-500 to-orange-600",
   }
