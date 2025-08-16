@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { format } from "date-fns"
-import { Loader2, Printer, Copy, Settings } from "lucide-react"
+import { Loader2, Printer, Copy, Settings, RefreshCw } from "lucide-react"
 import { getProductStockHistory } from "@/app/actions/product-actions"
 import { printBarcodeSticker, printMultipleBarcodeStickers, encodeNumberAsLetters } from "@/lib/barcode-utils"
 import { Label } from "@/components/ui/label"
@@ -32,49 +32,65 @@ export default function ViewProductModal({
   const [isLoading, setIsLoading] = useState(false)
   const [printCopies, setPrintCopies] = useState(1)
   const [showPrintOptions, setShowPrintOptions] = useState(false)
-  const [currency, setCurrency] = useState(currencyProp || "AED") // Use prop or default to AED
+  const [currency, setCurrency] = useState(currencyProp || "AED")
+  const [stockHistoryError, setStockHistoryError] = useState<string | null>(null)
 
   // Get encoded wholesale price
   const wholesalePrice =
-    typeof product.wholesale_price === "number"
+    typeof product?.wholesale_price === "number"
       ? product.wholesale_price
-      : Number.parseFloat(product.wholesale_price || "0") || 0
+      : Number.parseFloat(product?.wholesale_price || "0") || 0
 
   const encodedWholesalePrice = encodeNumberAsLetters(Math.round(wholesalePrice))
 
   // Get MSP (Maximum Selling Price)
-  const msp = typeof product.msp === "number" ? product.msp : Number.parseFloat(product.msp || "0") || 0
+  const msp = typeof product?.msp === "number" ? product.msp : Number.parseFloat(product?.msp || "0") || 0
+
+  const fetchStockHistory = async () => {
+    if (!product?.id) return
+
+    try {
+      setIsLoading(true)
+      setStockHistoryError(null)
+      
+      console.log('Fetching stock history for product:', product.id)
+      const result = await getProductStockHistory(product.id)
+      
+      console.log('Stock history result:', result)
+      
+      if (result.success) {
+        setStockHistory(result.data || [])
+        console.log('Stock history data:', result.data)
+      } else {
+        setStockHistoryError(result.message || 'Failed to fetch stock history')
+        console.error('Stock history error:', result.message)
+        setStockHistory([])
+      }
+
+      // If currency is not provided as a prop, fetch it
+      if (!currencyProp) {
+        try {
+          const deviceCurrency = await getDeviceCurrency(product.created_by || 1)
+          setCurrency(deviceCurrency)
+        } catch (err) {
+          console.error("Error fetching currency:", err)
+        }
+      }
+    } catch (error) {
+      console.error("Error fetching stock history:", error)
+      setStockHistoryError('An error occurred while fetching stock history')
+      setStockHistory([])
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
   useEffect(() => {
-    const fetchStockHistory = async () => {
-      if (!isOpen || !product?.id) return
-
-      try {
-        setIsLoading(true)
-        const result = await getProductStockHistory(product.id)
-        if (result.success) {
-          setStockHistory(result.data)
-        }
-
-        // If currency is not provided as a prop, fetch it
-        if (!currencyProp) {
-          try {
-            const deviceCurrency = await getDeviceCurrency(product.created_by || 1)
-            setCurrency(deviceCurrency)
-          } catch (err) {
-            console.error("Error fetching currency:", err)
-          }
-        }
-      } catch (error) {
-        console.error("Error fetching stock history:", error)
-      } finally {
-        setIsLoading(false)
-      }
+    if (isOpen && product?.id) {
+      fetchStockHistory()
     }
 
-    fetchStockHistory()
-
-    if (product.barcode && typeof window !== "undefined") {
+    if (product?.barcode && typeof window !== "undefined" && isOpen) {
       // Use dynamic import for JsBarcode
       import("jsbarcode")
         .then((JsBarcode) => {
@@ -93,9 +109,9 @@ export default function ViewProductModal({
         })
         .catch((err) => console.error("Failed to load JsBarcode:", err))
     }
-  }, [isOpen, product?.id, currencyProp, product.barcode])
+  }, [isOpen, product?.id, product?.barcode, currencyProp])
 
-  // Helper function to get type label and color
+  // UPDATED: Helper function to get type label and color with better mapping
   const getTypeInfo = (
     type: string,
     referenceType: string,
@@ -103,44 +119,112 @@ export default function ViewProductModal({
     notes?: string,
     quantity?: number,
   ) => {
-    // regular purchase (green) or "purchase update" (blue)
-    if (type === "purchase") {
-      const isUpdate = notes?.toLowerCase().includes("update")
-      return {
-        label: `${isUpdate ? "Purchase Update" : "Purchase"} #${referenceId ?? "N/A"}`,
-        color: isUpdate
-          ? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
-          : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
-      }
-    }
+    console.log("Processing stock history type:", { type, referenceType, referenceId, notes, quantity })
 
-    // negative adjustment from a purchase delete / reduce  (red),
-    // or other manual adjustments (purple)
-    if (type === "adjustment") {
-      if (referenceType === "purchase") {
+    // Enhanced type detection based on the actual types from our stock history creation
+    switch (type) {
+      case "purchase":
+        const isUpdate = notes?.toLowerCase().includes("update") || notes?.toLowerCase().includes("modified")
         return {
-          label: `Purchase Deleted #${referenceId ?? "N/A"}`,
+          label: `${isUpdate ? "Purchase Update" : "Purchase"} #${referenceId ?? "N/A"}`,
+          color: isUpdate
+            ? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
+            : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+        }
+
+      // Main sale types from our createStockHistoryEntry function
+      case "sale":
+        return {
+          label: `Sale #${referenceId ?? "N/A"}`,
           color: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
         }
-      }
-      return {
-        label: "Manual Adjustment",
-        color: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200",
-      }
-    }
 
-    // sale stays red
-    if (type === "sale") {
-      return {
-        label: `Sale #${referenceId ?? "N/A"}`,
-        color: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
-      }
-    }
+      case "sale_returned":
+        return {
+          label: `Sale Return #${referenceId ?? "N/A"}`,
+          color: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200",
+        }
 
-    // fallback
-    return {
-      label: type,
-      color: "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200",
+      case "sale_completed":
+        return {
+          label: `Sale Completed #${referenceId ?? "N/A"}`,
+          color: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+        }
+
+      case "sale_deleted":
+        return {
+          label: `Sale Deleted #${referenceId ?? "N/A"}`,
+          color: "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200",
+        }
+
+      case "sale_item_increased":
+        return {
+          label: `Sale Item Added #${referenceId ?? "N/A"}`,
+          color: "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200",
+        }
+
+      case "sale_item_decreased":
+        return {
+          label: `Sale Item Reduced #${referenceId ?? "N/A"}`,
+          color: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200",
+        }
+
+      case "sale_item_added":
+        return {
+          label: `Sale Item Added #${referenceId ?? "N/A"}`,
+          color: "bg-cyan-100 text-cyan-800 dark:bg-cyan-900 dark:text-cyan-200",
+        }
+
+      case "sale_item_removed":
+        return {
+          label: `Sale Item Removed #${referenceId ?? "N/A"}`,
+          color: "bg-pink-100 text-pink-800 dark:bg-pink-900 dark:text-pink-200",
+        }
+
+      // Legacy support for old naming conventions
+      case "sale_cancelled":
+      case "sale_deleted_cancelled":
+        return {
+          label: `Sale Cancelled #${referenceId ?? "N/A"}`,
+          color: "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200",
+        }
+
+      case "sale_status_changed":
+        return {
+          label: `Sale Status Change #${referenceId ?? "N/A"}`,
+          color: "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200",
+        }
+
+      case "sale_item_updated":
+        return {
+          label: `Sale Item Update #${referenceId ?? "N/A"}`,
+          color: "bg-cyan-100 text-cyan-800 dark:bg-cyan-900 dark:text-cyan-200",
+        }
+
+      case "adjustment":
+        if (referenceType === "purchase") {
+          return {
+            label: `Purchase Adjustment #${referenceId ?? "N/A"}`,
+            color: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
+          }
+        }
+        return {
+          label: "Manual Adjustment",
+          color: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200",
+        }
+
+      case "test_entry":
+        return {
+          label: "Test Entry",
+          color: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200",
+        }
+
+      default:
+        console.log("Unknown stock history type:", type)
+        return {
+          label: type || "Unknown",
+          color: "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200",
+        }
     }
   }
 
@@ -151,15 +235,18 @@ export default function ViewProductModal({
   }
 
   const handlePrintMultipleTags = () => {
-    if (product) {
+    if (product && printCopies > 0) {
       printMultipleBarcodeStickers([product], printCopies, currency)
     }
   }
 
-  // Helper function to mask sensitive data
-  const maskValue = (value: string | number, showValue: boolean) => {
-    if (showValue) return value
-    return "***"
+  const handleRefreshStockHistory = () => {
+    fetchStockHistory()
+  }
+
+  // Don't render if no product
+  if (!product) {
+    return null
   }
 
   return (
@@ -181,7 +268,7 @@ export default function ViewProductModal({
                       <div className="aspect-square rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 p-4 overflow-hidden">
                         <img
                           src={product.image_url || "/placeholder.svg"}
-                          alt={product.name}
+                          alt={product.name || "Product"}
                           className="w-full h-full object-contain rounded-md"
                         />
                       </div>
@@ -194,7 +281,7 @@ export default function ViewProductModal({
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Name</h3>
-                      <p className="font-medium text-gray-900 dark:text-gray-100">{product.name}</p>
+                      <p className="font-medium text-gray-900 dark:text-gray-100">{product.name || "N/A"}</p>
                     </div>
 
                     <div className="space-y-2">
@@ -217,7 +304,7 @@ export default function ViewProductModal({
                     <div className="space-y-2">
                       <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">MRP (Retail Price)</h3>
                       <p className="font-medium text-gray-900 dark:text-gray-100">
-                        {currency} {product.price}
+                        {currency} {product.price || "0.00"}
                       </p>
                     </div>
 
@@ -271,7 +358,7 @@ export default function ViewProductModal({
                                   : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
                             }`}
                           >
-                            {product.stock}{" "}
+                            {product.stock || 0}{" "}
                             {product.stock === 0 ? "Out of Stock" : product.stock < 5 ? "Low Stock" : "In Stock"}
                           </span>
                         )}
@@ -291,6 +378,13 @@ export default function ViewProductModal({
                         {product.updated_at ? format(new Date(product.updated_at), "PPP p") : "N/A"}
                       </p>
                     </div>
+
+                    {product.description && (
+                      <div className="space-y-2 md:col-span-2">
+                        <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Description</h3>
+                        <p className="text-gray-900 dark:text-gray-100">{product.description}</p>
+                      </div>
+                    )}
                   </div>
 
                   {/* Barcode Section */}
@@ -367,13 +461,40 @@ export default function ViewProductModal({
                 )}
               </div>
 
-              {/* Stock History Section - Show with masked data in privacy mode */}
+              {/* UPDATED: Stock History Section with improved debugging and display */}
               <div className="space-y-4">
-                <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">Stock History</h3>
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">Stock History</h3>
+                  <Button
+                    onClick={handleRefreshStockHistory}
+                    variant="outline"
+                    size="sm"
+                    disabled={isLoading}
+                    className="border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+                  >
+                    <RefreshCw className={`mr-2 h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+                    Refresh
+                  </Button>
+                </div>
 
                 {isLoading ? (
-                  <div className="flex justify-center py-4">
-                    <Loader2 className="animate-spin h-6 w-6 text-gray-400" />
+                  <div className="flex justify-center py-8">
+                    <div className="flex items-center space-x-2">
+                      <Loader2 className="animate-spin h-5 w-5 text-gray-400" />
+                      <span className="text-gray-500 dark:text-gray-400">Loading stock history...</span>
+                    </div>
+                  </div>
+                ) : stockHistoryError ? (
+                  <div className="text-center py-8 bg-red-50 dark:bg-red-900/20 rounded-md border border-red-200 dark:border-red-800">
+                    <p className="text-red-600 dark:text-red-400 mb-2">{stockHistoryError}</p>
+                    <Button 
+                      onClick={handleRefreshStockHistory} 
+                      variant="outline" 
+                      size="sm"
+                      className="border-red-300 dark:border-red-600 text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/40"
+                    >
+                      Try Again
+                    </Button>
                   </div>
                 ) : stockHistory.length > 0 ? (
                   <div className="border rounded-md overflow-hidden border-gray-200 dark:border-gray-600">
@@ -381,16 +502,16 @@ export default function ViewProductModal({
                       <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-600">
                         <thead className="bg-gray-50 dark:bg-gray-800">
                           <tr>
-                            <th className="px-4 py-2 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-left">
-                              Date
+                            <th className="px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-left">
+                              Date & Time
                             </th>
-                            <th className="px-4 py-2 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-left">
-                              Type
+                            <th className="px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-left">
+                              Transaction Type
                             </th>
-                            <th className="px-4 py-2 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-center">
-                              Quantity
+                            <th className="px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-center">
+                              Quantity Change
                             </th>
-                            <th className="px-4 py-2 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-left">
+                            <th className="px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-left">
                               Notes
                             </th>
                           </tr>
@@ -405,13 +526,14 @@ export default function ViewProductModal({
                               item.quantity,
                             )
                             const isDecrease = item.quantity < 0
+                            const isZero = item.quantity === 0
 
                             return (
-                              <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
-                                <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-100">
-                                  {format(new Date(item.date), "PPP")}
+                              <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+                                <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">
+                                  {format(new Date(item.date), "PPP p")}
                                 </td>
-                                <td className="px-4 py-2 text-sm">
+                                <td className="px-4 py-3 text-sm">
                                   <span
                                     className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${
                                       privacyMode
@@ -422,24 +544,30 @@ export default function ViewProductModal({
                                     {privacyMode ? "*** Transaction" : typeInfo.label}
                                   </span>
                                 </td>
-                                <td className="px-4 py-2 text-sm text-center">
+                                <td className="px-4 py-3 text-sm text-center">
                                   {privacyMode ? (
                                     <span className="text-gray-400 dark:text-gray-500">***</span>
                                   ) : (
                                     <span
-                                      className={
+                                      className={`font-semibold ${
                                         isDecrease
                                           ? "text-red-600 dark:text-red-400"
-                                          : "text-green-600 dark:text-green-400"
-                                      }
+                                          : isZero
+                                            ? "text-gray-600 dark:text-gray-400"
+                                            : "text-green-600 dark:text-green-400"
+                                      }`}
                                     >
-                                      {isDecrease ? "" : "+"}
-                                      {item.quantity}
+                                      {isZero 
+                                        ? "0" 
+                                        : `${isDecrease ? "" : "+"}${item.quantity}`
+                                      }
                                     </span>
                                   )}
                                 </td>
-                                <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-100">
-                                  {privacyMode ? "***" : item.notes || "-"}
+                                <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">
+                                  <div className="max-w-xs truncate" title={privacyMode ? "***" : (item.notes || "-")}>
+                                    {privacyMode ? "***" : (item.notes || "-")}
+                                  </div>
                                 </td>
                               </tr>
                             )
@@ -447,21 +575,57 @@ export default function ViewProductModal({
                         </tbody>
                       </table>
                     </div>
+                    
+                    {/* Show total count */}
+                    <div className="px-4 py-2 bg-gray-50 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-600">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        Showing {stockHistory.length} entries {stockHistory.length >= 100 ? '(latest 100)' : ''}
+                        {!privacyMode && (
+                          <span className="ml-4">
+                            Total movements: {stockHistory.reduce((sum, item) => sum + Math.abs(item.quantity), 0)}
+                          </span>
+                        )}
+                      </p>
+                    </div>
                   </div>
                 ) : (
-                  <p className="text-sm text-gray-500 dark:text-gray-400 py-4">No stock history available</p>
+                  <div className="text-center py-8 bg-gray-50 dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-600">
+                    <div className="mb-2">
+                      <div className="w-12 h-12 mx-auto bg-gray-200 dark:bg-gray-700 rounded-full flex items-center justify-center mb-3">
+                        <RefreshCw className="w-6 h-6 text-gray-400" />
+                      </div>
+                      <p className="text-gray-500 dark:text-gray-400 font-medium">No stock history available</p>
+                      <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
+                        Stock movements will appear here after sales, purchases, or manual adjustments
+                      </p>
+                    </div>
+                    <Button 
+                      onClick={handleRefreshStockHistory}
+                      variant="outline" 
+                      size="sm"
+                      className="mt-2 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                    >
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                      Check Again
+                    </Button>
+                  </div>
                 )}
               </div>
             </div>
           </div>
 
-          <DialogFooter className="px-6 py-4 border-t border-gray-200 dark:border-gray-600">
-            <Button
-              onClick={onClose}
-              className="bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600"
-            >
-              Close
-            </Button>
+          <DialogFooter className="px-6 py-4 border-t border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-800">
+            <div className="flex items-center justify-between w-full">
+              <div className="text-sm text-gray-500 dark:text-gray-400">
+                Product ID: {product.id}
+              </div>
+              <Button
+                onClick={onClose}
+                className="bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600 border-0"
+              >
+                Close
+              </Button>
+            </div>
           </DialogFooter>
         </div>
       </DialogContent>

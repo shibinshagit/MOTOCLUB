@@ -39,6 +39,36 @@ async function getSchemaInfo() {
   return schemaCache
 }
 
+// Ensures the stock history table exists with the correct structure
+async function ensureStockHistoryTable() {
+  try {
+    // Create the main stock history table (using the same structure as product actions)
+    await sql`
+      CREATE TABLE IF NOT EXISTS product_stock_history (
+        id SERIAL PRIMARY KEY,
+        product_id INTEGER NOT NULL,
+        quantity INTEGER NOT NULL,
+        type VARCHAR(50) NOT NULL,
+        reference_id INTEGER,
+        reference_type VARCHAR(50),
+        notes TEXT,
+        created_by INTEGER,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `
+
+    // Add missing columns if they don't exist
+    await sql`ALTER TABLE product_stock_history ADD COLUMN IF NOT EXISTS change_type VARCHAR(50)`
+    await sql`ALTER TABLE product_stock_history ADD COLUMN IF NOT EXISTS quantity_change INTEGER`
+    await sql`ALTER TABLE product_stock_history ADD COLUMN IF NOT EXISTS sale_id INTEGER`
+    await sql`ALTER TABLE product_stock_history ADD COLUMN IF NOT EXISTS purchase_id INTEGER`
+
+    console.log("Stock history table structure ensured")
+  } catch (error) {
+    console.error("Error ensuring stock history table:", error)
+  }
+}
+
 // Helper function to safely update product stock with proper validation
 async function updateProductStock(productId: number, quantityChange: number, operation: "subtract" | "add") {
   try {
@@ -86,7 +116,7 @@ async function updateProductStock(productId: number, quantityChange: number, ope
   }
 }
 
-// Add this helper function at the top of the file, after the existing helper functions
+// UPDATED: Fixed createStockHistoryEntry function to use the correct table and structure
 async function createStockHistoryEntry(
   productId: number,
   changeType: string,
@@ -94,6 +124,7 @@ async function createStockHistoryEntry(
   referenceId: number,
   referenceType: string,
   notes?: string,
+  userId?: number
 ) {
   try {
     // Check if it's actually a product (not a service)
@@ -106,70 +137,35 @@ async function createStockHistoryEntry(
       return { success: true, message: "Item is not a product, stock history skipped" }
     }
 
-    // Check if stock_history table exists and has the required columns
-    const tableCheck = await sql`
-      SELECT EXISTS (
-        SELECT FROM information_schema.tables 
-        WHERE table_name = 'stock_history'
-      ) as table_exists
+    // Ensure the stock history table exists
+    await ensureStockHistoryTable()
+
+    // Insert stock history entry using the same structure as product actions
+    await sql`
+      INSERT INTO product_stock_history (
+        product_id, 
+        quantity, 
+        type, 
+        reference_id, 
+        reference_type, 
+        notes, 
+        created_by,
+        created_at
+      )
+      VALUES (
+        ${productId}, 
+        ${Math.abs(quantity)}, 
+        ${changeType}, 
+        ${referenceId}, 
+        ${referenceType}, 
+        ${notes || ""}, 
+        ${userId || null},
+        ${new Date()}
+      )
     `
-
-    if (!tableCheck[0]?.table_exists) {
-      console.log("Stock history table does not exist, skipping stock history creation")
-      return { success: true, message: "Stock history table not available" }
-    }
-
-    // ------------------------------------------------------------------
-    // Ensure the table has the columns we need (change_type, quantity_change)
-    // ------------------------------------------------------------------
-    try {
-      await sql`ALTER TABLE stock_history ADD COLUMN IF NOT EXISTS change_type VARCHAR(50)`
-      await sql`ALTER TABLE stock_history ADD COLUMN IF NOT EXISTS quantity_change INTEGER`
-    } catch (colErr) {
-      console.error("Error ensuring stock_history required columns:", colErr)
-      // Let execution continue – if the column already exists this will be a harmless notice
-    }
-
-    // Check for required columns
-    const columnCheck = await sql`
-      SELECT 
-        EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'stock_history' AND column_name = 'sale_id') as has_sale_id,
-        EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'stock_history' AND column_name = 'purchase_id') as has_purchase_id
-    `
-
-    const hasSaleId = columnCheck[0]?.has_sale_id || false
-    const hasPurchaseId = columnCheck[0]?.has_purchase_id || false
-
-    // Insert stock history entry with enhanced change types
-    if (hasSaleId && hasPurchaseId) {
-      // Both columns exist - use appropriate one based on reference type
-      if (referenceType === "sale") {
-        await sql`
-          INSERT INTO stock_history (product_id, change_type, quantity_change, sale_id, created_at, notes)
-          VALUES (${productId}, ${changeType}, ${quantity}, ${referenceId}, ${new Date()}, ${notes || ""})
-        `
-      } else {
-        await sql`
-          INSERT INTO stock_history (product_id, change_type, quantity_change, purchase_id, created_at, notes)
-          VALUES (${productId}, ${changeType}, ${quantity}, ${referenceId}, ${new Date()}, ${notes || ""})
-        `
-      }
-    } else if (hasSaleId && referenceType === "sale") {
-      // Only sale_id column exists
-      await sql`
-        INSERT INTO stock_history (product_id, change_type, quantity_change, sale_id, created_at, notes)
-        VALUES (${productId}, ${changeType}, ${quantity}, ${referenceId}, ${new Date()}, ${notes || ""})
-      `
-    } else {
-      // Fallback to basic stock history without reference IDs
-      await sql`
-        INSERT INTO stock_history (product_id, change_type, quantity_change, created_at, notes)
-        VALUES (${productId}, ${changeType}, ${quantity}, ${new Date()}, ${notes || ""})
-      `
-    }
 
     console.log(
-      `Stock history created for product ${productId}: ${changeType} ${quantity} units (${referenceType} #${referenceId})`,
+      `Stock history created for product ${productId}: ${changeType} ${Math.abs(quantity)} units (${referenceType} #${referenceId})`,
     )
     return { success: true, message: "Stock history created successfully" }
   } catch (error) {
@@ -468,13 +464,16 @@ export async function getSaleDetails(saleId: number) {
   }
 }
 
-// Updated addSale function with improved stock handling
+// Updated addSale function with improved stock handling and proper stock history
 export async function addSale(saleData: any) {
   try {
     console.log("Adding sale with data:", JSON.stringify(saleData, null, 2))
 
     // Get schema info (cached)
     const schema = await getSchemaInfo()
+    
+    // Ensure stock history table exists
+    await ensureStockHistoryTable()
 
     // Start transaction
     await sql`BEGIN`
@@ -695,10 +694,22 @@ export async function addSale(saleData: any) {
 
           saleItems.push(itemResult[0])
 
-          // Update stock using the safe helper function - only for products and if not cancelled
+          // Update stock and create stock history - only for products and if not cancelled
           if (!isCancelled && !isService) {
             const stockResult = await updateProductStock(item.productId, item.quantity, "subtract")
-            if (!stockResult.success) {
+            if (stockResult.success) {
+              // Create stock history entry for the sale
+              await createStockHistoryEntry(
+                item.productId,
+                "sale",
+                -item.quantity, // Negative because stock is being reduced
+                saleId,
+                "sale",
+                `Sale #${saleId} - ${itemName} sold`,
+                saleData.userId
+              )
+              console.log(`Stock updated and history recorded for product: ${itemName}`)
+            } else {
               console.warn(`Stock update warning for product ${itemName}:`, stockResult.message)
               // Don't fail the sale, just log the warning
             }
@@ -933,10 +944,13 @@ function calculateNetAccountingImpact(changes: any): { debitAmount: number; cred
   return { debitAmount, creditAmount }
 }
 
-// Consolidated updateSale function with proper sale items handling
+// Consolidated updateSale function with proper sale items handling and fixed stock history
 export async function updateSale(saleData: any) {
   try {
     console.log("Updating sale with consolidated approach:", JSON.stringify(saleData, null, 2))
+
+    // Ensure stock history table exists
+    await ensureStockHistoryTable()
 
     // Start a transaction
     await sql`BEGIN`
@@ -1159,10 +1173,11 @@ export async function updateSale(saleData: any) {
               await createStockHistoryEntry(
                 item.product_id,
                 "sale_returned",
-                item.quantity,
+                item.quantity, // Positive because stock is being restored
                 saleData.id,
                 "sale",
                 `Sale #${saleData.id} returned - stock restored`,
+                saleData.userId
               )
               console.log(`Stock restored for returned product ${item.product_id}: +${item.quantity}`)
             }
@@ -1177,10 +1192,11 @@ export async function updateSale(saleData: any) {
               await createStockHistoryEntry(
                 item.product_id,
                 "sale_completed",
-                -item.quantity,
+                -item.quantity, // Negative because stock is being reduced
                 saleData.id,
                 "sale",
                 `Sale #${saleData.id} completed - stock reduced`,
+                saleData.userId
               )
               console.log(`Stock reduced for product ${item.product_id}: -${item.quantity}`)
             }
@@ -1282,6 +1298,7 @@ export async function updateSale(saleData: any) {
               saleData.id,
               "sale",
               change.notes,
+              saleData.userId
             )
             console.log(`Stock reduced for product ${change.productId}: -${change.quantityChange}`)
           }
@@ -1296,6 +1313,7 @@ export async function updateSale(saleData: any) {
               saleData.id,
               "sale",
               change.notes,
+              saleData.userId
             )
             console.log(`Stock restored for product ${change.productId}: +${Math.abs(change.quantityChange)}`)
           }
@@ -1408,7 +1426,7 @@ export async function updateSale(saleData: any) {
   }
 }
 
-// Update the deleteSale function to handle stock adjustments based on status
+// Update the deleteSale function to handle stock adjustments based on status with proper stock history
 export async function deleteSale(saleId: number, deviceId: number) {
   if (!saleId || !deviceId) {
     return { success: false, message: "Sale ID and Device ID are required" }
@@ -1417,23 +1435,27 @@ export async function deleteSale(saleId: number, deviceId: number) {
   resetConnectionState()
 
   try {
+    // Ensure stock history table exists
+    await ensureStockHistoryTable()
+    
     // Use executeWithRetry for the entire transaction
     return await executeWithRetry(async () => {
       // Start a transaction
       await sql`BEGIN`
 
       try {
-        // Get sale status first to check if we need to restore stock
-        const saleStatus = await sql`
-          SELECT status FROM sales WHERE id = ${saleId} AND device_id = ${deviceId}
+        // Get sale status and user info first to check if we need to restore stock
+        const saleInfo = await sql`
+          SELECT status, created_by FROM sales WHERE id = ${saleId} AND device_id = ${deviceId}
         `
 
-        if (saleStatus.length === 0) {
+        if (saleInfo.length === 0) {
           await sql`ROLLBACK`
           return { success: false, message: "Sale not found" }
         }
 
-        const status = saleStatus[0].status
+        const status = saleInfo[0].status
+        const userId = saleInfo[0].created_by
         const isCancelled = status.toLowerCase() === "cancelled"
 
         // Get sale items to restore stock
@@ -1447,7 +1469,20 @@ export async function deleteSale(saleId: number, deviceId: number) {
         if ((status.toLowerCase() === "completed" || status.toLowerCase() === "delivered") && !isCancelled) {
           // Restore stock for each product (not services) using the safe helper function
           for (const item of saleItems) {
-            await updateProductStock(item.product_id, item.quantity, "add")
+            const stockResult = await updateProductStock(item.product_id, item.quantity, "add")
+            if (stockResult.success) {
+              // Create stock history entry for sale deletion
+              await createStockHistoryEntry(
+                item.product_id,
+                "sale_deleted",
+                item.quantity, // Positive because stock is being restored
+                saleId,
+                "sale",
+                `Sale #${saleId} deleted - stock restored`,
+                userId
+              )
+              console.log(`Stock restored for deleted sale product ${item.product_id}: +${item.quantity}`)
+            }
           }
         }
 
