@@ -82,7 +82,7 @@ import { DatePickerField } from "@/components/ui/date-picker-field"
 import NewCustomerModal from "@/components/sales/new-customer-modal"
 import NewProductModal from "@/components/sales/new-product-modal"
 import NewServiceModal from "@/components/services/new-service-modal"
-import { getProductByBarcode } from "@/app/actions/product-actions"
+import { getProductByBarcode, searchProducts } from "@/app/actions/product-actions"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { FormAlert } from "@/components/ui/form-alert"
 import { selectActiveStaff } from "@/store/slices/staffSlice"
@@ -220,6 +220,9 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
     lastFetchTime: 0,
     isCurrentlyFetching: false,
   })
+
+  // Debounce timer for barcode input
+  const barcodeTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   const { toast } = useToast()
   const router = useRouter()
@@ -408,7 +411,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
     }
   }, [deviceId, isDataStale, isSilentRefreshing, isLoading, fetchSalesFromAPI])
 
-  // Client-side filtering function
+  // Client-side filtering function (optimized)
   const applyClientSideFilters = useCallback(() => {
     if (!sales || sales.length === 0) {
       dispatch(setFilteredSales([]))
@@ -682,100 +685,139 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
     setIsNewServiceModalOpen(false)
   }
 
-  const handleBarcodeInput = async (barcode: string) => {
-    if (barcode === lastBarcodeProcessed || !barcode.trim()) return
+// FIXED: Enhanced barcode input handler to support both barcode and product name search
+const handleBarcodeInput = async (input: string) => {
+  if (input === lastBarcodeProcessed || !input.trim()) return
 
-    setLastBarcodeProcessed(barcode)
-    setIsBarcodeProcessing(true)
-    setScanStatus("processing")
-    setBarcodeAlert(null)
+  setLastBarcodeProcessed(input)
+  setIsBarcodeProcessing(true)
+  setScanStatus("processing")
+  setBarcodeAlert(null)
 
-    try {
-      const result = await getProductByBarcode(barcode)
+  try {
+    // First try barcode search
+    let result = await getProductByBarcode(input)
 
-      if (result.success && result.data) {
-        const existingProductIndex = products.findIndex((p) => p.productId === result.data.id && !p.isService)
-
-        if (existingProductIndex >= 0) {
-          const updatedProducts = [...products]
-          const product = updatedProducts[existingProductIndex]
-          const newQuantity = product.quantity + 1
-
-          if (result.data.stock !== undefined && newQuantity > result.data.stock) {
-            setBarcodeAlert({
-              type: "warning",
-              message: `Only ${result.data.stock} units available for ${result.data.name}`,
-            })
-            updatedProducts[existingProductIndex] = {
-              ...product,
-              quantity: result.data.stock,
-              total: result.data.stock * (Number(result.data.price) || 0),
-            }
-          } else {
-            updatedProducts[existingProductIndex] = {
-              ...product,
-              quantity: newQuantity,
-              total: newQuantity * (Number(result.data.price) || 0),
-            }
+    // If barcode search fails, try product name search
+    if (!result.success) {
+      const searchResult = await searchProducts(input, userId)
+      if (searchResult.success && searchResult.data && searchResult.data.length > 0) {
+        // Use the first match from product name search
+        const product = searchResult.data[0]
+        result = {
+          success: true,
+          data: {
+            id: product.id,
+            name: product.name,
+            price: product.price,
+            wholesale_price: product.wholesale_price,
+            stock: product.stock,
           }
+        }
+      }
+    }
 
-          setProducts(updatedProducts)
+    if (result.success && result.data) {
+      const existingProductIndex = products.findIndex((p) => p.productId === result.data.id && !p.isService)
+
+      if (existingProductIndex >= 0) {
+        const updatedProducts = [...products]
+        const product = updatedProducts[existingProductIndex]
+        const newQuantity = product.quantity + 1
+
+        if (result.data.stock !== undefined && newQuantity > result.data.stock) {
+          setBarcodeAlert({
+            type: "warning",
+            message: `Only ${result.data.stock} units available for ${result.data.name}`,
+          })
+          updatedProducts[existingProductIndex] = {
+            ...product,
+            quantity: result.data.stock,
+            total: result.data.stock * (Number(result.data.price) || 0),
+          }
         } else {
-          const emptyRowIndex = products.findIndex((p) => p.productId === null)
-          const newProduct = {
-            id: crypto.randomUUID(),
-            productId: result.data.id,
-            productName: result.data.name,
-            quantity: 1,
-            price: result.data.price,
-            cost: result.data.wholesale_price || 0,
-            stock: result.data.stock || 0,
-            total: result.data.price,
-            notes: "",
-            isService: false,
-          }
-
-          if (emptyRowIndex >= 0) {
-            const updatedProducts = [...products]
-            updatedProducts[emptyRowIndex] = {
-              ...updatedProducts[emptyRowIndex],
-              ...newProduct,
-            }
-            setProducts(updatedProducts)
-          } else {
-            setProducts([...products, newProduct])
+          updatedProducts[existingProductIndex] = {
+            ...product,
+            quantity: newQuantity,
+            total: newQuantity * (Number(result.data.price) || 0),
           }
         }
 
-        setScanStatus("success")
-        setBarcodeAlert({
-          type: "success",
-          message: `Added ${result.data.name} to the sale`,
-        })
+        setProducts(updatedProducts)
       } else {
-        setScanStatus("error")
-        setBarcodeAlert({
-          type: "error",
-          message: "No product found with this barcode",
-        })
+        const emptyRowIndex = products.findIndex((p) => p.productId === null)
+        const newProduct = {
+          id: crypto.randomUUID(),
+          productId: result.data.id,
+          productName: result.data.name,
+          quantity: 1,
+          price: result.data.price,
+          cost: result.data.wholesale_price || 0,
+          stock: result.data.stock || 0,
+          total: result.data.price,
+          notes: "",
+          isService: false,
+        }
+
+        if (emptyRowIndex >= 0) {
+          const updatedProducts = [...products]
+          updatedProducts[emptyRowIndex] = {
+            ...updatedProducts[emptyRowIndex],
+            ...newProduct,
+          }
+          setProducts(updatedProducts)
+        } else {
+          setProducts([...products, newProduct])
+        }
       }
-    } catch (error) {
-      console.error("Error scanning barcode:", error)
+
+      setScanStatus("success")
+      setBarcodeAlert({
+        type: "success",
+        message: `Added ${result.data.name} to the sale`,
+      })
+    } else {
       setScanStatus("error")
       setBarcodeAlert({
         type: "error",
-        message: "Failed to process barcode",
+        message: "No product found with this barcode or name",
       })
-    } finally {
-      setBarcodeInput("")
-      setIsBarcodeProcessing(false)
+    }
+  } catch (error) {
+    console.error("Error processing barcode/search:", error)
+    setScanStatus("error")
+    // FIXED: More specific error message instead of generic "Failed to process input"
+    setBarcodeAlert({
+      type: "error",
+      message: error.message || "Search failed. Please try again.",
+    })
+  } finally {
+    setBarcodeInput("")
+    setIsBarcodeProcessing(false)
 
+    setTimeout(() => {
+      setScanStatus("idle")
       setTimeout(() => {
-        setScanStatus("idle")
-        setTimeout(() => {
-          setLastBarcodeProcessed("")
-        }, 500)
-      }, 1500)
+        setLastBarcodeProcessed("")
+      }, 500)
+    }, 1500)
+  }
+}
+
+  // Debounced barcode input handler
+  const handleBarcodeInputChange = (value: string) => {
+    setBarcodeInput(value)
+    
+    // Clear existing timeout
+    if (barcodeTimeoutRef.current) {
+      clearTimeout(barcodeTimeoutRef.current)
+    }
+    
+    // Set new timeout for auto-search
+    if (value.trim() && !isBarcodeProcessing) {
+      barcodeTimeoutRef.current = setTimeout(() => {
+        handleBarcodeInput(value)
+      }, 300)
     }
   }
 
@@ -1367,7 +1409,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
               </Badge>
             </div>
 
-            {/* Action buttons */}
+            {/* FIXED: Action buttons with better responsive layout */}
             <div className="flex items-center justify-between pt-2 border-t border-gray-100 dark:border-gray-700">
               <Button
                 onClick={(e) => {
@@ -1376,10 +1418,10 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
                 }}
                 variant="ghost"
                 size="sm"
-                className="text-xs h-6 px-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                className="text-xs h-7 px-3 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20"
               >
                 <Eye className="h-3 w-3 mr-1" />
-                View
+                <span className="hidden sm:inline lg:hidden xl:inline">View</span>
               </Button>
               <Button
                 onClick={(e) => {
@@ -1388,10 +1430,10 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
                 }}
                 variant="ghost"
                 size="sm"
-                className="text-xs h-6 px-2 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20"
+                className="text-xs h-7 px-3 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20"
               >
                 <Edit className="h-3 w-3 mr-1" />
-                Edit
+                <span className="hidden sm:inline lg:hidden xl:inline">Edit</span>
               </Button>
             </div>
 
@@ -1406,6 +1448,15 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
     )
   }
 
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (barcodeTimeoutRef.current) {
+        clearTimeout(barcodeTimeoutRef.current)
+      }
+    }
+  }, [])
+
   return (
     <div className="min-h-[calc(100vh-100px)] bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 p-2 sm:p-3">
       {/* Mobile-first layout that wraps on smaller screens */}
@@ -1413,51 +1464,18 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
         
         {/* Main Sale Form Section */}
         <div className="flex-1 xl:w-3/4 flex flex-col min-h-0">
-          {/* Add Sale Form */}
-          <Card className="flex-1 overflow-hidden bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
-            <CardContent className="p-0 h-full">
-              {/* Header with edit mode indicator */}
-              {isEditMode && (
-                <div className="p-2 bg-orange-50 dark:bg-orange-900/30 border-b border-orange-200 dark:border-orange-600">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Edit className="h-4 w-4 text-orange-600 dark:text-orange-400" />
-                      <span className="text-sm font-medium text-orange-800 dark:text-orange-200">
-                        Editing Sale #{editingSaleId}
-                      </span>
-                    </div>
-                    <Button
-                      onClick={resetAddSaleForm}
-                      variant="ghost"
-                      size="sm"
-                      className="text-orange-600 dark:text-orange-400 hover:bg-orange-100 dark:hover:bg-orange-900/50"
-                    >
-                      Cancel Edit
-                    </Button>
-                  </div>
-                </div>
-              )}
-
-              {/* Alerts */}
-              {(formAlert || barcodeAlert) && (
-                <div className="p-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
-                  {formAlert && <FormAlert type={formAlert.type} message={formAlert.message} />}
-                  {barcodeAlert && <FormAlert type={barcodeAlert.type} message={barcodeAlert.message} />}
-                </div>
-              )}
-
-              {/* Responsive layout for products and sale details */}
-              <div className="flex flex-col lg:flex-row h-full">
-                
+          <Card className="flex-1 flex flex-col overflow-hidden bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 min-h-0">
+            <CardContent className="flex-1 flex flex-col p-0 h-full min-h-0">
+              <div className="flex flex-col lg:flex-row h-full min-h-0">
                 {/* Products section */}
-                <div className="flex-1 lg:w-[70%] flex flex-col border-b lg:border-b-0 lg:border-r border-gray-200 dark:border-gray-700">
-                  {/* Barcode scanner */}
+                <div className="flex-1 lg:w-[70%] flex flex-col border-b lg:border-b-0 lg:border-r border-gray-200 dark:border-gray-700 min-h-0 overflow-y-auto">
+                  {/* FIXED: Enhanced barcode scanner with better UX */}
                   <div className="p-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
                     <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                       <div className="relative flex-1">
                         <Barcode className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-400" />
                         <Input
-                          placeholder="Scan barcode or search product..."
+                          placeholder="Scan barcode or search product name..."
                           className={`pl-8 h-9 bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 transition-all duration-200 ${
                             scanStatus === "processing"
                               ? "border-yellow-500 bg-yellow-50 dark:bg-yellow-900/20"
@@ -1468,19 +1486,12 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
                                   : "border-gray-300 dark:border-gray-600 focus:border-blue-500 dark:focus:border-blue-400"
                           }`}
                           value={barcodeInput}
-                          onChange={(e) => {
-                            setBarcodeInput(e.target.value)
-                            if (e.target.value.trim() && !isBarcodeProcessing) {
-                              setTimeout(() => {
-                                handleBarcodeInput(e.target.value)
-                              }, 300)
-                            }
-                          }}
+                          onChange={(e) => handleBarcodeInputChange(e.target.value)}
                           onKeyDown={(e) => {
                             if (e.key === "Enter") {
                               e.preventDefault()
                               if (barcodeInput.trim()) {
-                                handleBarcodeInput(e.target.value)
+                                handleBarcodeInput(barcodeInput)
                               }
                             }
                           }}
@@ -1506,7 +1517,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
                         size="sm"
                         className="bg-blue-600 hover:bg-blue-700 text-white h-9 px-4 sm:px-6"
                       >
-                        Add
+                        {isBarcodeProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : "Add"}
                       </Button>
                     </div>
                   </div>
@@ -2021,7 +2032,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
                     </div>
 
                     {/* Complete Sale button */}
-                    <div className="mt-3">
+                    <div className="mt-3 flex gap-2">
                       <Button
                         onClick={handleSubmitSale}
                         disabled={isSubmitting}
@@ -2037,6 +2048,17 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
                           </span>
                         )}
                       </Button>
+                      {isEditMode && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={resetAddSaleForm}
+                          disabled={isSubmitting}
+                          className="w-full border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 h-auto py-2"
+                        >
+                          Cancel
+                        </Button>
+                      )}
                     </div>
                   </div>
                 </div>

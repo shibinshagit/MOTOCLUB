@@ -59,8 +59,12 @@ export default function ViewProductModal({
       console.log('Stock history result:', result)
       
       if (result.success) {
-        setStockHistory(result.data || [])
-        console.log('Stock history data:', result.data)
+        // Sort by date descending to show most recent first
+        const sortedHistory = (result.data || []).sort((a, b) => 
+          new Date(b.created_at || b.date).getTime() - new Date(a.created_at || a.date).getTime()
+        )
+        setStockHistory(sortedHistory)
+        console.log('Stock history data:', sortedHistory)
       } else {
         setStockHistoryError(result.message || 'Failed to fetch stock history')
         console.error('Stock history error:', result.message)
@@ -111,7 +115,7 @@ export default function ViewProductModal({
     }
   }, [isOpen, product?.id, product?.barcode, currencyProp])
 
-  // UPDATED: Helper function to get type label and color with better mapping
+  // UPDATED: Helper function to get type label and color with improved mapping for the corrected stock history
   const getTypeInfo = (
     type: string,
     referenceType: string,
@@ -121,7 +125,7 @@ export default function ViewProductModal({
   ) => {
     console.log("Processing stock history type:", { type, referenceType, referenceId, notes, quantity })
 
-    // Enhanced type detection based on the actual types from our stock history creation
+    // Enhanced type detection based on the corrected stock history types
     switch (type) {
       case "purchase":
         const isUpdate = notes?.toLowerCase().includes("update") || notes?.toLowerCase().includes("modified")
@@ -132,7 +136,7 @@ export default function ViewProductModal({
             : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
         }
 
-      // Main sale types from our createStockHistoryEntry function
+      // Main sale types from our corrected createStockHistoryEntry function
       case "sale":
         return {
           label: `Sale #${referenceId ?? "N/A"}`,
@@ -242,6 +246,46 @@ export default function ViewProductModal({
 
   const handleRefreshStockHistory = () => {
     fetchStockHistory()
+  }
+
+  // Helper function to determine quantity change display
+  const getQuantityDisplay = (item: any) => {
+    // Use the quantity field from the corrected stock history structure
+    const quantity = Number(item.quantity) || 0
+    
+    // Determine if this is an increase or decrease based on the transaction type
+    const isStockIncrease = [
+      'purchase', 
+      'sale_returned', 
+      'sale_deleted', 
+      'sale_item_removed', 
+      'adjustment'
+    ].includes(item.type) && !item.notes?.toLowerCase().includes('reduced')
+    
+    const isStockDecrease = [
+      'sale', 
+      'sale_completed', 
+      'sale_item_increased', 
+      'sale_item_added'
+    ].includes(item.type) || item.notes?.toLowerCase().includes('reduced')
+    
+    // For manual adjustments, check the notes for direction
+    if (item.type === 'adjustment' && item.notes) {
+      const notes = item.notes.toLowerCase()
+      if (notes.includes('decrease') || notes.includes('reduced')) {
+        return {
+          value: -Math.abs(quantity),
+          isDecrease: true,
+          isIncrease: false
+        }
+      }
+    }
+    
+    return {
+      value: isStockDecrease ? -Math.abs(quantity) : Math.abs(quantity),
+      isDecrease: isStockDecrease,
+      isIncrease: isStockIncrease
+    }
   }
 
   // Don't render if no product
@@ -461,7 +505,7 @@ export default function ViewProductModal({
                 )}
               </div>
 
-              {/* UPDATED: Stock History Section with improved debugging and display */}
+              {/* UPDATED: Stock History Section with corrected quantity display */}
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">Stock History</h3>
@@ -509,7 +553,7 @@ export default function ViewProductModal({
                               Transaction Type
                             </th>
                             <th className="px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-center">
-                              Quantity Change
+                              Stock Change
                             </th>
                             <th className="px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-left">
                               Notes
@@ -525,13 +569,13 @@ export default function ViewProductModal({
                               item.notes,
                               item.quantity,
                             )
-                            const isDecrease = item.quantity < 0
-                            const isZero = item.quantity === 0
+                            
+                            const quantityDisplay = getQuantityDisplay(item)
 
                             return (
                               <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
                                 <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">
-                                  {format(new Date(item.date), "PPP p")}
+                                  {format(new Date(item.created_at || item.date), "PPP p")}
                                 </td>
                                 <td className="px-4 py-3 text-sm">
                                   <span
@@ -550,16 +594,18 @@ export default function ViewProductModal({
                                   ) : (
                                     <span
                                       className={`font-semibold ${
-                                        isDecrease
+                                        quantityDisplay.isDecrease
                                           ? "text-red-600 dark:text-red-400"
-                                          : isZero
+                                          : quantityDisplay.value === 0
                                             ? "text-gray-600 dark:text-gray-400"
                                             : "text-green-600 dark:text-green-400"
                                       }`}
                                     >
-                                      {isZero 
+                                      {quantityDisplay.value === 0 
                                         ? "0" 
-                                        : `${isDecrease ? "" : "+"}${item.quantity}`
+                                        : quantityDisplay.isDecrease
+                                          ? quantityDisplay.value
+                                          : `+${quantityDisplay.value}`
                                       }
                                     </span>
                                   )}
@@ -576,13 +622,16 @@ export default function ViewProductModal({
                       </table>
                     </div>
                     
-                    {/* Show total count */}
+                    {/* Show total count and summary */}
                     <div className="px-4 py-2 bg-gray-50 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-600">
                       <p className="text-xs text-gray-500 dark:text-gray-400">
                         Showing {stockHistory.length} entries {stockHistory.length >= 100 ? '(latest 100)' : ''}
                         {!privacyMode && (
                           <span className="ml-4">
-                            Total movements: {stockHistory.reduce((sum, item) => sum + Math.abs(item.quantity), 0)}
+                            Total movements: {stockHistory.reduce((sum, item) => {
+                              const quantityDisplay = getQuantityDisplay(item)
+                              return sum + Math.abs(quantityDisplay.value)
+                            }, 0)}
                           </span>
                         )}
                       </p>
