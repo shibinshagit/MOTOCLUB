@@ -82,7 +82,7 @@ import { DatePickerField } from "@/components/ui/date-picker-field"
 import NewCustomerModal from "@/components/sales/new-customer-modal"
 import NewProductModal from "@/components/sales/new-product-modal"
 import NewServiceModal from "@/components/services/new-service-modal"
-import { getProductByBarcode, searchProducts } from "@/app/actions/product-actions"
+import { getProductByBarcode, getProducts } from "@/app/actions/product-actions"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { FormAlert } from "@/components/ui/form-alert"
 import { selectActiveStaff } from "@/store/slices/staffSlice"
@@ -686,8 +686,21 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
   }
 
 // FIXED: Enhanced barcode input handler to support both barcode and product name search
+// Replace the handleBarcodeInput function in your SaleTab component with this fixed version
+
 const handleBarcodeInput = async (input: string) => {
-  if (input === lastBarcodeProcessed || !input.trim()) return
+  if (!input || input.trim().length === 0) {
+    setBarcodeAlert({
+      type: "warning",
+      message: "Please enter a barcode or product name",
+    })
+    return
+  }
+
+  // Prevent duplicate processing
+  if (input === lastBarcodeProcessed || isBarcodeProcessing) {
+    return
+  }
 
   setLastBarcodeProcessed(input)
   setIsBarcodeProcessing(true)
@@ -695,71 +708,104 @@ const handleBarcodeInput = async (input: string) => {
   setBarcodeAlert(null)
 
   try {
-    // First try barcode search
-    let result = await getProductByBarcode(input)
+    let result = null
+    let searchAttempted = false
 
-    // If barcode search fails, try product name search
-    if (!result.success) {
-      const searchResult = await searchProducts(input, userId)
-      if (searchResult.success && searchResult.data && searchResult.data.length > 0) {
-        // Use the first match from product name search
-        const product = searchResult.data[0]
-        result = {
-          success: true,
-          data: {
-            id: product.id,
-            name: product.name,
-            price: product.price,
-            wholesale_price: product.wholesale_price,
-            stock: product.stock,
+    // First try barcode search
+    try {
+      result = await getProductByBarcode(input.trim())
+      if (result.success && result.data) {
+        console.log("Barcode search successful:", result.data)
+      }
+    } catch (error) {
+      console.log("Barcode search failed:", error.message)
+    }
+
+    // If barcode search fails or returns no results, try product name search using getProducts
+    if (!result || !result.success || !result.data) {
+      try {
+        searchAttempted = true
+        // Use getProducts with search functionality instead of non-existent searchProducts
+        const searchResult = await getProducts(userId, 10, input.trim()) // limit to 10 results
+        
+        if (searchResult.success && searchResult.data && searchResult.data.length > 0) {
+          // Use the first match from product name search
+          const product = searchResult.data[0]
+          result = {
+            success: true,
+            data: {
+              id: product.id,
+              name: product.name,
+              price: product.price || 0,
+              wholesale_price: product.wholesale_price || 0,
+              stock: product.stock || 0,
+            }
           }
+          console.log("Product name search successful:", result.data)
         }
+      } catch (error) {
+        console.log("Product search failed:", error.message)
       }
     }
 
-    if (result.success && result.data) {
-      const existingProductIndex = products.findIndex((p) => p.productId === result.data.id && !p.isService)
+    // Process the result if we found a product
+    if (result && result.success && result.data) {
+      const productData = result.data
+      
+      // Check if product already exists in the cart
+      const existingProductIndex = products.findIndex(
+        (p) => p.productId === productData.id && !p.isService
+      )
 
       if (existingProductIndex >= 0) {
+        // Product exists, increase quantity
         const updatedProducts = [...products]
-        const product = updatedProducts[existingProductIndex]
-        const newQuantity = product.quantity + 1
+        const existingProduct = updatedProducts[existingProductIndex]
+        const newQuantity = existingProduct.quantity + 1
 
-        if (result.data.stock !== undefined && newQuantity > result.data.stock) {
+        // Check stock availability
+        if (productData.stock !== undefined && productData.stock > 0 && newQuantity > productData.stock) {
           setBarcodeAlert({
             type: "warning",
-            message: `Only ${result.data.stock} units available for ${result.data.name}`,
+            message: `Only ${productData.stock} units available for ${productData.name}`,
           })
+          
+          // Set to maximum available stock
           updatedProducts[existingProductIndex] = {
-            ...product,
-            quantity: result.data.stock,
-            total: result.data.stock * (Number(result.data.price) || 0),
+            ...existingProduct,
+            quantity: productData.stock,
+            total: productData.stock * (Number(productData.price) || 0),
           }
         } else {
+          // Update quantity normally
           updatedProducts[existingProductIndex] = {
-            ...product,
+            ...existingProduct,
             quantity: newQuantity,
-            total: newQuantity * (Number(result.data.price) || 0),
+            total: newQuantity * (Number(productData.price) || 0),
           }
         }
 
         setProducts(updatedProducts)
       } else {
-        const emptyRowIndex = products.findIndex((p) => p.productId === null)
+        // Add as new product
         const newProduct = {
           id: crypto.randomUUID(),
-          productId: result.data.id,
-          productName: result.data.name,
+          productId: productData.id,
+          productName: productData.name,
           quantity: 1,
-          price: result.data.price,
-          cost: result.data.wholesale_price || 0,
-          stock: result.data.stock || 0,
-          total: result.data.price,
+          price: Number(productData.price) || 0,
+          cost: Number(productData.wholesale_price) || 0,
+          stock: Number(productData.stock) || 0,
+          total: Number(productData.price) || 0,
           notes: "",
           isService: false,
         }
 
+        // Find empty row or add new row
+        const emptyRowIndex = products.findIndex((p) => p.productId === null)
+        
         if (emptyRowIndex >= 0) {
+          // Replace empty row
           const updatedProducts = [...products]
           updatedProducts[emptyRowIndex] = {
             ...updatedProducts[emptyRowIndex],
@@ -767,6 +813,7 @@ const handleBarcodeInput = async (input: string) => {
           }
           setProducts(updatedProducts)
         } else {
+          // Add new row
           setProducts([...products, newProduct])
         }
       }
@@ -774,35 +821,42 @@ const handleBarcodeInput = async (input: string) => {
       setScanStatus("success")
       setBarcodeAlert({
         type: "success",
-        message: `Added ${result.data.name} to the sale`,
+        message: `Added ${productData.name} to the sale`,
       })
+
     } else {
+      // No product found
       setScanStatus("error")
       setBarcodeAlert({
         type: "error",
-        message: "No product found with this barcode or name",
+        message: searchAttempted 
+          ? `No product found matching "${input}"` 
+          : `No product found with barcode "${input}"`,
       })
     }
+
   } catch (error) {
     console.error("Error processing barcode/search:", error)
     setScanStatus("error")
-    // FIXED: More specific error message instead of generic "Failed to process input"
     setBarcodeAlert({
       type: "error",
-      message: error.message || "Search failed. Please try again.",
+      message: `Search failed: ${error.message || "Please try again"}`,
     })
   } finally {
+    // Clear input and reset states
     setBarcodeInput("")
     setIsBarcodeProcessing(false)
 
+    // Reset status after delay
     setTimeout(() => {
       setScanStatus("idle")
       setTimeout(() => {
         setLastBarcodeProcessed("")
       }, 500)
-    }, 1500)
+    }, 2000)
   }
 }
+
 
   // Debounced barcode input handler
   const handleBarcodeInputChange = (value: string) => {
@@ -2412,3 +2466,4 @@ const handleBarcodeInput = async (input: string) => {
     </div>
   )
 }
+
