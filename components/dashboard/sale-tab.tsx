@@ -32,6 +32,8 @@ import {
   EyeOff,
   CalendarDays,
   Edit,
+  X,
+  Pencil,
 } from "lucide-react"
 import { getUserSales, deleteSale, addSale, getSaleDetails, updateSale } from "@/app/actions/sale-actions"
 import { useToast } from "@/components/ui/use-toast"
@@ -685,188 +687,185 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
     setIsNewServiceModalOpen(false)
   }
 
-// FIXED: Enhanced barcode input handler to support both barcode and product name search
-// Replace the handleBarcodeInput function in your SaleTab component with this fixed version
+  // FIXED: Enhanced barcode input handler to support both barcode and product name search
+  // Replace the handleBarcodeInput function in your SaleTab component with this fixed version
 
-const handleBarcodeInput = async (input: string) => {
-  if (!input || input.trim().length === 0) {
-    setBarcodeAlert({
-      type: "warning",
-      message: "Please enter a barcode or product name",
-    })
-    return
-  }
-
-  // Prevent duplicate processing
-  if (input === lastBarcodeProcessed || isBarcodeProcessing) {
-    return
-  }
-
-  setLastBarcodeProcessed(input)
-  setIsBarcodeProcessing(true)
-  setScanStatus("processing")
-  setBarcodeAlert(null)
-
-  try {
-    let result = null
-    let searchAttempted = false
-
-    // First try barcode search
-    try {
-      result = await getProductByBarcode(input.trim())
-      if (result.success && result.data) {
-        console.log("Barcode search successful:", result.data)
-      }
-    } catch (error) {
-      console.log("Barcode search failed:", error.message)
+  const handleBarcodeInput = async (input: string) => {
+    if (!input || input.trim().length === 0) {
+      setBarcodeAlert({
+        type: "warning",
+        message: "Please enter a barcode or product name",
+      })
+      return
     }
 
-    // If barcode search fails or returns no results, try product name search using getProducts
-    if (!result || !result.success || !result.data) {
+    // Prevent duplicate processing
+    if (input === lastBarcodeProcessed || isBarcodeProcessing) {
+      return
+    }
+
+    setLastBarcodeProcessed(input)
+    setIsBarcodeProcessing(true)
+    setScanStatus("processing")
+    setBarcodeAlert(null)
+
+    try {
+      let result = null
+      let searchAttempted = false
+
+      // First try barcode search
       try {
-        searchAttempted = true
-        // Use getProducts with search functionality instead of non-existent searchProducts
-        const searchResult = await getProducts(userId, 10, input.trim()) // limit to 10 results
-        
-        if (searchResult.success && searchResult.data && searchResult.data.length > 0) {
-          // Use the first match from product name search
-          const product = searchResult.data[0]
-          result = {
-            success: true,
-            data: {
-              id: product.id,
-              name: product.name,
-              price: product.price || 0,
-              wholesale_price: product.wholesale_price || 0,
-              stock: product.stock || 0,
-            }
-          }
-          console.log("Product name search successful:", result.data)
+        result = await getProductByBarcode(input.trim())
+        if (result.success && result.data) {
+          console.log("Barcode search successful:", result.data)
         }
       } catch (error) {
-        console.log("Product search failed:", error.message)
+        console.log("Barcode search failed:", error.message)
       }
-    }
 
-    // Process the result if we found a product
-    if (result && result.success && result.data) {
-      const productData = result.data
-      
-      // Check if product already exists in the cart
-      const existingProductIndex = products.findIndex(
-        (p) => p.productId === productData.id && !p.isService
-      )
+      // If barcode search fails or returns no results, try product name search using getProducts
+      if (!result || !result.success || !result.data) {
+        try {
+          searchAttempted = true
+          // Use getProducts with search functionality instead of non-existent searchProducts
+          const searchResult = await getProducts(userId, 10, input.trim()) // limit to 10 results
 
-      if (existingProductIndex >= 0) {
-        // Product exists, increase quantity
-        const updatedProducts = [...products]
-        const existingProduct = updatedProducts[existingProductIndex]
-        const newQuantity = existingProduct.quantity + 1
-
-        // Check stock availability
-        if (productData.stock !== undefined && productData.stock > 0 && newQuantity > productData.stock) {
-          setBarcodeAlert({
-            type: "warning",
-            message: `Only ${productData.stock} units available for ${productData.name}`,
-          })
-          
-          // Set to maximum available stock
-          updatedProducts[existingProductIndex] = {
-            ...existingProduct,
-            quantity: productData.stock,
-            total: productData.stock * (Number(productData.price) || 0),
+          if (searchResult.success && searchResult.data && searchResult.data.length > 0) {
+            // Use the first match from product name search
+            const product = searchResult.data[0]
+            result = {
+              success: true,
+              data: {
+                id: product.id,
+                name: product.name,
+                price: product.price || 0,
+                wholesale_price: product.wholesale_price || 0,
+                stock: product.stock || 0,
+              },
+            }
+            console.log("Product name search successful:", result.data)
           }
-        } else {
-          // Update quantity normally
-          updatedProducts[existingProductIndex] = {
-            ...existingProduct,
-            quantity: newQuantity,
-            total: newQuantity * (Number(productData.price) || 0),
-          }
+        } catch (error) {
+          console.log("Product search failed:", error.message)
         }
+      }
 
-        setProducts(updatedProducts)
-      } else {
-        // Add as new product
-        const newProduct = {
-          id: crypto.randomUUID(),
-          productId: productData.id,
-          productName: productData.name,
-          quantity: 1,
-          price: Number(productData.price) || 0,
-          cost: Number(productData.wholesale_price) || 0,
-          stock: Number(productData.stock) || 0,
-          total: Number(productData.price) || 0,
-          notes: "",
-          isService: false,
-        }
+      // Process the result if we found a product
+      if (result && result.success && result.data) {
+        const productData = result.data
 
-        // Find empty row or add new row
-        const emptyRowIndex = products.findIndex((p) => p.productId === null)
-        
-        if (emptyRowIndex >= 0) {
-          // Replace empty row
+        // Check if product already exists in the cart
+        const existingProductIndex = products.findIndex(
+          (p) => p.productId === productData.id && !p.isService,
+        )
+
+        if (existingProductIndex >= 0) {
+          // Product exists, increase quantity
           const updatedProducts = [...products]
-          updatedProducts[emptyRowIndex] = {
-            ...updatedProducts[emptyRowIndex],
-            ...newProduct,
+          const existingProduct = updatedProducts[existingProductIndex]
+          const newQuantity = existingProduct.quantity + 1
+
+          // Check stock availability
+          if (productData.stock !== undefined && productData.stock > 0 && newQuantity > productData.stock) {
+            setBarcodeAlert({
+              type: "warning",
+              message: `Only ${productData.stock} units available for ${productData.name}`,
+            })
+
+            // Set to maximum available stock
+            updatedProducts[existingProductIndex] = {
+              ...existingProduct,
+              quantity: productData.stock,
+              total: productData.stock * (Number(productData.price) || 0),
+            }
+          } else {
+            // Update quantity normally
+            updatedProducts[existingProductIndex] = {
+              ...existingProduct,
+              quantity: newQuantity,
+              total: newQuantity * (Number(productData.price) || 0),
+            }
           }
+
           setProducts(updatedProducts)
         } else {
-          // Add new row
-          setProducts([...products, newProduct])
+          // Add as new product
+          const newProduct = {
+            id: crypto.randomUUID(),
+            productId: productData.id,
+            productName: productData.name,
+            quantity: 1,
+            price: Number(productData.price) || 0,
+            cost: Number(productData.wholesale_price) || 0,
+            stock: Number(productData.stock) || 0,
+            total: Number(productData.price) || 0,
+            notes: "",
+            isService: false,
+          }
+
+          // Find empty row or add new row
+          const emptyRowIndex = products.findIndex((p) => p.productId === null)
+
+          if (emptyRowIndex >= 0) {
+            // Replace empty row
+            const updatedProducts = [...products]
+            updatedProducts[emptyRowIndex] = {
+              ...updatedProducts[emptyRowIndex],
+              ...newProduct,
+            }
+            setProducts(updatedProducts)
+          } else {
+            // Add new row
+            setProducts([...products, newProduct])
+          }
         }
+
+        setScanStatus("success")
+        setBarcodeAlert({
+          type: "success",
+          message: `Added ${productData.name} to the sale`,
+        })
+      } else {
+        // No product found
+        setScanStatus("error")
+        setBarcodeAlert({
+          type: "error",
+          message: searchAttempted
+            ? `No product found matching "${input}"`
+            : `No product found with barcode "${input}"`,
+        })
       }
-
-      setScanStatus("success")
-      setBarcodeAlert({
-        type: "success",
-        message: `Added ${productData.name} to the sale`,
-      })
-
-    } else {
-      // No product found
+    } catch (error) {
+      console.error("Error processing barcode/search:", error)
       setScanStatus("error")
       setBarcodeAlert({
         type: "error",
-        message: searchAttempted 
-          ? `No product found matching "${input}"` 
-          : `No product found with barcode "${input}"`,
+        message: `Search failed: ${error.message || "Please try again"}`,
       })
-    }
+    } finally {
+      // Clear input and reset states
+      setBarcodeInput("")
+      setIsBarcodeProcessing(false)
 
-  } catch (error) {
-    console.error("Error processing barcode/search:", error)
-    setScanStatus("error")
-    setBarcodeAlert({
-      type: "error",
-      message: `Search failed: ${error.message || "Please try again"}`,
-    })
-  } finally {
-    // Clear input and reset states
-    setBarcodeInput("")
-    setIsBarcodeProcessing(false)
-
-    // Reset status after delay
-    setTimeout(() => {
-      setScanStatus("idle")
+      // Reset status after delay
       setTimeout(() => {
-        setLastBarcodeProcessed("")
-      }, 500)
-    }, 2000)
+        setScanStatus("idle")
+        setTimeout(() => {
+          setLastBarcodeProcessed("")
+        }, 500)
+      }, 2000)
+    }
   }
-}
-
 
   // Debounced barcode input handler
   const handleBarcodeInputChange = (value: string) => {
     setBarcodeInput(value)
-    
+
     // Clear existing timeout
     if (barcodeTimeoutRef.current) {
       clearTimeout(barcodeTimeoutRef.current)
     }
-    
+
     // Set new timeout for auto-search
     if (value.trim() && !isBarcodeProcessing) {
       barcodeTimeoutRef.current = setTimeout(() => {
@@ -1394,12 +1393,29 @@ const handleBarcodeInput = async (input: string) => {
   )
 
   // Mobile Card Component
-  const SaleCard = ({ sale, index }: { sale: any; index: number }) => {
+  const SaleCard = ({
+    sale,
+    index,
+    isEditing = false,
+  }: {
+    sale: any
+    index: number
+    isEditing?: boolean
+  }) => {
     const isExpanded = expandedCards.has(sale.id)
     const remainingAmount = getRemainingAmount(sale)
 
     return (
-      <Card className="mb-2 overflow-hidden border border-gray-200 dark:border-gray-600 hover:shadow-md transition-all duration-200 bg-white dark:bg-gray-800">
+      <Card
+        className={`
+        mb-2 overflow-hidden border
+        ${isEditing
+          ? "border-yellow-400 ring-2 ring-yellow-300 dark:ring-yellow-600 bg-yellow-50 dark:bg-yellow-900/40"
+          : "border-gray-200 dark:border-gray-600"}
+        hover:shadow-md transition-all duration-200
+        bg-white dark:bg-gray-800
+      `}
+      >
         <CardContent className="p-0">
           {/* Main card content */}
           <div className="p-3">
@@ -1511,19 +1527,36 @@ const handleBarcodeInput = async (input: string) => {
     }
   }, [])
 
+  // --- UI STARTS HERE ---
   return (
     <div className="min-h-[calc(100vh-100px)] bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 p-2 sm:p-3">
-      {/* Mobile-first layout that wraps on smaller screens */}
       <div className="flex flex-col xl:flex-row gap-3 h-full">
-        
         {/* Main Sale Form Section */}
         <div className="flex-1 xl:w-3/4 flex flex-col min-h-0">
-          <Card className="flex-1 flex flex-col overflow-hidden bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 min-h-0">
-            <CardContent className="flex-1 flex flex-col p-0 h-full min-h-0">
+          <Card className="flex-1 flex flex-col overflow-hidden bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 min-h-0 relative">
+            {/* --- EDIT MODE BANNER --- */}
+            {isEditMode && (
+              <div className="absolute top-0 left-0 w-full z-20 bg-yellow-100 dark:bg-yellow-900/80 border-b border-yellow-400 dark:border-yellow-700 flex items-center justify-between px-4 py-2">
+                <div className="flex items-center gap-2 text-yellow-800 dark:text-yellow-200 font-semibold text-sm">
+                  <Pencil className="h-4 w-4" />
+                  Edit Mode: Updating Sale #{editingSaleId}
+                </div>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="text-yellow-800 dark:text-yellow-200 hover:bg-yellow-200/40 dark:hover:bg-yellow-800/40"
+                  onClick={resetAddSaleForm}
+                  aria-label="Exit Edit Mode"
+                >
+                  <X className="h-5 w-5" />
+                </Button>
+              </div>
+            )}
+            <CardContent className="flex-1 flex flex-col p-0 h-full min-h-0 pt-10">
               <div className="flex flex-col lg:flex-row h-full min-h-0">
                 {/* Products section */}
                 <div className="flex-1 lg:w-[70%] flex flex-col border-b lg:border-b-0 lg:border-r border-gray-200 dark:border-gray-700 min-h-0 overflow-y-auto">
-                  {/* FIXED: Enhanced barcode scanner with better UX */}
+                  {/* Barcode scanner and product table (unchanged) */}
                   <div className="p-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
                     <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                       <div className="relative flex-1">
@@ -1587,7 +1620,7 @@ const handleBarcodeInput = async (input: string) => {
                         onClick={() => setIsNewServiceModalOpen(true)}
                         className="flex items-center gap-1 text-green-600 dark:text-green-400 border-green-300 dark:border-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 h-7 text-xs"
                       >
-                        <Wrench className="h-3 w-3" /> 
+                        <Wrench className="h-3 w-3" />
                         <span className="hidden sm:inline">Service</span>
                       </Button>
                       <Button
@@ -1597,7 +1630,7 @@ const handleBarcodeInput = async (input: string) => {
                         onClick={() => setIsNewProductModalOpen(true)}
                         className="flex items-center gap-1 text-blue-600 dark:text-blue-400 border-blue-300 dark:border-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 h-7 text-xs"
                       >
-                        <Plus className="h-3 w-3" /> 
+                        <Plus className="h-3 w-3" />
                         <span className="hidden sm:inline">Product</span>
                       </Button>
                       <Button
@@ -1607,7 +1640,7 @@ const handleBarcodeInput = async (input: string) => {
                         onClick={addProductRow}
                         className="flex items-center gap-1 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 h-7 text-xs bg-transparent"
                       >
-                        <Plus className="h-3 w-3" /> 
+                        <Plus className="h-3 w-3" />
                         <span className="hidden sm:inline">Row</span>
                       </Button>
                     </div>
@@ -2090,7 +2123,9 @@ const handleBarcodeInput = async (input: string) => {
                       <Button
                         onClick={handleSubmitSale}
                         disabled={isSubmitting}
-                        className="w-full bg-blue-600 hover:bg-blue-700 text-white h-auto py-2"
+                        className={`w-full bg-blue-600 hover:bg-blue-700 text-white h-auto py-2 ${
+                          isEditMode ? "ring-2 ring-yellow-400 dark:ring-yellow-600" : ""
+                        }`}
                       >
                         {isSubmitting ? (
                           <span className="flex items-center justify-center">
@@ -2121,7 +2156,7 @@ const handleBarcodeInput = async (input: string) => {
           </Card>
         </div>
 
-        {/* Right side - Summary and Sales List - wraps below on smaller screens */}
+        {/* Right side - Summary and Sales List - unchanged */}
         <div className="w-full xl:w-1/4 flex flex-col space-y-3 min-h-0">
           {/* Summary Cards - responsive grid */}
           <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-3 gap-2">
@@ -2377,7 +2412,12 @@ const handleBarcodeInput = async (input: string) => {
                 ) : (
                   <div className="p-2">
                     {filteredSales.slice(0, 20).map((sale, index) => (
-                      <SaleCard key={sale.id} sale={sale} index={index} />
+                      <SaleCard
+                        key={sale.id}
+                        sale={sale}
+                        index={index}
+                        isEditing={isEditMode && editingSaleId === sale.id}
+                      />
                     ))}
                   </div>
                 )}
