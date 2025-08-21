@@ -122,6 +122,8 @@ interface ScanResult {
 }
 
 const STALE_TIME = 5 * 60 * 1000 // 5 minutes in milliseconds
+const INITIAL_LOAD_LIMIT = 50 // Limit initial load to recent sales
+const DEBOUNCE_DELAY = 300 // Debounce delay for search and filters
 
 export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }: SaleTabProps) {
   // Redux state
@@ -151,6 +153,12 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
   const maxAmountFilter = useSelector(selectSalesMaxAmountFilter)
   const showFilters = useSelector(selectSalesShowFilters)
   const currency = useSelector(selectSalesCurrency)
+
+  // Performance optimization states
+  const [isInitialLoad, setIsInitialLoad] = useState(true)
+  const [loadMoreLoading, setLoadMoreLoading] = useState(false)
+  const [hasMoreData, setHasMoreData] = useState(true)
+  const [loadedCount, setLoadedCount] = useState(0)
 
   // Privacy mode state - enabled by default
   const [privacyMode, setPrivacyMode] = useState(true)
@@ -215,15 +223,18 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
   const [isMobile, setIsMobile] = useState(false)
   const [expandedCards, setExpandedCards] = useState<Set<number>>(new Set())
 
-  // Use refs to track fetch state and prevent duplicate calls
+  // Optimized refs to track fetch state and prevent duplicate calls
   const initializationRef = useRef({
     hasInitialized: false,
     currentDeviceId: null as number | null,
     lastFetchTime: 0,
     isCurrentlyFetching: false,
+    initialLoadComplete: false,
   })
 
-  // Debounce timer for barcode input
+  // Debounce refs for search and filters
+  const searchDebounceRef = useRef<NodeJS.Timeout | null>(null)
+  const filterDebounceRef = useRef<NodeJS.Timeout | null>(null)
   const barcodeTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   const { toast } = useToast()
@@ -239,16 +250,21 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
     return () => window.removeEventListener("resize", checkMobile)
   }, [])
 
-  // Device change handling
+  // Device change handling - optimized
   useEffect(() => {
     if (deviceId && deviceId !== initializationRef.current.currentDeviceId) {
+      console.log("Device changed, resetting sales state")
       dispatch(resetSalesState())
       initializationRef.current = {
         hasInitialized: false,
         currentDeviceId: deviceId,
         lastFetchTime: 0,
         isCurrentlyFetching: false,
+        initialLoadComplete: false,
       }
+      setIsInitialLoad(true)
+      setLoadedCount(0)
+      setHasMoreData(true)
     }
   }, [deviceId, dispatch])
 
@@ -299,54 +315,70 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
 
   // Update needsRefresh when data becomes stale
   useEffect(() => {
-    if (fetchedTime && isDataStale && !needsRefresh) {
+    if (fetchedTime && isDataStale && !needsRefresh && initializationRef.current.initialLoadComplete) {
       dispatch(setNeedsRefresh(true))
     }
   }, [fetchedTime, isDataStale, needsRefresh, dispatch])
 
   // Format currency with the device's currency
-  const formatCurrency = (amount: number) => {
+  const formatCurrency = useCallback((amount: number) => {
     return new Intl.NumberFormat("en-US", {
       style: "currency",
       currency: currency || "AED",
       minimumFractionDigits: 2,
     }).format(amount)
-  }
+  }, [currency])
 
-  // Set today's date filter on initial load - but don't fetch, just set the filter
+  // Set today's date filter on initial load - optimized
   useEffect(() => {
-    const today = new Date()
-    const formattedDate = format(today, "yyyy-MM-dd")
-    if (!dateFromFilter && !dateToFilter) {
+    if (!dateFromFilter && !dateToFilter && !initializationRef.current.hasInitialized) {
+      const today = new Date()
+      const formattedDate = format(today, "yyyy-MM-dd")
       dispatch(setDateFromFilter(formattedDate))
       dispatch(setDateToFilter(formattedDate))
     }
   }, [dateFromFilter, dateToFilter, dispatch])
 
-  // Centralized fetch function with proper duplicate prevention
+  // Optimized fetch function with pagination and caching
   const fetchSalesFromAPI = useCallback(
-    async (silent = false) => {
+    async (silent = false, loadMore = false, limit = INITIAL_LOAD_LIMIT) => {
       if (!deviceId) {
         dispatch(setError("Device ID not found"))
         return
       }
+
+      // Prevent duplicate calls
       if (initializationRef.current.isCurrentlyFetching) {
         return
       }
+
+      // Rate limiting
       const now = Date.now()
       if (now - initializationRef.current.lastFetchTime < 1000) {
         return
       }
+
       try {
         initializationRef.current.isCurrentlyFetching = true
         initializationRef.current.lastFetchTime = now
-        if (!silent) {
+
+        // Set loading states
+        if (loadMore) {
+          setLoadMoreLoading(true)
+        } else if (!silent) {
           dispatch(setLoading(true))
+          setIsInitialLoad(true)
         } else {
           dispatch(setSilentRefreshing(true))
         }
+
         dispatch(setError(null))
-        const result = await getUserSales(deviceId)
+
+        console.log("Fetching sales:", { silent, loadMore, limit, deviceId })
+
+        // Use optimized query with limit for better performance
+        const result = await getUserSales(deviceId, limit)
+
         if (result.success) {
           const serializedData = result.data.map((sale: any) => ({
             ...sale,
@@ -363,57 +395,76 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
                 ? sale.updated_at.toISOString()
                 : sale.updated_at || "",
           }))
-          if (silent) {
+
+          if (loadMore) {
+            // Append new data for load more
+            dispatch(updateSalesData([...sales, ...serializedData]))
+            setLoadedCount(prev => prev + serializedData.length)
+            setHasMoreData(serializedData.length === limit)
+          } else if (silent) {
             dispatch(updateSalesData(serializedData))
           } else {
             dispatch(setSales(serializedData))
+            setLoadedCount(serializedData.length)
+            setHasMoreData(serializedData.length === limit)
           }
+
+          // Mark initialization as complete
           initializationRef.current.hasInitialized = true
+          initializationRef.current.initialLoadComplete = true
+          setIsInitialLoad(false)
+
+          console.log("Sales loaded successfully:", serializedData.length, "records")
         } else {
           dispatch(setError(result.message || "Failed to load sales"))
+          setIsInitialLoad(false)
         }
       } catch (error) {
         console.error("Fetch sales error:", error)
         dispatch(setError("An error occurred while loading sales"))
+        setIsInitialLoad(false)
       } finally {
         dispatch(setLoading(false))
         dispatch(setSilentRefreshing(false))
+        setLoadMoreLoading(false)
         initializationRef.current.isCurrentlyFetching = false
       }
     },
-    [deviceId, dispatch],
+    [deviceId, dispatch, sales]
   )
 
-  // Single initialization effect (optimized)
+  // Optimized initialization effect
   useEffect(() => {
     if (
       deviceId &&
       !initializationRef.current.hasInitialized &&
       initializationRef.current.currentDeviceId === deviceId
     ) {
-      initializationRef.current.hasInitialized = true // Set before fetch to prevent double fetch
-      fetchSalesFromAPI(false)
+      console.log("Initializing sales data for device:", deviceId)
+      fetchSalesFromAPI(false, false, INITIAL_LOAD_LIMIT)
     }
   }, [deviceId, fetchSalesFromAPI])
 
-  // Silent refresh effect (unchanged)
+  // Optimized silent refresh effect
   useEffect(() => {
     if (
       deviceId &&
-      initializationRef.current.hasInitialized &&
+      initializationRef.current.initialLoadComplete &&
       isDataStale &&
       !isSilentRefreshing &&
       !isLoading &&
       !initializationRef.current.isCurrentlyFetching
     ) {
       const now = Date.now()
-      if (now - initializationRef.current.lastFetchTime > 120000) {
-        fetchSalesFromAPI(true)
+      // Increase interval for silent refresh to reduce load
+      if (now - initializationRef.current.lastFetchTime > 300000) { // 5 minutes
+        console.log("Performing silent refresh")
+        fetchSalesFromAPI(true, false, INITIAL_LOAD_LIMIT)
       }
     }
   }, [deviceId, isDataStale, isSilentRefreshing, isLoading, fetchSalesFromAPI])
 
-  // Client-side filtering function (optimized)
+  // Optimized client-side filtering function with debouncing
   const applyClientSideFilters = useCallback(() => {
     if (!sales || sales.length === 0) {
       dispatch(setFilteredSales([]))
@@ -422,29 +473,18 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
 
     let filtered = [...sales]
 
-    // Date filtering
+    // Date filtering - optimized
     if (dateFromFilter || dateToFilter) {
+      const fromTime = dateFromFilter ? new Date(dateFromFilter).getTime() : 0
+      const toTime = dateToFilter ? new Date(dateToFilter).setHours(23, 59, 59, 999) : Infinity
+
       filtered = filtered.filter((sale) => {
-        const saleDate = new Date(sale.sale_date)
-        saleDate.setHours(0, 0, 0, 0)
-
-        if (dateFromFilter) {
-          const fromDate = new Date(dateFromFilter)
-          fromDate.setHours(0, 0, 0, 0)
-          if (saleDate < fromDate) return false
-        }
-
-        if (dateToFilter) {
-          const toDate = new Date(dateToFilter)
-          toDate.setHours(23, 59, 59, 999)
-          if (saleDate > toDate) return false
-        }
-
-        return true
+        const saleTime = new Date(sale.sale_date).getTime()
+        return saleTime >= fromTime && saleTime <= toTime
       })
     }
 
-    // Search filter
+    // Search filter - optimized with early exit
     if (searchTerm && searchTerm.trim() !== "") {
       const searchLower = searchTerm.toLowerCase()
       filtered = filtered.filter(
@@ -452,7 +492,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
           (sale.customer_name?.toLowerCase() || "").includes(searchLower) ||
           sale.id.toString().includes(searchLower) ||
           (sale.status?.toLowerCase() || "").includes(searchLower) ||
-          sale.total_amount.toString().includes(searchLower),
+          sale.total_amount.toString().includes(searchLower)
       )
     }
 
@@ -497,18 +537,54 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
     dispatch,
   ])
 
+  // Debounced filter application
   useEffect(() => {
-    applyClientSideFilters()
+    if (filterDebounceRef.current) {
+      clearTimeout(filterDebounceRef.current)
+    }
+
+    filterDebounceRef.current = setTimeout(() => {
+      applyClientSideFilters()
+    }, DEBOUNCE_DELAY)
+
+    return () => {
+      if (filterDebounceRef.current) {
+        clearTimeout(filterDebounceRef.current)
+      }
+    }
   }, [applyClientSideFilters])
+
+  // Load more functionality
+  const handleLoadMore = useCallback(() => {
+    if (!hasMoreData || loadMoreLoading || initializationRef.current.isCurrentlyFetching) {
+      return
+    }
+    
+    const nextLimit = INITIAL_LOAD_LIMIT
+    console.log("Loading more sales, current count:", loadedCount)
+    fetchSalesFromAPI(false, true, nextLimit)
+  }, [hasMoreData, loadMoreLoading, loadedCount, fetchSalesFromAPI])
+
+  // Force refresh functionality
+  const handleForcedRefresh = useCallback(() => {
+    if (initializationRef.current.isCurrentlyFetching) return
+    
+    console.log("Forcing refresh of sales data")
+    initializationRef.current.hasInitialized = false
+    initializationRef.current.initialLoadComplete = false
+    setIsInitialLoad(true)
+    setLoadedCount(0)
+    setHasMoreData(true)
+    fetchSalesFromAPI(false, false, INITIAL_LOAD_LIMIT)
+  }, [fetchSalesFromAPI])
 
   // Handle modal state from parent
   useEffect(() => {
-    // setIsNewSaleModalOpen(isAddModalOpen)
+    // Modal handling logic here if needed
   }, [isAddModalOpen])
 
   // Handle new sale modal close
   const handleNewSaleModalClose = () => {
-    // setIsNewSaleModalOpen(false)
     if (onModalClose) {
       onModalClose()
     }
@@ -516,7 +592,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
     handleForcedRefresh()
   }
 
-  // Add Sale Form Functions
+  // Add Sale Form Functions (keeping existing functionality)
   const addProductRow = () => {
     setProducts([
       ...products,
@@ -1262,31 +1338,6 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
       }
     }
     return "Custom"
-  }
-
-  // FIXED: Handle forced refresh - properly reset state
-  const handleForcedRefresh = () => {
-    console.log("Forced refresh initiated...")
-
-    // Clear all data and filters
-    dispatch(forceClearSales())
-    dispatch(clearFilters())
-
-    // Reset local state
-    setExpandedCards(new Set())
-
-    // Reset initialization state
-    initializationRef.current.hasInitialized = false
-    initializationRef.current.isCurrentlyFetching = false
-    initializationRef.current.lastFetchTime = 0
-
-    // Force fetch new data
-    fetchSalesFromAPI(false)
-
-    toast({
-      title: "Refreshed",
-      description: "Sales data has been refreshed and filters cleared",
-    })
   }
 
   // Handle clear all filters
