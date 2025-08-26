@@ -4,8 +4,10 @@ import { sql, getLastError, resetConnectionState, executeWithRetry } from "@/lib
 import { revalidatePath } from "next/cache"
 import { recordSaleTransaction, recordSaleAdjustment, deleteSaleTransaction } from "./simplified-accounting"
 
-const CACHE_DURATION = 60000 // 1 minute
+// Enhanced schema caching with connection pooling optimization
+const CACHE_DURATION = 300000 // 5 minutes (increased for better performance)
 let schemaCache: any = null
+let schemaCachePromise: Promise<any> | null = null
 
 // Enhanced status mapping for stock impact
 const STOCK_IMPACT_STATUS = {
@@ -34,6 +36,7 @@ const PAYMENT_METHOD_LABELS = {
   mixed: 'Mixed Payment'
 }
 
+// OPTIMIZATION: Enhanced schema info with single query and longer cache
 async function getSchemaInfo() {
   const now = Date.now()
 
@@ -42,60 +45,146 @@ async function getSchemaInfo() {
     return schemaCache
   }
 
-  // Check schema once, cache result
-  const checkResult = await sql`
-    SELECT 
-      EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sales' AND column_name = 'payment_method') as has_payment_method,
-      EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sales' AND column_name = 'discount') as has_discount,
-      EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sales' AND column_name = 'device_id') as has_device_id,
-      EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sales' AND column_name = 'received_amount') as has_received_amount,
-      EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sales' AND column_name = 'staff_id') as has_staff_id,
-      EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sales' AND column_name = 'sale_type') as has_sale_type
-  `
-
-  schemaCache = {
-    hasPaymentMethod: checkResult[0]?.has_payment_method || false,
-    hasDiscount: checkResult[0]?.has_discount || false,
-    hasDeviceId: checkResult[0]?.has_device_id || false,
-    hasReceivedAmount: checkResult[0]?.has_received_amount || false,
-    hasStaffId: checkResult[0]?.has_staff_id || false,
-    hasSaleType: checkResult[0]?.has_sale_type || false,
-    lastChecked: now,
+  // Prevent multiple concurrent schema checks
+  if (schemaCachePromise) {
+    return await schemaCachePromise
   }
 
-  return schemaCache
+  schemaCachePromise = checkSchemaInfo()
+  try {
+    schemaCache = await schemaCachePromise
+    schemaCache.lastChecked = now
+    return schemaCache
+  } finally {
+    schemaCachePromise = null
+  }
 }
 
-// Ensures the stock history table exists with the correct structure
+async function checkSchemaInfo() {
+  // Single query to check all schema info at once
+  const result = await sql`
+    SELECT 
+      (SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'sales' AND column_name = 'payment_method') > 0 as has_payment_method,
+      (SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'sales' AND column_name = 'discount') > 0 as has_discount,
+      (SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'sales' AND column_name = 'device_id') > 0 as has_device_id,
+      (SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'sales' AND column_name = 'received_amount') > 0 as has_received_amount,
+      (SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'sales' AND column_name = 'staff_id') > 0 as has_staff_id,
+      (SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'sales' AND column_name = 'sale_type') > 0 as has_sale_type,
+      (SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'sale_items' AND column_name = 'cost') > 0 as sale_items_has_cost,
+      (SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'sale_items' AND column_name = 'notes') > 0 as sale_items_has_notes,
+      (SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'product_stock_history') > 0 as has_stock_history_table
+  `
+
+  return {
+    hasPaymentMethod: result[0]?.has_payment_method || false,
+    hasDiscount: result[0]?.has_discount || false,
+    hasDeviceId: result[0]?.has_device_id || false,
+    hasReceivedAmount: result[0]?.has_received_amount || false,
+    hasStaffId: result[0]?.has_staff_id || false,
+    hasSaleType: result[0]?.has_sale_type || false,
+    saleItemsHasCost: result[0]?.sale_items_has_cost || false,
+    saleItemsHasNotes: result[0]?.sale_items_has_notes || false,
+    hasStockHistoryTable: result[0]?.has_stock_history_table || false,
+  }
+}
+
+// OPTIMIZATION: Ensure stock history table only once per app lifecycle
+let stockHistoryTableEnsured = false
 async function ensureStockHistoryTable() {
+  if (stockHistoryTableEnsured) return
+  
   try {
-    // Create the main stock history table
+    // Create the main stock history table with all columns
     await sql`
       CREATE TABLE IF NOT EXISTS product_stock_history (
         id SERIAL PRIMARY KEY,
         product_id INTEGER NOT NULL,
-        quantity INTEGER NOT NULL,
+        quantity INTEGER NOT NULL DEFAULT 0,
         type VARCHAR(50) NOT NULL,
         reference_id INTEGER,
         reference_type VARCHAR(50),
         notes TEXT,
         created_by INTEGER,
-        created_at TIMESTAMP DEFAULT NOW()
+        created_at TIMESTAMP DEFAULT NOW(),
+        change_type VARCHAR(50),
+        quantity_change INTEGER,
+        sale_id INTEGER,
+        purchase_id INTEGER,
+        payment_method VARCHAR(50),
+        sale_status VARCHAR(50)
       )
     `
-
-    // Add missing columns if they don't exist
+    
+    // Add missing columns if they don't exist (for backward compatibility)
     await sql`ALTER TABLE product_stock_history ADD COLUMN IF NOT EXISTS change_type VARCHAR(50)`
     await sql`ALTER TABLE product_stock_history ADD COLUMN IF NOT EXISTS quantity_change INTEGER`
     await sql`ALTER TABLE product_stock_history ADD COLUMN IF NOT EXISTS sale_id INTEGER`
     await sql`ALTER TABLE product_stock_history ADD COLUMN IF NOT EXISTS purchase_id INTEGER`
     await sql`ALTER TABLE product_stock_history ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50)`
     await sql`ALTER TABLE product_stock_history ADD COLUMN IF NOT EXISTS sale_status VARCHAR(50)`
-
-    console.log("Stock history table structure ensured")
+    
+    // Create indexes for better query performance
+    await sql`
+      CREATE INDEX IF NOT EXISTS idx_product_stock_history_product_id ON product_stock_history(product_id);
+      CREATE INDEX IF NOT EXISTS idx_product_stock_history_reference ON product_stock_history(reference_id, reference_type);
+      CREATE INDEX IF NOT EXISTS idx_product_stock_history_created_at ON product_stock_history(created_at);
+    `
+    
+    stockHistoryTableEnsured = true
+    console.log("Stock history table and indexes ensured")
   } catch (error) {
     console.error("Error ensuring stock history table:", error)
   }
+}
+
+// OPTIMIZATION: Connection pooling friendly transaction wrapper
+export async function executeInTransaction<T>(operation: () => Promise<T>): Promise<T> {
+  let retryCount = 0
+  const maxRetries = 3
+
+  while (retryCount < maxRetries) {
+    try {
+      await sql`BEGIN`
+      const result = await operation()
+      await sql`COMMIT`
+      return result
+    } catch (error) {
+      await sql`ROLLBACK`
+      
+      // Retry on connection issues (common with Neon)
+      if (error.message?.includes('connection') || error.message?.includes('timeout')) {
+        retryCount++
+        if (retryCount < maxRetries) {
+          console.warn(`Transaction retry ${retryCount}/${maxRetries}:`, error.message)
+          await new Promise(resolve => setTimeout(resolve, Math.pow(2, retryCount) * 100)) // Exponential backoff
+          continue
+        }
+      }
+      
+      throw error
+    }
+  }
+}
+
+// OPTIMIZATION: Batch validation with Neon compatible queries
+async function batchValidateItems(productIds: number[]) {
+  if (productIds.length === 0) return { products: [], services: [] }
+
+  // Use parameterized query with ANY for better performance
+  const [products, services] = await Promise.all([
+    sql`
+      SELECT id, name, stock, wholesale_price as cost
+      FROM products 
+      WHERE id = ANY(${productIds})
+    `,
+    sql`
+      SELECT id, name, 0 as cost
+      FROM services 
+      WHERE id = ANY(${productIds})
+    `
+  ])
+
+  return { products, services }
 }
 
 // Enhanced helper function to determine if a status should affect stock
@@ -422,114 +511,142 @@ async function calculateCOGS(items: any[], saleId?: number) {
   return totalCogs
 }
 
-export async function getUserSales(deviceId: number, limit?: number, searchTerm?: string) {
+
+// Add your other functions here (addSale, updateSale, etc.)
+// Completely rewritten getUserSales function compatible with Neon Database
+// Updated getUserSales function with pagination support
+export async function getUserSales(
+  deviceId: number,
+  limit: number = 5,
+  searchTerm?: string,
+  offset: number = 0
+) {
   if (!deviceId) {
-    return { success: false, message: "Device ID is required", data: [] }
+    return {
+      success: false,
+      message: "Device ID is required",
+      data: [],
+      hasMore: false,
+      total: 0,
+    }
   }
 
   resetConnectionState()
 
   try {
+    // ✅ Ensure offset is never negative
+    offset = Math.max(0, offset)
+    limit = Math.max(1, limit) // also ensure at least 1 row is requested
+
     let sales
+    let totalCount = 0
 
-    if (searchTerm && searchTerm.trim() !== "") {
-      // Search query - search across customer name, sale ID, and status
-      const searchPattern = `%${searchTerm.toLowerCase()}%`
+    // First get the total count for pagination
+    const countQuery =
+      searchTerm && searchTerm.trim() !== ""
+        ? await executeWithRetry(async () => {
+            const searchPattern = `%${searchTerm.toLowerCase()}%`
+            return await sql`
+              SELECT COUNT(*) as total
+              FROM sales s
+              LEFT JOIN customers c ON s.customer_id = c.id
+              WHERE s.device_id = ${deviceId}
+              AND (
+                LOWER(COALESCE(c.name, '')) LIKE ${searchPattern}
+                OR CAST(s.id AS TEXT) LIKE ${searchPattern}
+                OR LOWER(s.status) LIKE ${searchPattern}
+                OR CAST(s.total_amount AS TEXT) LIKE ${searchPattern}
+              )
+            `
+          })
+        : await executeWithRetry(async () => {
+            return await sql`
+              SELECT COUNT(*) as total
+              FROM sales s
+              WHERE s.device_id = ${deviceId}
+            `
+          })
 
-      if (limit) {
-        sales = await executeWithRetry(async () => {
-          return await sql`
-            SELECT s.*, c.name as customer_name, st.name as staff_name,
-            COALESCE(
-              (SELECT SUM(si.quantity * COALESCE(si.cost, si.wholesale_price, 0))
-               FROM sale_items si 
-               WHERE si.sale_id = s.id), 0
-            ) as total_cost
-            FROM sales s
-            LEFT JOIN customers c ON s.customer_id = c.id
-            LEFT JOIN staff st ON s.staff_id = st.id
-            WHERE s.device_id = ${deviceId}
-            AND (
-              LOWER(c.name) LIKE ${searchPattern}
-              OR CAST(s.id AS TEXT) LIKE ${searchPattern}
-              OR LOWER(s.status) LIKE ${searchPattern}
-              OR CAST(s.total_amount AS TEXT) LIKE ${searchPattern}
-            )
-            ORDER BY s.sale_date DESC
-            LIMIT ${limit}
-          `
-        })
-      } else {
-        sales = await executeWithRetry(async () => {
-          return await sql`
-            SELECT s.*, c.name as customer_name, st.name as staff_name,
-            COALESCE(
-              (SELECT SUM(si.quantity * COALESCE(si.cost, si.wholesale_price, 0))
-               FROM sale_items si 
-               WHERE si.sale_id = s.id), 0
-            ) as total_cost
-            FROM sales s
-            LEFT JOIN customers c ON s.customer_id = c.id
-            LEFT JOIN staff st ON s.staff_id = st.id
-            WHERE s.device_id = ${deviceId}
-            AND (
-              LOWER(c.name) LIKE ${searchPattern}
-              OR CAST(s.id AS TEXT) LIKE ${searchPattern}
-              OR LOWER(s.status) LIKE ${searchPattern}
-              OR CAST(s.total_amount AS TEXT) LIKE ${searchPattern}
-            )
-            ORDER BY s.sale_date DESC
-          `
-        })
-      }
-    } else {
-      // Regular query without search
-      if (limit) {
-        sales = await executeWithRetry(async () => {
-          return await sql`
-            SELECT s.*, c.name as customer_name, st.name as staff_name,
-            COALESCE(
-              (SELECT SUM(si.quantity * COALESCE(si.cost, si.wholesale_price, 0))
-               FROM sale_items si 
-               WHERE si.sale_id = s.id), 0
-            ) as total_cost
-            FROM sales s
-            LEFT JOIN customers c ON s.customer_id = c.id
-            LEFT JOIN staff st ON s.staff_id = st.id
-            WHERE s.device_id = ${deviceId}
-            ORDER BY s.sale_date DESC
-            LIMIT ${limit}
-          `
-        })
-      } else {
-        sales = await executeWithRetry(async () => {
-          return await sql`
-            SELECT s.*, c.name as customer_name, st.name as staff_name,
-            COALESCE(
-              (SELECT SUM(si.quantity * COALESCE(si.cost, si.wholesale_price, 0))
-               FROM sale_items si 
-               WHERE si.sale_id = s.id), 0
-            ) as total_cost
-            FROM sales s
-            LEFT JOIN customers c ON s.customer_id = c.id
-            LEFT JOIN staff st ON s.staff_id = st.id
-            WHERE s.device_id = ${deviceId}
-            ORDER BY s.sale_date DESC
-          `
-        })
-      }
+    totalCount = Number(countQuery[0]?.total || 0)
+
+    // Fetch sales
+    const query = searchTerm && searchTerm.trim() !== ""
+      ? sql`
+          SELECT 
+            s.*,
+            c.name as customer_name,
+            st.name as staff_name,
+            COALESCE(cost_data.total_cost, 0) as total_cost
+          FROM sales s
+          LEFT JOIN customers c ON s.customer_id = c.id
+          LEFT JOIN staff st ON s.staff_id = st.id
+          LEFT JOIN (
+            SELECT 
+              sale_id,
+              SUM(quantity * COALESCE(cost, wholesale_price, 0)) as total_cost
+            FROM sale_items
+            GROUP BY sale_id
+          ) cost_data ON s.id = cost_data.sale_id
+          WHERE s.device_id = ${deviceId}
+          AND (
+            LOWER(COALESCE(c.name, '')) LIKE ${`%${searchTerm.toLowerCase()}%`}
+            OR CAST(s.id AS TEXT) LIKE ${`%${searchTerm.toLowerCase()}%`}
+            OR LOWER(s.status) LIKE ${`%${searchTerm.toLowerCase()}%`}
+            OR CAST(s.total_amount AS TEXT) LIKE ${`%${searchTerm.toLowerCase()}%`}
+          )
+          ORDER BY s.sale_date DESC
+          LIMIT ${limit}
+          OFFSET ${offset}
+        `
+      : sql`
+          SELECT 
+            s.*,
+            c.name as customer_name,
+            st.name as staff_name,
+            COALESCE(cost_data.total_cost, 0) as total_cost
+          FROM sales s
+          LEFT JOIN customers c ON s.customer_id = c.id
+          LEFT JOIN staff st ON s.staff_id = st.id
+          LEFT JOIN (
+            SELECT 
+              sale_id,
+              SUM(quantity * COALESCE(cost, wholesale_price, 0)) as total_cost
+            FROM sale_items
+            GROUP BY sale_id
+          ) cost_data ON s.id = cost_data.sale_id
+          WHERE s.device_id = ${deviceId}
+          ORDER BY s.sale_date DESC
+          LIMIT ${limit}
+          OFFSET ${offset}
+        `
+
+    sales = await executeWithRetry(async () => query)
+
+    const hasMore = offset + sales.length < totalCount
+
+    return {
+      success: true,
+      data: sales,
+      hasMore,
+      total: totalCount,
+      currentPage: Math.floor(offset / limit) + 1,
+      totalPages: Math.ceil(totalCount / limit),
     }
-
-    return { success: true, data: sales }
   } catch (error) {
     console.error("Get device sales error:", error)
     return {
       success: false,
-      message: `Database error: ${getLastError()?.message || "Unknown error"}. Please try again later.`,
+      message: `Database error: ${
+        getLastError()?.message || "Unknown error"
+      }. Please try again later.`,
       data: [],
+      hasMore: false,
+      total: 0,
     }
   }
 }
+
+
 
 export async function getSaleDetails(saleId: number) {
   if (!saleId) {
@@ -668,7 +785,7 @@ export async function getSaleDetails(saleId: number) {
 // Enhanced addSale function with comprehensive stock handling
 export async function addSale(saleData: any) {
   try {
-    console.log("Adding sale with comprehensive stock tracking:", JSON.stringify(saleData, null, 2))
+    console.log("Adding sale with optimized stock tracking:", JSON.stringify(saleData, null, 2))
 
     const schema = await getSchemaInfo()
     await ensureStockHistoryTable()
@@ -705,110 +822,21 @@ export async function addSale(saleData: any) {
         receivedAmount = Number(saleData.receivedAmount) || 0
       }
 
-      const outstandingAmount = total - receivedAmount
+      // OPTIMIZATION 1: Batch validate all products/services in a single query
+      const productIds = saleData.items.map(item => item.productId)
+      const { products, services } = await batchValidateItems(productIds)
 
-      // Add missing columns if they don't exist
-      if (!schema.hasDeviceId) {
-        await sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS device_id INTEGER`
-        schema.hasDeviceId = true
-      }
-      if (!schema.hasReceivedAmount) {
-        await sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS received_amount DECIMAL(12,2) DEFAULT 0`
-        schema.hasReceivedAmount = true
-      }
-      if (!schema.hasStaffId) {
-        await sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS staff_id INTEGER`
-        schema.hasStaffId = true
-      }
-      if (!schema.hasSaleType) {
-        await sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS sale_type VARCHAR(20) DEFAULT 'product'`
-        schema.hasSaleType = true
-      }
+      // Create lookup maps for O(1) access
+      const productMap = new Map(products.map(p => [p.id, p]))
+      const serviceMap = new Map(services.map(s => [s.id, s]))
 
-      // Build INSERT query based on available columns
-      let saleResult
-      if (schema.hasDeviceId && schema.hasPaymentMethod && schema.hasDiscount && schema.hasReceivedAmount && schema.hasStaffId && saleData.staffId) {
-        saleResult = await sql`
-          INSERT INTO sales (customer_id, created_by, total_amount, status, sale_date, device_id, payment_method, discount, received_amount, staff_id) 
-          VALUES (${saleData.customerId || null}, ${saleData.userId}, ${total}, ${status}, ${saleData.saleDate || new Date()}, ${saleData.deviceId}, ${paymentMethod}, ${discountAmount}, ${receivedAmount}, ${saleData.staffId}) 
-          RETURNING *
-        `
-      } else if (schema.hasDeviceId && schema.hasPaymentMethod && schema.hasDiscount && schema.hasReceivedAmount) {
-        saleResult = await sql`
-          INSERT INTO sales (customer_id, created_by, total_amount, status, sale_date, device_id, payment_method, discount, received_amount) 
-          VALUES (${saleData.customerId || null}, ${saleData.userId}, ${total}, ${status}, ${saleData.saleDate || new Date()}, ${saleData.deviceId}, ${paymentMethod}, ${discountAmount}, ${receivedAmount}) 
-          RETURNING *
-        `
-      } else if (schema.hasDeviceId && schema.hasPaymentMethod && schema.hasDiscount) {
-        saleResult = await sql`
-          INSERT INTO sales (customer_id, created_by, total_amount, status, sale_date, device_id, payment_method, discount) 
-          VALUES (${saleData.customerId || null}, ${saleData.userId}, ${total}, ${status}, ${saleData.saleDate || new Date()}, ${saleData.deviceId}, ${paymentMethod}, ${discountAmount}) 
-          RETURNING *
-        `
-      } else if (schema.hasDeviceId && schema.hasPaymentMethod) {
-        saleResult = await sql`
-          INSERT INTO sales (customer_id, created_by, total_amount, status, sale_date, device_id, payment_method) 
-          VALUES (${saleData.customerId || null}, ${saleData.userId}, ${total}, ${status}, ${saleData.saleDate || new Date()}, ${saleData.deviceId}, ${paymentMethod}) 
-          RETURNING *
-        `
-      } else if (schema.hasDeviceId) {
-        saleResult = await sql`
-          INSERT INTO sales (customer_id, created_by, total_amount, status, sale_date, device_id) 
-          VALUES (${saleData.customerId || null}, ${saleData.userId}, ${total}, ${status}, ${saleData.saleDate || new Date()}, ${saleData.deviceId}) 
-          RETURNING *
-        `
-      } else {
-        // Fallback for basic columns
-        saleResult = await sql`
-          INSERT INTO sales (customer_id, created_by, total_amount, status, sale_date) 
-          VALUES (${saleData.customerId || null}, ${saleData.userId}, ${total}, ${status}, ${saleData.saleDate || new Date()}) 
-          RETURNING *
-        `
-      }
-
-      const sale = saleResult[0]
-      const saleId = sale.id
-
-      // Get customer name for enhanced tracking
-      let customerName = null
-      if (saleData.customerId) {
-        try {
-          const customerResult = await sql`SELECT name FROM customers WHERE id = ${saleData.customerId}`
-          if (customerResult.length > 0) {
-            customerName = customerResult[0].name
-          }
-        } catch (err) {
-          console.log("Could not fetch customer name:", err)
-        }
-      }
-
-      // Insert sale items and validate existence
-      const saleItems = []
+      // Validate all items exist
+      const validatedItems = []
       for (const item of saleData.items) {
-        // Validate that the product/service exists
-        let itemExists = false
-        let isService = false
-        let itemName = "Unknown Item"
-
-        try {
-          const productCheck = await sql`SELECT id, name FROM products WHERE id = ${item.productId}`
-          if (productCheck.length > 0) {
-            itemExists = true
-            isService = false
-            itemName = productCheck[0].name
-          } else {
-            const serviceCheck = await sql`SELECT id, name FROM services WHERE id = ${item.productId}`
-            if (serviceCheck.length > 0) {
-              itemExists = true
-              isService = true
-              itemName = serviceCheck[0].name
-            }
-          }
-        } catch (checkError) {
-          console.error("Error checking product/service existence:", checkError)
-        }
-
-        if (!itemExists) {
+        const product = productMap.get(item.productId)
+        const service = serviceMap.get(item.productId)
+        
+        if (!product && !service) {
           await sql`ROLLBACK`
           return {
             success: false,
@@ -816,120 +844,59 @@ export async function addSale(saleData: any) {
           }
         }
 
-        // Check and add missing columns in sale_items table
-        let hasCostColumn = true
-        let hasNotesColumn = true
-        try {
-          const checkColumns = await sql`
-            SELECT 
-              EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sale_items' AND column_name = 'cost') as has_cost,
-              EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sale_items' AND column_name = 'notes') as has_notes
-          `
-          hasCostColumn = checkColumns[0]?.has_cost || false
-          hasNotesColumn = checkColumns[0]?.has_notes || false
-
-          if (!hasCostColumn) {
-            await sql`ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS cost DECIMAL(12,2) DEFAULT 0`
-            hasCostColumn = true
-          }
-          if (!hasNotesColumn) {
-            await sql`ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS notes TEXT`
-            hasNotesColumn = true
-          }
-        } catch (err) {
-          console.error("Error checking/adding sale_items columns:", err)
-          hasCostColumn = false
-          hasNotesColumn = false
-        }
-
-        // Insert sale item
-        let itemResult
-        try {
-          if (hasCostColumn && hasNotesColumn) {
-            itemResult = await sql`
-              INSERT INTO sale_items (sale_id, product_id, quantity, price, cost, notes)
-              VALUES (${saleId}, ${item.productId}, ${item.quantity}, ${item.price}, ${item.cost || 0}, ${item.notes || ""})
-              RETURNING *
-            `
-          } else if (hasCostColumn) {
-            itemResult = await sql`
-              INSERT INTO sale_items (sale_id, product_id, quantity, price, cost)
-              VALUES (${saleId}, ${item.productId}, ${item.quantity}, ${item.price}, ${item.cost || 0})
-              RETURNING *
-            `
-          } else {
-            itemResult = await sql`
-              INSERT INTO sale_items (sale_id, product_id, quantity, price)
-              VALUES (${saleId}, ${item.productId}, ${item.quantity}, ${item.price})
-              RETURNING *
-            `
-          }
-
-          itemResult[0].product_name = itemName
-          itemResult[0].item_type = isService ? "service" : "product"
-          saleItems.push(itemResult[0])
-
-          console.log(`Successfully added ${isService ? "service" : "product"}: ${itemName} (ID: ${item.productId})`)
-        } catch (insertError) {
-          console.error("Error inserting sale item:", insertError)
-          await sql`ROLLBACK`
-          return {
-            success: false,
-            message: `Failed to add item to sale: ${insertError.message}`,
-          }
-        }
+        validatedItems.push({
+          ...item,
+          itemName: product?.name || service?.name || "Unknown Item",
+          isService: !product,
+          currentStock: product?.stock || 0
+        })
       }
 
-      // Handle comprehensive stock changes based on status and payment method
-      console.log(`Processing stock changes for new sale - Status: ${status}, Payment: ${paymentMethod}`)
-      await handleStockChange(
-        saleData.items,
-        saleId,
+      // OPTIMIZATION 2: Add missing columns in parallel
+      await addMissingSaleColumns(schema)
+
+      // Insert sale with optimized column detection
+      const sale = await insertSaleRecord(schema, {
+        customerId: saleData.customerId,
+        userId: saleData.userId,
+        total,
         status,
+        saleDate: saleData.saleDate || new Date(),
+        deviceId: saleData.deviceId,
         paymentMethod,
-        'create',
-        saleData.userId,
-        undefined,
-        customerName
-      )
+        discountAmount,
+        receivedAmount,
+        staffId: saleData.staffId
+      })
 
-      // Determine and update sale type
-      let saleType = "product"
-      if (schema.hasSaleType) {
-        try {
-          const serviceCheck = await sql`
-            SELECT COUNT(*) as service_count
-            FROM sale_items si
-            WHERE si.sale_id = ${saleId}
-            AND EXISTS (SELECT 1 FROM services s WHERE s.id = si.product_id)
-          `
+      const saleId = sale.id
 
-          if (serviceCheck[0]?.service_count > 0) {
-            saleType = "service"
-          }
-
-          await sql`
-            UPDATE sales 
-            SET sale_type = ${saleType}
-            WHERE id = ${saleId}
-          `
-        } catch (err) {
-          console.log("Error determining sale type, defaulting to product type")
-        }
+      // OPTIMIZATION 3: Get customer name only if needed
+      let customerName = null
+      if (saleData.customerId) {
+        const customerResult = await sql`SELECT name FROM customers WHERE id = ${saleData.customerId}`
+        customerName = customerResult[0]?.name || null
       }
 
-      // Calculate COGS and record accounting transaction
-      const cogsAmount = await calculateCOGS(saleData.items)
+      // OPTIMIZATION 4: Batch insert sale items
+      const saleItems = await batchInsertSaleItems(saleId, validatedItems)
 
-      try {
-        console.log("Recording accounting transaction for sale:", saleId, "with status:", status)
+      // OPTIMIZATION 5: Batch stock updates and history entries
+      await batchProcessStockChanges(validatedItems, saleId, status, paymentMethod, saleData.userId, customerName)
 
-        const accountingResult = await recordSaleTransaction({
+      // OPTIMIZATION 6: Update sale type efficiently
+      await updateSaleType(saleId, validatedItems, schema)
+
+      // OPTIMIZATION 7: Calculate COGS and record accounting in parallel
+      const [cogsAmount] = await Promise.all([
+        calculateCOGS(saleData.items),
+        // Record accounting transaction asynchronously to not block the main flow
+        recordSaleTransactionAsync({
           saleId,
           totalAmount: total,
-          cogsAmount,
+          cogsAmount: await calculateCOGS(saleData.items),
           receivedAmount,
-          outstandingAmount,
+          outstandingAmount: total - receivedAmount,
           status: status,
           paymentMethod: paymentMethod,
           deviceId: saleData.deviceId,
@@ -937,19 +904,14 @@ export async function addSale(saleData: any) {
           customerId: saleData.customerId,
           saleDate: new Date(saleData.saleDate || new Date()),
         })
-
-        console.log("Accounting transaction result:", accountingResult)
-        if (!accountingResult.success) {
-          console.error("Failed to record accounting transaction:", accountingResult.error)
-        }
-      } catch (accountingError) {
-        console.error("Error recording accounting transaction:", accountingError)
-      }
+      ])
 
       await sql`COMMIT`
-      revalidatePath("/dashboard")
+      
+      // Revalidate path after successful commit
+      setImmediate(() => revalidatePath("/dashboard"))
 
-      console.log(`Sale ${saleId} created successfully with ${saleItems.length} items (${saleType} sale)`)
+      console.log(`Sale ${saleId} created successfully with ${saleItems.length} items`)
 
       return {
         success: true,
@@ -972,217 +934,242 @@ export async function addSale(saleData: any) {
   }
 }
 
-// Enhanced helper function to calculate all changes in one place
-function calculateSaleChanges(original: any, newData: any, originalItems: any[], newItems: any[]) {
-  const subtotal = newData.items.reduce(
-    (sum: number, item: any) => sum + Number.parseFloat(item.price) * Number.parseInt(item.quantity),
-    0,
-  )
-  const newDiscountAmount = Number(newData.discount) || 0
-  const newTotal = Math.max(0, subtotal - newDiscountAmount)
-  const newStatus = newData.paymentStatus || "completed"
-  const newPaymentMethod = newData.paymentMethod || "cash"
-
-  // Calculate new received amount based on status
-  let newReceivedAmount = 0
-  if (newStatus.toLowerCase() === "completed" || newStatus.toLowerCase() === "paid") {
-    newReceivedAmount = newTotal
-  } else if (newStatus.toLowerCase() === "cancelled") {
-    newReceivedAmount = 0
-  } else if (newStatus.toLowerCase() === "credit" || newStatus.toLowerCase() === "partial") {
-    newReceivedAmount = Number(newData.receivedAmount) || 0
-  } else if (newStatus.toLowerCase() === "pending") {
-    newReceivedAmount = Number(newData.receivedAmount) || 0
+// OPTIMIZATION HELPER: Add missing columns in parallel
+async function addMissingSaleColumns(schema: any) {
+  const alterPromises = []
+  
+  if (!schema.hasDeviceId) {
+    alterPromises.push(sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS device_id INTEGER`)
+  }
+  if (!schema.hasReceivedAmount) {
+    alterPromises.push(sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS received_amount DECIMAL(12,2) DEFAULT 0`)
+  }
+  if (!schema.hasStaffId) {
+    alterPromises.push(sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS staff_id INTEGER`)
+  }
+  if (!schema.hasSaleType) {
+    alterPromises.push(sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS sale_type VARCHAR(20) DEFAULT 'product'`)
   }
 
-  // Calculate original values
-  const originalSubtotal = originalItems.reduce(
-    (sum: number, item: any) => sum + Number(item.price) * Number(item.quantity),
-    0,
-  )
-  const originalTotal = Number(original.total_amount)
-  const originalDiscountAmount = Math.max(0, originalSubtotal - originalTotal)
-  const originalStatus = original.status || "completed"
-  const originalPaymentMethod = original.payment_method || "cash"
-
-  console.log("Enhanced change calculation:", {
-    originalStatus, newStatus,
-    originalPaymentMethod, newPaymentMethod,
-    originalTotal, newTotal,
-    originalDiscount: originalDiscountAmount, newDiscount: newDiscountAmount,
-    statusChanged: originalStatus !== newStatus,
-    paymentMethodChanged: originalPaymentMethod !== newPaymentMethod
-  })
-
-  return {
-    // Basic changes
-    dateChanged: new Date(original.sale_date).getTime() !== new Date(newData.saleDate).getTime(),
-    statusChanged: originalStatus !== newStatus,
-    paymentMethodChanged: originalPaymentMethod !== newPaymentMethod,
-    totalChanged: originalTotal !== newTotal,
-    discountChanged: originalDiscountAmount !== newDiscountAmount,
-    receivedChanged: Number(original.received_amount || 0) !== newReceivedAmount,
-    itemsChanged: JSON.stringify(originalItems.map(i => ({id: i.id, productId: i.product_id, quantity: i.quantity, price: i.price}))) !== JSON.stringify(newItems.map(i => ({id: i.id, productId: i.productId, quantity: i.quantity, price: i.price}))),
-
-    // Values
-    originalDate: new Date(original.sale_date),
-    newDate: new Date(newData.saleDate),
-    originalStatus: originalStatus,
-    newStatus: newStatus,
-    originalPaymentMethod: originalPaymentMethod,
-    newPaymentMethod: newPaymentMethod,
-    originalTotal: originalTotal,
-    newTotal: newTotal,
-    originalDiscount: originalDiscountAmount,
-    newDiscount: newDiscountAmount,
-    originalReceived: Number(original.received_amount || 0),
-    newReceived: newReceivedAmount,
-
-    // Differences
-    totalDiff: newTotal - originalTotal,
-    discountDiff: newDiscountAmount - originalDiscountAmount,
-    receivedDiff: newReceivedAmount - Number(original.received_amount || 0),
-    outstandingAmount: newTotal - newReceivedAmount,
+  if (alterPromises.length > 0) {
+    await Promise.all(alterPromises)
+    // Update schema cache
+    Object.assign(schema, {
+      hasDeviceId: true,
+      hasReceivedAmount: true,
+      hasStaffId: true,
+      hasSaleType: true
+    })
   }
 }
 
-// Enhanced function to handle item-level stock changes during updates
-async function handleItemStockChanges(
-  originalItems: any[],
-  newItems: any[],
-  saleId: number,
-  saleStatus: string,
-  paymentMethod: string,
-  userId: number,
-  customerName?: string
-) {
-  const statusImpact = shouldAffectStock(saleStatus)
+// OPTIMIZATION HELPER: Optimized sale record insertion
+async function insertSaleRecord(schema: any, saleData: any) {
+  // Build the most complete INSERT query possible
+  if (schema.hasDeviceId && schema.hasPaymentMethod && schema.hasDiscount && schema.hasReceivedAmount && schema.hasStaffId && saleData.staffId) {
+    const result = await sql`
+      INSERT INTO sales (customer_id, created_by, total_amount, status, sale_date, device_id, payment_method, discount, received_amount, staff_id) 
+      VALUES (${saleData.customerId || null}, ${saleData.userId}, ${saleData.total}, ${saleData.status}, ${saleData.saleDate}, ${saleData.deviceId}, ${saleData.paymentMethod}, ${saleData.discountAmount}, ${saleData.receivedAmount}, ${saleData.staffId}) 
+      RETURNING *
+    `
+    return result[0]
+  } else if (schema.hasDeviceId && schema.hasPaymentMethod && schema.hasDiscount && schema.hasReceivedAmount) {
+    const result = await sql`
+      INSERT INTO sales (customer_id, created_by, total_amount, status, sale_date, device_id, payment_method, discount, received_amount) 
+      VALUES (${saleData.customerId || null}, ${saleData.userId}, ${saleData.total}, ${saleData.status}, ${saleData.saleDate}, ${saleData.deviceId}, ${saleData.paymentMethod}, ${saleData.discountAmount}, ${saleData.receivedAmount}) 
+      RETURNING *
+    `
+    return result[0]
+  } else if (schema.hasDeviceId && schema.hasPaymentMethod && schema.hasDiscount) {
+    const result = await sql`
+      INSERT INTO sales (customer_id, created_by, total_amount, status, sale_date, device_id, payment_method, discount) 
+      VALUES (${saleData.customerId || null}, ${saleData.userId}, ${saleData.total}, ${saleData.status}, ${saleData.saleDate}, ${saleData.deviceId}, ${saleData.paymentMethod}, ${saleData.discountAmount}) 
+      RETURNING *
+    `
+    return result[0]
+  } else if (schema.hasDeviceId && schema.hasPaymentMethod) {
+    const result = await sql`
+      INSERT INTO sales (customer_id, created_by, total_amount, status, sale_date, device_id, payment_method) 
+      VALUES (${saleData.customerId || null}, ${saleData.userId}, ${saleData.total}, ${saleData.status}, ${saleData.saleDate}, ${saleData.deviceId}, ${saleData.paymentMethod}) 
+      RETURNING *
+    `
+    return result[0]
+  } else if (schema.hasDeviceId) {
+    const result = await sql`
+      INSERT INTO sales (customer_id, created_by, total_amount, status, sale_date, device_id) 
+      VALUES (${saleData.customerId || null}, ${saleData.userId}, ${saleData.total}, ${saleData.status}, ${saleData.saleDate}, ${saleData.deviceId}) 
+      RETURNING *
+    `
+    return result[0]
+  }
   
-  // Only process stock changes if the current status should affect stock
+  // Fallback for basic columns
+  const result = await sql`
+    INSERT INTO sales (customer_id, created_by, total_amount, status, sale_date) 
+    VALUES (${saleData.customerId || null}, ${saleData.userId}, ${saleData.total}, ${saleData.status}, ${saleData.saleDate}) 
+    RETURNING *
+  `
+  return result[0]
+}
+
+// OPTIMIZATION HELPER: Batch insert sale items (Neon compatible)
+async function batchInsertSaleItems(saleId: number, validatedItems: any[]) {
+  if (validatedItems.length === 0) return []
+
+  // Check for columns once using schema cache
+  const schema = await getSchemaInfo()
+  let hasCostColumn = schema.saleItemsHasCost
+  let hasNotesColumn = schema.saleItemsHasNotes
+
+  // Add columns if missing
+  const alterPromises = []
+  if (!hasCostColumn) {
+    alterPromises.push(sql`ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS cost DECIMAL(12,2) DEFAULT 0`)
+  }
+  if (!hasNotesColumn) {
+    alterPromises.push(sql`ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS notes TEXT`)
+  }
+  
+  if (alterPromises.length > 0) {
+    await Promise.all(alterPromises)
+    hasCostColumn = true
+    hasNotesColumn = true
+  }
+
+  // NEON COMPATIBLE: Use individual inserts in parallel (still faster than original)
+  const saleItems = []
+  const insertPromises = validatedItems.map(async (item) => {
+    try {
+      let itemResult
+      if (hasCostColumn && hasNotesColumn) {
+        itemResult = await sql`
+          INSERT INTO sale_items (sale_id, product_id, quantity, price, cost, notes)
+          VALUES (${saleId}, ${item.productId}, ${item.quantity}, ${item.price}, ${item.cost || 0}, ${item.notes || ""})
+          RETURNING *
+        `
+      } else if (hasCostColumn) {
+        itemResult = await sql`
+          INSERT INTO sale_items (sale_id, product_id, quantity, price, cost)
+          VALUES (${saleId}, ${item.productId}, ${item.quantity}, ${item.price}, ${item.cost || 0})
+          RETURNING *
+        `
+      } else {
+        itemResult = await sql`
+          INSERT INTO sale_items (sale_id, product_id, quantity, price)
+          VALUES (${saleId}, ${item.productId}, ${item.quantity}, ${item.price})
+          RETURNING *
+        `
+      }
+
+      // Enhance result with cached item info
+      return {
+        ...itemResult[0],
+        product_name: item.itemName,
+        item_type: item.isService ? "service" : "product"
+      }
+    } catch (insertError) {
+      console.error("Error inserting sale item:", insertError)
+      throw new Error(`Failed to add item to sale: ${insertError.message}`)
+    }
+  })
+
+  const results = await Promise.all(insertPromises)
+  console.log(`Successfully added ${results.length} items to sale`)
+  return results
+}
+
+// OPTIMIZATION HELPER: Batch process stock changes (Neon compatible)
+async function batchProcessStockChanges(validatedItems: any[], saleId: number, status: string, paymentMethod: string, userId: number, customerName?: string) {
+  const statusImpact = shouldAffectStock(status)
+  
   if (!statusImpact.affectsStock || !statusImpact.reduces) {
-    console.log(`Skipping item stock changes - status ${saleStatus} doesn't affect stock`)
+    console.log(`Skipping stock changes - status ${status} doesn't affect stock`)
     return
   }
 
-  const existingItemMap = new Map()
-  for (const item of originalItems) {
-    existingItemMap.set(item.id, {
-      productId: item.product_id,
-      quantity: item.quantity,
-    })
-  }
+  // Separate products from services
+  const productsToUpdate = validatedItems.filter(item => !item.isService)
+  const servicesToLog = validatedItems.filter(item => item.isService)
 
-  const processedItemIds = new Set()
-
-  // Process updated and new items
-  for (const item of newItems) {
-    if (item.id) {
-      // Update existing item - check for quantity changes
-      const existingItem = existingItemMap.get(item.id)
-      if (existingItem) {
-        const quantityDiff = item.quantity - existingItem.quantity
-
-        if (quantityDiff !== 0) {
-          if (quantityDiff > 0) {
-            // More items sold - reduce stock further
-            const stockResult = await updateProductStock(
-              item.productId, 
-              quantityDiff, 
-              "subtract",
-              `Item quantity increased: ${existingItem.quantity} -> ${item.quantity}`
-            )
-            if (stockResult.success && !stockResult.isService) {
-              await createStockHistoryEntry(
-                item.productId,
-                "sale_item_increased",
-                -quantityDiff,
-                saleId,
-                "sale",
-                `Sale #${saleId} item quantity increased from ${existingItem.quantity} to ${item.quantity}`,
-                userId,
-                paymentMethod,
-                saleStatus,
-                { customerName }
-              )
-            }
-          } else {
-            // Fewer items sold - restore stock
-            const stockResult = await updateProductStock(
-              item.productId, 
-              Math.abs(quantityDiff), 
-              "add",
-              `Item quantity decreased: ${existingItem.quantity} -> ${item.quantity}`
-            )
-            if (stockResult.success && !stockResult.isService) {
-              await createStockHistoryEntry(
-                item.productId,
-                "sale_item_decreased", 
-                Math.abs(quantityDiff),
-                saleId,
-                "sale",
-                `Sale #${saleId} item quantity decreased from ${existingItem.quantity} to ${item.quantity}`,
-                userId,
-                paymentMethod,
-                saleStatus,
-                { customerName }
-              )
-            }
-          }
-        }
-      }
-      processedItemIds.add(item.id)
-    } else {
-      // New item added - reduce stock
-      const stockResult = await updateProductStock(
+  // NEON COMPATIBLE: Update product stocks individually but in parallel
+  if (productsToUpdate.length > 0) {
+    const stockUpdatePromises = productsToUpdate.map(item => 
+      updateProductStock(
         item.productId, 
         item.quantity, 
         "subtract",
-        `New item added to sale`
+        `New sale - ${status} via ${paymentMethod}`
       )
-      if (stockResult.success && !stockResult.isService) {
-        await createStockHistoryEntry(
-          item.productId,
-          "sale_item_added",
-          -item.quantity,
-          saleId,
-          "sale",
-          `New item added to Sale #${saleId}`,
-          userId,
-          paymentMethod,
-          saleStatus,
-          { customerName }
-        )
-      }
-    }
+    )
+    
+    await Promise.all(stockUpdatePromises)
+    console.log(`Updated ${productsToUpdate.length} product stocks`)
   }
 
-  // Handle deleted items
-  for (const [itemId, itemData] of existingItemMap.entries()) {
-    if (!processedItemIds.has(itemId)) {
-      // Item was removed - restore stock
-      const stockResult = await updateProductStock(
-        itemData.productId, 
-        itemData.quantity, 
-        "add",
-        `Item removed from sale`
-      )
-      if (stockResult.success && !stockResult.isService) {
-        await createStockHistoryEntry(
-          itemData.productId,
-          "sale_item_removed",
-          itemData.quantity,
-          saleId,
-          "sale",
-          `Item removed from Sale #${saleId} - stock restored`,
-          userId,
-          paymentMethod,
-          saleStatus,
-          { customerName }
-        )
-      }
-    }
+  // NEON COMPATIBLE: Create stock history entries individually but in parallel
+  const allHistoryEntries = [...productsToUpdate, ...servicesToLog]
+  if (allHistoryEntries.length > 0) {
+    await batchInsertStockHistoryNeonCompatible(allHistoryEntries, saleId, status, paymentMethod, userId, customerName)
   }
+
+  console.log(`Processed ${productsToUpdate.length} stock updates and ${allHistoryEntries.length} history entries`)
 }
+
+// OPTIMIZATION HELPER: Batch insert stock history entries (Neon compatible)
+async function batchInsertStockHistoryNeonCompatible(items: any[], saleId: number, status: string, paymentMethod: string, userId: number, customerName?: string) {
+  const historyType = getStockHistoryType('sale', status, paymentMethod)
+  const methodLabel = PAYMENT_METHOD_LABELS[paymentMethod?.toLowerCase()] || paymentMethod
+  const baseNotes = `New sale created - ${status} via ${methodLabel}`
+  const enhancedNotes = customerName ? `${baseNotes} | Customer: ${customerName}` : baseNotes
+
+  // NEON COMPATIBLE: Create stock history entries in parallel individual queries
+  const historyPromises = items.map(item => {
+    const quantity = item.isService ? 0 : item.quantity // Services don't affect stock quantity
+    return createStockHistoryEntry(
+      item.productId,
+      historyType,
+      item.isService ? 0 : -quantity, // Negative for stock reduction
+      saleId,
+      'sale',
+      enhancedNotes,
+      userId,
+      paymentMethod,
+      status
+    )
+  })
+
+  await Promise.all(historyPromises)
+  console.log(`Created ${items.length} stock history entries`)
+}
+
+
+
+
+// OPTIMIZATION HELPER: Efficient sale type update
+async function updateSaleType(saleId: number, validatedItems: any[], schema: any) {
+  if (!schema.hasSaleType) return
+
+  const hasService = validatedItems.some(item => item.isService)
+  const saleType = hasService ? "service" : "product"
+
+  await sql`UPDATE sales SET sale_type = ${saleType} WHERE id = ${saleId}`
+}
+
+// OPTIMIZATION HELPER: Async accounting record (doesn't block main flow)
+async function recordSaleTransactionAsync(transactionData: any) {
+  // Use setTimeout to make this truly async and not block the main transaction
+  setTimeout(async () => {
+    try {
+      const accountingResult = await recordSaleTransaction(transactionData)
+      if (!accountingResult.success) {
+        console.error("Failed to record accounting transaction:", accountingResult.error)
+      }
+    } catch (error) {
+      console.error("Error recording accounting transaction:", error)
+    }
+  }, 0)
+}
+
 
 // Consolidated and enhanced updateSale function
 export async function updateSale(saleData: any) {
@@ -1513,93 +1500,353 @@ export async function updateSale(saleData: any) {
   }
 }
 
-// Enhanced deleteSale function with comprehensive stock restoration
-export async function deleteSale(saleId: number, deviceId: number) {
-  if (!saleId || !deviceId) {
-    return { success: false, message: "Sale ID and Device ID are required" }
+// Missing helper functions for the updateSale functionality
+
+// Function to calculate all changes between original and new sale data
+function calculateSaleChanges(original: any, saleData: any, originalItems: any[], newItems: any[]) {
+  // Parse original values with proper defaults
+  const originalTotal = Number(original.total_amount) || 0
+  const originalDiscount = Number(original.discount) || 0
+  const originalReceived = Number(original.received_amount) || 0
+  const originalStatus = (original.status || "completed").toLowerCase()
+  const originalPaymentMethod = original.payment_method || "cash"
+  const originalDate = new Date(original.sale_date)
+
+  // Parse new values
+  const newSubtotal = saleData.items.reduce(
+    (sum: number, item: any) => sum + Number(item.price) * Number(item.quantity),
+    0
+  )
+  const newDiscount = Number(saleData.discount) || 0
+  const newTotal = Math.max(0, newSubtotal - newDiscount)
+  const newStatus = (saleData.paymentStatus || "completed").toLowerCase()
+  const newPaymentMethod = saleData.paymentMethod || "cash"
+  const newDate = new Date(saleData.saleDate || new Date())
+
+  // Calculate received amount based on status
+  let newReceived = 0
+  if (newStatus === "completed" || newStatus === "paid") {
+    newReceived = newTotal
+  } else if (newStatus === "cancelled") {
+    newReceived = 0
+  } else if (newStatus === "credit" || newStatus === "partial") {
+    newReceived = Number(saleData.receivedAmount) || 0
+  } else if (newStatus === "pending") {
+    newReceived = Number(saleData.receivedAmount) || 0
+  } else {
+    newReceived = newTotal // Default for other statuses
+  }
+
+  // Calculate outstanding amount
+  const outstandingAmount = Math.max(0, newTotal - newReceived)
+
+  // Check for changes
+  const dateChanged = originalDate.getTime() !== newDate.getTime()
+  const statusChanged = originalStatus !== newStatus
+  const paymentMethodChanged = originalPaymentMethod !== newPaymentMethod
+  const totalChanged = Math.abs(originalTotal - newTotal) > 0.01
+  const discountChanged = Math.abs(originalDiscount - newDiscount) > 0.01
+  const receivedChanged = Math.abs(originalReceived - newReceived) > 0.01
+
+  // Check if items changed (basic comparison)
+  const itemsChanged = checkItemsChanged(originalItems, newItems)
+
+  return {
+    // Original values
+    originalTotal,
+    originalDiscount,
+    originalReceived,
+    originalStatus,
+    originalPaymentMethod,
+    originalDate,
+
+    // New values
+    newTotal,
+    newDiscount,
+    newReceived,
+    newStatus,
+    newPaymentMethod,
+    newDate,
+    outstandingAmount,
+
+    // Change flags
+    dateChanged,
+    statusChanged,
+    paymentMethodChanged,
+    totalChanged,
+    discountChanged,
+    receivedChanged,
+    itemsChanged,
+  }
+}
+
+// Helper function to check if items have changed
+function checkItemsChanged(originalItems: any[], newItems: any[]): boolean {
+  if (originalItems.length !== newItems.length) {
+    return true
+  }
+
+  // Create maps for comparison
+  const originalMap = new Map()
+  originalItems.forEach(item => {
+    originalMap.set(item.id || `temp_${item.product_id}`, {
+      productId: item.product_id,
+      quantity: Number(item.quantity),
+      price: Number(item.price)
+    })
+  })
+
+  const newMap = new Map()
+  newItems.forEach(item => {
+    newMap.set(item.id || `temp_${item.productId}`, {
+      productId: item.productId,
+      quantity: Number(item.quantity),
+      price: Number(item.price)
+    })
+  })
+
+  // Check if any item changed
+  for (const [id, originalItem] of originalMap.entries()) {
+    const newItem = newMap.get(id)
+    if (!newItem) {
+      return true // Item was deleted
+    }
+
+    if (
+      originalItem.productId !== newItem.productId ||
+      originalItem.quantity !== newItem.quantity ||
+      Math.abs(originalItem.price - newItem.price) > 0.01
+    ) {
+      return true // Item was modified
+    }
+  }
+
+  // Check for new items
+  for (const id of newMap.keys()) {
+    if (!originalMap.has(id)) {
+      return true // New item was added
+    }
+  }
+
+  return false
+}
+
+// Function to handle item-level stock changes when items are modified
+async function handleItemStockChanges(
+  originalItems: any[],
+  newItems: any[],
+  saleId: number,
+  status: string,
+  paymentMethod: string,
+  userId: number,
+  customerName?: string
+) {
+  const statusImpact = shouldAffectStock(status)
+  
+  // Only process stock changes if the current status affects stock
+  if (!statusImpact.affectsStock || !statusImpact.reduces) {
+    console.log(`Skipping item stock changes - status ${status} doesn't affect stock`)
+    return
+  }
+
+  console.log(`Processing item-level stock changes for status: ${status}`)
+
+  // Create maps for easier comparison
+  const originalMap = new Map()
+  originalItems.forEach(item => {
+    originalMap.set(item.product_id, {
+      id: item.id,
+      productId: item.product_id,
+      quantity: Number(item.quantity)
+    })
+  })
+
+  const newMap = new Map()
+  newItems.forEach(item => {
+    const key = item.productId
+    if (newMap.has(key)) {
+      // If duplicate product IDs, sum the quantities
+      newMap.get(key).quantity += Number(item.quantity)
+    } else {
+      newMap.set(key, {
+        id: item.id,
+        productId: item.productId,
+        quantity: Number(item.quantity)
+      })
+    }
+  })
+
+  // Process changes for each product
+  const allProductIds = new Set([...originalMap.keys(), ...newMap.keys()])
+
+  for (const productId of allProductIds) {
+    const originalItem = originalMap.get(productId)
+    const newItem = newMap.get(productId)
+
+    const originalQty = originalItem ? originalItem.quantity : 0
+    const newQty = newItem ? newItem.quantity : 0
+    const qtyDiff = newQty - originalQty
+
+    if (qtyDiff === 0) {
+      continue // No quantity change for this product
+    }
+
+    try {
+      if (qtyDiff > 0) {
+        // Quantity increased - reduce stock further
+        const stockResult = await updateProductStock(
+          productId,
+          qtyDiff,
+          "subtract",
+          `Sale update - quantity increased by ${qtyDiff}`
+        )
+
+        if (stockResult.success && !stockResult.isService) {
+          await createStockHistoryEntry(
+            productId,
+            'sale_item_increased',
+            -qtyDiff, // Negative because we're reducing stock
+            saleId,
+            'sale',
+            `Sale item quantity increased by ${qtyDiff} units | Status: ${status} | Payment: ${paymentMethod}${customerName ? ` | Customer: ${customerName}` : ''}`,
+            userId,
+            paymentMethod,
+            status
+          )
+        }
+      } else {
+        // Quantity decreased - restore some stock
+        const stockResult = await updateProductStock(
+          productId,
+          Math.abs(qtyDiff),
+          "add",
+          `Sale update - quantity decreased by ${Math.abs(qtyDiff)}`
+        )
+
+        if (stockResult.success && !stockResult.isService) {
+          await createStockHistoryEntry(
+            productId,
+            'sale_item_decreased',
+            Math.abs(qtyDiff), // Positive because we're restoring stock
+            saleId,
+            'sale',
+            `Sale item quantity decreased by ${Math.abs(qtyDiff)} units | Status: ${status} | Payment: ${paymentMethod}${customerName ? ` | Customer: ${customerName}` : ''}`,
+            userId,
+            paymentMethod,
+            status
+          )
+        }
+      }
+
+      console.log(`Stock updated for product ${productId}: quantity change ${qtyDiff}`)
+    } catch (error) {
+      console.error(`Error updating stock for product ${productId}:`, error)
+    }
+  }
+
+  console.log("Item-level stock changes processed successfully")
+}
+
+// Enhanced delete sale function with proper stock restoration
+export async function deleteSale(saleId: number, deviceId?: number, userId?: number) {
+  if (!saleId) {
+    return { success: false, message: "Sale ID is required" }
   }
 
   resetConnectionState()
 
   try {
     await ensureStockHistoryTable()
-    
-    return await executeWithRetry(async () => {
-      await sql`BEGIN`
+    await sql`BEGIN`
 
-      try {
-        // Get sale information
-        const saleInfo = await sql`
-          SELECT s.*, c.name as customer_name FROM sales s
+    try {
+      // Get sale details first
+      let saleQuery
+      if (deviceId) {
+        saleQuery = await sql`
+          SELECT s.*, c.name as customer_name
+          FROM sales s
           LEFT JOIN customers c ON s.customer_id = c.id
           WHERE s.id = ${saleId} AND s.device_id = ${deviceId}
         `
-
-        if (saleInfo.length === 0) {
-          await sql`ROLLBACK`
-          return { success: false, message: "Sale not found" }
-        }
-
-        const sale = saleInfo[0]
-        const status = sale.status
-        const paymentMethod = sale.payment_method || "cash"
-        const userId = sale.created_by
-        const customerName = sale.customer_name
-
-        // Get sale items to restore stock
-        const saleItems = await sql`
-          SELECT product_id, quantity
-          FROM sale_items
-          WHERE sale_id = ${saleId}
+      } else {
+        saleQuery = await sql`
+          SELECT s.*, c.name as customer_name
+          FROM sales s
+          LEFT JOIN customers c ON s.customer_id = c.id
+          WHERE s.id = ${saleId}
         `
-
-        // Handle stock restoration using the enhanced stock change handler
-        console.log(`Processing stock restoration for deleted sale - Status was: ${status}`)
-        await handleStockChange(
-          saleItems.map(item => ({ productId: item.product_id, quantity: item.quantity })),
-          saleId,
-          status,
-          paymentMethod,
-          'delete',
-          userId,
-          undefined,
-          customerName
-        )
-
-        // Delete accounting entries for this sale
-        try {
-          await deleteSaleTransaction(saleId, deviceId)
-        } catch (accountingError) {
-          console.error("Error deleting accounting records:", accountingError)
-          // Continue with sale deletion even if accounting cleanup fails
-        }
-
-        // Delete sale items
-        await sql`DELETE FROM sale_items WHERE sale_id = ${saleId}`
-
-        // Delete the sale with device_id check
-        const result = await sql`DELETE FROM sales WHERE id = ${saleId} AND device_id = ${deviceId} RETURNING id`
-
-        if (result.length === 0) {
-          await sql`ROLLBACK`
-          return { success: false, message: "Failed to delete sale" }
-        }
-
-        await sql`COMMIT`
-        revalidatePath("/dashboard")
-        
-        console.log(`Sale ${saleId} deleted successfully with comprehensive stock tracking`)
-        return { success: true, message: "Sale deleted successfully" }
-      } catch (error) {
-        await sql`ROLLBACK`
-        throw error
       }
-    })
+
+      if (saleQuery.length === 0) {
+        await sql`ROLLBACK`
+        return { success: false, message: "Sale not found" }
+      }
+
+      const sale = saleQuery[0]
+
+      // Get sale items
+      const items = await sql`
+        SELECT product_id, quantity FROM sale_items WHERE sale_id = ${saleId}
+      `
+
+      // Handle stock restoration using the comprehensive stock change handler
+      await handleStockChange(
+        items.map(item => ({ productId: item.product_id, quantity: item.quantity })),
+        saleId,
+        sale.status || 'completed',
+        sale.payment_method || 'cash',
+        'delete',
+        userId,
+        undefined,
+        sale.customer_name
+      )
+
+      // Delete sale items first (due to foreign key constraint)
+      await sql`DELETE FROM sale_items WHERE sale_id = ${saleId}`
+
+      // Delete the sale
+      await sql`DELETE FROM sales WHERE id = ${saleId}`
+
+      // Record accounting transaction for deletion
+      try {
+        const cogsAmount = await calculateCOGS([], saleId)
+        
+        await deleteSaleTransaction({
+          saleId,
+          totalAmount: Number(sale.total_amount) || 0,
+          cogsAmount,
+          receivedAmount: Number(sale.received_amount) || Number(sale.total_amount) || 0,
+          status: sale.status || 'completed',
+          paymentMethod: sale.payment_method || 'cash',
+          deviceId: deviceId || null,
+          userId: userId || null,
+          customerId: sale.customer_id || null,
+          saleDate: new Date(sale.sale_date),
+          deletionReason: 'Sale deleted by user'
+        })
+      } catch (accountingError) {
+        console.error("Error recording sale deletion in accounting:", accountingError)
+      }
+
+      await sql`COMMIT`
+      revalidatePath("/dashboard")
+
+      console.log(`Sale ${saleId} deleted successfully with stock restoration`)
+
+      return {
+        success: true,
+        message: "Sale deleted successfully",
+      }
+    } catch (error) {
+      await sql`ROLLBACK`
+      throw error
+    }
   } catch (error) {
     console.error("Delete sale error:", error)
     return {
       success: false,
-      message: `Database error: ${getLastError()?.message || "Unknown error"}. Please try again later.`,
+      message: `Database error: ${getLastError()?.message || error.message}. Please try again later.`,
     }
   }
 }

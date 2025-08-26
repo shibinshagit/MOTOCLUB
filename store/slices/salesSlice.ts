@@ -11,7 +11,15 @@ interface Sale {
   status: string
   created_at: string
   updated_at: string
-  total_cost?: number // Add this
+  total_cost?: number
+}
+
+interface PaginationInfo {
+  currentPage: number
+  totalPages: number
+  totalCount: number
+  hasMore: boolean
+  limit: number
 }
 
 interface SalesState {
@@ -19,11 +27,14 @@ interface SalesState {
   filteredSales: Sale[]
   isLoading: boolean
   isRefreshing: boolean
-  isSilentRefreshing: boolean // Add this for background updates
+  isSilentRefreshing: boolean
   lastUpdated: string | null
-  fetchedTime: number | null // Add this to track exact fetch time
+  fetchedTime: number | null
   error: string | null
-  needsRefresh: boolean // Add this to indicate stale data
+  needsRefresh: boolean
+  
+  // Pagination state
+  pagination: PaginationInfo
 
   // Filter states
   searchTerm: string
@@ -49,6 +60,15 @@ const initialState: SalesState = {
   fetchedTime: null,
   error: null,
   needsRefresh: false,
+  
+  // Pagination state
+  pagination: {
+    currentPage: 1,
+    totalPages: 1,
+    totalCount: 0,
+    hasMore: false,
+    limit: 5
+  },
 
   // Filter states
   searchTerm: "",
@@ -64,12 +84,50 @@ const initialState: SalesState = {
   currency: "AED",
 }
 
+interface SetSalesWithPaginationPayload {
+  data: Sale[]
+  pagination: {
+    currentPage: number
+    totalPages: number
+    totalCount: number
+    hasMore: boolean
+  }
+  append?: boolean // For load more functionality
+}
+
 const salesSlice = createSlice({
   name: "sales",
   initialState,
   reducers: {
     setSales: (state, action: PayloadAction<Sale[]>) => {
       state.sales = action.payload
+      state.fetchedTime = Date.now()
+      state.lastUpdated = new Date().toISOString()
+      state.error = null
+      state.needsRefresh = false
+    },
+
+    setSalesWithPagination: (state, action: PayloadAction<SetSalesWithPaginationPayload>) => {
+      const { data, pagination, append = false } = action.payload
+      
+      if (append) {
+        // Append new data for "load more"
+        const existingIds = new Set(state.sales.map(sale => sale.id))
+        const newSales = data.filter(sale => !existingIds.has(sale.id))
+        state.sales = [...state.sales, ...newSales]
+      } else {
+        // Replace all data for new search/filter
+        state.sales = data
+      }
+      
+      state.pagination = {
+        ...state.pagination,
+        currentPage: pagination.currentPage,
+        totalPages: pagination.totalPages,
+        totalCount: pagination.totalCount,
+        hasMore: pagination.hasMore
+      }
+      
       state.fetchedTime = Date.now()
       state.lastUpdated = new Date().toISOString()
       state.error = null
@@ -104,9 +162,25 @@ const salesSlice = createSlice({
       state.error = action.payload
     },
 
+    setPaginationLimit: (state, action: PayloadAction<number>) => {
+      state.pagination.limit = action.payload
+    },
+
+    resetPagination: (state) => {
+      state.pagination = {
+        currentPage: 1,
+        totalPages: 1,
+        totalCount: 0,
+        hasMore: false,
+        limit: state.pagination.limit
+      }
+    },
+
     // Filter actions
     setSearchTerm: (state, action: PayloadAction<string>) => {
       state.searchTerm = action.payload
+      // Reset pagination when search changes
+      state.pagination.currentPage = 1
     },
 
     setStatusFilter: (state, action: PayloadAction<string>) => {
@@ -150,11 +224,13 @@ const salesSlice = createSlice({
       state.dateToFilter = ""
       state.minAmountFilter = ""
       state.maxAmountFilter = ""
+      state.pagination.currentPage = 1
     },
 
     // Add new sale to the list
     addSale: (state, action: PayloadAction<Sale>) => {
       state.sales.unshift(action.payload)
+      state.pagination.totalCount += 1
       state.lastUpdated = new Date().toISOString()
     },
 
@@ -170,6 +246,7 @@ const salesSlice = createSlice({
     // Remove sale from the list
     removeSale: (state, action: PayloadAction<number>) => {
       state.sales = state.sales.filter((sale) => sale.id !== action.payload)
+      state.pagination.totalCount = Math.max(0, state.pagination.totalCount - 1)
       state.lastUpdated = new Date().toISOString()
     },
 
@@ -195,12 +272,20 @@ const salesSlice = createSlice({
       state.lastUpdated = null
       state.needsRefresh = false
       state.error = null
+      state.pagination = {
+        currentPage: 1,
+        totalPages: 1,
+        totalCount: 0,
+        hasMore: false,
+        limit: state.pagination.limit
+      }
     },
   },
 })
 
 export const {
   setSales,
+  setSalesWithPagination,
   updateSalesData,
   setFilteredSales,
   setLoading,
@@ -210,6 +295,8 @@ export const {
   setFetchedTime,
   forceClearSales,
   setError,
+  setPaginationLimit,
+  resetPagination,
   setSearchTerm,
   setStatusFilter,
   setPaymentMethodFilter,
@@ -233,6 +320,13 @@ export const selectSalesLoading = (state: { sales: SalesState }) => state.sales.
 export const selectSalesRefreshing = (state: { sales: SalesState }) => state.sales.isRefreshing
 export const selectSalesLastUpdated = (state: { sales: SalesState }) => state.sales.lastUpdated
 export const selectSalesError = (state: { sales: SalesState }) => state.sales.error
+
+// Pagination selectors
+export const selectSalesPagination = (state: { sales: SalesState }) => state.sales.pagination
+export const selectSalesHasMore = (state: { sales: SalesState }) => state.sales.pagination.hasMore
+export const selectSalesCurrentPage = (state: { sales: SalesState }) => state.sales.pagination.currentPage
+export const selectSalesTotalPages = (state: { sales: SalesState }) => state.sales.pagination.totalPages
+export const selectSalesTotalCount = (state: { sales: SalesState }) => state.sales.pagination.totalCount
 
 // Filter selectors
 export const selectSalesSearchTerm = (state: { sales: SalesState }) => state.sales.searchTerm
