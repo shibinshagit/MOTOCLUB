@@ -155,6 +155,15 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
   const showFilters = useSelector(selectSalesShowFilters)
   const currency = useSelector(selectSalesCurrency)
 
+  // Pagination state from Redux
+  const {
+    currentPage,
+    totalPages,
+    totalCount,
+    hasMore,
+    limit,
+  } = useSelector(selectSalesPagination)
+
   // Privacy mode state - enabled by default
   const [privacyMode, setPrivacyMode] = useState(true)
 
@@ -225,17 +234,6 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
     lastFetchTime: 0,
     isCurrentlyFetching: false,
   })
-
-
-  // Pagination state from Redux
-const {
-  currentPage,
-  totalPages,
-  totalCount,
-  hasMore,
-  limit,
-} = useSelector(selectSalesPagination)
-
 
   // Debounce timer for barcode input
   const barcodeTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -338,85 +336,81 @@ const {
   }, [dateFromFilter, dateToFilter, dispatch])
 
   // Centralized fetch function with proper duplicate prevention
-const fetchSalesFromAPI = useCallback(
-  async (page: number = 1, silent = false, append = false) => {
-    if (!deviceId) {
-      dispatch(setError("Device ID not found"))
-      return
-    }
-    if (initializationRef.current.isCurrentlyFetching) {
-      return
-    }
-    const now = Date.now()
-    if (now - initializationRef.current.lastFetchTime < 1000) {
-      return
-    }
-
-    try {
-      initializationRef.current.isCurrentlyFetching = true
-      initializationRef.current.lastFetchTime = now
-
-      if (!silent) {
-        dispatch(setLoading(true))
-      } else {
-        dispatch(setSilentRefreshing(true))
+  const fetchSalesFromAPI = useCallback(
+    async (page: number = 1, silent = false, append = false) => {
+      if (!deviceId) {
+        dispatch(setError("Device ID not found"))
+        return
       }
-      dispatch(setError(null))
-
-      // ✅ use limit & searchTerm from useSelector
-      const offset = (page - 1) * limit
-
-      const result = await getUserSales(deviceId, limit, searchTerm, offset)
-
-      if (result.success) {
-        const serializedData = result.data.map((sale: any) => ({
-          ...sale,
-          sale_date:
-            sale.sale_date && typeof sale.sale_date === "object" && sale.sale_date !== null
-              ? sale.sale_date.toISOString()
-              : sale.sale_date || "",
-          created_at:
-            sale.created_at && typeof sale.created_at === "object" && sale.created_at !== null
-              ? sale.created_at.toISOString()
-              : sale.created_at || "",
-          updated_at:
-            sale.updated_at && typeof sale.updated_at === "object" && sale.updated_at !== null
-              ? sale.updated_at.toISOString()
-              : sale.updated_at || "",
-        }))
-
-        dispatch(
-          setSalesWithPagination({
-            data: serializedData,
-            pagination: {
-              currentPage: result.currentPage ?? page, // ✅ fallback to requested page
-              totalPages: result.totalPages ?? (Math.ceil(result.total / limit) || 1), // ✅ fixed
-              totalCount: result.total ?? serializedData.length,
-              hasMore: result.hasMore ?? (page < (result.totalPages ?? 1)),
-            },
-            append,
-          })
-        )
-
-
-        initializationRef.current.hasInitialized = true
-      } else {
-        dispatch(setError(result.message || "Failed to load sales"))
+      if (initializationRef.current.isCurrentlyFetching) {
+        return
       }
-    } catch (error) {
-      console.error("Fetch sales error:", error)
-      dispatch(setError("An error occurred while loading sales"))
-    } finally {
-      dispatch(setLoading(false))
-      dispatch(setSilentRefreshing(false))
-      initializationRef.current.isCurrentlyFetching = false
-    }
-  },
-  [deviceId, dispatch, limit, searchTerm] // ✅ add limit & searchTerm as deps
-)
+      const now = Date.now()
+      if (now - initializationRef.current.lastFetchTime < 1000) {
+        return
+      }
 
+      try {
+        initializationRef.current.isCurrentlyFetching = true
+        initializationRef.current.lastFetchTime = now
 
+        if (!silent) {
+          dispatch(setLoading(true))
+        } else {
+          dispatch(setSilentRefreshing(true))
+        }
+        dispatch(setError(null))
 
+        // ✅ use limit & searchTerm from useSelector
+        const offset = (page - 1) * limit
+
+        const result = await getUserSales(deviceId, limit, searchTerm, offset)
+
+        if (result.success) {
+          const serializedData = result.data.map((sale: any) => ({
+            ...sale,
+            sale_date:
+              sale.sale_date && typeof sale.sale_date === "object" && sale.sale_date !== null
+                ? sale.sale_date.toISOString()
+                : sale.sale_date || "",
+            created_at:
+              sale.created_at && typeof sale.created_at === "object" && sale.created_at !== null
+                ? sale.created_at.toISOString()
+                : sale.created_at || "",
+            updated_at:
+              sale.updated_at && typeof sale.updated_at === "object" && sale.updated_at !== null
+                ? sale.updated_at.toISOString()
+                : sale.updated_at || "",
+          }))
+
+          dispatch(
+            setSalesWithPagination({
+              data: serializedData,
+              pagination: {
+                currentPage: result.currentPage ?? page, // ✅ fallback to requested page
+                totalPages: result.totalPages ?? (Math.ceil(result.total / limit) || 1), // ✅ fixed
+                totalCount: result.total ?? serializedData.length,
+                hasMore: result.hasMore ?? (page < (result.totalPages ?? 1)),
+              },
+              append,
+            })
+          )
+
+          initializationRef.current.hasInitialized = true
+        } else {
+          dispatch(setError(result.message || "Failed to load sales"))
+        }
+      } catch (error) {
+        console.error("Fetch sales error:", error)
+        dispatch(setError("An error occurred while loading sales"))
+      } finally {
+        dispatch(setLoading(false))
+        dispatch(setSilentRefreshing(false))
+        initializationRef.current.isCurrentlyFetching = false
+      }
+    },
+    [deviceId, dispatch, limit, searchTerm] // ✅ add limit & searchTerm as deps
+  )
 
   // Single initialization effect (optimized)
   useEffect(() => {
@@ -721,9 +715,7 @@ const fetchSalesFromAPI = useCallback(
     setIsNewServiceModalOpen(false)
   }
 
-  // FIXED: Enhanced barcode input handler to support both barcode and product name search
-  // Replace the handleBarcodeInput function in your SaleTab component with this fixed version
-
+  // Enhanced barcode input handler to support both barcode and product name search
   const handleBarcodeInput = async (input: string) => {
     if (!input || input.trim().length === 0) {
       setBarcodeAlert({
@@ -1041,57 +1033,114 @@ const fetchSalesFromAPI = useCallback(
     }
   }
 
-  const handleSubmitSale = async (e: React.FormEvent) => {
-    e.preventDefault()
-
+  const validateSaleForm = () => {
+    // Check if device ID exists
     if (!deviceId) {
       setFormAlert({
         type: "error",
         message: "Device ID not found. Please refresh the page.",
       })
-      return
+      return false
     }
 
+    // Check if staff is selected
     if (!staffId) {
       setFormAlert({
         type: "error",
         message: "Please select a staff member",
       })
-      return
+      return false
     }
 
-    const validItems = products
-      .filter((p) => p.productId !== null)
-      .map((p) => ({
-        id: p.originalItemId, // Include for edit mode
-        productId: p.productId,
-        quantity: p.quantity,
-        price: p.price,
-        cost: p.cost || 0,
-        notes: p.notes || "",
-        isService: p.isService,
-        serviceId: p.serviceId,
-      }))
-
+    // Check if at least one product is added
+    const validItems = products.filter((p) => p.productId !== null)
     if (validItems.length === 0) {
       setFormAlert({
         type: "error",
         message: "Please add at least one item to the sale",
       })
-      return
+      return false
     }
 
+    // Validate product quantities
+    for (const product of validItems) {
+      if (product.quantity < 1) {
+        setFormAlert({
+          type: "error",
+          message: `Quantity for ${product.productName} must be at least 1`,
+        })
+        return false
+      }
+
+      if (product.stock !== undefined && product.stock !== 999 && product.quantity > product.stock) {
+        setFormAlert({
+          type: "error",
+          message: `Only ${product.stock} units available for ${product.productName}`,
+        })
+        return false
+      }
+
+      if (product.price <= 0) {
+        setFormAlert({
+          type: "error",
+          message: `Price for ${product.productName} must be greater than 0`,
+        })
+        return false
+      }
+    }
+
+    // Validate received amount for credit sales
     if (status === "Credit" && receivedAmount > totalAmount) {
       setFormAlert({
         type: "error",
         message: "Received amount cannot be greater than total amount",
       })
+      return false
+    }
+
+    // Validate discount amount
+    if (discountAmount < 0) {
+      setFormAlert({
+        type: "error",
+        message: "Discount amount cannot be negative",
+      })
+      return false
+    }
+
+    if (discountAmount > subtotal) {
+      setFormAlert({
+        type: "error",
+        message: "Discount amount cannot be greater than subtotal",
+      })
+      return false
+    }
+
+    return true
+  }
+
+  const handleSubmitSale = async (e: React.FormEvent) => {
+    e.preventDefault()
+
+    if (!validateSaleForm()) {
       return
     }
 
     setIsSubmitting(true)
 
     try {
+      const validItems = products
+        .filter((p) => p.productId !== null)
+        .map((p) => ({
+          id: p.originalItemId, // Include for edit mode
+          productId: p.productId,
+          quantity: p.quantity,
+          price: p.price,
+          cost: p.cost || 0,
+          notes: p.notes || "",
+          isService: p.isService,
+          serviceId: p.serviceId,
+        }))
+
       if (isEditMode && editingSaleId) {
         // Update existing sale
         const saleData = {
@@ -1298,7 +1347,7 @@ const fetchSalesFromAPI = useCallback(
     return "Custom"
   }
 
-  // FIXED: Handle forced refresh - properly reset state
+  // Handle forced refresh - properly reset state
   const handleForcedRefresh = () => {
     console.log("Forced refresh initiated...")
 
@@ -1513,7 +1562,7 @@ const fetchSalesFromAPI = useCallback(
               </Badge>
             </div>
 
-            {/* FIXED: Action buttons with better responsive layout */}
+            {/* Action buttons with better responsive layout */}
             <div className="flex items-center justify-between pt-2 border-t border-gray-100 dark:border-gray-700">
               <Button
                 onClick={(e) => {
@@ -1561,7 +1610,6 @@ const fetchSalesFromAPI = useCallback(
     }
   }, [])
 
-  // --- UI STARTS HERE ---
   return (
     <div className="min-h-[calc(100vh-100px)] bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 p-2 sm:p-3">
       <div className="flex flex-col xl:flex-row gap-3 h-full">
@@ -1590,7 +1638,7 @@ const fetchSalesFromAPI = useCallback(
               <div className="flex flex-col lg:flex-row h-full min-h-0">
                 {/* Products section */}
                 <div className="flex-1 lg:w-[70%] flex flex-col border-b lg:border-b-0 lg:border-r border-gray-200 dark:border-gray-700 min-h-0 overflow-y-auto">
-                  {/* Barcode scanner and product table (unchanged) */}
+                  {/* Barcode scanner and product table */}
                   <div className="p-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
                     <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                       <div className="relative flex-1">
@@ -2190,7 +2238,7 @@ const fetchSalesFromAPI = useCallback(
           </Card>
         </div>
 
-        {/* Right side - Summary and Sales List - unchanged */}
+        {/* Right side - Summary and Sales List */}
         <div className="w-full xl:w-1/4 flex flex-col space-y-3 min-h-0">
           {/* Summary Cards - responsive grid */}
           <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-3 gap-2">
@@ -2458,17 +2506,17 @@ const fetchSalesFromAPI = useCallback(
               </div>
 
               <div className="p-2 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
-              <Pagination
-                currentPage={currentPage}
-                totalPages={totalPages}
-                totalCount={totalCount}
-                itemsPerPage={limit}
-                onPageChange={(page) => fetchSalesFromAPI(page, false, false)}
-                isLoading={isLoading}
-                hasMore={hasMore}
-                showLoadMore={false} // toggle true if you want "Load More"
-              />
-            </div>
+                <Pagination
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                  totalCount={totalCount}
+                  itemsPerPage={limit}
+                  onPageChange={(page) => fetchSalesFromAPI(page, false, false)}
+                  isLoading={isLoading}
+                  hasMore={hasMore}
+                  showLoadMore={false} // toggle true if you want "Load More"
+                />
+              </div>
             </CardContent>
           </Card>
         </div>
@@ -2553,4 +2601,3 @@ const fetchSalesFromAPI = useCallback(
     </div>
   )
 }
-
