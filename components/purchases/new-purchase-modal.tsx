@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -47,7 +47,7 @@ export default function NewPurchaseModal({
   onPurchaseAdded,
 }: NewPurchaseModalProps) {
   const dispatch = useDispatch()
-  const isSubmittingRef = useRef(false) // Prevent double submissions
+  const isSubmittingRef = useRef(false)
   const [localCurrency, setLocalCurrency] = useState(currency)
   const [date, setDate] = useState<Date>(new Date())
   const [supplier, setSupplier] = useState("")
@@ -75,100 +75,62 @@ export default function NewPurchaseModal({
 
   const { showNotification } = useNotification()
 
-  // Memoize calculations to prevent unnecessary recalculations
-  const { subtotal, taxAmount, totalAmount } = useMemo(() => {
-    const newSubtotal = products.reduce((sum, product) => sum + product.total, 0)
-    const newTaxAmount = newSubtotal * (taxRate / 100)
-    const newTotalAmount = newSubtotal + newTaxAmount - discountAmount
-    
-    return {
-      subtotal: newSubtotal,
-      taxAmount: newTaxAmount,
-      totalAmount: newTotalAmount
-    }
-  }, [products, taxRate, discountAmount])
+  // Calculate subtotal, tax, total
+  const subtotal = products.reduce((sum, product) => sum + product.total, 0)
+  const taxAmount = subtotal * (taxRate / 100)
+  const totalAmount = subtotal + taxAmount - discountAmount
 
-  // Get device currency only once when modal opens (with caching)
+  // Fetch device currency on open
   useEffect(() => {
     let isMounted = true
-    
-    const fetchCurrency = async () => {
-      if (!isOpen) return
-
-      try {
-        const deviceCurrency = await getDeviceCurrency(userId)
-        if (isMounted) {
-          setLocalCurrency(deviceCurrency)
-        }
-      } catch (err) {
-        console.error("Error fetching currency:", err)
-        if (isMounted) {
-          setLocalCurrency("QAR") // Fallback
-        }
-      }
-    }
-
-    fetchCurrency()
-    
-    return () => {
-      isMounted = false
-    }
+    if (!isOpen) return
+    getDeviceCurrency(userId)
+      .then((deviceCurrency) => {
+        if (isMounted) setLocalCurrency(deviceCurrency)
+      })
+      .catch(() => {
+        if (isMounted) setLocalCurrency("QAR")
+      })
+    return () => { isMounted = false }
   }, [isOpen, userId])
 
-  // Reset form when modal closes - optimized with useCallback
-  const resetForm = useCallback(() => {
-    setDate(new Date())
-    setSupplier("")
-    setStatus("Credit")
-    setPurchaseStatus("Delivered")
-    setPaymentMethod("Cash")
-    setReceivedAmount(0)
-    setProducts([
-      {
-        id: crypto.randomUUID(),
-        productId: null,
-        productName: "",
-        quantity: 1,
-        price: 0,
-        total: 0,
-        wholesalePrice: 0,
-      },
-    ])
-    setTaxRate(0)
-    setDiscountAmount(0)
-    setFormAlert(null)
-    setActiveProductRowId(null)
-    isSubmittingRef.current = false
-  }, [])
-
+  // Reset form when modal closes
   useEffect(() => {
     if (!isOpen) {
-      resetForm()
-    }
-  }, [isOpen, resetForm])
-
-  // Auto-adjust received amount based on status - optimized
-  useEffect(() => {
-    if (status === "Paid") {
-      setReceivedAmount(totalAmount)
-    } else if (status === "Cancelled") {
+      setDate(new Date())
+      setSupplier("")
+      setStatus("Credit")
+      setPurchaseStatus("Delivered")
+      setPaymentMethod("Cash")
       setReceivedAmount(0)
+      setProducts([
+        {
+          id: crypto.randomUUID(),
+          productId: null,
+          productName: "",
+          quantity: 1,
+          price: 0,
+          total: 0,
+          wholesalePrice: 0,
+        },
+      ])
+      setTaxRate(0)
+      setDiscountAmount(0)
+      setFormAlert(null)
+      setActiveProductRowId(null)
+      isSubmittingRef.current = false
     }
+  }, [isOpen])
+
+  // Auto-adjust received amount based on status
+  useEffect(() => {
+    if (status === "Paid") setReceivedAmount(totalAmount)
+    else if (status === "Cancelled") setReceivedAmount(0)
   }, [status, totalAmount])
 
-  // Handle status change - memoized
-  const handleStatusChange = useCallback((newStatus: string) => {
-    setStatus(newStatus)
-    if (newStatus === "Paid") {
-      setReceivedAmount(totalAmount)
-    } else if (newStatus === "Cancelled") {
-      setReceivedAmount(0)
-    }
-  }, [totalAmount])
-
-  // Add a new product row - memoized
-  const addProductRow = useCallback(() => {
-    setProducts(prev => [
+  // Add a new product row
+  const addProductRow = () => {
+    setProducts((prev) => [
       ...prev,
       {
         id: crypto.randomUUID(),
@@ -180,30 +142,31 @@ export default function NewPurchaseModal({
         wholesalePrice: 0,
       },
     ])
-  }, [])
+  }
 
-  // Remove a product row - memoized
-  const removeProductRow = useCallback((id: string) => {
-    setProducts(prev => prev.length > 1 ? prev.filter((product) => product.id !== id) : prev)
-  }, [])
+  // Remove a product row
+  const removeProductRow = (id: string) => {
+    setProducts((prev) => prev.length > 1 ? prev.filter((product) => product.id !== id) : prev)
+  }
 
-  // Update product row - optimized with useCallback
-  const updateProductRow = useCallback((id: string, updates: Partial<ProductRow>) => {
-    setProducts(prev => prev.map((product) => {
-      if (product.id === id) {
-        const updatedProduct = { ...product, ...updates }
-        // Recalculate total if quantity or price changed
-        if (updates.quantity !== undefined || updates.price !== undefined) {
-          updatedProduct.total = updatedProduct.quantity * updatedProduct.price
+  // Update product row
+  const updateProductRow = (id: string, updates: Partial<ProductRow>) => {
+    setProducts((prev) =>
+      prev.map((product) => {
+        if (product.id === id) {
+          const updatedProduct = { ...product, ...updates }
+          if (updates.quantity !== undefined || updates.price !== undefined) {
+            updatedProduct.total = updatedProduct.quantity * updatedProduct.price
+          }
+          return updatedProduct
         }
-        return updatedProduct
-      }
-      return product
-    }))
-  }, [])
+        return product
+      })
+    )
+  }
 
-  // Handle product selection - memoized
-  const handleProductSelect = useCallback((
+  // Handle product selection
+  const handleProductSelect = (
     id: string,
     productId: number,
     productName: string,
@@ -212,7 +175,6 @@ export default function NewPurchaseModal({
   ) => {
     const priceToUse = wholesalePrice || price
     const quantity = products.find((p) => p.id === id)?.quantity || 1
-    
     updateProductRow(id, {
       productId,
       productName,
@@ -220,32 +182,24 @@ export default function NewPurchaseModal({
       wholesalePrice,
       total: quantity * priceToUse,
     })
-  }, [products, updateProductRow])
+  }
 
-  // Track which row is opening the add product modal - memoized
-  const handleAddNewFromRow = useCallback((rowId: string) => {
+  // Track which row is opening the add product modal
+  const handleAddNewFromRow = (rowId: string) => {
     setActiveProductRowId(rowId)
     setIsNewProductModalOpen(true)
-  }, [])
+  }
 
-  // Handle new product added - optimized
-  const handleNewProduct = useCallback((product: any) => {
-    // First, add the product to Redux store
+  // Handle new product added
+  const handleNewProduct = (product: any) => {
     dispatch(addProduct(product))
-
-    // Show success notification
     showNotification("success", `Product "${product.name}" added successfully`)
-
-    // Find the target row - either the active row or first empty row
-    const targetRowId = activeProductRowId || 
-      products.find((p) => !p.productId)?.id || 
+    const targetRowId =
+      activeProductRowId ||
+      products.find((p) => !p.productId)?.id ||
       products[products.length - 1].id
-
-    // Use wholesale price if available, otherwise use retail price
     const priceToUse = product.wholesale_price || product.price
     const quantity = products.find((p) => p.id === targetRowId)?.quantity || 1
-
-    // Update the target row with the new product
     updateProductRow(targetRowId, {
       productId: product.id,
       productName: product.name,
@@ -253,70 +207,45 @@ export default function NewPurchaseModal({
       wholesalePrice: product.wholesale_price,
       total: quantity * priceToUse,
     })
-
-    // Close the modal and reset active row
     setIsNewProductModalOpen(false)
     setActiveProductRowId(null)
-  }, [activeProductRowId, products, updateProductRow, dispatch, showNotification])
+  }
 
-  // Validation function - memoized
-  const validateForm = useMemo(() => {
-    if (!supplier) {
-      return { isValid: false, message: "Please enter a supplier name" }
-    }
-
+  // Validation function
+  const validateForm = () => {
+    if (!supplier) return { isValid: false, message: "Please enter a supplier name" }
     if (!products.every((p) => p.productId && p.quantity > 0)) {
-      return { 
-        isValid: false, 
-        message: "Please select products and ensure quantities are greater than zero" 
-      }
+      return { isValid: false, message: "Please select products and ensure quantities are greater than zero" }
     }
-
     if (status === "Paid" && !paymentMethod) {
       return { isValid: false, message: "Please select a payment method" }
     }
-
     if (receivedAmount > totalAmount) {
-      return { 
-        isValid: false, 
-        message: "Received amount cannot be greater than total amount" 
-      }
+      return { isValid: false, message: "Received amount cannot be greater than total amount" }
     }
-
     return { isValid: true, message: "" }
-  }, [supplier, products, status, paymentMethod, receivedAmount, totalAmount])
+  }
 
-  // Handle form submission - optimized
-  const handleSubmit = useCallback(async () => {
-    // Prevent double submission
+  // Handle form submission
+  const handleSubmit = async () => {
     if (isSubmittingRef.current) return
-    
-    setFormAlert(null) // Clear any previous alerts
-    
-    // Validate form and show validation messages
-    if (!validateForm.isValid) {
-      setFormAlert({
-        type: "error",
-        message: validateForm.message,
-      })
+    setFormAlert(null)
+    const validation = validateForm()
+    if (!validation.isValid) {
+      setFormAlert({ type: "error", message: validation.message })
       return
     }
-
     isSubmittingRef.current = true
     setIsSubmitting(true)
-
     try {
-      // Prepare form data more efficiently
       const items = products
-        .filter(p => p.productId) // Only include valid products
+        .filter((p) => p.productId)
         .map((p) => ({
           product_id: p.productId,
           quantity: p.quantity,
           price: p.price,
         }))
-
       const formData = new FormData()
-      // Add all fields at once
       const fields = {
         supplier,
         purchase_date: date.toISOString(),
@@ -329,65 +258,32 @@ export default function NewPurchaseModal({
         received_amount: receivedAmount.toString(),
         items: JSON.stringify(items),
       }
-
       Object.entries(fields).forEach(([key, value]) => {
         formData.append(key, value)
       })
-
-      // Submit form
       const result = await createPurchase(formData)
-
       if (result.success) {
         showNotification("success", "Purchase added successfully")
-        
-        // Call the callback if provided
         onPurchaseAdded?.()
-        
-        // Close modal immediately - no delay needed
         onClose()
       } else {
         const errorMessage = result.message || "Failed to add purchase"
-        setFormAlert({
-          type: "error",
-          message: errorMessage,
-        })
+        setFormAlert({ type: "error", message: errorMessage })
         showNotification("error", errorMessage)
       }
     } catch (error) {
-      console.error("Add purchase error:", error)
-      const errorMessage = "An unexpected error occurred"
-      setFormAlert({
-        type: "error",
-        message: errorMessage,
-      })
-      showNotification("error", errorMessage)
+      setFormAlert({ type: "error", message: "An unexpected error occurred" })
+      showNotification("error", "An unexpected error occurred")
     } finally {
       setIsSubmitting(false)
       isSubmittingRef.current = false
     }
-  }, [
-    validateForm, 
-    supplier, 
-    date, 
-    totalAmount, 
-    status, 
-    purchaseStatus, 
-    paymentMethod, 
-    userId, 
-    deviceId, 
-    receivedAmount, 
-    products, 
-    showNotification, 
-    onPurchaseAdded, 
-    onClose
-  ])
+  }
 
-  // Close handler - memoized
-  const handleClose = useCallback(() => {
-    if (!isSubmitting) {
-      onClose()
-    }
-  }, [isSubmitting, onClose])
+  // Close handler
+  const handleClose = () => {
+    if (!isSubmitting) onClose()
+  }
 
   return (
     <>
@@ -417,7 +313,7 @@ export default function NewPurchaseModal({
           )}
 
           <div className="flex h-[calc(95vh-120px)] overflow-hidden">
-            {/* Left side - Form fields (compact) */}
+            {/* Left side - Form fields */}
             <div className="w-80 border-r border-gray-200 dark:border-gray-700 overflow-hidden bg-gray-50 dark:bg-gray-800 flex flex-col">
               <div className="flex-1 overflow-y-auto p-4">
                 <div className="space-y-3">
@@ -432,7 +328,6 @@ export default function NewPurchaseModal({
                       className="h-9 mt-1"
                     />
                   </div>
-
                   {/* Date and Payment Status */}
                   <div className="grid grid-cols-1 gap-3">
                     <div>
@@ -441,7 +336,7 @@ export default function NewPurchaseModal({
                     </div>
                     <div>
                       <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">Payment Status</Label>
-                      <Select value={status} onValueChange={handleStatusChange}>
+                      <Select value={status} onValueChange={setStatus}>
                         <SelectTrigger className="h-9 mt-1 bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100">
                           <SelectValue />
                         </SelectTrigger>
@@ -453,7 +348,6 @@ export default function NewPurchaseModal({
                       </Select>
                     </div>
                   </div>
-
                   {/* Purchase Status */}
                   <div>
                     <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">Purchase Status</Label>
@@ -468,7 +362,6 @@ export default function NewPurchaseModal({
                       </SelectContent>
                     </Select>
                   </div>
-
                   {/* Payment Method - only show when status is Paid */}
                   {status === "Paid" && (
                     <div>
@@ -498,7 +391,6 @@ export default function NewPurchaseModal({
                       </RadioGroup>
                     </div>
                   )}
-
                   {/* Received Amount - only show for Credit */}
                   {status === "Credit" && (
                     <div>
@@ -515,7 +407,6 @@ export default function NewPurchaseModal({
                       />
                     </div>
                   )}
-
                   {/* Calculation Summary */}
                   <div className="border-t border-gray-200 dark:border-gray-700 pt-3 mt-4">
                     <div className="space-y-2 text-sm">
@@ -564,7 +455,6 @@ export default function NewPurchaseModal({
                   </div>
                 </div>
               </div>
-              
               {/* Fixed Submit Button at Bottom */}
               <div className="border-t border-gray-200 dark:border-gray-700 p-4 bg-gray-50 dark:bg-gray-800">
                 <Button
@@ -582,7 +472,6 @@ export default function NewPurchaseModal({
                 </Button>
               </div>
             </div>
-
             {/* Right side - Products table */}
             <div className="flex-1 flex flex-col overflow-hidden">
               <div className="flex items-center justify-between p-3 bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
@@ -598,7 +487,6 @@ export default function NewPurchaseModal({
                   <Plus className="h-3 w-3" /> Add Product
                 </Button>
               </div>
-
               <div className="flex-1 overflow-y-auto">
                 <div className="sticky top-0 z-10 grid grid-cols-12 gap-2 p-2 bg-green-50 dark:bg-green-900/30 font-medium text-sm text-green-800 dark:text-green-200 border-b border-gray-200 dark:border-gray-700">
                   <div className="col-span-5">Product</div>
@@ -607,7 +495,6 @@ export default function NewPurchaseModal({
                   <div className="col-span-2 text-center">Total</div>
                   <div className="col-span-1"></div>
                 </div>
-
                 {products.map((product, index) => (
                   <div
                     key={product.id}
@@ -674,7 +561,6 @@ export default function NewPurchaseModal({
           </div>
         </DialogContent>
       </Dialog>
-
       {/* New Product Modal */}
       <NewProductModal
         isOpen={isNewProductModalOpen}

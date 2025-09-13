@@ -60,8 +60,6 @@ import {
   selectSalesMaxAmountFilter,
   selectSalesShowFilters,
   selectSalesCurrency,
-  setSales,
-  updateSalesData,
   setFilteredSales,
   setLoading,
   setSilentRefreshing,
@@ -88,7 +86,6 @@ import NewProductModal from "@/components/sales/new-product-modal"
 import NewServiceModal from "@/components/services/new-service-modal"
 import { getProductByBarcode, getProducts } from "@/app/actions/product-actions"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { FormAlert } from "@/components/ui/form-alert"
 import { selectActiveStaff } from "@/store/slices/staffSlice"
 import StaffHeaderDropdown from "../dashboard/staff-header-dropdown"
 import { printSalesReceipt } from "@/lib/receipt-utils"
@@ -156,13 +153,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
   const currency = useSelector(selectSalesCurrency)
 
   // Pagination state from Redux
-  const {
-    currentPage,
-    totalPages,
-    totalCount,
-    hasMore,
-    limit,
-  } = useSelector(selectSalesPagination)
+  const { currentPage, totalPages, totalCount, hasMore, limit } = useSelector(selectSalesPagination)
 
   // Privacy mode state - enabled by default
   const [privacyMode, setPrivacyMode] = useState(true)
@@ -337,7 +328,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
 
   // Centralized fetch function with proper duplicate prevention
   const fetchSalesFromAPI = useCallback(
-    async (page: number = 1, silent = false, append = false) => {
+    async (page = 1, silent = false, append = false) => {
       if (!deviceId) {
         dispatch(setError("Device ID not found"))
         return
@@ -390,10 +381,10 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
                 currentPage: result.currentPage ?? page, // ✅ fallback to requested page
                 totalPages: result.totalPages ?? (Math.ceil(result.total / limit) || 1), // ✅ fixed
                 totalCount: result.total ?? serializedData.length,
-                hasMore: result.hasMore ?? (page < (result.totalPages ?? 1)),
+                hasMore: result.hasMore ?? page < (result.totalPages ?? 1),
               },
               append,
-            })
+            }),
           )
 
           initializationRef.current.hasInitialized = true
@@ -409,7 +400,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
         initializationRef.current.isCurrentlyFetching = false
       }
     },
-    [deviceId, dispatch, limit, searchTerm] // ✅ add limit & searchTerm as deps
+    [deviceId, dispatch, limit, searchTerm], // ✅ add limit & searchTerm as deps
   )
 
   // Single initialization effect (optimized)
@@ -420,7 +411,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
       initializationRef.current.currentDeviceId === deviceId
     ) {
       initializationRef.current.hasInitialized = true // Set before fetch to prevent double fetch
-      fetchSalesFromAPI(false)
+      fetchSalesFromAPI(1, false, false)
     }
   }, [deviceId, fetchSalesFromAPI])
 
@@ -436,7 +427,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
     ) {
       const now = Date.now()
       if (now - initializationRef.current.lastFetchTime > 120000) {
-        fetchSalesFromAPI(true)
+        fetchSalesFromAPI(1, true, false)
       }
     }
   }, [deviceId, isDataStale, isSilentRefreshing, isLoading, fetchSalesFromAPI])
@@ -781,9 +772,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
         const productData = result.data
 
         // Check if product already exists in the cart
-        const existingProductIndex = products.findIndex(
-          (p) => p.productId === productData.id && !p.isService,
-        )
+        const existingProductIndex = products.findIndex((p) => p.productId === productData.id && !p.isService)
 
         if (existingProductIndex >= 0) {
           // Product exists, increase quantity
@@ -1171,7 +1160,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
             setFormAlert(null)
             // Reset fetch state to force refresh
             initializationRef.current.hasInitialized = false
-            fetchSalesFromAPI(false)
+            fetchSalesFromAPI(1, false, false)
           }, 1500)
         } else {
           setFormAlert({
@@ -1214,7 +1203,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
             setFormAlert(null)
             // Reset fetch state to force refresh
             initializationRef.current.hasInitialized = false
-            fetchSalesFromAPI(false)
+            fetchSalesFromAPI(1, false, false)
           }, 1500)
         } else {
           setFormAlert({
@@ -1273,7 +1262,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
         })
         // Force refresh after deletion
         initializationRef.current.hasInitialized = false
-        fetchSalesFromAPI(false)
+        fetchSalesFromAPI(1, false, false)
       } else {
         toast({
           title: "Error",
@@ -1364,7 +1353,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
     initializationRef.current.lastFetchTime = 0
 
     // Force fetch new data
-    fetchSalesFromAPI(false)
+    fetchSalesFromAPI(1, false, false)
 
     toast({
       title: "Refreshed",
@@ -1492,9 +1481,11 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
       <Card
         className={`
         mb-2 overflow-hidden border
-        ${isEditing
-          ? "border-yellow-400 ring-2 ring-yellow-300 dark:ring-yellow-600 bg-yellow-50 dark:bg-yellow-900/40"
-          : "border-gray-200 dark:border-gray-600"}
+        ${
+          isEditing
+            ? "border-yellow-400 ring-2 ring-yellow-300 dark:ring-yellow-600 bg-yellow-50 dark:bg-yellow-900/40"
+            : "border-gray-200 dark:border-gray-600"
+        }
         hover:shadow-md transition-all duration-200
         bg-white dark:bg-gray-800
       `}
@@ -2156,7 +2147,10 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
                             </div>
                             <div className="flex items-center space-x-1 bg-gray-50 dark:bg-gray-700 p-1 rounded-md border border-gray-200 dark:border-gray-600">
                               <RadioGroupItem value="Online" id="online" className="h-3 w-3" />
-                              <Label htmlFor="online" className="cursor-pointer text-xs text-gray-900 dark:text-gray-200">
+                              <Label
+                                htmlFor="online"
+                                className="cursor-pointer text-xs text-gray-900 dark:text-gray-200"
+                              >
                                 Online
                               </Label>
                             </div>
@@ -2225,7 +2219,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
                           variant="outline"
                           onClick={resetAddSaleForm}
                           disabled={isSubmitting}
-                          className="w-full border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 h-auto py-2"
+                          className="w-full border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 h-auto py-2 bg-transparent"
                         >
                           Cancel
                         </Button>
@@ -2399,7 +2393,9 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
                     >
                       <Filter className="h-3 w-3 mr-1" />
                       <span className="hidden sm:inline xl:inline">
-                        {statusFilter === "all" ? "All" : statusFilter?.charAt(0).toUpperCase() + statusFilter?.slice(1)}
+                        {statusFilter === "all"
+                          ? "All"
+                          : statusFilter?.charAt(0).toUpperCase() + statusFilter?.slice(1)}
                       </span>
                     </Button>
                   </div>
@@ -2493,7 +2489,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
                   </div>
                 ) : (
                   <div className="p-2">
-                    {filteredSales.slice(0, 20).map((sale, index) => (
+                    {filteredSales.map((sale, index) => (
                       <SaleCard
                         key={sale.id}
                         sale={sale}
@@ -2601,3 +2597,4 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
     </div>
   )
 }
+

@@ -57,13 +57,13 @@ interface PurchaseTabProps {
   mockMode?: boolean
 }
 
-// Constants for performance optimization
+// Optimized constants
 const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes
 const DEBOUNCE_DELAY = 300
-const REFRESH_THROTTLE = 2000 // Increased back to 2 seconds for safety
-const INITIALIZATION_DELAY = 100
+const REFRESH_THROTTLE = 2000
+const INITIALIZATION_DELAY = 50
 
-// Memoized components for better performance
+// Memoized components for performance
 const StatusBadge = memo(({ status }: { status: string }) => {
   const normalizedStatus = status?.toLowerCase() || ""
   
@@ -118,7 +118,7 @@ const PaymentMethodIcon = memo(({ method }: { method: string }) => {
 })
 PaymentMethodIcon.displayName = "PaymentMethodIcon"
 
-// Memoized table row component to prevent unnecessary re-renders
+// Optimized table row component
 const PurchaseTableRow = memo(({ 
   purchase, 
   index, 
@@ -229,9 +229,9 @@ export default function PurchaseTab({
   const lastUpdated = useSelector(selectLastUpdated)
 
   const { toast } = useToast()
-  const [showAddModal, setShowAddModal] = useState(isAddModalOpen)
 
-  // Modal states
+  // Local state - Fixed modal management
+  const [showAddModal, setShowAddModal] = useState(false)
   const [selectedPurchaseId, setSelectedPurchaseId] = useState<number | null>(null)
   const [isViewModalOpen, setIsViewModalOpen] = useState(false)
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
@@ -245,18 +245,18 @@ export default function PurchaseTab({
   const [tempMaxAmount, setTempMaxAmount] = useState("")
   const [supplierSearchTerm, setSupplierSearchTerm] = useState("")
 
-  // Search debouncing
-  const [localSearchTerm, setLocalSearchTerm] = useState(filters.searchTerm)
+  // Search state with debouncing
+  const [localSearchTerm, setLocalSearchTerm] = useState("")
   const searchTimeoutRef = useRef<NodeJS.Timeout>()
 
-  // Optimization: Use refs to track state and prevent duplicate requests
+  // Performance optimization refs
   const isInitializedRef = useRef(false)
   const isLoadingRef = useRef(false)
   const lastFetchRef = useRef<number>(0)
   const hasMountedRef = useRef(false)
   const initializationTimeoutRef = useRef<NodeJS.Timeout>()
 
-  // Memoized currency formatter - stable reference
+  // Stable currency formatter
   const formatCurrency = useMemo(() => {
     return (amount: number | string | null | undefined) => {
       const numAmount = typeof amount === "number" ? amount : Number.parseFloat(String(amount || 0))
@@ -265,72 +265,56 @@ export default function PurchaseTab({
     }
   }, [currency])
 
-  // Memoized cache check function
+  // Cache check optimization
   const needsRefresh = useMemo(() => {
     if (!lastUpdated) return true
     return Date.now() - lastUpdated > CACHE_DURATION
   }, [lastUpdated])
 
-  // CRITICAL OPTIMIZATION: Single initialization effect with minimal dependencies
+  // FIXED: Single initialization effect
   useEffect(() => {
-    // Early returns to prevent unnecessary initialization
-    if (!deviceId || mockMode) return
-    if (isInitializedRef.current) return
+    if (!deviceId || mockMode || isInitializedRef.current) return
 
     const loadInitialData = async () => {
-      // Prevent concurrent requests
       if (isLoadingRef.current) return
       
       const now = Date.now()
-      
-      // More aggressive throttling during initialization
-      if (now - lastFetchRef.current < 1000) {
-        console.log('🔄 Throttling: Too soon for another request')
-        return
-      }
+      if (now - lastFetchRef.current < 1000) return
       
       lastFetchRef.current = now
       isLoadingRef.current = true
       
       try {
-        console.log('🚀 Starting optimized initial data load...')
+        console.log('🚀 Starting initial data load...')
         
-        // Step 1: Load currency first (lightweight and essential)
-        console.log('📦 Fetching currency...')
+        // Load currency first (lightweight)
         await dispatch(fetchCurrency(userId)).unwrap()
         
-        // Step 2: Check cache status for purchases
+        // Load purchases if not cached or cache expired
         const hasCachedPurchases = purchases.length > 0
         const cacheExpired = needsRefresh
         
         if (!hasCachedPurchases || cacheExpired) {
-          console.log('📦 Fetching purchases data...', { hasCachedPurchases, cacheExpired })
           await dispatch(fetchPurchases({ 
             deviceId, 
             forceRefresh: cacheExpired 
           })).unwrap()
-        } else {
-          console.log('✅ Using cached purchases data')
         }
         
-        // Step 3: Load suppliers in background (non-critical)
+        // Load suppliers in background
         if (suppliers.length === 0) {
-          console.log('📦 Scheduling suppliers fetch...')
           setTimeout(() => {
             if (!isLoadingRef.current) {
               dispatch(fetchSuppliers())
             }
-          }, 1000) // Increased delay to prevent concurrent requests
+          }, 500)
         }
         
-        // Mark as fully initialized
         isInitializedRef.current = true
         hasMountedRef.current = true
         
-        console.log('✅ Optimized initial data loading completed')
-        
       } catch (error) {
-        console.error('❌ Error in optimized initial data loading:', error)
+        console.error('❌ Error in initial data loading:', error)
         toast({
           title: "Loading Error",
           description: "Failed to load purchase data. Please refresh the page.",
@@ -341,31 +325,31 @@ export default function PurchaseTab({
       }
     }
 
-    // Delay initialization to prevent race conditions and allow React to settle
     initializationTimeoutRef.current = setTimeout(() => {
       loadInitialData()
     }, INITIALIZATION_DELAY)
 
-    // Cleanup function
     return () => {
       if (initializationTimeoutRef.current) {
         clearTimeout(initializationTimeoutRef.current)
       }
       isLoadingRef.current = false
     }
-  }, [deviceId, mockMode]) // MINIMAL DEPENDENCIES - removed userId, dispatch, needsRefresh, purchases.length, toast, suppliers.length
+  }, [deviceId, mockMode]) // Minimal dependencies
 
-  // OPTIMIZED: Search debouncing effect
+  // FIXED: Modal state sync - proper handling of isAddModalOpen prop
   useEffect(() => {
-    // Don't process during initial mount
+    setShowAddModal(isAddModalOpen)
+  }, [isAddModalOpen])
+
+  // Search debouncing
+  useEffect(() => {
     if (!hasMountedRef.current) return
 
-    // Clear existing timeout
     if (searchTimeoutRef.current) {
       clearTimeout(searchTimeoutRef.current)
     }
 
-    // Only update if value actually changed
     if (localSearchTerm === filters.searchTerm) return
 
     searchTimeoutRef.current = setTimeout(() => {
@@ -377,23 +361,20 @@ export default function PurchaseTab({
         clearTimeout(searchTimeoutRef.current)
       }
     }
-  }, [localSearchTerm, dispatch]) // Minimal dependencies
+  }, [localSearchTerm, dispatch])
 
-  // OPTIMIZED: Filter application effect
+  // Filter application
   useEffect(() => {
-    // Don't apply filters until fully initialized with data
     if (!hasMountedRef.current || !isInitializedRef.current || purchases.length === 0) {
       return
     }
     
-    // Debounce filter application to prevent excessive calls
     const timeoutId = setTimeout(() => {
       dispatch(applyFilters())
     }, 50)
 
     return () => clearTimeout(timeoutId)
   }, [
-    // Specific filter dependencies instead of entire filters object
     filters.statusFilter,
     filters.supplierFilter,
     filters.paymentMethodFilter,
@@ -408,14 +389,7 @@ export default function PurchaseTab({
     purchases.length
   ])
 
-  // Optimization: Modal state sync - only update when different
-  useEffect(() => {
-    if (isAddModalOpen !== showAddModal) {
-      setShowAddModal(isAddModalOpen)
-    }
-  }, [isAddModalOpen, showAddModal])
-
-  // Optimization: Stable callbacks using useCallback with proper dependencies
+  // Optimized computed values
   const hasActiveFilters = useMemo(() => {
     return (
       filters.statusFilter !== "all" ||
@@ -448,7 +422,6 @@ export default function PurchaseTab({
     return "More than a day ago"
   }, [lastUpdated])
 
-  // Optimization: Memoized filtered suppliers with better performance
   const filteredSuppliers = useMemo(() => {
     if (!supplierSearchTerm) return suppliers
     const searchLower = supplierSearchTerm.toLowerCase()
@@ -457,13 +430,12 @@ export default function PurchaseTab({
     )
   }, [suppliers, supplierSearchTerm])
 
-  // OPTIMIZED: Improved refresh handler with better throttling
+  // FIXED: Improved refresh handler
   const handleRefresh = useCallback(async () => {
     if (!deviceId || isLoadingRef.current) return
 
     const now = Date.now()
     
-    // Prevent spam refreshing
     if (now - lastFetchRef.current < REFRESH_THROTTLE) {
       const waitTime = Math.ceil((REFRESH_THROTTLE - (now - lastFetchRef.current)) / 1000)
       toast({
@@ -477,9 +449,6 @@ export default function PurchaseTab({
     isLoadingRef.current = true
     
     try {
-      console.log('🔄 Manual refresh initiated')
-      
-      // Clear cache and force refresh
       dispatch(clearCache())
       await dispatch(fetchPurchases({ deviceId, forceRefresh: true })).unwrap()
       
@@ -499,13 +468,12 @@ export default function PurchaseTab({
     }
   }, [deviceId, dispatch, toast])
 
-  // OPTIMIZED: Data refresh handlers with delays to prevent race conditions
+  // Data refresh handlers with proper delays
   const handlePurchaseAdded = useCallback(() => {
     if (!deviceId || mockMode || isLoadingRef.current || !hasMountedRef.current) {
       return
     }
     
-    // Delay to allow server processing and prevent race conditions
     setTimeout(() => {
       if (!isLoadingRef.current) {
         isLoadingRef.current = true
@@ -514,7 +482,7 @@ export default function PurchaseTab({
             isLoadingRef.current = false
           })
       }
-    }, 800) // Increased delay
+    }, 800)
   }, [deviceId, mockMode, dispatch])
 
   const handlePurchaseUpdated = useCallback(() => {
@@ -522,7 +490,6 @@ export default function PurchaseTab({
       return
     }
     
-    // Delay to allow server processing and prevent race conditions
     setTimeout(() => {
       if (!isLoadingRef.current) {
         isLoadingRef.current = true
@@ -531,10 +498,10 @@ export default function PurchaseTab({
             isLoadingRef.current = false
           })
       }
-    }, 800) // Increased delay
+    }, 800)
   }, [deviceId, mockMode, dispatch])
 
-  // Optimization: Stable callback handlers
+  // Stable callback handlers
   const handleDelete = useCallback(async (id: number) => {
     if (!deviceId) {
       toast({
@@ -580,7 +547,7 @@ export default function PurchaseTab({
     setIsEditModalOpen(true)
   }, [])
 
-  // Optimization: Stable date filter handlers
+  // Date filter handlers
   const handleTodayFilter = useCallback(() => {
     const today = new Date()
     const formattedDate = format(today, "yyyy-MM-dd")
@@ -622,7 +589,7 @@ export default function PurchaseTab({
     )
   }, [dispatch])
 
-  // Modal handlers
+  // Filter modal handlers
   const openDateFilterModal = useCallback(() => {
     setTempDateFrom(filters.dateFromFilter || "")
     setTempDateTo(filters.dateToFilter || "")
@@ -681,7 +648,7 @@ export default function PurchaseTab({
     setIsAmountFilterModalOpen(false)
   }, [dispatch])
 
-  // Optimization: Memoized display text
+  // Display text optimization
   const filterDisplayTexts = useMemo(() => ({
     status: filters.statusFilter === "paid" ? "Paid" : 
             filters.statusFilter === "credit" ? "Credit" :
@@ -703,7 +670,7 @@ export default function PurchaseTab({
     setIsEditModalOpen(false)
   }, [])
 
-  // Optimization: Improved print handler
+  // Print handler optimization
   const handlePrint = useCallback(() => {
     if (filteredPurchases.length === 0) {
       toast({
@@ -715,7 +682,6 @@ export default function PurchaseTab({
     }
 
     try {
-      // Use requestAnimationFrame to prevent blocking
       requestAnimationFrame(() => {
         const printWindow = window.open("", "_blank", "width=800,height=900,scrollbars=yes")
         if (!printWindow) {
@@ -734,7 +700,6 @@ export default function PurchaseTab({
           hour12: true,
         })
 
-        // Calculate summary data efficiently
         const summaryData = filteredPurchases.reduce((acc, p) => {
           const total = Number(p.total_amount) || 0
           const paid = Number(p.received_amount) || 0
@@ -744,7 +709,6 @@ export default function PurchaseTab({
           return acc
         }, { totalAmount: 0, paidAmount: 0, outstandingAmount: 0 })
 
-        // Generate print content...
         printWindow.document.write(`
           <!DOCTYPE html>
           <html>
@@ -965,7 +929,7 @@ export default function PurchaseTab({
     }
   }, [filteredPurchases, formatCurrency, toast])
 
-  // OPTIMIZED: Early return with better loading state management
+  // FIXED: Better loading state for initialization
   if (!hasMountedRef.current && (isLoading || !isInitializedRef.current)) {
     return (
       <div className="space-y-4 dark:bg-gray-900">
@@ -1045,6 +1009,7 @@ export default function PurchaseTab({
                   <span className="hidden sm:inline">Print</span>
                 </Button>
 
+                {/* FIXED: Add Purchase Button */}
                 <Button
                   onClick={() => setShowAddModal(true)}
                   variant="outline"
@@ -1319,7 +1284,7 @@ export default function PurchaseTab({
         />
       </div>
 
-      {/* Modals */}
+      {/* FIXED: Modals with proper state management */}
       <NewPurchaseModal
         isOpen={showAddModal}
         onClose={handleAddModalClose}
@@ -1477,3 +1442,4 @@ export default function PurchaseTab({
     </div>
   )
 }
+

@@ -4,18 +4,70 @@ import { sql, getLastError, resetConnectionState } from "@/lib/db"
 import { revalidatePath } from "next/cache"
 import { recordPurchaseTransaction, recordPurchaseAdjustment, deletePurchaseTransaction } from "./simplified-accounting"
 
-export async function getPurchases() {
+// Enhanced error handling wrapper
+async function withErrorHandling<T>(
+  operation: () => Promise<T>,
+  errorMessage: string
+): Promise<{ success: true; data?: T; message?: string } | { success: false; message: string; data?: null }> {
   try {
+    const result = await operation()
+    return { success: true, data: result }
+  } catch (error) {
+    console.error(`${errorMessage}:`, error)
+    const dbError = getLastError()
+    return {
+      success: false,
+      message: dbError?.message || error instanceof Error ? error.message : errorMessage,
+    }
+  }
+}
+
+// Enhanced data validation
+function validatePurchaseData(data: {
+  supplier?: string
+  totalAmount?: number
+  items?: any[]
+  userId?: number
+  deviceId?: number
+}) {
+  const errors: string[] = []
+
+  if (!data.supplier?.trim()) errors.push("Supplier name is required")
+  if (!data.totalAmount || isNaN(data.totalAmount) || data.totalAmount <= 0) errors.push("Valid total amount is required")
+  if (!data.items || !Array.isArray(data.items) || data.items.length === 0) errors.push("At least one item is required")
+  if (!data.userId || data.userId <= 0) errors.push("Valid user ID is required")
+  if (!data.deviceId || data.deviceId <= 0) errors.push("Valid device ID is required")
+
+  // Validate items
+  if (data.items) {
+    data.items.forEach((item, index) => {
+      if (!item.product_id || item.product_id <= 0) errors.push(`Item ${index + 1}: Valid product is required`)
+      if (!item.quantity || item.quantity <= 0) errors.push(`Item ${index + 1}: Valid quantity is required`)
+      if (item.price === undefined || item.price < 0) errors.push(`Item ${index + 1}: Valid price is required`)
+    })
+  }
+
+  return errors
+}
+
+// Enhanced database connection management
+async function ensureConnection() {
+  resetConnectionState()
+  // Add small delay to prevent connection race conditions
+  await new Promise(resolve => setTimeout(resolve, 10))
+}
+
+export async function getPurchases() {
+  return withErrorHandling(async () => {
+    await ensureConnection()
+    
     const purchases = await sql`
       SELECT * FROM purchases
-      ORDER BY purchase_date DESC
+      ORDER BY purchase_date DESC, id DESC
     `
 
-    return { success: true, data: purchases }
-  } catch (error) {
-    console.error("Get purchases error:", error)
-    return { success: false, message: "Failed to fetch purchases" }
-  }
+    return purchases
+  }, "Failed to fetch purchases")
 }
 
 export async function getUserPurchases(deviceId: number, limit = 500, searchTerm?: string) {
@@ -23,109 +75,135 @@ export async function getUserPurchases(deviceId: number, limit = 500, searchTerm
     return { success: false, message: "Device ID is required", data: [] }
   }
 
-  // Reset connection state to allow a fresh attempt
-  resetConnectionState()
+  return withErrorHandling(async () => {
+    await ensureConnection()
 
-  try {
     let purchases
 
     if (searchTerm && searchTerm.trim() !== "") {
-      // Search query
-      const searchPattern = `%${searchTerm.toLowerCase()}%`
+      // Enhanced search with better pattern matching
+      const searchPattern = `%${searchTerm.toLowerCase().trim()}%`
 
       purchases = await sql`
         SELECT *
         FROM purchases
         WHERE device_id = ${deviceId}
-          AND (LOWER(supplier) LIKE ${searchPattern}
-               OR CAST(id AS TEXT) LIKE ${searchPattern}
-               OR LOWER(status) LIKE ${searchPattern})
-        ORDER BY purchase_date DESC
-        LIMIT ${limit}
+          AND (
+            LOWER(TRIM(supplier)) LIKE ${searchPattern}
+            OR CAST(id AS TEXT) LIKE ${searchPattern}
+            OR LOWER(TRIM(status)) LIKE ${searchPattern}
+            OR LOWER(TRIM(purchase_status)) LIKE ${searchPattern}
+          )
+        ORDER BY purchase_date DESC, id DESC
+        LIMIT ${Math.min(limit, 1000)}
       `
     } else {
-      // Regular query
       purchases = await sql`
         SELECT *
         FROM purchases
         WHERE device_id = ${deviceId}
-        ORDER BY purchase_date DESC
-        LIMIT ${limit}
+        ORDER BY purchase_date DESC, id DESC
+        LIMIT ${Math.min(limit, 1000)}
       `
     }
 
-    return { success: true, data: purchases }
-  } catch (error) {
-    console.error("Get device purchases error:", error)
-    return {
-      success: false,
-      message: `Database error: ${getLastError()?.message || "Unknown error"}. Please try again later.`,
-      data: [],
-    }
-  }
+    return purchases
+  }, "Failed to fetch user purchases").then(result => ({
+    ...result,
+    data: result.success ? result.data : []
+  }))
 }
 
 export async function getPurchaseDetails(purchaseId: number) {
-  try {
-    const purchaseItems = await sql`
-      SELECT pi.*, p.name as product_name, p.category
-      FROM purchase_items pi
-      JOIN products p ON pi.product_id = p.id
-      WHERE pi.purchase_id = ${purchaseId}
-    `
+  if (!purchaseId || purchaseId <= 0) {
+    return { success: false, message: "Valid purchase ID is required" }
+  }
 
-    const purchase = await sql`
-      SELECT * FROM purchases
-      WHERE id = ${purchaseId}
-    `
+  return withErrorHandling(async () => {
+    await ensureConnection()
+
+    const [purchaseItems, purchase] = await Promise.all([
+      sql`
+        SELECT pi.*, p.name as product_name, p.category, p.barcode
+        FROM purchase_items pi
+        LEFT JOIN products p ON pi.product_id = p.id
+        WHERE pi.purchase_id = ${purchaseId}
+        ORDER BY pi.id
+      `,
+      sql`
+        SELECT * FROM purchases
+        WHERE id = ${purchaseId}
+      `
+    ])
 
     if (purchase.length === 0) {
-      return { success: false, message: "Purchase not found" }
+      throw new Error("Purchase not found")
     }
 
     return {
-      success: true,
-      data: {
-        purchase: purchase[0],
-        items: purchaseItems,
-      },
+      purchase: purchase[0],
+      items: purchaseItems,
     }
-  } catch (error) {
-    console.error("Get purchase details error:", error)
-    return { success: false, message: "Failed to fetch purchase details" }
-  }
+  }, "Failed to fetch purchase details")
 }
 
 export async function createPurchase(formData: FormData) {
+  // Enhanced data extraction and validation
   const supplier = (formData.get("supplier") as string)?.trim()
   const totalAmount = Number.parseFloat(formData.get("total_amount") as string)
-  const status = (formData.get("status") as string) || "Credit"
-  const purchaseStatus = (formData.get("purchase_status") as string) || "Delivered"
-  const paymentMethod = (formData.get("payment_method") as string) || null
+  const status = (formData.get("status") as string)?.trim() || "Credit"
+  const purchaseStatus = (formData.get("purchase_status") as string)?.trim() || "Delivered"
+  const paymentMethod = (formData.get("payment_method") as string)?.trim() || "Cash"
   const userId = Number.parseInt(formData.get("user_id") as string)
   const deviceId = Number.parseInt(formData.get("device_id") as string)
-  const purchaseDate = (formData.get("purchase_date") as string) || new Date().toISOString()
+  const purchaseDate = (formData.get("purchase_date") as string)?.trim() || new Date().toISOString()
   const receivedAmount = Number.parseFloat(formData.get("received_amount") as string) || 0
 
-  // Parse items from JSON string
+  // Parse and validate items
   const itemsJson = formData.get("items") as string
   let items = []
 
   try {
     items = JSON.parse(itemsJson)
+    if (!Array.isArray(items)) {
+      throw new Error("Items must be an array")
+    }
   } catch (e) {
     return { success: false, message: "Invalid items format" }
   }
 
-  // Normalise items so every numeric field is a real number
-  items = items.map((it: any) => ({
-    product_id: Number(it.product_id) || 0,
-    quantity: Number(it.quantity) || 0,
-    price: Number(it.price) || 0,
-  }))
+  // Normalize items with enhanced validation
+  items = items.map((item: any, index: number) => {
+    const normalizedItem = {
+      product_id: Number(item.product_id) || 0,
+      quantity: Number(item.quantity) || 0,
+      price: Number(item.price) || 0,
+    }
 
-  if (!supplier || isNaN(totalAmount) || items.length === 0 || !userId || !deviceId) {
-    return { success: false, message: "Supplier, total amount, at least one item, user ID, and device ID are required" }
+    if (normalizedItem.product_id <= 0) {
+      throw new Error(`Item ${index + 1}: Invalid product ID`)
+    }
+    if (normalizedItem.quantity <= 0) {
+      throw new Error(`Item ${index + 1}: Invalid quantity`)
+    }
+    if (normalizedItem.price < 0) {
+      throw new Error(`Item ${index + 1}: Invalid price`)
+    }
+
+    return normalizedItem
+  })
+
+  // Validate all data
+  const validationErrors = validatePurchaseData({
+    supplier,
+    totalAmount,
+    items,
+    userId,
+    deviceId,
+  })
+
+  if (validationErrors.length > 0) {
+    return { success: false, message: validationErrors.join("; ") }
   }
 
   // Validate received amount
@@ -133,57 +211,23 @@ export async function createPurchase(formData: FormData) {
     return { success: false, message: "Received amount cannot be greater than total amount" }
   }
 
-  // Reset connection state to allow a fresh attempt
-  resetConnectionState()
+  return withErrorHandling(async () => {
+    await ensureConnection()
 
-  try {
-    // Start a transaction
+    // Start transaction
     await sql`BEGIN`
 
     try {
-      // Check if columns exist and add them if needed
-      let hasDeviceIdColumn = false
-      let hasPaymentMethodColumn = false
-      let hasPurchaseStatusColumn = false
-      let hasReceivedAmountColumn = false
-
-      try {
-        const columns = await sql`
-          SELECT column_name 
-          FROM information_schema.columns 
-          WHERE table_name = 'purchases' AND column_name IN ('device_id', 'payment_method', 'purchase_status', 'received_amount')
-        `
-        hasDeviceIdColumn = columns.some((col) => col.column_name === "device_id")
-        hasPaymentMethodColumn = columns.some((col) => col.column_name === "payment_method")
-        hasPurchaseStatusColumn = columns.some((col) => col.column_name === "purchase_status")
-        hasReceivedAmountColumn = columns.some((col) => col.column_name === "received_amount")
-      } catch (error) {
-        console.error("Error checking columns:", error)
-      }
-
-      // Add missing columns
-      if (!hasDeviceIdColumn) {
-        await sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS device_id INTEGER`
-      }
-      if (!hasPaymentMethodColumn) {
-        await sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50)`
-      }
-      if (!hasPurchaseStatusColumn) {
-        await sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS purchase_status VARCHAR(50) DEFAULT 'Delivered'`
-      }
-      if (!hasReceivedAmountColumn) {
-        await sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS received_amount DECIMAL(12,2) DEFAULT 0`
-      }
+      // Ensure required columns exist with better error handling
+      await ensureColumnsExist()
 
       // Calculate final received amount based on status
       let finalReceivedAmount = receivedAmount
       if (status.toLowerCase() === "paid") {
-        finalReceivedAmount = totalAmount // Full payment
+        finalReceivedAmount = totalAmount
       } else if (status.toLowerCase() === "cancelled") {
-        finalReceivedAmount = 0 // No payment
+        finalReceivedAmount = 0
       }
-
-      console.log("Creating purchase with received amount:", finalReceivedAmount)
 
       // Create the purchase
       const purchaseResult = await sql`
@@ -199,173 +243,192 @@ export async function createPurchase(formData: FormData) {
       `
 
       if (purchaseResult.length === 0) {
-        await sql`ROLLBACK`
-        return { success: false, message: "Failed to create purchase" }
+        throw new Error("Failed to create purchase record")
       }
 
       const purchaseId = purchaseResult[0].id
       const isDelivered = purchaseStatus.toLowerCase() === "delivered"
       const isCancelled = status.toLowerCase() === "cancelled"
 
-      // Add purchase items and handle stock...
-      for (const item of items) {
-        await sql`
-          INSERT INTO purchase_items (purchase_id, product_id, quantity, price)
-          VALUES (${purchaseId}, ${item.product_id}, ${item.quantity}, ${item.price})
-        `
+      // Process items with enhanced error handling
+      const stockUpdates = []
+      const stockHistoryEntries = []
 
-        // Only update stock when purchase status is Delivered AND not Cancelled
-        if (isDelivered && !isCancelled) {
+      for (const [index, item] of items.entries()) {
+        try {
+          // Insert purchase item
           await sql`
-            UPDATE products
-            SET stock = stock + ${item.quantity}
-            WHERE id = ${item.product_id}
+            INSERT INTO purchase_items (purchase_id, product_id, quantity, price)
+            VALUES (${purchaseId}, ${item.product_id}, ${item.quantity}, ${item.price})
           `
 
-          // Add stock history entry for purchase
-          try {
-            const historyNote = `Stock added from purchase #${purchaseId} - ${supplier}`
+          // Handle stock updates only when delivered and not cancelled
+          if (isDelivered && !isCancelled) {
+            stockUpdates.push({
+              product_id: item.product_id,
+              quantity: item.quantity
+            })
 
-            await sql`
-              INSERT INTO product_stock_history (
-                product_id, quantity, type, reference_id, reference_type, notes, created_by
-              ) VALUES (
-                ${item.product_id}, ${item.quantity}, 'purchase', ${purchaseId}, 'purchase', 
-                ${historyNote}, ${userId}
-              )
-            `
-          } catch (error) {
-            console.error("Failed to add stock history for purchase:", error)
-            // Continue execution even if this fails
+            stockHistoryEntries.push({
+              product_id: item.product_id,
+              quantity: item.quantity,
+              type: 'purchase',
+              reference_id: purchaseId,
+              reference_type: 'purchase',
+              notes: `Stock added from purchase #${purchaseId} - ${supplier}`,
+              created_by: userId
+            })
           }
+        } catch (error) {
+          throw new Error(`Failed to process item ${index + 1}: ${error instanceof Error ? error.message : 'Unknown error'}`)
         }
       }
 
-      // Record purchase in simplified accounting system
-      await recordPurchaseTransaction({
-        purchaseId,
-        totalAmount,
-        receivedAmount: finalReceivedAmount,
-        outstandingAmount: totalAmount - finalReceivedAmount,
-        status,
-        paymentMethod: paymentMethod || "Cash",
-        supplierName: supplier,
-        deviceId,
-        userId,
-        purchaseDate: new Date(purchaseDate),
-      })
+      // Apply stock updates in batch
+      for (const update of stockUpdates) {
+        await sql`
+          UPDATE products
+          SET stock = COALESCE(stock, 0) + ${update.quantity}
+          WHERE id = ${update.product_id}
+        `
+      }
 
-      // Commit the transaction
+      // Insert stock history entries
+      for (const entry of stockHistoryEntries) {
+        try {
+          await sql`
+            INSERT INTO product_stock_history (
+              product_id, quantity, type, reference_id, reference_type, notes, created_by
+            ) VALUES (
+              ${entry.product_id}, ${entry.quantity}, ${entry.type}, ${entry.reference_id}, 
+              ${entry.reference_type}, ${entry.notes}, ${entry.created_by}
+            )
+          `
+        } catch (error) {
+          console.warn(`Failed to add stock history for product ${entry.product_id}:`, error)
+        }
+      }
+
+      // Record purchase transaction
+      try {
+        await recordPurchaseTransaction({
+          purchaseId,
+          totalAmount,
+          receivedAmount: finalReceivedAmount,
+          outstandingAmount: totalAmount - finalReceivedAmount,
+          status,
+          paymentMethod,
+          supplierName: supplier,
+          deviceId,
+          userId,
+          purchaseDate: new Date(purchaseDate),
+        })
+      } catch (error) {
+        console.warn("Failed to record purchase transaction:", error)
+      }
+
       await sql`COMMIT`
 
+      // Revalidate paths
       revalidatePath("/dashboard")
-      return { success: true, message: "Purchase added successfully", data: purchaseResult[0] }
+      revalidatePath("/purchases")
+
+      return purchaseResult[0]
     } catch (error) {
       await sql`ROLLBACK`
       throw error
     }
-  } catch (error) {
-    console.error("Add purchase error:", error)
-    return {
-      success: false,
-      message: `Database error: ${getLastError()?.message || "Unknown error"}. Please try again later.`,
-    }
-  }
+  }, "Failed to create purchase")
 }
 
 export async function updatePurchase(formData: FormData) {
+  // Enhanced data extraction
   const purchaseId = Number.parseInt(formData.get("id") as string)
   const supplier = (formData.get("supplier") as string)?.trim()
-  const purchaseDate = formData.get("purchase_date") as string
+  const purchaseDate = (formData.get("purchase_date") as string)?.trim()
   const totalAmount = Number.parseFloat(formData.get("total_amount") as string)
-  const status = (formData.get("status") as string) || "Credit"
-  const purchaseStatus = (formData.get("purchase_status") as string) || "Delivered"
-  const paymentMethod = (formData.get("payment_method") as string) || null
+  const status = (formData.get("status") as string)?.trim() || "Credit"
+  const purchaseStatus = (formData.get("purchase_status") as string)?.trim() || "Delivered"
+  const paymentMethod = (formData.get("payment_method") as string)?.trim() || "Cash"
   const userId = Number.parseInt(formData.get("user_id") as string)
   const deviceId = Number.parseInt(formData.get("device_id") as string)
   const receivedAmount = Number.parseFloat(formData.get("received_amount") as string) || 0
 
-  // Parse items from JSON string
+  // Parse items with validation
   const itemsJson = formData.get("items") as string
   let items = []
 
   try {
     items = JSON.parse(itemsJson)
+    if (!Array.isArray(items)) {
+      throw new Error("Items must be an array")
+    }
   } catch (e) {
     return { success: false, message: "Invalid items format" }
   }
 
-  // Normalise items so every numeric field is a real number
-  items = items.map((it: any) => ({
-    product_id: Number(it.product_id) || 0,
-    quantity: Number(it.quantity) || 0,
-    price: Number(it.price) || 0,
+  // Normalize items
+  items = items.map((item: any) => ({
+    product_id: Number(item.product_id) || 0,
+    quantity: Number(item.quantity) || 0,
+    price: Number(item.price) || 0,
   }))
 
-  if (!purchaseId || !supplier || isNaN(totalAmount) || items.length === 0 || !userId || !deviceId) {
-    return {
-      success: false,
-      message: "Purchase ID, supplier, total amount, at least one item, user ID, and device ID are required",
-    }
+  // Validate data
+  const validationErrors = validatePurchaseData({
+    supplier,
+    totalAmount,
+    items,
+    userId,
+    deviceId,
+  })
+
+  if (!purchaseId || purchaseId <= 0) {
+    validationErrors.push("Valid purchase ID is required")
   }
 
-  // Validate received amount
+  if (validationErrors.length > 0) {
+    return { success: false, message: validationErrors.join("; ") }
+  }
+
   if (receivedAmount > totalAmount) {
     return { success: false, message: "Received amount cannot be greater than total amount" }
   }
 
-  // Reset connection state to allow a fresh attempt
-  resetConnectionState()
+  return withErrorHandling(async () => {
+    await ensureConnection()
 
-  try {
-    // Start a transaction
     await sql`BEGIN`
 
     try {
-      // Get current purchase details to check status change
+      // Get current purchase details
       const currentPurchase = await sql`
-        SELECT status, purchase_status, received_amount, total_amount FROM purchases WHERE id = ${purchaseId} AND device_id = ${deviceId}
+        SELECT status, purchase_status, received_amount, total_amount 
+        FROM purchases 
+        WHERE id = ${purchaseId} AND device_id = ${deviceId}
       `
 
       if (currentPurchase.length === 0) {
-        await sql`ROLLBACK`
-        return { success: false, message: "Purchase not found" }
+        throw new Error("Purchase not found or access denied")
       }
 
-      // Get current items to handle stock changes properly
+      // Get current items for stock calculations
       const currentItems = await sql`
         SELECT product_id, quantity FROM purchase_items WHERE purchase_id = ${purchaseId}
       `
 
-      // Calculate final received amount based on status
+      // Calculate final received amount
       let finalReceivedAmount = receivedAmount
       if (status.toLowerCase() === "paid") {
-        finalReceivedAmount = totalAmount // Full payment
+        finalReceivedAmount = totalAmount
       } else if (status.toLowerCase() === "cancelled") {
-        finalReceivedAmount = 0 // No payment
+        finalReceivedAmount = 0
       }
 
-      console.log("Updating purchase with received amount:", finalReceivedAmount)
+      // Ensure columns exist
+      await ensureColumnsExist()
 
-      // Check if received_amount column exists
-      let hasReceivedAmountColumn = false
-      try {
-        const columns = await sql`
-          SELECT column_name 
-          FROM information_schema.columns 
-          WHERE table_name = 'purchases' AND column_name = 'received_amount'
-        `
-        hasReceivedAmountColumn = columns.length > 0
-      } catch (error) {
-        console.error("Error checking for received_amount column:", error)
-      }
-
-      // Add the received_amount column if it doesn't exist
-      if (!hasReceivedAmountColumn) {
-        await sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS received_amount DECIMAL(12,2) DEFAULT 0`
-      }
-
-      // Update purchase with received amount
+      // Update purchase
       const purchaseResult = await sql`
         UPDATE purchases 
         SET supplier = ${supplier}, total_amount = ${totalAmount}, 
@@ -377,99 +440,21 @@ export async function updatePurchase(formData: FormData) {
       `
 
       if (purchaseResult.length === 0) {
-        await sql`ROLLBACK`
-        return { success: false, message: "Failed to update purchase" }
+        throw new Error("Failed to update purchase")
       }
 
-      console.log("Purchase updated successfully:", purchaseResult[0])
+      // Handle stock updates
+      await handleStockUpdates(
+        purchaseId,
+        currentPurchase[0],
+        { status, purchase_status: purchaseStatus },
+        currentItems,
+        items,
+        supplier,
+        userId
+      )
 
-      // Handle stock updates based on status changes
-      const oldStatus = currentPurchase[0].status?.toLowerCase()
-      const oldPurchaseStatus = currentPurchase[0].purchase_status?.toLowerCase()
-      const newStatus = status.toLowerCase()
-      const newPurchaseStatus = purchaseStatus.toLowerCase()
-
-      // Determine if stock was previously added and if it should be added now
-      const wasStockAdded = oldPurchaseStatus === "delivered" && oldStatus !== "cancelled"
-      const shouldAddStock = newPurchaseStatus === "delivered" && newStatus !== "cancelled"
-
-      console.log("Stock status:", {
-        wasStockAdded,
-        shouldAddStock,
-        oldStatus,
-        newStatus,
-        oldPurchaseStatus,
-        newPurchaseStatus,
-      })
-
-      // Create maps for easier lookup
-      const currentItemsMap = new Map()
-      currentItems.forEach((item) => {
-        currentItemsMap.set(item.product_id, item.quantity)
-      })
-
-      const newItemsMap = new Map()
-      items.forEach((item) => {
-        newItemsMap.set(item.product_id, item.quantity)
-      })
-
-      // Get all unique product IDs from both old and new items
-      const allProductIds = new Set([...currentItemsMap.keys(), ...newItemsMap.keys()])
-
-      // Calculate net changes and update stock accordingly
-      const stockChanges = []
-
-      for (const productId of allProductIds) {
-        const oldQuantity = wasStockAdded ? currentItemsMap.get(productId) || 0 : 0
-        const newQuantity = shouldAddStock ? newItemsMap.get(productId) || 0 : 0
-        const netChange = newQuantity - oldQuantity
-
-        if (netChange !== 0) {
-          stockChanges.push({
-            product_id: productId,
-            net_change: netChange,
-            old_quantity: oldQuantity,
-            new_quantity: newQuantity,
-          })
-
-          // Update the product stock
-          await sql`
-            UPDATE products
-            SET stock = stock + ${netChange}
-            WHERE id = ${productId}
-          `
-
-          // Create a single stock history entry for the net change
-          try {
-            let historyNote = ""
-            let historyType = ""
-
-            if (netChange > 0) {
-              historyNote = `Stock increased by ${netChange} from purchase #${purchaseId} update - ${supplier}`
-              historyType = "purchase" // was "purchase_update"
-            } else {
-              historyNote = `Stock decreased by ${Math.abs(netChange)} from purchase #${purchaseId} update - ${supplier}`
-              historyType = "adjustment" // was "purchase_update"
-            }
-
-            await sql`
-              INSERT INTO product_stock_history (
-                product_id, quantity, type, reference_id, reference_type, notes, created_by
-              ) VALUES (
-                ${productId}, ${netChange}, ${historyType}, ${purchaseId}, 'purchase', 
-                ${historyNote}, ${userId}
-              )
-            `
-          } catch (error) {
-            console.error("Failed to add stock history for purchase update:", error)
-            // Continue execution even if this fails
-          }
-        }
-      }
-
-      console.log("Stock changes applied:", stockChanges)
-
-      // Delete existing items and add new ones
+      // Update purchase items
       await sql`DELETE FROM purchase_items WHERE purchase_id = ${purchaseId}`
 
       for (const item of items) {
@@ -479,157 +464,141 @@ export async function updatePurchase(formData: FormData) {
         `
       }
 
-      // Get previous values for adjustment tracking
-      const previousValues = {
-        totalAmount: Number(currentPurchase[0].total_amount) || 0,
-        receivedAmount: Number(currentPurchase[0].received_amount) || 0,
-        status: currentPurchase[0].status,
+      // Record purchase adjustment
+      try {
+        await recordPurchaseAdjustment({
+          purchaseId,
+          changeType: status.toLowerCase() === "cancelled" ? "cancel" : "edit",
+          previousValues: {
+            totalAmount: Number(currentPurchase[0].total_amount) || 0,
+            receivedAmount: Number(currentPurchase[0].received_amount) || 0,
+            status: currentPurchase[0].status,
+          },
+          newValues: {
+            totalAmount,
+            receivedAmount: finalReceivedAmount,
+            status,
+          },
+          deviceId,
+          userId,
+          description: `Purchase #${purchaseId} updated - ${supplier}`,
+          adjustmentDate: new Date(),
+        })
+      } catch (error) {
+        console.warn("Failed to record purchase adjustment:", error)
       }
 
-      const newValues = {
-        totalAmount,
-        receivedAmount: finalReceivedAmount,
-        status,
-      }
-
-      // Record purchase adjustment in simplified accounting system
-      await recordPurchaseAdjustment({
-        purchaseId,
-        changeType: status.toLowerCase() === "cancelled" ? "cancel" : "edit",
-        previousValues,
-        newValues,
-        deviceId,
-        userId,
-        description: `Purchase #${purchaseId} updated - ${supplier}`,
-        adjustmentDate: new Date(),
-      })
-
-      // Commit the transaction
       await sql`COMMIT`
 
       revalidatePath("/dashboard")
-      return { success: true, message: "Purchase updated successfully", data: purchaseResult[0] }
+      revalidatePath("/purchases")
+
+      return purchaseResult[0]
     } catch (error) {
       await sql`ROLLBACK`
       throw error
     }
-  } catch (error) {
-    console.error("Update purchase error:", error)
-    return {
-      success: false,
-      message: `Database error: ${getLastError()?.message || "Unknown error"}. Please try again later.`,
-    }
-  }
+  }, "Failed to update purchase")
 }
 
 export async function deletePurchase(purchaseId: number, deviceId: number) {
-  if (!purchaseId || !deviceId) {
-    return { success: false, message: "Purchase ID and Device ID are required" }
+  if (!purchaseId || purchaseId <= 0) {
+    return { success: false, message: "Valid purchase ID is required" }
+  }
+  if (!deviceId || deviceId <= 0) {
+    return { success: false, message: "Valid device ID is required" }
   }
 
-  // Reset connection state to allow a fresh attempt
-  resetConnectionState()
+  return withErrorHandling(async () => {
+    await ensureConnection()
 
-  try {
-    // Start a transaction
     await sql`BEGIN`
 
     try {
-      // Get the purchase status first
+      // Get purchase details
       const purchaseResult = await sql`
-        SELECT purchase_status, status, created_by FROM purchases WHERE id = ${purchaseId} AND device_id = ${deviceId}
+        SELECT purchase_status, status, created_by, supplier
+        FROM purchases 
+        WHERE id = ${purchaseId} AND device_id = ${deviceId}
       `
 
       if (purchaseResult.length === 0) {
-        await sql`ROLLBACK`
-        return { success: false, message: "Purchase not found" }
+        throw new Error("Purchase not found or access denied")
       }
 
       const purchase = purchaseResult[0]
-      const wasStockAdded =
-        purchase.purchase_status?.toLowerCase() === "delivered" && purchase.status?.toLowerCase() !== "cancelled"
+      const wasStockAdded = 
+        purchase.purchase_status?.toLowerCase() === "delivered" && 
+        purchase.status?.toLowerCase() !== "cancelled"
 
-      // Get items to restore stock if needed
+      // Get items to reverse stock changes
       const items = await sql`
         SELECT product_id, quantity FROM purchase_items WHERE purchase_id = ${purchaseId}
       `
 
-      // If stock was previously added, remove it
-      if (wasStockAdded) {
-        console.log("Removing stock for deleted purchase items:", items)
+      // Reverse stock changes if needed
+      if (wasStockAdded && items.length > 0) {
         for (const item of items) {
           await sql`
             UPDATE products
-            SET stock = stock - ${item.quantity}
+            SET stock = GREATEST(0, COALESCE(stock, 0) - ${item.quantity})
             WHERE id = ${item.product_id}
           `
 
-          // Record negative adjustment
+          // Add stock history
           try {
             await sql`
               INSERT INTO product_stock_history (
-                product_id,
-                quantity,
-                type,
-                reference_id,
-                reference_type,
-                notes,
-                created_by
-              )
-              VALUES (
-                ${item.product_id},
-                ${-item.quantity},
-                'adjustment',                 -- was 'purchase_deletion'
-                ${purchaseId},
-                'purchase',
-                ${`Stock removed due to purchase #${purchaseId} deletion`},
-                ${purchase.created_by}
+                product_id, quantity, type, reference_id, reference_type, notes, created_by
+              ) VALUES (
+                ${item.product_id}, ${-item.quantity}, 'adjustment', ${purchaseId}, 'purchase',
+                ${'Stock removed due to purchase #' + purchaseId + ' deletion'}, ${purchase.created_by}
               )
             `
           } catch (error) {
-            console.error("Failed to add stock history for deleted purchase:", error)
+            console.warn(`Failed to add stock history for product ${item.product_id}:`, error)
           }
         }
       }
 
       // Delete financial transactions
-      await deletePurchaseTransaction(purchaseId, deviceId)
-
-      // Delete purchase items first
-      await sql`DELETE FROM purchase_items WHERE purchase_id = ${purchaseId}`
-
-      // Delete the purchase with device_id check
-      const result = await sql`DELETE FROM purchases WHERE id = ${purchaseId} AND device_id = ${deviceId} RETURNING id`
-
-      if (result.length === 0) {
-        await sql`ROLLBACK`
-        return { success: false, message: "Failed to delete purchase" }
+      try {
+        await deletePurchaseTransaction(purchaseId, deviceId)
+      } catch (error) {
+        console.warn("Failed to delete purchase transaction:", error)
       }
 
-      // Commit the transaction
+      // Delete purchase items
+      await sql`DELETE FROM purchase_items WHERE purchase_id = ${purchaseId}`
+
+      // Delete the purchase
+      const result = await sql`
+        DELETE FROM purchases 
+        WHERE id = ${purchaseId} AND device_id = ${deviceId} 
+        RETURNING id
+      `
+
+      if (result.length === 0) {
+        throw new Error("Failed to delete purchase")
+      }
+
       await sql`COMMIT`
 
       revalidatePath("/dashboard")
-      return { success: true, message: "Purchase deleted successfully" }
+      revalidatePath("/purchases")
+
+      return { deleted: true }
     } catch (error) {
       await sql`ROLLBACK`
       throw error
     }
-  } catch (error) {
-    console.error("Delete purchase error:", error)
-    return {
-      success: false,
-      message: `Database error: ${getLastError()?.message || "Unknown error"}. Please try again later.`,
-    }
-  }
+  }, "Failed to delete purchase")
 }
 
-// Add this new function to get unique supplier names
 export async function getSuppliers() {
-  // Reset connection state to allow a fresh attempt
-  resetConnectionState()
+  return withErrorHandling(async () => {
+    await ensureConnection()
 
-  try {
     const result = await sql`
       SELECT DISTINCT TRIM(supplier) as supplier
       FROM purchases 
@@ -637,39 +606,29 @@ export async function getSuppliers() {
       ORDER BY TRIM(supplier)
     `
 
-    // Extract just the supplier names as an array of strings
-    const suppliers = result.map((row) => row.supplier)
-
-    return { success: true, data: suppliers }
-  } catch (error) {
-    console.error("Get suppliers error:", error)
-    return {
-      success: false,
-      message: `Database error: ${getLastError()?.message || "Unknown error"}. Please try again later.`,
-      data: [],
-    }
-  }
+    return result.map((row) => row.supplier)
+  }, "Failed to fetch suppliers").then(result => ({
+    ...result,
+    data: result.success ? result.data : []
+  }))
 }
 
 export async function getPurchaseById(id: number) {
-  // Reset connection state to allow a fresh attempt
-  resetConnectionState()
+  if (!id || id <= 0) {
+    return { success: false, message: "Valid purchase ID is required" }
+  }
 
-  try {
-    console.log("Fetching purchase with ID:", id)
+  return withErrorHandling(async () => {
+    await ensureConnection()
 
-    // First get the purchase details
+    // Get purchase details
     const purchaseResult = await sql`SELECT * FROM purchases WHERE id = ${id}`
 
     if (purchaseResult.length === 0) {
-      console.log("Purchase not found for ID:", id)
-      return { success: false, message: "Purchase not found" }
+      throw new Error("Purchase not found")
     }
 
-    const purchase = purchaseResult[0]
-    console.log("Found purchase:", purchase)
-
-    // Then get the purchase items with product details
+    // Get purchase items with product details
     const itemsResult = await sql`
       SELECT 
         pi.id,
@@ -685,19 +644,97 @@ export async function getPurchaseById(id: number) {
       ORDER BY pi.id
     `
 
-    console.log("Found purchase items:", itemsResult)
-
-    // Combine purchase and items
-    const result = {
-      ...purchase,
+    return {
+      ...purchaseResult[0],
       items: itemsResult,
     }
+  }, "Failed to fetch purchase")
+}
 
-    console.log("Final result:", result)
+// Helper functions
 
-    return { success: true, data: result }
+async function ensureColumnsExist() {
+  try {
+    const columns = await sql`
+      SELECT column_name 
+      FROM information_schema.columns 
+      WHERE table_name = 'purchases' 
+      AND column_name IN ('device_id', 'payment_method', 'purchase_status', 'received_amount')
+    `
+
+    const existingColumns = new Set(columns.map(col => col.column_name))
+
+    if (!existingColumns.has('device_id')) {
+      await sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS device_id INTEGER`
+    }
+    if (!existingColumns.has('payment_method')) {
+      await sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50)`
+    }
+    if (!existingColumns.has('purchase_status')) {
+      await sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS purchase_status VARCHAR(50) DEFAULT 'Delivered'`
+    }
+    if (!existingColumns.has('received_amount')) {
+      await sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS received_amount DECIMAL(12,2) DEFAULT 0`
+    }
   } catch (error) {
-    console.error("Get purchase by ID error:", error)
-    return { success: false, message: "Failed to fetch purchase" }
+    console.warn("Failed to ensure columns exist:", error)
+  }
+}
+
+async function handleStockUpdates(
+  purchaseId: number,
+  oldPurchase: any,
+  newPurchase: any,
+  currentItems: any[],
+  newItems: any[],
+  supplier: string,
+  userId: number
+) {
+  const oldStatus = oldPurchase.status?.toLowerCase()
+  const oldPurchaseStatus = oldPurchase.purchase_status?.toLowerCase()
+  const newStatus = newPurchase.status?.toLowerCase()
+  const newPurchaseStatus = newPurchase.purchase_status?.toLowerCase()
+
+  const wasStockAdded = oldPurchaseStatus === "delivered" && oldStatus !== "cancelled"
+  const shouldAddStock = newPurchaseStatus === "delivered" && newStatus !== "cancelled"
+
+  // Create maps for easier lookup
+  const currentItemsMap = new Map(currentItems.map(item => [item.product_id, item.quantity]))
+  const newItemsMap = new Map(newItems.map(item => [item.product_id, item.quantity]))
+
+  // Get all unique product IDs
+  const allProductIds = new Set([...currentItemsMap.keys(), ...newItemsMap.keys()])
+
+  // Apply stock changes
+  for (const productId of allProductIds) {
+    const oldQuantity = wasStockAdded ? (currentItemsMap.get(productId) || 0) : 0
+    const newQuantity = shouldAddStock ? (newItemsMap.get(productId) || 0) : 0
+    const netChange = newQuantity - oldQuantity
+
+    if (netChange !== 0) {
+      await sql`
+        UPDATE products
+        SET stock = GREATEST(0, COALESCE(stock, 0) + ${netChange})
+        WHERE id = ${productId}
+      `
+
+      // Add stock history
+      try {
+        const historyNote = netChange > 0 
+          ? `Stock increased by ${netChange} from purchase #${purchaseId} update - ${supplier}`
+          : `Stock decreased by ${Math.abs(netChange)} from purchase #${purchaseId} update - ${supplier}`
+
+        await sql`
+          INSERT INTO product_stock_history (
+            product_id, quantity, type, reference_id, reference_type, notes, created_by
+          ) VALUES (
+            ${productId}, ${netChange}, ${netChange > 0 ? 'purchase' : 'adjustment'}, 
+            ${purchaseId}, 'purchase', ${historyNote}, ${userId}
+          )
+        `
+      } catch (error) {
+        console.warn(`Failed to add stock history for product ${productId}:`, error)
+      }
+    }
   }
 }

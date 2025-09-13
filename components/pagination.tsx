@@ -9,8 +9,8 @@ interface PaginationProps {
   isLoading?: boolean;
   hasMore?: boolean;
   showLoadMore?: boolean;
-  siblingCount?: number; // Number of page buttons to show on each side of current page
-  boundaryCount?: number; // Number of always visible pages at start/end
+  siblingCount?: number;
+  boundaryCount?: number;
 }
 
 const Pagination: React.FC<PaginationProps> = ({
@@ -27,7 +27,6 @@ const Pagination: React.FC<PaginationProps> = ({
 }) => {
   const [isMobile, setIsMobile] = useState(false);
 
-  // Check screen size on mount and resize
   useEffect(() => {
     const checkScreenSize = () => {
       setIsMobile(window.innerWidth < 640);
@@ -40,7 +39,6 @@ const Pagination: React.FC<PaginationProps> = ({
 
   if (totalCount === 0) return null;
 
-  // Generate page numbers with ellipsis logic
   const generatePageNumbers = () => {
     const totalPageNumbers = siblingCount * 2 + 3 + boundaryCount * 2;
     if (totalPages <= totalPageNumbers) {
@@ -89,21 +87,22 @@ const Pagination: React.FC<PaginationProps> = ({
   const pageNumbers = generatePageNumbers();
 
   return (
-    <div className="flex flex-col sm:flex-row items-center justify-between border-t border-gray-200 dark:border-gray-700 px-4 py-3 sm:px-6">
-      {/* Item count - simplified version */}
-      <div className="text-sm text-gray-700 dark:text-gray-300 mb-2 sm:mb-0">
-        <span className="font-medium">{totalCount}</span> items
+    <div className="flex flex-col sm:flex-row items-center justify-between border-t border-gray-200 dark:border-gray-700 px-4 py-4 sm:px-6">
+      {/* Item count in a circular badge */}
+      <div className="flex items-center mb-3 sm:mb-0">
+        <span className="flex items-center justify-center w-8 h-8 mr-2 rounded-full bg-slate-400 text-red-500 text-sm font-medium">
+          {totalCount}
+        </span>
       </div>
 
       {/* Pagination controls */}
       {showLoadMore ? (
-        // --- Load More button mode ---
         <div>
           {hasMore && (
             <button
               onClick={() => onPageChange(currentPage + 1)}
               disabled={isLoading}
-              className="relative inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-md transition-colors duration-200"
+              className="relative inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-300 hover:bg-blue-700 disabled:opacity-50 rounded-md transition-colors duration-200"
             >
               {isLoading ? (
                 <span className="flex items-center">
@@ -136,7 +135,6 @@ const Pagination: React.FC<PaginationProps> = ({
           )}
         </div>
       ) : (
-        // --- Classic numbered pagination mode ---
         <div className="flex items-center space-x-1">
           <button
             onClick={() => onPageChange(currentPage - 1)}
@@ -147,7 +145,6 @@ const Pagination: React.FC<PaginationProps> = ({
             {isMobile ? "←" : "Previous"}
           </button>
 
-          {/* Page numbers with ellipsis */}
           <div className="flex space-x-1">
             {pageNumbers.map((page, index) => {
               if (page === "...") {
