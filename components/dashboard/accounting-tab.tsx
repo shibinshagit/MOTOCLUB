@@ -539,6 +539,21 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
     }
   }
 
+  // Helper function to calculate credit percentage
+  const getCreditPercentage = (transaction: any) => {
+    if (!transaction.amount || transaction.amount === 0) return 0
+    const creditPercentage = (transaction.credit / transaction.amount) * 100
+    return Math.min(100, Math.max(0, creditPercentage)) // Ensure between 0-100
+  }
+
+  // Helper function to format credit status
+  const getCreditStatus = (transaction: any) => {
+    const percentage = getCreditPercentage(transaction)
+    if (percentage === 0) return "Not credited"
+    if (percentage === 100) return "Fully credited"
+    return `Partially credited (${percentage.toFixed(0)}%)`
+  }
+
   const handleAddManualTransaction = async () => {
     if (!manualAmount || !manualCategory) {
       toast.error("Please fill in all required fields")
@@ -737,11 +752,11 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                 <div class="value">${currency} ${getProfit().toFixed(2)}</div>
               </div>
               <div class="summary-card">
-                <h3>Amount Received</h3>
+                <h3>Cash Received</h3>
                 <div class="value">${currency} ${getAmountReceived().toFixed(2)}</div>
               </div>
               <div class="summary-card">
-                <h3>Total Spends</h3>
+                <h3>Cash Spent</h3>
                 <div class="value">${currency} ${getSpends().toFixed(2)}</div>
               </div>
               <div class="summary-card">
@@ -765,9 +780,9 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                   <th>Description</th>
                   <th>Type</th>
                   <th>Status</th>
-                  <th>Amount</th>
-                  <th>${filteredTransactions.length > 0 ? "Received" : "Spend"}</th>
-                  <th>Cost</th>
+                  <th>Total Amount</th>
+                  <th>Cash Received/Spent</th>
+                  <th>Item Cost</th>
                   <th>Net Impact</th>
                 </tr>
               </thead>
@@ -776,6 +791,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                   .map((t) => {
                     const dateTime = formatDateTime(t.date)
                     const netImpact = getNetImpact(t)
+                    const moneyFlow = netImpact >= 0 ? t.credit : Math.abs(t.debit || t.amount)
                     return `
                     <tr>
                       <td>${dateTime.date}</td>
@@ -783,10 +799,12 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                       <td>${t.type || "Unknown"}</td>
                       <td>${t.status}</td>
                       <td>${currency} ${t.amount.toFixed(2)}</td>
-                      <td>${getNetImpact(t) >= 0 ? currency + " " + t.received.toFixed(2) : currency + " " + Math.abs(getNetImpact(t)).toFixed(2)}</td>
-                      <td>${currency} ${t.cost.toFixed(2)}</td>
                       <td style="color: ${netImpact >= 0 ? "#059669" : "#dc2626"}">
-                        ${netImpact >= 0 ? "" : "-"}${currency} ${Math.abs(netImpact).toFixed(2)}
+                        ${netImpact >= 0 ? "+" : "-"}${currency} ${moneyFlow.toFixed(2)}
+                      </td>
+                      <td>${currency} ${t.cost.toFixed(2)}</td>
+                      <td style="color: ${netImpact >= 0 ? "#059669" : "#dc2626"}; font-weight: bold;">
+                        ${netImpact >= 0 ? "+" : "-"}${currency} ${Math.abs(netImpact).toFixed(2)}
                       </td>
                     </tr>
                   `
@@ -1220,11 +1238,11 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                 <CardContent className="p-3">
                   <div className="flex items-center gap-1 mb-1">
                     <ArrowDownCircle className="h-4 w-4" />
-                    <span className="text-xs">Received</span>
+                    <span className="text-xs">Cash Received</span>
                   </div>
                   <div className="text-lg font-bold">{`${currency} ${getAmountReceived().toFixed(2)}`}</div>
                   <div className="text-[10px] mt-1">
-                    Credits: {filteredTransactions.filter((t) => t.credit > 0).length}
+                    Inflows: {filteredTransactions.filter((t) => t.credit > 0).length}
                   </div>
                 </CardContent>
               </Card>
@@ -1234,11 +1252,11 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                 <CardContent className="p-3">
                   <div className="flex items-center gap-1 mb-1">
                     <CreditCard className="h-4 w-4" />
-                    <span className="text-xs">Spends</span>
+                    <span className="text-xs">Cash Spent</span>
                   </div>
                   <div className="text-lg font-bold">{`${currency} ${getSpends().toFixed(2)}`}</div>
                   <div className="text-[10px] mt-1">
-                    Debits: {filteredTransactions.filter((t) => t.debit > 0).length}
+                    Outflows: {filteredTransactions.filter((t) => t.debit > 0).length}
                   </div>
                 </CardContent>
               </Card>
@@ -1253,7 +1271,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                   <div className="text-lg font-bold">
                     {`${currency} ${(financialData?.accountsReceivable || 0).toFixed(2)}`}
                   </div>
-                  <div className="text-[10px] mt-1">{(financialData?.receivables || []).length} outstanding</div>
+                  <div className="text-[10px] mt-1">{(financialData?.receivables || []).length} pending</div>
                 </CardContent>
               </Card>
 
@@ -1267,7 +1285,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                   <div className="text-lg font-bold">
                     {`${currency} ${(financialData?.accountsPayable || 0).toFixed(2)}`}
                   </div>
-                  <div className="text-[10px] mt-1">{(financialData?.payables || []).length} outstanding</div>
+                  <div className="text-[10px] mt-1">{(financialData?.payables || []).length} pending</div>
                 </CardContent>
               </Card>
             </>
@@ -1312,13 +1330,15 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                   const dateTime = formatDateTime(transaction.date)
                   const netImpact = getNetImpact(transaction)
                   const isPositive = netImpact >= 0
+                  const creditPercentage = getCreditPercentage(transaction)
+                  const creditStatus = getCreditStatus(transaction)
 
                   // Determine transaction type and extract the correct ID
                   const isSale = transaction.type === "sale" || transaction.description?.toLowerCase().startsWith("sale")
                   const isPurchase = transaction.type === "purchase" || transaction.description?.toLowerCase().startsWith("purchase")
                   const isManual = transaction.type === "manual" || transaction.description?.toLowerCase().includes("manual")
-                  const isSupplierPayment = transaction.type === "supplier_payment" || 
-                                           transaction.description?.toLowerCase().includes("supplier payment")
+                  const isSupplierPayment = transaction.type === 'supplier_payment' || 
+                                           transaction.description?.toLowerCase().includes('supplier payment')
                   
                   const handleClick = () => {
                     if (isSale) {
@@ -1384,48 +1404,41 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                         <div className="flex items-center gap-6">
                           <div className="grid grid-cols-4 gap-4 text-sm">
                             <div className="text-right">
-                              <div className="text-xs text-gray-500 dark:text-gray-400">Amount</div>
-                              <div className="text-gray-900 dark:text-gray-100">
+                              <div className="text-xs text-gray-500 dark:text-gray-400">Total Amount</div>
+                              <div className="text-gray-900 dark:text-gray-100 font-medium">
                                 {currency} {transaction.amount.toFixed(2)}
                               </div>
                             </div>
                             <div className="text-right">
-                              <div className="text-xs text-gray-500 dark:text-gray-400">
-                                {getNetImpact(transaction) >= 0 ? "Received" : "Spend"}
+                              <div className="text-xs text-gray-500 dark:text-gray-400">Credit Amount</div>
+                              <div className="text-green-600 dark:text-green-400 font-medium">
+                                {currency} {transaction.credit.toFixed(2)}
                               </div>
-                              <div
-                                className={
-                                  getNetImpact(transaction) >= 0
-                                    ? "text-green-600 dark:text-green-400"
-                                    : "text-red-600 dark:text-red-400"
-                                }
-                              >
-                                {currency}{" "}
-                                {getNetImpact(transaction) >= 0
-                                  ? transaction.credit.toFixed(2)
-                                  : Math.abs(transaction.debit || transaction.amount).toFixed(2)}
+                              <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                {creditStatus}
                               </div>
                             </div>
                             <div className="text-right">
-                              <div className="text-xs text-gray-500 dark:text-gray-400">Cost</div>
-                              <div className="text-orange-600 dark:text-orange-400">
+                              <div className="text-xs text-gray-500 dark:text-gray-400">Debit Amount</div>
+                              <div className="text-red-600 dark:text-red-400 font-medium">
+                                {currency} {transaction.debit.toFixed(2)}
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <div className="text-xs text-gray-500 dark:text-gray-400">Item Cost</div>
+                              <div className="text-orange-600 dark:text-orange-400 font-medium">
                                 {currency} {transaction.cost.toFixed(2)}
-                              </div>
-                            </div>
-                            <div className="text-right">
-                              <div className="text-xs text-gray-500 dark:text-gray-400">Credit/Debit</div>
-                              <div className="text-blue-600 dark:text-blue-400">
-                                {currency} {transaction.credit.toFixed(2)} / {currency} {transaction.debit.toFixed(2)}
                               </div>
                             </div>
                           </div>
 
+                          {/* Updated from "Balance Impact" to "Net Impact" */}
                           <div className="min-w-[120px] text-right">
                             <div className="text-xs text-gray-500 dark:text-gray-400">Net Impact</div>
                             <div
-                              className={`font-bold ${isPositive ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}
+                              className={`font-bold text-base ${isPositive ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}
                             >
-                              {isPositive ? "" : "- "}
+                              {isPositive ? "+" : "- "}
                               {currency} {Math.abs(netImpact).toFixed(2)}
                             </div>
                           </div>
