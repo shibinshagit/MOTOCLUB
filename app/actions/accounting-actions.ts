@@ -537,3 +537,30 @@ export async function addManualTransaction(data: {
   }
 }
 
+
+// Debug function to verify transaction accounting
+async function debugTransactionAccounting(deviceId: number, dateFrom: Date, dateTo: Date) {
+  const transactions = await sql`
+    SELECT 
+      transaction_type,
+      description,
+      received_amount,
+      debit_amount,
+      credit_amount,
+      cost_amount,
+      (received_amount - debit_amount) as cash_impact,
+      (credit_amount - debit_amount) as net_impact
+    FROM financial_transactions 
+    WHERE device_id = ${deviceId}
+      AND transaction_date BETWEEN ${dateFrom} AND ${dateTo}
+    ORDER BY transaction_date
+  `
+  
+  console.log("Transaction Accounting Debug:", transactions)
+  
+  transactions.forEach(tx => {
+    console.log(`${tx.transaction_type}: ${tx.description}`)
+    console.log(`  Received: ${tx.received_amount}, Debit: ${tx.debit_amount}`)
+    console.log(`  Cash Impact: ${tx.cash_impact}, Net Impact: ${tx.net_impact}`)
+  })
+}

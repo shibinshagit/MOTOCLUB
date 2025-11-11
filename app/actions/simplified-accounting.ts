@@ -901,6 +901,7 @@ function getAccountType(transactionType: string): string {
 }
 
 // Get opening and closing balances based on actual transaction data with date range
+// Get opening and closing balances based on actual transaction data with date range - FIXED
 export async function getAccountingBalances(deviceId: number, openingDate: Date, closingDate?: Date) {
   try {
     console.log(
@@ -925,11 +926,16 @@ export async function getAccountingBalances(deviceId: number, openingDate: Date,
 
     console.log("Date strings for balance calculation:", { openingDateStr, closingDateStr })
 
+    // FIXED: Calculate CASH BALANCE instead of net profit
+    // Cash Balance = Total Money Received (credits) - Total Money Spent (debits)
+    
     // Get all transactions up to opening date for opening balance
     const openingTransactions = await sql`
       SELECT 
         COALESCE(SUM(credit_amount), 0) as total_credits,
-        COALESCE(SUM(debit_amount), 0) as total_debits
+        COALESCE(SUM(debit_amount), 0) as total_debits,
+        COALESCE(SUM(received_amount), 0) as total_received,
+        COALESCE(SUM(cost_amount), 0) as total_cogs
       FROM financial_transactions 
       WHERE device_id = ${deviceId} 
         AND transaction_date <= ${openingDateStr}::timestamp
@@ -941,7 +947,9 @@ export async function getAccountingBalances(deviceId: number, openingDate: Date,
       closingTransactions = await sql`
         SELECT 
           COALESCE(SUM(credit_amount), 0) as total_credits,
-          COALESCE(SUM(debit_amount), 0) as total_debits
+          COALESCE(SUM(debit_amount), 0) as total_debits,
+          COALESCE(SUM(received_amount), 0) as total_received,
+          COALESCE(SUM(cost_amount), 0) as total_cogs
         FROM financial_transactions 
         WHERE device_id = ${deviceId} 
           AND transaction_date <= ${closingDateStr}::timestamp
@@ -950,19 +958,27 @@ export async function getAccountingBalances(deviceId: number, openingDate: Date,
 
     const openingCredits = Number(openingTransactions[0]?.total_credits) || 0
     const openingDebits = Number(openingTransactions[0]?.total_debits) || 0
-    const openingBalance = openingCredits - openingDebits
+    const openingReceived = Number(openingTransactions[0]?.total_received) || 0
+    
+    // FIXED: Opening Balance = Total Money Received - Total Money Spent
+    const openingBalance = openingReceived - openingDebits
 
     const closingCredits = Number(closingTransactions[0]?.total_credits) || 0
     const closingDebits = Number(closingTransactions[0]?.total_debits) || 0
-    const closingBalance = closingCredits - closingDebits
+    const closingReceived = Number(closingTransactions[0]?.total_received) || 0
+    
+    // FIXED: Closing Balance = Total Money Received - Total Money Spent
+    const closingBalance = closingReceived - closingDebits
 
     console.log("Balance calculation results:", {
-      openingCredits,
+      openingReceived,
       openingDebits,
       openingBalance,
-      closingCredits,
+      closingReceived,
       closingDebits,
       closingBalance,
+      openingCredits,
+      closingCredits,
     })
 
     return {
@@ -972,6 +988,8 @@ export async function getAccountingBalances(deviceId: number, openingDate: Date,
       openingDebits,
       closingCredits,
       closingDebits,
+      openingReceived,
+      closingReceived,
     }
   } catch (error) {
     console.error("Error getting accounting balances:", error)
@@ -982,6 +1000,9 @@ export async function getAccountingBalances(deviceId: number, openingDate: Date,
       openingDebits: 0,
       closingCredits: 0,
       closingDebits: 0,
+      openingReceived: 0,
+      closingReceived: 0,
     }
   }
 }
+
