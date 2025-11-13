@@ -735,7 +735,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                   .map((t) => {
                     const dateTime = formatDateTime(t.date)
                     const netImpact = getNetImpact(t)
-                    const moneyFlow = netImpact >= 0 ? t.credit : Math.abs(t.debit || t.amount)
+                    const moneyFlow = getMoneyFlowDisplay(t)
                     return `
                     <tr>
                       <td>${dateTime.date}</td>
@@ -743,12 +743,12 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                       <td>${t.type || "Unknown"}</td>
                       <td>${t.status}</td>
                       <td>${currency} ${t.amount.toFixed(2)}</td>
-                      <td style="color: ${netImpact >= 0 ? "#059669" : "#dc2626"}">
-                        ${netImpact >= 0 ? "+" : "-"}${currency} ${moneyFlow.toFixed(2)}
+                      <td style="color: ${moneyFlow.color.includes('green') ? "#059669" : moneyFlow.color.includes('red') ? "#dc2626" : "#6b7280"}">
+                        ${moneyFlow.showAmount ? (netImpact >= 0 ? "+" : "-") + currency + " " + moneyFlow.value.toFixed(2) : moneyFlow.text}
                       </td>
                       <td>${currency} ${t.cost.toFixed(2)}</td>
-                      <td style="color: ${netImpact >= 0 ? "#059669" : "#dc2626"}; font-weight: bold;">
-                        ${netImpact >= 0 ? "+" : "-"}${currency} ${Math.abs(netImpact).toFixed(2)}
+                      <td style="color: ${netImpact > 0 ? "#059669" : netImpact < 0 ? "#dc2626" : "#6b7280"}; font-weight: bold;">
+                        ${netImpact > 0 ? "+" : netImpact < 0 ? "-" : ""}${currency} ${Math.abs(netImpact).toFixed(2)}
                       </td>
                     </tr>
                   `
@@ -786,7 +786,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
     return match ? parseInt(match[1]) : null
   }
 
-  // FIXED: Calculate remaining amount for credit sales - IMPROVED LOGIC
+  // FIXED: Calculate remaining amount for credit sales - handle partial payments
   const getRemainingAmount = (transaction: any) => {
     const status = transaction.status?.toLowerCase()
     const totalAmount = Number(transaction.amount) || 0
@@ -807,53 +807,105 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
     return 0
   }
 
-  // FIXED: Get net impact with proper credit sale handling - IMPROVED LOGIC
+  // FIXED: Get net impact with proper partial credit sale handling
   const getNetImpact = (transaction: any) => {
     const status = transaction.status?.toLowerCase()
+    const type = transaction.type?.toLowerCase()
+    const totalAmount = Number(transaction.amount) || 0
+    const receivedAmount = Number(transaction.received) || 0
+    const costAmount = Number(transaction.cost) || 0
     
-    // For supplier payments, ensure we're calculating correctly
-    if (transaction.type === 'supplier_payment' || transaction.description?.toLowerCase().includes('supplier payment')) {
+    // For supplier payments, cash impact is negative
+    if (type === 'supplier_payment' || transaction.description?.toLowerCase().includes('supplier payment')) {
       return -Math.abs(transaction.debit || transaction.amount)
     }
     
-    // For credit sales with no money received, net impact is 0
-    if (status === 'credit' && transaction.credit === 0) {
-      return 0
-    }
-    
-    // For credit sales with partial payment, only count actual money received
+    // FIXED: For credit sales - cash impact = received amount - proportional COGS
     if (status === 'credit') {
-      return transaction.credit - transaction.debit
+      if (receivedAmount > 0) {
+        // Partial payment received: cash impact = received amount - proportional COGS
+        const paymentRatio = receivedAmount / totalAmount
+        const proportionalCost = costAmount * paymentRatio
+        return receivedAmount - proportionalCost
+      } else {
+        // No payment received: no cash impact
+        return 0
+      }
     }
     
-    // For completed sales, normal calculation
+    // For completed sales: cash impact = received amount - cost
+    if ((status === 'completed' || status === 'paid') && 
+        (type === 'sale' || transaction.description?.toLowerCase().startsWith('sale'))) {
+      return receivedAmount - costAmount
+    }
+    
+    // For purchases: cash impact = -debit amount (money going out)
+    if (type === 'purchase' || transaction.description?.toLowerCase().startsWith('purchase')) {
+      return -Math.abs(transaction.debit || transaction.amount)
+    }
+    
+    // For manual debit transactions: cash impact = -amount
+    if (type === 'manual' && transaction.debit > 0) {
+      return -transaction.debit
+    }
+    
+    // For manual credit transactions: cash impact = +amount
+    if (type === 'manual' && transaction.credit > 0) {
+      return transaction.credit
+    }
+    
+    // Default calculation (should rarely be used)
     return transaction.credit - transaction.debit
   }
 
-  // NEW: Get money flow display text and color
+  // FIXED: Get money flow display text and color for partial credit sales
   const getMoneyFlowDisplay = (transaction: any) => {
     const status = transaction.status?.toLowerCase()
     const netImpact = getNetImpact(transaction)
+    const receivedAmount = Number(transaction.received) || 0
+    const totalAmount = Number(transaction.amount) || 0
     
-    if (status === 'credit' && transaction.credit === 0) {
-      return {
-        text: "Pending",
-        color: "text-yellow-600 dark:text-yellow-400",
-        value: 0
+    // FIXED: For credit sales with partial payment
+    if (status === 'credit') {
+      if (receivedAmount > 0) {
+        // Partial payment received
+        return {
+          text: "Partial Payment",
+          color: "text-green-600 dark:text-green-400",
+          value: receivedAmount,
+          showAmount: true
+        }
+      } else {
+        // No payment received
+        return {
+          text: "Pending",
+          color: "text-yellow-600 dark:text-yellow-400",
+          value: 0,
+          showAmount: false
+        }
       }
     }
     
-    if (netImpact >= 0) {
+    if (netImpact > 0) {
       return {
         text: "Money In",
         color: "text-green-600 dark:text-green-400",
-        value: transaction.credit
+        value: transaction.received || transaction.credit,
+        showAmount: true
       }
-    } else {
+    } else if (netImpact < 0) {
       return {
         text: "Money Out",
         color: "text-red-600 dark:text-red-400",
-        value: Math.abs(transaction.debit || transaction.amount)
+        value: Math.abs(transaction.debit || transaction.amount),
+        showAmount: true
+      }
+    } else {
+      return {
+        text: "No Cash Impact",
+        color: "text-gray-600 dark:text-gray-400",
+        value: 0,
+        showAmount: false
       }
     }
   }
@@ -939,20 +991,33 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
     return getSalesTotal() - filteredCogs
   }
 
+  // FIXED: Get actual money received (only cash inflows) - include partial credit payments
   const getAmountReceived = () => {
-    return (
-      filteredTransactions?.reduce((sum, t) => {
-        return sum + t.credit
-      }, 0) || 0
-    )
+    return filteredTransactions?.reduce((sum, t) => {
+      const status = t.status?.toLowerCase()
+      
+      // FIXED: For credit sales, count the received amount (partial payments)
+      if (status === 'credit') {
+        return sum + (t.received || 0)
+      }
+      
+      // For completed sales, count received amount
+      if ((status === 'completed' || status === 'paid') && 
+          (t.type === 'sale' || t.description?.toLowerCase().startsWith('sale'))) {
+        return sum + (t.received || t.credit)
+      }
+      
+      // For other credit transactions
+      return sum + t.credit
+    }, 0) || 0
   }
 
+  // FIXED: Get actual money spent (only cash outflows)
   const getSpends = () => {
-    return (
-      filteredTransactions?.reduce((sum, t) => {
-        return sum + t.debit
-      }, 0) || 0
-    )
+    return filteredTransactions?.reduce((sum, t) => {
+      // Count all debit transactions (money going out)
+      return sum + t.debit
+    }, 0) || 0
   }
 
   const getFilteredCogs = () => {
@@ -963,7 +1028,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
     )
   }
 
-  // CORRECTED BALANCE CALCULATIONS
+  // FIXED BALANCE CALCULATIONS - Only actual cash movements
   const getOpeningBalance = () => {
     return balances?.openingBalance || 0
   }
@@ -1234,7 +1299,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                   </div>
                   <div className="text-lg font-bold">{`${currency} ${getAmountReceived().toFixed(2)}`}</div>
                   <div className="text-[10px] mt-1">
-                    Inflows: {filteredTransactions.filter((t) => t.credit > 0).length}
+                    Inflows: {filteredTransactions.filter((t) => getNetImpact(t) > 0).length}
                   </div>
                 </CardContent>
               </Card>
@@ -1248,7 +1313,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                   </div>
                   <div className="text-lg font-bold">{`${currency} ${getSpends().toFixed(2)}`}</div>
                   <div className="text-[10px] mt-1">
-                    Outflows: {filteredTransactions.filter((t) => t.debit > 0).length}
+                    Outflows: {filteredTransactions.filter((t) => getNetImpact(t) < 0).length}
                   </div>
                 </CardContent>
               </Card>
@@ -1321,7 +1386,8 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                 {filteredTransactions.map((transaction) => {
                   const dateTime = formatDateTime(transaction.date)
                   const netImpact = getNetImpact(transaction)
-                  const isPositive = netImpact >= 0
+                  const isPositive = netImpact > 0
+                  const isNegative = netImpact < 0
                   const remainingAmount = getRemainingAmount(transaction)
                   const moneyFlow = getMoneyFlowDisplay(transaction)
 
@@ -1375,7 +1441,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
                           <div className="text-gray-500 dark:text-gray-400">
-                            <Clock className="h-4 w-4" />
+                            {getTransactionTypeIcon(transaction.type)}
                           </div>
                           <div>
                             <div className="font-medium text-gray-900 dark:text-gray-100">
@@ -1394,7 +1460,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                         </div>
 
                         <div className="flex items-center gap-6">
-                          {/* UPDATED: Fixed Money Flow display for credit sales */}
+                          {/* FIXED: Corrected Money Flow display */}
                           <div className="grid grid-cols-4 gap-4 text-sm">
                             <div className="text-right">
                               <div className="text-xs text-gray-500 dark:text-gray-400">Transaction Amount</div>
@@ -1407,9 +1473,10 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                                 {moneyFlow.text}
                               </div>
                               <div className={`font-medium ${moneyFlow.color}`}>
-                                {moneyFlow.text === "Pending" 
-                                  ? "Pending" 
-                                  : `${currency} ${moneyFlow.value.toFixed(2)}`}
+                                {moneyFlow.showAmount 
+                                  ? `${currency} ${moneyFlow.value.toFixed(2)}`
+                                  : moneyFlow.text
+                                }
                               </div>
                             </div>
                             {/* Remaining column for credit sales */}
@@ -1434,9 +1501,15 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                           <div className="min-w-[120px] text-right">
                             <div className="text-xs text-gray-500 dark:text-gray-400">Cash Impact</div>
                             <div
-                              className={`font-bold text-base ${isPositive ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}
+                              className={`font-bold text-base ${
+                                isPositive 
+                                  ? "text-green-600 dark:text-green-400" 
+                                  : isNegative 
+                                    ? "text-red-600 dark:text-red-400" 
+                                    : "text-gray-600 dark:text-gray-400"
+                              }`}
                             >
-                              {isPositive ? "+" : "-"}
+                              {isPositive ? "+" : isNegative ? "-" : ""}
                               {currency} {Math.abs(netImpact).toFixed(2)}
                             </div>
                           </div>
