@@ -788,128 +788,137 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
 
   // FIXED: Calculate remaining amount for credit sales - handle partial payments
   const getRemainingAmount = (transaction: any) => {
-    const status = transaction.status?.toLowerCase()
-    const totalAmount = Number(transaction.amount) || 0
-    const receivedAmount = Number(transaction.received) || 0
-    
-    // For credit sales, remaining = total amount - received amount
-    if (status === 'credit') {
-      const remaining = totalAmount - receivedAmount
-      return Math.max(0, remaining)
-    }
-    
-    // For completed sales with partial payment (edge case)
-    if (status === 'completed' && receivedAmount < totalAmount) {
-      const remaining = totalAmount - receivedAmount
-      return Math.max(0, remaining)
-    }
-    
-    return 0
+  const status = transaction.status?.toLowerCase()
+  const totalAmount = Number(transaction.amount) || 0
+  const receivedAmount = Number(transaction.received) || 0
+  
+  // For credit sales, remaining = total amount - received amount
+  if (status === 'credit') {
+    const remaining = totalAmount - receivedAmount
+    return Math.max(0, remaining)
   }
+  
+  // For completed sales with partial payment (edge case)
+  if (status === 'completed' && receivedAmount < totalAmount) {
+    const remaining = totalAmount - receivedAmount
+    return Math.max(0, remaining)
+  }
+  
+  return 0
+}
 
-  // FIXED: Get net impact with proper partial credit sale handling
-  const getNetImpact = (transaction: any) => {
-    const status = transaction.status?.toLowerCase()
-    const type = transaction.type?.toLowerCase()
-    const totalAmount = Number(transaction.amount) || 0
-    const receivedAmount = Number(transaction.received) || 0
-    const costAmount = Number(transaction.cost) || 0
-    
-    // For supplier payments, cash impact is negative
-    if (type === 'supplier_payment' || transaction.description?.toLowerCase().includes('supplier payment')) {
-      return -Math.abs(transaction.debit || transaction.amount)
-    }
-    
-    // FIXED: For credit sales - cash impact = received amount - proportional COGS
-    if (status === 'credit') {
-      if (receivedAmount > 0) {
-        // Partial payment received: cash impact = received amount - proportional COGS
-        const paymentRatio = receivedAmount / totalAmount
-        const proportionalCost = costAmount * paymentRatio
-        return receivedAmount - proportionalCost
-      } else {
-        // No payment received: no cash impact
-        return 0
-      }
-    }
-    
-    // For completed sales: cash impact = received amount - cost
-    if ((status === 'completed' || status === 'paid') && 
-        (type === 'sale' || transaction.description?.toLowerCase().startsWith('sale'))) {
-      return receivedAmount - costAmount
-    }
-    
-    // For purchases: cash impact = -debit amount (money going out)
-    if (type === 'purchase' || transaction.description?.toLowerCase().startsWith('purchase')) {
-      return -Math.abs(transaction.debit || transaction.amount)
-    }
-    
-    // For manual debit transactions: cash impact = -amount
-    if (type === 'manual' && transaction.debit > 0) {
-      return -transaction.debit
-    }
-    
-    // For manual credit transactions: cash impact = +amount
-    if (type === 'manual' && transaction.credit > 0) {
-      return transaction.credit
-    }
-    
-    // Default calculation (should rarely be used)
-    return transaction.credit - transaction.debit
+// FIXED: Get net impact with proper partial credit sale handling
+const getNetImpact = (transaction: any) => {
+  const status = transaction.status?.toLowerCase()
+  const type = transaction.type?.toLowerCase()
+  const totalAmount = Number(transaction.amount) || 0
+  const receivedAmount = Number(transaction.received) || 0
+  const costAmount = Number(transaction.cost) || 0
+  
+  // For supplier payments, cash impact is negative
+  if (type === 'supplier_payment' || transaction.description?.toLowerCase().includes('supplier payment')) {
+    return -Math.abs(transaction.debit || transaction.amount)
   }
+  
+  // FIXED: For credit sales - cash impact = received amount - proportional COGS
+  if (status === 'credit') {
+    if (receivedAmount > 0) {
+      // Partial payment received: cash impact = received amount - proportional COGS
+      const paymentRatio = totalAmount > 0 ? receivedAmount / totalAmount : 0
+      const proportionalCost = costAmount * paymentRatio
+      return receivedAmount - proportionalCost
+    } else {
+      // No payment received: no cash impact
+      return 0
+    }
+  }
+  
+  // For completed sales: cash impact = received amount - cost
+  if ((status === 'completed' || status === 'paid') && 
+      (type === 'sale' || transaction.description?.toLowerCase().startsWith('sale'))) {
+    return receivedAmount - costAmount
+  }
+  
+  // For purchases: cash impact = -debit amount (money going out)
+  if (type === 'purchase' || transaction.description?.toLowerCase().startsWith('purchase')) {
+    return -Math.abs(transaction.debit || transaction.amount)
+  }
+  
+  // For manual debit transactions: cash impact = -amount
+  if (type === 'manual' && transaction.debit > 0) {
+    return -transaction.debit
+  }
+  
+  // For manual credit transactions: cash impact = +amount
+  if (type === 'manual' && transaction.credit > 0) {
+    return transaction.credit
+  }
+  
+  // Default calculation (should rarely be used)
+  return transaction.credit - transaction.debit
+}
 
   // FIXED: Get money flow display text and color for partial credit sales
   const getMoneyFlowDisplay = (transaction: any) => {
-    const status = transaction.status?.toLowerCase()
-    const netImpact = getNetImpact(transaction)
-    const receivedAmount = Number(transaction.received) || 0
-    const totalAmount = Number(transaction.amount) || 0
-    
-    // FIXED: For credit sales with partial payment
-    if (status === 'credit') {
-      if (receivedAmount > 0) {
-        // Partial payment received
-        return {
-          text: "Partial Payment",
-          color: "text-green-600 dark:text-green-400",
-          value: receivedAmount,
-          showAmount: true
-        }
-      } else {
-        // No payment received
-        return {
-          text: "Pending",
-          color: "text-yellow-600 dark:text-yellow-400",
-          value: 0,
-          showAmount: false
-        }
-      }
-    }
-    
-    if (netImpact > 0) {
+  const status = transaction.status?.toLowerCase()
+  const netImpact = getNetImpact(transaction)
+  const receivedAmount = Number(transaction.received) || 0
+  const totalAmount = Number(transaction.amount) || 0
+  
+  // FIXED: For credit sales with partial payment
+  if (status === 'credit') {
+    if (receivedAmount > 0 && receivedAmount < totalAmount) {
+      // Partial payment received
       return {
-        text: "Money In",
+        text: "Partial Payment",
         color: "text-green-600 dark:text-green-400",
-        value: transaction.received || transaction.credit,
+        value: receivedAmount,
         showAmount: true
       }
-    } else if (netImpact < 0) {
+    } else if (receivedAmount === 0) {
+      // No payment received - completely credit
       return {
-        text: "Money Out",
-        color: "text-red-600 dark:text-red-400",
-        value: Math.abs(transaction.debit || transaction.amount),
-        showAmount: true
-      }
-    } else {
-      return {
-        text: "No Cash Impact",
-        color: "text-gray-600 dark:text-gray-400",
+        text: "Pending",
+        color: "text-yellow-600 dark:text-yellow-400",
         value: 0,
         showAmount: false
       }
+    } else if (receivedAmount >= totalAmount) {
+      // Fully paid credit sale (edge case)
+      return {
+        text: "Money In",
+        color: "text-green-600 dark:text-green-400",
+        value: receivedAmount,
+        showAmount: true
+      }
     }
   }
+  
+  if (netImpact > 0) {
+    return {
+      text: "Money In",
+      color: "text-green-600 dark:text-green-400",
+      value: transaction.received || transaction.credit,
+      showAmount: true
+    }
+  } else if (netImpact < 0) {
+    return {
+      text: "Money Out",
+      color: "text-red-600 dark:text-red-400",
+      value: Math.abs(transaction.debit || transaction.amount),
+      showAmount: true
+    }
+  } else {
+    return {
+      text: "No Cash Impact",
+      color: "text-gray-600 dark:text-gray-400",
+      value: 0,
+      showAmount: false
+    }
+  }
+}
 
+// FIXED: Get actual money received (only cash inflows) - include partial credit payments
   // Enhanced filtering with income/expense and proper date comparison
   const filteredTransactions =
     financialData?.transactions?.filter((transaction) => {
@@ -993,24 +1002,25 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
 
   // FIXED: Get actual money received (only cash inflows) - include partial credit payments
   const getAmountReceived = () => {
-    return filteredTransactions?.reduce((sum, t) => {
-      const status = t.status?.toLowerCase()
-      
-      // FIXED: For credit sales, count the received amount (partial payments)
-      if (status === 'credit') {
-        return sum + (t.received || 0)
-      }
-      
-      // For completed sales, count received amount
-      if ((status === 'completed' || status === 'paid') && 
-          (t.type === 'sale' || t.description?.toLowerCase().startsWith('sale'))) {
-        return sum + (t.received || t.credit)
-      }
-      
-      // For other credit transactions
-      return sum + t.credit
-    }, 0) || 0
-  }
+  return filteredTransactions?.reduce((sum, t) => {
+    const status = t.status?.toLowerCase()
+    
+    // FIXED: For credit sales, count the received amount (partial payments)
+    if (status === 'credit') {
+      return sum + (t.received || 0)
+    }
+    
+    // For completed sales, count received amount
+    if ((status === 'completed' || status === 'paid') && 
+        (t.type === 'sale' || t.description?.toLowerCase().startsWith('sale'))) {
+      return sum + (t.received || t.credit)
+    }
+    
+    // For other credit transactions
+    return sum + t.credit
+  }, 0) || 0
+}
+
 
   // FIXED: Get actual money spent (only cash outflows)
   const getSpends = () => {

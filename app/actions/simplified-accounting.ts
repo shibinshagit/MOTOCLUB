@@ -180,30 +180,39 @@ export async function recordSaleTransaction(saleData: {
     let creditAmount = 0
     let costAmount = 0
     let description = ""
-    let receivedAmountForRecord = 0 // FIXED: For credit sales, record 0 as received amount
+    let receivedAmountForRecord = Number(saleData.receivedAmount) || 0
 
     if (saleData.status === "Cancelled") {
       // Cancelled sales: debit = received amount (refund), credit = 0, NO COGS
       debitAmount = Number(saleData.receivedAmount) || 0
       creditAmount = 0
       costAmount = 0
-      receivedAmountForRecord = 0
       description = `Sale #${saleData.saleId} - Cancelled - ${saleData.paymentMethod || "Cash"} - Customer: ${saleData.customerId ? `ID ${saleData.customerId}` : "Walk-in"}`
     } else if (saleData.status === "Credit") {
-      // FIXED: Credit sales - NO cash impact initially, record 0 as received amount
-      creditAmount = 0 // NO credit amount for credit sales until payment is received
+      // FIXED: Credit sales - record actual received amount for partial payments
+      creditAmount = Number(saleData.receivedAmount) || 0 // Only record actual cash received
       debitAmount = 0
-      costAmount = 0 // NO COGS impact for credit sales until payment is received
-      receivedAmountForRecord = 0 // FIXED: Record 0 as received amount for credit sales
-      description = `Sale #${saleData.saleId} - Credit - ${saleData.paymentMethod || "Cash"} - Customer: ${saleData.customerId ? `ID ${saleData.customerId}` : "Walk-in"} - Pending Payment`
       
-      console.log(`Credit sale recorded: No cash impact until payment received. Total: ${saleData.totalAmount}, Received: 0, COGS: 0`)
+      // For credit sales, only recognize COGS for the portion that's actually paid
+      if (saleData.receivedAmount > 0 && saleData.totalAmount > 0) {
+        const paymentRatio = saleData.receivedAmount / saleData.totalAmount
+        costAmount = saleData.cogsAmount * paymentRatio
+      } else {
+        costAmount = 0 // No COGS impact for completely credit sales
+      }
+      
+      if (saleData.receivedAmount > 0) {
+        description = `Sale #${saleData.saleId} - Credit - ${saleData.paymentMethod || "Cash"} - Customer: ${saleData.customerId ? `ID ${saleData.customerId}` : "Walk-in"} - Partial Payment`
+      } else {
+        description = `Sale #${saleData.saleId} - Credit - ${saleData.paymentMethod || "Cash"} - Customer: ${saleData.customerId ? `ID ${saleData.customerId}` : "Walk-in"} - Pending Payment`
+      }
+      
+      console.log(`Credit sale recorded: Total: ${saleData.totalAmount}, Received: ${saleData.receivedAmount}, COGS: ${costAmount}`)
     } else {
       // Completed sales: credit = received amount, debit = 0
       creditAmount = Number(saleData.receivedAmount) || 0
       debitAmount = 0
       costAmount = Number(saleData.cogsAmount) || 0
-      receivedAmountForRecord = Number(saleData.receivedAmount) || 0
       description = `Sale #${saleData.saleId} - Completed - ${saleData.paymentMethod || "Cash"} - Customer: ${saleData.customerId ? `ID ${saleData.customerId}` : "Walk-in"}`
     }
 
@@ -231,20 +240,10 @@ export async function recordSaleTransaction(saleData: {
     return { success: true, transactionId: result[0]?.id }
   } catch (error) {
     console.error("Error recording sale transaction:", error)
-    console.error("Error details:", {
-      message: error.message,
-      code: error.code,
-      detail: error.detail,
-      saleData: {
-        saleId: saleData.saleId,
-        deviceId: saleData.deviceId,
-        userId: saleData.userId,
-        totalAmount: saleData.totalAmount,
-      },
-    })
     return { success: false, error: error instanceof Error ? error.message : "Unknown error" }
   }
 }
+
 
 // FIXED: Record sale adjustments (edits, cancellations, payments) - PROPER credit sale payment handling
 export async function recordSaleAdjustment(adjustmentData: {

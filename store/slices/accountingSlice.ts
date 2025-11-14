@@ -166,15 +166,15 @@ export const selectCashImpact = (state: RootState) => (transaction: Transaction)
     return -Math.abs(transaction.debit || transaction.amount)
   }
   
-  // FIXED: For credit sales - cash impact = received amount - proportional COGS
+  // FIXED: For credit sales - handle both no payment and partial payment
   if (status === 'credit') {
     if (receivedAmount > 0) {
-      // Partial payment received: cash impact = received amount - proportional COGS
-      const paymentRatio = receivedAmount / totalAmount
+      // Partial payment: cash impact = received amount - proportional COGS
+      const paymentRatio = totalAmount > 0 ? receivedAmount / totalAmount : 0
       const proportionalCost = costAmount * paymentRatio
       return receivedAmount - proportionalCost
     } else {
-      // No payment received: no cash impact
+      // No payment: no cash impact
       return 0
     }
   }
@@ -204,12 +204,13 @@ export const selectCashImpact = (state: RootState) => (transaction: Transaction)
   return transaction.credit - transaction.debit
 }
 
+// FIXED: Remaining amount selector - for both full and partial credit sales
 export const selectRemainingAmount = (state: RootState) => (transaction: Transaction) => {
   const status = transaction.status?.toLowerCase()
   const totalAmount = Number(transaction.amount) || 0
   const receivedAmount = Number(transaction.received) || 0
   
-  // For credit sales, remaining = total amount - received amount
+  // FIXED: For ALL credit sales (no payment and partial payment), calculate remaining
   if (status === 'credit') {
     const remaining = totalAmount - receivedAmount
     return Math.max(0, remaining)
@@ -224,14 +225,13 @@ export const selectRemainingAmount = (state: RootState) => (transaction: Transac
   return 0
 }
 
-// FIXED: Add selector for money flow display
+// FIXED: Money flow display selector - proper handling for both full and partial credit sales
 export const selectMoneyFlowDisplay = (state: RootState) => (transaction: Transaction) => {
   const status = transaction.status?.toLowerCase()
-  const cashImpact = selectCashImpact(state)(transaction)
   const receivedAmount = Number(transaction.received) || 0
   const totalAmount = Number(transaction.amount) || 0
   
-  // FIXED: For credit sales with partial payment
+  // FIXED: For credit sales - handle both no payment and partial payment
   if (status === 'credit') {
     if (receivedAmount > 0 && receivedAmount < totalAmount) {
       // Partial payment received
@@ -241,33 +241,35 @@ export const selectMoneyFlowDisplay = (state: RootState) => (transaction: Transa
         value: receivedAmount,
         showAmount: true
       }
-    } else if (receivedAmount === totalAmount) {
-      // Full payment received but still credit status
-      return {
-        text: "Money In",
-        color: "text-green-600 dark:text-green-400",
-        value: receivedAmount,
-        showAmount: true
-      }
-    } else {
-      // No payment received
+    } else if (receivedAmount === 0) {
+      // No payment received - completely credit
       return {
         text: "Pending",
         color: "text-yellow-600 dark:text-yellow-400",
         value: 0,
         showAmount: false
       }
+    } else if (receivedAmount >= totalAmount) {
+      // Fully paid credit sale (edge case)
+      return {
+        text: "Money In",
+        color: "text-green-600 dark:text-green-400",
+        value: receivedAmount,
+        showAmount: true
+      }
     }
   }
   
-  if (cashImpact > 0) {
+  const netImpact = selectCashImpact(state)(transaction)
+  
+  if (netImpact > 0) {
     return {
       text: "Money In",
       color: "text-green-600 dark:text-green-400",
       value: transaction.received || transaction.credit,
       showAmount: true
     }
-  } else if (cashImpact < 0) {
+  } else if (netImpact < 0) {
     return {
       text: "Money Out",
       color: "text-red-600 dark:text-red-400",
