@@ -1,4 +1,3 @@
-// store/slices/accountingSlice.ts
 import { createSlice, type PayloadAction } from "@reduxjs/toolkit"
 import type { RootState } from "../store"
 
@@ -89,6 +88,152 @@ const initialState: AccountingState = {
   isBackgroundLoading: false,
 }
 
+// Helper functions that can be used both in slice and component
+export const calculateCashImpact = (transaction: Transaction): number => {
+  const status = transaction.status?.toLowerCase()
+  const type = transaction.type?.toLowerCase()
+  const totalAmount = Number(transaction.amount) || 0
+  const receivedAmount = Number(transaction.received) || 0
+  const costAmount = Number(transaction.cost) || 0
+  
+  // For supplier payments, cash impact is negative
+  if (type === 'supplier_payment' || transaction.description?.toLowerCase().includes('supplier payment')) {
+    return -Math.abs(transaction.debit || transaction.amount)
+  }
+  
+  // For credit sales - handle both no payment and partial payment
+  if (status === 'credit') {
+    if (receivedAmount > 0) {
+      // Partial payment received: cash impact = received amount - proportional COGS
+      const paymentRatio = totalAmount > 0 ? receivedAmount / totalAmount : 0
+      const proportionalCost = costAmount * paymentRatio
+      return receivedAmount - proportionalCost
+    } else {
+      // No payment received: no cash impact
+      return 0
+    }
+  }
+  
+  // For completed sales: cash impact = received amount - cost
+  if ((status === 'completed' || status === 'paid') && 
+      (type === 'sale' || transaction.description?.toLowerCase().startsWith('sale'))) {
+    return receivedAmount - costAmount
+  }
+  
+  // For purchases: cash impact = -debit amount (money going out)
+  if (type === 'purchase' || transaction.description?.toLowerCase().startsWith('purchase')) {
+    return -Math.abs(transaction.debit || transaction.amount)
+  }
+  
+  // For manual debit transactions: cash impact = -amount
+  if (type === 'manual' && transaction.debit > 0) {
+    return -transaction.debit
+  }
+  
+  // For manual credit transactions: cash impact = +amount
+  if (type === 'manual' && transaction.credit > 0) {
+    return transaction.credit
+  }
+  
+  // Default calculation (should rarely be used)
+  return transaction.credit - transaction.debit
+}
+
+export const calculateRemainingAmount = (transaction: Transaction) => {
+  const type = transaction.type?.toLowerCase();
+  const status = transaction.status?.toLowerCase();
+  const amount = Number(transaction.amount) || 0;
+  const received = Number(transaction.received) || 0;
+  
+  // For credit sales, remaining amount is total minus actual received
+  if (type === 'sale' && status === 'credit') {
+    return Math.max(0, amount - received);
+  }
+  
+  // For other sale types
+  if (type === 'sale') {
+    return Math.max(0, amount - received);
+  }
+  
+  // For purchases
+  if (type === 'purchase') {
+    return Math.max(0, amount - received);
+  }
+  
+  return 0;
+};
+
+export const getMoneyFlowDisplay = (transaction: Transaction) => {
+  const type = transaction.type?.toLowerCase();
+  const status = transaction.status?.toLowerCase();
+  const amount = Number(transaction.amount) || 0;
+  const received = Number(transaction.received) || 0;
+  const credit = Number(transaction.credit) || 0;
+  
+  // For credit sales with partial payments
+  if (type === 'sale' && status === 'credit') {
+    const actualReceived = received;
+    const remaining = amount - actualReceived;
+    
+    if (actualReceived > 0 && actualReceived < amount) {
+      // Partial credit sale - show partial payment
+      return {
+        text: 'Partial Payment',
+        value: actualReceived,
+        showAmount: true,
+        color: 'text-blue-600 dark:text-blue-400'
+      };
+    } else if (actualReceived === 0) {
+      // Full credit sale - no payment received
+      return {
+        text: 'Pending',
+        value: 0,
+        showAmount: false,
+        color: 'text-yellow-600 dark:text-yellow-400'
+      };
+    }
+  }
+  
+  // Existing logic for other transaction types
+  if (type === 'sale' && status === 'completed') {
+    return {
+      text: 'Paid',
+      value: amount,
+      showAmount: true,
+      color: 'text-green-600 dark:text-green-400'
+    };
+  } else if (type === 'sale' && status === 'credit') {
+    return {
+      text: 'Pending',
+      value: 0,
+      showAmount: false,
+      color: 'text-yellow-600 dark:text-yellow-400'
+    };
+  } else if (type === 'purchase') {
+    return {
+      text: 'Paid',
+      value: received,
+      showAmount: true,
+      color: 'text-orange-600 dark:text-orange-400'
+    };
+  } else if (type === 'manual') {
+    const netAmount = credit - (Number(transaction.debit) || 0);
+    return {
+      text: netAmount >= 0 ? 'Income' : 'Expense',
+      value: Math.abs(netAmount),
+      showAmount: true,
+      color: netAmount >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+    };
+  } else {
+    return {
+      text: 'Processed',
+      value: amount,
+      showAmount: true,
+      color: 'text-gray-600 dark:text-gray-400'
+    };
+  }
+};
+
 export const accountingSlice = createSlice({
   name: "accounting",
   initialState,
@@ -152,138 +297,5 @@ export const selectDateRange = (state: RootState) => ({
 })
 export const selectIsLoading = (state: RootState) => state.accounting.isLoading
 export const selectIsBackgroundLoading = (state: RootState) => state.accounting.isBackgroundLoading
-
-// FIXED: Helper selectors for calculations - PROPER credit sale handling
-export const selectCashImpact = (state: RootState) => (transaction: Transaction) => {
-  const status = transaction.status?.toLowerCase()
-  const type = transaction.type?.toLowerCase()
-  const totalAmount = Number(transaction.amount) || 0
-  const receivedAmount = Number(transaction.received) || 0
-  const costAmount = Number(transaction.cost) || 0
-  
-  // For supplier payments, cash impact is negative
-  if (type === 'supplier_payment' || transaction.description?.toLowerCase().includes('supplier payment')) {
-    return -Math.abs(transaction.debit || transaction.amount)
-  }
-  
-  // FIXED: For credit sales - handle both no payment and partial payment
-  if (status === 'credit') {
-    if (receivedAmount > 0) {
-      // Partial payment: cash impact = received amount - proportional COGS
-      const paymentRatio = totalAmount > 0 ? receivedAmount / totalAmount : 0
-      const proportionalCost = costAmount * paymentRatio
-      return receivedAmount - proportionalCost
-    } else {
-      // No payment: no cash impact
-      return 0
-    }
-  }
-  
-  // For completed sales: cash impact = received amount - cost
-  if ((status === 'completed' || status === 'paid') && 
-      (type === 'sale' || transaction.description?.toLowerCase().startsWith('sale'))) {
-    return receivedAmount - costAmount
-  }
-  
-  // For purchases: cash impact = -debit amount (money going out)
-  if (type === 'purchase' || transaction.description?.toLowerCase().startsWith('purchase')) {
-    return -Math.abs(transaction.debit || transaction.amount)
-  }
-  
-  // For manual debit transactions: cash impact = -amount
-  if (type === 'manual' && transaction.debit > 0) {
-    return -transaction.debit
-  }
-  
-  // For manual credit transactions: cash impact = +amount
-  if (type === 'manual' && transaction.credit > 0) {
-    return transaction.credit
-  }
-  
-  // Default calculation (should rarely be used)
-  return transaction.credit - transaction.debit
-}
-
-// FIXED: Remaining amount selector - for both full and partial credit sales
-export const selectRemainingAmount = (state: RootState) => (transaction: Transaction) => {
-  const status = transaction.status?.toLowerCase()
-  const totalAmount = Number(transaction.amount) || 0
-  const receivedAmount = Number(transaction.received) || 0
-  
-  // FIXED: For ALL credit sales (no payment and partial payment), calculate remaining
-  if (status === 'credit') {
-    const remaining = totalAmount - receivedAmount
-    return Math.max(0, remaining)
-  }
-  
-  // For completed sales with partial payment (edge case)
-  if ((status === 'completed' || status === 'paid') && receivedAmount < totalAmount) {
-    const remaining = totalAmount - receivedAmount
-    return Math.max(0, remaining)
-  }
-  
-  return 0
-}
-
-// FIXED: Money flow display selector - proper handling for both full and partial credit sales
-export const selectMoneyFlowDisplay = (state: RootState) => (transaction: Transaction) => {
-  const status = transaction.status?.toLowerCase()
-  const receivedAmount = Number(transaction.received) || 0
-  const totalAmount = Number(transaction.amount) || 0
-  
-  // FIXED: For credit sales - handle both no payment and partial payment
-  if (status === 'credit') {
-    if (receivedAmount > 0 && receivedAmount < totalAmount) {
-      // Partial payment received
-      return {
-        text: "Partial Payment",
-        color: "text-green-600 dark:text-green-400",
-        value: receivedAmount,
-        showAmount: true
-      }
-    } else if (receivedAmount === 0) {
-      // No payment received - completely credit
-      return {
-        text: "Pending",
-        color: "text-yellow-600 dark:text-yellow-400",
-        value: 0,
-        showAmount: false
-      }
-    } else if (receivedAmount >= totalAmount) {
-      // Fully paid credit sale (edge case)
-      return {
-        text: "Money In",
-        color: "text-green-600 dark:text-green-400",
-        value: receivedAmount,
-        showAmount: true
-      }
-    }
-  }
-  
-  const netImpact = selectCashImpact(state)(transaction)
-  
-  if (netImpact > 0) {
-    return {
-      text: "Money In",
-      color: "text-green-600 dark:text-green-400",
-      value: transaction.received || transaction.credit,
-      showAmount: true
-    }
-  } else if (netImpact < 0) {
-    return {
-      text: "Money Out",
-      color: "text-red-600 dark:text-red-400",
-      value: Math.abs(transaction.debit || transaction.amount),
-      showAmount: true
-    }
-  } else {
-    return {
-      text: "No Cash Impact",
-      color: "text-gray-600 dark:text-gray-400",
-      value: 0,
-      showAmount: false
-    }
-  }
-}
 
 export default accountingSlice.reducer

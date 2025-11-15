@@ -437,11 +437,17 @@ export async function getSaleDetails(saleId: number) {
       discountValue = subtotal - total > 0 ? subtotal - total : 0
     }
 
+    // Calculate outstanding amount
+    const totalAmount = Number(saleResult[0].total_amount)
+    const receivedAmount = Number(saleResult[0].received_amount || 0)
+    const outstandingAmount = totalAmount - receivedAmount
+
     // Add calculated values to sale data
     const saleData = {
       ...saleResult[0],
       discount: discountValue,
       subtotal: subtotal,
+      outstanding_amount: outstandingAmount,
     }
 
     console.log("Sale details fetched successfully:", {
@@ -449,6 +455,8 @@ export async function getSaleDetails(saleId: number) {
       customerName: saleData.customer_name,
       itemsCount: itemsResult.length,
       totalAmount: saleData.total_amount,
+      receivedAmount: saleData.received_amount,
+      outstandingAmount: saleData.outstanding_amount,
       discount: discountValue,
     })
 
@@ -468,7 +476,125 @@ export async function getSaleDetails(saleId: number) {
   }
 }
 
-// Updated addSale function with improved stock handling
+export async function getSaleDetailsWithDebug(saleId: number) {
+  if (!saleId) {
+    return { success: false, message: "Sale ID is required" }
+  }
+
+  console.log("=== GET SALE DETAILS DEBUG ===")
+  console.log(`Fetching details for sale ID: ${saleId}`)
+
+  try {
+    // First, let's debug the raw database query
+    const rawSaleQuery = await sql`
+      SELECT 
+        id,
+        status,
+        total_amount,
+        received_amount,
+        discount,
+        payment_method,
+        customer_id,
+        staff_id,
+        device_id,
+        sale_date,
+        created_at,
+        updated_at
+      FROM sales 
+      WHERE id = ${saleId}
+    `
+
+    console.log("Raw sale query result:")
+    console.table(rawSaleQuery)
+
+    if (rawSaleQuery.length === 0) {
+      console.log(`Sale ${saleId} not found in database`)
+      return { success: false, message: "Sale not found" }
+    }
+
+    const sale = rawSaleQuery[0]
+    
+    console.log("Sale data analysis:")
+    console.log(`- Status: ${sale.status}`)
+    console.log(`- Total Amount: ${sale.total_amount}`)
+    console.log(`- Received Amount: ${sale.received_amount}`)
+    console.log(`- Outstanding (calculated): ${Number(sale.total_amount) - Number(sale.received_amount)}`)
+    console.log(`- Payment Method: ${sale.payment_method}`)
+
+    // Get sale items with debug info
+    const itemsQuery = await sql`
+      SELECT 
+        si.*,
+        p.name as product_name,
+        s.name as service_name,
+        CASE 
+          WHEN s.id IS NOT NULL THEN 'service'
+          WHEN p.id IS NOT NULL THEN 'product'
+          ELSE 'unknown'
+        END as item_type
+      FROM sale_items si
+      LEFT JOIN products p ON si.product_id = p.id AND NOT EXISTS (SELECT 1 FROM services s WHERE s.id = si.product_id)
+      LEFT JOIN services s ON si.product_id = s.id
+      WHERE si.sale_id = ${saleId}
+      ORDER BY si.id
+    `
+
+    console.log(`Found ${itemsQuery.length} sale items:`)
+    console.table(itemsQuery)
+
+    // Calculate totals from items for verification
+    const calculatedSubtotal = itemsQuery.reduce((sum, item) => sum + Number(item.quantity) * Number(item.price), 0)
+    const calculatedTotal = calculatedSubtotal - Number(sale.discount || 0)
+    
+    console.log("Calculated totals from items:")
+    console.log(`- Subtotal: ${calculatedSubtotal}`)
+    console.log(`- Discount: ${sale.discount || 0}`)
+    console.log(`- Total: ${calculatedTotal}`)
+    console.log(`- Database Total: ${sale.total_amount}`)
+    console.log(`- Match: ${calculatedTotal === Number(sale.total_amount)}`)
+
+    // Enhanced sale data with debug info
+    const saleData = {
+      ...sale,
+      discount: Number(sale.discount) || 0,
+      subtotal: calculatedSubtotal,
+      outstanding_amount: Number(sale.total_amount) - Number(sale.received_amount),
+      _debug: {
+        calculatedSubtotal,
+        calculatedTotal,
+        totalsMatch: calculatedTotal === Number(sale.total_amount),
+        rawReceivedAmount: sale.received_amount,
+        rawTotalAmount: sale.total_amount
+      }
+    }
+
+    console.log("Final sale data being returned:")
+    console.log(JSON.stringify(saleData, null, 2))
+
+    return {
+      success: true,
+      data: {
+        sale: saleData,
+        items: itemsQuery,
+      },
+      debug: {
+        rawSaleData: sale,
+        calculatedTotals: {
+          subtotal: calculatedSubtotal,
+          total: calculatedTotal
+        }
+      }
+    }
+  } catch (error) {
+    console.error("Get sale details debug error:", error)
+    return {
+      success: false,
+      message: `Database error: ${error.message}. Please try again later.`,
+    }
+  }
+}
+
+// FIXED addSale function with proper credit sale handling
 export async function addSale(saleData: any) {
   try {
     console.log("Adding sale with data:", JSON.stringify(saleData, null, 2))
@@ -487,26 +613,35 @@ export async function addSale(saleData: any) {
       )
       const discountAmount = Number(saleData.discount) || 0
       const total = Math.max(0, subtotal - discountAmount)
+
+      // 🚨 FIXED: Handle received amount based on status - PROPER credit sale handling
+      let receivedAmount = 0
+      const isCompleted = saleData.paymentStatus?.toLowerCase() === "completed"
       const isCancelled = saleData.paymentStatus?.toLowerCase() === "cancelled"
       const isCredit = saleData.paymentStatus?.toLowerCase() === "credit"
 
-      // Handle received amount based on status
-      let receivedAmount = 0
-      if (saleData.paymentStatus?.toLowerCase() === "completed") {
-        receivedAmount = total // Full amount received
-      } else if (saleData.paymentStatus?.toLowerCase() === "cancelled") {
-        receivedAmount = 0 // No payment for cancelled
+      if (isCompleted) {
+        // Completed sales: full amount received
+        receivedAmount = total
+        console.log(`✅ COMPLETED SALE: received_amount = total_amount = ${total}`)
+      } else if (isCancelled) {
+        // Cancelled sales: no payment received
+        receivedAmount = 0
+        console.log(`❌ CANCELLED SALE: received_amount = 0`)
       } else if (isCredit) {
-        receivedAmount = Number(saleData.receivedAmount) || 0 // Partial payment for credit
-
-        // Validate received amount for credit sales
-        if (receivedAmount > total) {
-          await sql`ROLLBACK`
-          return {
-            success: false,
-            message: `Received amount (${receivedAmount}) cannot be greater than total amount (${total})`,
-          }
+        // 🚨 FIXED: Credit sales MUST have received_amount = 0 initially
+        // Only record payments when customer actually pays later (via updateSale)
+        receivedAmount = 0 // Force to 0 for new credit sales
+        
+        console.log(`🔄 CREDIT SALE CREATION: Setting received_amount to 0 (ignoring frontend value: ${saleData.receivedAmount || 0})`)
+        
+        // Debug log to track the issue
+        if (saleData.receivedAmount && Number(saleData.receivedAmount) > 0) {
+          console.warn(`⚠️ FRONTEND BUG DETECTED: Form sent receivedAmount=${saleData.receivedAmount} for credit sale`)
+          console.warn(`💡 Backend is fixing this by forcing received_amount to 0`)
         }
+        
+        console.log(`📝 CREDIT SALE: Total=${total}, Received=0, Outstanding=${total}`)
       }
 
       const outstandingAmount = total - receivedAmount
@@ -787,12 +922,18 @@ export async function addSale(saleData: any) {
       revalidatePath("/dashboard")
 
       console.log(`Sale ${saleId} created successfully with ${saleItems.length} items (${saleType} sale)`)
+      console.log(`Sale financial summary: Total=${total}, Received=${receivedAmount}, Outstanding=${outstandingAmount}, Status=${saleData.paymentStatus}`)
 
       return {
         success: true,
         message: "Sale added successfully",
         data: {
-          sale: { ...sale, discount: discountAmount, received_amount: receivedAmount },
+          sale: { 
+            ...sale, 
+            discount: discountAmount, 
+            received_amount: receivedAmount,
+            outstanding_amount: outstandingAmount 
+          },
           items: saleItems,
         },
       }
@@ -809,7 +950,7 @@ export async function addSale(saleData: any) {
   }
 }
 
-// Helper function to calculate all changes in one place
+// CORRECTED Helper function to calculate all changes in one place
 function calculateSaleChanges(original: any, newData: any, originalItems: any[], newItems: any[]) {
   const subtotal = newData.items.reduce(
     (sum: number, item: any) => sum + Number.parseFloat(item.price) * Number.parseInt(item.quantity),
@@ -818,14 +959,39 @@ function calculateSaleChanges(original: any, newData: any, originalItems: any[],
   const newDiscountAmount = Number(newData.discount) || 0
   const newTotal = Math.max(0, subtotal - newDiscountAmount)
 
-  // Calculate new received amount based on status
+  // CORRECTED: Calculate new received amount based on status with proper credit handling
   let newReceivedAmount = 0
-  if (newData.paymentStatus?.toLowerCase() === "completed") {
-    newReceivedAmount = newTotal
-  } else if (newData.paymentStatus?.toLowerCase() === "cancelled") {
-    newReceivedAmount = 0
-  } else if (newData.paymentStatus?.toLowerCase() === "credit") {
-    newReceivedAmount = Number(newData.receivedAmount) || 0
+  const isCompleted = newData.paymentStatus?.toLowerCase() === "completed"
+  const isCancelled = newData.paymentStatus?.toLowerCase() === "cancelled"
+  const isCredit = newData.paymentStatus?.toLowerCase() === "credit"
+
+  if (isCompleted) {
+    newReceivedAmount = newTotal // Full amount received for completed sales
+  } else if (isCancelled) {
+    newReceivedAmount = 0 // No payment for cancelled sales
+  } else if (isCredit) {
+    // 🚨 FIXED: For credit sales, only allow received_amount increases when customer pays
+    // Don't allow setting received_amount directly to total for credit sales
+    const currentReceived = Number(original.received_amount || 0)
+    const requestedReceived = Number(newData.receivedAmount) || 0
+    
+    // Validate: Can only increase received_amount, not set it arbitrarily
+    if (requestedReceived < currentReceived) {
+      throw new Error(`Cannot decrease received amount for credit sales. Current: ${currentReceived}, Requested: ${requestedReceived}`)
+    }
+    
+    if (requestedReceived > newTotal) {
+      throw new Error(`Received amount (${requestedReceived}) cannot be greater than total amount (${newTotal}) for credit sales`)
+    }
+    
+    newReceivedAmount = requestedReceived
+    
+    console.log(`🔄 CREDIT SALE UPDATE: received_amount ${currentReceived} → ${newReceivedAmount}`)
+    
+    // Log if this is a payment on a credit sale
+    if (newReceivedAmount > currentReceived) {
+      console.log(`💰 CREDIT SALE PAYMENT: Customer paid ${newReceivedAmount - currentReceived}, Outstanding: ${newTotal - newReceivedAmount}`)
+    }
   }
 
   // Calculate original discount from original items since we don't have discount column
@@ -836,12 +1002,18 @@ function calculateSaleChanges(original: any, newData: any, originalItems: any[],
   const originalTotal = Number(original.total_amount)
   const originalDiscountAmount = Math.max(0, originalSubtotal - originalTotal)
 
-  console.log("Discount calculation debug:", {
+  const outstandingAmount = newTotal - newReceivedAmount
+
+  console.log("Sale changes calculation:", {
     originalSubtotal,
     originalTotal,
     originalDiscount: originalDiscountAmount,
     newDiscount: newDiscountAmount,
     discountDiff: newDiscountAmount - originalDiscountAmount,
+    newStatus: newData.paymentStatus,
+    newReceived: newReceivedAmount,
+    originalReceived: original.received_amount || 0,
+    outstandingAmount,
   })
 
   return {
@@ -860,16 +1032,16 @@ function calculateSaleChanges(original: any, newData: any, originalItems: any[],
     newStatus: newData.paymentStatus,
     originalTotal: Number(original.total_amount),
     newTotal: newTotal,
-    originalDiscount: originalDiscountAmount, // Now calculated correctly
+    originalDiscount: originalDiscountAmount,
     newDiscount: newDiscountAmount,
     originalReceived: Number(original.received_amount || 0),
     newReceived: newReceivedAmount,
 
     // Differences
     totalDiff: newTotal - Number(original.total_amount),
-    discountDiff: newDiscountAmount - originalDiscountAmount, // Now correct
+    discountDiff: newDiscountAmount - originalDiscountAmount,
     receivedDiff: newReceivedAmount - Number(original.received_amount || 0),
-    outstandingAmount: newTotal - newReceivedAmount,
+    outstandingAmount: outstandingAmount,
   }
 }
 
@@ -933,7 +1105,7 @@ function calculateNetAccountingImpact(changes: any): { debitAmount: number; cred
   return { debitAmount, creditAmount }
 }
 
-// Consolidated updateSale function with proper sale items handling
+// FIXED updateSale function with proper credit sale handling
 export async function updateSale(saleData: any) {
   try {
     console.log("Updating sale with consolidated approach:", JSON.stringify(saleData, null, 2))
@@ -990,12 +1162,17 @@ export async function updateSale(saleData: any) {
           data: {
             discount: changes.newDiscount,
             received_amount: changes.newReceived,
+            outstanding_amount: changes.outstandingAmount,
           },
         }
       }
 
-      // 4. Validate received amount for credit sales
-      if (changes.newStatus.toLowerCase() === "credit" && changes.newReceived > changes.newTotal) {
+      // 4. CORRECTED: Validate received amount for credit sales with proper logic
+      const isCompleted = changes.newStatus.toLowerCase() === "completed"
+      const isCancelled = changes.newStatus.toLowerCase() === "cancelled"
+      const isCredit = changes.newStatus.toLowerCase() === "credit"
+
+      if (isCredit && changes.newReceived > changes.newTotal) {
         await sql`ROLLBACK`
         return {
           success: false,
@@ -1331,7 +1508,7 @@ export async function updateSale(saleData: any) {
         }
       }
 
-      // 8. Create accounting entry only if there are actual financial changes
+      // 8. FIXED: Create accounting entry only if there are actual financial changes
       try {
         // Generate appropriate description for returns
         let adjustmentDescription = `Sale #${saleData.id} updated with changes`
@@ -1346,35 +1523,44 @@ export async function updateSale(saleData: any) {
           adjustmentDescription = `Sale #${saleData.id} status changed from ${changes.originalStatus} to ${changes.newStatus}`
         }
 
-        const accountingResult = await recordSaleAdjustment({
-          saleId: saleData.id,
-          changeType: "consolidated_edit",
-          previousValues: {
-            totalAmount: changes.originalTotal,
-            receivedAmount: changes.originalReceived,
-            status: changes.originalStatus,
-            cogsAmount: originalCogs,
-            discount: changes.originalDiscount,
-          },
-          newValues: {
-            totalAmount: changes.newTotal,
-            cogsAmount: newCogs,
-            receivedAmount: changes.newReceived,
-            outstandingAmount: changes.outstandingAmount,
-            status: changes.newStatus,
-            customerId: saleData.customerId,
-            discount: changes.newDiscount,
-          },
-          deviceId: saleData.deviceId,
-          userId: saleData.userId,
-          description: adjustmentDescription,
-          adjustmentDate: new Date(),
-        })
+        // FIXED: Only record accounting transaction if there are actual cash movements
+        const hasCashMovement = changes.receivedDiff !== 0 || 
+                               (changes.statusChanged && 
+                                (changes.originalStatus.toLowerCase() === "completed" && changes.newStatus.toLowerCase() === "cancelled"))
 
-        if (accountingResult.success && accountingResult.transactionId) {
-          console.log("Accounting entry created for sale update:", accountingResult.transactionId)
-        } else if (accountingResult.message) {
-          console.log("Accounting:", accountingResult.message)
+        if (hasCashMovement) {
+          const accountingResult = await recordSaleAdjustment({
+            saleId: saleData.id,
+            changeType: "consolidated_edit",
+            previousValues: {
+              totalAmount: changes.originalTotal,
+              receivedAmount: changes.originalReceived,
+              status: changes.originalStatus,
+              cogsAmount: originalCogs,
+              discount: changes.originalDiscount,
+            },
+            newValues: {
+              totalAmount: changes.newTotal,
+              cogsAmount: newCogs,
+              receivedAmount: changes.newReceived,
+              outstandingAmount: changes.outstandingAmount,
+              status: changes.newStatus,
+              customerId: saleData.customerId,
+              discount: changes.newDiscount,
+            },
+            deviceId: saleData.deviceId,
+            userId: saleData.userId,
+            description: adjustmentDescription,
+            adjustmentDate: new Date(),
+          })
+
+          if (accountingResult.success && accountingResult.transactionId) {
+            console.log("Accounting entry created for sale update:", accountingResult.transactionId)
+          } else if (accountingResult.message) {
+            console.log("Accounting:", accountingResult.message)
+          }
+        } else {
+          console.log("No cash movement detected, skipping accounting entry")
         }
       } catch (accountingError) {
         console.error("Error creating accounting entry:", accountingError)
@@ -1387,12 +1573,20 @@ export async function updateSale(saleData: any) {
       // Revalidate the dashboard page to show the updated sale
       revalidatePath("/dashboard")
 
+      console.log(`Sale ${saleData.id} updated successfully:`, {
+        status: changes.newStatus,
+        total: changes.newTotal,
+        received: changes.newReceived,
+        outstanding: changes.outstandingAmount
+      })
+
       return {
         success: true,
         message: "Sale updated successfully",
         data: {
           discount: changes.newDiscount,
           received_amount: changes.newReceived,
+          outstanding_amount: changes.outstandingAmount,
         },
       }
     } catch (error) {
@@ -1486,6 +1680,515 @@ export async function deleteSale(saleId: number, deviceId: number) {
     return {
       success: false,
       message: `Database error: ${getLastError()?.message || "Unknown error"}. Please try again later.`,
+    }
+  }
+}
+
+// =============================================================================
+// TESTING FUNCTIONS
+// =============================================================================
+
+export async function testCreditSaleCreationFixed() {
+  try {
+    console.log("=== REAL CREDIT SALE CREATION TEST ===")
+    
+    const tests = []
+    
+    // Test 1: Check if backend fixes frontend bug
+    const frontendBugTest = await testFrontendBugScenario()
+    tests.push(frontendBugTest)
+
+    // Test 2: Check current problematic sales
+    const problematicTest = await testProblematicSales()
+    tests.push(problematicTest)
+
+    // Test 3: Validate business rules
+    const rulesTest = await testBusinessRules()
+    tests.push(rulesTest)
+
+    const passed = tests.filter(t => t.passed).length
+    const failed = tests.filter(t => !t.passed).length
+
+    const summary = {
+      totalTests: tests.length,
+      passed,
+      failed,
+      successRate: Math.round((passed / tests.length) * 100)
+    }
+
+    console.log("REAL TEST RESULTS:")
+    console.table(summary)
+    console.table(tests.map(t => ({
+      Test: t.name,
+      Passed: t.passed ? '✅' : '❌',
+      Result: t.actual
+    })))
+
+    return {
+      success: true,
+      data: {
+        tests,
+        summary,
+        isFixed: tests.every(t => t.passed)
+      }
+    }
+  } catch (error: any) {
+    console.error("Real test error:", error)
+    return { success: false, message: error.message }
+  }
+}
+
+async function testFrontendBugScenario() {
+  try {
+    console.log("🧪 Testing Frontend Bug Scenario")
+    
+    // Check recent credit sales to see if the bug exists
+    const recentCreditSales = await sql`
+      SELECT id, status, total_amount, received_amount, created_at
+      FROM sales 
+      WHERE status = 'Credit' 
+      AND created_at >= NOW() - INTERVAL '1 hour'
+      ORDER BY created_at DESC
+      LIMIT 10
+    `
+    
+    let hasBug = false
+    const buggySales = []
+    
+    for (const sale of recentCreditSales) {
+      if (Number(sale.received_amount) > 0) {
+        hasBug = true
+        buggySales.push({
+          saleId: sale.id,
+          total: sale.total_amount,
+          received: sale.received_amount,
+          created: sale.created_at
+        })
+      }
+    }
+    
+    return {
+      name: "Frontend Bug Fix Test",
+      scenario: "Checking if backend fixes incorrect received_amount for credit sales",
+      expected: "No recent credit sales should have received_amount > 0",
+      passed: !hasBug,
+      actual: hasBug 
+        ? `Found ${buggySales.length} credit sales with received_amount > 0` 
+        : "All recent credit sales have received_amount = 0 ✅",
+      message: hasBug 
+        ? `❌ Backend still has the bug - ${buggySales.length} sales need fixing`
+        : "✅ Backend correctly fixes frontend bug"
+    }
+  } catch (error) {
+    return {
+      name: "Frontend Bug Fix Test",
+      scenario: "Checking if backend fixes incorrect received_amount for credit sales",
+      expected: "No recent credit sales should have received_amount > 0",
+      passed: false,
+      actual: `Error: ${error.message}`,
+      message: "❌ Test failed due to error"
+    }
+  }
+}
+
+async function testProblematicSales() {
+  try {
+    // Count all problematic credit sales
+    const problematicCount = await sql`
+      SELECT COUNT(*) as count 
+      FROM sales 
+      WHERE status = 'Credit' AND received_amount::numeric > 0
+    `
+    
+    const count = problematicCount[0]?.count || 0
+    
+    return {
+      name: "Existing Problematic Sales",
+      scenario: "Checking total count of credit sales with incorrect received_amount",
+      expected: "0 problematic credit sales (after fixes)",
+      passed: count === 0,
+      actual: `Found ${count} credit sales with received_amount > 0`,
+      message: count === 0 
+        ? "✅ No problematic credit sales found"
+        : `❌ Need to fix ${count} credit sales`
+    }
+  } catch (error) {
+    return {
+      name: "Existing Problematic Sales",
+      scenario: "Checking total count of credit sales with incorrect received_amount",
+      expected: "0 problematic credit sales",
+      passed: false,
+      actual: `Error: ${error.message}`,
+      message: "❌ Test failed due to error"
+    }
+  }
+}
+
+async function testBusinessRules() {
+  try {
+    // Check various business rules
+    const rules = [
+      {
+        name: "Credit sales have received_amount = 0",
+        query: `SELECT COUNT(*) as count FROM sales WHERE status = 'Credit' AND received_amount::numeric > 0`,
+        expected: 0
+      },
+      {
+        name: "Completed sales have received_amount = total_amount", 
+        query: `SELECT COUNT(*) as count FROM sales WHERE status = 'Completed' AND received_amount::numeric != total_amount::numeric`,
+        expected: 0
+      },
+      {
+        name: "No sales have received_amount > total_amount",
+        query: `SELECT COUNT(*) as count FROM sales WHERE received_amount::numeric > total_amount::numeric`,
+        expected: 0
+      }
+    ]
+    
+    let passedRules = 0
+    const ruleResults = []
+    
+    for (const rule of rules) {
+      const result = await sql`${sql.unsafe(rule.query)}`
+      const count = result[0]?.count || 0
+      const passed = count === rule.expected
+      
+      if (passed) passedRules++
+      
+      ruleResults.push({
+        rule: rule.name,
+        passed,
+        actual: count,
+        expected: rule.expected
+      })
+    }
+    
+    return {
+      name: "Business Rules Validation",
+      scenario: "Checking all business rules for sale creation",
+      expected: "All business rules should pass",
+      passed: passedRules === rules.length,
+      actual: `${passedRules}/${rules.length} rules passed`,
+      message: passedRules === rules.length 
+        ? "✅ All business rules are satisfied"
+        : `❌ ${rules.length - passedRules} business rules violated`
+    }
+  } catch (error) {
+    return {
+      name: "Business Rules Validation",
+      scenario: "Checking all business rules for sale creation",
+      expected: "All business rules should pass",
+      passed: false,
+      actual: `Error: ${error.message}`,
+      message: "❌ Test failed due to error"
+    }
+  }
+}
+
+export async function createRealTestCreditSale() {
+  try {
+    console.log("=== CREATING REAL TEST CREDIT SALE ===")
+    
+    // Use your actual addSale function to create a test sale
+    const testSaleData = {
+      paymentStatus: 'Credit',
+      receivedAmount: 25.00, // Simulating the frontend bug
+      paymentMethod: 'Cash',
+      deviceId: 1,
+      userId: 1,
+      customerId: null,
+      saleDate: new Date(),
+      items: [
+        {
+          productId: 1, // Use an existing product
+          quantity: 1,
+          price: 25.00,
+          cost: 12.50
+        }
+      ]
+    }
+    
+    console.log("Creating test sale with buggy data:", {
+      paymentStatus: 'Credit',
+      receivedAmount: 25.00, // This should be fixed by backend
+      expectedReceivedAmount: 0.00 // Backend should set this to 0
+    })
+    
+    // Call your actual addSale function
+    const result = await addSale(testSaleData)
+    
+    if (result.success) {
+      const saleId = result.data.sale.id
+      const actualReceivedAmount = result.data.sale.received_amount
+      
+      // Check if backend fixed the bug
+      const backendFixedBug = Number(actualReceivedAmount) === 0
+      
+      const testResult = {
+        saleId,
+        status: 'Credit',
+        totalAmount: '25.00',
+        receivedAmount: actualReceivedAmount,
+        backendFixedBug,
+        success: true,
+        message: backendFixedBug 
+          ? '✅ Backend correctly fixed frontend bug - received_amount = 0'
+          : '❌ Backend still has the bug - received_amount should be 0'
+      }
+      
+      console.log("REAL TEST SALE RESULT:")
+      console.table(testResult)
+      
+      return {
+        success: true,
+        data: testResult
+      }
+    } else {
+      return {
+        success: false,
+        data: {
+          message: `Failed to create test sale: ${result.message}`
+        }
+      }
+    }
+  } catch (error: any) {
+    console.error("Real test sale creation error:", error)
+    return { 
+      success: false, 
+      data: {
+        message: `Error: ${error.message}`
+      }
+    }
+  }
+}
+
+// =============================================================================
+// DEBUG FUNCTIONS
+// =============================================================================
+
+export async function debugSalesTableSchema() {
+  try {
+    const schema = await sql`
+      SELECT 
+        column_name,
+        data_type,
+        is_nullable,
+        column_default,
+        character_maximum_length,
+        numeric_precision,
+        numeric_scale
+      FROM information_schema.columns 
+      WHERE table_name = 'sales' 
+      ORDER BY ordinal_position
+    `
+    
+    console.log("=== SALES TABLE SCHEMA ===")
+    console.table(schema)
+    
+    return {
+      success: true,
+      data: schema,
+      message: `Found ${schema.length} columns in sales table`
+    }
+  } catch (error) {
+    console.error("Error checking sales table schema:", error)
+    return {
+      success: false,
+      message: `Error checking schema: ${error.message}`
+    }
+  }
+}
+
+// Debug function to check specific sale data
+export async function debugSaleData(saleId: number) {
+  try {
+    // Get raw sale data
+    const saleData = await sql`
+      SELECT * FROM sales WHERE id = ${saleId}
+    `
+    
+    if (saleData.length === 0) {
+      return {
+        success: false,
+        message: `Sale ${saleId} not found`
+      }
+    }
+
+    // Get sale items
+    const saleItems = await sql`
+      SELECT * FROM sale_items WHERE sale_id = ${saleId}
+    `
+
+    console.log("=== SALE DATA DEBUG ===")
+    console.log(`Sale ID: ${saleId}`)
+    console.log("Raw sale data:", JSON.stringify(saleData[0], null, 2))
+    console.log(`Sale items: ${saleItems.length} items`)
+    console.table(saleItems)
+
+    return {
+      success: true,
+      data: {
+        sale: saleData[0],
+        items: saleItems
+      },
+      message: `Found sale ${saleId} with ${saleItems.length} items`
+    }
+  } catch (error) {
+    console.error("Error debugging sale data:", error)
+    return {
+      success: false,
+      message: `Error debugging sale: ${error.message}`
+    }
+  }
+}
+
+// Debug function to check recent sales with their status and amounts
+export async function debugRecentSales(limit: number = 10) {
+  try {
+    const recentSales = await sql`
+      SELECT 
+        id,
+        status,
+        total_amount,
+        received_amount,
+        (total_amount - received_amount) as calculated_outstanding,
+        payment_method,
+        sale_date,
+        created_at
+      FROM sales 
+      ORDER BY created_at DESC 
+      LIMIT ${limit}
+    `
+    
+    console.log("=== RECENT SALES DEBUG ===")
+    console.log(`Showing ${recentSales.length} most recent sales:`)
+    console.table(recentSales)
+
+    // Count by status
+    const statusCount = await sql`
+      SELECT 
+        status,
+        COUNT(*) as count,
+        SUM(total_amount) as total_amount_sum,
+        SUM(received_amount) as received_amount_sum,
+        AVG(total_amount) as avg_total_amount,
+        AVG(received_amount) as avg_received_amount
+      FROM sales 
+      GROUP BY status
+    `
+
+    console.log("=== SALES BY STATUS ===")
+    console.table(statusCount)
+
+    return {
+      success: true,
+      data: {
+        recentSales,
+        statusCount
+      },
+      message: `Analyzed ${recentSales.length} recent sales`
+    }
+  } catch (error) {
+    console.error("Error debugging recent sales:", error)
+    return {
+      success: false,
+      message: `Error debugging recent sales: ${error.message}`
+    }
+  }
+}
+
+// Debug function to check database schema for all relevant tables
+export async function debugAllRelevantTables() {
+  try {
+    const tables = ['sales', 'sale_items', 'products', 'services', 'customers', 'staff']
+    
+    const schemas = {}
+    
+    for (const table of tables) {
+      try {
+        const schema = await sql`
+          SELECT 
+            column_name,
+            data_type,
+            is_nullable,
+            column_default
+          FROM information_schema.columns 
+          WHERE table_name = ${table} 
+          ORDER BY ordinal_position
+        `
+        schemas[table] = schema
+        console.log(`=== ${table.toUpperCase()} TABLE SCHEMA ===`)
+        console.table(schema)
+      } catch (error) {
+        console.error(`Error getting schema for ${table}:`, error)
+        schemas[table] = { error: error.message }
+      }
+    }
+
+    return {
+      success: true,
+      data: schemas,
+      message: `Checked schemas for ${tables.length} tables`
+    }
+  } catch (error) {
+    console.error("Error debugging all tables:", error)
+    return {
+      success: false,
+      message: `Error debugging tables: ${error.message}`
+    }
+  }
+}
+
+// Debug function to trace a specific sale creation
+export async function debugSaleCreation(saleData: any) {
+  try {
+    console.log("=== SALE CREATION DEBUG ===")
+    console.log("Incoming sale data:", JSON.stringify(saleData, null, 2))
+    
+    // Log the critical fields
+    console.log("Critical fields:")
+    console.log("- Status:", saleData.paymentStatus)
+    console.log("- Total Amount:", saleData.items?.reduce((sum, item) => sum + (item.price * item.quantity), 0))
+    console.log("- Received Amount:", saleData.receivedAmount)
+    console.log("- Discount:", saleData.discount)
+    
+    return {
+      success: true,
+      message: "Sale creation data logged"
+    }
+  } catch (error) {
+    console.error("Error debugging sale creation:", error)
+    return {
+      success: false,
+      message: `Error debugging sale creation: ${error.message}`
+    }
+  }
+}
+
+// Debug function to check financial transactions for a sale
+export async function debugSaleFinancialTransactions(saleId: number) {
+  try {
+    const transactions = await sql`
+      SELECT * FROM financial_transactions 
+      WHERE sale_id = ${saleId} 
+      ORDER BY created_at
+    `
+    
+    console.log("=== FINANCIAL TRANSACTIONS DEBUG ===")
+    console.log(`Sale ID: ${saleId}`)
+    console.log(`Found ${transactions.length} transactions:`)
+    console.table(transactions)
+
+    return {
+      success: true,
+      data: transactions,
+      message: `Found ${transactions.length} financial transactions for sale ${saleId}`
+    }
+  } catch (error) {
+    console.error("Error debugging financial transactions:", error)
+    return {
+      success: false,
+      message: `Error debugging transactions: ${error.message}`
     }
   }
 }

@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { format } from "date-fns"
+import { QuickDebugPanel } from "../debug/Quickdebugpanel"
 import {
   Search,
   Loader2,
@@ -285,6 +286,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
   }, [activeStaff, isEditMode])
 
   // Calculate totals whenever products or discount changes
+  // Calculate totals whenever products or discount changes
   useEffect(() => {
     const newSubtotal = products.reduce((sum, product) => {
       const productTotal = typeof product.total === "number" ? product.total : 0
@@ -294,18 +296,26 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
     const discount = typeof discountAmount === "number" ? discountAmount : 0
     const finalTotal = Math.max(0, newSubtotal - discount)
     setTotalAmount(finalTotal)
+    
+    // FIXED: Handle received amount based on status
     if (status === "Completed") {
-      setReceivedAmount(finalTotal)
+      setReceivedAmount(finalTotal) // Full payment
     } else if (status === "Cancelled") {
-      setReceivedAmount(finalTotal)
+      setReceivedAmount(0) // No payment for cancelled
     } else if (status === "Credit") {
-      if (receivedAmount > finalTotal) {
-        setReceivedAmount(0)
+      // For credit sales, keep current received amount but validate
+      // If received amount was previously set to full total, reset to 0
+      if (receivedAmount === 0 || receivedAmount === finalTotal) {
+        setReceivedAmount(0) // Default to completely credit (no payment)
+      } else if (receivedAmount > finalTotal) {
+        setReceivedAmount(0) // Invalid amount, reset to 0
       }
+      // Otherwise keep the partial payment amount
     } else if (status === "Pending") {
-      setReceivedAmount(0)
+      setReceivedAmount(0) // No payment for pending
     }
   }, [products, discountAmount, status])
+
 
   // Check if data is stale
   const isDataStale = useMemo(() => {
@@ -1622,7 +1632,6 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
                                 <div className="col-span-1"></div>
                               </div>
                             </div>
-
                             {/* Desktop table rows */}
                             <div className="hidden lg:block min-w-[800px]">
                               {products.map((product, index) => (
@@ -1921,6 +1930,9 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
                             </div>
                           </div>
                         </div>
+
+
+                        
 
                         {/* Sale details section */}
                         <div className="w-full lg:w-[30%] flex flex-col bg-white dark:bg-gray-800 min-h-0">
@@ -2346,6 +2358,8 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
                     </div>
                   </CardContent>
                 </Card>
+
+                
 
                 {/* Sales List - responsive height */}
                 <Card className="flex-1 overflow-hidden bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 shadow-sm min-h-[300px] xl:min-h-0">

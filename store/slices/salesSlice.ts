@@ -11,7 +11,8 @@ interface Sale {
   status: string
   created_at: string
   updated_at: string
-  total_cost?: number // Add this
+  total_cost?: number
+  outstanding_amount?: number // Add this for credit tracking
 }
 
 interface SalesState {
@@ -19,11 +20,11 @@ interface SalesState {
   filteredSales: Sale[]
   isLoading: boolean
   isRefreshing: boolean
-  isSilentRefreshing: boolean // Add this for background updates
+  isSilentRefreshing: boolean
   lastUpdated: string | null
-  fetchedTime: number | null // Add this to track exact fetch time
+  fetchedTime: number | null
   error: string | null
-  needsRefresh: boolean // Add this to indicate stale data
+  needsRefresh: boolean
 
   // Filter states
   searchTerm: string
