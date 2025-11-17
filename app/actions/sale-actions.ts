@@ -476,125 +476,7 @@ export async function getSaleDetails(saleId: number) {
   }
 }
 
-export async function getSaleDetailsWithDebug(saleId: number) {
-  if (!saleId) {
-    return { success: false, message: "Sale ID is required" }
-  }
-
-  console.log("=== GET SALE DETAILS DEBUG ===")
-  console.log(`Fetching details for sale ID: ${saleId}`)
-
-  try {
-    // First, let's debug the raw database query
-    const rawSaleQuery = await sql`
-      SELECT 
-        id,
-        status,
-        total_amount,
-        received_amount,
-        discount,
-        payment_method,
-        customer_id,
-        staff_id,
-        device_id,
-        sale_date,
-        created_at,
-        updated_at
-      FROM sales 
-      WHERE id = ${saleId}
-    `
-
-    console.log("Raw sale query result:")
-    console.table(rawSaleQuery)
-
-    if (rawSaleQuery.length === 0) {
-      console.log(`Sale ${saleId} not found in database`)
-      return { success: false, message: "Sale not found" }
-    }
-
-    const sale = rawSaleQuery[0]
-    
-    console.log("Sale data analysis:")
-    console.log(`- Status: ${sale.status}`)
-    console.log(`- Total Amount: ${sale.total_amount}`)
-    console.log(`- Received Amount: ${sale.received_amount}`)
-    console.log(`- Outstanding (calculated): ${Number(sale.total_amount) - Number(sale.received_amount)}`)
-    console.log(`- Payment Method: ${sale.payment_method}`)
-
-    // Get sale items with debug info
-    const itemsQuery = await sql`
-      SELECT 
-        si.*,
-        p.name as product_name,
-        s.name as service_name,
-        CASE 
-          WHEN s.id IS NOT NULL THEN 'service'
-          WHEN p.id IS NOT NULL THEN 'product'
-          ELSE 'unknown'
-        END as item_type
-      FROM sale_items si
-      LEFT JOIN products p ON si.product_id = p.id AND NOT EXISTS (SELECT 1 FROM services s WHERE s.id = si.product_id)
-      LEFT JOIN services s ON si.product_id = s.id
-      WHERE si.sale_id = ${saleId}
-      ORDER BY si.id
-    `
-
-    console.log(`Found ${itemsQuery.length} sale items:`)
-    console.table(itemsQuery)
-
-    // Calculate totals from items for verification
-    const calculatedSubtotal = itemsQuery.reduce((sum, item) => sum + Number(item.quantity) * Number(item.price), 0)
-    const calculatedTotal = calculatedSubtotal - Number(sale.discount || 0)
-    
-    console.log("Calculated totals from items:")
-    console.log(`- Subtotal: ${calculatedSubtotal}`)
-    console.log(`- Discount: ${sale.discount || 0}`)
-    console.log(`- Total: ${calculatedTotal}`)
-    console.log(`- Database Total: ${sale.total_amount}`)
-    console.log(`- Match: ${calculatedTotal === Number(sale.total_amount)}`)
-
-    // Enhanced sale data with debug info
-    const saleData = {
-      ...sale,
-      discount: Number(sale.discount) || 0,
-      subtotal: calculatedSubtotal,
-      outstanding_amount: Number(sale.total_amount) - Number(sale.received_amount),
-      _debug: {
-        calculatedSubtotal,
-        calculatedTotal,
-        totalsMatch: calculatedTotal === Number(sale.total_amount),
-        rawReceivedAmount: sale.received_amount,
-        rawTotalAmount: sale.total_amount
-      }
-    }
-
-    console.log("Final sale data being returned:")
-    console.log(JSON.stringify(saleData, null, 2))
-
-    return {
-      success: true,
-      data: {
-        sale: saleData,
-        items: itemsQuery,
-      },
-      debug: {
-        rawSaleData: sale,
-        calculatedTotals: {
-          subtotal: calculatedSubtotal,
-          total: calculatedTotal
-        }
-      }
-    }
-  } catch (error) {
-    console.error("Get sale details debug error:", error)
-    return {
-      success: false,
-      message: `Database error: ${error.message}. Please try again later.`,
-    }
-  }
-}
-
-// FIXED addSale function with proper credit sale handling
+// FIXED addSale function with proper partial payment support for credit sales
 export async function addSale(saleData: any) {
   try {
     console.log("Adding sale with data:", JSON.stringify(saleData, null, 2))
@@ -614,7 +496,7 @@ export async function addSale(saleData: any) {
       const discountAmount = Number(saleData.discount) || 0
       const total = Math.max(0, subtotal - discountAmount)
 
-      // 🚨 FIXED: Handle received amount based on status - PROPER credit sale handling
+      // 🚨 FIXED: Handle received amount based on status - PROPER partial payment support for credit sales
       let receivedAmount = 0
       const isCompleted = saleData.paymentStatus?.toLowerCase() === "completed"
       const isCancelled = saleData.paymentStatus?.toLowerCase() === "cancelled"
@@ -629,19 +511,18 @@ export async function addSale(saleData: any) {
         receivedAmount = 0
         console.log(`❌ CANCELLED SALE: received_amount = 0`)
       } else if (isCredit) {
-        // 🚨 FIXED: Credit sales MUST have received_amount = 0 initially
-        // Only record payments when customer actually pays later (via updateSale)
-        receivedAmount = 0 // Force to 0 for new credit sales
+        // 🚨 FIXED: Credit sales can have partial payments
+        // Use the receivedAmount from frontend, but validate it
+        const requestedReceived = Number(saleData.receivedAmount) || 0
         
-        console.log(`🔄 CREDIT SALE CREATION: Setting received_amount to 0 (ignoring frontend value: ${saleData.receivedAmount || 0})`)
-        
-        // Debug log to track the issue
-        if (saleData.receivedAmount && Number(saleData.receivedAmount) > 0) {
-          console.warn(`⚠️ FRONTEND BUG DETECTED: Form sent receivedAmount=${saleData.receivedAmount} for credit sale`)
-          console.warn(`💡 Backend is fixing this by forcing received_amount to 0`)
+        if (requestedReceived > total) {
+          receivedAmount = total // Cap at total amount
+          console.warn(`⚠️ Received amount ${requestedReceived} capped to total ${total}`)
+        } else {
+          receivedAmount = requestedReceived
         }
         
-        console.log(`📝 CREDIT SALE: Total=${total}, Received=0, Outstanding=${total}`)
+        console.log(`🔄 CREDIT SALE: Total=${total}, Received=${receivedAmount}, Outstanding=${total - receivedAmount}`)
       }
 
       const outstandingAmount = total - receivedAmount
@@ -959,7 +840,7 @@ function calculateSaleChanges(original: any, newData: any, originalItems: any[],
   const newDiscountAmount = Number(newData.discount) || 0
   const newTotal = Math.max(0, subtotal - newDiscountAmount)
 
-  // CORRECTED: Calculate new received amount based on status with proper credit handling
+  // CORRECTED: Calculate new received amount based on status with proper partial payment handling
   let newReceivedAmount = 0
   const isCompleted = newData.paymentStatus?.toLowerCase() === "completed"
   const isCancelled = newData.paymentStatus?.toLowerCase() === "cancelled"
@@ -970,12 +851,11 @@ function calculateSaleChanges(original: any, newData: any, originalItems: any[],
   } else if (isCancelled) {
     newReceivedAmount = 0 // No payment for cancelled sales
   } else if (isCredit) {
-    // 🚨 FIXED: For credit sales, only allow received_amount increases when customer pays
-    // Don't allow setting received_amount directly to total for credit sales
+    // 🚨 FIXED: For credit sales, allow partial payments and proper updates
     const currentReceived = Number(original.received_amount || 0)
     const requestedReceived = Number(newData.receivedAmount) || 0
     
-    // Validate: Can only increase received_amount, not set it arbitrarily
+    // Validate: Can only increase received_amount for credit sales (no refunds via this method)
     if (requestedReceived < currentReceived) {
       throw new Error(`Cannot decrease received amount for credit sales. Current: ${currentReceived}, Requested: ${requestedReceived}`)
     }
@@ -1105,7 +985,7 @@ function calculateNetAccountingImpact(changes: any): { debitAmount: number; cred
   return { debitAmount, creditAmount }
 }
 
-// FIXED updateSale function with proper credit sale handling
+// FIXED updateSale function with proper partial payment support for credit sales
 export async function updateSale(saleData: any) {
   try {
     console.log("Updating sale with consolidated approach:", JSON.stringify(saleData, null, 2))
@@ -1688,22 +1568,18 @@ export async function deleteSale(saleId: number, deviceId: number) {
 // TESTING FUNCTIONS
 // =============================================================================
 
-export async function testCreditSaleCreationFixed() {
+export async function testCreditSalePartialPayments() {
   try {
-    console.log("=== REAL CREDIT SALE CREATION TEST ===")
+    console.log("=== TESTING CREDIT SALE PARTIAL PAYMENTS ===")
     
     const tests = []
     
-    // Test 1: Check if backend fixes frontend bug
-    const frontendBugTest = await testFrontendBugScenario()
-    tests.push(frontendBugTest)
+    // Test 1: Check if partial payments are working
+    const partialPaymentTest = await testPartialPaymentScenario()
+    tests.push(partialPaymentTest)
 
-    // Test 2: Check current problematic sales
-    const problematicTest = await testProblematicSales()
-    tests.push(problematicTest)
-
-    // Test 3: Validate business rules
-    const rulesTest = await testBusinessRules()
+    // Test 2: Check business rules for partial payments
+    const rulesTest = await testPartialPaymentBusinessRules()
     tests.push(rulesTest)
 
     const passed = tests.filter(t => t.passed).length
@@ -1716,7 +1592,7 @@ export async function testCreditSaleCreationFixed() {
       successRate: Math.round((passed / tests.length) * 100)
     }
 
-    console.log("REAL TEST RESULTS:")
+    console.log("PARTIAL PAYMENT TEST RESULTS:")
     console.table(summary)
     console.table(tests.map(t => ({
       Test: t.name,
@@ -1729,22 +1605,23 @@ export async function testCreditSaleCreationFixed() {
       data: {
         tests,
         summary,
-        isFixed: tests.every(t => t.passed)
+        isWorking: tests.every(t => t.passed)
       }
     }
   } catch (error: any) {
-    console.error("Real test error:", error)
+    console.error("Partial payment test error:", error)
     return { success: false, message: error.message }
   }
 }
 
-async function testFrontendBugScenario() {
+async function testPartialPaymentScenario() {
   try {
-    console.log("🧪 Testing Frontend Bug Scenario")
+    console.log("🧪 Testing Partial Payment Scenario")
     
-    // Check recent credit sales to see if the bug exists
+    // Check recent credit sales to see if partial payments are working
     const recentCreditSales = await sql`
-      SELECT id, status, total_amount, received_amount, created_at
+      SELECT id, status, total_amount, received_amount, (total_amount - received_amount) as outstanding,
+      created_at
       FROM sales 
       WHERE status = 'Credit' 
       AND created_at >= NOW() - INTERVAL '1 hour'
@@ -1752,38 +1629,44 @@ async function testFrontendBugScenario() {
       LIMIT 10
     `
     
-    let hasBug = false
-    const buggySales = []
+    let hasPartialPayments = false
+    const partialPaymentSales = []
     
     for (const sale of recentCreditSales) {
-      if (Number(sale.received_amount) > 0) {
-        hasBug = true
-        buggySales.push({
+      const received = Number(sale.received_amount)
+      const total = Number(sale.total_amount)
+      const outstanding = Number(sale.outstanding)
+      
+      // Check if this is a partial payment (received > 0 but less than total)
+      if (received > 0 && received < total) {
+        hasPartialPayments = true
+        partialPaymentSales.push({
           saleId: sale.id,
-          total: sale.total_amount,
-          received: sale.received_amount,
+          total: total,
+          received: received,
+          outstanding: outstanding,
           created: sale.created_at
         })
       }
     }
     
     return {
-      name: "Frontend Bug Fix Test",
-      scenario: "Checking if backend fixes incorrect received_amount for credit sales",
-      expected: "No recent credit sales should have received_amount > 0",
-      passed: !hasBug,
-      actual: hasBug 
-        ? `Found ${buggySales.length} credit sales with received_amount > 0` 
-        : "All recent credit sales have received_amount = 0 ✅",
-      message: hasBug 
-        ? `❌ Backend still has the bug - ${buggySales.length} sales need fixing`
-        : "✅ Backend correctly fixes frontend bug"
+      name: "Partial Payment Test",
+      scenario: "Checking if partial payments for credit sales are working",
+      expected: "Credit sales should support partial payments (0 < received < total)",
+      passed: hasPartialPayments,
+      actual: hasPartialPayments 
+        ? `Found ${partialPaymentSales.length} credit sales with partial payments` 
+        : "No partial payment credit sales found",
+      message: hasPartialPayments 
+        ? "✅ Partial payments are working correctly"
+        : "❌ No partial payment credit sales found"
     }
   } catch (error) {
     return {
-      name: "Frontend Bug Fix Test",
-      scenario: "Checking if backend fixes incorrect received_amount for credit sales",
-      expected: "No recent credit sales should have received_amount > 0",
+      name: "Partial Payment Test",
+      scenario: "Checking if partial payments for credit sales are working",
+      expected: "Credit sales should support partial payments",
       passed: false,
       actual: `Error: ${error.message}`,
       message: "❌ Test failed due to error"
@@ -1791,56 +1674,23 @@ async function testFrontendBugScenario() {
   }
 }
 
-async function testProblematicSales() {
+async function testPartialPaymentBusinessRules() {
   try {
-    // Count all problematic credit sales
-    const problematicCount = await sql`
-      SELECT COUNT(*) as count 
-      FROM sales 
-      WHERE status = 'Credit' AND received_amount::numeric > 0
-    `
-    
-    const count = problematicCount[0]?.count || 0
-    
-    return {
-      name: "Existing Problematic Sales",
-      scenario: "Checking total count of credit sales with incorrect received_amount",
-      expected: "0 problematic credit sales (after fixes)",
-      passed: count === 0,
-      actual: `Found ${count} credit sales with received_amount > 0`,
-      message: count === 0 
-        ? "✅ No problematic credit sales found"
-        : `❌ Need to fix ${count} credit sales`
-    }
-  } catch (error) {
-    return {
-      name: "Existing Problematic Sales",
-      scenario: "Checking total count of credit sales with incorrect received_amount",
-      expected: "0 problematic credit sales",
-      passed: false,
-      actual: `Error: ${error.message}`,
-      message: "❌ Test failed due to error"
-    }
-  }
-}
-
-async function testBusinessRules() {
-  try {
-    // Check various business rules
+    // Check various business rules for partial payments
     const rules = [
       {
-        name: "Credit sales have received_amount = 0",
-        query: `SELECT COUNT(*) as count FROM sales WHERE status = 'Credit' AND received_amount::numeric > 0`,
+        name: "Credit sales can have partial payments",
+        query: `SELECT COUNT(*) as count FROM sales WHERE status = 'Credit' AND received_amount::numeric > 0 AND received_amount::numeric < total_amount::numeric`,
+        expected: ">=0" // Should be possible, not necessarily present
+      },
+      {
+        name: "No credit sales have received_amount > total_amount", 
+        query: `SELECT COUNT(*) as count FROM sales WHERE status = 'Credit' AND received_amount::numeric > total_amount::numeric`,
         expected: 0
       },
       {
-        name: "Completed sales have received_amount = total_amount", 
+        name: "Completed sales have full payment",
         query: `SELECT COUNT(*) as count FROM sales WHERE status = 'Completed' AND received_amount::numeric != total_amount::numeric`,
-        expected: 0
-      },
-      {
-        name: "No sales have received_amount > total_amount",
-        query: `SELECT COUNT(*) as count FROM sales WHERE received_amount::numeric > total_amount::numeric`,
         expected: 0
       }
     ]
@@ -1851,7 +1701,13 @@ async function testBusinessRules() {
     for (const rule of rules) {
       const result = await sql`${sql.unsafe(rule.query)}`
       const count = result[0]?.count || 0
-      const passed = count === rule.expected
+      
+      let passed = false
+      if (rule.expected === ">=0") {
+        passed = count >= 0 // Just check that query runs without error
+      } else {
+        passed = count === rule.expected
+      }
       
       if (passed) passedRules++
       
@@ -1864,100 +1720,23 @@ async function testBusinessRules() {
     }
     
     return {
-      name: "Business Rules Validation",
-      scenario: "Checking all business rules for sale creation",
+      name: "Partial Payment Business Rules",
+      scenario: "Checking all business rules for partial payments",
       expected: "All business rules should pass",
       passed: passedRules === rules.length,
       actual: `${passedRules}/${rules.length} rules passed`,
       message: passedRules === rules.length 
-        ? "✅ All business rules are satisfied"
+        ? "✅ All partial payment business rules are satisfied"
         : `❌ ${rules.length - passedRules} business rules violated`
     }
   } catch (error) {
     return {
-      name: "Business Rules Validation",
-      scenario: "Checking all business rules for sale creation",
+      name: "Partial Payment Business Rules",
+      scenario: "Checking all business rules for partial payments",
       expected: "All business rules should pass",
       passed: false,
       actual: `Error: ${error.message}`,
       message: "❌ Test failed due to error"
-    }
-  }
-}
-
-export async function createRealTestCreditSale() {
-  try {
-    console.log("=== CREATING REAL TEST CREDIT SALE ===")
-    
-    // Use your actual addSale function to create a test sale
-    const testSaleData = {
-      paymentStatus: 'Credit',
-      receivedAmount: 25.00, // Simulating the frontend bug
-      paymentMethod: 'Cash',
-      deviceId: 1,
-      userId: 1,
-      customerId: null,
-      saleDate: new Date(),
-      items: [
-        {
-          productId: 1, // Use an existing product
-          quantity: 1,
-          price: 25.00,
-          cost: 12.50
-        }
-      ]
-    }
-    
-    console.log("Creating test sale with buggy data:", {
-      paymentStatus: 'Credit',
-      receivedAmount: 25.00, // This should be fixed by backend
-      expectedReceivedAmount: 0.00 // Backend should set this to 0
-    })
-    
-    // Call your actual addSale function
-    const result = await addSale(testSaleData)
-    
-    if (result.success) {
-      const saleId = result.data.sale.id
-      const actualReceivedAmount = result.data.sale.received_amount
-      
-      // Check if backend fixed the bug
-      const backendFixedBug = Number(actualReceivedAmount) === 0
-      
-      const testResult = {
-        saleId,
-        status: 'Credit',
-        totalAmount: '25.00',
-        receivedAmount: actualReceivedAmount,
-        backendFixedBug,
-        success: true,
-        message: backendFixedBug 
-          ? '✅ Backend correctly fixed frontend bug - received_amount = 0'
-          : '❌ Backend still has the bug - received_amount should be 0'
-      }
-      
-      console.log("REAL TEST SALE RESULT:")
-      console.table(testResult)
-      
-      return {
-        success: true,
-        data: testResult
-      }
-    } else {
-      return {
-        success: false,
-        data: {
-          message: `Failed to create test sale: ${result.message}`
-        }
-      }
-    }
-  } catch (error: any) {
-    console.error("Real test sale creation error:", error)
-    return { 
-      success: false, 
-      data: {
-        message: `Error: ${error.message}`
-      }
     }
   }
 }

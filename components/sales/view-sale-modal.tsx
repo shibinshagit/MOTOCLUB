@@ -171,25 +171,10 @@ export default function ViewSaleModal({
     return paymentMethod
   }
 
-  // CORRECTED: Get received amount based on status - use actual received_amount from database
+  // CORRECTED: Get received amount - use actual received_amount from database
   const getReceivedAmount = () => {
     if (!saleData) return 0
-
-    // For credit sales, only show received amount if it's a partial credit
-    // For completely credit sales (no payment received), received_amount should be 0
-    const received = Number.parseFloat(saleData.received_amount) || 0
-    
-    // If it's a credit sale and received amount equals total, it's likely a data issue
-    // In proper credit sales, received amount should be less than total
-    if (saleData.status === "Credit") {
-      const total = Number.parseFloat(saleData.total_amount) || 0
-      // If received equals total, it's not actually a credit sale
-      if (received === total) {
-        return 0
-      }
-    }
-    
-    return received
+    return Number.parseFloat(saleData.received_amount) || 0
   }
 
   // CORRECTED: Get remaining amount - use actual outstanding_amount from database or calculate
@@ -210,8 +195,6 @@ export default function ViewSaleModal({
   const handleEdit = () => {
     if (onEdit && saleData) {
       onEdit(saleData.id)
-      // Don't close here - let the parent handle the modal transition
-      // onClose() // Remove this line
     }
   }
 
@@ -720,7 +703,7 @@ export default function ViewSaleModal({
                         </span>
                       </div>
                       {/* Show remaining amount for ALL credit sales */}
-                      {saleData.status === "Credit" && (
+                      {(saleData.status === "Credit" && getRemainingAmount() > 0) && (
                         <div className="flex flex-col">
                           <span className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
                             Remaining Amount
@@ -947,8 +930,8 @@ export default function ViewSaleModal({
                     </div>
                     <div className="text-sm text-green-600 dark:text-green-400 font-medium">Received</div>
                     
-                    {/* Show remaining amount for ALL credit sales, not just when remaining > 0 */}
-                    {saleData.status === "Credit" && (
+                    {/* Show remaining amount for ALL credit sales when there's outstanding balance */}
+                    {saleData.status === "Credit" && getRemainingAmount() > 0 && (
                       <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
                         <div className="text-lg font-bold text-red-600 dark:text-red-400">
                           {formatCurrency(getRemainingAmount())}

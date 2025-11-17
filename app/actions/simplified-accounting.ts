@@ -471,7 +471,7 @@ export async function recordSaleAdjustment(adjustmentData: {
   }
 }
 
-// Record purchase transactions
+// FIXED: Record purchase transactions with proper credit purchase handling
 export async function recordPurchaseTransaction(purchaseData: {
   purchaseId: number
   totalAmount: number
@@ -488,14 +488,38 @@ export async function recordPurchaseTransaction(purchaseData: {
     // Ensure table exists
     await createFinancialTransactionsTable()
 
-    // For purchases: debit = received amount (actual money paid), credit = 0, cost = 0
     const totalAmount = Number(purchaseData.totalAmount) || 0
     const receivedAmount = Number(purchaseData.receivedAmount) || 0
-    const debitAmount = receivedAmount // Money actually paid out
-    const creditAmount = 0
+    const status = purchaseData.status?.toLowerCase()
+
+    let debitAmount = 0
+    let creditAmount = 0
+    let description = ""
+
+    // FIXED: Different handling for credit vs completed purchases
+    if (status === "credit") {
+      // For credit purchases: debit = received amount (actual money paid out), credit = 0
+      debitAmount = receivedAmount // Money actually paid out
+      creditAmount = 0
+      description = `Purchase #${purchaseData.purchaseId} - Credit - ${purchaseData.paymentMethod} - Supplier: ${purchaseData.supplierName} - Paid: ${receivedAmount} - Outstanding: ${purchaseData.outstandingAmount}`
+    } else {
+      // For completed purchases: debit = received amount (money paid out), credit = 0
+      debitAmount = receivedAmount
+      creditAmount = 0
+      description = `Purchase #${purchaseData.purchaseId} - ${purchaseData.status} - ${purchaseData.paymentMethod} - Supplier: ${purchaseData.supplierName}`
+    }
+
     const costAmount = 0 // Purchases don't have COGS
 
-    const description = `Purchase #${purchaseData.purchaseId} - ${purchaseData.status} - ${purchaseData.paymentMethod} - Supplier: ${purchaseData.supplierName}`
+    console.log("Recording purchase transaction:", {
+      purchaseId: purchaseData.purchaseId,
+      status,
+      totalAmount,
+      receivedAmount,
+      debitAmount,
+      creditAmount,
+      description
+    })
 
     // Insert the main purchase transaction
     const result = await sql`
@@ -511,13 +535,160 @@ export async function recordPurchaseTransaction(purchaseData: {
       ) RETURNING id
     `
 
-    console.log(`Purchase transaction recorded: ID ${result[0]?.id}`)
+    console.log(`Purchase transaction recorded: ID ${result[0]?.id}`, {
+      status: purchaseData.status,
+      debitAmount,
+      creditAmount,
+      totalAmount,
+      receivedAmount
+    })
     return { success: true, transactionId: result[0]?.id }
   } catch (error) {
     console.error("Error recording purchase transaction:", error)
     return { success: false, error: error instanceof Error ? error.message : "Unknown error" }
   }
 }
+
+// FIXED: Record purchase adjustments with PROPER partial credit handling
+export async function recordPurchaseAdjustment(adjustmentData: {
+  purchaseId: number
+  changeType: "edit" | "cancel" | "payment" | "status_change" | "consolidated_edit"
+  previousValues: any
+  newValues: any
+  deviceId: number
+  userId: number
+  description: string
+  adjustmentDate?: Date
+}) {
+  try {
+    await createFinancialTransactionsTable()
+
+    // Calculate the NET differences
+    const previousAmount = Number(adjustmentData.previousValues.totalAmount) || 0
+    const newAmount = Number(adjustmentData.newValues.totalAmount) || 0
+    const amountDiff = newAmount - previousAmount
+
+    const previousReceived = Number(adjustmentData.previousValues.receivedAmount) || 0
+    const newReceived = Number(adjustmentData.newValues.receivedAmount) || 0
+    const receivedDiff = newReceived - previousReceived
+
+    const previousOutstanding = Number(adjustmentData.previousValues.outstandingAmount) || 0
+    const newOutstanding = Number(adjustmentData.newValues.outstandingAmount) || 0
+    const outstandingDiff = newOutstanding - previousOutstanding
+
+    const previousStatus = adjustmentData.previousValues.status?.toLowerCase() || ""
+    const newStatus = adjustmentData.newValues.status?.toLowerCase() || ""
+
+    let debitAmount = 0
+    let creditAmount = 0
+    let description = adjustmentData.description
+    let status = "Adjustment"
+
+    console.log("Purchase adjustment calculation:", {
+      purchaseId: adjustmentData.purchaseId,
+      previousAmount,
+      newAmount,
+      amountDiff,
+      previousReceived,
+      newReceived,
+      receivedDiff,
+      previousOutstanding,
+      newOutstanding,
+      outstandingDiff,
+      previousStatus,
+      newStatus,
+      changeType: adjustmentData.changeType
+    })
+
+    // FIXED: Handle payment changes for credit purchases
+    if (adjustmentData.changeType === "consolidated_edit" || adjustmentData.changeType === "payment") {
+      // CRITICAL FIX: For credit purchases, track ACTUAL cash movements
+      if (receivedDiff > 0) {
+        // Additional payment made - money going OUT
+        debitAmount = receivedDiff
+        status = "Payment"
+        description = `Purchase #${adjustmentData.purchaseId} - Additional Payment - Paid ${receivedDiff}`
+        console.log(`Credit purchase: Additional payment ${receivedDiff}, recording debit`)
+      } else if (receivedDiff < 0) {
+        // Payment reduced - money coming IN (refund)
+        creditAmount = Math.abs(receivedDiff)
+        status = "Payment Reduction"
+        description = `Purchase #${adjustmentData.purchaseId} - Payment Reduced - Refund ${Math.abs(receivedDiff)}`
+        console.log(`Credit purchase: Payment reduced by ${Math.abs(receivedDiff)}, recording credit`)
+      } else {
+        // No payment changes
+        if (amountDiff === 0 && outstandingDiff === 0) {
+          console.log("No financial changes in purchase edit")
+          return { success: true, transactionId: null, message: "No financial changes to record" }
+        }
+      }
+      
+      // Handle amount changes separately
+      if (amountDiff > 0) {
+        // Purchase amount increased
+        description += ` - Amount increased by ${amountDiff}`
+      } else if (amountDiff < 0) {
+        // Purchase amount decreased
+        description += ` - Amount decreased by ${Math.abs(amountDiff)}`
+      }
+    } 
+    else if (adjustmentData.changeType === "cancel") {
+      // Cancelled purchases - refund any money paid
+      const previousReceived = Number(adjustmentData.previousValues.receivedAmount) || 0
+      creditAmount = previousReceived
+      status = "Cancelled"
+      description = `Purchase #${adjustmentData.purchaseId} - Cancelled - Refund ${previousReceived}`
+    } 
+    else {
+      // Simple edit adjustments (fallback)
+      if (receivedDiff > 0) {
+        debitAmount = receivedDiff
+        status = "Edit"
+        description = `Purchase #${adjustmentData.purchaseId} - Edited - Payment increased by ${receivedDiff}`
+      } else if (receivedDiff < 0) {
+        creditAmount = Math.abs(receivedDiff)
+        status = "Edit"
+        description = `Purchase #${adjustmentData.purchaseId} - Edited - Payment decreased by ${Math.abs(receivedDiff)}`
+      } else {
+        return { success: true, transactionId: null, message: "No changes to record" }
+      }
+    }
+
+    const transactionDate = adjustmentData.adjustmentDate || new Date()
+
+    // Only create transaction if there are actual financial changes
+    if (debitAmount !== 0 || creditAmount !== 0) {
+      const result = await sql`
+        INSERT INTO financial_transactions (
+          transaction_type, reference_type, reference_id,
+          amount, received_amount, cost_amount, debit_amount, credit_amount,
+          status, description, device_id, company_id, created_by, transaction_date
+        ) VALUES (
+          'adjustment', 'purchase', ${adjustmentData.purchaseId},
+          ${amountDiff}, ${receivedDiff}, 0, ${debitAmount}, ${creditAmount},
+          ${status}, ${description}, 
+          ${adjustmentData.deviceId}, 1, ${adjustmentData.userId}, ${transactionDate}
+        ) RETURNING id
+      `
+
+      console.log(`Purchase adjustment recorded: ${description}`, {
+        debitAmount,
+        creditAmount,
+        amountDiff,
+        receivedDiff,
+        outstandingDiff
+      })
+      return { success: true, transactionId: result[0]?.id }
+    } else {
+      return { success: true, transactionId: null, message: "No financial changes to record" }
+    }
+  } catch (error) {
+    console.error("Error recording purchase adjustment:", error)
+    return { success: false, error: error instanceof Error ? error.message : "Unknown error" }
+  }
+}
+
+
 
 // Record manual/petty transactions
 export async function recordManualTransaction(transactionData: {
@@ -583,114 +754,6 @@ export async function deleteSaleTransaction(saleId: number, deviceId: number) {
   }
 }
 
-// Record purchase adjustments (edits, cancellations, payments, returns)
-export async function recordPurchaseAdjustment(adjustmentData: {
-  purchaseId: number
-  changeType: "edit" | "cancel" | "payment" | "status_change"
-  previousValues: any
-  newValues: any
-  deviceId: number
-  userId: number
-  description: string
-  adjustmentDate?: Date
-}) {
-  try {
-    // Ensure table exists
-    await createFinancialTransactionsTable()
-
-    // Calculate the differences
-    const previousAmount = Number(adjustmentData.previousValues.totalAmount) || 0
-    const newAmount = Number(adjustmentData.newValues.totalAmount) || 0
-    const amountDiff = newAmount - previousAmount
-
-    const previousReceived = Number(adjustmentData.previousValues.receivedAmount) || 0
-    const newReceived = Number(adjustmentData.newValues.receivedAmount) || 0
-    const receivedDiff = newReceived - previousReceived
-
-    let debitAmount = 0
-    let creditAmount = 0
-    let description = adjustmentData.description
-    let status = "Adjustment"
-
-    if (adjustmentData.changeType === "payment") {
-      // Payment adjustments for purchases
-      if (receivedDiff > 0) {
-        debitAmount = receivedDiff
-        creditAmount = 0
-        status = "Payment"
-        description = `Purchase #${adjustmentData.purchaseId} - Payment - Paid ${receivedDiff}`
-      } else if (receivedDiff < 0) {
-        creditAmount = Math.abs(receivedDiff)
-        debitAmount = 0
-        status = "Payment Reduction"
-        description = `Purchase #${adjustmentData.purchaseId} - Payment Reduction - Credit ${Math.abs(receivedDiff)}`
-      } else {
-        debitAmount = 0
-        creditAmount = 0
-        status = "No Change"
-        description = `Purchase #${adjustmentData.purchaseId} - No payment change`
-      }
-    } else if (adjustmentData.changeType === "cancel") {
-      // Cancelled/Returned purchases
-      const previousReceived = Number(adjustmentData.previousValues.receivedAmount) || 0
-      creditAmount = previousReceived
-      debitAmount = 0
-
-      const previousStatus = adjustmentData.previousValues.status?.toLowerCase() || ""
-      const newStatus = adjustmentData.newValues.status?.toLowerCase() || ""
-
-      if ((previousStatus === "paid" || previousStatus === "credit") && newStatus === "cancelled") {
-        status = "Returned"
-        description = `Purchase #${adjustmentData.purchaseId} - RETURNED - Credit ${previousReceived} - Stock removed`
-      } else {
-        status = "Cancelled"
-        description = `Purchase #${adjustmentData.purchaseId} - Cancelled - Credit ${previousReceived}`
-      }
-    } else {
-      // Edit adjustments
-      if (receivedDiff > 0) {
-        debitAmount = receivedDiff
-        creditAmount = 0
-        status = "Edit"
-        description = `Purchase #${adjustmentData.purchaseId} - Edited - Payment increased by ${receivedDiff}`
-      } else if (receivedDiff < 0) {
-        creditAmount = Math.abs(receivedDiff)
-        debitAmount = 0
-        status = "Edit"
-        description = `Purchase #${adjustmentData.purchaseId} - Edited - Payment decreased by ${Math.abs(receivedDiff)}`
-      } else {
-        debitAmount = 0
-        creditAmount = 0
-        status = "Edit"
-        description = `Purchase #${adjustmentData.purchaseId} - Edited - No payment change`
-      }
-    }
-
-    // Ensure adjustmentDate is not null
-    const transactionDate = adjustmentData.adjustmentDate || new Date()
-
-    // Insert adjustment transaction
-    const result = await sql`
-      INSERT INTO financial_transactions (
-        transaction_type, reference_type, reference_id,
-        amount, received_amount, cost_amount, debit_amount, credit_amount,
-        status, description, device_id, company_id, created_by, transaction_date
-      ) VALUES (
-        'adjustment', 'purchase', ${adjustmentData.purchaseId},
-        ${amountDiff}, ${receivedDiff}, 0, ${debitAmount}, ${creditAmount},
-        ${status}, ${description}, 
-        ${adjustmentData.deviceId}, 1, ${adjustmentData.userId}, ${transactionDate}
-      ) RETURNING id
-    `
-
-    console.log(`Purchase adjustment recorded: ${adjustmentData.changeType} for purchase ${adjustmentData.purchaseId}`)
-    return { success: true, transactionId: result[0]?.id }
-  } catch (error) {
-    console.error("Error recording purchase adjustment:", error)
-    return { success: false, error: error instanceof Error ? error.message : "Unknown error" }
-  }
-}
-
 // Delete transaction when purchase is deleted
 export async function deletePurchaseTransaction(purchaseId: number, deviceId: number) {
   try {
@@ -712,7 +775,10 @@ export async function deletePurchaseTransaction(purchaseId: number, deviceId: nu
   }
 }
 
-// FIXED: Get financial summary from the simplified structure - PROPER partial credit sale handling
+// FIXED: Get financial summary from the simplified structure - PROPER cash balance calculation
+// Fix for getFinancialSummary function in simplified-accounting.ts
+// Replace the transaction mapping section with this enhanced version
+
 export async function getFinancialSummary(deviceId: number, dateFrom?: Date, dateTo?: Date, cacheBuster?: number) {
   try {
     console.log("Getting financial summary for device:", deviceId, "date range:", dateFrom, "to", dateTo)
@@ -730,6 +796,7 @@ export async function getFinancialSummary(deviceId: number, dateFrom?: Date, dat
         accountsReceivable: 0,
         accountsPayable: 0,
         outstandingReceivables: 0,
+        cashBalance: 0,
         transactions: [],
         receivables: [],
         payables: [],
@@ -769,26 +836,27 @@ export async function getFinancialSummary(deviceId: number, dateFrom?: Date, dat
 
     console.log(`Found ${transactions.length} transactions for device ${deviceId}`)
 
-    // FIXED: Calculate totals - Include partial credit payments in income
+    // Calculate totals
     let totalIncome = 0
     let totalExpenses = 0
     let totalCogs = 0
     let totalProfit = 0
+    let cashBalance = 0
 
     transactions.forEach((tx: any) => {
       const creditAmount = Number(tx.credit_amount) || 0
       const debitAmount = Number(tx.debit_amount) || 0
       const costAmount = Number(tx.cost_amount) || 0
 
-      // FIXED: Include all credit amounts (including partial credit payments) in income
       totalIncome += creditAmount
       totalCogs += costAmount
       totalExpenses += debitAmount
 
-      // Calculate profit for all sales that have actual cash impact
       if (creditAmount > 0 && costAmount > 0) {
         totalProfit += creditAmount - costAmount
       }
+
+      cashBalance += (creditAmount - debitAmount)
     })
 
     // Get receivables (sales with outstanding amounts)
@@ -826,6 +894,43 @@ export async function getFinancialSummary(deviceId: number, dateFrom?: Date, dat
       ORDER BY p.purchase_date DESC
     `
 
+    // CRITICAL FIX: Get latest purchase and sale data for credit transactions
+    const purchaseDataMap = new Map()
+    const saleDataMap = new Map()
+    
+    // Fetch all purchases referenced in transactions
+    const purchaseIds = transactions
+      .filter((tx: any) => tx.reference_type === 'purchase')
+      .map((tx: any) => tx.reference_id)
+    
+    if (purchaseIds.length > 0) {
+      const purchases = await sql`
+        SELECT id, total_amount, received_amount, status, supplier
+        FROM purchases 
+        WHERE id = ANY(${purchaseIds})
+      `
+      purchases.forEach((p: any) => {
+        purchaseDataMap.set(p.id, p)
+      })
+    }
+
+    // Fetch all sales referenced in transactions
+    const saleIds = transactions
+      .filter((tx: any) => tx.reference_type === 'sale')
+      .map((tx: any) => tx.reference_id)
+    
+    if (saleIds.length > 0) {
+      const sales = await sql`
+        SELECT s.id, s.total_amount, s.received_amount, s.status, c.name as customer_name
+        FROM sales s
+        LEFT JOIN customers c ON s.customer_id = c.id
+        WHERE s.id = ANY(${saleIds})
+      `
+      sales.forEach((s: any) => {
+        saleDataMap.set(s.id, s)
+      })
+    }
+
     const accountsReceivable = receivablesQuery.reduce((sum, r) => sum + Number(r.outstanding_amount), 0)
     const accountsPayable = payablesQuery.reduce((sum, p) => sum + Number(p.outstanding_amount), 0)
     const netProfit = totalIncome - totalExpenses
@@ -838,10 +943,11 @@ export async function getFinancialSummary(deviceId: number, dateFrom?: Date, dat
       netProfit,
       accountsReceivable,
       accountsPayable,
+      cashBalance,
       transactionCount: transactions.length,
     })
 
-    // FIXED: Proper partial credit sale handling in transaction mapping
+    // FIXED: Map transactions with latest data from purchases/sales tables
     return {
       totalIncome,
       totalCogs,
@@ -851,33 +957,64 @@ export async function getFinancialSummary(deviceId: number, dateFrom?: Date, dat
       accountsReceivable,
       accountsPayable,
       outstandingReceivables: accountsReceivable,
+      cashBalance,
       transactions: transactions.map((tx: any) => {
-        const amount = Number(tx.amount) || 0
-        const received = Number(tx.received_amount) || 0
         const status = tx.status || "Unknown"
+        const type = tx.transaction_type || "Unknown"
         const creditAmount = Number(tx.credit_amount) || 0
+        const debitAmount = Number(tx.debit_amount) || 0
         
-        // FIXED: For credit sales, show actual received amount and calculate remaining properly
-        const isCreditSale = status.toLowerCase() === 'credit'
-        const displayReceived = received // Show actual received amount for credit sales
-        const remaining = isCreditSale ? Math.max(0, amount - received) : 0
+        // CRITICAL FIX: For purchases and sales, use the LATEST data from the tables
+        let amount = Number(tx.amount) || 0
+        let received = Number(tx.received_amount) || 0
+        let description = tx.description || `${tx.transaction_type} #${tx.reference_id}`
+        
+        // For purchase transactions, fetch current purchase data
+        if (type === 'purchase' && tx.reference_id) {
+          const purchaseData = purchaseDataMap.get(tx.reference_id)
+          if (purchaseData) {
+            amount = Number(purchaseData.total_amount) || 0
+            received = Number(purchaseData.received_amount) || 0
+            // Update description to show current status
+            description = `Purchase #${tx.reference_id} - ${purchaseData.status} - ${tx.payment_method || 'Cash'} - Supplier: ${purchaseData.supplier}`
+          }
+        }
+        
+        // For sale transactions, fetch current sale data
+        if (type === 'sale' && tx.reference_id) {
+          const saleData = saleDataMap.get(tx.reference_id)
+          if (saleData) {
+            amount = Number(saleData.total_amount) || 0
+            received = Number(saleData.received_amount) || 0
+            // Update description to show current status
+            description = `Sale #${tx.reference_id} - ${saleData.status} - ${tx.payment_method || 'Cash'} - Customer: ${saleData.customer_name || 'Walk-in'}`
+          }
+        }
+        
+        // Calculate remaining amount based on current data
+        let remaining = 0
+        if (status.toLowerCase() === 'credit') {
+          remaining = Math.max(0, amount - received)
+        } else if (status.toLowerCase() === 'completed' && received < amount) {
+          remaining = Math.max(0, amount - received)
+        }
 
         return {
           id: tx.id,
           date: tx.transaction_date,
-          description: tx.description || `${tx.transaction_type} #${tx.reference_id}`,
+          description: description,
           type: tx.transaction_type,
           status: status,
-          amount: amount,
-          received: displayReceived, // FIXED: Show actual received for credit sales
+          amount: amount, // FIXED: Now shows current amount
+          received: received, // FIXED: Now shows current received
           cost: Number(tx.cost_amount) || 0,
-          debit: Number(tx.debit_amount) || 0,
+          debit: debitAmount,
           credit: creditAmount,
           paymentMethod: tx.payment_method || "",
           notes: tx.notes || "",
           account: getAccountType(tx.transaction_type),
           reference: `${tx.reference_type} #${tx.reference_id}`,
-          remaining: remaining, // FIXED: Calculate remaining properly for credit sales
+          remaining: Math.max(0, remaining), // FIXED: Calculated from current data
           sale_id: tx.reference_type === 'sale' ? tx.reference_id : undefined,
           purchase_id: tx.reference_type === 'purchase' ? tx.reference_id : undefined,
           supplier_payment_id: tx.reference_type === 'supplier' ? tx.reference_id : undefined,
@@ -929,12 +1066,14 @@ export async function getFinancialSummary(deviceId: number, dateFrom?: Date, dat
       accountsReceivable: 0,
       accountsPayable: 0,
       outstandingReceivables: 0,
+      cashBalance: 0,
       transactions: [],
       receivables: [],
       payables: [],
     }
   }
 }
+
 
 // Helper function to get account type for display
 function getAccountType(transactionType: string): string {
@@ -970,60 +1109,54 @@ export async function getAccountingBalances(deviceId: number, openingDate: Date,
     await createFinancialTransactionsTable()
 
     // Format dates properly without timezone conversion
-    const openingDateStr = `${openingDate.getFullYear()}-${String(openingDate.getMonth() + 1).padStart(2, "0")}-${String(openingDate.getDate()).padStart(2, "0")} ${String(openingDate.getHours()).padStart(2, "0")}:${String(openingDate.getMinutes()).padStart(2, "0")}:${String(openingDate.getSeconds()).padStart(2, "0")}`
+    const openingDateStr = `${openingDate.getFullYear()}-${String(openingDate.getMonth() + 1).padStart(2, "0")}-${String(openingDate.getDate()).padStart(2, "0")} 00:00:00`
 
-    let closingDateStr = openingDateStr
+    let closingDateStr = `${openingDate.getFullYear()}-${String(openingDate.getMonth() + 1).padStart(2, "0")}-${String(openingDate.getDate()).padStart(2, "0")} 23:59:59`
     if (closingDate) {
-      closingDateStr = `${closingDate.getFullYear()}-${String(closingDate.getMonth() + 1).padStart(2, "0")}-${String(closingDate.getDate()).padStart(2, "0")} ${String(closingDate.getHours()).padStart(2, "0")}:${String(closingDate.getMinutes()).padStart(2, "0")}:${String(closingDate.getSeconds()).padStart(2, "0")}`
+      closingDateStr = `${closingDate.getFullYear()}-${String(closingDate.getMonth() + 1).padStart(2, "0")}-${String(closingDate.getDate()).padStart(2, "0")} 23:59:59`
     }
 
     console.log("Date strings for balance calculation:", { openingDateStr, closingDateStr })
 
-    // FIXED: Calculate CASH BALANCE = Money Received - Money Spent (include partial credit payments)
+    // FIXED: Calculate CASH BALANCE = Total Money In (credits) - Total Money Out (debits)
+    // Money In: credit_amount (sales income, payments received)
+    // Money Out: debit_amount (purchases, supplier payments, refunds, expenses)
+    
+    // Opening balance: All transactions BEFORE opening date
     const openingTransactions = await sql`
       SELECT 
         COALESCE(SUM(credit_amount), 0) as total_credits,
-        COALESCE(SUM(debit_amount), 0) as total_debits,
-        COALESCE(SUM(received_amount), 0) as total_received,
-        COALESCE(SUM(cost_amount), 0) as total_cogs
+        COALESCE(SUM(debit_amount), 0) as total_debits
       FROM financial_transactions 
       WHERE device_id = ${deviceId} 
-        AND transaction_date <= ${openingDateStr}::timestamp
+        AND transaction_date < ${openingDateStr}::timestamp
     `
 
-    let closingTransactions = openingTransactions
-    if (closingDate) {
-      closingTransactions = await sql`
-        SELECT 
-          COALESCE(SUM(credit_amount), 0) as total_credits,
-          COALESCE(SUM(debit_amount), 0) as total_debits,
-          COALESCE(SUM(received_amount), 0) as total_received,
-          COALESCE(SUM(cost_amount), 0) as total_cogs
-        FROM financial_transactions 
-        WHERE device_id = ${deviceId} 
-          AND transaction_date <= ${closingDateStr}::timestamp
-      `
-    }
+    // Closing balance: All transactions UP TO closing date
+    const closingTransactions = await sql`
+      SELECT 
+        COALESCE(SUM(credit_amount), 0) as total_credits,
+        COALESCE(SUM(debit_amount), 0) as total_debits
+      FROM financial_transactions 
+      WHERE device_id = ${deviceId} 
+        AND transaction_date <= ${closingDateStr}::timestamp
+    `
 
     const openingCredits = Number(openingTransactions[0]?.total_credits) || 0
     const openingDebits = Number(openingTransactions[0]?.total_debits) || 0
-    const openingReceived = Number(openingTransactions[0]?.total_received) || 0
-    const openingBalance = openingReceived - openingDebits
+    const openingBalance = openingCredits - openingDebits
 
     const closingCredits = Number(closingTransactions[0]?.total_credits) || 0
     const closingDebits = Number(closingTransactions[0]?.total_debits) || 0
-    const closingReceived = Number(closingTransactions[0]?.total_received) || 0
-    const closingBalance = closingReceived - closingDebits
+    const closingBalance = closingCredits - closingDebits
 
     console.log("Balance calculation results:", {
-      openingReceived,
+      openingCredits,
       openingDebits,
       openingBalance,
-      closingReceived,
+      closingCredits,
       closingDebits,
       closingBalance,
-      openingCredits,
-      closingCredits,
     })
 
     return {
@@ -1033,8 +1166,6 @@ export async function getAccountingBalances(deviceId: number, openingDate: Date,
       openingDebits,
       closingCredits,
       closingDebits,
-      openingReceived,
-      closingReceived,
     }
   } catch (error) {
     console.error("Error getting accounting balances:", error)
@@ -1045,8 +1176,6 @@ export async function getAccountingBalances(deviceId: number, openingDate: Date,
       openingDebits: 0,
       closingCredits: 0,
       closingDebits: 0,
-      openingReceived: 0,
-      closingReceived: 0,
     }
   }
 }
