@@ -498,10 +498,11 @@ export async function recordPurchaseTransaction(purchaseData: {
 
     // FIXED: Different handling for credit vs completed purchases
     if (status === "credit") {
-      // For credit purchases: debit = received amount (actual money paid out), credit = 0
-      debitAmount = receivedAmount // Money actually paid out
+      // For credit purchases: debit = 0, credit = 0 (no cash impact until payment)
+      // Only record the outstanding amount as a liability
+      debitAmount = 0
       creditAmount = 0
-      description = `Purchase #${purchaseData.purchaseId} - Credit - ${purchaseData.paymentMethod} - Supplier: ${purchaseData.supplierName} - Paid: ${receivedAmount} - Outstanding: ${purchaseData.outstandingAmount}`
+      description = `Purchase #${purchaseData.purchaseId} - Credit - ${purchaseData.paymentMethod} - Supplier: ${purchaseData.supplierName} - Outstanding: ${purchaseData.outstandingAmount}`
     } else {
       // For completed purchases: debit = received amount (money paid out), credit = 0
       debitAmount = receivedAmount
@@ -549,7 +550,7 @@ export async function recordPurchaseTransaction(purchaseData: {
   }
 }
 
-// FIXED: Record purchase adjustments with PROPER partial credit handling
+// FIXED: Record purchase adjustments with proper NET change calculation for credit purchases
 export async function recordPurchaseAdjustment(adjustmentData: {
   purchaseId: number
   changeType: "edit" | "cancel" | "payment" | "status_change" | "consolidated_edit"
@@ -600,36 +601,65 @@ export async function recordPurchaseAdjustment(adjustmentData: {
       changeType: adjustmentData.changeType
     })
 
-    // FIXED: Handle payment changes for credit purchases
-    if (adjustmentData.changeType === "consolidated_edit" || adjustmentData.changeType === "payment") {
-      // CRITICAL FIX: For credit purchases, track ACTUAL cash movements
-      if (receivedDiff > 0) {
-        // Additional payment made - money going OUT
-        debitAmount = receivedDiff
-        status = "Payment"
-        description = `Purchase #${adjustmentData.purchaseId} - Additional Payment - Paid ${receivedDiff}`
-        console.log(`Credit purchase: Additional payment ${receivedDiff}, recording debit`)
-      } else if (receivedDiff < 0) {
-        // Payment reduced - money coming IN (refund)
-        creditAmount = Math.abs(receivedDiff)
-        status = "Payment Reduction"
-        description = `Purchase #${adjustmentData.purchaseId} - Payment Reduced - Refund ${Math.abs(receivedDiff)}`
-        console.log(`Credit purchase: Payment reduced by ${Math.abs(receivedDiff)}, recording credit`)
+    if (adjustmentData.changeType === "consolidated_edit") {
+      // FIXED: Handle credit purchase adjustments differently
+      if (previousStatus === "credit" && newStatus === "credit") {
+        // Credit purchase amount changed - record the outstanding amount change
+        if (outstandingDiff > 0) {
+          // Outstanding amount increased (more credit)
+          description = `Purchase #${adjustmentData.purchaseId} - Credit Increased - Additional: ${outstandingDiff}`
+          console.log(`Credit purchase: Outstanding increased by ${outstandingDiff}`)
+        } else if (outstandingDiff < 0) {
+          // Outstanding amount decreased (less credit)
+          description = `Purchase #${adjustmentData.purchaseId} - Credit Reduced - Decrease: ${Math.abs(outstandingDiff)}`
+          console.log(`Credit purchase: Outstanding decreased by ${Math.abs(outstandingDiff)}`)
+        }
       } else {
-        // No payment changes
-        if (amountDiff === 0 && outstandingDiff === 0) {
-          console.log("No financial changes in purchase edit")
-          return { success: true, transactionId: null, message: "No financial changes to record" }
+        // Regular purchase edits
+        if (amountDiff > 0) {
+          // Purchase amount increased = additional money out
+          debitAmount = amountDiff
+          description = `Purchase #${adjustmentData.purchaseId} - Edited - Additional amount: ${amountDiff}`
+          console.log(`Purchase edit: Amount increased by ${amountDiff}, recording debit`)
+        } else if (amountDiff < 0) {
+          // Purchase amount decreased = money returned (refund)
+          creditAmount = Math.abs(amountDiff)
+          description = `Purchase #${adjustmentData.purchaseId} - Edited - Amount reduced by ${Math.abs(amountDiff)}`
+          console.log(`Purchase edit: Amount decreased by ${Math.abs(amountDiff)}, recording credit`)
         }
       }
       
-      // Handle amount changes separately
-      if (amountDiff > 0) {
-        // Purchase amount increased
-        description += ` - Amount increased by ${amountDiff}`
-      } else if (amountDiff < 0) {
-        // Purchase amount decreased
-        description += ` - Amount decreased by ${Math.abs(amountDiff)}`
+      // Handle payment changes separately from amount changes
+      if (receivedDiff > 0) {
+        // Additional payment made
+        debitAmount += receivedDiff
+        description += ` - Additional payment: ${receivedDiff}`
+        console.log(`Purchase edit: Additional payment ${receivedDiff}`)
+      } else if (receivedDiff < 0) {
+        // Payment reduced (refund received)
+        creditAmount += Math.abs(receivedDiff)
+        description += ` - Payment reduced: ${Math.abs(receivedDiff)}`
+        console.log(`Purchase edit: Payment reduced by ${Math.abs(receivedDiff)}`)
+      }
+
+      // If no amount or payment changes, check if we need to create any transaction
+      if (amountDiff === 0 && receivedDiff === 0 && outstandingDiff === 0) {
+        console.log("No financial changes in purchase edit")
+        return { success: true, transactionId: null, message: "No financial changes to record" }
+      }
+    } 
+    else if (adjustmentData.changeType === "payment") {
+      // Payment adjustments
+      if (receivedDiff > 0) {
+        debitAmount = receivedDiff
+        status = "Payment"
+        description = `Purchase #${adjustmentData.purchaseId} - Payment - Paid ${receivedDiff}`
+      } else if (receivedDiff < 0) {
+        creditAmount = Math.abs(receivedDiff)
+        status = "Payment Reduction"
+        description = `Purchase #${adjustmentData.purchaseId} - Payment Reduction - Credit ${Math.abs(receivedDiff)}`
+      } else {
+        return { success: true, transactionId: null, message: "No payment changes to record" }
       }
     } 
     else if (adjustmentData.changeType === "cancel") {
@@ -687,8 +717,6 @@ export async function recordPurchaseAdjustment(adjustmentData: {
     return { success: false, error: error instanceof Error ? error.message : "Unknown error" }
   }
 }
-
-
 
 // Record manual/petty transactions
 export async function recordManualTransaction(transactionData: {
@@ -776,9 +804,6 @@ export async function deletePurchaseTransaction(purchaseId: number, deviceId: nu
 }
 
 // FIXED: Get financial summary from the simplified structure - PROPER cash balance calculation
-// Fix for getFinancialSummary function in simplified-accounting.ts
-// Replace the transaction mapping section with this enhanced version
-
 export async function getFinancialSummary(deviceId: number, dateFrom?: Date, dateTo?: Date, cacheBuster?: number) {
   try {
     console.log("Getting financial summary for device:", deviceId, "date range:", dateFrom, "to", dateTo)
@@ -836,7 +861,7 @@ export async function getFinancialSummary(deviceId: number, dateFrom?: Date, dat
 
     console.log(`Found ${transactions.length} transactions for device ${deviceId}`)
 
-    // Calculate totals
+    // FIXED: Calculate totals - Include partial credit payments in income
     let totalIncome = 0
     let totalExpenses = 0
     let totalCogs = 0
@@ -848,14 +873,17 @@ export async function getFinancialSummary(deviceId: number, dateFrom?: Date, dat
       const debitAmount = Number(tx.debit_amount) || 0
       const costAmount = Number(tx.cost_amount) || 0
 
+      // FIXED: Include all credit amounts (including partial credit payments) in income
       totalIncome += creditAmount
       totalCogs += costAmount
       totalExpenses += debitAmount
 
+      // Calculate profit for all sales that have actual cash impact
       if (creditAmount > 0 && costAmount > 0) {
         totalProfit += creditAmount - costAmount
       }
 
+      // FIXED: Calculate cash balance = money in - money out
       cashBalance += (creditAmount - debitAmount)
     })
 
@@ -894,43 +922,6 @@ export async function getFinancialSummary(deviceId: number, dateFrom?: Date, dat
       ORDER BY p.purchase_date DESC
     `
 
-    // CRITICAL FIX: Get latest purchase and sale data for credit transactions
-    const purchaseDataMap = new Map()
-    const saleDataMap = new Map()
-    
-    // Fetch all purchases referenced in transactions
-    const purchaseIds = transactions
-      .filter((tx: any) => tx.reference_type === 'purchase')
-      .map((tx: any) => tx.reference_id)
-    
-    if (purchaseIds.length > 0) {
-      const purchases = await sql`
-        SELECT id, total_amount, received_amount, status, supplier
-        FROM purchases 
-        WHERE id = ANY(${purchaseIds})
-      `
-      purchases.forEach((p: any) => {
-        purchaseDataMap.set(p.id, p)
-      })
-    }
-
-    // Fetch all sales referenced in transactions
-    const saleIds = transactions
-      .filter((tx: any) => tx.reference_type === 'sale')
-      .map((tx: any) => tx.reference_id)
-    
-    if (saleIds.length > 0) {
-      const sales = await sql`
-        SELECT s.id, s.total_amount, s.received_amount, s.status, c.name as customer_name
-        FROM sales s
-        LEFT JOIN customers c ON s.customer_id = c.id
-        WHERE s.id = ANY(${saleIds})
-      `
-      sales.forEach((s: any) => {
-        saleDataMap.set(s.id, s)
-      })
-    }
-
     const accountsReceivable = receivablesQuery.reduce((sum, r) => sum + Number(r.outstanding_amount), 0)
     const accountsPayable = payablesQuery.reduce((sum, p) => sum + Number(p.outstanding_amount), 0)
     const netProfit = totalIncome - totalExpenses
@@ -947,7 +938,7 @@ export async function getFinancialSummary(deviceId: number, dateFrom?: Date, dat
       transactionCount: transactions.length,
     })
 
-    // FIXED: Map transactions with latest data from purchases/sales tables
+    // FIXED: Proper partial credit sale and purchase handling in transaction mapping
     return {
       totalIncome,
       totalCogs,
@@ -959,54 +950,31 @@ export async function getFinancialSummary(deviceId: number, dateFrom?: Date, dat
       outstandingReceivables: accountsReceivable,
       cashBalance,
       transactions: transactions.map((tx: any) => {
+        const amount = Number(tx.amount) || 0
+        const received = Number(tx.received_amount) || 0
         const status = tx.status || "Unknown"
         const type = tx.transaction_type || "Unknown"
         const creditAmount = Number(tx.credit_amount) || 0
         const debitAmount = Number(tx.debit_amount) || 0
         
-        // CRITICAL FIX: For purchases and sales, use the LATEST data from the tables
-        let amount = Number(tx.amount) || 0
-        let received = Number(tx.received_amount) || 0
-        let description = tx.description || `${tx.transaction_type} #${tx.reference_id}`
-        
-        // For purchase transactions, fetch current purchase data
-        if (type === 'purchase' && tx.reference_id) {
-          const purchaseData = purchaseDataMap.get(tx.reference_id)
-          if (purchaseData) {
-            amount = Number(purchaseData.total_amount) || 0
-            received = Number(purchaseData.received_amount) || 0
-            // Update description to show current status
-            description = `Purchase #${tx.reference_id} - ${purchaseData.status} - ${tx.payment_method || 'Cash'} - Supplier: ${purchaseData.supplier}`
-          }
-        }
-        
-        // For sale transactions, fetch current sale data
-        if (type === 'sale' && tx.reference_id) {
-          const saleData = saleDataMap.get(tx.reference_id)
-          if (saleData) {
-            amount = Number(saleData.total_amount) || 0
-            received = Number(saleData.received_amount) || 0
-            // Update description to show current status
-            description = `Sale #${tx.reference_id} - ${saleData.status} - ${tx.payment_method || 'Cash'} - Customer: ${saleData.customer_name || 'Walk-in'}`
-          }
-        }
-        
-        // Calculate remaining amount based on current data
+        // FIXED: For credit purchases, calculate remaining amount properly
         let remaining = 0
-        if (status.toLowerCase() === 'credit') {
-          remaining = Math.max(0, amount - received)
+        if (status.toLowerCase() === 'credit' && type === 'purchase') {
+          remaining = amount - received
+        } else if (status.toLowerCase() === 'credit' && type === 'sale') {
+          remaining = amount - received
         } else if (status.toLowerCase() === 'completed' && received < amount) {
-          remaining = Math.max(0, amount - received)
+          remaining = amount - received
         }
 
         return {
           id: tx.id,
           date: tx.transaction_date,
-          description: description,
+          description: tx.description || `${tx.transaction_type} #${tx.reference_id}`,
           type: tx.transaction_type,
           status: status,
-          amount: amount, // FIXED: Now shows current amount
-          received: received, // FIXED: Now shows current received
+          amount: amount,
+          received: received,
           cost: Number(tx.cost_amount) || 0,
           debit: debitAmount,
           credit: creditAmount,
@@ -1014,7 +982,7 @@ export async function getFinancialSummary(deviceId: number, dateFrom?: Date, dat
           notes: tx.notes || "",
           account: getAccountType(tx.transaction_type),
           reference: `${tx.reference_type} #${tx.reference_id}`,
-          remaining: Math.max(0, remaining), // FIXED: Calculated from current data
+          remaining: Math.max(0, remaining),
           sale_id: tx.reference_type === 'sale' ? tx.reference_id : undefined,
           purchase_id: tx.reference_type === 'purchase' ? tx.reference_id : undefined,
           supplier_payment_id: tx.reference_type === 'supplier' ? tx.reference_id : undefined,
@@ -1073,7 +1041,6 @@ export async function getFinancialSummary(deviceId: number, dateFrom?: Date, dat
     }
   }
 }
-
 
 // Helper function to get account type for display
 function getAccountType(transactionType: string): string {
