@@ -190,7 +190,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
           </button>
           <div className="relative h-8 w-8 mr-3">
             <Image
-              src="https://www.ezzycartz.com/logo-fav-main.png"
+              src="https://www.opencoders.icu/oc.png"
               alt="EzzyCartz Logo"
               width={32}
               height={32}

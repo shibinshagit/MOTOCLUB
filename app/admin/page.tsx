@@ -73,7 +73,7 @@ export default function AdminPage() {
         <div className="mb-8 text-center">
           <div className="relative mx-auto mb-6 h-24 w-24">
             <Image
-              src="https://www.ezzycartz.com/logo-fav-main.png"
+              src="https://www.opencoders.icu/oc.png"
               alt="EzzyCartz Logo"
               width={96}
               height={96}

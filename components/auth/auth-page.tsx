@@ -9,7 +9,7 @@ export default function AuthPage() {
         <div className="sm:mx-auto sm:w-full sm:max-w-md">
           <div className="flex justify-center">
             <Image
-              src="https://www.ezzycartz.com/logo-fav-main.png"
+              src="https://www.opencoders.icu/oc.png"
               alt="Ezzy Cart Logo"
               width={120}
               height={120}

@@ -159,7 +159,7 @@ export default function SaleInvoicePage() {
             </div>
             <div className="logo-container">
               <img
-                src="https://www.opencoders.icu/oc.png"
+                src="https://res.cloudinary.com/dxishiq9x/image/upload/v1751969415/286709952_155636793670880_4247278441893099316_n_unlqm6.jpg"
                 alt="Moto Club"
                 className="h-20"
               />

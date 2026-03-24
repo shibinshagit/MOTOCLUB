@@ -490,7 +490,7 @@ export function printSalesReceipt(sale: any, items: any[], currency = "AED", bus
             </div>
           </div>
           <div class="logo-container">
-            <img src="https://www.opencoders.icu/oc.png" alt="Moto Club" class="logo">
+            <img src="https://res.cloudinary.com/dxishiq9x/image/upload/v1751969415/286709952_155636793670880_4247278441893099316_n_unlqm6.jpg" alt="Moto Club" class="logo">
           </div>
         </div>
         
@@ -1064,7 +1064,7 @@ export function printPurchaseReceipt(purchase: any, items: any[], currency = "AE
             </div>
           </div>
           <div class="logo-container">
-            <img src="https://www.opencoders.icu/oc.png" alt="Moto Club" class="logo">
+            <img src="https://res.cloudinary.com/dxishiq9x/image/upload/v1751969415/286709952_155636793670880_4247278441893099316_n_unlqm6.jpg" alt="Moto Club" class="logo">
           </div>
         </div>
         
