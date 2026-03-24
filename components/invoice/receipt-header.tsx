@@ -19,11 +19,11 @@ interface ReceiptHeaderProps {
 
 export function ReceiptHeader({ deviceId, className = "" }: ReceiptHeaderProps) {
   const [companyInfo, setCompanyInfo] = useState<CompanyInfo | null>({
-    name: "SABS",
-    address: "Karama, opp. Al Rayan Hotel. Ajman - United Arab Emirates",
-    phone: "+971 566770889",
+    name: "Moto Club",
+    address: "kottakkal, malappuram, kerala, india",
+    phone: "+91 9995442239",
     email: "",
-    currency: "AED",
+    currency: "INR",
   })
   const [loading, setLoading] = useState(false)
 

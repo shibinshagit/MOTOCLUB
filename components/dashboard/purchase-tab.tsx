@@ -607,7 +607,7 @@ export default function PurchaseTab({
         <!DOCTYPE html>
         <html>
         <head>
-          <title>Purchase Report - SABS SOUQ</title>
+          <title>Purchase Report - Moto Club</title>
           <style>
             @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
             
@@ -729,21 +729,11 @@ export default function PurchaseTab({
         </head>
         <body>
           <div class="header">
-            <div class="company-name">SABS SOUQ</div>
-            <div style="font-size: 0.7rem; color: #6b7280;">Karama, opp. Al Rayan Hotel, Ajman - UAE | +971 566770889</div>
+            <div class="company-name">Moto Club</div>
+            <div style="font-size: 0.7rem; color: #6b7280;">kottakkal, malappuram, kerala, india | +91 9995442239</div>
             <div class="report-title">Purchase Report</div>
             <div class="report-info">Generated on ${currentDate} at ${currentTime}</div>
-          </div>
-          
-          <div class="summary">
-            <div class="summary-item">
-              <div class="summary-label">Total Purchases</div>
-              <div class="summary-value">${filteredPurchases.length}</div>
-            </div>
-            <div class="summary-item">
-              <div class="summary-label">Total Amount</div>
-              <div class="summary-value">${formatCurrency(totalAmount)}</div>
-            </div>
+          </div> 
             <div class="summary-item">
               <div class="summary-label">Paid Amount</div>
               <div class="summary-value">${formatCurrency(paidAmount)}</div>

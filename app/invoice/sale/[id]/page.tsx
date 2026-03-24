@@ -18,9 +18,9 @@ export default function SaleInvoicePage() {
   const [error, setError] = useState<string | null>(null)
   const [currency] = useState<string>("AED") // Default to AED
   const [companyInfo] = useState<any>({
-    name: "SABS SOUQ",
-    address: "Karama, opp. Al Rayan Hotel. Ajman - United Arab Emirates",
-    phone: "+971 566770889",
+    name: "Moto Club",
+    address: "kottakkal, malappuram, kerala, india",
+    phone: "+91 9995442239",
   })
 
   const [receivedAmount, setReceivedAmount] = useState(0)
@@ -148,19 +148,19 @@ export default function SaleInvoicePage() {
         <div className="bg-white p-8 rounded-lg shadow-md">
           <div className="flex justify-between items-start mb-8">
             <div className="company-info">
-              <div className="text-2xl font-bold mb-2">SABS SOUQ</div>
+              <div className="text-2xl font-bold mb-2">Moto Club</div>
               <div className="text-gray-600">
-                Karama, opp. Al Rayan Hotel
+             office address:
                 <br />
-                Ajman - United Arab Emirates
+                kottakkal, malappuram, kerala, india
                 <br />
-                Phone: +971 566770889
+                Phone: +91 9995442239
               </div>
             </div>
             <div className="logo-container">
               <img
-                src="https://hebbkx1anhila5yf.public.blob.vercel-storage.com/WhatsApp%20Image%202025-05-12%20at%2010.25.11_3ee03183.jpg-wsW1MM2yqcFGb01fJ7wZEnO5J8dRdJ.jpeg"
-                alt="SABS SOUQ"
+                src="https://www.opencoders.icu/oc.png"
+                alt="Moto Club"
                 className="h-20"
               />
             </div>

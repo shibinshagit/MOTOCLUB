@@ -15,9 +15,9 @@ export function printServiceReceipt(sale: any, items: any[], currency = "AED", b
 
   // Use the company info
   const business = {
-    name: "SABS SOUQ",
-    address: "Karama, opp. Al Rayan Hotel. Ajman - United Arab Emirates",
-    phone: "+971 566770889",
+    name: "Moto Club",
+    address: "kottakkal, malappuram, kerala, india",
+    phone: "+91 9995442239",
     ...businessInfo,
   }
 
@@ -80,7 +80,7 @@ export function printServiceReceipt(sale: any, items: any[], currency = "AED", b
     <head>
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-      <title>Service Invoice - SABS SOUQ</title>
+      <title>Service Invoice - Moto Club</title>
       <style>
         @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');
         
@@ -348,15 +348,14 @@ export function printServiceReceipt(sale: any, items: any[], currency = "AED", b
         <div class="invoice-header">
           <div class="header-content">
             <div class="company-info">
-              <div class="company-name">SABS SOUQ</div>
+              <div class="company-name">Moto Club</div>
               <div class="company-details">
-                Karama, opp. Al Rayan Hotel<br>
-                Ajman - United Arab Emirates<br>
-                Phone: +971 566770889
+                kottakkal, malappuram, kerala, india<br>
+                Phone: +91 9995442239
               </div>
             </div>
             <div class="logo-container">
-              <img src="https://hebbkx1anhila5yf.public.blob.vercel-storage.com/WhatsApp%20Image%202025-05-12%20at%2010.25.11_3ee03183.jpg-wsW1MM2yqcFGb01fJ7wZEnO5J8dRdJ.jpeg" alt="SABS SOUQ" class="logo">
+              <img src="https://www.opencoders.icu/oc.png" alt="Moto Club" class="logo">
             </div>
           </div>
           <div class="invoice-title">

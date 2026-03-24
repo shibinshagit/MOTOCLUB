@@ -66,7 +66,7 @@ export default function AddSalePage() {
     // Fetch products
     setProducts([
       { id: 879, name: "PUBG TRIGGER", price: 20, stock: 10, type: "product" },
-      { id: 504, name: "SABS WHITENING CREAM", price: 65, stock: 5, type: "product" },
+      { id: 504, name: "WHITENING CREAM", price: 65, stock: 5, type: "product" },
       { id: 464, name: "PERFUME BOX", price: 10, stock: 15, type: "product" },
     ])
 

@@ -58,12 +58,12 @@ export async function generateDetailedSalePDF(saleData: any) {
   // Add company header
   doc.setFontSize(18)
   doc.setFont("helvetica", "bold")
-  doc.text("SABS SOUQ", 105, 15, { align: "center" })
+  doc.text("Moto Club", 105, 15, { align: "center" })
 
   doc.setFontSize(10)
   doc.setFont("helvetica", "normal")
-  doc.text("Karama, opp. Al Rayan Hotel. Ajman - United Arab Emirates", 105, 22, { align: "center" })
-  doc.text("Phone: +971 566770889", 105, 27, { align: "center" })
+  doc.text("kottakkal, malappuram, kerala, india", 105, 22, { align: "center" })
+  doc.text("Phone: +91 9995442239", 105, 27, { align: "center" })
 
   // Add title
   doc.setFillColor(245, 245, 245)

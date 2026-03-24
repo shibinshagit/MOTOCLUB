@@ -4,16 +4,16 @@
 const getCompanyInfoFromDOM = (): { name: string; address: string; phone: string } => {
   if (typeof document === "undefined") {
     return {
-      name: "SABS SOUQ",
-      address: "Karama, opp. Al Rayan Hotel. Ajman - United Arab Emirates",
-      phone: "+971 566770889",
+      name: "Moto Club",
+      address: "kottakkal, malappuram, kerala, india",
+      phone: "+91 9995442239",
     }
   }
-  // Always return the fixed company info
+  // Always return the fixed company info 
   return {
-    name: "SABS SOUQ",
-    address: "Karama, opp. Al Rayan Hotel. Ajman - United Arab Emirates",
-    phone: "+971 566770889",
+    name: "Moto Club",
+    address: "kottakkal, malappuram, kerala, india",
+    phone: "+91 9995442239",
   }
 }
 
@@ -35,9 +35,9 @@ export function printSalesReceipt(sale: any, items: any[], currency = "AED", bus
 
   // Use the company info from the DOM or fallback to provided info
   const business = {
-    name: "SABS SOUQ",
-    address: "Karama, opp. Al Rayan Hotel. Ajman - United Arab Emirates",
-    phone: "+971 566770889",
+    name: "Moto Club",
+    address: "kottakkal, malappuram, kerala, india",
+    phone: "+91 9995442239",
     ...businessInfo,
   }
 
@@ -113,7 +113,7 @@ export function printSalesReceipt(sale: any, items: any[], currency = "AED", bus
     <head>
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-      <title>Invoice - SABS SOUQ</title>
+      <title>Invoice - Moto Club</title>
       <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
         
@@ -483,14 +483,14 @@ export function printSalesReceipt(sale: any, items: any[], currency = "AED", bus
       <div class="invoice-container">
         <div class="invoice-header">
           <div class="company-info">
-            <div class="company-name">SABS SOUQ</div>
+            <div class="company-name">Moto Club</div>
             <div class="company-details">
-              Karama, opp. Al Rayan Hotel, Ajman - UAE<br>
-              Phone: +971 566770889
+              kottakkal, malappuram, kerala, india<br>
+              Phone: +91 9995442239
             </div>
           </div>
           <div class="logo-container">
-            <img src="https://hebbkx1anhila5yf.public.blob.vercel-storage.com/WhatsApp%20Image%202025-05-12%20at%2010.25.11_3ee03183.jpg-wsW1MM2yqcFGb01fJ7wZEnO5J8dRdJ.jpeg" alt="SABS SOUQ" class="logo">
+            <img src="https://www.opencoders.icu/oc.png" alt="Moto Club" class="logo">
           </div>
         </div>
         
@@ -642,7 +642,7 @@ export function printSalesReceipt(sale: any, items: any[], currency = "AED", bus
         <div class="invoice-footer">
           <div class="thank-you">Thank You For Your Business!</div>
           <div class="footer-note">
-            This is a computer-generated invoice. For queries, contact +971 566770889
+            This is a computer-generated invoice. For queries, contact +91 9995442239
           </div>
         </div>
       </div>
@@ -749,7 +749,7 @@ export function printPurchaseReceipt(purchase: any, items: any[], currency = "AE
     <head>
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-      <title>Purchase Invoice - SABS SOUQ</title>
+      <title>Purchase Invoice - Moto Club</title>
       <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
         
@@ -1057,14 +1057,14 @@ export function printPurchaseReceipt(purchase: any, items: any[], currency = "AE
       <div class="receipt-container">
         <div class="receipt-header">
           <div class="company-info">
-            <div class="company-name">SABS SOUQ</div>
+            <div class="company-name">Moto Club</div>
             <div class="company-details">
-              Karama, opp. Al Rayan Hotel, Ajman - UAE<br>
-              Phone: +971 566770889
+              kottakkal, malappuram, kerala, india<br>
+              Phone: +91 9995442239
             </div>
           </div>
           <div class="logo-container">
-            <img src="https://hebbkx1anhila5yf.public.blob.vercel-storage.com/WhatsApp%20Image%202025-05-12%20at%2010.25.11_3ee03183.jpg-wsW1MM2yqcFGb01fJ7wZEnO5J8dRdJ.jpeg" alt="SABS SOUQ" class="logo">
+            <img src="https://www.opencoders.icu/oc.png" alt="Moto Club" class="logo">
           </div>
         </div>
         
@@ -1211,7 +1211,7 @@ export function printPurchaseReceipt(purchase: any, items: any[], currency = "AE
         <div class="receipt-footer">
           <div class="thank-you">Purchase Invoice</div>
           <div class="footer-note">
-            Generated on ${formattedDate} ${formattedTime} | For queries, contact +971 566770889
+            Generated on ${formattedDate} ${formattedTime} | For queries, contact +91 9995442239
           </div>
         </div>
       </div>
