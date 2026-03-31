@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
+import { useRouter } from "next/navigation"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -10,7 +11,6 @@ import { deletePurchase } from "@/app/actions/purchase-actions"
 import NewPurchaseModal from "../purchases/new-purchase-modal"
 import ViewPurchaseModal from "../purchases/view-purchase-modal"
 import EditPurchaseModal from "../purchases/edit-purchase-modal"
-import SupplierTab from "./supplier-tab"
 import { Input } from "@/components/ui/input"
 import { PdfExportButton } from "@/components/ui/pdf-export-button"
 import { useSelector, useDispatch } from "react-redux"
@@ -68,6 +68,7 @@ export default function PurchaseTab({
   onModalClose,
   mockMode = false,
 }: PurchaseTabProps) {
+  const router = useRouter()
   const dispatch = useDispatch<AppDispatch>()
   const deviceId = useSelector(selectDeviceId)
 
@@ -107,8 +108,6 @@ export default function PurchaseTab({
   const isInitializedRef = useRef(false)
   const isLoadingRef = useRef(false)
   const lastFetchRef = useRef<number>(0)
-
-  const [isSuppliersViewOpen, setIsSuppliersViewOpen] = useState(false)
 
   // Debounced search effect
   useEffect(() => {
@@ -885,14 +884,13 @@ export default function PurchaseTab({
             </div>
 
             <Button
-                onClick={() => setIsSuppliersViewOpen(true)}
+                onClick={() => router.push("/dashboard?tab=supplier")}
                 variant="outline"
                 size="sm"
                 className="flex items-center gap-2 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-xs sm:text-sm whitespace-nowrap"
               >
                 <Truck className="h-4 w-4 flex-shrink-0" />
-                <span className="hidden sm:inline">View Suppliers</span>
-                <span className="sm:hidden">Suppliers</span>
+                <span>Suppliers</span>
               </Button>
 
 
@@ -1387,28 +1385,6 @@ export default function PurchaseTab({
           </div>
         </div>
       )}
-
-      {isSuppliersViewOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-2">
-          <div className="bg-white dark:bg-gray-900 rounded-2xl w-full max-w-5xl h-[90vh] overflow-hidden shadow-2xl relative animate-in fade-in-50 zoom-in-90">
-            {/* Close button */}
-            <Button
-              size="icon"
-              onClick={() => setIsSuppliersViewOpen(false)}
-              className="absolute top-16 right-1/2  z-14"
-            >
-              <X className="h-5 w-5" />
-            </Button>
-
-            {/* SupplierTab Component */}
-            <SupplierTab
-              userId={userId}
-              onModalClose={() => setIsSuppliersViewOpen(false)}
-            />
-          </div>
-        </div>
-      )}
-
 
       {/* Amount Filter Modal */}
       {isAmountFilterModalOpen && (

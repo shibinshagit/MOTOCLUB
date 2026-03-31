@@ -278,13 +278,14 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
     { id: "sale", icon: <ShoppingCart className="h-4 w-4" />, label: "Sale" },
     { id: "purchase", icon: <Receipt className="h-4 w-4" />, label: "Purchase" },
     { id: "product", icon: <Package className="h-4 w-4" />, label: "Product" },
+    { id: "supplier", icon: <Truck className="h-4 w-4" />, label: "Suppliers" },
     { id: "stock", icon: <BarChart2 className="h-4 w-4" />, label: "Stock" },
     { id: "accounting", icon: <Calculator className="h-4 w-4" />, label: "Accounting" },
   ]
 
   // Primary tabs for bottom navigation (most used)
   const primaryTabs = ["home", "sale", "purchase", "product"]
-  const secondaryTabs = [ "stock", "accounting"]
+  const secondaryTabs = ["supplier", "stock", "accounting"]
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-gray-50 dark:bg-gray-900">

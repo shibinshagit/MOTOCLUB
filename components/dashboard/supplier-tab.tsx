@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import {
   Loader2,
   Search,
@@ -19,6 +20,8 @@ import {
   MapPin,
   RefreshCw,
   CreditCard,
+  History,
+  FilePenLine,
 } from "lucide-react"
 import { useAppDispatch, useAppSelector } from "@/store/hooks"
 import {
@@ -45,6 +48,9 @@ import SimpleAddModal from "../suppliers/simple-add-modal"
 import SimpleViewModal from "../suppliers/simple-view-modal"
 import SimpleEditModal from "../suppliers/simple-edit-modal"
 import PayCreditModal from "../suppliers/pay-credit-modal"
+import ViewSupplierPaymentModal from "../suppliers/View-supplier-payment-model"
+import EditSupplierPaymentModal from "../suppliers/View-suplier-payment-edit"
+import type { SupplierPaymentListRow } from "@/app/actions/supplier-payment-actions"
 
 interface SupplierTabProps {
   userId: number
@@ -143,6 +149,12 @@ export default function SupplierTab({
     name: string
     balance_amount: number
   } | null>(null)
+
+  const [paymentHistorySupplier, setPaymentHistorySupplier] = useState<{ id: number; name: string } | null>(null)
+  const [supplierPayments, setSupplierPayments] = useState<SupplierPaymentListRow[]>([])
+  const [loadingSupplierPayments, setLoadingSupplierPayments] = useState(false)
+  const [viewSupplierPaymentId, setViewSupplierPaymentId] = useState<number | null>(null)
+  const [editSupplierPaymentId, setEditSupplierPaymentId] = useState<number | null>(null)
 
   // Refs for managing state and preventing issues
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -362,6 +374,38 @@ export default function SupplierTab({
     setShowPayCreditModal(true)
   }, [])
 
+  const handleOpenPaymentHistory = useCallback((supplier: { id: number; name: string }) => {
+    setPaymentHistorySupplier(supplier)
+  }, [])
+
+  const handleEditSupplierPayment = useCallback((paymentId: number) => {
+    setViewSupplierPaymentId(null)
+    setEditSupplierPaymentId(paymentId)
+  }, [])
+
+  useEffect(() => {
+    if (!paymentHistorySupplier || !deviceId || mockMode) {
+      setSupplierPayments([])
+      setLoadingSupplierPayments(false)
+      return
+    }
+    let cancelled = false
+    setLoadingSupplierPayments(true)
+    import("@/app/actions/supplier-payment-actions")
+      .then(({ listSupplierPaymentsForSupplier }) =>
+        listSupplierPaymentsForSupplier(paymentHistorySupplier.id, deviceId, userId),
+      )
+      .then((result) => {
+        if (!cancelled && result.success) setSupplierPayments(result.data)
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingSupplierPayments(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [paymentHistorySupplier, deviceId, userId, mockMode])
+
   const handleModalClose = useCallback(() => {
     setShowAddModal(false)
     setShowViewModal(false)
@@ -384,9 +428,19 @@ export default function SupplierTab({
     } catch (error) {
       console.error("Error refreshing after modal success:", error)
     }
+
+    if (paymentHistorySupplier && deviceId && !mockMode) {
+      try {
+        const { listSupplierPaymentsForSupplier } = await import("@/app/actions/supplier-payment-actions")
+        const result = await listSupplierPaymentsForSupplier(paymentHistorySupplier.id, deviceId, userId)
+        if (result.success) setSupplierPayments(result.data)
+      } catch (e) {
+        console.error("Error refreshing supplier payments list:", e)
+      }
+    }
     
     handleModalClose()
-  }, [userId, fetchSuppliersData, handleModalClose])
+  }, [userId, fetchSuppliersData, handleModalClose, paymentHistorySupplier, deviceId, mockMode])
 
   // Handle external add modal
   useEffect(() => {
@@ -442,23 +496,37 @@ export default function SupplierTab({
 
               {/* Action Buttons */}
               <div className="flex flex-col sm:flex-row gap-1 ml-2 sm:ml-4 flex-shrink-0">
-                {(supplier.balance_amount || 0) > 0 && (
-                  <Button
-                    size="sm"
-                    className="h-7 px-2 bg-green-600 hover:bg-green-700 text-white text-xs whitespace-nowrap"
-                    onClick={() =>
-                      handlePayCredit({
-                        id: supplier.id,
-                        name: supplier.name,
-                        balance_amount: supplier.balance_amount || 0,
-                      })
-                    }
-                  >
-                    <CreditCard className="h-3 w-3 mr-1 flex-shrink-0" />
-                    <span className="hidden sm:inline">Pay Credit</span>
-                    <span className="sm:hidden">Pay</span>
-                  </Button>
-                )}
+                <div className="flex flex-wrap gap-1 justify-end sm:justify-start">
+                  {(supplier.balance_amount || 0) > 0 && (
+                    <Button
+                      size="sm"
+                      className="h-7 px-2 bg-green-600 hover:bg-green-700 text-white text-xs whitespace-nowrap"
+                      onClick={() =>
+                        handlePayCredit({
+                          id: supplier.id,
+                          name: supplier.name,
+                          balance_amount: supplier.balance_amount || 0,
+                        })
+                      }
+                    >
+                      <CreditCard className="h-3 w-3 mr-1 flex-shrink-0" />
+                      <span className="hidden sm:inline">Pay Credit</span>
+                      <span className="sm:hidden">Pay</span>
+                    </Button>
+                  )}
+                  {(supplier.paid_amount || 0) > 0 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 px-2 text-xs whitespace-nowrap border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200 hover:bg-amber-50 dark:hover:bg-amber-950/40"
+                      onClick={() => handleOpenPaymentHistory({ id: supplier.id, name: supplier.name })}
+                    >
+                      <History className="h-3 w-3 mr-1 flex-shrink-0" />
+                      <span className="hidden sm:inline">Payments</span>
+                      <span className="sm:hidden">Paymts</span>
+                    </Button>
+                  )}
+                </div>
 
                 <div className="flex space-x-1">
                   <Button
@@ -533,7 +601,7 @@ export default function SupplierTab({
         </CardContent>
       </Card>
     ))
-  }, [suppliers, formatCurrency, handleView, handleEdit, handleDelete, handlePayCredit])
+  }, [suppliers, formatCurrency, handleView, handleEdit, handleDelete, handlePayCredit, handleOpenPaymentHistory])
 
   return (
     <div className="h-full flex flex-col bg-gray-50 dark:bg-gray-900">
@@ -667,6 +735,126 @@ export default function SupplierTab({
           deviceId={deviceId || 0}
         />
       )}
+
+      <Dialog
+        open={!!paymentHistorySupplier}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPaymentHistorySupplier(null)
+            setSupplierPayments([])
+          }
+        }}
+      >
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto dark:bg-gray-900 dark:border-gray-700">
+          <DialogHeader>
+            <DialogTitle className="dark:text-gray-100">
+              Credit payments{paymentHistorySupplier ? ` — ${paymentHistorySupplier.name}` : ""}
+            </DialogTitle>
+          </DialogHeader>
+          {loadingSupplierPayments ? (
+            <div className="flex items-center justify-center py-10 text-gray-600 dark:text-gray-400">
+              <Loader2 className="h-5 w-5 animate-spin mr-2" />
+              Loading…
+            </div>
+          ) : supplierPayments.length === 0 ? (
+            <p className="text-sm text-gray-500 dark:text-gray-400 py-6 text-center">
+              No recorded credit payments for this supplier yet.
+            </p>
+          ) : (
+            <ul className="space-y-2">
+              {supplierPayments.map((p) => (
+                <li
+                  key={p.id}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/80 px-3 py-2 text-sm"
+                >
+                  <div className="min-w-0">
+                    <div className="font-medium text-gray-900 dark:text-gray-100">
+                      {formatCurrency(p.amount)}
+                    </div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">
+                      {p.payment_method} · {new Date(p.transaction_date).toLocaleDateString()}
+                    </div>
+                  </div>
+                  <div className="flex gap-1 flex-shrink-0">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 px-2 text-blue-600"
+                      onClick={() => setViewSupplierPaymentId(p.id)}
+                    >
+                      <Eye className="h-4 w-4 mr-1" />
+                      View
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 px-2 text-amber-600"
+                      onClick={() => setEditSupplierPaymentId(p.id)}
+                    >
+                      <FilePenLine className="h-4 w-4 mr-1" />
+                      Edit
+                    </Button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <ViewSupplierPaymentModal
+        isOpen={viewSupplierPaymentId != null}
+        onClose={() => setViewSupplierPaymentId(null)}
+        paymentId={viewSupplierPaymentId}
+        currency={currency || "AED"}
+        deviceId={deviceId ?? undefined}
+        onEdit={handleEditSupplierPayment}
+        onPaymentDeleted={async () => {
+          setViewSupplierPaymentId(null)
+          RequestManager.clearCache(`suppliers_${userId}`)
+          try {
+            await fetchSuppliersData({
+              searchTerm: currentSearchTermRef.current || undefined,
+              forceRefresh: true,
+            })
+          } catch (e) {
+            console.error(e)
+          }
+          if (paymentHistorySupplier && deviceId && !mockMode) {
+            const { listSupplierPaymentsForSupplier } = await import("@/app/actions/supplier-payment-actions")
+            const result = await listSupplierPaymentsForSupplier(paymentHistorySupplier.id, deviceId, userId)
+            if (result.success) setSupplierPayments(result.data)
+          }
+        }}
+      />
+
+      <EditSupplierPaymentModal
+        isOpen={editSupplierPaymentId != null}
+        onClose={() => setEditSupplierPaymentId(null)}
+        paymentId={editSupplierPaymentId}
+        userId={userId}
+        deviceId={deviceId || 0}
+        currency={currency || "AED"}
+        onPaymentUpdated={async () => {
+          setEditSupplierPaymentId(null)
+          RequestManager.clearCache(`suppliers_${userId}`)
+          try {
+            await fetchSuppliersData({
+              searchTerm: currentSearchTermRef.current || undefined,
+              forceRefresh: true,
+            })
+          } catch (e) {
+            console.error(e)
+          }
+          if (paymentHistorySupplier && deviceId && !mockMode) {
+            const { listSupplierPaymentsForSupplier } = await import("@/app/actions/supplier-payment-actions")
+            const result = await listSupplierPaymentsForSupplier(paymentHistorySupplier.id, deviceId, userId)
+            if (result.success) setSupplierPayments(result.data)
+          }
+        }}
+      />
     </div>
   )
 }

@@ -280,6 +280,58 @@ export async function getSupplierPaymentById(paymentId: number) {
   }
 }
 
+export type SupplierPaymentListRow = {
+  id: number
+  amount: number
+  payment_method: string
+  transaction_date: string
+  notes: string | null
+}
+
+/**
+ * List supplier_payment rows for a supplier (for Suppliers tab: view / edit credit payments).
+ */
+export async function listSupplierPaymentsForSupplier(
+  supplierId: number,
+  deviceId: number,
+  userId: number,
+): Promise<{ success: boolean; message?: string; data: SupplierPaymentListRow[] }> {
+  if (!supplierId || !deviceId || !userId) {
+    return { success: false, message: "Missing required parameters", data: [] }
+  }
+
+  resetConnectionState()
+
+  try {
+    const rows = await sql`
+      SELECT id, amount, payment_method, transaction_date, notes
+      FROM financial_transactions
+      WHERE transaction_type = 'supplier_payment'
+        AND reference_id = ${supplierId}
+        AND device_id = ${deviceId}
+        AND created_by = ${userId}
+      ORDER BY transaction_date DESC, id DESC
+    `
+
+    const data: SupplierPaymentListRow[] = rows.map((r: any) => ({
+      id: r.id,
+      amount: Number(r.amount) || 0,
+      payment_method: r.payment_method || "Cash",
+      transaction_date: r.transaction_date,
+      notes: r.notes ?? null,
+    }))
+
+    return { success: true, data }
+  } catch (error) {
+    console.error("Error listing supplier payments:", error)
+    return {
+      success: false,
+      message: getLastError()?.message || "Failed to list supplier payments",
+      data: [],
+    }
+  }
+}
+
 /**
  * FIXED: Delete supplier payment from financial_transactions
  */
