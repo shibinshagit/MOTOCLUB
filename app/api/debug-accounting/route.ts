@@ -5,61 +5,6 @@ export async function POST(request: NextRequest) {
   try {
     const { deviceId } = await request.json()
 
-    // First, let's create the accounting tables if they don't exist
-    try {
-      await sql`
-        CREATE TABLE IF NOT EXISTS financial_ledger (
-          id SERIAL PRIMARY KEY,
-          transaction_date TIMESTAMP NOT NULL DEFAULT NOW(),
-          transaction_type VARCHAR(50) NOT NULL,
-          reference_type VARCHAR(50),
-          reference_id INTEGER,
-          amount DECIMAL(12,2) NOT NULL,
-          description TEXT,
-          category VARCHAR(100),
-          account_type VARCHAR(50) NOT NULL,
-          debit_amount DECIMAL(12,2) DEFAULT 0,
-          credit_amount DECIMAL(12,2) DEFAULT 0,
-          device_id INTEGER NOT NULL,
-          company_id INTEGER NOT NULL,
-          created_by INTEGER NOT NULL,
-          created_at TIMESTAMP DEFAULT NOW(),
-          updated_at TIMESTAMP DEFAULT NOW()
-        )
-      `
-
-      await sql`
-        CREATE TABLE IF NOT EXISTS cogs_entries (
-          id SERIAL PRIMARY KEY,
-          sale_id INTEGER,
-          product_id INTEGER,
-          quantity INTEGER NOT NULL,
-          cost_price DECIMAL(12,2) NOT NULL,
-          total_cost DECIMAL(12,2) NOT NULL,
-          device_id INTEGER NOT NULL,
-          created_at TIMESTAMP DEFAULT NOW()
-        )
-      `
-
-      await sql`
-        CREATE TABLE IF NOT EXISTS accounts_receivable (
-          id SERIAL PRIMARY KEY,
-          customer_id INTEGER,
-          sale_id INTEGER,
-          original_amount DECIMAL(12,2) NOT NULL,
-          paid_amount DECIMAL(12,2) DEFAULT 0,
-          outstanding_amount DECIMAL(12,2) NOT NULL,
-          due_date TIMESTAMP,
-          device_id INTEGER NOT NULL,
-          company_id INTEGER NOT NULL,
-          created_at TIMESTAMP DEFAULT NOW(),
-          updated_at TIMESTAMP DEFAULT NOW()
-        )
-      `
-    } catch (createError) {
-      console.error("Error creating tables:", createError)
-    }
-
     // Check if tables exist
     const tablesExist = await sql`
       SELECT table_name 

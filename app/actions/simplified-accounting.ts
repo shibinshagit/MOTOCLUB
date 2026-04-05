@@ -2,71 +2,9 @@
 
 import { sql } from "@/lib/db"
 
-// Create a simplified financial transactions table from scratch
+// Schema is now managed by `npm run migrate` — this is kept as a no-op for call-site compatibility
 async function createFinancialTransactionsTable() {
-  try {
-    // First check if the table exists
-    const tableExists = await sql`
-      SELECT EXISTS (
-        SELECT FROM information_schema.tables 
-        WHERE table_name = 'financial_transactions'
-      ) as exists
-    `
-
-    if (!tableExists[0]?.exists) {
-      console.log("Creating financial_transactions table from scratch")
-
-      // Create the table with all required columns for detailed accounting
-      await sql`
-        CREATE TABLE financial_transactions (
-          id SERIAL PRIMARY KEY,
-          transaction_date TIMESTAMP NOT NULL DEFAULT NOW(),
-          transaction_type VARCHAR(50) NOT NULL,
-          reference_type VARCHAR(50) NOT NULL,
-          reference_id INTEGER NOT NULL,
-          amount DECIMAL(12,2) NOT NULL DEFAULT 0,
-          received_amount DECIMAL(12,2) DEFAULT 0,
-          cost_amount DECIMAL(12,2) DEFAULT 0,
-          debit_amount DECIMAL(12,2) DEFAULT 0,
-          credit_amount DECIMAL(12,2) DEFAULT 0,
-          status VARCHAR(50),
-          payment_method VARCHAR(50),
-          description TEXT,
-          notes TEXT,
-          device_id INTEGER NOT NULL,
-          company_id INTEGER DEFAULT 1,
-          created_by INTEGER NOT NULL,
-          created_at TIMESTAMP DEFAULT NOW(),
-          updated_at TIMESTAMP DEFAULT NOW()
-        )
-      `
-
-      // Create indexes
-      await sql`CREATE INDEX idx_financial_transactions_device ON financial_transactions(device_id, transaction_date)`
-      await sql`CREATE INDEX idx_financial_transactions_ref ON financial_transactions(reference_type, reference_id)`
-
-      console.log("Financial transactions table created successfully")
-    } else {
-      // Check if new columns exist and add them if needed
-      try {
-        await sql`ALTER TABLE financial_transactions ADD COLUMN IF NOT EXISTS received_amount DECIMAL(12,2) DEFAULT 0`
-        await sql`ALTER TABLE financial_transactions ADD COLUMN IF NOT EXISTS cost_amount DECIMAL(12,2) DEFAULT 0`
-        await sql`ALTER TABLE financial_transactions ADD COLUMN IF NOT EXISTS debit_amount DECIMAL(12,2) DEFAULT 0`
-        await sql`ALTER TABLE financial_transactions ADD COLUMN IF NOT EXISTS credit_amount DECIMAL(12,2) DEFAULT 0`
-        await sql`ALTER TABLE financial_transactions ADD COLUMN IF NOT EXISTS status VARCHAR(50)`
-        await sql`ALTER TABLE financial_transactions ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50)`
-        await sql`ALTER TABLE financial_transactions ADD COLUMN IF NOT EXISTS notes TEXT`
-        console.log("Added missing columns to financial_transactions table")
-      } catch (err) {
-        console.log("Columns might already exist:", err.message)
-      }
-    }
-
-    return true
-  } catch (error) {
-    console.error("Error creating financial_transactions table:", error)
-    return false
-  }
+  return true
 }
 
 // Record supplier payment transaction

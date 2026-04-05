@@ -12,7 +12,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { useToast } from "@/components/ui/use-toast"
 import { createProduct } from "@/app/actions/product-actions"
 import { getCategories, createCategory } from "@/app/actions/category-actions"
-import { AlertCircle, Check, ChevronRight, Loader2, Plus, Search, Tag, X, ImageIcon } from "lucide-react"
+import { AlertCircle, Check, ChevronRight, Loader2, Plus, Search, Tag, X, ImageIcon, Link2, Trash2 } from "lucide-react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { getDeviceCurrency } from "@/app/actions/dashboard-actions"
@@ -22,6 +22,13 @@ interface Category {
   id: number
   name: string
   description?: string
+  parent_id?: number | null
+  parent_name?: string | null
+}
+
+interface AttributeEntry {
+  key: string
+  value: string
 }
 
 interface NewProductModalProps {
@@ -35,7 +42,7 @@ export default function NewProductModal({ isOpen, onClose, onSuccess, userId }: 
   const { toast } = useToast()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [currency, setCurrency] = useState("QAR") // Default currency
+  const [currency, setCurrency] = useState("QAR")
   const [selectedImage, setSelectedImage] = useState<File | null>(null)
   const [imagePreview, setImagePreview] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -51,9 +58,13 @@ export default function NewProductModal({ isOpen, onClose, onSuccess, userId }: 
     stock: "",
     shelf: "",
     barcode: "",
+    color: "",
+    size: "",
+    suitableFor: "",
+    link: "",
   })
+  const [attributes, setAttributes] = useState<AttributeEntry[]>([])
 
-  // Category selection state
   const [categories, setCategories] = useState<Category[]>([])
   const [filteredCategories, setFilteredCategories] = useState<Category[]>([])
   const [isLoadingCategories, setIsLoadingCategories] = useState(false)
@@ -62,33 +73,26 @@ export default function NewProductModal({ isOpen, onClose, onSuccess, userId }: 
   const [isCategoryDialogOpen, setIsCategoryDialogOpen] = useState(false)
   const [isAddingNewCategory, setIsAddingNewCategory] = useState(false)
   const [newCategoryName, setNewCategoryName] = useState("")
+  const [newCategoryParentId, setNewCategoryParentId] = useState<number | null>(null)
   const categorySearchInputRef = useRef<HTMLInputElement>(null)
   const newCategoryInputRef = useRef<HTMLInputElement>(null)
 
-  // Add this state for field-specific errors
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
 
-  // Auto-dismiss error messages after 5 seconds
   useEffect(() => {
     if (error) {
-      const timer = setTimeout(() => {
-        setError(null)
-      }, 5000)
+      const timer = setTimeout(() => setError(null), 5000)
       return () => clearTimeout(timer)
     }
   }, [error])
 
-  // Auto-dismiss field errors after 5 seconds
   useEffect(() => {
     if (Object.keys(fieldErrors).length > 0) {
-      const timer = setTimeout(() => {
-        setFieldErrors({})
-      }, 5000)
+      const timer = setTimeout(() => setFieldErrors({}), 5000)
       return () => clearTimeout(timer)
     }
   }, [fieldErrors])
 
-  // Fetch categories function
   const fetchCategories = async () => {
     setIsLoadingCategories(true)
     try {
@@ -98,208 +102,159 @@ export default function NewProductModal({ isOpen, onClose, onSuccess, userId }: 
       }
     } catch (error) {
       console.error("Error fetching categories:", error)
-      toast({
-        title: "Error",
-        description: "Failed to load categories",
-        variant: "destructive",
-      })
+      toast({ title: "Error", description: "Failed to load categories", variant: "destructive" })
     } finally {
       setIsLoadingCategories(false)
     }
   }
 
-  // Image handling functions
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-
-    // Validate file size (5MB limit)
     if (file.size > 5 * 1024 * 1024) {
-      toast({
-        title: "Error",
-        description: "Image size must be less than 5MB",
-        variant: "destructive",
-      })
+      toast({ title: "Error", description: "Image size must be less than 5MB", variant: "destructive" })
       return
     }
-
-    // Validate file type
     if (!file.type.startsWith('image/')) {
-      toast({
-        title: "Error",
-        description: "Please select a valid image file",
-        variant: "destructive",
-      })
+      toast({ title: "Error", description: "Please select a valid image file", variant: "destructive" })
       return
     }
-
     setSelectedImage(file)
-    
-    // Create preview URL
     const reader = new FileReader()
-    reader.onload = (e) => {
-      setImagePreview(e.target?.result as string)
-    }
+    reader.onload = (e) => setImagePreview(e.target?.result as string)
     reader.readAsDataURL(file)
   }
 
   const removeImage = () => {
     setSelectedImage(null)
     setImagePreview(null)
-    if (fileInputRef.current) {
-      fileInputRef.current.value = ""
-    }
+    if (fileInputRef.current) fileInputRef.current.value = ""
   }
 
-useEffect(() => {
-  if (!isOpen) return
-
-  const initializeForm = async () => {
-    // Reset form
-    setFormData({
-      name: "",
-      companyName: "",
-      category: "",
-      categoryId: null,
-      description: "",
-      price: "",
-      wholesalePrice: "",
-      msp: "",
-      stock: "",
-      shelf: "",
-      barcode: "",
-    })
-    setSelectedCategory(null)
-    setSelectedImage(null)
-    setImagePreview(null)
-    setError(null)
-    setFieldErrors({})
-
-    // Fetch categories
-    fetchCategories()
-
-    // Fetch currency
-    try {
-      const deviceCurrency = await getDeviceCurrency(userId || 1)
-      setCurrency(deviceCurrency)
-    } catch (err) {
-      console.error("Error fetching currency:", err)
+  useEffect(() => {
+    if (!isOpen) return
+    const initializeForm = async () => {
+      setFormData({
+        name: "", companyName: "", category: "", categoryId: null,
+        description: "", price: "", wholesalePrice: "", msp: "",
+        stock: "", shelf: "", barcode: "", color: "", size: "",
+        suitableFor: "", link: "",
+      })
+      setAttributes([])
+      setSelectedCategory(null)
+      setSelectedImage(null)
+      setImagePreview(null)
+      setError(null)
+      setFieldErrors({})
+      fetchCategories()
+      try {
+        const deviceCurrency = await getDeviceCurrency(userId || 1)
+        setCurrency(deviceCurrency)
+      } catch (err) {
+        console.error("Error fetching currency:", err)
+      }
     }
-  }
+    initializeForm()
+  }, [isOpen, userId])
 
-  initializeForm()
-}, [isOpen, userId])
-
-
-
-  // Filter categories based on search query
   useEffect(() => {
     if (categorySearchQuery.trim() === "") {
       setFilteredCategories(categories)
     } else {
       const query = categorySearchQuery.toLowerCase()
-      setFilteredCategories(categories.filter((category) => category.name.toLowerCase().includes(query)))
+      setFilteredCategories(categories.filter((c) =>
+        c.name.toLowerCase().includes(query) || c.parent_name?.toLowerCase().includes(query)
+      ))
     }
   }, [categorySearchQuery, categories])
 
-  // Focus search input when category dialog opens
   useEffect(() => {
     if (isCategoryDialogOpen && categorySearchInputRef.current) {
-      setTimeout(() => {
-        categorySearchInputRef.current?.focus()
-      }, 100)
+      setTimeout(() => categorySearchInputRef.current?.focus(), 100)
     }
   }, [isCategoryDialogOpen])
 
-  // Focus new category input when adding new category
   useEffect(() => {
     if (isAddingNewCategory && newCategoryInputRef.current) {
-      setTimeout(() => {
-        newCategoryInputRef.current?.focus()
-      }, 100)
+      setTimeout(() => newCategoryInputRef.current?.focus(), 100)
     }
   }, [isAddingNewCategory])
-
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target
     setFormData((prev) => ({ ...prev, [name]: value }))
   }
 
+  const handleAddAttribute = () => {
+    setAttributes((prev) => [...prev, { key: "", value: "" }])
+  }
+
+  const handleRemoveAttribute = (index: number) => {
+    setAttributes((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  const handleAttributeChange = (index: number, field: "key" | "value", val: string) => {
+    setAttributes((prev) => prev.map((attr, i) => i === index ? { ...attr, [field]: val } : attr))
+  }
+
+  // Build hierarchy: parent categories and their children
+  const parentCategories = categories.filter((c) => !c.parent_id)
+  const childrenOf = (parentId: number) => categories.filter((c) => c.parent_id === parentId)
+
+  const getCategoryDisplayName = (cat: Category) => {
+    if (cat.parent_name) return `${cat.parent_name} › ${cat.name}`
+    return cat.name
+  }
+
   const handleAddNewCategory = async () => {
-  if (!newCategoryName.trim()) {
-    toast({
-      title: "Error",
-      description: "Category name cannot be empty",
-      variant: "destructive",
-    })
-    return
-  }
-
-  setIsSubmitting(true)
-  try {
-    const result = await createCategory({
-      name: newCategoryName.trim(),
-      userId: userId,
-    })
-
-    if (result.success && result.data) {
-      setCategories((prev) => {
-        const exists = prev.some((cat) => cat.id === result.data.id)
-        return exists ? prev : [...prev, result.data]
-      })
-
-      setSelectedCategory(result.data)
-      setFormData((prev) => ({
-        ...prev,
-        category: result.data.name,
-        categoryId: result.data.id,
-      }))
-
-      toast({
-        title: "Success",
-        description: `Category "${result.data.name}" added successfully`,
-      })
-
-      setNewCategoryName("")
-      setIsAddingNewCategory(false)
-      setIsCategoryDialogOpen(false)
-    } else {
-      toast({
-        title: "Error",
-        description: result.message || "Failed to add category",
-        variant: "destructive",
-      })
+    if (!newCategoryName.trim()) {
+      toast({ title: "Error", description: "Category name cannot be empty", variant: "destructive" })
+      return
     }
-  } catch (error) {
-    console.error("Error adding category:", error)
-    toast({
-      title: "Error",
-      description: "An unexpected error occurred",
-      variant: "destructive",
-    })
-  } finally {
-    setIsSubmitting(false)
+    setIsSubmitting(true)
+    try {
+      const result = await createCategory({
+        name: newCategoryName.trim(),
+        userId: userId,
+        parentId: newCategoryParentId,
+      })
+      if (result.success && result.data) {
+        setCategories((prev) => {
+          const exists = prev.some((cat) => cat.id === result.data.id)
+          return exists ? prev : [...prev, result.data]
+        })
+        setSelectedCategory(result.data)
+        setFormData((prev) => ({
+          ...prev,
+          category: result.data.parent_name ? `${result.data.parent_name} › ${result.data.name}` : result.data.name,
+          categoryId: result.data.id,
+        }))
+        toast({ title: "Success", description: `Category "${result.data.name}" added successfully` })
+        setNewCategoryName("")
+        setNewCategoryParentId(null)
+        setIsAddingNewCategory(false)
+        setIsCategoryDialogOpen(false)
+      } else {
+        toast({ title: "Error", description: result.message || "Failed to add category", variant: "destructive" })
+      }
+    } catch (error) {
+      console.error("Error adding category:", error)
+      toast({ title: "Error", description: "An unexpected error occurred", variant: "destructive" })
+    } finally {
+      setIsSubmitting(false)
+    }
   }
-}
-
-
 
   const handleCategorySelect = (category: Category) => {
-  setSelectedCategory(category)
-  setFormData((prev) => ({
-    ...prev,
-    category: category.name,
-    categoryId: category.id,
-  }))
-  setIsCategoryDialogOpen(false)
-
-  toast({
-    title: "Category Selected",
-    description: `"${category.name}" has been selected`,
-    duration: 2000,
-  })
-}
+    setSelectedCategory(category)
+    setFormData((prev) => ({
+      ...prev,
+      category: getCategoryDisplayName(category),
+      categoryId: category.id,
+    }))
+    setIsCategoryDialogOpen(false)
+    toast({ title: "Category Selected", description: `"${getCategoryDisplayName(category)}" has been selected`, duration: 2000 })
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -308,24 +263,23 @@ useEffect(() => {
     setFieldErrors({})
 
     try {
-      // Validate form
-      if (!formData.name || !formData.price) {
-        setFieldErrors({
-          ...(formData.name ? {} : { name: "Product name is required" }),
-          ...(formData.price ? {} : { price: "Price is required" }),
-        })
+      const errors: Record<string, string> = {}
+      if (!formData.name) errors.name = "Product name is required"
+      if (!formData.price) errors.price = "MRP is required"
+      if (!formData.wholesalePrice) errors.wholesalePrice = "Cost price is required"
+      if (!formData.stock) errors.stock = "Stock is required"
+
+      if (Object.keys(errors).length > 0) {
+        setFieldErrors(errors)
         setIsSubmitting(false)
         return
       }
 
-      // Create FormData object
       const submitFormData = new FormData()
       submitFormData.append("name", formData.name)
       submitFormData.append("company_name", formData.companyName)
       submitFormData.append("category", formData.category)
-      if (formData.categoryId) {
-        submitFormData.append("category_id", formData.categoryId.toString())
-      }
+      if (formData.categoryId) submitFormData.append("category_id", formData.categoryId.toString())
       submitFormData.append("description", formData.description)
       submitFormData.append("price", formData.price)
       submitFormData.append("wholesale_price", formData.wholesalePrice || "0")
@@ -333,34 +287,22 @@ useEffect(() => {
       submitFormData.append("stock", formData.stock || "0")
       submitFormData.append("shelf", formData.shelf)
       submitFormData.append("barcode", formData.barcode)
-      if (userId) {
-        submitFormData.append("user_id", userId.toString())
-      }
-      if (selectedImage) {
-        submitFormData.append("image", selectedImage)
-      }
-console.log('FormData contents:')
-for (let pair of submitFormData.entries()) {
-  console.log(pair[0]+ ':', pair[1])
-}
-      // Create product with FormData
+      submitFormData.append("color", formData.color)
+      submitFormData.append("size", formData.size)
+      submitFormData.append("suitable_for", formData.suitableFor)
+      submitFormData.append("link", formData.link)
+      const validAttributes = attributes.filter((a) => a.key.trim() && a.value.trim())
+      submitFormData.append("attributes", JSON.stringify(validAttributes))
+      if (userId) submitFormData.append("user_id", userId.toString())
+      if (selectedImage) submitFormData.append("image", selectedImage)
+
       const result = await createProduct(submitFormData)
 
       if (result && result.success) {
-        toast({
-          title: "Success",
-          description: "Product created successfully",
-        })
-
-        // Call onSuccess callback if provided
-        if (onSuccess) {
-          onSuccess(result.data)
-        }
-
-        // Close the modal
+        toast({ title: "Success", description: "Product created successfully" })
+        if (onSuccess) onSuccess(result.data)
         onClose()
       } else {
-        // Handle field-specific errors
         if (result?.field) {
           setFieldErrors({ [result.field]: result.error || result.message })
         } else {
@@ -369,8 +311,7 @@ for (let pair of submitFormData.entries()) {
       }
     } catch (error) {
       console.error("Error creating product:", error)
-      const errorMessage = error instanceof Error ? error.message : String(error)
-      setError(errorMessage)
+      setError(error instanceof Error ? error.message : String(error))
     } finally {
       setIsSubmitting(false)
     }
@@ -387,240 +328,148 @@ for (let pair of submitFormData.entries()) {
 
             <form onSubmit={handleSubmit} className="space-y-4 mt-4">
               <div className="grid gap-4">
-                {/* Product Image Upload */}
+                {/* Product Image */}
                 <div className="grid gap-2">
-                  <Label className="text-gray-700 dark:text-gray-300">Product Image (Optional)</Label>
+                  <Label className="text-gray-700 dark:text-gray-300">Product Image</Label>
                   <div className="flex flex-col gap-2">
                     {imagePreview ? (
                       <div className="relative">
-                        <img
-                          src={imagePreview || "/placeholder.svg"}
-                          alt="Product preview"
-                          className="w-full h-32 object-cover rounded-md border border-gray-300 dark:border-gray-600"
-                        />
-                        <Button
-                          type="button"
-                          variant="destructive"
-                          size="sm"
-                          onClick={removeImage}
-                          className="absolute top-2 right-2"
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
+                        <img src={imagePreview || "/placeholder.svg"} alt="Product preview" className="w-full h-32 object-cover rounded-md border border-gray-300 dark:border-gray-600" />
+                        <Button type="button" variant="destructive" size="sm" onClick={removeImage} className="absolute top-2 right-2"><X className="h-4 w-4" /></Button>
                       </div>
                     ) : (
-                      <div
-                        onClick={() => fileInputRef.current?.click()}
-                        className="w-full h-32 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-md flex flex-col items-center justify-center cursor-pointer hover:border-gray-400 dark:hover:border-gray-500 transition-colors"
-                      >
+                      <div onClick={() => fileInputRef.current?.click()} className="w-full h-32 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-md flex flex-col items-center justify-center cursor-pointer hover:border-gray-400 dark:hover:border-gray-500 transition-colors">
                         <ImageIcon className="h-8 w-8 text-gray-400 dark:text-gray-500 mb-2" />
                         <p className="text-sm text-gray-500 dark:text-gray-400">Click to upload image</p>
                         <p className="text-xs text-gray-400 dark:text-gray-500">Max 5MB</p>
                       </div>
                     )}
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept="image/*"
-                      onChange={handleImageSelect}
-                      className="hidden"
-                    />
+                    <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageSelect} className="hidden" />
                   </div>
                 </div>
 
+                {/* Link */}
                 <div className="grid gap-2">
-                  <Label htmlFor="name" className="text-gray-700 dark:text-gray-300">
-                    Product Name *
+                  <Label htmlFor="link" className="text-gray-700 dark:text-gray-300">
+                    <span className="flex items-center gap-1"><Link2 className="h-3.5 w-3.5" /> Product Link</span>
                   </Label>
-                  <Input
-                    id="name"
-                    name="name"
-                    value={formData.name}
-                    onChange={handleChange}
-                    placeholder="Enter product name"
-                    required
-                    className={`bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400 ${fieldErrors.name ? "border-red-500 dark:border-red-400" : ""}`}
-                  />
+                  <Input id="link" name="link" value={formData.link} onChange={handleChange} placeholder="https://..." className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400" />
+                </div>
+
+                {/* Name */}
+                <div className="grid gap-2">
+                  <Label htmlFor="name" className="text-gray-700 dark:text-gray-300">Product Name *</Label>
+                  <Input id="name" name="name" value={formData.name} onChange={handleChange} placeholder="Enter product name" required className={`bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400 ${fieldErrors.name ? "border-red-500 dark:border-red-400" : ""}`} />
                   <FormError message={fieldErrors.name || ""} />
                 </div>
 
+                {/* Company Name */}
                 <div className="grid gap-2">
-                  <Label htmlFor="companyName" className="text-gray-700 dark:text-gray-300">
-                    Company Name
-                  </Label>
-                  <Input
-                    id="companyName"
-                    name="companyName"
-                    value={formData.companyName}
-                    onChange={handleChange}
-                    placeholder="Enter company name"
-                    className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400"
-                  />
+                  <Label htmlFor="companyName" className="text-gray-700 dark:text-gray-300">Company / Brand</Label>
+                  <Input id="companyName" name="companyName" value={formData.companyName} onChange={handleChange} placeholder="Enter company or brand name" className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400" />
                 </div>
 
-                {/* Category Selection */}
+                {/* Category */}
                 <div className="grid gap-2">
-                  <Label htmlFor="category" className="text-gray-700 dark:text-gray-300">
-                    Category *
-                  </Label>
+                  <Label htmlFor="category" className="text-gray-700 dark:text-gray-300">Category *</Label>
                   <div className="flex gap-2 items-center">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="w-full justify-between bg-white dark:bg-gray-700 text-left border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-600"
-                      onClick={() => setIsCategoryDialogOpen(true)}
-                    >
+                    <Button type="button" variant="outline" className="w-full justify-between bg-white dark:bg-gray-700 text-left border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-600" onClick={() => setIsCategoryDialogOpen(true)}>
                       {selectedCategory ? (
-                        <span className="flex items-center gap-2">
-                          <Tag className="h-4 w-4" />
-                          {selectedCategory.name}
-                        </span>
-                      ) : (
-                        "Select category..."
-                      )}
+                        <span className="flex items-center gap-2"><Tag className="h-4 w-4" />{getCategoryDisplayName(selectedCategory)}</span>
+                      ) : "Select category..."}
                       <ChevronRight className="h-4 w-4 opacity-50" />
                     </Button>
                   </div>
                   {selectedCategory && (
-                    <p className="text-xs text-gray-500 dark:text-gray-400">
-                      Selected:{" "}
-                      <Badge
-                        variant="outline"
-                        className="border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300"
-                      >
-                        {selectedCategory.name}
-                      </Badge>
-                    </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Selected: <Badge variant="outline" className="border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300">{getCategoryDisplayName(selectedCategory)}</Badge></p>
                   )}
                 </div>
 
+                {/* Description */}
                 <div className="grid gap-2">
-                  <Label htmlFor="description" className="text-gray-700 dark:text-gray-300">
-                    Description
-                  </Label>
-                  <Textarea
-                    id="description"
-                    name="description"
-                    value={formData.description}
-                    onChange={handleChange}
-                    placeholder="Enter product description"
-                    className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400"
-                    rows={3}
-                  />
+                  <Label htmlFor="description" className="text-gray-700 dark:text-gray-300">Description</Label>
+                  <Textarea id="description" name="description" value={formData.description} onChange={handleChange} placeholder="Enter product description" className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400" rows={3} />
                 </div>
 
                 {/* Price Fields */}
                 <div className="grid grid-cols-1 gap-4">
                   <div className="grid gap-2">
-                    <Label htmlFor="wholesalePrice" className="text-gray-700 dark:text-gray-300">
-                      Wholesale Price ({currency})
-                    </Label>
-                    <Input
-                      id="wholesalePrice"
-                      name="wholesalePrice"
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={formData.wholesalePrice}
-                      onChange={handleChange}
-                      placeholder="0.00"
-                      className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400"
-                    />
+                    <Label htmlFor="wholesalePrice" className="text-gray-700 dark:text-gray-300">Cost Price ({currency}) *</Label>
+                    <Input id="wholesalePrice" name="wholesalePrice" type="number" step="0.01" min="0" value={formData.wholesalePrice} onChange={handleChange} placeholder="0.00" className={`bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400 ${fieldErrors.wholesalePrice ? "border-red-500 dark:border-red-400" : ""}`} />
+                    <FormError message={fieldErrors.wholesalePrice || ""} />
                   </div>
 
                   <div className="grid gap-2">
-                    <Label htmlFor="msp" className="text-gray-700 dark:text-gray-300">
-                      MSP - Minimum Selling Price ({currency})
-                    </Label>
-                    <Input
-                      id="msp"
-                      name="msp"
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={formData.msp}
-                      onChange={handleChange}
-                      placeholder="0.00"
-                      className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400"
-                    />
+                    <Label htmlFor="msp" className="text-gray-700 dark:text-gray-300">MSP - Minimum Selling Price ({currency})</Label>
+                    <Input id="msp" name="msp" type="number" step="0.01" min="0" value={formData.msp} onChange={handleChange} placeholder="0.00" className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400" />
                   </div>
 
                   <div className="grid gap-2">
-                    <Label htmlFor="price" className="text-gray-700 dark:text-gray-300">
-                      MRP ({currency}) *
-                    </Label>
-                    <Input
-                      id="price"
-                      name="price"
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={formData.price}
-                      onChange={handleChange}
-                      placeholder="0.00"
-                      required
-                      className={`bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400 ${fieldErrors.price ? "border-red-500 dark:border-red-400" : ""}`}
-                    />
+                    <Label htmlFor="price" className="text-gray-700 dark:text-gray-300">MRP ({currency}) *</Label>
+                    <Input id="price" name="price" type="number" step="0.01" min="0" value={formData.price} onChange={handleChange} placeholder="0.00" required className={`bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400 ${fieldErrors.price ? "border-red-500 dark:border-red-400" : ""}`} />
                     <FormError message={fieldErrors.price || ""} />
                   </div>
                 </div>
 
+                {/* Stock & Shelf */}
                 <div className="grid grid-cols-2 gap-4">
                   <div className="grid gap-2">
-                    <Label htmlFor="stock" className="text-gray-700 dark:text-gray-300">
-                      Stock
-                    </Label>
-                    <Input
-                      id="stock"
-                      name="stock"
-                      type="number"
-                      min="0"
-                      value={formData.stock}
-                      onChange={handleChange}
-                      onFocus={(e) => e.target.select()}
-                      placeholder="0"
-                      className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400"
-                    />
+                    <Label htmlFor="stock" className="text-gray-700 dark:text-gray-300">Stock *</Label>
+                    <Input id="stock" name="stock" type="number" min="0" value={formData.stock} onChange={handleChange} onFocus={(e) => e.target.select()} placeholder="0" className={`bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400 ${fieldErrors.stock ? "border-red-500 dark:border-red-400" : ""}`} />
+                    <FormError message={fieldErrors.stock || ""} />
                   </div>
-
                   <div className="grid gap-2">
-                    <Label htmlFor="shelf" className="text-gray-700 dark:text-gray-300">
-                      Shelf
-                    </Label>
-                    <Input
-                      id="shelf"
-                      name="shelf"
-                      value={formData.shelf}
-                      onChange={handleChange}
-                      placeholder="Enter shelf name"
-                      className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400"
-                    />
+                    <Label htmlFor="shelf" className="text-gray-700 dark:text-gray-300">Shelf</Label>
+                    <Input id="shelf" name="shelf" value={formData.shelf} onChange={handleChange} placeholder="e.g. A1, B3" className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400" />
                   </div>
                 </div>
 
+                {/* Barcode */}
                 <div className="grid gap-2">
-                  <Label htmlFor="barcode" className="text-gray-700 dark:text-gray-300">
-                    Barcode
-                  </Label>
-                  <Input
-                    id="barcode"
-                    name="barcode"
-                    value={formData.barcode}
-                    onChange={handleChange}
-                    placeholder="Enter barcode"
-                    className={`bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400 ${fieldErrors.barcode ? "border-red-500 dark:border-red-400" : ""}`}
-                  />
+                  <Label htmlFor="barcode" className="text-gray-700 dark:text-gray-300">Barcode + Code</Label>
+                  <Input id="barcode" name="barcode" value={formData.barcode} onChange={handleChange} placeholder="Enter or scan barcode" className={`bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400 ${fieldErrors.barcode ? "border-red-500 dark:border-red-400" : ""}`} />
                   <FormError message={fieldErrors.barcode || ""} />
-                  <p className="text-xs text-gray-500 dark:text-gray-400">Enter a barcode or scan a product to add.</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Auto-generated if left blank.</p>
+                </div>
+
+                {/* Attributes */}
+                <div className="grid gap-2">
+                  <Label className="text-gray-700 dark:text-gray-300">Attributes (Model, Year, etc.)</Label>
+                  <div className="space-y-2">
+                    {attributes.map((attr, index) => (
+                      <div key={index} className="flex gap-2 items-center">
+                        <Input value={attr.key} onChange={(e) => handleAttributeChange(index, "key", e.target.value)} placeholder="e.g. Model" className="flex-1 bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400 text-sm h-9" />
+                        <Input value={attr.value} onChange={(e) => handleAttributeChange(index, "value", e.target.value)} placeholder="e.g. CBR600" className="flex-1 bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400 text-sm h-9" />
+                        <Button type="button" variant="ghost" size="sm" onClick={() => handleRemoveAttribute(index)} className="h-9 w-9 p-0 text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20"><Trash2 className="h-4 w-4" /></Button>
+                      </div>
+                    ))}
+                    <Button type="button" variant="outline" size="sm" onClick={handleAddAttribute} className="w-full border-dashed border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 bg-transparent">
+                      <Plus className="h-4 w-4 mr-1" /> Add Attribute
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Suitable For */}
+                <div className="grid gap-2">
+                  <Label htmlFor="suitableFor" className="text-gray-700 dark:text-gray-300">Suitable For (Optional)</Label>
+                  <Input id="suitableFor" name="suitableFor" value={formData.suitableFor} onChange={handleChange} placeholder="e.g. Honda CBR, Yamaha R15" className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400" />
+                </div>
+
+                {/* Colour & Size */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="color" className="text-gray-700 dark:text-gray-300">Colour (Optional)</Label>
+                    <Input id="color" name="color" value={formData.color} onChange={handleChange} placeholder="e.g. Red, Black" className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400" />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="size" className="text-gray-700 dark:text-gray-300">Size (Optional)</Label>
+                    <Input id="size" name="size" value={formData.size} onChange={handleChange} placeholder="e.g. M, L, XL" className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400" />
+                  </div>
                 </div>
               </div>
 
-              {/* Error Message Display - Above Buttons */}
               {error && (
-                <Alert
-                  variant="destructive"
-                  className="mt-4 border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20"
-                >
+                <Alert variant="destructive" className="mt-4 border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20">
                   <AlertCircle className="h-4 w-4" />
                   <AlertTitle className="text-red-800 dark:text-red-300">Error</AlertTitle>
                   <AlertDescription className="text-red-700 dark:text-red-400">{error}</AlertDescription>
@@ -628,27 +477,9 @@ for (let pair of submitFormData.entries()) {
               )}
 
               <DialogFooter className="flex flex-col sm:flex-row gap-2 pt-4">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={onClose}
-                  className="w-full sm:w-auto border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 bg-transparent"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600"
-                >
-                  {isSubmitting ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Creating...
-                    </>
-                  ) : (
-                    "Create Product"
-                  )}
+                <Button type="button" variant="outline" onClick={onClose} className="w-full sm:w-auto border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 bg-transparent">Cancel</Button>
+                <Button type="submit" disabled={isSubmitting} className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600">
+                  {isSubmitting ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" />Creating...</>) : "Create Product"}
                 </Button>
               </DialogFooter>
             </form>
@@ -656,51 +487,39 @@ for (let pair of submitFormData.entries()) {
         </DialogContent>
       </Dialog>
 
-      {/* Category Selection Dialog */}
+      {/* Category Selection Dialog with Hierarchy */}
       <Dialog open={isCategoryDialogOpen} onOpenChange={setIsCategoryDialogOpen}>
         <DialogContent className="sm:max-w-md p-0 max-h-[90vh] overflow-hidden flex flex-col bg-white dark:bg-gray-800 border dark:border-gray-700">
           <DialogHeader className="p-4 border-b border-gray-200 dark:border-gray-700">
             <div className="flex items-center justify-between">
               <DialogTitle className="text-gray-900 dark:text-gray-100">Select Category</DialogTitle>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setIsCategoryDialogOpen(false)}
-                className="h-8 w-8 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
-              >
-                <X className="h-4 w-4" />
-              </Button>
+              <Button variant="ghost" size="icon" onClick={() => setIsCategoryDialogOpen(false)} className="h-8 w-8 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"><X className="h-4 w-4" /></Button>
             </div>
           </DialogHeader>
 
           {isAddingNewCategory ? (
             <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-              <div className="space-y-4">
+              <div className="space-y-3">
                 <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100">Add New Category</h3>
-                <div className="flex gap-2">
-                  <Input
-                    ref={newCategoryInputRef}
-                    value={newCategoryName}
-                    onChange={(e) => setNewCategoryName(e.target.value)}
-                    placeholder="Enter category name"
-                    className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400 flex-1"
-                  />
-                  <Button
-                    type="button"
-                    onClick={handleAddNewCategory}
-                    disabled={!newCategoryName.trim() || isSubmitting}
-                    className="bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600"
+                <div className="grid gap-2">
+                  <Label className="text-xs text-gray-600 dark:text-gray-400">Parent Category (optional)</Label>
+                  <select
+                    value={newCategoryParentId || ""}
+                    onChange={(e) => setNewCategoryParentId(e.target.value ? Number(e.target.value) : null)}
+                    className="w-full h-9 px-3 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm"
                   >
+                    <option value="">None (Top-level)</option>
+                    {parentCategories.map((cat) => (
+                      <option key={cat.id} value={cat.id}>{cat.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex gap-2">
+                  <Input ref={newCategoryInputRef} value={newCategoryName} onChange={(e) => setNewCategoryName(e.target.value)} placeholder="Enter category name" className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400 flex-1" />
+                  <Button type="button" onClick={handleAddNewCategory} disabled={!newCategoryName.trim() || isSubmitting} className="bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600">
                     {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Add"}
                   </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setIsAddingNewCategory(false)}
-                    className="border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
-                  >
-                    Cancel
-                  </Button>
+                  <Button type="button" variant="outline" onClick={() => { setIsAddingNewCategory(false); setNewCategoryParentId(null) }} className="border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700">Cancel</Button>
                 </div>
               </div>
             </div>
@@ -708,23 +527,9 @@ for (let pair of submitFormData.entries()) {
             <div className="p-4 border-b border-gray-200 dark:border-gray-700">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-500 dark:text-gray-400" />
-                <Input
-                  ref={categorySearchInputRef}
-                  value={categorySearchQuery}
-                  onChange={(e) => setCategorySearchQuery(e.target.value)}
-                  placeholder="Search categories..."
-                  className="pl-9 pr-4 py-2 bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400"
-                />
+                <Input ref={categorySearchInputRef} value={categorySearchQuery} onChange={(e) => setCategorySearchQuery(e.target.value)} placeholder="Search categories..." className="pl-9 pr-4 py-2 bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400" />
                 {categorySearchQuery && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => setCategorySearchQuery("")}
-                    className="absolute right-2 top-1/2 transform -translate-y-1/2 h-6 w-6 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
+                  <Button type="button" variant="ghost" size="icon" onClick={() => setCategorySearchQuery("")} className="absolute right-2 top-1/2 transform -translate-y-1/2 h-6 w-6 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"><X className="h-4 w-4" /></Button>
                 )}
               </div>
             </div>
@@ -739,35 +544,112 @@ for (let pair of submitFormData.entries()) {
             ) : (
               !isAddingNewCategory && (
                 <>
-                  {filteredCategories.length > 0 ? (
-                    <div className="grid gap-1 p-2">
-                      {filteredCategories.map((category) => (
-                        <Button
-                          key={category.id}
-                          type="button"
-                          variant="ghost"
-                          className={`w-full justify-start text-left h-auto py-3 text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700 ${
-                            selectedCategory?.id === category.id ? "bg-gray-100 dark:bg-gray-700" : ""
-                          }`}
-                          onClick={() => handleCategorySelect(category)}
-                        >
-                          <div className="flex items-center justify-between w-full">
-                            <div className="flex items-center gap-2">
-                              <Tag className="h-4 w-4 text-gray-500 dark:text-gray-400" />
-                              <span>{category.name}</span>
+                  {categorySearchQuery.trim() ? (
+                    // Flat filtered list when searching
+                    filteredCategories.length > 0 ? (
+                      <div className="grid gap-1 p-2">
+                        {filteredCategories.map((category) => (
+                          <Button key={category.id} type="button" variant="ghost"
+                            className={`w-full justify-start text-left h-auto py-3 text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700 ${selectedCategory?.id === category.id ? "bg-gray-100 dark:bg-gray-700" : ""}`}
+                            onClick={() => handleCategorySelect(category)}>
+                            <div className="flex items-center justify-between w-full">
+                              <div className="flex items-center gap-2">
+                                <Tag className="h-4 w-4 text-gray-500 dark:text-gray-400" />
+                                <span>{getCategoryDisplayName(category)}</span>
+                              </div>
+                              {selectedCategory?.id === category.id && <Check className="h-4 w-4 text-green-600 dark:text-green-400" />}
                             </div>
-                            {selectedCategory?.id === category.id && (
-                              <Check className="h-4 w-4 text-green-600 dark:text-green-400" />
-                            )}
-                          </div>
-                        </Button>
-                      ))}
-                    </div>
+                          </Button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+                        <p>No categories found</p>
+                        <p className="mt-1 text-xs">Try a different search or add a new category</p>
+                      </div>
+                    )
                   ) : (
-                    <div className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
-                      <p>No categories found</p>
-                      <p className="mt-1 text-xs">Try a different search or add a new category</p>
-                    </div>
+                    // Hierarchical view when not searching
+                    categories.length > 0 ? (
+                      <div className="p-2 space-y-1">
+                        {parentCategories.map((parent) => {
+                          const children = childrenOf(parent.id)
+                          return (
+                            <div key={parent.id}>
+                              <Button type="button" variant="ghost"
+                                className={`w-full justify-start text-left h-auto py-3 text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700 font-medium ${selectedCategory?.id === parent.id ? "bg-gray-100 dark:bg-gray-700" : ""}`}
+                                onClick={() => handleCategorySelect(parent)}>
+                                <div className="flex items-center justify-between w-full">
+                                  <div className="flex items-center gap-2">
+                                    <Tag className="h-4 w-4 text-blue-500 dark:text-blue-400" />
+                                    <span>{parent.name}</span>
+                                  </div>
+                                  {selectedCategory?.id === parent.id && <Check className="h-4 w-4 text-green-600 dark:text-green-400" />}
+                                </div>
+                              </Button>
+                              {children.length > 0 && (
+                                <div className="ml-6 border-l-2 border-gray-200 dark:border-gray-600 pl-2 space-y-1">
+                                  {children.map((child) => {
+                                    const grandchildren = childrenOf(child.id)
+                                    return (
+                                      <div key={child.id}>
+                                        <Button type="button" variant="ghost"
+                                          className={`w-full justify-start text-left h-auto py-2 text-gray-800 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 text-sm ${selectedCategory?.id === child.id ? "bg-gray-100 dark:bg-gray-700" : ""}`}
+                                          onClick={() => handleCategorySelect(child)}>
+                                          <div className="flex items-center justify-between w-full">
+                                            <div className="flex items-center gap-2">
+                                              <Tag className="h-3.5 w-3.5 text-gray-400 dark:text-gray-500" />
+                                              <span>{child.name}</span>
+                                            </div>
+                                            {selectedCategory?.id === child.id && <Check className="h-4 w-4 text-green-600 dark:text-green-400" />}
+                                          </div>
+                                        </Button>
+                                        {grandchildren.length > 0 && (
+                                          <div className="ml-4 border-l-2 border-gray-100 dark:border-gray-700 pl-2 space-y-1">
+                                            {grandchildren.map((gc) => (
+                                              <Button key={gc.id} type="button" variant="ghost"
+                                                className={`w-full justify-start text-left h-auto py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 text-xs ${selectedCategory?.id === gc.id ? "bg-gray-100 dark:bg-gray-700" : ""}`}
+                                                onClick={() => handleCategorySelect(gc)}>
+                                                <div className="flex items-center justify-between w-full">
+                                                  <div className="flex items-center gap-2">
+                                                    <Tag className="h-3 w-3 text-gray-300 dark:text-gray-600" />
+                                                    <span>{gc.name}</span>
+                                                  </div>
+                                                  {selectedCategory?.id === gc.id && <Check className="h-4 w-4 text-green-600 dark:text-green-400" />}
+                                                </div>
+                                              </Button>
+                                            ))}
+                                          </div>
+                                        )}
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })}
+                        {/* Orphan categories (no parent, but parent_id is set to non-existent parent) */}
+                        {categories.filter((c) => c.parent_id && !categories.some((p) => p.id === c.parent_id)).map((orphan) => (
+                          <Button key={orphan.id} type="button" variant="ghost"
+                            className={`w-full justify-start text-left h-auto py-3 text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700 ${selectedCategory?.id === orphan.id ? "bg-gray-100 dark:bg-gray-700" : ""}`}
+                            onClick={() => handleCategorySelect(orphan)}>
+                            <div className="flex items-center justify-between w-full">
+                              <div className="flex items-center gap-2">
+                                <Tag className="h-4 w-4 text-gray-500 dark:text-gray-400" />
+                                <span>{orphan.name}</span>
+                              </div>
+                              {selectedCategory?.id === orphan.id && <Check className="h-4 w-4 text-green-600 dark:text-green-400" />}
+                            </div>
+                          </Button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+                        <p>No categories found</p>
+                        <p className="mt-1 text-xs">Add a new category below</p>
+                      </div>
+                    )
                   )}
                 </>
               )
@@ -776,14 +658,8 @@ for (let pair of submitFormData.entries()) {
 
           {!isAddingNewCategory && (
             <div className="p-4 border-t border-gray-200 dark:border-gray-700">
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 bg-transparent"
-                onClick={() => setIsAddingNewCategory(true)}
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                Add New Category
+              <Button type="button" variant="outline" className="w-full border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 bg-transparent" onClick={() => setIsAddingNewCategory(true)}>
+                <Plus className="h-4 w-4 mr-2" /> Add New Category
               </Button>
             </div>
           )}

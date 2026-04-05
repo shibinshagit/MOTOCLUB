@@ -12,7 +12,12 @@ export interface Product {
   category: string
   shelf: string
   currency: string
-  [key: string]: any // allows for dynamic properties
+  color?: string
+  size?: string
+  suitable_for?: string
+  attributes?: { key: string; value: string }[] | string
+  link?: string
+  [key: string]: any
 }
 
 interface ProductState {

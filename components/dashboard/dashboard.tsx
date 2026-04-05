@@ -34,7 +34,6 @@ import SupplierTab from "./supplier-tab"
 import NewSaleModal from "@/components/sales/new-sale-modal"
 import StaffHeaderDropdown from "./staff-header-dropdown"
 import { AnimatedThemeToggle } from "@/components/ui/animated-theme-toggle"
-import { useTheme } from "next-themes"
 
 import { useAppSelector, useAppDispatch } from "@/store/hooks"
 import { selectUser, selectCompany, selectDevice, clearDeviceData } from "@/store/slices/deviceSlice"
@@ -85,7 +84,6 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
   
   const router = useRouter()
   const { toast } = useToast()
-  const { theme, setTheme } = useTheme()
 
   // Refs for stable references
   const routerRef = useRef(router)
@@ -101,13 +99,6 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
   useEffect(() => {
     setMounted(true)
   }, [])
-
-  // Theme initialization - runs once on mount, only if no theme is set
-  useEffect(() => {
-    if (mounted && !theme) {
-      setTheme("light")
-    }
-  }, [mounted, theme, setTheme])
 
   // Authentication effect - with stabilized dependencies
   useEffect(() => {

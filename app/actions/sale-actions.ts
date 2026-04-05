@@ -119,17 +119,6 @@ async function createStockHistoryEntry(
       return { success: true, message: "Stock history table not available" }
     }
 
-    // ------------------------------------------------------------------
-    // Ensure the table has the columns we need (change_type, quantity_change)
-    // ------------------------------------------------------------------
-    try {
-      await sql`ALTER TABLE stock_history ADD COLUMN IF NOT EXISTS change_type VARCHAR(50)`
-      await sql`ALTER TABLE stock_history ADD COLUMN IF NOT EXISTS quantity_change INTEGER`
-    } catch (colErr) {
-      console.error("Error ensuring stock_history required columns:", colErr)
-      // Let execution continue – if the column already exists this will be a harmless notice
-    }
-
     // Check for required columns
     const columnCheck = await sql`
       SELECT 
@@ -527,43 +516,6 @@ export async function addSale(saleData: any) {
 
       const outstandingAmount = total - receivedAmount
 
-      // Add missing columns if they don't exist
-      if (!schema.hasDeviceId) {
-        try {
-          await sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS device_id INTEGER`
-          schema.hasDeviceId = true
-        } catch (err) {
-          console.error("Error adding device_id column:", err)
-        }
-      }
-
-      if (!schema.hasReceivedAmount) {
-        try {
-          await sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS received_amount DECIMAL(12,2) DEFAULT 0`
-          schema.hasReceivedAmount = true
-        } catch (err) {
-          console.error("Error adding received_amount column:", err)
-        }
-      }
-
-      if (!schema.hasStaffId) {
-        try {
-          await sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS staff_id INTEGER`
-          schema.hasStaffId = true
-        } catch (err) {
-          console.error("Error adding staff_id column:", err)
-        }
-      }
-
-      if (!schema.hasSaleType) {
-        try {
-          await sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS sale_type VARCHAR(20) DEFAULT 'product'`
-          schema.hasSaleType = true
-        } catch (err) {
-          console.error("Error adding sale_type column:", err)
-        }
-      }
-
       // Build INSERT query based on available columns
       let saleResult
       if (
@@ -657,30 +609,8 @@ export async function addSale(saleData: any) {
         }
 
         // Check if cost and notes columns exist in sale_items table
-        let hasCostColumn = true
-        let hasNotesColumn = true
-        try {
-          const checkColumns = await sql`
-            SELECT 
-              EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sale_items' AND column_name = 'cost') as has_cost,
-              EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sale_items' AND column_name = 'notes') as has_notes
-          `
-          hasCostColumn = checkColumns[0]?.has_cost || false
-          hasNotesColumn = checkColumns[0]?.has_notes || false
-
-          if (!hasCostColumn) {
-            await sql`ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS cost DECIMAL(12,2) DEFAULT 0`
-            hasCostColumn = true
-          }
-          if (!hasNotesColumn) {
-            await sql`ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS notes TEXT`
-            hasNotesColumn = true
-          }
-        } catch (err) {
-          console.error("Error checking/adding sale_items columns:", err)
-          hasCostColumn = false
-          hasNotesColumn = false
-        }
+        const hasCostColumn = true
+        const hasNotesColumn = true
 
         // Insert sale item - now works without foreign key constraint
         let itemResult
@@ -1060,36 +990,8 @@ export async function updateSale(saleData: any) {
         }
       }
 
-      // 5. Check and add missing columns if needed
+      // 5. Check schema info
       const schema = await getSchemaInfo()
-
-      // Add missing columns if needed
-      if (!schema.hasDeviceId) {
-        try {
-          await sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS device_id INTEGER`
-          schema.hasDeviceId = true
-        } catch (err) {
-          console.error("Error adding device_id column:", err)
-        }
-      }
-
-      if (!schema.hasReceivedAmount) {
-        try {
-          await sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS received_amount DECIMAL(12,2) DEFAULT 0`
-          schema.hasReceivedAmount = true
-        } catch (err) {
-          console.error("Error adding received_amount column:", err)
-        }
-      }
-
-      if (!schema.hasStaffId) {
-        try {
-          await sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS staff_id INTEGER`
-          schema.hasStaffId = true
-        } catch (err) {
-          console.error("Error adding staff_id column:", err)
-        }
-      }
 
       // 6. Update the sale record with optimized query
       // Build the UPDATE query - Fixed version

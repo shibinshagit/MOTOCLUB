@@ -19,28 +19,6 @@ export async function recordAccountingTransaction(transaction: AccountingTransac
   try {
     console.log("Recording accounting transaction:", transaction)
 
-    // Ensure the financial_ledger table exists
-    await sql`
-      CREATE TABLE IF NOT EXISTS financial_ledger (
-        id SERIAL PRIMARY KEY,
-        transaction_date TIMESTAMP NOT NULL DEFAULT NOW(),
-        transaction_type VARCHAR(50) NOT NULL,
-        reference_type VARCHAR(50),
-        reference_id INTEGER,
-        amount DECIMAL(12,2) NOT NULL,
-        description TEXT,
-        category VARCHAR(100),
-        account_type VARCHAR(50) NOT NULL,
-        debit_amount DECIMAL(12,2) DEFAULT 0,
-        credit_amount DECIMAL(12,2) DEFAULT 0,
-        device_id INTEGER NOT NULL,
-        company_id INTEGER NOT NULL,
-        created_by INTEGER NOT NULL,
-        created_at TIMESTAMP DEFAULT NOW(),
-        updated_at TIMESTAMP DEFAULT NOW()
-      )
-    `
-
     // Insert the transaction
     const result = await sql`
       INSERT INTO financial_ledger (
@@ -104,22 +82,6 @@ export async function recordSaleTransaction(
 
     // If it's a credit sale, create accounts receivable
     if (customerId) {
-      await sql`
-        CREATE TABLE IF NOT EXISTS accounts_receivable (
-          id SERIAL PRIMARY KEY,
-          customer_id INTEGER,
-          sale_id INTEGER,
-          original_amount DECIMAL(12,2) NOT NULL,
-          paid_amount DECIMAL(12,2) DEFAULT 0,
-          outstanding_amount DECIMAL(12,2) NOT NULL,
-          due_date TIMESTAMP,
-          device_id INTEGER NOT NULL,
-          company_id INTEGER NOT NULL,
-          created_at TIMESTAMP DEFAULT NOW(),
-          updated_at TIMESTAMP DEFAULT NOW()
-        )
-      `
-
       await sql`
         INSERT INTO accounts_receivable (
           customer_id,

@@ -51,33 +51,9 @@ async function updateExistingSalesAndPurchasesWithDeviceId(deviceId: number, use
   }
 }
 
-// Add device_id column to a table if it doesn't exist
-async function addDeviceIdColumn(tableName: string): Promise<boolean> {
-  try {
-    console.log(`Adding device_id column to ${tableName} table...`)
-
-    // Use direct SQL string interpolation for DDL operations
-    if (tableName === "budgets") {
-      await sql`ALTER TABLE budgets ADD COLUMN IF NOT EXISTS device_id INTEGER`
-    } else if (tableName === "financial_transactions") {
-      await sql`ALTER TABLE financial_transactions ADD COLUMN IF NOT EXISTS device_id INTEGER`
-    } else if (tableName === "expense_categories") {
-      await sql`ALTER TABLE expense_categories ADD COLUMN IF NOT EXISTS device_id INTEGER`
-    } else if (tableName === "sales") {
-      await sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS device_id INTEGER`
-    } else if (tableName === "purchases") {
-      await sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS device_id INTEGER`
-    } else {
-      console.error(`Unsupported table name for device_id column addition: ${tableName}`)
-      return false
-    }
-
-    console.log(`Successfully added device_id column to ${tableName} table`)
-    return true
-  } catch (error) {
-    console.error(`Error adding device_id column to ${tableName}:`, error)
-    return false
-  }
+// Schema is now managed by `npm run migrate` — kept as a no-op for call-site compatibility
+async function addDeviceIdColumn(_tableName: string): Promise<boolean> {
+  return true
 }
 
 // Check if a table has a specific column
@@ -1347,29 +1323,9 @@ export async function getAllCategories(companyId: number, deviceId?: number | nu
   }
 }
 
-// Create budget schema if it doesn't exist
+// Schema is now managed by `npm run migrate`
 async function createBudgetSchema() {
-  try {
-    await sql`
-     CREATE TABLE IF NOT EXISTS budgets (
-       id SERIAL PRIMARY KEY,
-       company_id INTEGER,
-       device_id INTEGER,
-       category_id VARCHAR(255),
-       category_name VARCHAR(255) NOT NULL,
-       amount DECIMAL(10, 2) NOT NULL,
-       period VARCHAR(50) NOT NULL,
-       start_date TIMESTAMP NOT NULL DEFAULT NOW(),
-       end_date TIMESTAMP,
-       created_by INTEGER,
-       created_at TIMESTAMP DEFAULT NOW()
-     )
-   `
-    return { success: true }
-  } catch (error) {
-    console.error("Error creating budget schema:", error)
-    return { success: false, message: "Failed to create budget schema" }
-  }
+  return { success: true }
 }
 
 // Get budgets with flexible device filtering (graceful fallback)
@@ -1740,14 +1696,6 @@ export async function addPettyCashTransaction(data: any) {
 
     if (!amount || !operation_type) {
       return { success: false, message: "Missing required fields" }
-    }
-
-    // Check if petty_cash table has device_id column
-    const hasPettyCashDeviceId = await hasColumn("petty_cash", "device_id")
-
-    // If device_id column doesn't exist, try to add it
-    if (!hasPettyCashDeviceId) {
-      await sql`ALTER TABLE petty_cash ADD COLUMN IF NOT EXISTS device_id INTEGER`.catch(() => {})
     }
 
     const result = await sql`

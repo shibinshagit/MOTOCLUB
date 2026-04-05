@@ -545,7 +545,7 @@ export default function ProductTab({ userId, isAddModalOpen = false, onModalClos
                     Retail Price
                   </th>
                   <th className="text-left p-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    Wholesale Price
+                    Cost Price
                   </th>
                   <th className="text-left p-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                     Stock
@@ -725,7 +725,7 @@ export default function ProductTab({ userId, isAddModalOpen = false, onModalClos
                         </p>
                       </div>
                       <div>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Wholesale</p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Cost</p>
                         <p className="font-medium text-gray-900 dark:text-gray-100">
                           {currency} {Number(product.wholesale_price || 0).toFixed(2)}
                         </p>

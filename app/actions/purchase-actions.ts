@@ -141,40 +141,6 @@ export async function createPurchase(formData: FormData) {
     await sql`BEGIN`
 
     try {
-      // Check if columns exist and add them if needed
-      let hasDeviceIdColumn = false
-      let hasPaymentMethodColumn = false
-      let hasPurchaseStatusColumn = false
-      let hasReceivedAmountColumn = false
-
-      try {
-        const columns = await sql`
-          SELECT column_name 
-          FROM information_schema.columns 
-          WHERE table_name = 'purchases' AND column_name IN ('device_id', 'payment_method', 'purchase_status', 'received_amount')
-        `
-        hasDeviceIdColumn = columns.some((col) => col.column_name === "device_id")
-        hasPaymentMethodColumn = columns.some((col) => col.column_name === "payment_method")
-        hasPurchaseStatusColumn = columns.some((col) => col.column_name === "purchase_status")
-        hasReceivedAmountColumn = columns.some((col) => col.column_name === "received_amount")
-      } catch (error) {
-        console.error("Error checking columns:", error)
-      }
-
-      // Add missing columns
-      if (!hasDeviceIdColumn) {
-        await sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS device_id INTEGER`
-      }
-      if (!hasPaymentMethodColumn) {
-        await sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50)`
-      }
-      if (!hasPurchaseStatusColumn) {
-        await sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS purchase_status VARCHAR(50) DEFAULT 'Delivered'`
-      }
-      if (!hasReceivedAmountColumn) {
-        await sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS received_amount DECIMAL(12,2) DEFAULT 0`
-      }
-
       // Calculate final received amount based on status
       let finalReceivedAmount = receivedAmount
       if (status.toLowerCase() === "paid") {
@@ -346,24 +312,6 @@ export async function updatePurchase(formData: FormData) {
       }
 
       console.log("Updating purchase with received amount:", finalReceivedAmount)
-
-      // Check if received_amount column exists
-      let hasReceivedAmountColumn = false
-      try {
-        const columns = await sql`
-          SELECT column_name 
-          FROM information_schema.columns 
-          WHERE table_name = 'purchases' AND column_name = 'received_amount'
-        `
-        hasReceivedAmountColumn = columns.length > 0
-      } catch (error) {
-        console.error("Error checking for received_amount column:", error)
-      }
-
-      // Add the received_amount column if it doesn't exist
-      if (!hasReceivedAmountColumn) {
-        await sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS received_amount DECIMAL(12,2) DEFAULT 0`
-      }
 
       // Update purchase with received amount
       const purchaseResult = await sql`

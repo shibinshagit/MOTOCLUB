@@ -222,7 +222,7 @@ export default function ViewProductModal({
                     </div>
 
                     <div className="space-y-2">
-                      <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Wholesale Price</h3>
+                      <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Cost Price</h3>
                       <p className="font-medium text-gray-900 dark:text-gray-100">
                         {privacyMode ? (
                           <span className="text-gray-400 dark:text-gray-500">*** ***</span>
@@ -242,7 +242,7 @@ export default function ViewProductModal({
                     {msp > 0 && (
                       <div className="space-y-2">
                         <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">
-                          MSP (Maximum Selling Price)
+                          MSP (Minimum Selling Price)
                         </h3>
                         <p className="font-medium text-gray-900 dark:text-gray-100">
                           {privacyMode ? (
@@ -291,7 +291,65 @@ export default function ViewProductModal({
                         {product.updated_at ? format(new Date(product.updated_at), "PPP p") : "N/A"}
                       </p>
                     </div>
+
+                    {product.color && (
+                      <div className="space-y-2">
+                        <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Colour</h3>
+                        <p className="text-gray-900 dark:text-gray-100">{product.color}</p>
+                      </div>
+                    )}
+
+                    {product.size && (
+                      <div className="space-y-2">
+                        <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Size</h3>
+                        <p className="text-gray-900 dark:text-gray-100">{product.size}</p>
+                      </div>
+                    )}
+
+                    {product.suitable_for && (
+                      <div className="space-y-2">
+                        <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Suitable For</h3>
+                        <p className="text-gray-900 dark:text-gray-100">{product.suitable_for}</p>
+                      </div>
+                    )}
+
+                    {product.link && (
+                      <div className="space-y-2">
+                        <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Product Link</h3>
+                        <a href={product.link} target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline text-sm break-all">{product.link}</a>
+                      </div>
+                    )}
+
+                    {product.description && (
+                      <div className="space-y-2 md:col-span-2">
+                        <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Description</h3>
+                        <p className="text-gray-900 dark:text-gray-100 text-sm">{product.description}</p>
+                      </div>
+                    )}
                   </div>
+
+                  {/* Attributes Section */}
+                  {(() => {
+                    let attrs: any[] = []
+                    try {
+                      if (product.attributes) {
+                        attrs = typeof product.attributes === "string" ? JSON.parse(product.attributes) : product.attributes
+                      }
+                    } catch { attrs = [] }
+                    return attrs.length > 0 ? (
+                      <div className="mt-4">
+                        <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">Attributes</h3>
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                          {attrs.map((attr: any, idx: number) => (
+                            <div key={idx} className="flex flex-col rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 p-2">
+                              <span className="text-xs text-gray-500 dark:text-gray-400">{attr.key}</span>
+                              <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{attr.value}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null
+                  })()}
 
                   {/* Barcode Section */}
                   {product.barcode && (

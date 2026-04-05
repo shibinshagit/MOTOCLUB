@@ -3,80 +3,6 @@
 import { sql, getLastError, resetConnectionState } from "@/lib/db"
 import { put } from "@vercel/blob"
 
-// Ensures the products table exists before any query runs
-async function ensureProductsTable() {
-  try {
-    await sql`
-      CREATE TABLE IF NOT EXISTS products (
-        id SERIAL PRIMARY KEY,
-        name VARCHAR(255) NOT NULL,
-        company_name VARCHAR(255),
-        category VARCHAR(255),
-        category_id INTEGER,
-        description TEXT,
-        price DECIMAL(10, 2) NOT NULL,
-        wholesale_price DECIMAL(10, 2) DEFAULT 0,
-        msp DECIMAL(10, 2) DEFAULT 0,
-        stock INTEGER DEFAULT 0,
-        barcode VARCHAR(255),
-        image_url TEXT,
-        shelf VARCHAR(255),
-        created_by INTEGER,
-        created_at TIMESTAMP DEFAULT NOW(),
-        updated_at TIMESTAMP DEFAULT NOW()
-      )
-    `
-
-    // Ensure new columns exist (for older schemas)
-    await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS barcode VARCHAR(255)`
-    await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS company_name VARCHAR(255)`
-    await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS category_id INTEGER`
-    await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS wholesale_price DECIMAL(10, 2) DEFAULT 0`
-    await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS msp DECIMAL(10, 2) DEFAULT 0`
-    await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS image_url TEXT`
-    await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS shelf VARCHAR(255)`
-  } catch (error) {
-    console.error("Error ensuring products table:", error)
-  }
-}
-
-// Ensures the product_categories table exists
-async function ensureProductCategoriesTable() {
-  try {
-    await sql`
-      CREATE TABLE IF NOT EXISTS product_categories (
-        id SERIAL PRIMARY KEY,
-        name VARCHAR(255) NOT NULL,
-        company_id INTEGER,
-        created_by INTEGER,
-        created_at TIMESTAMP DEFAULT NOW()
-      )
-    `
-  } catch (error) {
-    console.error("Error ensuring product_categories table:", error)
-  }
-}
-
-// Ensures the product_stock_history table exists
-async function ensureProductStockHistoryTable() {
-  try {
-    await sql`
-      CREATE TABLE IF NOT EXISTS product_stock_history (
-        id SERIAL PRIMARY KEY,
-        product_id INTEGER NOT NULL,
-        quantity INTEGER NOT NULL,
-        type VARCHAR(50) NOT NULL,
-        reference_id INTEGER,
-        reference_type VARCHAR(50),
-        notes TEXT,
-        created_by INTEGER,
-        created_at TIMESTAMP DEFAULT NOW()
-      )
-    `
-  } catch (error) {
-    console.error("Error ensuring product_stock_history table:", error)
-  }
-}
 
 // Generate a unique barcode for a product
 async function generateProductBarcode(productId: number): Promise<string> {
@@ -170,8 +96,6 @@ async function uploadProductImage(file: File, productName: string): Promise<stri
 
 export async function getProducts(userId?: number, limit?: number, searchTerm?: string) {
   resetConnectionState()
-  await ensureProductsTable()
-  await ensureProductCategoriesTable()
 
   console.log("getProducts called with:", { userId, limit, searchTerm })
 
@@ -238,7 +162,9 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
               REPLACE(LOWER(p.category), ' ', '') LIKE ${searchPattern} OR
               REPLACE(LOWER(p.company_name), ' ', '') LIKE ${searchPattern} OR
               REPLACE(LOWER(p.shelf), ' ', '') LIKE ${searchPattern} OR
-              REPLACE(COALESCE(p.barcode, ''), ' ', '') LIKE ${searchPattern}
+              REPLACE(COALESCE(p.barcode, ''), ' ', '') LIKE ${searchPattern} OR
+              REPLACE(LOWER(COALESCE(p.color, '')), ' ', '') LIKE ${searchPattern} OR
+              REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
             )
             ORDER BY 
               CASE WHEN p.id::text = ${searchTerm.trim()} THEN 0 ELSE 1 END,
@@ -257,7 +183,9 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
               REPLACE(LOWER(p.category), ' ', '') LIKE ${searchPattern} OR
               REPLACE(LOWER(p.company_name), ' ', '') LIKE ${searchPattern} OR
               REPLACE(LOWER(p.shelf), ' ', '') LIKE ${searchPattern} OR
-              REPLACE(COALESCE(p.barcode, ''), ' ', '') LIKE ${searchPattern}
+              REPLACE(COALESCE(p.barcode, ''), ' ', '') LIKE ${searchPattern} OR
+              REPLACE(LOWER(COALESCE(p.color, '')), ' ', '') LIKE ${searchPattern} OR
+              REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
             )
             ORDER BY 
               CASE WHEN p.id::text = ${searchTerm.trim()} THEN 0 ELSE 1 END,
@@ -280,7 +208,9 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
               REPLACE(LOWER(p.category), ' ', '') LIKE ${searchPattern} OR
               REPLACE(LOWER(p.company_name), ' ', '') LIKE ${searchPattern} OR
               REPLACE(LOWER(p.shelf), ' ', '') LIKE ${searchPattern} OR
-              REPLACE(COALESCE(p.barcode, ''), ' ', '') LIKE ${searchPattern}
+              REPLACE(COALESCE(p.barcode, ''), ' ', '') LIKE ${searchPattern} OR
+              REPLACE(LOWER(COALESCE(p.color, '')), ' ', '') LIKE ${searchPattern} OR
+              REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
             )
             ORDER BY 
               CASE WHEN p.id::text = ${searchTerm.trim()} THEN 0 ELSE 1 END,
@@ -298,7 +228,9 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
               REPLACE(LOWER(p.category), ' ', '') LIKE ${searchPattern} OR
               REPLACE(LOWER(p.company_name), ' ', '') LIKE ${searchPattern} OR
               REPLACE(LOWER(p.shelf), ' ', '') LIKE ${searchPattern} OR
-              REPLACE(COALESCE(p.barcode, ''), ' ', '') LIKE ${searchPattern}
+              REPLACE(COALESCE(p.barcode, ''), ' ', '') LIKE ${searchPattern} OR
+              REPLACE(LOWER(COALESCE(p.color, '')), ' ', '') LIKE ${searchPattern} OR
+              REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
             )
             ORDER BY 
               CASE WHEN p.id::text = ${searchTerm.trim()} THEN 0 ELSE 1 END,
@@ -383,8 +315,6 @@ export async function getProductById(id: number) {
 
   // Reset connection state to allow a fresh attempt
   resetConnectionState()
-  await ensureProductsTable()
-  await ensureProductCategoriesTable()
 
   try {
     const result = await sql`
@@ -517,6 +447,7 @@ export async function createProduct(formData: FormData) {
   const companyName = formData.get("company_name") as string
   const category = formData.get("category") as string
   const categoryId = formData.get("category_id") ? Number(formData.get("category_id")) : null
+  const description = (formData.get("description") as string) || ""
   const price = Number.parseFloat(formData.get("price") as string)
   const wholesalePrice = Number.parseFloat(formData.get("wholesale_price") as string) || 0
   const msp = Number.parseFloat(formData.get("msp") as string) || 0
@@ -525,6 +456,12 @@ export async function createProduct(formData: FormData) {
   const userId = formData.get("user_id") ? Number.parseInt(formData.get("user_id") as string) : undefined
   const barcode = formData.get("barcode") as string
   const imageFile = formData.get("image") as File | null
+  const color = (formData.get("color") as string) || ""
+  const size = (formData.get("size") as string) || ""
+  const suitableFor = (formData.get("suitable_for") as string) || ""
+  const attributesRaw = formData.get("attributes") as string
+  const attributes = attributesRaw ? JSON.parse(attributesRaw) : []
+  const link = (formData.get("link") as string) || ""
 
   if (!name || isNaN(price)) {
     return { success: false, error: "Name and valid price are required" }
@@ -576,14 +513,19 @@ export async function createProduct(formData: FormData) {
             shelf,
             image_url,
             created_by,
-            barcode
+            barcode,
+            color,
+            size,
+            suitable_for,
+            attributes,
+            link
           )
           VALUES (
             ${name}, 
             ${companyName || ""},
             ${category || ""}, 
             ${categoryId}, 
-            ${""}, 
+            ${description}, 
             ${price},
             ${wholesalePrice},
             ${msp},
@@ -591,7 +533,12 @@ export async function createProduct(formData: FormData) {
             ${shelf || ""},
             ${imageUrl},
             ${userId},
-            ${barcode}
+            ${barcode},
+            ${color},
+            ${size},
+            ${suitableFor},
+            ${JSON.stringify(attributes)},
+            ${link}
           )
           RETURNING *
         `
@@ -666,10 +613,6 @@ export async function createProduct(formData: FormData) {
 
 // Update the updateProduct function to handle FormData properly
 export async function updateProduct(formData: FormData) {
-  await ensureProductsTable()
-  await ensureProductCategoriesTable()
-  await ensureProductStockHistoryTable()
-
   const id = Number.parseInt(formData.get("id") as string)
   const name = formData.get("name") as string
   const companyName = formData.get("company_name") as string
@@ -684,6 +627,12 @@ export async function updateProduct(formData: FormData) {
   const barcode = formData.get("barcode") as string
   const imageFile = formData.get("image") as File | null
   const userId = formData.get("user_id") ? Number.parseInt(formData.get("user_id") as string) : undefined
+  const color = (formData.get("color") as string) || ""
+  const size = (formData.get("size") as string) || ""
+  const suitableFor = (formData.get("suitable_for") as string) || ""
+  const attributesRaw = formData.get("attributes") as string
+  const attributes = attributesRaw ? JSON.parse(attributesRaw) : []
+  const link = (formData.get("link") as string) || ""
 
   if (!id || !name || isNaN(price)) {
     return { success: false, message: "ID, name, and valid price are required" }
@@ -752,7 +701,12 @@ export async function updateProduct(formData: FormData) {
           stock = ${stock}, 
           shelf = ${shelf || ""},
           image_url = ${imageUrl},
-          barcode = ${barcode || currentProduct[0].barcode}
+          barcode = ${barcode || currentProduct[0].barcode},
+          color = ${color},
+          size = ${size},
+          suitable_for = ${suitableFor},
+          attributes = ${JSON.stringify(attributes)},
+          link = ${link}
         WHERE id = ${id}
         AND created_by = ${userId}
         RETURNING *
@@ -772,7 +726,12 @@ export async function updateProduct(formData: FormData) {
           stock = ${stock}, 
           shelf = ${shelf || ""},
           image_url = ${imageUrl},
-          barcode = ${barcode || currentProduct[0].barcode}
+          barcode = ${barcode || currentProduct[0].barcode},
+          color = ${color},
+          size = ${size},
+          suitable_for = ${suitableFor},
+          attributes = ${JSON.stringify(attributes)},
+          link = ${link}
         WHERE id = ${id}
         RETURNING *
       `
@@ -836,8 +795,6 @@ export async function deleteProduct(id: number) {
 
   // Reset connection state to allow a fresh attempt
   resetConnectionState()
-  await ensureProductsTable()
-  await ensureProductStockHistoryTable()
 
   try {
     // Check if product is used in any sales or purchases
@@ -900,8 +857,6 @@ export async function deleteProduct(id: number) {
 
 // Add getProductStockHistory function
 export async function getProductStockHistory(productId: number) {
-  await ensureProductStockHistoryTable()
-
   if (!productId) {
     return { success: false, message: "Product ID is required", data: [] }
   }
@@ -942,8 +897,6 @@ export async function getProductStockHistory(productId: number) {
 }
 
 export async function adjustProductStock(formData: FormData) {
-  await ensureProductsTable()
-  await ensureProductStockHistoryTable()
 
   const productId = Number.parseInt(formData.get("product_id") as string)
   const quantity = Number.parseInt(formData.get("quantity") as string)
@@ -1031,8 +984,6 @@ export async function adjustProductStock(formData: FormData) {
 
 // Add this function to the existing file
 export async function getProductByBarcode(barcode: string) {
-  await ensureProductsTable()
-  await ensureProductCategoriesTable()
 
   if (!barcode) {
     return { success: false, message: "Barcode is required", data: null }
@@ -1073,8 +1024,6 @@ export async function getProductByBarcode(barcode: string) {
 }
 
 export async function getUserProducts(userId: number) {
-  await ensureProductsTable()
-  await ensureProductCategoriesTable()
 
   // Reset connection state to allow a fresh attempt
   resetConnectionState()

@@ -3,55 +3,9 @@
 import { sql } from "@/lib/db"
 import { revalidatePath } from "next/cache"
 
-// Initialize services schema
+// Schema is now managed by `npm run migrate`
 export async function initializeServicesSchema() {
-  try {
-    // Create services table
-    await sql`
-      CREATE TABLE IF NOT EXISTS services (
-        id SERIAL PRIMARY KEY,
-        name VARCHAR(255) NOT NULL,
-        description TEXT,
-        category VARCHAR(100),
-        price DECIMAL(10,2) NOT NULL,
-        duration_minutes INTEGER DEFAULT 0,
-        is_active BOOLEAN DEFAULT true,
-        device_id INTEGER NOT NULL,
-        company_id INTEGER DEFAULT 1,
-        created_by INTEGER NOT NULL,
-        created_at TIMESTAMP DEFAULT NOW(),
-        updated_at TIMESTAMP DEFAULT NOW()
-      )
-    `
-
-    // Create service_items table for sales
-    await sql`
-      CREATE TABLE IF NOT EXISTS service_items (
-        id SERIAL PRIMARY KEY,
-        sale_id INTEGER NOT NULL,
-        service_id INTEGER NOT NULL,
-        quantity INTEGER NOT NULL DEFAULT 1,
-        price DECIMAL(10,2) NOT NULL,
-        notes TEXT,
-        staff_id INTEGER,
-        service_cost DECIMAL(10,2) DEFAULT 0,
-        include_cost_in_invoice BOOLEAN DEFAULT false,
-        created_at TIMESTAMP DEFAULT NOW()
-      )
-    `
-
-    // Create indexes
-    await sql`CREATE INDEX IF NOT EXISTS idx_services_device_id ON services(device_id)`
-    await sql`CREATE INDEX IF NOT EXISTS idx_services_active ON services(is_active)`
-    await sql`CREATE INDEX IF NOT EXISTS idx_services_category ON services(category)`
-    await sql`CREATE INDEX IF NOT EXISTS idx_service_items_sale_id ON service_items(sale_id)`
-    await sql`CREATE INDEX IF NOT EXISTS idx_service_items_service_id ON service_items(service_id)`
-
-    return { success: true, message: "Services schema initialized successfully" }
-  } catch (error) {
-    console.error("Error initializing services schema:", error)
-    return { success: false, message: "Failed to initialize services schema" }
-  }
+  return { success: true, message: "Schema managed by migration script — run `npm run migrate`" }
 }
 
 // Get all services for a device

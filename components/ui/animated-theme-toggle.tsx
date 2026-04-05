@@ -1,33 +1,70 @@
 "use client"
 
+import { useEffect, useState } from "react"
 import { Moon, Sun } from "lucide-react"
+
+import { Button } from "@/components/ui/button"
 import { useCustomTheme } from "@/hooks/use-custom-theme"
+import { cn } from "@/lib/utils"
 
-export function AnimatedThemeToggle() {
-  const { theme, setTheme } = useCustomTheme();
-  // Ensure dark is default if theme is not set
-  const isDark = theme === "dark" || !theme;
+export function AnimatedThemeToggle({ className }: { className?: string }) {
+  const [mounted, setMounted] = useState(false)
+  const [isDark, setIsDark] = useState(false)
+  const { setTheme } = useCustomTheme()
 
-  const handleToggle = () => {
-    setTheme(isDark ? "light" : "dark");
-  };
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
+  useEffect(() => {
+    if (typeof document === "undefined") return
+    const sync = () => setIsDark(document.documentElement.classList.contains("dark"))
+    sync()
+    const el = document.documentElement
+    const obs = new MutationObserver(sync)
+    obs.observe(el, { attributes: true, attributeFilter: ["class"] })
+    return () => obs.disconnect()
+  }, [])
+
+  if (!mounted) {
+    return (
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className={cn("relative h-9 w-9", className)}
+        disabled
+        aria-hidden
+      >
+        <Sun className="h-4 w-4 opacity-40" />
+      </Button>
+    )
+  }
 
   return (
-    <button
-      onClick={handleToggle}
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      className={cn("relative h-9 w-9", className)}
+      onClick={() => setTheme(isDark ? "light" : "dark")}
+      title={isDark ? "Switch to light mode" : "Switch to dark mode"}
       aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
-      className={`relative w-12 h-6 flex items-center rounded-full transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-blue-400
-        ${isDark ? "bg-white-800" : "bg-yellow-300"}`}
-      style={{ minWidth: 48 }}
     >
-      <span
-        className={`absolute left-1 top-1 transition-transform duration-300 flex items-center justify-center w-4 h-4 rounded-full shadow
-          ${isDark ? "translate-x-6 bg-gray-900 text-yellow-300" : "translate-x-0 bg-white text-yellow-500"}`}
-      >
-        {isDark ? <Moon className="w-3 h-3" /> : <Sun className="w-3 h-3" />}
-      </span>
-      {/* Visually hidden for accessibility */}
-      <span className="sr-only">{isDark ? "Dark mode" : "Light mode"}</span>
-    </button>
-  );
+      <Sun
+        className={cn(
+          "absolute left-1/2 top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 transition-all duration-300 ease-out",
+          isDark ? "scale-0 rotate-90 opacity-0" : "scale-100 rotate-0 opacity-100"
+        )}
+        aria-hidden
+      />
+      <Moon
+        className={cn(
+          "absolute left-1/2 top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 transition-all duration-300 ease-out",
+          isDark ? "scale-100 rotate-0 opacity-100" : "scale-0 -rotate-90 opacity-0"
+        )}
+        aria-hidden
+      />
+    </Button>
+  )
 }

@@ -51,18 +51,6 @@ export async function addServiceSale(saleData: any) {
         }
       }
 
-      // Check if required columns exist and add them if needed
-      try {
-        await sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS device_id INTEGER`
-        await sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS received_amount DECIMAL(12,2) DEFAULT 0`
-        await sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS sale_type VARCHAR(20) DEFAULT 'product'`
-        await sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50)`
-        await sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS discount DECIMAL(12,2) DEFAULT 0`
-        await sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS total_cost DECIMAL(12,2) DEFAULT 0`
-      } catch (err) {
-        console.log("Some columns might already exist:", err.message)
-      }
-
       // Insert the sale
       const saleResult = await sql`
         INSERT INTO sales (

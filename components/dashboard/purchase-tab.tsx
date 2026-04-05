@@ -50,6 +50,7 @@ import {
   FileText,
 } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { cn } from "@/lib/utils"
 
 interface PurchaseTabProps {
   userId: number
@@ -812,175 +813,278 @@ export default function PurchaseTab({
     }
   }, [filteredPurchases, formatCurrency, toast])
 
+  const glassCard =
+    "overflow-hidden rounded-[1.35rem] border border-white/60 bg-white/45 shadow-[0_16px_48px_-20px_rgba(15,23,42,0.22)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-gray-950/35 dark:shadow-[0_20px_56px_-18px_rgba(0,0,0,0.65)]"
+  const glassInset =
+    "rounded-2xl border border-white/50 bg-white/35 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] backdrop-blur-xl dark:border-white/[0.07] dark:bg-white/[0.04] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]"
+  const glassActionBtn =
+    "h-9 shrink-0 gap-2 rounded-xl border border-white/45 bg-white/40 text-gray-800 shadow-sm backdrop-blur-md transition-[transform,background-color,box-shadow] hover:bg-white/60 active:scale-[0.98] dark:border-white/[0.1] dark:bg-white/[0.07] dark:text-gray-100 dark:hover:bg-white/[0.12]"
+  const glassFilterBtn =
+    "h-9 min-w-0 justify-center gap-1.5 rounded-xl border text-xs font-medium shadow-sm backdrop-blur-md transition-[transform,background-color,border-color,box-shadow] active:scale-[0.98] sm:gap-2 sm:text-sm"
+  const glassFilterOff =
+    "border-white/45 bg-white/30 text-gray-700 hover:bg-white/50 dark:border-white/[0.1] dark:bg-white/[0.05] dark:text-gray-200 dark:hover:bg-white/[0.1]"
+  const glassFilterOn =
+    "border-blue-400/55 bg-blue-500/20 text-blue-950 ring-1 ring-blue-400/20 hover:bg-blue-500/28 dark:border-blue-400/35 dark:bg-blue-500/20 dark:text-blue-50 dark:ring-blue-400/15"
+  const menuGlass = "border border-white/50 bg-white/75 backdrop-blur-2xl dark:border-white/[0.1] dark:bg-gray-950/75"
+  const sectionLabel =
+    "text-[10px] font-semibold uppercase tracking-[0.2em] text-gray-500 dark:text-gray-400"
+
   return (
-    <div className="space-y-4 dark:bg-gray-900">
-      <Card className="overflow-hidden rounded-xl shadow-md border-0 dark:bg-gray-800 dark:border-gray-700">
+    <div className="space-y-4">
+      <Card className={cn("border-0 shadow-none", glassCard)}>
         <CardContent className="p-0">
-          {/* Search and Filter Section */}
-          <div className="p-4 space-y-4">
-            {/* Search Bar and Action Buttons Row - Mobile Responsive */}
-            <div className="flex flex-col lg:flex-row lg:items-center gap-4 mb-4">
-              {/* Search Bar - Full width on mobile, half width on desktop */}
-              <div className="relative flex-1 lg:max-w-md">
-                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  type="search"
-                  placeholder="Search purchases by supplier, ID, status, or amount..."
-                  className="pl-8 dark:text-white dark:placeholder-gray-400"
-                  value={localSearchTerm}
-                  onChange={(e) => setLocalSearchTerm(e.target.value)}
-                />
+          <div className="space-y-4 p-4 sm:p-5">
+            {/* Title + sync + actions — single dense row on desktop */}
+            <div className="flex flex-col gap-3 border-b border-white/35 pb-4 dark:border-white/10 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+              <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+                <h2 className="text-lg font-semibold tracking-tight text-gray-900 dark:text-gray-100">
+                  Purchases
+                </h2>
+                {lastUpdated ? (
+                  <div
+                    className={cn(
+                      "inline-flex max-w-full items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium text-gray-600",
+                      glassInset,
+                      "dark:text-gray-300"
+                    )}
+                    role="status"
+                  >
+                    <Clock className="h-3 w-3 shrink-0 text-gray-500 dark:text-gray-400" />
+                    <span className="truncate">
+                      <span className="hidden sm:inline">{getLastUpdatedText}</span>
+                      <span className="sm:hidden">Updated</span>
+                    </span>
+                    {isBackgroundRefreshing && (
+                      <Loader2 className="h-3 w-3 shrink-0 animate-spin text-blue-500 dark:text-blue-400" />
+                    )}
+                  </div>
+                ) : null}
               </div>
 
-              {/* Action Buttons - Responsive grid */}
-              <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
-                {/* Last Updated Status */}
-                {lastUpdated && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="flex items-center gap-2 text-red-600 dark:text-red-400 border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-900/20 bg-transparent text-xs sm:text-sm whitespace-nowrap"
-                    disabled
-                  >
-                    <Clock className="h-4 w-4 flex-shrink-0" />
-                    <span className="hidden sm:inline">{getLastUpdatedText}</span>
-                    <span className="sm:hidden">Updated</span>
-                    {isBackgroundRefreshing && <Loader2 className="h-3 w-3 animate-spin ml-1" />}
-                  </Button>
+              <div
+                className={cn(
+                  "flex flex-wrap items-center gap-1 rounded-2xl border border-white/45 bg-white/30 p-1 shadow-sm backdrop-blur-md dark:border-white/[0.1] dark:bg-white/[0.06] sm:gap-1.5"
                 )}
-
+              >
                 <Button
+                  type="button"
                   variant="outline"
                   size="sm"
                   onClick={handleRefresh}
                   disabled={isLoading}
-                  className="flex items-center gap-2 text-red-600 dark:text-red-400 border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-900/20 bg-transparent text-xs sm:text-sm whitespace-nowrap"
+                  className={cn(glassActionBtn, "border-0 bg-white/50 dark:bg-white/[0.08]")}
                 >
-                  <RefreshCw className={`h-4 w-4 flex-shrink-0 ${isLoading ? "animate-spin" : ""}`} />
+                  <RefreshCw className={cn("h-4 w-4 shrink-0", isLoading && "animate-spin")} />
                   <span className="hidden sm:inline">Refresh</span>
                 </Button>
-
                 <Button
+                  type="button"
                   variant="outline"
                   size="sm"
                   onClick={handlePrint}
-                  className="flex items-center gap-2 text-red-600 dark:text-red-400 border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-900/20 text-xs sm:text-sm whitespace-nowrap"
+                  className={cn(glassActionBtn, "border-0 bg-white/50 dark:bg-white/[0.08]")}
                 >
-                  <FileText className="h-4 w-4 flex-shrink-0" />
+                  <FileText className="h-4 w-4 shrink-0" />
                   <span className="hidden sm:inline">Print</span>
                 </Button>
-
                 <Button
-                  onClick={() => setShowAddModal(true)}
+                  type="button"
                   variant="outline"
                   size="sm"
-                  className="flex items-center gap-2 text-red-600 dark:text-red-400 border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-900/20 text-xs sm:text-sm whitespace-nowrap"
+                  onClick={() => setShowAddModal(true)}
+                  className={cn(
+                    glassActionBtn,
+                    "border-0 bg-blue-500/20 text-blue-900 hover:bg-blue-500/28 dark:bg-blue-500/25 dark:text-blue-50 dark:hover:bg-blue-500/35"
+                  )}
                 >
-                  <Plus className="h-4 w-4 flex-shrink-0" />
+                  <Plus className="h-4 w-4 shrink-0" />
                   <span className="hidden sm:inline">Add Purchase</span>
                   <span className="sm:hidden">Add</span>
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => router.push("/dashboard?tab=supplier")}
+                  className={cn(glassActionBtn, "border-0 bg-white/50 dark:bg-white/[0.08]")}
+                >
+                  <Truck className="h-4 w-4 shrink-0" />
+                  <span>Suppliers</span>
                 </Button>
               </div>
             </div>
 
-            <Button
-                onClick={() => router.push("/dashboard?tab=supplier")}
-                variant="outline"
-                size="sm"
-                className="flex items-center gap-2 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-xs sm:text-sm whitespace-nowrap"
-              >
-                <Truck className="h-4 w-4 flex-shrink-0" />
-                <span>Suppliers</span>
-              </Button>
+            {/* Compact search + period — one strip, search capped width */}
+            <div className={cn("p-3 sm:p-4", glassInset)}>
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-stretch lg:gap-0">
+                <div className="flex w-full shrink-0 lg:w-[min(100%,15.5rem)] lg:pr-4">
+                  <label className="sr-only" htmlFor="purchase-list-search">
+                    Search purchases
+                  </label>
+                  <div className="relative flex w-full items-center gap-2 rounded-xl border border-white/45 bg-white/25 px-2.5 py-0.5 shadow-sm backdrop-blur-md dark:border-white/[0.1] dark:bg-white/[0.05]">
+                    <Search
+                      className="h-3.5 w-3.5 shrink-0 text-gray-500 dark:text-gray-400"
+                      aria-hidden
+                    />
+                    <Input
+                      id="purchase-list-search"
+                      type="search"
+                      placeholder="Search…"
+                      className="h-8 min-w-0 flex-1 border-0 bg-transparent px-0 text-sm shadow-none placeholder:text-gray-500 focus-visible:ring-0 dark:text-gray-100 dark:placeholder:text-gray-500"
+                      value={localSearchTerm}
+                      onChange={(e) => setLocalSearchTerm(e.target.value)}
+                    />
+                  </div>
+                </div>
 
+                <div
+                  aria-hidden
+                  className="hidden h-auto w-px shrink-0 bg-gradient-to-b from-transparent via-white/50 to-transparent dark:via-white/15 lg:block"
+                />
 
-            {/* Filter Buttons - Mobile Responsive Grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:flex lg:flex-wrap gap-2 mb-4">
-              {/* Date Filters */}
-              <Button
-                onClick={handleTodayFilter}
-                variant={filters.dateRangeFilter === "today" ? "default" : "outline"}
-                size="sm"
-                className="flex items-center justify-center gap-1 sm:gap-2 dark:text-blue-400 text-xs sm:text-sm min-w-0"
-              >
-                <CalendarDays className="h-4 w-4 flex-shrink-0" />
-                <span className="truncate">Today</span>
-              </Button>
+                <div className="min-w-0 flex-1 lg:pl-4">
+                  <p className={sectionLabel}>Period</p>
+                  <div className="mt-1.5 -mx-0.5 flex gap-1.5 overflow-x-auto pb-0.5 pt-0.5 sm:flex-wrap sm:overflow-visible">
+                <Button
+                  type="button"
+                  onClick={handleTodayFilter}
+                  variant="outline"
+                  size="sm"
+                  className={cn(
+                    glassFilterBtn,
+                    "shrink-0 sm:min-w-0",
+                    filters.dateRangeFilter === "today" ? glassFilterOn : glassFilterOff
+                  )}
+                >
+                  <CalendarDays className="h-4 w-4 shrink-0" />
+                  <span className="truncate">Today</span>
+                </Button>
+                <Button
+                  type="button"
+                  onClick={handleThisWeekFilter}
+                  variant="outline"
+                  size="sm"
+                  className={cn(
+                    glassFilterBtn,
+                    "shrink-0 sm:min-w-0",
+                    filters.dateRangeFilter === "thisweek" ? glassFilterOn : glassFilterOff
+                  )}
+                >
+                  <CalendarDays className="h-4 w-4 shrink-0" />
+                  <span className="truncate">This Week</span>
+                </Button>
+                <Button
+                  type="button"
+                  onClick={handleThisMonthFilter}
+                  variant="outline"
+                  size="sm"
+                  className={cn(
+                    glassFilterBtn,
+                    "shrink-0 sm:min-w-0",
+                    filters.dateRangeFilter === "thismonth" ? glassFilterOn : glassFilterOff
+                  )}
+                >
+                  <CalendarDays className="h-4 w-4 shrink-0" />
+                  <span className="truncate">This Month</span>
+                </Button>
+                <Button
+                  type="button"
+                  onClick={openDateFilterModal}
+                  variant="outline"
+                  size="sm"
+                  className={cn(
+                    glassFilterBtn,
+                    "min-w-[min(100%,11rem)] shrink-0 sm:min-w-0",
+                    filters.dateFromFilter || filters.dateToFilter ? glassFilterOn : glassFilterOff
+                  )}
+                >
+                  <CalendarDays className="h-4 w-4 shrink-0" />
+                  <span className="truncate">Custom</span>
+                  {(filters.dateFromFilter || filters.dateToFilter) && (
+                    <Badge
+                      variant="secondary"
+                      className="ml-0.5 hidden max-w-[7rem] truncate border-0 bg-white/50 text-[10px] font-normal backdrop-blur-sm dark:bg-white/10 sm:inline-flex"
+                    >
+                      {filters.dateFromFilter && filters.dateToFilter
+                        ? `${format(new Date(filters.dateFromFilter), "MMM d")} – ${format(new Date(filters.dateToFilter), "MMM d")}`
+                        : filters.dateFromFilter
+                          ? `From ${format(new Date(filters.dateFromFilter), "MMM d")}`
+                          : `To ${format(new Date(filters.dateToFilter!), "MMM d")}`}
+                    </Badge>
+                  )}
+                </Button>
+              </div>
+                </div>
+              </div>
+            </div>
 
-              <Button
-                onClick={handleThisWeekFilter}
-                variant={filters.dateRangeFilter === "thisweek" ? "default" : "outline"}
-                size="sm"
-                className="flex items-center justify-center gap-1 sm:gap-2 dark:text-blue-400 text-xs sm:text-sm min-w-0"
-              >
-                <CalendarDays className="h-4 w-4 flex-shrink-0" />
-                <span className="truncate">This Week</span>
-              </Button>
-
-              <Button
-                onClick={handleThisMonthFilter}
-                variant={filters.dateRangeFilter === "thismonth" ? "default" : "outline"}
-                size="sm"
-                className="flex items-center justify-center gap-1 sm:gap-2 dark:text-blue-400 text-xs sm:text-sm min-w-0"
-              >
-                <CalendarDays className="h-4 w-4 flex-shrink-0" />
-                <span className="truncate">This Month</span>
-              </Button>
-
-              {/* Custom Date Range Button */}
-              <Button
-                onClick={openDateFilterModal}
-                variant={filters.dateFromFilter || filters.dateToFilter ? "default" : "outline"}
-                size="sm"
-                className="flex items-center justify-center gap-1 sm:gap-2 dark:text-blue-400 text-xs sm:text-sm min-w-0 col-span-2 sm:col-span-1"
-              >
-                <CalendarDays className="h-4 w-4 flex-shrink-0" />
-                <span className="truncate">Custom Range</span>
-                {(filters.dateFromFilter || filters.dateToFilter) && (
-                  <Badge variant="secondary" className="ml-1 text-xs hidden sm:inline-block">
-                    {filters.dateFromFilter && filters.dateToFilter
-                      ? `${format(new Date(filters.dateFromFilter), "MMM d")} - ${format(new Date(filters.dateToFilter), "MMM d")}`
-                      : filters.dateFromFilter
-                        ? `From ${format(new Date(filters.dateFromFilter), "MMM d")}`
-                        : `To ${format(new Date(filters.dateToFilter), "MMM d")}`}
-                  </Badge>
-                )}
-              </Button>
-
-              {/* Amount Filter Button */}
-              <Button
-                onClick={openAmountFilterModal}
-                variant={filters.minAmountFilter || filters.maxAmountFilter ? "default" : "outline"}
-                size="sm"
-                className="flex items-center justify-center gap-1 sm:gap-2 dark:text-blue-400 text-xs sm:text-sm min-w-0"
-              >
-                <DollarSign className="h-4 w-4 flex-shrink-0" />
-                <span className="truncate">Amount</span>
-                {(filters.minAmountFilter || filters.maxAmountFilter) && (
-                  <Badge variant="secondary" className="ml-1 text-xs hidden lg:inline-block">
-                    {filters.minAmountFilter && filters.maxAmountFilter
-                      ? `${filters.minAmountFilter} - ${filters.maxAmountFilter}`
-                      : filters.minAmountFilter
-                        ? `Min: ${filters.minAmountFilter}`
-                        : `Max: ${filters.maxAmountFilter}`}
-                  </Badge>
-                )}
-              </Button>
+            {/* Refine filters — second compact panel */}
+            <div className={cn("p-3 sm:p-4", glassInset)}>
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <p className={sectionLabel}>Refine</p>
+                {hasActiveFilters ? (
+                  <Button
+                    type="button"
+                    onClick={() => dispatch(clearAllFilters())}
+                    variant="outline"
+                    size="sm"
+                    className={cn(
+                      glassFilterBtn,
+                      "h-8 border-red-300/55 bg-red-500/10 px-2.5 text-xs text-red-700 hover:bg-red-500/18 dark:border-red-500/25 dark:bg-red-500/15 dark:text-red-300 dark:hover:bg-red-500/25"
+                    )}
+                  >
+                    <X className="h-3.5 w-3.5 shrink-0" />
+                    <span>Clear</span>
+                  </Button>
+                ) : null}
+              </div>
+              <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+                <Button
+                  type="button"
+                  onClick={openAmountFilterModal}
+                  variant="outline"
+                  size="sm"
+                  className={cn(
+                    glassFilterBtn,
+                    "col-span-2 md:col-span-1",
+                    filters.minAmountFilter || filters.maxAmountFilter ? glassFilterOn : glassFilterOff
+                  )}
+                >
+                  <DollarSign className="h-4 w-4 shrink-0" />
+                  <span className="truncate">Amount</span>
+                  {(filters.minAmountFilter || filters.maxAmountFilter) && (
+                    <Badge
+                      variant="secondary"
+                      className="ml-0.5 hidden max-w-[5.5rem] truncate border-0 bg-white/50 text-[10px] font-normal backdrop-blur-sm dark:bg-white/10 lg:inline-flex"
+                    >
+                      {filters.minAmountFilter && filters.maxAmountFilter
+                        ? `${filters.minAmountFilter} – ${filters.maxAmountFilter}`
+                        : filters.minAmountFilter
+                          ? `Min ${filters.minAmountFilter}`
+                          : `Max ${filters.maxAmountFilter}`}
+                    </Badge>
+                  )}
+                </Button>
 
               {/* Status Filter Dropdown */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
-                    variant={filters.statusFilter !== "all" ? "default" : "outline"}
+                    type="button"
+                    variant="outline"
                     size="sm"
-                    className="flex items-center justify-center gap-1 sm:gap-2 dark:text-blue-400 text-xs sm:text-sm min-w-0"
+                    className={cn(
+                      glassFilterBtn,
+                      "w-full",
+                      filters.statusFilter !== "all" ? glassFilterOn : glassFilterOff
+                    )}
                   >
-                    <CheckCircle className="h-4 w-4 flex-shrink-0" />
-                    <span className="truncate">{getStatusDisplayText}</span>
-                    <ChevronDown className="h-4 w-4 flex-shrink-0" />
+                    <CheckCircle className="h-4 w-4 shrink-0" />
+                    <span className="min-w-0 flex-1 truncate text-left">{getStatusDisplayText}</span>
+                    <ChevronDown className="h-4 w-4 shrink-0 opacity-60" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-48">
+                <DropdownMenuContent align="start" className={cn("w-48", menuGlass)}>
                   <DropdownMenuItem onClick={() => dispatch(setFilters({ statusFilter: "all" }))}>
                     <div className="flex items-center gap-2">
                       <div className="w-4 h-4" />
@@ -1012,16 +1116,21 @@ export default function PurchaseTab({
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
-                    variant={filters.paymentMethodFilter !== "all" ? "default" : "outline"}
+                    type="button"
+                    variant="outline"
                     size="sm"
-                    className="flex items-center justify-center gap-1 sm:gap-2 dark:text-blue-400 text-xs sm:text-sm min-w-0"
+                    className={cn(
+                      glassFilterBtn,
+                      "w-full",
+                      filters.paymentMethodFilter !== "all" ? glassFilterOn : glassFilterOff
+                    )}
                   >
-                    <CreditCard className="h-4 w-4 flex-shrink-0" />
-                    <span className="truncate">{getPaymentMethodDisplayText}</span>
-                    <ChevronDown className="h-4 w-4 flex-shrink-0" />
+                    <CreditCard className="h-4 w-4 shrink-0" />
+                    <span className="min-w-0 flex-1 truncate text-left">{getPaymentMethodDisplayText}</span>
+                    <ChevronDown className="h-4 w-4 shrink-0 opacity-60" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-48">
+                <DropdownMenuContent align="start" className={cn("w-48", menuGlass)}>
                   <DropdownMenuItem onClick={() => dispatch(setFilters({ paymentMethodFilter: "all" }))}>
                     <div className="flex items-center gap-2">
                       <div className="w-4 h-4" />
@@ -1053,16 +1162,21 @@ export default function PurchaseTab({
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
-                    variant={filters.deliveryStatusFilter !== "all" ? "default" : "outline"}
+                    type="button"
+                    variant="outline"
                     size="sm"
-                    className="flex items-center justify-center gap-1 sm:gap-2 dark:text-blue-400 text-xs sm:text-sm min-w-0"
+                    className={cn(
+                      glassFilterBtn,
+                      "w-full",
+                      filters.deliveryStatusFilter !== "all" ? glassFilterOn : glassFilterOff
+                    )}
                   >
-                    <Truck className="h-4 w-4 flex-shrink-0" />
-                    <span className="truncate">{getDeliveryStatusDisplayText}</span>
-                    <ChevronDown className="h-4 w-4 flex-shrink-0" />
+                    <Truck className="h-4 w-4 shrink-0" />
+                    <span className="min-w-0 flex-1 truncate text-left">{getDeliveryStatusDisplayText}</span>
+                    <ChevronDown className="h-4 w-4 shrink-0 opacity-60" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-48">
+                <DropdownMenuContent align="start" className={cn("w-48", menuGlass)}>
                   <DropdownMenuItem onClick={() => dispatch(setFilters({ deliveryStatusFilter: "all" }))}>
                     <div className="flex items-center gap-2">
                       <div className="w-4 h-4" />
@@ -1088,25 +1202,32 @@ export default function PurchaseTab({
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
-                    variant={filters.supplierFilter !== "all" ? "default" : "outline"}
+                    type="button"
+                    variant="outline"
                     size="sm"
-                    className="flex items-center justify-center gap-1 sm:gap-2 dark:text-blue-400 text-xs sm:text-sm min-w-0 col-span-2 sm:col-span-1"
+                    className={cn(
+                      glassFilterBtn,
+                      "col-span-2 w-full md:col-span-4",
+                      filters.supplierFilter !== "all" ? glassFilterOn : glassFilterOff
+                    )}
                   >
-                    <Building className="h-4 w-4 flex-shrink-0" />
-                    <span className="truncate">{filters.supplierFilter === "all" ? "All Suppliers" : filters.supplierFilter}</span>
-                    <ChevronDown className="h-4 w-4 flex-shrink-0" />
+                    <Building className="h-4 w-4 shrink-0" />
+                    <span className="min-w-0 flex-1 truncate text-left">
+                      {filters.supplierFilter === "all" ? "All suppliers" : filters.supplierFilter}
+                    </span>
+                    <ChevronDown className="h-4 w-4 shrink-0 opacity-60" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-64">
+                <DropdownMenuContent align="start" className={cn("w-64", menuGlass)}>
                   {/* Search input for suppliers */}
-                  <div className="p-2 border-b">
-                    <div className="relative">
+                  <div className="border-b border-white/40 p-2 dark:border-white/10">
+                    <div className="relative rounded-lg border border-white/40 bg-white/40 backdrop-blur-md dark:border-white/10 dark:bg-white/[0.06]">
                       <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
                       <Input
                         placeholder="Search suppliers..."
                         value={supplierSearchTerm}
                         onChange={(e) => setSupplierSearchTerm(e.target.value)}
-                        className="pl-8 h-8"
+                        className="h-8 border-0 bg-transparent pl-8 shadow-none focus-visible:ring-0"
                       />
                     </div>
                   </div>
@@ -1136,19 +1257,7 @@ export default function PurchaseTab({
                   </div>
                 </DropdownMenuContent>
               </DropdownMenu>
-
-              {/* Clear All Filters Button */}
-              {hasActiveFilters && (
-                <Button
-                  onClick={() => dispatch(clearAllFilters())}
-                  variant="outline"
-                  size="sm"
-                  className="flex items-center justify-center gap-1 sm:gap-2 text-red-600 border-red-200 hover:bg-red-50 dark:text-red-400 dark:border-red-800 dark:hover:bg-red-900/20 text-xs sm:text-sm min-w-0 col-span-2 sm:col-span-1"
-                >
-                  <X className="h-4 w-4 flex-shrink-0" />
-                  <span className="truncate">Clear All</span>
-                </Button>
-              )}
+              </div>
             </div>
           </div>
 

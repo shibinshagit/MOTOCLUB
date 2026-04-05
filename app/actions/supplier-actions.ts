@@ -189,25 +189,6 @@ export async function createSupplier(formData: FormData) {
   resetConnectionState()
 
   try {
-    console.log("createSupplier: Creating suppliers table if not exists")
-    try {
-      await sql`
-        CREATE TABLE IF NOT EXISTS suppliers (
-          id SERIAL PRIMARY KEY,
-          name VARCHAR(255) NOT NULL,
-          phone VARCHAR(50) NOT NULL,
-          email VARCHAR(255),
-          address TEXT,
-          created_by INTEGER NOT NULL,
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-      `
-      console.log("createSupplier: Suppliers table ready")
-    } catch (error) {
-      console.error("createSupplier: Error creating suppliers table:", error)
-    }
-
     console.log("createSupplier: Checking for existing supplier")
     const existingSupplier = await sql`
       SELECT id FROM suppliers 
@@ -254,16 +235,6 @@ export async function updateSupplier(formData: FormData) {
   resetConnectionState()
 
   try {
-    // First, ensure the updated_at column exists
-    try {
-      await sql`
-        ALTER TABLE suppliers 
-        ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      `
-    } catch (error) {
-      console.log("Column updated_at might already exist or couldn't be added:", error)
-    }
-
     // Get the old supplier name before update
     const oldSupplierResult = await sql`
       SELECT name FROM suppliers WHERE id = ${id} AND created_by = ${userId}

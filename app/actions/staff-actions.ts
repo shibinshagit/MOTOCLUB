@@ -3,53 +3,15 @@
 import { sql } from "@/lib/db"
 import { revalidatePath } from "next/cache"
 
-// Initialize staff schema
+// Schema is now managed by `npm run migrate`
 export async function initializeStaffSchema() {
-  try {
-    // Create staff table
-    await sql`
-      CREATE TABLE IF NOT EXISTS staff (
-        id SERIAL PRIMARY KEY,
-        name VARCHAR(255) NOT NULL,
-        phone VARCHAR(50) NOT NULL,
-        email VARCHAR(255),
-        position VARCHAR(100) NOT NULL,
-        salary DECIMAL(10,2) NOT NULL,
-        salary_date DATE NOT NULL,
-        joined_on DATE NOT NULL,
-        age INTEGER,
-        id_card_number VARCHAR(100),
-        address TEXT,
-        is_active BOOLEAN DEFAULT true,
-        device_id INTEGER NOT NULL,
-        company_id INTEGER DEFAULT 1,
-        created_by INTEGER NOT NULL,
-        created_at TIMESTAMP DEFAULT NOW(),
-        updated_at TIMESTAMP DEFAULT NOW()
-      )
-    `
-
-    // Add columns to service_items if they don't exist
-    await sql`ALTER TABLE service_items ADD COLUMN IF NOT EXISTS staff_id INTEGER`
-    await sql`ALTER TABLE service_items ADD COLUMN IF NOT EXISTS service_cost DECIMAL(10,2) DEFAULT 0`
-    await sql`ALTER TABLE service_items ADD COLUMN IF NOT EXISTS include_cost_in_invoice BOOLEAN DEFAULT false`
-
-    // Create indexes
-    await sql`CREATE INDEX IF NOT EXISTS idx_staff_device_id ON staff(device_id)`
-    await sql`CREATE INDEX IF NOT EXISTS idx_staff_active ON staff(is_active)`
-    await sql`CREATE INDEX IF NOT EXISTS idx_staff_position ON staff(position)`
-
-    return { success: true, message: "Staff schema initialized successfully" }
-  } catch (error) {
-    console.error("Error initializing staff schema:", error)
-    return { success: false, message: "Failed to initialize staff schema" }
-  }
+  return { success: true, message: "Schema managed by migration script — run `npm run migrate`" }
 }
 
 // Get all staff for a device (including inactive for management)
 export async function getDeviceStaff(deviceId: number) {
   try {
-    await initializeStaffSchema()
+
 
     const staff = await sql`
       SELECT * FROM staff 
@@ -67,7 +29,7 @@ export async function getDeviceStaff(deviceId: number) {
 // Get only active staff for a device
 export async function getActiveStaff(deviceId: number) {
   try {
-    await initializeStaffSchema()
+
 
     const staff = await sql`
       SELECT * FROM staff 
@@ -111,7 +73,7 @@ export async function updateStaff(
       return { success: false, message: "Staff ID is required" }
     }
 
-    await initializeStaffSchema()
+
 
     // Check if staff member exists and belongs to the device
     const existingStaff = await sql`
@@ -237,7 +199,7 @@ export async function addStaff(staffData: {
       return { success: false, message: "User ID is required" }
     }
 
-    await initializeStaffSchema()
+
 
     // Check if there's already an active staff member
     const activeStaffCheck = await sql`
