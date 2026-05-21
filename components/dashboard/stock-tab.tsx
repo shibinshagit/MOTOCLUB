@@ -659,6 +659,11 @@ export default function StockTab({ userId, mockMode = false }: StockTabProps) {
                         </th>
                         <th className="px-6 py-3 text-left">
                           <div className="text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300">
+                            Other Devices
+                          </div>
+                        </th>
+                        <th className="px-6 py-3 text-left">
+                          <div className="text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300">
                             Status
                           </div>
                         </th>
@@ -709,6 +714,11 @@ export default function StockTab({ userId, mockMode = false }: StockTabProps) {
                               }`}
                             >
                               {product.stock}
+                            </div>
+                          </td>
+                          <td className="px-6 py-3">
+                            <div className="font-semibold text-blue-600 dark:text-blue-300">
+                              {Number.parseInt(product.other_devices_stock || 0)}
                             </div>
                           </td>
                           <td className="px-6 py-3">{getStockStatus(Number.parseInt(product.stock) || 0)}</td>
@@ -835,6 +845,7 @@ export default function StockTab({ userId, mockMode = false }: StockTabProps) {
             setAdjustModalOpen(true)
           }}
           currency={currency}
+          userId={userId}
         />
       )}
 

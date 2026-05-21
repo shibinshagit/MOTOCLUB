@@ -4,6 +4,48 @@ import { sql, getLastError, resetConnectionState } from "@/lib/db"
 import { revalidatePath } from "next/cache"
 import { recordPurchaseTransaction, recordPurchaseAdjustment, deletePurchaseTransaction } from "./simplified-accounting"
 
+async function ensureProductDeviceStockTable() {
+  await sql`
+    CREATE TABLE IF NOT EXISTS product_device_stock (
+      id SERIAL PRIMARY KEY,
+      product_id INTEGER NOT NULL,
+      device_id INTEGER NOT NULL,
+      stock INTEGER NOT NULL DEFAULT 0,
+      updated_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(product_id, device_id)
+    )
+  `
+}
+
+async function adjustDeviceProductStock(productId: number, deviceId: number, delta: number) {
+  await ensureProductDeviceStockTable()
+
+  const productCheck = await sql`
+    SELECT id FROM products WHERE id = ${productId}
+  `
+
+  if (productCheck.length === 0) return
+
+  const deviceStock = await sql`
+    SELECT stock
+    FROM product_device_stock
+    WHERE product_id = ${productId} AND device_id = ${deviceId}
+    LIMIT 1
+  `
+
+  const currentStock = deviceStock.length > 0 ? Number(deviceStock[0].stock || 0) : 0
+
+  const nextStock = Math.max(0, currentStock + delta)
+
+  await sql`
+    INSERT INTO product_device_stock (product_id, device_id, stock, updated_at)
+    VALUES (${productId}, ${deviceId}, ${nextStock}, NOW())
+    ON CONFLICT (product_id, device_id)
+    DO UPDATE SET stock = ${nextStock}, updated_at = NOW()
+  `
+
+}
+
 export async function getPurchases() {
   try {
     const purchases = await sql`
@@ -182,11 +224,7 @@ export async function createPurchase(formData: FormData) {
 
         // Only update stock when purchase status is Delivered AND not Cancelled
         if (isDelivered && !isCancelled) {
-          await sql`
-            UPDATE products
-            SET stock = stock + ${item.quantity}
-            WHERE id = ${item.product_id}
-          `
+          await adjustDeviceProductStock(item.product_id, deviceId, Number(item.quantity))
 
           // Add stock history entry for purchase
           try {
@@ -194,10 +232,10 @@ export async function createPurchase(formData: FormData) {
 
             await sql`
               INSERT INTO product_stock_history (
-                product_id, quantity, type, reference_id, reference_type, notes, created_by
+                product_id, quantity, type, reference_id, reference_type, notes, created_by, device_id
               ) VALUES (
                 ${item.product_id}, ${item.quantity}, 'purchase', ${purchaseId}, 'purchase', 
-                ${historyNote}, ${userId}
+                ${historyNote}, ${userId}, ${deviceId}
               )
             `
           } catch (error) {
@@ -380,12 +418,8 @@ export async function updatePurchase(formData: FormData) {
             new_quantity: newQuantity,
           })
 
-          // Update the product stock
-          await sql`
-            UPDATE products
-            SET stock = stock + ${netChange}
-            WHERE id = ${productId}
-          `
+          // Update the product stock for this device
+          await adjustDeviceProductStock(productId, deviceId, Number(netChange))
 
           // Create a single stock history entry for the net change
           try {
@@ -402,10 +436,10 @@ export async function updatePurchase(formData: FormData) {
 
             await sql`
               INSERT INTO product_stock_history (
-                product_id, quantity, type, reference_id, reference_type, notes, created_by
+                product_id, quantity, type, reference_id, reference_type, notes, created_by, device_id
               ) VALUES (
                 ${productId}, ${netChange}, ${historyType}, ${purchaseId}, 'purchase', 
-                ${historyNote}, ${userId}
+                ${historyNote}, ${userId}, ${deviceId}
               )
             `
           } catch (error) {
@@ -506,11 +540,7 @@ export async function deletePurchase(purchaseId: number, deviceId: number) {
       if (wasStockAdded) {
         console.log("Removing stock for deleted purchase items:", items)
         for (const item of items) {
-          await sql`
-            UPDATE products
-            SET stock = stock - ${item.quantity}
-            WHERE id = ${item.product_id}
-          `
+          await adjustDeviceProductStock(item.product_id, deviceId, -Number(item.quantity))
 
           // Record negative adjustment
           try {
@@ -522,7 +552,8 @@ export async function deletePurchase(purchaseId: number, deviceId: number) {
                 reference_id,
                 reference_type,
                 notes,
-                created_by
+                created_by,
+                device_id
               )
               VALUES (
                 ${item.product_id},
@@ -531,7 +562,8 @@ export async function deletePurchase(purchaseId: number, deviceId: number) {
                 ${purchaseId},
                 'purchase',
                 ${`Stock removed due to purchase #${purchaseId} deletion`},
-                ${purchase.created_by}
+                ${purchase.created_by},
+                ${deviceId}
               )
             `
           } catch (error) {

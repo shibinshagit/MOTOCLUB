@@ -90,6 +90,38 @@ async function uploadProductImage(file: File, productName: string): Promise<stri
   }
 }
 
+async function ensureProductDeviceStockTable() {
+  await sql`
+    CREATE TABLE IF NOT EXISTS product_device_stock (
+      id SERIAL PRIMARY KEY,
+      product_id INTEGER NOT NULL,
+      device_id INTEGER NOT NULL,
+      stock INTEGER NOT NULL DEFAULT 0,
+      updated_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(product_id, device_id)
+    )
+  `
+}
+
+function resolveDeviceStock(product: any, stockMap: Map<number, number>) {
+  if (stockMap.has(product.id)) {
+    return Number(stockMap.get(product.id) || 0)
+  }
+
+  return 0
+}
+
+async function upsertDeviceStock(productId: number, deviceId: number, stock: number) {
+  await ensureProductDeviceStockTable()
+
+  await sql`
+    INSERT INTO product_device_stock (product_id, device_id, stock, updated_at)
+    VALUES (${productId}, ${deviceId}, ${Math.max(0, stock)}, NOW())
+    ON CONFLICT (product_id, device_id)
+    DO UPDATE SET stock = ${Math.max(0, stock)}, updated_at = NOW()
+  `
+}
+
 // NEW: Updated getProducts function with limit and search functionality
 // Add this improved version to your product-actions.ts file
 // Replace the existing getProducts function
@@ -313,11 +345,46 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
       }
     }
 
-    // Map results
-    const mappedProducts = products.map((product) => ({
-      ...product,
-      category: product.category_name || product.category || "",
-    }))
+    let stockMap = new Map<number, number>()
+    let companyTotalStockMap = new Map<number, number>()
+    if (userId) {
+      await ensureProductDeviceStockTable()
+      const deviceStocks = await sql`
+        SELECT product_id, stock
+        FROM product_device_stock
+        WHERE device_id = ${userId}
+      `
+      stockMap = new Map(deviceStocks.map((row) => [Number(row.product_id), Number(row.stock)]))
+
+      const companyDeviceStocks = await sql`
+        SELECT pds.product_id, COALESCE(SUM(pds.stock), 0) AS total_stock
+        FROM product_device_stock pds
+        JOIN devices d ON d.id = pds.device_id
+        WHERE d.company_id = (
+          SELECT company_id FROM devices WHERE id = ${userId}
+        )
+        GROUP BY pds.product_id
+      `
+      companyTotalStockMap = new Map(
+        companyDeviceStocks.map((row) => [Number(row.product_id), Number(row.total_stock)]),
+      )
+    }
+
+    // Map results with device-specific stock
+    const mappedProducts = products.map((product) => {
+      const currentDeviceStock = userId ? resolveDeviceStock(product, stockMap) : 0
+      const companyTotalStock = userId
+        ? Number(companyTotalStockMap.get(product.id) ?? currentDeviceStock)
+        : currentDeviceStock
+
+      return {
+        ...product,
+        stock: currentDeviceStock,
+        company_total_stock: companyTotalStock,
+        other_devices_stock: Math.max(0, companyTotalStock - currentDeviceStock),
+        category: product.category_name || product.category || "",
+      }
+    })
 
     console.log(`Found ${mappedProducts.length} products`)
 
@@ -333,7 +400,7 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
 }
 
 
-export async function getProductById(id: number) {
+export async function getProductById(id: number, userId?: number) {
   if (!id) {
     return { success: false, message: "Product ID is required", data: null }
   }
@@ -355,9 +422,26 @@ export async function getProductById(id: number) {
       return { success: false, message: "Product not found", data: null }
     }
 
+    let resolvedStock = 0
+    if (userId) {
+      await ensureProductDeviceStockTable()
+      const deviceStock = await sql`
+        SELECT stock
+        FROM product_device_stock
+        WHERE product_id = ${result[0].id} AND device_id = ${userId}
+        LIMIT 1
+      `
+
+      resolvedStock =
+        deviceStock.length > 0
+          ? Number(deviceStock[0].stock || 0)
+          : 0
+    }
+
     // Include category from either category_id or legacy category field
     const product = {
       ...result[0],
+      stock: resolvedStock,
       category: result[0].category_name || result[0].category || "",
     }
 
@@ -603,7 +687,6 @@ export async function createProduct(formData: FormData) {
             price,
             wholesale_price,
             msp,
-            stock, 
             shelf,
             image_url,
             created_by,
@@ -623,7 +706,6 @@ export async function createProduct(formData: FormData) {
             ${price},
             ${wholesalePrice},
             ${msp},
-            ${stock}, 
             ${shelf || ""},
             ${imageUrl},
             ${userId},
@@ -652,13 +734,17 @@ export async function createProduct(formData: FormData) {
           WHERE id = ${productId}
         `
 
+        if (userId) {
+          await upsertDeviceStock(productId, userId, stock)
+        }
+
         // Always add a stock history record for initial stock (even if 0)
         try {
           await sql`
             INSERT INTO product_stock_history (
-              product_id, quantity, type, reference_type, notes, created_by
+              product_id, quantity, type, reference_type, notes, created_by, device_id
             ) VALUES (
-              ${productId}, ${stock}, 'adjustment', 'manual', 'Initial stock', ${userId}
+              ${productId}, ${stock}, 'adjustment', 'manual', 'Initial stock', ${userId}, ${userId}
             )
           `
         } catch (error) {
@@ -775,7 +861,17 @@ export async function updateProduct(formData: FormData) {
     // Start a transaction
     await sql`BEGIN`
 
-    const oldStock = currentProduct[0].stock
+    const stockDeviceId = userId || currentProduct[0].created_by
+    await ensureProductDeviceStockTable()
+
+    const existingDeviceStock = await sql`
+      SELECT stock
+      FROM product_device_stock
+      WHERE product_id = ${id} AND device_id = ${stockDeviceId}
+      LIMIT 1
+    `
+
+    const oldStock = existingDeviceStock.length > 0 ? Number(existingDeviceStock[0].stock || 0) : 0
 
     // Update the product with all new fields
     let result
@@ -792,7 +888,6 @@ export async function updateProduct(formData: FormData) {
           price = ${price},
           wholesale_price = ${wholesalePrice},
           msp = ${msp},
-          stock = ${stock}, 
           shelf = ${shelf || ""},
           image_url = ${imageUrl},
           barcode = ${barcode || currentProduct[0].barcode},
@@ -822,7 +917,6 @@ export async function updateProduct(formData: FormData) {
           price = ${price},
           wholesale_price = ${wholesalePrice},
           msp = ${msp},
-          stock = ${stock}, 
           shelf = ${shelf || ""},
           image_url = ${imageUrl},
           barcode = ${barcode || currentProduct[0].barcode},
@@ -837,6 +931,8 @@ export async function updateProduct(formData: FormData) {
     }
 
     if (result.length > 0) {
+      await upsertDeviceStock(id, stockDeviceId, stock)
+
       // If stock has changed, add a stock history record
       if (stock !== oldStock) {
         const adjustmentQuantity = stock - oldStock
@@ -845,9 +941,9 @@ export async function updateProduct(formData: FormData) {
         try {
           await sql`
             INSERT INTO product_stock_history (
-              product_id, quantity, type, reference_type, notes, created_by
+              product_id, quantity, type, reference_type, notes, created_by, device_id
             ) VALUES (
-              ${id}, ${Math.abs(adjustmentQuantity)}, ${adjustmentType}, 'manual', 'Stock adjustment from product edit', ${userId || currentProduct[0].created_by}
+              ${id}, ${Math.abs(adjustmentQuantity)}, ${adjustmentType}, 'manual', 'Stock adjustment from product edit', ${userId || currentProduct[0].created_by}, ${stockDeviceId}
             )
           `
         } catch (error) {
@@ -869,6 +965,7 @@ export async function updateProduct(formData: FormData) {
       await sql`COMMIT`
 
       const updatedProduct = result[0]
+      updatedProduct.stock = stock
       updatedProduct.category = categoryName
 
       return { success: true, message: "Product updated successfully", data: updatedProduct }
@@ -968,17 +1065,20 @@ export async function getProductStockHistory(productId: number) {
     try {
       const history = await sql`
         SELECT 
-          id, 
-          product_id, 
-          quantity, 
-          type, 
-          reference_id, 
-          reference_type, 
-          notes, 
-          created_at as date
-        FROM product_stock_history
-        WHERE product_id = ${productId}
-        ORDER BY created_at DESC
+          h.id, 
+          h.product_id, 
+          h.quantity, 
+          h.type, 
+          h.reference_id, 
+          h.reference_type, 
+          h.notes, 
+          h.device_id,
+          COALESCE(d.name, 'Unknown Device') AS device_name,
+          h.created_at as date
+        FROM product_stock_history h
+        LEFT JOIN devices d ON d.id = h.device_id
+        WHERE h.product_id = ${productId}
+        ORDER BY h.created_at DESC
       `
       return { success: true, data: history }
     } catch (error) {
@@ -987,6 +1087,45 @@ export async function getProductStockHistory(productId: number) {
     }
   } catch (error) {
     console.error("Get product stock history error:", error)
+    return {
+      success: false,
+      message: `Database error: ${getLastError()?.message || "Unknown error"}. Please try again later.`,
+      data: [],
+    }
+  }
+}
+
+export async function getProductStockByDevice(productId: number, userId: number) {
+  if (!productId || !userId) {
+    return { success: false, message: "Product ID and User ID are required", data: [] }
+  }
+
+  resetConnectionState()
+
+  try {
+    await ensureProductDeviceStockTable()
+
+    const devices = await sql`
+      SELECT d.id AS device_id, d.name AS device_name, COALESCE(pds.stock, 0) AS stock
+      FROM devices d
+      LEFT JOIN product_device_stock pds
+        ON pds.device_id = d.id AND pds.product_id = ${productId}
+      WHERE d.company_id = (
+        SELECT company_id FROM devices WHERE id = ${userId}
+      )
+      ORDER BY d.name ASC
+    `
+
+    const data = devices.map((row) => ({
+      device_id: Number(row.device_id),
+      device_name: row.device_name,
+      stock: Number(row.stock || 0),
+      is_current_device: Number(row.device_id) === Number(userId),
+    }))
+
+    return { success: true, data }
+  } catch (error) {
+    console.error("Get product stock by device error:", error)
     return {
       success: false,
       message: `Database error: ${getLastError()?.message || "Unknown error"}. Please try again later.`,
@@ -1026,12 +1165,23 @@ export async function adjustProductStock(formData: FormData) {
       return { success: false, message: "Product not found" }
     }
 
+    await ensureProductDeviceStockTable()
+
+    const existingDeviceStock = await sql`
+      SELECT stock
+      FROM product_device_stock
+      WHERE product_id = ${productId} AND device_id = ${userId}
+      LIMIT 1
+    `
+
+    const currentStock = existingDeviceStock.length > 0 ? Number(existingDeviceStock[0].stock || 0) : 0
+
     // Calculate new stock
     let newStock
     if (type === "increase") {
-      newStock = product[0].stock + quantity
+      newStock = currentStock + quantity
     } else {
-      newStock = product[0].stock - quantity
+      newStock = currentStock - quantity
 
       // Check if we have enough stock
       if (newStock < 0) {
@@ -1040,21 +1190,20 @@ export async function adjustProductStock(formData: FormData) {
       }
     }
 
-    // Update product stock
-    const updatedProduct = await sql`
-      UPDATE products
-      SET stock = ${newStock}
-      WHERE id = ${productId}
-      RETURNING *
-    `
+    await upsertDeviceStock(productId, userId, newStock)
+
+    const updatedProduct = {
+      ...product[0],
+      stock: newStock,
+    }
 
     // Add stock history record
     try {
       await sql`
         INSERT INTO product_stock_history (
-          product_id, quantity, type, reference_type, notes, created_by
+          product_id, quantity, type, reference_type, notes, created_by, device_id
         ) VALUES (
-          ${productId}, ${quantity}, ${type === "increase" ? "adjustment" : "adjustment"}, 'manual', ${notes || "Manual stock adjustment"}, ${userId}
+          ${productId}, ${quantity}, ${type === "increase" ? "adjustment" : "adjustment"}, 'manual', ${notes || "Manual stock adjustment"}, ${userId}, ${userId}
         )
       `
     } catch (error) {
@@ -1068,7 +1217,7 @@ export async function adjustProductStock(formData: FormData) {
     return {
       success: true,
       message: `Stock ${type === "increase" ? "increased" : "decreased"} successfully`,
-      data: updatedProduct[0],
+      data: updatedProduct,
     }
   } catch (error) {
     await sql`ROLLBACK`
@@ -1120,9 +1269,24 @@ export async function getProductByBarcode(barcode: string, userId?: number) {
       return { success: false, message: "Product not found", data: null }
     }
 
+    let resolvedStock = 0
+    if (userId) {
+      await ensureProductDeviceStockTable()
+      const deviceStock = await sql`
+        SELECT stock
+        FROM product_device_stock
+        WHERE product_id = ${result[0].id} AND device_id = ${userId}
+        LIMIT 1
+      `
+      if (deviceStock.length > 0) {
+        resolvedStock = Number(deviceStock[0].stock || 0)
+      }
+    }
+
     // Include category from either category_id or legacy category field
     const product = {
       ...result[0],
+      stock: resolvedStock,
       category: result[0].category_name || result[0].category || "",
     }
 
@@ -1158,9 +1322,18 @@ export async function getUserProducts(userId: number) {
       ORDER BY p.name ASC
     `
 
-    // Map the results to include category from either category_id or legacy category field
+    await ensureProductDeviceStockTable()
+    const deviceStocks = await sql`
+      SELECT product_id, stock
+      FROM product_device_stock
+      WHERE device_id = ${userId}
+    `
+    const stockMap = new Map(deviceStocks.map((row) => [Number(row.product_id), Number(row.stock)]))
+
+    // Map the results to include category and device-specific stock
     const mappedProducts = products.map((product) => ({
       ...product,
+      stock: resolveDeviceStock(product, stockMap),
       category: product.category_name || product.category || "",
     }))
 

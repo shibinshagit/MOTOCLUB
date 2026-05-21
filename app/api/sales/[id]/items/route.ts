@@ -9,13 +9,22 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
       return NextResponse.json({ success: false, message: "Invalid sale ID" }, { status: 400 })
     }
 
+    const saleResult = await sql`
+      SELECT device_id, created_by
+      FROM sales
+      WHERE id = ${saleId}
+      LIMIT 1
+    `
+
+    const stockDeviceId = Number(saleResult[0]?.device_id || saleResult[0]?.created_by || 0)
+
     // Get sale items with comprehensive product and service information
     const itemsResult = await sql`
       SELECT 
         si.*,
         p.name as product_name,
         p.category as product_category,
-        p.stock,
+        COALESCE(pds.stock, 0) as stock,
         p.barcode,
         p.description as product_description,
         p.wholesale_price as product_wholesale_price,
@@ -31,6 +40,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
         END as item_type
       FROM sale_items si
       LEFT JOIN products p ON si.product_id = p.id AND NOT EXISTS (SELECT 1 FROM services srv WHERE srv.id = si.product_id)
+      LEFT JOIN product_device_stock pds ON pds.product_id = p.id AND pds.device_id = ${stockDeviceId}
       LEFT JOIN services s ON si.product_id = s.id
       WHERE si.sale_id = ${saleId}
       ORDER BY si.id

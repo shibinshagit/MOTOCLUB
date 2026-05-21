@@ -116,7 +116,6 @@ async function createProductTables() {
         price DECIMAL(10, 2) NOT NULL,
         wholesale_price DECIMAL(10, 2) DEFAULT 0,
         msp DECIMAL(10, 2) DEFAULT 0,
-        stock INTEGER DEFAULT 0,
         barcode VARCHAR(255),
         image_url TEXT,
         shelf VARCHAR(255),
@@ -160,6 +159,26 @@ async function createProductTables() {
         created_by INTEGER,
         created_at TIMESTAMP DEFAULT NOW()
       )
+    `
+  })
+
+  await run("product_device_stock", async () => {
+    await sql`
+      CREATE TABLE IF NOT EXISTS product_device_stock (
+        id SERIAL PRIMARY KEY,
+        product_id INTEGER NOT NULL,
+        device_id INTEGER NOT NULL,
+        stock INTEGER NOT NULL DEFAULT 0,
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(product_id, device_id)
+      )
+    `
+  })
+
+  await runSafe("product_stock_history.device_id column", async () => {
+    await sql`
+      ALTER TABLE product_stock_history
+      ADD COLUMN IF NOT EXISTS device_id INTEGER
     `
   })
 
@@ -253,20 +272,6 @@ async function createSalesPurchaseTables() {
     `
   })
 
-  await run("stock_history", async () => {
-    await sql`
-      CREATE TABLE IF NOT EXISTS stock_history (
-        id SERIAL PRIMARY KEY,
-        product_id INTEGER NOT NULL,
-        change_type VARCHAR(50),
-        quantity_change INTEGER,
-        sale_id INTEGER,
-        purchase_id INTEGER,
-        notes TEXT,
-        created_at TIMESTAMP DEFAULT NOW()
-      )
-    `
-  })
 }
 
 // ─── staff & service tables ─────────────────────────────────────────────────
@@ -564,10 +569,6 @@ async function addColumns() {
   await runSafe("purchases.payment_method", () => sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50)`)
   await runSafe("purchases.purchase_status", () => sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS purchase_status VARCHAR(50) DEFAULT 'Delivered'`)
   await runSafe("purchases.received_amount", () => sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS received_amount DECIMAL(12,2) DEFAULT 0`)
-
-  // ── stock_history ──
-  await runSafe("stock_history.change_type", () => sql`ALTER TABLE stock_history ADD COLUMN IF NOT EXISTS change_type VARCHAR(50)`)
-  await runSafe("stock_history.quantity_change", () => sql`ALTER TABLE stock_history ADD COLUMN IF NOT EXISTS quantity_change INTEGER`)
 
   // ── service_items ──
   await runSafe("service_items.staff_id", () => sql`ALTER TABLE service_items ADD COLUMN IF NOT EXISTS staff_id INTEGER`)

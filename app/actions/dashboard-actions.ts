@@ -86,12 +86,21 @@ export async function getUserDashboardSummary(userId: number, deviceId: number) 
 
     // First, let's try to get the out of stock products (stock = 0)
     const outOfStockProducts = await sql`
-      SELECT 
+      SELECT
         p.*,
-        COALESCE(pc.name, p.category) as category_name
+        COALESCE(pc.name, p.category) as category_name,
+        COALESCE(pds.stock, 0) as stock
       FROM products p
       LEFT JOIN product_categories pc ON p.category_id = pc.id
-      WHERE p.stock = 0 AND p.created_by = ${userId}
+      LEFT JOIN product_device_stock pds
+        ON pds.product_id = p.id AND pds.device_id = ${userId}
+      WHERE COALESCE(pds.stock, 0) = 0
+        AND p.created_by IN (
+          SELECT d2.id
+          FROM devices d1
+          JOIN devices d2 ON d2.company_id = d1.company_id
+          WHERE d1.id = ${userId}
+        )
       ORDER BY p.name ASC
       LIMIT 5
     `
@@ -102,13 +111,23 @@ export async function getUserDashboardSummary(userId: number, deviceId: number) 
     // If we don't have any out of stock products, try to get low stock products (stock < 5)
     if (outOfStockProducts.length === 0) {
       lowStockProducts = await sql`
-        SELECT 
+        SELECT
           p.*,
-          COALESCE(pc.name, p.category) as category_name
+          COALESCE(pc.name, p.category) as category_name,
+          COALESCE(pds.stock, 0) as stock
         FROM products p
         LEFT JOIN product_categories pc ON p.category_id = pc.id
-        WHERE p.stock < 5 AND p.stock > 0 AND p.created_by = ${userId}
-        ORDER BY p.stock ASC
+        LEFT JOIN product_device_stock pds
+          ON pds.product_id = p.id AND pds.device_id = ${userId}
+        WHERE COALESCE(pds.stock, 0) < 5
+          AND COALESCE(pds.stock, 0) > 0
+          AND p.created_by IN (
+            SELECT d2.id
+            FROM devices d1
+            JOIN devices d2 ON d2.company_id = d1.company_id
+            WHERE d1.id = ${userId}
+          )
+        ORDER BY COALESCE(pds.stock, 0) ASC
         LIMIT 5
       `
     }
@@ -116,13 +135,22 @@ export async function getUserDashboardSummary(userId: number, deviceId: number) 
     // If we still don't have any products, try with a higher threshold (stock < 10)
     if (lowStockProducts.length === 0) {
       lowStockProducts = await sql`
-        SELECT 
+        SELECT
           p.*,
-          COALESCE(pc.name, p.category) as category_name
+          COALESCE(pc.name, p.category) as category_name,
+          COALESCE(pds.stock, 0) as stock
         FROM products p
         LEFT JOIN product_categories pc ON p.category_id = pc.id
-        WHERE p.stock < 10 AND p.created_by = ${userId}
-        ORDER BY p.stock ASC
+        LEFT JOIN product_device_stock pds
+          ON pds.product_id = p.id AND pds.device_id = ${userId}
+        WHERE COALESCE(pds.stock, 0) < 10
+          AND p.created_by IN (
+            SELECT d2.id
+            FROM devices d1
+            JOIN devices d2 ON d2.company_id = d1.company_id
+            WHERE d1.id = ${userId}
+          )
+        ORDER BY COALESCE(pds.stock, 0) ASC
         LIMIT 5
       `
     }

@@ -733,12 +733,21 @@ export async function getStockByCompany(companyId: number) {
       }
     }
 
-    // Get all products with stock information associated with devices from this company
+    // Get all products with aggregated stock across company devices
     const result = await sql`
-      SELECT p.id, p.name, p.category, p.stock, p.price
+      SELECT
+        p.id,
+        p.name,
+        p.category,
+        COALESCE(SUM(pds.stock), 0) AS stock,
+        p.price
       FROM products p
       JOIN devices d ON p.created_by = d.id
+      LEFT JOIN product_device_stock pds ON pds.product_id = p.id
+      LEFT JOIN devices sd ON sd.id = pds.device_id
       WHERE d.company_id = ${companyId}
+        AND (sd.company_id = ${companyId} OR sd.id IS NULL)
+      GROUP BY p.id, p.name, p.category, p.price
       ORDER BY p.name
     `
 
@@ -1351,12 +1360,22 @@ export async function getStockByDevice(deviceId: number) {
       }
     }
 
-    // Get all products with stock information created by this device
+    // Get all company products with this device's stock
     const result = await sql`
-      SELECT id, name, category, stock, price
-      FROM products
-      WHERE created_by = ${deviceId}
-      ORDER BY name
+      SELECT
+        p.id,
+        p.name,
+        p.category,
+        COALESCE(pds.stock, 0) AS stock,
+        p.price
+      FROM products p
+      JOIN devices d ON p.created_by = d.id
+      LEFT JOIN product_device_stock pds
+        ON pds.product_id = p.id AND pds.device_id = ${deviceId}
+      WHERE d.company_id = (
+        SELECT company_id FROM devices WHERE id = ${deviceId}
+      )
+      ORDER BY p.name
     `
 
     return {

@@ -859,6 +859,7 @@ export default function ProductTab({ userId, isAddModalOpen = false, onModalClos
           }}
           currency={currency}
           privacyMode={privacyMode}
+          userId={userId}
         />
       )}
 

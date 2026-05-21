@@ -5,7 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Button } from "@/components/ui/button"
 import { format } from "date-fns"
 import { Loader2, Printer, Copy, Settings } from "lucide-react"
-import { getProductStockHistory } from "@/app/actions/product-actions"
+import { getProductStockHistory, getProductStockByDevice } from "@/app/actions/product-actions"
 import { printBarcodeSticker, printMultipleBarcodeStickers, encodeNumberAsLetters } from "@/lib/barcode-utils"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
@@ -18,6 +18,7 @@ interface ViewProductModalProps {
   onAdjustStock?: () => void
   currency?: string
   privacyMode?: boolean
+  userId?: number
 }
 
 export default function ViewProductModal({
@@ -27,8 +28,10 @@ export default function ViewProductModal({
   onAdjustStock,
   currency: currencyProp,
   privacyMode = true,
+  userId,
 }: ViewProductModalProps) {
   const [stockHistory, setStockHistory] = useState<any[]>([])
+  const [deviceStocks, setDeviceStocks] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [printCopies, setPrintCopies] = useState(1)
   const [showPrintOptions, setShowPrintOptions] = useState(false)
@@ -56,10 +59,17 @@ export default function ViewProductModal({
           setStockHistory(result.data)
         }
 
+        const stockByDevice = await getProductStockByDevice(product.id, userId || product.created_by || 1)
+        if (stockByDevice.success) {
+          setDeviceStocks(stockByDevice.data)
+        } else {
+          setDeviceStocks([])
+        }
+
         // If currency is not provided as a prop, fetch it
         if (!currencyProp) {
           try {
-            const deviceCurrency = await getDeviceCurrency(product.created_by || 1)
+            const deviceCurrency = await getDeviceCurrency(userId || product.created_by || 1)
             setCurrency(deviceCurrency)
           } catch (err) {
             console.error("Error fetching currency:", err)
@@ -93,7 +103,7 @@ export default function ViewProductModal({
         })
         .catch((err) => console.error("Failed to load JsBarcode:", err))
     }
-  }, [isOpen, product?.id, currencyProp, product.barcode])
+  }, [isOpen, product?.id, currencyProp, product.barcode, userId, product.created_by])
 
   // Helper function to get type label and color
   const getTypeInfo = (
@@ -364,6 +374,43 @@ export default function ViewProductModal({
                 </div>
               </div>
 
+              {!privacyMode && deviceStocks.length > 0 && (
+                <div className="space-y-3">
+                  <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Stock by Warehouse/Device</h3>
+                  <div className="border rounded-md overflow-hidden border-gray-200 dark:border-gray-600">
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-600">
+                        <thead className="bg-gray-50 dark:bg-gray-800">
+                          <tr>
+                            <th className="px-4 py-2 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-left">
+                              Device
+                            </th>
+                            <th className="px-4 py-2 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-center">
+                              Stock
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-600">
+                          {deviceStocks.map((row) => (
+                            <tr key={row.device_id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                              <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-100">
+                                {row.device_name}
+                                {row.is_current_device ? (
+                                  <span className="ml-2 text-xs text-blue-600 dark:text-blue-300">(Current)</span>
+                                ) : null}
+                              </td>
+                              <td className="px-4 py-2 text-sm text-center text-gray-900 dark:text-gray-100 font-medium">
+                                {row.stock}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Print Price Tag Section */}
               <div className="border rounded-lg p-4 bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-600">
                 <h3 className="text-lg font-medium mb-3 text-gray-900 dark:text-gray-100">Price Tag Printing</h3>
@@ -445,6 +492,9 @@ export default function ViewProductModal({
                             <th className="px-4 py-2 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-left">
                               Type
                             </th>
+                            <th className="px-4 py-2 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-left">
+                              Device
+                            </th>
                             <th className="px-4 py-2 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-center">
                               Quantity
                             </th>
@@ -479,6 +529,9 @@ export default function ViewProductModal({
                                   >
                                     {privacyMode ? "*** Transaction" : typeInfo.label}
                                   </span>
+                                </td>
+                                <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-100">
+                                  {privacyMode ? "***" : item.device_name || "Unknown"}
                                 </td>
                                 <td className="px-4 py-2 text-sm text-center">
                                   {privacyMode ? (

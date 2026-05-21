@@ -26,11 +26,13 @@ export async function getDetailedSalesData(userId: number) {
       // For each sale, get the detailed items
       const salesWithItems = await Promise.all(
         sales.map(async (sale) => {
+          const stockDeviceId = Number(sale.device_id || sale.created_by || userId)
           const items = await sql`
             SELECT si.*, p.name as product_name, p.barcode, p.category, p.description as product_description,
-                   p.price as current_price, p.wholesale_price, p.stock as current_stock
+                   p.price as current_price, p.wholesale_price, COALESCE(pds.stock, 0) as current_stock
             FROM sale_items si
             JOIN products p ON si.product_id = p.id
+            LEFT JOIN product_device_stock pds ON pds.product_id = p.id AND pds.device_id = ${stockDeviceId}
             WHERE si.sale_id = ${sale.id}
           `
 
@@ -81,13 +83,15 @@ export async function getDetailedSaleData(saleId: number) {
       }
 
       const sale = sales[0]
+      const stockDeviceId = Number(sale.device_id || sale.created_by || 0)
 
       // Get the detailed items
       const items = await sql`
         SELECT si.*, p.name as product_name, p.barcode, p.category, p.description as product_description,
-               p.price as current_price, p.wholesale_price, p.stock as current_stock
+               p.price as current_price, p.wholesale_price, COALESCE(pds.stock, 0) as current_stock
         FROM sale_items si
         JOIN products p ON si.product_id = p.id
+        LEFT JOIN product_device_stock pds ON pds.product_id = p.id AND pds.device_id = ${stockDeviceId}
         WHERE si.sale_id = ${saleId}
       `
 
