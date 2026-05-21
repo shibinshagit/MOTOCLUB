@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { format } from "date-fns"
@@ -32,7 +32,11 @@ export default function ViewProductModal({
 }: ViewProductModalProps) {
   const [stockHistory, setStockHistory] = useState<any[]>([])
   const [deviceStocks, setDeviceStocks] = useState<any[]>([])
+  const [historyFilter, setHistoryFilter] = useState<"current" | "other" | "all">("current")
   const [isLoading, setIsLoading] = useState(false)
+  const [isLoadingAllHistory, setIsLoadingAllHistory] = useState(false)
+  const [hasMoreHistory, setHasMoreHistory] = useState(false)
+  const [isHistoryLimited, setIsHistoryLimited] = useState(true)
   const [printCopies, setPrintCopies] = useState(1)
   const [showPrintOptions, setShowPrintOptions] = useState(false)
   const [currency, setCurrency] = useState(currencyProp || "AED") // Use prop or default to AED
@@ -47,6 +51,16 @@ export default function ViewProductModal({
 
   // Get MSP (Maximum Selling Price)
   const msp = typeof product.msp === "number" ? product.msp : Number.parseFloat(product.msp || "0") || 0
+  const currentDeviceId = Number(userId || product.created_by || 1)
+
+  const loadStockHistory = async (limit?: number) => {
+    const result = await getProductStockHistory(product.id, limit)
+    if (result.success) {
+      setStockHistory(result.data)
+      setIsHistoryLimited(typeof limit === "number")
+      setHasMoreHistory(Boolean(result.hasMore))
+    }
+  }
 
   useEffect(() => {
     const fetchStockHistory = async () => {
@@ -54,10 +68,7 @@ export default function ViewProductModal({
 
       try {
         setIsLoading(true)
-        const result = await getProductStockHistory(product.id)
-        if (result.success) {
-          setStockHistory(result.data)
-        }
+        await loadStockHistory(5)
 
         const stockByDevice = await getProductStockByDevice(product.id, userId || product.created_by || 1)
         if (stockByDevice.success) {
@@ -104,6 +115,35 @@ export default function ViewProductModal({
         .catch((err) => console.error("Failed to load JsBarcode:", err))
     }
   }, [isOpen, product?.id, currencyProp, product.barcode, userId, product.created_by])
+
+  useEffect(() => {
+    if (isOpen) {
+      setHistoryFilter("current")
+      setIsHistoryLimited(true)
+    }
+  }, [isOpen, product?.id])
+
+  const handleLoadAllHistory = async () => {
+    if (!product?.id || isLoadingAllHistory) return
+    try {
+      setIsLoadingAllHistory(true)
+      await loadStockHistory()
+    } catch (error) {
+      console.error("Error loading full stock history:", error)
+    } finally {
+      setIsLoadingAllHistory(false)
+    }
+  }
+
+  const filteredHistory = useMemo(() => {
+    if (historyFilter === "all") {
+      return stockHistory
+    }
+    if (historyFilter === "current") {
+      return stockHistory.filter((item) => Number(item.device_id) === currentDeviceId)
+    }
+    return stockHistory.filter((item) => Number(item.device_id) !== currentDeviceId)
+  }, [stockHistory, historyFilter, currentDeviceId])
 
   // Helper function to get type label and color
   const getTypeInfo = (
@@ -474,13 +514,67 @@ export default function ViewProductModal({
 
               {/* Stock History Section - Show with masked data in privacy mode */}
               <div className="space-y-4">
-                <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">Stock History</h3>
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">Stock History</h3>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {isHistoryLimited && hasMoreHistory && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={handleLoadAllHistory}
+                        disabled={isLoadingAllHistory}
+                        className="h-8"
+                      >
+                        {isLoadingAllHistory ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : null}
+                        Show Full History
+                      </Button>
+                    )}
+                    <div className="inline-flex rounded-md border border-gray-200 dark:border-gray-600 overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => setHistoryFilter("current")}
+                        className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                          historyFilter === "current"
+                            ? "bg-blue-600 text-white"
+                            : "bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+                        }`}
+                      >
+                        Current Device
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setHistoryFilter("other")}
+                        className={`px-3 py-1.5 text-xs font-medium transition-colors border-l border-gray-200 dark:border-gray-600 ${
+                          historyFilter === "other"
+                            ? "bg-blue-600 text-white"
+                            : "bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+                        }`}
+                      >
+                        Other Devices
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setHistoryFilter("all")}
+                        className={`px-3 py-1.5 text-xs font-medium transition-colors border-l border-gray-200 dark:border-gray-600 ${
+                          historyFilter === "all"
+                            ? "bg-blue-600 text-white"
+                            : "bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+                        }`}
+                      >
+                        All
+                      </button>
+                    </div>
+                  </div>
+                </div>
 
                 {isLoading ? (
                   <div className="flex justify-center py-4">
                     <Loader2 className="animate-spin h-6 w-6 text-gray-400" />
                   </div>
-                ) : stockHistory.length > 0 ? (
+                ) : filteredHistory.length > 0 ? (
                   <div className="border rounded-md overflow-hidden border-gray-200 dark:border-gray-600">
                     <div className="overflow-x-auto">
                       <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-600">
@@ -504,7 +598,7 @@ export default function ViewProductModal({
                           </tr>
                         </thead>
                         <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-600">
-                          {stockHistory.map((item) => {
+                          {filteredHistory.map((item) => {
                             const typeInfo = getTypeInfo(
                               item.type,
                               item.reference_type,
@@ -560,7 +654,13 @@ export default function ViewProductModal({
                     </div>
                   </div>
                 ) : (
-                  <p className="text-sm text-gray-500 dark:text-gray-400 py-4">No stock history available</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 py-4">
+                    {historyFilter === "current"
+                      ? "No stock history for current device"
+                      : historyFilter === "other"
+                        ? "No stock history for other devices"
+                        : "No stock history available"}
+                  </p>
                 )}
               </div>
             </div>

@@ -5,7 +5,7 @@ import type React from "react"
 import { useEffect, useState, useCallback, useMemo } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Plus, Search, X, RefreshCw, Package, Download, Building2, Filter, Eye, EyeOff } from "lucide-react"
+import { Plus, Search, X, RefreshCw, Package, Download, Building2, Filter } from "lucide-react"
 import { getProducts, deleteProduct } from "@/app/actions/product-actions"
 import {
   AlertDialog,
@@ -64,8 +64,8 @@ export default function ProductTab({ userId, isAddModalOpen = false, onModalClos
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [selectedCategory, setSelectedCategory] = useState<string>("All")
   const [selectedCompany, setSelectedCompany] = useState<string>("All")
+  const [selectedStatus, setSelectedStatus] = useState<"all" | "oos" | "low" | "ok">("all")
   const [filterSearch, setFilterSearch] = useState<string>("")
-  const [privacyMode, setPrivacyMode] = useState<boolean>(true) // Default to privacy ON
   const [popupState, setPopupState] = useState<{
     isOpen: boolean
     product: any | null
@@ -172,8 +172,18 @@ export default function ProductTab({ userId, isAddModalOpen = false, onModalClos
       )
     }
 
+    // Filter by stock status
+    if (selectedStatus !== "all") {
+      filtered = filtered.filter((product) => {
+        const stock = Number(product.stock || 0)
+        if (selectedStatus === "oos") return stock === 0
+        if (selectedStatus === "low") return stock > 0 && stock <= 5
+        return stock > 5
+      })
+    }
+
     return filtered
-  }, [products, searchTerm, selectedCategory, selectedCompany])
+  }, [products, searchTerm, selectedCategory, selectedCompany, selectedStatus])
 
   // Get count for current filter items
   const getItemCount = useCallback(
@@ -227,6 +237,7 @@ export default function ProductTab({ userId, isAddModalOpen = false, onModalClos
     dispatch(clearProducts())
     setSelectedCategory("All")
     setSelectedCompany("All")
+    setSelectedStatus("all")
     fetchProducts()
   }
 
@@ -338,6 +349,28 @@ export default function ProductTab({ userId, isAddModalOpen = false, onModalClos
     dispatch(setSearchTerm(value))
   }
 
+  const getStatusTag = (stock: number) => {
+    if (stock === 0) {
+      return {
+        label: "OOS",
+        className:
+          "bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300 border border-rose-200 dark:border-rose-700",
+      }
+    }
+    if (stock <= 5) {
+      return {
+        label: "LOW",
+        className:
+          "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 border border-amber-200 dark:border-amber-700",
+      }
+    }
+    return {
+      label: "OK",
+      className:
+        "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-700",
+    }
+  }
+
  return (
     <div className="flex flex-col lg:flex-row h-full gap-4">
       {/* Main Products Area - Full width on mobile, 75% on desktop */}
@@ -347,27 +380,14 @@ export default function ProductTab({ userId, isAddModalOpen = false, onModalClos
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
             <div className="flex items-center gap-3">
               <Package className="h-6 w-6 flex-shrink-0" />
-              <h1 className="text-lg sm:text-xl font-semibold">Product Management</h1>
+              <h1 className="text-lg sm:text-xl font-semibold">Inventory Management</h1>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button
-                onClick={() => setPrivacyMode(!privacyMode)}
-                size="sm"
-                variant="secondary"
-                className={`${
-                  privacyMode
-                    ? "bg-red-500/20 hover:bg-red-500/30 text-red-100 border-red-300/30"
-                    : "bg-green-500/20 hover:bg-green-500/30 text-green-100 border-green-300/30"
-                } backdrop-blur-sm transition-all`}
-              >
-                {privacyMode ? <EyeOff className="h-4 w-4 mr-1" /> : <Eye className="h-4 w-4 mr-1" />}
-                {privacyMode ? "Privacy On" : "Privacy Off"}
-              </Button>
               <Button
                 onClick={() =>
                   exportProductsToPDF(
                     filteredProducts,
-                    `products_report_${new Date().toISOString().split("T")[0]}.pdf`,
+                    `inventory_report_${new Date().toISOString().split("T")[0]}.pdf`,
                     currency,
                   )
                 }
@@ -425,6 +445,31 @@ export default function ProductTab({ userId, isAddModalOpen = false, onModalClos
 
         {/* Mobile Filter Section */}
         <div className="lg:hidden bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 shadow-sm">
+          {/* Status Filter */}
+          <div className="mb-4">
+            <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Status</p>
+            <div className="grid grid-cols-4 gap-2">
+              {[
+                { id: "all", label: "All" },
+                { id: "oos", label: "OOS" },
+                { id: "low", label: "LOW" },
+                { id: "ok", label: "OK" },
+              ].map((status) => (
+                <button
+                  key={status.id}
+                  onClick={() => setSelectedStatus(status.id as "all" | "oos" | "low" | "ok")}
+                  className={`px-2 py-2 rounded-md text-xs font-semibold transition-all ${
+                    selectedStatus === status.id
+                      ? "bg-blue-600 text-white"
+                      : "bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600"
+                  }`}
+                >
+                  {status.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Filter Mode Tabs */}
           <div className="flex bg-gray-100 dark:bg-gray-700 rounded-lg p-1 mb-4">
             <button
@@ -551,6 +596,9 @@ export default function ProductTab({ userId, isAddModalOpen = false, onModalClos
                     Stock
                   </th>
                   <th className="text-left p-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    Other Devices
+                  </th>
+                  <th className="text-left p-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                     Status
                   </th>
                 </tr>
@@ -581,7 +629,7 @@ export default function ProductTab({ userId, isAddModalOpen = false, onModalClos
                   ))
                 ) : filteredProducts.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="p-8 text-center text-gray-500 dark:text-gray-400">
+                    <td colSpan={7} className="p-8 text-center text-gray-500 dark:text-gray-400">
                       {searchTerm || selectedCategory !== "All" || selectedCompany !== "All"
                         ? "No products found"
                         : "No products available"}
@@ -617,33 +665,26 @@ export default function ProductTab({ userId, isAddModalOpen = false, onModalClos
                         {currency} {Number(product.price).toFixed(2)}
                       </td>
                       <td className="p-3 text-sm font-medium text-gray-900 dark:text-gray-100">
-                        {privacyMode ? (
-                          <span className="text-gray-400 dark:text-gray-500">***</span>
-                        ) : (
-                          `${currency} ${Number(product.wholesale_price || 0).toFixed(2)}`
-                        )}
+                        <span className="group/cost inline-flex items-center">
+                          <span className="text-gray-400 dark:text-gray-500 group-hover/cost:hidden select-none">******</span>
+                          <span className="hidden group-hover/cost:inline">
+                          {currency} {Number(product.wholesale_price || 0).toFixed(2)}
+                          </span>
+                        </span>
                       </td>
                       <td className="p-3 text-sm font-medium text-gray-900 dark:text-gray-100">
-                        {privacyMode ? <span className="text-gray-400 dark:text-gray-500">***</span> : product.stock}
+                        {product.stock}
+                      </td>
+                      <td className="p-3 text-sm font-medium text-blue-600 dark:text-blue-300">
+                        {Number(product.other_devices_stock || 0)}
                       </td>
                       <td className="p-3">
-                        {privacyMode ? (
-                          <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400">
-                            *** Status
-                          </span>
-                        ) : (
-                          <span
-                            className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                              product.stock === 0
-                                ? "bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200"
-                                : product.stock <= 5
-                                  ? "bg-orange-100 dark:bg-orange-900 text-orange-800 dark:text-orange-200"
-                                  : "bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200"
-                            }`}
-                          >
-                            {product.stock === 0 ? "Out of Stock" : product.stock <= 5 ? "Low Stock" : "In Stock"}
-                          </span>
-                        )}
+                        <span
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold tracking-wide ${getStatusTag(product.stock).className}`}
+                        >
+                          <span className="h-1.5 w-1.5 rounded-full bg-current opacity-80"></span>
+                          {getStatusTag(product.stock).label}
+                        </span>
                       </td>
                     </tr>
                   ))
@@ -701,15 +742,10 @@ export default function ProductTab({ userId, isAddModalOpen = false, onModalClos
                       </div>
                       <div className="flex flex-col items-end gap-2 ml-4">
                         <span
-                          className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                            product.stock === 0
-                              ? "bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200"
-                              : product.stock <= 5
-                                ? "bg-orange-100 dark:bg-orange-900 text-orange-800 dark:text-orange-200"
-                                : "bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200"
-                          }`}
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold tracking-wide ${getStatusTag(product.stock).className}`}
                         >
-                          {product.stock === 0 ? "Out of Stock" : product.stock <= 5 ? "Low Stock" : "In Stock"}
+                          <span className="h-1.5 w-1.5 rounded-full bg-current opacity-80"></span>
+                          {getStatusTag(product.stock).label}
                         </span>
                         <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200">
                           {product.category || "Uncategorized"}
@@ -717,7 +753,7 @@ export default function ProductTab({ userId, isAddModalOpen = false, onModalClos
                       </div>
                     </div>
                     
-                    <div className="grid grid-cols-3 gap-4 text-sm">
+                    <div className="grid grid-cols-4 gap-4 text-sm">
                       <div>
                         <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Retail</p>
                         <p className="font-medium text-gray-900 dark:text-gray-100">
@@ -726,13 +762,24 @@ export default function ProductTab({ userId, isAddModalOpen = false, onModalClos
                       </div>
                       <div>
                         <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Cost</p>
-                        <p className="font-medium text-gray-900 dark:text-gray-100">
-                          {currency} {Number(product.wholesale_price || 0).toFixed(2)}
+                        <p className="font-medium group/cost inline-flex items-center">
+                          <span className="text-gray-400 dark:text-gray-500 group-hover/cost:hidden select-none">
+                            ******
+                          </span>
+                          <span className="hidden group-hover/cost:inline text-gray-900 dark:text-gray-100">
+                            {currency} {Number(product.wholesale_price || 0).toFixed(2)}
+                          </span>
                         </p>
                       </div>
                       <div>
                         <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Stock</p>
                         <p className="font-medium text-gray-900 dark:text-gray-100">{product.stock}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Other Devices</p>
+                        <p className="font-medium text-blue-600 dark:text-blue-300">
+                          {Number(product.other_devices_stock || 0)}
+                        </p>
                       </div>
                     </div>
                   </div>
@@ -755,6 +802,31 @@ export default function ProductTab({ userId, isAddModalOpen = false, onModalClos
               <Plus className="h-4 w-4 mr-2" />
               Add Product
             </Button>
+
+            {/* Status Filter */}
+            <div>
+              <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Status</p>
+              <div className="grid grid-cols-4 gap-2">
+                {[
+                  { id: "all", label: "All" },
+                  { id: "oos", label: "OOS" },
+                  { id: "low", label: "LOW" },
+                  { id: "ok", label: "OK" },
+                ].map((status) => (
+                  <button
+                    key={status.id}
+                    onClick={() => setSelectedStatus(status.id as "all" | "oos" | "low" | "ok")}
+                    className={`px-2 py-2 rounded-md text-xs font-semibold transition-all ${
+                      selectedStatus === status.id
+                        ? "bg-blue-600 text-white"
+                        : "bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600"
+                    }`}
+                  >
+                    {status.label}
+                  </button>
+                ))}
+              </div>
+            </div>
 
             {/* Filter Mode Tabs */}
             <div className="flex bg-gray-100 dark:bg-gray-700 rounded-lg p-1">
@@ -858,7 +930,7 @@ export default function ProductTab({ userId, isAddModalOpen = false, onModalClos
             setIsAdjustStockModalOpen(true)
           }}
           currency={currency}
-          privacyMode={privacyMode}
+          privacyMode={false}
           userId={userId}
         />
       )}

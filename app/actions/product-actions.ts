@@ -1052,9 +1052,9 @@ export async function deleteProduct(id: number) {
 }
 
 // Add getProductStockHistory function
-export async function getProductStockHistory(productId: number) {
+export async function getProductStockHistory(productId: number, limit?: number) {
   if (!productId) {
-    return { success: false, message: "Product ID is required", data: [] }
+    return { success: false, message: "Product ID is required", data: [], hasMore: false }
   }
 
   // Reset connection state to allow a fresh attempt
@@ -1063,27 +1063,52 @@ export async function getProductStockHistory(productId: number) {
   try {
     // Get stock history from the dedicated table
     try {
-      const history = await sql`
-        SELECT 
-          h.id, 
-          h.product_id, 
-          h.quantity, 
-          h.type, 
-          h.reference_id, 
-          h.reference_type, 
-          h.notes, 
-          h.device_id,
-          COALESCE(d.name, 'Unknown Device') AS device_name,
-          h.created_at as date
-        FROM product_stock_history h
-        LEFT JOIN devices d ON d.id = h.device_id
-        WHERE h.product_id = ${productId}
-        ORDER BY h.created_at DESC
-      `
-      return { success: true, data: history }
+      const safeLimit = typeof limit === "number" && Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : undefined
+      if (safeLimit) {
+        const historyWithExtra = await sql`
+          SELECT 
+            h.id, 
+            h.product_id, 
+            h.quantity, 
+            h.type, 
+            h.reference_id, 
+            h.reference_type, 
+            h.notes, 
+            h.device_id,
+            COALESCE(d.name, 'Unknown Device') AS device_name,
+            h.created_at as date
+          FROM product_stock_history h
+          LEFT JOIN devices d ON d.id = h.device_id
+          WHERE h.product_id = ${productId}
+          ORDER BY h.created_at DESC
+          LIMIT ${safeLimit + 1}
+        `
+        const hasMore = historyWithExtra.length > safeLimit
+        return { success: true, data: historyWithExtra.slice(0, safeLimit), hasMore }
+      }
+
+      const history =
+        await sql`
+          SELECT 
+            h.id, 
+            h.product_id, 
+            h.quantity, 
+            h.type, 
+            h.reference_id, 
+            h.reference_type, 
+            h.notes, 
+            h.device_id,
+            COALESCE(d.name, 'Unknown Device') AS device_name,
+            h.created_at as date
+          FROM product_stock_history h
+          LEFT JOIN devices d ON d.id = h.device_id
+          WHERE h.product_id = ${productId}
+          ORDER BY h.created_at DESC
+        `
+      return { success: true, data: history, hasMore: false }
     } catch (error) {
       console.error("Stock history table might not exist:", error)
-      return { success: true, data: [] }
+      return { success: true, data: [], hasMore: false }
     }
   } catch (error) {
     console.error("Get product stock history error:", error)
@@ -1091,6 +1116,7 @@ export async function getProductStockHistory(productId: number) {
       success: false,
       message: `Database error: ${getLastError()?.message || "Unknown error"}. Please try again later.`,
       data: [],
+      hasMore: false,
     }
   }
 }
