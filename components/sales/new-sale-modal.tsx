@@ -1060,7 +1060,7 @@ export default function NewSaleModal({ isOpen, onClose, userId, currency: propCu
 
     try {
       // Call the server action to get product by barcode
-      const result = await getProductByBarcode(barcode)
+      const result = await getProductByBarcode(barcode, userId)
 
       if (result.success && result.data) {
         // Add the product to the cart using the existing function

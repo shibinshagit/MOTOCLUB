@@ -287,7 +287,7 @@ export default function NewSaleTab({ userId, mockMode = false }: NewSaleTabProps
     setScanStatus("processing")
 
     try {
-      const result = await getProductByBarcode(barcodeInput.trim())
+      const result = await getProductByBarcode(barcodeInput.trim(), userId)
 
       if (result.success && result.data) {
         // Handle found product

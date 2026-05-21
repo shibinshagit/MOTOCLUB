@@ -478,7 +478,7 @@ export default function NewSalePage() {
 
     try {
       // Call the server action to get product by barcode
-      const result = await getProductByBarcode(barcode)
+      const result = await getProductByBarcode(barcode, userId)
 
       setDebugInfo((prev) => `${prev}\nAPI response: ${JSON.stringify(result)}`)
 
@@ -1087,7 +1087,7 @@ export default function NewSalePage() {
       <NewProductModal
         isOpen={isNewProductModalOpen}
         onClose={() => setIsNewProductModalOpen(false)}
-        onSuccess={handleNewProduct}
+        onSuccess={(product) => handleNewProduct(product.id, product.name, Number(product.price) || 0)}
         userId={userId}
         initialBarcode={notFoundBarcode}
       />

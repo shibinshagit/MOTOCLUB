@@ -33,8 +33,6 @@ import {
   EyeOff,
   CalendarDays,
   Edit,
-  ShoppingCart,
-  Contact,
 } from "lucide-react"
 import { getUserSales, deleteSale, addSale, getSaleDetails, updateSale } from "@/app/actions/sale-actions"
 import { useToast } from "@/components/ui/use-toast"
@@ -89,11 +87,9 @@ import { getProductByBarcode } from "@/app/actions/product-actions"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { FormAlert } from "@/components/ui/form-alert"
 import { selectActiveStaff } from "@/store/slices/staffSlice"
-import StaffHeaderDropdown from "../dashboard/staff-header-dropdown"
+import StaffHeaderDropdown from "./staff-header-dropdown"
 import { printSalesReceipt } from "@/lib/receipt-utils"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import CustomerTab from "./customer-tab"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 interface SaleTabProps {
   userId: number
@@ -154,9 +150,6 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
   const maxAmountFilter = useSelector(selectSalesMaxAmountFilter)
   const showFilters = useSelector(selectSalesShowFilters)
   const currency = useSelector(selectSalesCurrency)
-
-  // Active tab state
-  const [activeTab, setActiveTab] = useState<"sales" | "customers">("sales")
 
   // Privacy mode state - enabled by default
   const [privacyMode, setPrivacyMode] = useState(true)
@@ -722,7 +715,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
     setBarcodeAlert(null)
 
     try {
-      const result = await getProductByBarcode(barcode)
+      const result = await getProductByBarcode(barcode, userId)
 
       if (result.success && result.data) {
         const existingProductIndex = products.findIndex((p) => p.productId === result.data.id && !p.isService)
@@ -1447,27 +1440,8 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
 
   return (
     <div className="min-h-[calc(100vh-100px)] bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 p-2 sm:p-3">
-      {/* Tab Navigation */}
       <div className="mb-4">
-        <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as "sales" | "customers")}>
-          <TabsList className="grid w-full grid-cols-2 max-w-md mx-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-1 rounded-lg">
-            <TabsTrigger 
-              value="sales" 
-              className="flex items-center gap-2 data-[state=active]:bg-blue-600 data-[state=active]:text-white transition-all duration-200"
-            >
-              <ShoppingCart className="h-4 w-4" />
-              Sales
-            </TabsTrigger>
-            <TabsTrigger 
-              value="customers" 
-              className="flex items-center gap-2 data-[state=active]:bg-purple-600 data-[state=active]:text-white transition-all duration-200"
-            >
-              <Contact className="h-4 w-4" />
-              Customers
-            </TabsTrigger>
-          </TabsList>
-          
-          <TabsContent value="sales" className="mt-4">
+        <div className="mt-4">
             {/* Sales Tab Content - FIXED SCROLL LAYOUT */}
             <div className="flex flex-col xl:flex-row gap-3 h-full">
               {/* Main Sale Form Section - FIXED SCROLL */}
@@ -2449,13 +2423,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
                 </Card>
               </div>
             </div>
-          </TabsContent>
-
-          <TabsContent value="customers" className="mt-4">
-            {/* Customers Tab Content */}
-            <CustomerTab onClose={() => {}} />
-          </TabsContent>
-        </Tabs>
+        </div>
       </div>
 
       {/* Date Range Modal */}

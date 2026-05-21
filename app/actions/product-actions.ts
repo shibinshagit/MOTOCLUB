@@ -119,7 +119,12 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
           FROM products p
           LEFT JOIN product_categories c ON p.category_id = c.id
           WHERE p.id = ${productId}
-          AND p.created_by = ${userId}
+          AND p.created_by IN (
+            SELECT d2.id
+            FROM devices d1
+            JOIN devices d2 ON d2.company_id = d1.company_id
+            WHERE d1.id = ${userId}
+          )
         `
       } else {
         products = await sql`
@@ -156,7 +161,12 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
               c.name as category_name
             FROM products p
             LEFT JOIN product_categories c ON p.category_id = c.id
-            WHERE p.created_by = ${userId}
+            WHERE p.created_by IN (
+              SELECT d2.id
+              FROM devices d1
+              JOIN devices d2 ON d2.company_id = d1.company_id
+              WHERE d1.id = ${userId}
+            )
             AND (
               REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
               REPLACE(LOWER(p.category), ' ', '') LIKE ${searchPattern} OR
@@ -202,7 +212,12 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
               c.name as category_name
             FROM products p
             LEFT JOIN product_categories c ON p.category_id = c.id
-            WHERE p.created_by = ${userId}
+            WHERE p.created_by IN (
+              SELECT d2.id
+              FROM devices d1
+              JOIN devices d2 ON d2.company_id = d1.company_id
+              WHERE d1.id = ${userId}
+            )
             AND (
               REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
               REPLACE(LOWER(p.category), ' ', '') LIKE ${searchPattern} OR
@@ -248,7 +263,12 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
               c.name as category_name
             FROM products p
             LEFT JOIN product_categories c ON p.category_id = c.id
-            WHERE p.created_by = ${userId}
+            WHERE p.created_by IN (
+              SELECT d2.id
+              FROM devices d1
+              JOIN devices d2 ON d2.company_id = d1.company_id
+              WHERE d1.id = ${userId}
+            )
             ORDER BY p.created_at DESC
             LIMIT ${limit}
           `
@@ -272,7 +292,12 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
               c.name as category_name
             FROM products p
             LEFT JOIN product_categories c ON p.category_id = c.id
-            WHERE p.created_by = ${userId}
+            WHERE p.created_by IN (
+              SELECT d2.id
+              FROM devices d1
+              JOIN devices d2 ON d2.company_id = d1.company_id
+              WHERE d1.id = ${userId}
+            )
             ORDER BY p.created_at DESC
           `
         } else {
@@ -361,16 +386,70 @@ async function executeWithRetry<T>(fn: () => Promise<T>, retries = 3): Promise<T
   }
 }
 
-// Updated function to check for duplicate products within the same user's products
-async function checkProductDuplicates(name: string, barcode: string | null, userId: number, excludeId?: number) {
+// Updated function to check for duplicate products within the same company
+async function checkProductDuplicates(name: string, barcode: string | null, userId?: number, excludeId?: number) {
   try {
-    // Check for duplicate name within user's products
+    // If user context is missing, fall back to global checks
+    if (!userId) {
+      const nameQuery = excludeId
+        ? await sql`
+            SELECT id FROM products
+            WHERE LOWER(name) = LOWER(${name})
+            AND id != ${excludeId}
+            LIMIT 1
+          `
+        : await sql`
+            SELECT id FROM products
+            WHERE LOWER(name) = LOWER(${name})
+            LIMIT 1
+          `
+
+      if (nameQuery.length > 0) {
+        return {
+          isDuplicate: true,
+          field: "name",
+          message: `A product with the name "${name}" already exists.`,
+        }
+      }
+
+      if (barcode) {
+        const barcodeQuery = excludeId
+          ? await sql`
+              SELECT id FROM products
+              WHERE barcode = ${barcode}
+              AND id != ${excludeId}
+              LIMIT 1
+            `
+          : await sql`
+              SELECT id FROM products
+              WHERE barcode = ${barcode}
+              LIMIT 1
+            `
+
+        if (barcodeQuery.length > 0) {
+          return {
+            isDuplicate: true,
+            field: "barcode",
+            message: `A product with the barcode "${barcode}" already exists.`,
+          }
+        }
+      }
+
+      return { isDuplicate: false }
+    }
+
+    // Check for duplicate name within company products
     let nameQuery
     if (excludeId) {
       nameQuery = await sql`
         SELECT id FROM products 
         WHERE LOWER(name) = LOWER(${name}) 
-        AND created_by = ${userId} 
+        AND created_by IN (
+          SELECT d2.id
+          FROM devices d1
+          JOIN devices d2 ON d2.company_id = d1.company_id
+          WHERE d1.id = ${userId}
+        )
         AND id != ${excludeId} 
         LIMIT 1
       `
@@ -378,7 +457,12 @@ async function checkProductDuplicates(name: string, barcode: string | null, user
       nameQuery = await sql`
         SELECT id FROM products 
         WHERE LOWER(name) = LOWER(${name}) 
-        AND created_by = ${userId} 
+        AND created_by IN (
+          SELECT d2.id
+          FROM devices d1
+          JOIN devices d2 ON d2.company_id = d1.company_id
+          WHERE d1.id = ${userId}
+        )
         LIMIT 1
       `
     }
@@ -387,18 +471,23 @@ async function checkProductDuplicates(name: string, barcode: string | null, user
       return {
         isDuplicate: true,
         field: "name",
-        message: `A product with the name "${name}" already exists in your products.`,
+        message: `A product with the name "${name}" already exists in your company products.`,
       }
     }
 
-    // Check for duplicate barcode within user's products (only if barcode is provided)
+    // Check for duplicate barcode within company products (only if barcode is provided)
     if (barcode) {
       let barcodeQuery
       if (excludeId) {
         barcodeQuery = await sql`
           SELECT id FROM products 
           WHERE barcode = ${barcode} 
-          AND created_by = ${userId} 
+          AND created_by IN (
+            SELECT d2.id
+            FROM devices d1
+            JOIN devices d2 ON d2.company_id = d1.company_id
+            WHERE d1.id = ${userId}
+          )
           AND id != ${excludeId} 
           LIMIT 1
         `
@@ -406,7 +495,12 @@ async function checkProductDuplicates(name: string, barcode: string | null, user
         barcodeQuery = await sql`
           SELECT id FROM products 
           WHERE barcode = ${barcode} 
-          AND created_by = ${userId} 
+          AND created_by IN (
+            SELECT d2.id
+            FROM devices d1
+            JOIN devices d2 ON d2.company_id = d1.company_id
+            WHERE d1.id = ${userId}
+          )
           LIMIT 1
         `
       }
@@ -415,7 +509,7 @@ async function checkProductDuplicates(name: string, barcode: string | null, user
         return {
           isDuplicate: true,
           field: "barcode",
-          message: `A product with the barcode "${barcode}" already exists in your products.`,
+          message: `A product with the barcode "${barcode}" already exists in your company products.`,
         }
       }
     }
@@ -708,7 +802,12 @@ export async function updateProduct(formData: FormData) {
           attributes = ${JSON.stringify(attributes)},
           link = ${link}
         WHERE id = ${id}
-        AND created_by = ${userId}
+        AND created_by IN (
+          SELECT d2.id
+          FROM devices d1
+          JOIN devices d2 ON d2.company_id = d1.company_id
+          WHERE d1.id = ${userId}
+        )
         RETURNING *
       `
     } else {
@@ -983,7 +1082,7 @@ export async function adjustProductStock(formData: FormData) {
 }
 
 // Add this function to the existing file
-export async function getProductByBarcode(barcode: string) {
+export async function getProductByBarcode(barcode: string, userId?: number) {
 
   if (!barcode) {
     return { success: false, message: "Barcode is required", data: null }
@@ -993,14 +1092,29 @@ export async function getProductByBarcode(barcode: string) {
   resetConnectionState()
 
   try {
-    const result = await sql`
-      SELECT 
-        p.*,
-        c.name as category_name
-      FROM products p
-      LEFT JOIN product_categories c ON p.category_id = c.id
-      WHERE p.barcode = ${barcode}
-    `
+    const result = userId
+      ? await sql`
+          SELECT 
+            p.*,
+            c.name as category_name
+          FROM products p
+          LEFT JOIN product_categories c ON p.category_id = c.id
+          WHERE p.barcode = ${barcode}
+          AND p.created_by IN (
+            SELECT d2.id
+            FROM devices d1
+            JOIN devices d2 ON d2.company_id = d1.company_id
+            WHERE d1.id = ${userId}
+          )
+        `
+      : await sql`
+          SELECT 
+            p.*,
+            c.name as category_name
+          FROM products p
+          LEFT JOIN product_categories c ON p.category_id = c.id
+          WHERE p.barcode = ${barcode}
+        `
 
     if (result.length === 0) {
       return { success: false, message: "Product not found", data: null }
@@ -1035,7 +1149,12 @@ export async function getUserProducts(userId: number) {
         c.name as category_name
       FROM products p
       LEFT JOIN product_categories c ON p.category_id = c.id
-      WHERE p.created_by = ${userId}
+      WHERE p.created_by IN (
+        SELECT d2.id
+        FROM devices d1
+        JOIN devices d2 ON d2.company_id = d1.company_id
+        WHERE d1.id = ${userId}
+      )
       ORDER BY p.name ASC
     `
 

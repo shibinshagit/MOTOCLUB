@@ -36,9 +36,10 @@ interface NewProductModalProps {
   onClose: () => void
   onSuccess?: (product: any) => void
   userId?: number
+  initialBarcode?: string
 }
 
-export default function NewProductModal({ isOpen, onClose, onSuccess, userId }: NewProductModalProps) {
+export default function NewProductModal({ isOpen, onClose, onSuccess, userId, initialBarcode = "" }: NewProductModalProps) {
   const { toast } = useToast()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -137,7 +138,7 @@ export default function NewProductModal({ isOpen, onClose, onSuccess, userId }: 
       setFormData({
         name: "", companyName: "", category: "", categoryId: null,
         description: "", price: "", wholesalePrice: "", msp: "",
-        stock: "", shelf: "", barcode: "", color: "", size: "",
+        stock: "", shelf: "", barcode: initialBarcode, color: "", size: "",
         suitableFor: "", link: "",
       })
       setAttributes([])
@@ -155,7 +156,7 @@ export default function NewProductModal({ isOpen, onClose, onSuccess, userId }: 
       }
     }
     initializeForm()
-  }, [isOpen, userId])
+  }, [isOpen, userId, initialBarcode])
 
   useEffect(() => {
     if (categorySearchQuery.trim() === "") {

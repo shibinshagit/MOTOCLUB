@@ -644,7 +644,7 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
 
     try {
       // Call the server action to get product by barcode
-      const result = await getProductByBarcode(barcode.trim())
+      const result = await getProductByBarcode(barcode.trim(), userId)
 
       if (result.success && result.data) {
         // Add the product to the cart using the existing function
