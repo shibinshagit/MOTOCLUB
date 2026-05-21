@@ -32,7 +32,10 @@ export function AnimatedThemeToggle({ className }: { className?: string }) {
         type="button"
         variant="ghost"
         size="icon"
-        className={cn("relative h-9 w-9", className)}
+        className={cn(
+          "relative h-9 w-9 rounded-full border border-gray-200/80 bg-white/80 text-gray-500 shadow-sm backdrop-blur transition-colors dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-400",
+          className
+        )}
         disabled
         aria-hidden
       >
@@ -46,7 +49,10 @@ export function AnimatedThemeToggle({ className }: { className?: string }) {
       type="button"
       variant="ghost"
       size="icon"
-      className={cn("relative h-9 w-9", className)}
+      className={cn(
+        "relative h-9 w-9 rounded-full border border-gray-200/80 bg-white/80 text-gray-600 shadow-sm backdrop-blur transition-colors hover:bg-gray-100 hover:text-gray-900 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-white",
+        className
+      )}
       onClick={() => setTheme(isDark ? "light" : "dark")}
       title={isDark ? "Switch to light mode" : "Switch to dark mode"}
       aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}

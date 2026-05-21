@@ -9,6 +9,7 @@ import {
   User,
   AlertTriangle,
   Truck,
+  ArrowRightLeft,
   Calculator,
   Plus,
   Power,
@@ -26,6 +27,7 @@ import SaleTab from "./sale-tab"
 import PurchaseTab from "./purchase-tab"
 import ProductTab from "./product-tab"
 import CustomerTab from "./customer-tab"
+import TransferTab from "./transfer-tab"
 import AccountingTab from "./accounting-tab"
 import NewSaleTab from "./new-sale-tab"
 import SupplierTab from "./supplier-tab"
@@ -36,7 +38,7 @@ import { AnimatedThemeToggle } from "@/components/ui/animated-theme-toggle"
 import { useAppSelector, useAppDispatch } from "@/store/hooks"
 import { selectUser, selectCompany, selectDevice, clearDeviceData } from "@/store/slices/deviceSlice"
 
-type TabType = "home" | "sale" | "purchase" | "product" | "customer" | "accounting" | "newsale" | "supplier"
+type TabType = "home" | "sale" | "purchase" | "product" | "customer" | "transfer" | "accounting" | "newsale" | "supplier"
 
 interface DashboardProps {
   mockMode?: boolean
@@ -113,7 +115,7 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
   useEffect(() => {
     if (
       tabParam &&
-      ["home", "sale", "purchase", "product", "customer", "accounting", "newsale", "supplier"].includes(
+      ["home", "sale", "purchase", "product", "customer", "transfer", "accounting", "newsale", "supplier"].includes(
         tabParam,
       )
     ) {
@@ -248,6 +250,8 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
               onModalClose={() => setIsAddModalOpen(false)}
             />
           )
+        case "transfer":
+          return <TransferTab userId={user?.id || 0} />
         case "accounting":
           return <AccountingTab userId={user?.id || 0} companyId={companyId} deviceId={deviceId || 0} />
         case "newsale":
@@ -269,12 +273,13 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
     { id: "product", icon: <Package className="h-4 w-4" />, label: "Inventory" },
     { id: "customer", icon: <User className="h-4 w-4" />, label: "Customers" },
     { id: "supplier", icon: <Truck className="h-4 w-4" />, label: "Suppliers" },
+    { id: "transfer", icon: <ArrowRightLeft className="h-4 w-4" />, label: "Transfers" },
     { id: "accounting", icon: <Calculator className="h-4 w-4" />, label: "Accounting" },
   ]
 
   // Primary tabs for bottom navigation (most used)
   const primaryTabs = ["home", "sale", "purchase", "product"]
-  const secondaryTabs = ["customer", "supplier", "accounting"]
+  const secondaryTabs = ["customer", "supplier", "transfer", "accounting"]
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-gray-50 dark:bg-gray-900">

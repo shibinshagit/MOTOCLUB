@@ -338,6 +338,36 @@ async function createStaffServiceTables() {
       )
     `
   })
+
+  await run("stock_transfers", async () => {
+    await sql`
+      CREATE TABLE IF NOT EXISTS stock_transfers (
+        id SERIAL PRIMARY KEY,
+        company_id INTEGER NOT NULL,
+        from_device_id INTEGER NOT NULL,
+        to_device_id INTEGER NOT NULL,
+        status VARCHAR(30) NOT NULL DEFAULT 'completed',
+        notes TEXT,
+        created_by INTEGER NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        cancelled_at TIMESTAMP,
+        cancelled_by INTEGER
+      )
+    `
+  })
+
+  await run("stock_transfer_items", async () => {
+    await sql`
+      CREATE TABLE IF NOT EXISTS stock_transfer_items (
+        id SERIAL PRIMARY KEY,
+        transfer_id INTEGER NOT NULL,
+        product_id INTEGER NOT NULL,
+        quantity INTEGER NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `
+  })
 }
 
 // ─── finance & accounting tables ────────────────────────────────────────────
