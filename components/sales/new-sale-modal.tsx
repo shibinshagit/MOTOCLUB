@@ -31,7 +31,6 @@ import { DatePickerField } from "@/components/ui/date-picker-field"
 import NewCustomerModal from "./new-customer-modal"
 import NewProductModal from "./new-product-modal"
 import NewServiceModal from "../services/new-service-modal"
-import NewStaffModal from "../staff/new-staff-modal"
 import { addSale } from "@/app/actions/sale-actions"
 import { printSalesReceipt } from "@/lib/receipt-utils"
 import { checkDatabaseHealth } from "@/lib/db"
@@ -39,11 +38,9 @@ import { getProductByBarcode } from "@/app/actions/product-actions"
 import { getDeviceCurrency } from "@/app/actions/dashboard-actions"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { FormAlert } from "@/components/ui/form-alert"
-import { useSelector, useDispatch } from "react-redux"
+import { useSelector } from "react-redux"
 import { selectDeviceId } from "@/store/slices/deviceSlice"
-import { selectStaff, selectActiveStaff, addStaff as addStaffToRedux } from "@/store/slices/staffSlice"
-import StaffSelectionModal from "../staff/staff-selection-modal"
-import StaffHeaderDropdown from "../dashboard/staff-header-dropdown"
+import { selectActiveStaff } from "@/store/slices/staffSlice"
 
 interface NewSaleModalProps {
   isOpen: boolean
@@ -93,9 +90,7 @@ interface ProductSelectSimpleProps {
 
 export default function NewSaleModal({ isOpen, onClose, userId, currency: propCurrency }: NewSaleModalProps) {
   // Get device ID and staff data from Redux
-  const dispatch = useDispatch()
   const deviceId = useSelector(selectDeviceId)
-  const allStaff = useSelector(selectStaff)
   const activeStaff = useSelector(selectActiveStaff)
 
   // ... existing state ...
@@ -105,7 +100,6 @@ export default function NewSaleModal({ isOpen, onClose, userId, currency: propCu
   const [customerId, setCustomerId] = useState<number | null>(null)
   const [customerName, setCustomerName] = useState<string>("")
   const [staffId, setStaffId] = useState<number | null>(null)
-  const [staffName, setStaffName] = useState<string>("")
   const [status, setStatus] = useState<string>("Completed") // Default to Completed
   const [paymentMethod, setPaymentMethod] = useState<string>("Cash") // Default payment method
   const [products, setProducts] = useState<ProductRow[]>([
@@ -140,8 +134,6 @@ export default function NewSaleModal({ isOpen, onClose, userId, currency: propCu
   const [barcodeAlert, setBarcodeAlert] = useState<{ type: "success" | "error" | "warning"; message: string } | null>(
     null,
   )
-  const [isStaffSelectionModalOpen, setIsStaffSelectionModalOpen] = useState(false)
-  const [isNewStaffModalOpen, setIsNewStaffModalOpen] = useState(false)
   const [isNotFoundModalOpen, setIsNotFoundModalOpen] = useState(false)
   const [newProductBarcode, setNewProductBarcode] = useState<string>("")
 
@@ -471,11 +463,9 @@ export default function NewSaleModal({ isOpen, onClose, userId, currency: propCu
       // Auto-select active staff from Redux
       if (activeStaff) {
         setStaffId(activeStaff.id)
-        setStaffName(activeStaff.name)
         console.log("Auto-selected active staff:", activeStaff.name)
       } else {
         setStaffId(null)
-        setStaffName("")
       }
 
       setStatus("Completed") // Default to Completed
@@ -733,29 +723,6 @@ export default function NewSaleModal({ isOpen, onClose, userId, currency: propCu
     setCustomerId(customerId)
     setCustomerName(customerName)
     setIsNewCustomerModalOpen(false)
-
-    // Focus back on barcode input
-    setTimeout(() => {
-      if (barcodeInputRef.current) {
-        barcodeInputRef.current.focus()
-      }
-    }, 100)
-  }
-
-  // Handle new staff added - update Redux and local state
-  const handleNewStaff = (staffId: number, staffName: string, staffData?: any) => {
-    console.log("New staff added:", { staffId, staffName, staffData })
-
-    // Update local state
-    setStaffId(staffId)
-    setStaffName(staffName)
-    setIsNewStaffModalOpen(false)
-
-    // Update Redux if we have the full staff data
-    if (staffData) {
-      dispatch(addStaffToRedux(staffData))
-      console.log("Added new staff to Redux:", staffData)
-    }
 
     // Focus back on barcode input
     setTimeout(() => {
@@ -1245,7 +1212,6 @@ export default function NewSaleModal({ isOpen, onClose, userId, currency: propCu
           // Keep staff selected from Redux
           if (activeStaff) {
             setStaffId(activeStaff.id)
-            setStaffName(activeStaff.name)
           }
           setStatus("Completed")
           setPaymentMethod("Cash")
@@ -1661,7 +1627,9 @@ export default function NewSaleModal({ isOpen, onClose, userId, currency: propCu
                           <Users className="h-3.5 w-3.5 mr-1 text-green-600 dark:text-green-400" />
                           Staff *
                         </Label>
-                        <StaffHeaderDropdown userId={userId} showInSaleModal={true} />
+                        <div className="h-9 rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 flex items-center text-sm text-gray-900 dark:text-gray-100">
+                          {activeStaff?.name || "Authenticate staff from dashboard"}
+                        </div>
                       </div>
 
                       <div className="space-y-1">
@@ -1839,16 +1807,6 @@ export default function NewSaleModal({ isOpen, onClose, userId, currency: propCu
         userId={userId}
       />
 
-      {/* New Staff Modal with Redux update */}
-      <NewStaffModal
-        isOpen={isNewStaffModalOpen}
-        onClose={() => setIsNewStaffModalOpen(false)}
-        onStaffAdded={(staffId, staffName, staffData) => {
-          handleNewStaff(staffId, staffName, staffData)
-        }}
-        userId={userId}
-      />
-
       {/* New Product Modal */}
       <NewProductModal
         isOpen={isNewProductModalOpen}
@@ -1899,30 +1857,6 @@ export default function NewSaleModal({ isOpen, onClose, userId, currency: propCu
         </DialogContent>
       </Dialog>
 
-      {/* Staff Selection Modal with Redux data */}
-      <StaffSelectionModal
-        isOpen={isStaffSelectionModalOpen}
-        onClose={() => setIsStaffSelectionModalOpen(false)}
-        onSelect={(staffId, staffName) => {
-          setStaffId(staffId)
-          setStaffName(staffName)
-          setIsStaffSelectionModalOpen(false)
-
-          // Focus back on barcode input
-          setTimeout(() => {
-            if (barcodeInputRef.current) {
-              barcodeInputRef.current.focus()
-            }
-          }, 100)
-        }}
-        onAddNew={() => {
-          setIsStaffSelectionModalOpen(false)
-          setIsNewStaffModalOpen(true)
-        }}
-        selectedStaffId={staffId}
-        deviceId={deviceId}
-        staffData={allStaff} // Pass Redux staff data
-      />
     </>
   )
 }

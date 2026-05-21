@@ -3,6 +3,22 @@
 import { sql } from "@/lib/db"
 import { revalidatePath } from "next/cache"
 
+async function generatePasswordHash(password: string): Promise<string> {
+  const encoder = new TextEncoder()
+  const data = encoder.encode(password)
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data)
+  const hashArray = Array.from(new Uint8Array(hashBuffer))
+  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("")
+}
+
+async function ensureStaffPasswordColumn() {
+  try {
+    await sql`ALTER TABLE staff ADD COLUMN IF NOT EXISTS staff_password_hash TEXT`
+  } catch (error) {
+    console.error("Failed ensuring staff_password_hash column:", error)
+  }
+}
+
 // Schema is now managed by `npm run migrate`
 export async function initializeStaffSchema() {
   return { success: true, message: "Schema managed by migration script — run `npm run migrate`" }
@@ -59,9 +75,12 @@ export async function updateStaff(
     idCardNumber?: string
     address?: string
     deviceId: number
+    password?: string
   },
 ) {
   try {
+    await ensureStaffPasswordColumn()
+
     // Validate required IDs
     if (!staffData.deviceId || staffData.deviceId === null || staffData.deviceId === undefined) {
       console.error("❌ Device ID is missing or null:", staffData.deviceId)
@@ -86,6 +105,11 @@ export async function updateStaff(
       return { success: false, message: "Staff member not found or access denied" }
     }
 
+    const newPasswordHash =
+      staffData.password && staffData.password.trim().length > 0
+        ? await generatePasswordHash(staffData.password.trim())
+        : null
+
     // Update the staff member
     const result = await sql`
       UPDATE staff SET
@@ -99,6 +123,7 @@ export async function updateStaff(
         age = ${staffData.age || null},
         id_card_number = ${staffData.idCardNumber || null},
         address = ${staffData.address || null},
+        staff_password_hash = COALESCE(${newPasswordHash}, staff_password_hash),
         updated_at = NOW()
       WHERE id = ${staffId} AND device_id = ${staffData.deviceId}
       RETURNING *
@@ -185,20 +210,24 @@ export async function addStaff(staffData: {
   idCardNumber?: string
   address?: string
   deviceId: number
-  userId: number
+  userId?: number
+  password: string
 }) {
   try {
+    await ensureStaffPasswordColumn()
+
     // Validate required IDs
     if (!staffData.deviceId || staffData.deviceId === null || staffData.deviceId === undefined) {
       console.error("❌ Device ID is missing or null:", staffData.deviceId)
       return { success: false, message: "Device ID is required" }
     }
 
-    if (!staffData.userId || staffData.userId === null || staffData.userId === undefined) {
-      console.error("❌ User ID is missing or null:", staffData.userId)
-      return { success: false, message: "User ID is required" }
+    if (!staffData.password || !staffData.password.trim()) {
+      return { success: false, message: "Staff password is required" }
     }
 
+    const createdBy = staffData.userId || staffData.deviceId
+    const staffPasswordHash = await generatePasswordHash(staffData.password.trim())
 
 
     // Check if there's already an active staff member
@@ -214,7 +243,7 @@ export async function addStaff(staffData: {
     const result = await sql`
       INSERT INTO staff (
         name, phone, email, position, salary, salary_date, joined_on, 
-        age, id_card_number, address, device_id, created_by, is_active
+        age, id_card_number, address, device_id, created_by, is_active, staff_password_hash
       ) VALUES (
         ${staffData.name},
         ${staffData.phone},
@@ -227,8 +256,9 @@ export async function addStaff(staffData: {
         ${staffData.idCardNumber || null},
         ${staffData.address || null},
         ${staffData.deviceId},
-        ${staffData.userId},
-        ${isActive}
+        ${createdBy},
+        ${isActive},
+        ${staffPasswordHash}
       ) RETURNING *
     `
 
@@ -243,6 +273,72 @@ export async function addStaff(staffData: {
   } catch (error) {
     console.error("❌ Error adding staff:", error)
     return { success: false, message: `Failed to add staff member: ${error.message}` }
+  }
+}
+
+export async function getStaffForAuthentication(deviceId: number) {
+  try {
+    await ensureStaffPasswordColumn()
+
+    const staff = await sql`
+      SELECT id, name, position, is_active
+      FROM staff
+      WHERE device_id = ${deviceId}
+      ORDER BY is_active DESC, name ASC
+    `
+
+    return { success: true, data: staff }
+  } catch (error) {
+    console.error("Error fetching staff for authentication:", error)
+    return { success: false, message: "Failed to fetch staff members", data: [] }
+  }
+}
+
+export async function authenticateStaff(
+  staffId: number,
+  deviceId: number,
+  password: string,
+) {
+  try {
+    await ensureStaffPasswordColumn()
+
+    if (!password?.trim()) {
+      return { success: false, message: "Staff password is required" }
+    }
+
+    const passwordHash = await generatePasswordHash(password.trim())
+    const staffResult = await sql`
+      SELECT *
+      FROM staff
+      WHERE id = ${staffId}
+        AND device_id = ${deviceId}
+        AND is_active = true
+      LIMIT 1
+    `
+
+    if (staffResult.length === 0) {
+      return { success: false, message: "Staff not found or inactive" }
+    }
+
+    const staff = staffResult[0]
+    if (!staff.staff_password_hash || staff.staff_password_hash !== passwordHash) {
+      return { success: false, message: "Invalid staff password" }
+    }
+
+    const activateResult = await activateStaff(staffId, deviceId)
+    if (!activateResult.success) {
+      return { success: false, message: activateResult.message || "Failed to activate staff session" }
+    }
+
+    return {
+      success: true,
+      message: "Staff authenticated successfully",
+      data: activateResult.data,
+      allStaff: activateResult.allStaff,
+    }
+  } catch (error) {
+    console.error("Error authenticating staff:", error)
+    return { success: false, message: "Failed to authenticate staff" }
   }
 }
 

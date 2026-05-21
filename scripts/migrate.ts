@@ -297,6 +297,7 @@ async function createStaffServiceTables() {
         device_id INTEGER NOT NULL,
         company_id INTEGER DEFAULT 1,
         created_by INTEGER NOT NULL,
+        staff_password_hash TEXT,
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()
       )
@@ -604,6 +605,7 @@ async function addColumns() {
   await runSafe("service_items.staff_id", () => sql`ALTER TABLE service_items ADD COLUMN IF NOT EXISTS staff_id INTEGER`)
   await runSafe("service_items.service_cost", () => sql`ALTER TABLE service_items ADD COLUMN IF NOT EXISTS service_cost DECIMAL(10,2) DEFAULT 0`)
   await runSafe("service_items.include_cost_in_invoice", () => sql`ALTER TABLE service_items ADD COLUMN IF NOT EXISTS include_cost_in_invoice BOOLEAN DEFAULT false`)
+  await runSafe("staff.staff_password_hash", () => sql`ALTER TABLE staff ADD COLUMN IF NOT EXISTS staff_password_hash TEXT`)
 
   // ── financial_transactions ──
   await runSafe("financial_transactions.device_id", () => sql`ALTER TABLE financial_transactions ADD COLUMN IF NOT EXISTS device_id INTEGER`)

@@ -11,17 +11,26 @@ import {
   Truck,
   ArrowRightLeft,
   Calculator,
-  Plus,
   Power,
   Menu,
   X,
   ChevronUp,
   ChevronDown,
+  UserCircle2,
+  LogOut,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/components/ui/use-toast"
 import { logout } from "@/app/actions/auth-actions"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import HomeTab from "./home-tab"
 import SaleTab from "./sale-tab"
 import PurchaseTab from "./purchase-tab"
@@ -29,16 +38,15 @@ import ProductTab from "./product-tab"
 import CustomerTab from "./customer-tab"
 import TransferTab from "./transfer-tab"
 import AccountingTab from "./accounting-tab"
-import NewSaleTab from "./new-sale-tab"
 import SupplierTab from "./supplier-tab"
-import NewSaleModal from "@/components/sales/new-sale-modal"
-import StaffHeaderDropdown from "./staff-header-dropdown"
 import { AnimatedThemeToggle } from "@/components/ui/animated-theme-toggle"
+import StaffAuthModal from "../staff/staff-auth-modal"
 
 import { useAppSelector, useAppDispatch } from "@/store/hooks"
 import { selectUser, selectCompany, selectDevice, clearDeviceData } from "@/store/slices/deviceSlice"
+import { clearStaff, selectActiveStaff } from "@/store/slices/staffSlice"
 
-type TabType = "home" | "sale" | "purchase" | "product" | "customer" | "transfer" | "accounting" | "newsale" | "supplier"
+type TabType = "home" | "sale" | "purchase" | "product" | "customer" | "transfer" | "accounting" | "supplier"
 
 interface DashboardProps {
   mockMode?: boolean
@@ -73,14 +81,15 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
   const user = useAppSelector(selectUser)
   const company = useAppSelector(selectCompany)
   const device = useAppSelector(selectDevice)
+  const activeStaff = useAppSelector(selectActiveStaff)
 
   const [isLoading, setIsLoading] = useState(true)
   const [dbError, setDbError] = useState<string | null>(null)
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
-  const [isHeaderSaleModalOpen, setIsHeaderSaleModalOpen] = useState(false)
   const [isFooterExpanded, setIsFooterExpanded] = useState(false)
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [mounted, setMounted] = useState(false)
+  const [staffAuthOpen, setStaffAuthOpen] = useState(false)
   
   const router = useRouter()
   const { toast } = useToast()
@@ -111,11 +120,18 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
     }
   }, [mounted, user?.id])
 
+  useEffect(() => {
+    if (!mounted || !user?.id || !device?.id) return
+    if (!activeStaff) {
+      setStaffAuthOpen(true)
+    }
+  }, [mounted, user?.id, device?.id, activeStaff])
+
   // Tab parameter synchronization
   useEffect(() => {
     if (
       tabParam &&
-      ["home", "sale", "purchase", "product", "customer", "transfer", "accounting", "newsale", "supplier"].includes(
+      ["home", "sale", "purchase", "product", "customer", "transfer", "accounting", "supplier"].includes(
         tabParam,
       )
     ) {
@@ -145,6 +161,7 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
     try {
       // Clear Redux store first
       dispatchRef.current(clearDeviceData())
+      dispatchRef.current(clearStaff())
 
       if (!mockMode) {
         await logout()
@@ -161,33 +178,20 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
 
       // Even if server logout fails, clear Redux and redirect
       dispatchRef.current(clearDeviceData())
+      dispatchRef.current(clearStaff())
       routerRef.current.push("/")
     }
   }, [mockMode, toast])
 
-  const handleAddButtonClick = useCallback((tab?: TabType) => {
-    if (tab === "sale") {
-      handleTabChange("newsale")
-      return
-    }
-
-    setIsAddModalOpen(true)
-    if (tab && tab !== activeTab) {
-      handleTabChange(tab)
-    }
-  }, [activeTab, handleTabChange])
-
-  const handleHeaderSaleClick = useCallback(() => {
-    setIsHeaderSaleModalOpen(true)
-  }, [])
-
-  const handleHeaderSaleModalClose = useCallback(() => {
-    setIsHeaderSaleModalOpen(false)
-    // Refresh sales data if we're on the sales tab
-    if (activeTab === "sale") {
-      window.location.reload()
-    }
-  }, [activeTab])
+  const handleStaffLogout = useCallback(() => {
+    dispatchRef.current(clearStaff())
+    setStaffAuthOpen(true)
+    setIsMobileMenuOpen(false)
+    toast({
+      title: "Staff logged out",
+      description: "Please log in with staff password to continue.",
+    })
+  }, [toast])
 
   // Don't render anything until mounted (prevents hydration issues)
   if (!mounted || isLoading) {
@@ -254,8 +258,6 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
           return <TransferTab userId={user?.id || 0} />
         case "accounting":
           return <AccountingTab userId={user?.id || 0} companyId={companyId} deviceId={deviceId || 0} />
-        case "newsale":
-          return <NewSaleTab userId={user?.id} />
         default:
           return <ErrorTab name={activeTab} />
       }
@@ -333,42 +335,105 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
           </Button>
 
           {/* Desktop Controls */}
-          <div className="hidden sm:flex items-center space-x-4">
-            <AnimatedThemeToggle />
-
-            <Button
-              onClick={handleHeaderSaleClick}
-              variant="outline"
-              size="sm"
-              className="flex items-center gap-2 border-blue-300 dark:border-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
-            >
-              <Plus className="h-4 w-4" />
-              <span>Add Sale</span>
-            </Button>
-
-            {device?.id && user?.id ? (
-              <StaffHeaderDropdown
-                userId={user.id}
-                deviceId={device.id}
-              />
-            ) : (
-              <div className="h-8 w-8 animate-spin rounded-full border-2 border-blue-600 border-t-transparent"></div>
-            )}
-
+          <div className="hidden sm:flex items-center space-x-2">
             <Button
               onClick={handleLogout}
               variant="ghost"
               size="sm"
-              className="flex items-center gap-2 hover:bg-red-50 dark:hover:bg-red-900/20 text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300"
+              className="h-9 w-9 rounded-full p-0 hover:bg-red-50 dark:hover:bg-red-900/20 text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300"
               title="Logout"
             >
               <Power className="h-4 w-4" />
             </Button>
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-9 w-9 rounded-full p-0 hover:bg-gray-100 dark:hover:bg-gray-700"
+                  title="Staff Profile"
+                >
+                  <UserCircle2 className="h-4 w-4 text-gray-700 dark:text-gray-200" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                className="w-56 bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700"
+              >
+                <DropdownMenuLabel className="text-gray-900 dark:text-gray-100">Staff Profile</DropdownMenuLabel>
+                <DropdownMenuSeparator className="bg-gray-200 dark:bg-gray-700" />
+                <div className="px-2 py-2 flex items-center justify-between">
+                  <span className="text-sm text-gray-700 dark:text-gray-200">Theme</span>
+                  <AnimatedThemeToggle />
+                </div>
+                <DropdownMenuSeparator className="bg-gray-200 dark:bg-gray-700" />
+                {activeStaff ? (
+                  <>
+                    <div className="px-2 py-2">
+                      <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{activeStaff.name}</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Active staff session</p>
+                    </div>
+                    <DropdownMenuSeparator className="bg-gray-200 dark:bg-gray-700" />
+                    <DropdownMenuItem
+                      onClick={handleStaffLogout}
+                      className="cursor-pointer text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-900/20"
+                    >
+                      <LogOut className="mr-2 h-4 w-4" />
+                      Staff Logout
+                    </DropdownMenuItem>
+                  </>
+                ) : (
+                  <div className="px-2 py-2 text-sm text-amber-600 dark:text-amber-400">No staff authenticated</div>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
 
           {/* Mobile Controls */}
           <div className="flex sm:hidden items-center space-x-2">
-            <AnimatedThemeToggle />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-9 w-9 rounded-full p-0 hover:bg-gray-100 dark:hover:bg-gray-700"
+                  title="Staff Profile"
+                >
+                  <UserCircle2 className="h-5 w-5 text-gray-700 dark:text-gray-200" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                className="w-56 bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700"
+              >
+                <DropdownMenuLabel className="text-gray-900 dark:text-gray-100">Staff Profile</DropdownMenuLabel>
+                <DropdownMenuSeparator className="bg-gray-200 dark:bg-gray-700" />
+                <div className="px-2 py-2 flex items-center justify-between">
+                  <span className="text-sm text-gray-700 dark:text-gray-200">Theme</span>
+                  <AnimatedThemeToggle />
+                </div>
+                <DropdownMenuSeparator className="bg-gray-200 dark:bg-gray-700" />
+                {activeStaff ? (
+                  <>
+                    <div className="px-2 py-2">
+                      <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{activeStaff.name}</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Active staff session</p>
+                    </div>
+                    <DropdownMenuSeparator className="bg-gray-200 dark:bg-gray-700" />
+                    <DropdownMenuItem
+                      onClick={handleStaffLogout}
+                      className="cursor-pointer text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-900/20"
+                    >
+                      <LogOut className="mr-2 h-4 w-4" />
+                      Staff Logout
+                    </DropdownMenuItem>
+                  </>
+                ) : (
+                  <div className="px-2 py-2 text-sm text-amber-600 dark:text-amber-400">No staff authenticated</div>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Button
               onClick={handleLogout}
               variant="ghost"
@@ -386,30 +451,31 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
       {isMobileMenuOpen && (
         <div className="sm:hidden bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 shadow-lg z-20">
           <div className="px-4 py-3 space-y-3">
-            <Button
-              onClick={handleHeaderSaleClick}
-              variant="outline"
-              size="sm"
-              className="w-full flex items-center justify-center gap-2 border-blue-300 dark:border-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-blue-600 dark:text-blue-400"
-            >
-              <Plus className="h-4 w-4" />
-              Add Sale
-            </Button>
-            
             <div className="pt-2 border-t border-gray-200 dark:border-gray-700">
               <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
                 Account
               </p>
               <div className="space-y-2">
                 <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-2">
-                 {device?.id && user?.id ? (
-                    <StaffHeaderDropdown
-                      userId={user.id}
-                      deviceId={device.id}
-                    />
-                  ) : (
-                    <div className="h-6 w-24 animate-pulse bg-gray-300 dark:bg-gray-600 rounded"></div>
-                  )}
+                  <p className="text-xs text-gray-600 dark:text-gray-300">
+                    {activeStaff ? (
+                      <>
+                        Staff: <span className="font-semibold">{activeStaff.name}</span>
+                      </>
+                    ) : (
+                      "Staff not authenticated"
+                    )}
+                  </p>
+                  {activeStaff ? (
+                    <Button
+                      onClick={handleStaffLogout}
+                      variant="outline"
+                      size="sm"
+                      className="mt-2 h-7 border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-900/20"
+                    >
+                      Staff Logout
+                    </Button>
+                  ) : null}
                 </div>
               </div>
             </div> 
@@ -514,13 +580,13 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
         </div>
       </nav>
 
-      {/* Header Sale Modal */}
-      <NewSaleModal
-        isOpen={isHeaderSaleModalOpen}
-        onClose={handleHeaderSaleModalClose}
-        userId={user?.id || 0}
-        currency={device?.currency || "AED"}
-      />
+      {device?.id ? (
+        <StaffAuthModal
+          deviceId={device.id}
+          isOpen={staffAuthOpen}
+          onAuthenticated={() => setStaffAuthOpen(false)}
+        />
+      ) : null}
     </div>
   )
 }

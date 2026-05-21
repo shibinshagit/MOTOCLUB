@@ -14,6 +14,7 @@ import DeviceStockTab from "./device-tabs/device-stock-tab"
 import DeviceCustomersTab from "./device-tabs/device-customers-tab"
 import DeviceFinanceTab from "./device-tabs/device-finance-tab"
 import DeviceAnalyticsTab from "./device-tabs/device-analytics-tab"
+import DeviceStaffTab from "./device-tabs/device-staff-tab"
 
 type Device = {
   id: number
@@ -144,7 +145,7 @@ export default function DeviceDetails({ device, onBack }: DeviceDetailsProps) {
       </Card>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="mb-6 grid w-full grid-cols-2 gap-2 rounded-lg bg-[#1E293B] p-1 md:grid-cols-4 lg:grid-cols-7">
+        <TabsList className="mb-6 grid w-full grid-cols-2 gap-2 rounded-lg bg-[#1E293B] p-1 md:grid-cols-4 lg:grid-cols-8">
           <TabsTrigger
             value="overview"
             className="rounded-md data-[state=active]:bg-[#334155] data-[state=active]:text-white"
@@ -188,6 +189,13 @@ export default function DeviceDetails({ device, onBack }: DeviceDetailsProps) {
             CUSTOMERS
           </TabsTrigger>
           <TabsTrigger
+            value="staff"
+            className="rounded-md data-[state=active]:bg-[#334155] data-[state=active]:text-white"
+          >
+            <Users className="mr-2 h-4 w-4" />
+            STAFF
+          </TabsTrigger>
+          <TabsTrigger
             value="finance"
             className="rounded-md data-[state=active]:bg-[#334155] data-[state=active]:text-white"
           >
@@ -218,6 +226,10 @@ export default function DeviceDetails({ device, onBack }: DeviceDetailsProps) {
 
         <TabsContent value="customers">
           <DeviceCustomersTab deviceId={device.id} />
+        </TabsContent>
+
+        <TabsContent value="staff">
+          <DeviceStaffTab deviceId={device.id} />
         </TabsContent>
 
         <TabsContent value="finance">

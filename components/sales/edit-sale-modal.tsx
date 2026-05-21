@@ -28,17 +28,15 @@ import ProductSelectSimple from "./product-select-simple"
 import NewCustomerModal from "./new-customer-modal"
 import NewProductModal from "./new-product-modal"
 import NewServiceModal from "../services/new-service-modal"
-import NewStaffModal from "../staff/new-staff-modal"
 import { getSaleDetails, updateSale } from "@/app/actions/sale-actions"
 import { getProductByBarcode } from "@/app/actions/product-actions"
 import { getDeviceCurrency } from "@/app/actions/dashboard-actions"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { FormAlert } from "@/components/ui/form-alert"
-import { useSelector, useDispatch } from "react-redux"
+import { useSelector } from "react-redux"
 import { selectDeviceId } from "@/store/slices/deviceSlice"
-import { selectStaff, selectActiveStaff, addStaff as addStaffToRedux } from "@/store/slices/staffSlice"
-import StaffHeaderDropdown from "../dashboard/staff-header-dropdown"
+import { selectActiveStaff } from "@/store/slices/staffSlice"
 
 import { format } from "date-fns"
 import { CalendarIcon } from "lucide-react"
@@ -70,9 +68,7 @@ interface ProductRow {
 }
 
 export default function EditSaleModal({ isOpen, onClose, saleId, userId, currency: propCurrency }: EditSaleModalProps) {
-  const dispatch = useDispatch()
   const deviceId = useSelector(selectDeviceId)
-  const allStaff = useSelector(selectStaff)
   const activeStaff = useSelector(selectActiveStaff)
 
   const [isLoading, setIsLoading] = useState(true)
@@ -108,7 +104,6 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
 
   // Staff state with Redux integration
   const [staffId, setStaffId] = useState<number | null>(null)
-  const [staffName, setStaffName] = useState<string>("")
 
   // Auto-dismiss form alerts after 5 seconds
   useEffect(() => {
@@ -134,7 +129,6 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
   const [isNewCustomerModalOpen, setIsNewCustomerModalOpen] = useState(false)
   const [isNewProductModalOpen, setIsNewProductModalOpen] = useState(false)
   const [isNewServiceModalOpen, setIsNewServiceModalOpen] = useState(false)
-  const [isNewStaffModalOpen, setIsNewStaffModalOpen] = useState(false)
   const [isNotFoundModalOpen, setIsNotFoundModalOpen] = useState(false)
   const [newProductBarcode, setNewProductBarcode] = useState("")
 
@@ -208,11 +202,9 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
           // Set staff information from sale data or use active staff from Redux
           if (sale.staff_id) {
             setStaffId(sale.staff_id)
-            setStaffName(sale.staff_name || "")
           } else if (activeStaff) {
             // If no staff in sale but we have active staff, use that
             setStaffId(activeStaff.id)
-            setStaffName(activeStaff.name)
             console.log("Auto-selected active staff for edit:", activeStaff.name)
           }
 
@@ -427,29 +419,6 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
     setCustomerId(customerId)
     setCustomerName(customerName)
     setIsNewCustomerModalOpen(false)
-
-    // Focus back on barcode input
-    setTimeout(() => {
-      if (barcodeInputRef.current) {
-        barcodeInputRef.current.focus()
-      }
-    }, 100)
-  }
-
-  // Handle new staff added - update Redux and local state
-  const handleNewStaff = (staffId: number, staffName: string, staffData?: any) => {
-    console.log("New staff added in edit modal:", { staffId, staffName, staffData })
-
-    // Update local state
-    setStaffId(staffId)
-    setStaffName(staffName)
-    setIsNewStaffModalOpen(false)
-
-    // Update Redux if we have the full staff data
-    if (staffData) {
-      dispatch(addStaffToRedux(staffData))
-      console.log("Added new staff to Redux from edit modal:", staffData)
-    }
 
     // Focus back on barcode input
     setTimeout(() => {
@@ -1152,15 +1121,9 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
                               <User className="h-3.5 w-3.5 mr-1 text-green-600 dark:text-green-400" />
                               Staff *
                             </Label>
-                            <StaffHeaderDropdown
-                              userId={userId}
-                              showInSaleModal={true}
-                              selectedStaffId={staffId}
-                              onStaffChange={(id, name) => {
-                                setStaffId(id)
-                                setStaffName(name || "")
-                              }}
-                            />
+                            <div className="h-9 rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 flex items-center text-sm text-gray-900 dark:text-gray-100">
+                              {activeStaff?.name || "Authenticate staff from dashboard"}
+                            </div>
                           </div>
 
                           <div className="space-y-1">
@@ -1359,16 +1322,6 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
         isOpen={isNewCustomerModalOpen}
         onClose={() => setIsNewCustomerModalOpen(false)}
         onCustomerAdded={handleNewCustomer}
-        userId={userId}
-      />
-
-      {/* New Staff Modal with Redux update */}
-      <NewStaffModal
-        isOpen={isNewStaffModalOpen}
-        onClose={() => setIsNewStaffModalOpen(false)}
-        onStaffAdded={(staffId, staffName, staffData) => {
-          handleNewStaff(staffId, staffName, staffData)
-        }}
         userId={userId}
       />
 

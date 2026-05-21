@@ -87,7 +87,6 @@ import { getProductByBarcode } from "@/app/actions/product-actions"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { FormAlert } from "@/components/ui/form-alert"
 import { selectActiveStaff } from "@/store/slices/staffSlice"
-import StaffHeaderDropdown from "./staff-header-dropdown"
 import { printSalesReceipt } from "@/lib/receipt-utils"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
@@ -1954,7 +1953,9 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
                                     <Users className="h-3 w-3 mr-1 text-green-500 dark:text-green-400" />
                                     Staff *
                                   </Label>
-                                  <StaffHeaderDropdown userId={userId} showInSaleModal={true} />
+                                  <div className="h-8 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 text-xs flex items-center text-gray-700 dark:text-gray-200">
+                                    {activeStaff?.name || "Authenticate staff from dashboard header"}
+                                  </div>
                                 </div>
 
                                 <div className="flex flex-col space-y-1 flex-1">
