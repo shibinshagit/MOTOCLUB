@@ -12,7 +12,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { useToast } from "@/components/ui/use-toast"
 import { createProduct } from "@/app/actions/product-actions"
 import { getCategories, createCategory } from "@/app/actions/category-actions"
-import { AlertCircle, Check, ChevronRight, Loader2, Plus, Search, Tag, X, ImageIcon, Link2, Trash2 } from "lucide-react"
+import { AlertCircle, Check, ChevronRight, Loader2, Plus, Search, Tag, X, ImageIcon, Link2, Trash2, Film } from "lucide-react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { getDeviceCurrency } from "@/app/actions/dashboard-actions"
@@ -31,6 +31,16 @@ interface AttributeEntry {
   value: string
 }
 
+type PlatformKey = "amazon" | "flipkart" | "meesho" | "own_ecom"
+type PlatformStatus = "not_listed" | "active" | "archived"
+
+const PLATFORM_OPTIONS: { key: PlatformKey; label: string }[] = [
+  { key: "amazon", label: "Amazon" },
+  { key: "flipkart", label: "Flipkart" },
+  { key: "meesho", label: "Meesho" },
+  { key: "own_ecom", label: "Own Ecom" },
+]
+
 interface NewProductModalProps {
   isOpen: boolean
   onClose: () => void
@@ -44,9 +54,12 @@ export default function NewProductModal({ isOpen, onClose, onSuccess, userId, in
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [currency, setCurrency] = useState("QAR")
-  const [selectedImage, setSelectedImage] = useState<File | null>(null)
-  const [imagePreview, setImagePreview] = useState<string | null>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [selectedImages, setSelectedImages] = useState<File[]>([])
+  const [imagePreviews, setImagePreviews] = useState<string[]>([])
+  const [selectedVideo, setSelectedVideo] = useState<File | null>(null)
+  const [videoPreview, setVideoPreview] = useState<string | null>(null)
+  const imageInputRef = useRef<HTMLInputElement>(null)
+  const videoInputRef = useRef<HTMLInputElement>(null)
   const [formData, setFormData] = useState({
     name: "",
     companyName: "",
@@ -65,6 +78,12 @@ export default function NewProductModal({ isOpen, onClose, onSuccess, userId, in
     link: "",
   })
   const [attributes, setAttributes] = useState<AttributeEntry[]>([])
+  const [platformStatus, setPlatformStatus] = useState<Record<PlatformKey, PlatformStatus>>({
+    amazon: "not_listed",
+    flipkart: "not_listed",
+    meesho: "not_listed",
+    own_ecom: "not_listed",
+  })
 
   const [categories, setCategories] = useState<Category[]>([])
   const [filteredCategories, setFilteredCategories] = useState<Category[]>([])
@@ -110,31 +129,77 @@ export default function NewProductModal({ isOpen, onClose, onSuccess, userId, in
   }
 
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    if (file.size > 5 * 1024 * 1024) {
-      toast({ title: "Error", description: "Image size must be less than 5MB", variant: "destructive" })
+    const files = Array.from(e.target.files || [])
+    if (!files.length) return
+
+    const validImageFiles: File[] = []
+    const validImagePreviews: string[] = []
+
+    const maxSelectable = 4 - selectedImages.length
+    if (maxSelectable <= 0) {
+      toast({ title: "Limit reached", description: "You can upload up to 4 images only.", variant: "destructive" })
       return
     }
-    if (!file.type.startsWith('image/')) {
-      toast({ title: "Error", description: "Please select a valid image file", variant: "destructive" })
-      return
+
+    for (const file of files.slice(0, maxSelectable)) {
+      if (!file.type.startsWith("image/")) {
+        toast({ title: "Error", description: `${file.name} is not an image file`, variant: "destructive" })
+        continue
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        toast({ title: "Error", description: `${file.name} exceeds 5MB`, variant: "destructive" })
+        continue
+      }
+      validImageFiles.push(file)
+      validImagePreviews.push(URL.createObjectURL(file))
     }
-    setSelectedImage(file)
-    const reader = new FileReader()
-    reader.onload = (e) => setImagePreview(e.target?.result as string)
-    reader.readAsDataURL(file)
+
+    if (validImageFiles.length > 0) {
+      setSelectedImages((prev) => [...prev, ...validImageFiles].slice(0, 4))
+      setImagePreviews((prev) => [...prev, ...validImagePreviews].slice(0, 4))
+    }
+
+    if (imageInputRef.current) imageInputRef.current.value = ""
   }
 
-  const removeImage = () => {
-    setSelectedImage(null)
-    setImagePreview(null)
-    if (fileInputRef.current) fileInputRef.current.value = ""
+  const removeImageAt = (index: number) => {
+    setSelectedImages((prev) => prev.filter((_, i) => i !== index))
+    setImagePreviews((prev) => {
+      const urlToRevoke = prev[index]
+      if (urlToRevoke) URL.revokeObjectURL(urlToRevoke)
+      return prev.filter((_, i) => i !== index)
+    })
+  }
+
+  const handleVideoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (!file.type.startsWith("video/")) {
+      toast({ title: "Error", description: "Please select a valid video file", variant: "destructive" })
+      return
+    }
+    if (file.size > 25 * 1024 * 1024) {
+      toast({ title: "Error", description: "Video size must be less than 25MB", variant: "destructive" })
+      return
+    }
+    if (videoPreview) URL.revokeObjectURL(videoPreview)
+    setSelectedVideo(file)
+    setVideoPreview(URL.createObjectURL(file))
+    if (videoInputRef.current) videoInputRef.current.value = ""
+  }
+
+  const removeVideo = () => {
+    if (videoPreview) URL.revokeObjectURL(videoPreview)
+    setSelectedVideo(null)
+    setVideoPreview(null)
+    if (videoInputRef.current) videoInputRef.current.value = ""
   }
 
   useEffect(() => {
     if (!isOpen) return
     const initializeForm = async () => {
+      imagePreviews.forEach((url) => URL.revokeObjectURL(url))
+      if (videoPreview) URL.revokeObjectURL(videoPreview)
       setFormData({
         name: "", companyName: "", category: "", categoryId: null,
         description: "", price: "", wholesalePrice: "", msp: "",
@@ -142,9 +207,17 @@ export default function NewProductModal({ isOpen, onClose, onSuccess, userId, in
         suitableFor: "", link: "",
       })
       setAttributes([])
+      setPlatformStatus({
+        amazon: "not_listed",
+        flipkart: "not_listed",
+        meesho: "not_listed",
+        own_ecom: "not_listed",
+      })
       setSelectedCategory(null)
-      setSelectedImage(null)
-      setImagePreview(null)
+      setSelectedImages([])
+      setImagePreviews([])
+      setSelectedVideo(null)
+      setVideoPreview(null)
       setError(null)
       setFieldErrors({})
       fetchCategories()
@@ -157,6 +230,13 @@ export default function NewProductModal({ isOpen, onClose, onSuccess, userId, in
     }
     initializeForm()
   }, [isOpen, userId, initialBarcode])
+
+  useEffect(() => {
+    return () => {
+      imagePreviews.forEach((url) => URL.revokeObjectURL(url))
+      if (videoPreview) URL.revokeObjectURL(videoPreview)
+    }
+  }, [imagePreviews, videoPreview])
 
   useEffect(() => {
     if (categorySearchQuery.trim() === "") {
@@ -295,7 +375,12 @@ export default function NewProductModal({ isOpen, onClose, onSuccess, userId, in
       const validAttributes = attributes.filter((a) => a.key.trim() && a.value.trim())
       submitFormData.append("attributes", JSON.stringify(validAttributes))
       if (userId) submitFormData.append("user_id", userId.toString())
-      if (selectedImage) submitFormData.append("image", selectedImage)
+      selectedImages.forEach((img) => submitFormData.append("images", img))
+      if (selectedVideo) submitFormData.append("video", selectedVideo)
+      submitFormData.append("amazon_status", platformStatus.amazon)
+      submitFormData.append("flipkart_status", platformStatus.flipkart)
+      submitFormData.append("meesho_status", platformStatus.meesho)
+      submitFormData.append("own_ecom_status", platformStatus.own_ecom)
 
       const result = await createProduct(submitFormData)
 
@@ -329,23 +414,130 @@ export default function NewProductModal({ isOpen, onClose, onSuccess, userId, in
 
             <form onSubmit={handleSubmit} className="space-y-4 mt-4">
               <div className="grid gap-4">
-                {/* Product Image */}
-                <div className="grid gap-2">
-                  <Label className="text-gray-700 dark:text-gray-300">Product Image</Label>
-                  <div className="flex flex-col gap-2">
-                    {imagePreview ? (
+                {/* Product Media */}
+                <div className="grid gap-3">
+                  <Label className="text-gray-700 dark:text-gray-300">Product Media</Label>
+                  <div className="grid gap-2">
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      Add up to 4 images (max 5MB each)
+                    </p>
+                    {imagePreviews.length > 0 ? (
+                      <div className="grid grid-cols-2 gap-2">
+                        {imagePreviews.map((preview, index) => (
+                          <div key={`${preview}-${index}`} className="relative">
+                            <img
+                              src={preview || "/placeholder.svg"}
+                              alt={`Product preview ${index + 1}`}
+                              className="w-full h-24 object-cover rounded-md border border-gray-300 dark:border-gray-600"
+                            />
+                            <Button
+                              type="button"
+                              variant="destructive"
+                              size="sm"
+                              onClick={() => removeImageAt(index)}
+                              className="absolute top-1 right-1 h-6 w-6 p-0"
+                            >
+                              <X className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                    {selectedImages.length < 4 ? (
+                      <div
+                        onClick={() => imageInputRef.current?.click()}
+                        className="w-full h-24 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-md flex flex-col items-center justify-center cursor-pointer hover:border-gray-400 dark:hover:border-gray-500 transition-colors"
+                      >
+                        <ImageIcon className="h-6 w-6 text-gray-400 dark:text-gray-500 mb-1" />
+                        <p className="text-sm text-gray-500 dark:text-gray-400">Add Images ({selectedImages.length}/4)</p>
+                      </div>
+                    ) : null}
+                    <input
+                      ref={imageInputRef}
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      onChange={handleImageSelect}
+                      className="hidden"
+                    />
+                  </div>
+
+                  <div className="grid gap-2">
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      Optional: 1 video (max 25MB)
+                    </p>
+                    {videoPreview ? (
                       <div className="relative">
-                        <img src={imagePreview || "/placeholder.svg"} alt="Product preview" className="w-full h-32 object-cover rounded-md border border-gray-300 dark:border-gray-600" />
-                        <Button type="button" variant="destructive" size="sm" onClick={removeImage} className="absolute top-2 right-2"><X className="h-4 w-4" /></Button>
+                        <video controls className="w-full h-32 rounded-md border border-gray-300 dark:border-gray-600">
+                          <source src={videoPreview} />
+                        </video>
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          size="sm"
+                          onClick={removeVideo}
+                          className="absolute top-2 right-2"
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
                       </div>
                     ) : (
-                      <div onClick={() => fileInputRef.current?.click()} className="w-full h-32 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-md flex flex-col items-center justify-center cursor-pointer hover:border-gray-400 dark:hover:border-gray-500 transition-colors">
-                        <ImageIcon className="h-8 w-8 text-gray-400 dark:text-gray-500 mb-2" />
-                        <p className="text-sm text-gray-500 dark:text-gray-400">Click to upload image</p>
-                        <p className="text-xs text-gray-400 dark:text-gray-500">Max 5MB</p>
+                      <div
+                        onClick={() => videoInputRef.current?.click()}
+                        className="w-full h-24 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-md flex flex-col items-center justify-center cursor-pointer hover:border-gray-400 dark:hover:border-gray-500 transition-colors"
+                      >
+                        <Film className="h-6 w-6 text-gray-400 dark:text-gray-500 mb-1" />
+                        <p className="text-sm text-gray-500 dark:text-gray-400">Add Video (optional)</p>
                       </div>
                     )}
-                    <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageSelect} className="hidden" />
+                    <input ref={videoInputRef} type="file" accept="video/*" onChange={handleVideoSelect} className="hidden" />
+                  </div>
+                </div>
+
+                <div className="grid gap-2">
+                  <Label className="text-gray-700 dark:text-gray-300">Marketplace Availability</Label>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Use Archived when a listing was live before but is currently stopped.
+                  </p>
+                  <div className="space-y-2">
+                    {PLATFORM_OPTIONS.map((platform) => (
+                      <div
+                        key={platform.key}
+                        className="rounded-md border border-gray-200 dark:border-gray-700 p-2 bg-gray-50 dark:bg-gray-900/30"
+                      >
+                        <div className="text-sm font-medium text-gray-800 dark:text-gray-200 mb-2">{platform.label}</div>
+                        <div className="grid grid-cols-3 gap-2">
+                          {[
+                            { value: "not_listed" as PlatformStatus, label: "Not Listed" },
+                            { value: "active" as PlatformStatus, label: "Active" },
+                            { value: "archived" as PlatformStatus, label: "Archived" },
+                          ].map((option) => {
+                            const isActive = platformStatus[platform.key] === option.value
+                            return (
+                              <Button
+                                key={option.value}
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() =>
+                                  setPlatformStatus((prev) => ({
+                                    ...prev,
+                                    [platform.key]: option.value,
+                                  }))
+                                }
+                                className={`text-xs ${
+                                  isActive
+                                    ? "border-blue-500 text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/20"
+                                    : "border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300"
+                                }`}
+                              >
+                                {option.label}
+                              </Button>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
 

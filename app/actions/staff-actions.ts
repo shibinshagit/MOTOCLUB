@@ -19,6 +19,18 @@ async function ensureStaffPasswordColumn() {
   }
 }
 
+async function ensureStaffRoleColumn() {
+  try {
+    await sql`ALTER TABLE staff ADD COLUMN IF NOT EXISTS role VARCHAR(20) NOT NULL DEFAULT 'staff'`
+  } catch (error) {
+    console.error("Failed ensuring staff.role column:", error)
+  }
+}
+
+function normalizeStaffRole(role?: string): "admin" | "staff" {
+  return role === "admin" ? "admin" : "staff"
+}
+
 // Schema is now managed by `npm run migrate`
 export async function initializeStaffSchema() {
   return { success: true, message: "Schema managed by migration script — run `npm run migrate`" }
@@ -67,6 +79,7 @@ export async function updateStaff(
     name: string
     phone: string
     email?: string
+    role?: "admin" | "staff"
     position: string
     salary: number
     salaryDate: string
@@ -80,6 +93,7 @@ export async function updateStaff(
 ) {
   try {
     await ensureStaffPasswordColumn()
+    await ensureStaffRoleColumn()
 
     // Validate required IDs
     if (!staffData.deviceId || staffData.deviceId === null || staffData.deviceId === undefined) {
@@ -116,6 +130,7 @@ export async function updateStaff(
         name = ${staffData.name},
         phone = ${staffData.phone},
         email = ${staffData.email || null},
+        role = ${normalizeStaffRole(staffData.role)},
         position = ${staffData.position},
         salary = ${staffData.salary},
         salary_date = ${staffData.salaryDate},
@@ -150,17 +165,8 @@ export async function updateStaff(
 // Activate staff (automatically deactivates all others)
 export async function activateStaff(staffId: number, deviceId: number) {
   try {
-    // Start a transaction to ensure atomicity
-    await sql`BEGIN`
-
-    // First, deactivate all other staff members for this device
-    await sql`
-      UPDATE staff 
-      SET is_active = false, updated_at = NOW()
-      WHERE device_id = ${deviceId} AND id != ${staffId}
-    `
-
-    // Then activate the selected staff member
+    await ensureStaffRoleColumn()
+    // Enable selected staff without changing others (multi-active support)
     const result = await sql`
       UPDATE staff 
       SET is_active = true, updated_at = NOW()
@@ -169,12 +175,8 @@ export async function activateStaff(staffId: number, deviceId: number) {
     `
 
     if (result.length === 0) {
-      await sql`ROLLBACK`
       return { success: false, message: "Staff member not found" }
     }
-
-    // Commit the transaction
-    await sql`COMMIT`
 
     // Get all updated staff data to return
     const allStaff = await sql`
@@ -188,10 +190,9 @@ export async function activateStaff(staffId: number, deviceId: number) {
       success: true,
       data: result[0],
       allStaff: allStaff,
-      message: `${result[0].name} is now the active staff member`,
+      message: `${result[0].name} is now active`,
     }
   } catch (error) {
-    await sql`ROLLBACK`
     console.error("Error activating staff:", error)
     return { success: false, message: "Failed to activate staff member" }
   }
@@ -202,6 +203,7 @@ export async function addStaff(staffData: {
   name: string
   phone: string
   email?: string
+  role?: "admin" | "staff"
   position: string
   salary: number
   salaryDate: string
@@ -215,6 +217,7 @@ export async function addStaff(staffData: {
 }) {
   try {
     await ensureStaffPasswordColumn()
+    await ensureStaffRoleColumn()
 
     // Validate required IDs
     if (!staffData.deviceId || staffData.deviceId === null || staffData.deviceId === undefined) {
@@ -230,24 +233,18 @@ export async function addStaff(staffData: {
     const staffPasswordHash = await generatePasswordHash(staffData.password.trim())
 
 
-    // Check if there's already an active staff member
-    const activeStaffCheck = await sql`
-      SELECT id, name FROM staff 
-      WHERE device_id = ${staffData.deviceId} AND is_active = true
-      LIMIT 1
-    `
-
-    // If there's already an active staff, create new staff as inactive
-    const isActive = activeStaffCheck.length === 0
+    // New staff should be active by default (supports multi-active staff)
+    const isActive = true
 
     const result = await sql`
       INSERT INTO staff (
-        name, phone, email, position, salary, salary_date, joined_on, 
+        name, phone, email, role, position, salary, salary_date, joined_on, 
         age, id_card_number, address, device_id, created_by, is_active, staff_password_hash
       ) VALUES (
         ${staffData.name},
         ${staffData.phone},
         ${staffData.email || null},
+        ${normalizeStaffRole(staffData.role)},
         ${staffData.position},
         ${staffData.salary},
         ${staffData.salaryDate},
@@ -265,9 +262,7 @@ export async function addStaff(staffData: {
     console.log("✅ Staff member created successfully:", result[0])
     revalidatePath("/dashboard")
 
-    const message = isActive
-      ? "Staff member added and activated successfully"
-      : `Staff member added as inactive. ${activeStaffCheck[0]?.name} is currently active.`
+    const message = "Staff member added and activated successfully"
 
     return { success: true, data: result[0], message }
   } catch (error) {
@@ -279,9 +274,10 @@ export async function addStaff(staffData: {
 export async function getStaffForAuthentication(deviceId: number) {
   try {
     await ensureStaffPasswordColumn()
+    await ensureStaffRoleColumn()
 
     const staff = await sql`
-      SELECT id, name, position, is_active
+      SELECT id, name, position, role, is_active
       FROM staff
       WHERE device_id = ${deviceId}
       ORDER BY is_active DESC, name ASC
@@ -301,6 +297,7 @@ export async function authenticateStaff(
 ) {
   try {
     await ensureStaffPasswordColumn()
+    await ensureStaffRoleColumn()
 
     if (!password?.trim()) {
       return { success: false, message: "Staff password is required" }

@@ -118,6 +118,12 @@ async function createProductTables() {
         msp DECIMAL(10, 2) DEFAULT 0,
         barcode VARCHAR(255),
         image_url TEXT,
+        image_urls JSONB DEFAULT '[]',
+        video_url TEXT,
+        amazon_status VARCHAR(20) DEFAULT 'not_listed',
+        flipkart_status VARCHAR(20) DEFAULT 'not_listed',
+        meesho_status VARCHAR(20) DEFAULT 'not_listed',
+        own_ecom_status VARCHAR(20) DEFAULT 'not_listed',
         shelf VARCHAR(255),
         color VARCHAR(255),
         size VARCHAR(255),
@@ -286,6 +292,7 @@ async function createStaffServiceTables() {
         name VARCHAR(255) NOT NULL,
         phone VARCHAR(50) NOT NULL,
         email VARCHAR(255),
+        role VARCHAR(20) NOT NULL DEFAULT 'staff',
         position VARCHAR(100) NOT NULL,
         salary DECIMAL(10,2) NOT NULL,
         salary_date DATE NOT NULL,
@@ -566,6 +573,12 @@ async function addColumns() {
   await runSafe("products.wholesale_price", () => sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS wholesale_price DECIMAL(10, 2) DEFAULT 0`)
   await runSafe("products.msp", () => sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS msp DECIMAL(10, 2) DEFAULT 0`)
   await runSafe("products.image_url", () => sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS image_url TEXT`)
+  await runSafe("products.image_urls", () => sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS image_urls JSONB DEFAULT '[]'`)
+  await runSafe("products.video_url", () => sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS video_url TEXT`)
+  await runSafe("products.amazon_status", () => sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS amazon_status VARCHAR(20) DEFAULT 'not_listed'`)
+  await runSafe("products.flipkart_status", () => sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS flipkart_status VARCHAR(20) DEFAULT 'not_listed'`)
+  await runSafe("products.meesho_status", () => sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS meesho_status VARCHAR(20) DEFAULT 'not_listed'`)
+  await runSafe("products.own_ecom_status", () => sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS own_ecom_status VARCHAR(20) DEFAULT 'not_listed'`)
   await runSafe("products.shelf", () => sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS shelf VARCHAR(255)`)
   await runSafe("products.color", () => sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS color VARCHAR(255)`)
   await runSafe("products.size", () => sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS size VARCHAR(255)`)
@@ -606,6 +619,7 @@ async function addColumns() {
   await runSafe("service_items.service_cost", () => sql`ALTER TABLE service_items ADD COLUMN IF NOT EXISTS service_cost DECIMAL(10,2) DEFAULT 0`)
   await runSafe("service_items.include_cost_in_invoice", () => sql`ALTER TABLE service_items ADD COLUMN IF NOT EXISTS include_cost_in_invoice BOOLEAN DEFAULT false`)
   await runSafe("staff.staff_password_hash", () => sql`ALTER TABLE staff ADD COLUMN IF NOT EXISTS staff_password_hash TEXT`)
+  await runSafe("staff.role", () => sql`ALTER TABLE staff ADD COLUMN IF NOT EXISTS role VARCHAR(20) NOT NULL DEFAULT 'staff'`)
 
   // ── financial_transactions ──
   await runSafe("financial_transactions.device_id", () => sql`ALTER TABLE financial_transactions ADD COLUMN IF NOT EXISTS device_id INTEGER`)

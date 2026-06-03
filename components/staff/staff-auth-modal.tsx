@@ -14,17 +14,19 @@ import { authenticateStaff, getStaffForAuthentication } from "@/app/actions/staf
 interface StaffAuthModalProps {
   deviceId: number
   isOpen: boolean
-  onAuthenticated: () => void
+  onAuthenticated: (staffId: number) => void
+  onLogout: () => void
 }
 
 type LoginStaff = {
   id: number
   name: string
   position: string
+  role?: "admin" | "staff"
   is_active: boolean
 }
 
-export default function StaffAuthModal({ deviceId, isOpen, onAuthenticated }: StaffAuthModalProps) {
+export default function StaffAuthModal({ deviceId, isOpen, onAuthenticated, onLogout }: StaffAuthModalProps) {
   const dispatch = useAppDispatch()
   const { toast } = useToast()
 
@@ -97,7 +99,7 @@ export default function StaffAuthModal({ deviceId, isOpen, onAuthenticated }: St
       setPassword("")
       setAuthError(null)
       toast({ title: "Staff unlocked", description: `${selectedStaff?.name || "Staff"} session is active.` })
-      onAuthenticated()
+      onAuthenticated(selectedStaffId)
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : "Invalid staff credentials")
     } finally {
@@ -145,7 +147,9 @@ export default function StaffAuthModal({ deviceId, isOpen, onAuthenticated }: St
                         <UserCircle2 className="h-4 w-4" />
                         {member.name}
                       </span>
-                      <span className="text-xs text-muted-foreground">{member.position}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {member.role === "admin" ? "Admin" : "Staff"}
+                      </span>
                     </button>
                   ))
                 )}
@@ -173,14 +177,23 @@ export default function StaffAuthModal({ deviceId, isOpen, onAuthenticated }: St
               {authError ? <p className="text-sm text-red-600 dark:text-red-400">{authError}</p> : null}
             </div>
 
-            <Button
-              className="w-full"
-              onClick={handleAuthenticate}
-              disabled={isChecking || staff.length === 0}
-            >
-              {isChecking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              Unlock Session
-            </Button>
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                className="w-full"
+                onClick={handleAuthenticate}
+                disabled={isChecking || staff.length === 0}
+              >
+                {isChecking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                Unlock Session
+              </Button>
+              <Button
+                variant="outline"
+                className="w-full border-red-300 text-red-700 hover:bg-red-50 dark:border-red-700 dark:text-red-300 dark:hover:bg-red-900/20"
+                onClick={onLogout}
+              >
+                Logout
+              </Button>
+            </div>
           </div>
         )}
       </DialogContent>

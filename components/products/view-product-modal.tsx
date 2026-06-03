@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { format } from "date-fns"
-import { Loader2, Printer, Copy, Settings } from "lucide-react"
+import { Loader2, Printer, Copy, Settings, ImageIcon, Film } from "lucide-react"
 import { getProductStockHistory, getProductStockByDevice } from "@/app/actions/product-actions"
 import { printBarcodeSticker, printMultipleBarcodeStickers, encodeNumberAsLetters } from "@/lib/barcode-utils"
 import { Label } from "@/components/ui/label"
@@ -52,6 +52,44 @@ export default function ViewProductModal({
   // Get MSP (Maximum Selling Price)
   const msp = typeof product.msp === "number" ? product.msp : Number.parseFloat(product.msp || "0") || 0
   const currentDeviceId = Number(userId || product.created_by || 1)
+  const mediaImageUrls = useMemo(() => {
+    let urls: string[] = []
+    if (Array.isArray(product.image_urls)) {
+      urls = product.image_urls.filter((url: unknown) => typeof url === "string" && url.trim().length > 0) as string[]
+    } else if (typeof product.image_urls === "string" && product.image_urls.trim()) {
+      try {
+        const parsed = JSON.parse(product.image_urls)
+        if (Array.isArray(parsed)) {
+          urls = parsed.filter((url) => typeof url === "string" && url.trim().length > 0)
+        }
+      } catch {
+        urls = []
+      }
+    }
+    if (urls.length === 0 && product.image_url) {
+      urls = [product.image_url]
+    }
+    return urls.slice(0, 4)
+  }, [product.image_urls, product.image_url])
+  const mediaVideoUrl = typeof product.video_url === "string" && product.video_url.trim() ? product.video_url : null
+  const platformStatuses = [
+    { key: "amazon", label: "Amazon", status: product.amazon_status || "not_listed" },
+    { key: "flipkart", label: "Flipkart", status: product.flipkart_status || "not_listed" },
+    { key: "meesho", label: "Meesho", status: product.meesho_status || "not_listed" },
+    { key: "own_ecom", label: "Own Ecom", status: product.own_ecom_status || "not_listed" },
+  ]
+
+  const getPlatformBadgeClass = (status: string) => {
+    if (status === "active") return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
+    if (status === "archived") return "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200"
+    return "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200"
+  }
+
+  const getPlatformStatusLabel = (status: string) => {
+    if (status === "active") return "Active"
+    if (status === "archived") return "Archived"
+    return "Not Listed"
+  }
 
   const loadStockHistory = async (limit?: number) => {
     const result = await getProductStockHistory(product.id, limit)
@@ -237,24 +275,49 @@ export default function ViewProductModal({
           <div className="flex-1 overflow-y-auto px-6 pb-6">
             <div className="space-y-6">
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Product Image */}
-                {product.image_url && (
+                {/* Product Media */}
+                {(mediaImageUrls.length > 0 || mediaVideoUrl) && (
                   <div className="lg:col-span-1">
                     <div className="space-y-2">
-                      <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Product Image</h3>
-                      <div className="aspect-square rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 p-4 overflow-hidden">
-                        <img
-                          src={product.image_url || "/placeholder.svg"}
-                          alt={product.name}
-                          className="w-full h-full object-contain rounded-md"
-                        />
+                      <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Product Media</h3>
+                      <div className="space-y-2">
+                        {mediaImageUrls.length > 0 ? (
+                          <div className="grid grid-cols-2 gap-2">
+                            {mediaImageUrls.map((url, index) => (
+                              <div key={`${url}-${index}`} className="rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 p-1 overflow-hidden">
+                                <img
+                                  src={url || "/placeholder.svg"}
+                                  alt={`${product.name} ${index + 1}`}
+                                  className="w-full h-20 object-cover rounded-md"
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="h-24 rounded-lg border border-dashed border-gray-200 dark:border-gray-600 flex items-center justify-center text-gray-400">
+                            <ImageIcon className="h-5 w-5 mr-1" />
+                            <span className="text-xs">No images</span>
+                          </div>
+                        )}
+                        {mediaVideoUrl ? (
+                          <div className="rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 p-1 overflow-hidden">
+                            <video controls className="w-full h-28 rounded-md">
+                              <source src={mediaVideoUrl} />
+                            </video>
+                          </div>
+                        ) : (
+                          <div className="h-16 rounded-lg border border-dashed border-gray-200 dark:border-gray-600 flex items-center justify-center text-gray-400">
+                            <Film className="h-4 w-4 mr-1" />
+                            <span className="text-xs">No video</span>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
                 )}
 
                 {/* Product Details */}
-                <div className={`space-y-4 ${product.image_url ? "lg:col-span-2" : "lg:col-span-3"}`}>
+                <div className={`space-y-4 ${(mediaImageUrls.length > 0 || mediaVideoUrl) ? "lg:col-span-2" : "lg:col-span-3"}`}>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Name</h3>
@@ -390,6 +453,28 @@ export default function ViewProductModal({
                         <p className="text-gray-900 dark:text-gray-100 text-sm">{product.description}</p>
                       </div>
                     )}
+                  </div>
+
+                  {/* Attributes Section */}
+                  <div className="mt-4">
+                    <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">Marketplace Availability</h3>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                      {platformStatuses.map((platform) => (
+                        <div
+                          key={platform.key}
+                          className="flex flex-col rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 p-2"
+                        >
+                          <span className="text-xs text-gray-500 dark:text-gray-400">{platform.label}</span>
+                          <span
+                            className={`mt-1 inline-flex w-fit rounded-full px-2 py-0.5 text-xs font-medium ${getPlatformBadgeClass(
+                              platform.status,
+                            )}`}
+                          >
+                            {getPlatformStatusLabel(platform.status)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
 
                   {/* Attributes Section */}

@@ -90,6 +90,35 @@ async function uploadProductImage(file: File, productName: string): Promise<stri
   }
 }
 
+async function uploadProductVideo(file: File, productName: string): Promise<string | null> {
+  try {
+    const token = process.env.BLOB_READ_WRITE_TOKEN
+
+    if (!token) {
+      console.error("BLOB_READ_WRITE_TOKEN environment variable is not set")
+      throw new Error("Blob storage token not configured")
+    }
+
+    const timestamp = Date.now()
+    const safeName = productName.replace(/[^a-zA-Z0-9]/g, "_").substring(0, 50)
+    const extension = file.name.split(".").pop()?.toLowerCase() || "mp4"
+    const filename = `products/videos/${timestamp}-${safeName}.${extension}`
+
+    const blob = await put(filename, file, {
+      access: "public",
+      token: token,
+    })
+
+    return blob.url
+  } catch (error) {
+    console.error("Error uploading video:", error)
+    if (error instanceof Error) {
+      throw new Error(`Video upload failed: ${error.message}`)
+    }
+    return null
+  }
+}
+
 async function ensureProductDeviceStockTable() {
   await sql`
     CREATE TABLE IF NOT EXISTS product_device_stock (
@@ -101,6 +130,29 @@ async function ensureProductDeviceStockTable() {
       UNIQUE(product_id, device_id)
     )
   `
+}
+
+async function ensureProductMediaColumns() {
+  await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS image_urls JSONB DEFAULT '[]'`
+  await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS video_url TEXT`
+}
+
+const PLATFORM_KEYS = ["amazon", "flipkart", "meesho", "own_ecom"] as const
+type PlatformKey = (typeof PLATFORM_KEYS)[number]
+type PlatformStatus = "not_listed" | "active" | "archived"
+
+function normalizePlatformStatus(value: unknown): PlatformStatus {
+  const normalized = String(value || "").trim().toLowerCase()
+  if (normalized === "active") return "active"
+  if (normalized === "archived") return "archived"
+  return "not_listed"
+}
+
+async function ensureProductPlatformColumns() {
+  await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS amazon_status VARCHAR(20) DEFAULT 'not_listed'`
+  await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS flipkart_status VARCHAR(20) DEFAULT 'not_listed'`
+  await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS meesho_status VARCHAR(20) DEFAULT 'not_listed'`
+  await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS own_ecom_status VARCHAR(20) DEFAULT 'not_listed'`
 }
 
 function resolveDeviceStock(product: any, stockMap: Map<number, number>) {
@@ -132,6 +184,7 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
   console.log("getProducts called with:", { userId, limit, searchTerm })
 
   try {
+    await ensureProductPlatformColumns()
     let products
 
     // Check if searchTerm is a pure number (likely an ID lookup)
@@ -409,6 +462,7 @@ export async function getProductById(id: number, userId?: number) {
   resetConnectionState()
 
   try {
+    await ensureProductPlatformColumns()
     const result = await sql`
       SELECT 
         p.*,
@@ -634,12 +688,18 @@ export async function createProduct(formData: FormData) {
   const userId = formData.get("user_id") ? Number.parseInt(formData.get("user_id") as string) : undefined
   const barcode = formData.get("barcode") as string
   const imageFile = formData.get("image") as File | null
+  const imageFiles = formData.getAll("images").filter((item): item is File => item instanceof File && item.size > 0)
+  const videoFile = formData.get("video") as File | null
   const color = (formData.get("color") as string) || ""
   const size = (formData.get("size") as string) || ""
   const suitableFor = (formData.get("suitable_for") as string) || ""
   const attributesRaw = formData.get("attributes") as string
   const attributes = attributesRaw ? JSON.parse(attributesRaw) : []
   const link = (formData.get("link") as string) || ""
+  const amazonStatus = normalizePlatformStatus(formData.get("amazon_status"))
+  const flipkartStatus = normalizePlatformStatus(formData.get("flipkart_status"))
+  const meeshoStatus = normalizePlatformStatus(formData.get("meesho_status"))
+  const ownEcomStatus = normalizePlatformStatus(formData.get("own_ecom_status"))
 
   if (!name || isNaN(price)) {
     return { success: false, error: "Name and valid price are required" }
@@ -659,16 +719,36 @@ export async function createProduct(formData: FormData) {
       }
     }
 
-    // Upload image if provided
-    let imageUrl = null
-    if (imageFile && imageFile.size > 0) {
+    await ensureProductMediaColumns()
+    await ensureProductPlatformColumns()
+
+    // Upload images if provided (max 4)
+    const normalizedImages = imageFiles.length > 0 ? imageFiles.slice(0, 4) : imageFile && imageFile.size > 0 ? [imageFile] : []
+    const uploadedImageUrls: string[] = []
+    if (normalizedImages.length > 0) {
       try {
-        imageUrl = await uploadProductImage(imageFile, name)
+        for (const image of normalizedImages) {
+          const uploaded = await uploadProductImage(image, name)
+          if (uploaded) uploadedImageUrls.push(uploaded)
+        }
       } catch (error) {
         console.error("Image upload error:", error)
         return {
           success: false,
-          error: error instanceof Error ? error.message : "Failed to upload product image",
+          error: error instanceof Error ? error.message : "Failed to upload product image(s)",
+        }
+      }
+    }
+
+    let videoUrl: string | null = null
+    if (videoFile && videoFile.size > 0) {
+      try {
+        videoUrl = await uploadProductVideo(videoFile, name)
+      } catch (error) {
+        console.error("Video upload error:", error)
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : "Failed to upload product video",
         }
       }
     }
@@ -689,13 +769,19 @@ export async function createProduct(formData: FormData) {
             msp,
             shelf,
             image_url,
+            image_urls,
+            video_url,
             created_by,
             barcode,
             color,
             size,
             suitable_for,
             attributes,
-            link
+            link,
+            amazon_status,
+            flipkart_status,
+            meesho_status,
+            own_ecom_status
           )
           VALUES (
             ${name}, 
@@ -707,14 +793,20 @@ export async function createProduct(formData: FormData) {
             ${wholesalePrice},
             ${msp},
             ${shelf || ""},
-            ${imageUrl},
+            ${uploadedImageUrls[0] || null},
+            ${JSON.stringify(uploadedImageUrls)},
+            ${videoUrl},
             ${userId},
             ${barcode},
             ${color},
             ${size},
             ${suitableFor},
             ${JSON.stringify(attributes)},
-            ${link}
+            ${link},
+            ${amazonStatus},
+            ${flipkartStatus},
+            ${meeshoStatus},
+            ${ownEcomStatus}
           )
           RETURNING *
         `
@@ -806,6 +898,10 @@ export async function updateProduct(formData: FormData) {
   const shelf = formData.get("shelf") as string
   const barcode = formData.get("barcode") as string
   const imageFile = formData.get("image") as File | null
+  const imageFiles = formData.getAll("images").filter((item): item is File => item instanceof File && item.size > 0)
+  const videoFile = formData.get("video") as File | null
+  const removeVideo = String(formData.get("remove_video") || "false") === "true"
+  const existingImageUrlsRaw = (formData.get("existing_image_urls") as string) || ""
   const userId = formData.get("user_id") ? Number.parseInt(formData.get("user_id") as string) : undefined
   const color = (formData.get("color") as string) || ""
   const size = (formData.get("size") as string) || ""
@@ -813,6 +909,10 @@ export async function updateProduct(formData: FormData) {
   const attributesRaw = formData.get("attributes") as string
   const attributes = attributesRaw ? JSON.parse(attributesRaw) : []
   const link = (formData.get("link") as string) || ""
+  const amazonStatusRaw = formData.get("amazon_status")
+  const flipkartStatusRaw = formData.get("flipkart_status")
+  const meeshoStatusRaw = formData.get("meesho_status")
+  const ownEcomStatusRaw = formData.get("own_ecom_status")
 
   if (!id || !name || isNaN(price)) {
     return { success: false, message: "ID, name, and valid price are required" }
@@ -822,6 +922,9 @@ export async function updateProduct(formData: FormData) {
   resetConnectionState()
 
   try {
+    await ensureProductMediaColumns()
+    await ensureProductPlatformColumns()
+
     // Get current product to get the userId if not provided
     const currentProduct = await sql`SELECT * FROM products WHERE id = ${id}`
 
@@ -841,19 +944,84 @@ export async function updateProduct(formData: FormData) {
       }
     }
 
-    // Upload new image if provided
-    let imageUrl = currentProduct[0].image_url // Keep existing image by default
-    if (imageFile && imageFile.size > 0) {
+    const amazonStatus = formData.has("amazon_status")
+      ? normalizePlatformStatus(amazonStatusRaw)
+      : normalizePlatformStatus(currentProduct[0].amazon_status)
+    const flipkartStatus = formData.has("flipkart_status")
+      ? normalizePlatformStatus(flipkartStatusRaw)
+      : normalizePlatformStatus(currentProduct[0].flipkart_status)
+    const meeshoStatus = formData.has("meesho_status")
+      ? normalizePlatformStatus(meeshoStatusRaw)
+      : normalizePlatformStatus(currentProduct[0].meesho_status)
+    const ownEcomStatus = formData.has("own_ecom_status")
+      ? normalizePlatformStatus(ownEcomStatusRaw)
+      : normalizePlatformStatus(currentProduct[0].own_ecom_status)
+
+    let parsedExistingImageUrls: string[] = []
+    try {
+      if (existingImageUrlsRaw) {
+        const parsed = JSON.parse(existingImageUrlsRaw)
+        if (Array.isArray(parsed)) {
+          parsedExistingImageUrls = parsed.filter((url) => typeof url === "string" && url.trim().length > 0)
+        }
+      }
+    } catch {
+      parsedExistingImageUrls = []
+    }
+
+    if (parsedExistingImageUrls.length === 0) {
+      if (Array.isArray(currentProduct[0].image_urls)) {
+        parsedExistingImageUrls = currentProduct[0].image_urls.filter((url: unknown) => typeof url === "string") as string[]
+      } else if (typeof currentProduct[0].image_urls === "string" && currentProduct[0].image_urls.trim()) {
+        try {
+          const parsed = JSON.parse(currentProduct[0].image_urls)
+          if (Array.isArray(parsed)) {
+            parsedExistingImageUrls = parsed.filter((url) => typeof url === "string" && url.trim().length > 0)
+          }
+        } catch {
+          parsedExistingImageUrls = []
+        }
+      }
+      if (parsedExistingImageUrls.length === 0 && currentProduct[0].image_url) {
+        parsedExistingImageUrls = [currentProduct[0].image_url]
+      }
+    }
+
+    const normalizedNewImages = imageFiles.length > 0 ? imageFiles.slice(0, 4) : imageFile && imageFile.size > 0 ? [imageFile] : []
+    const uploadedImageUrls: string[] = []
+    if (normalizedNewImages.length > 0) {
       try {
-        const newImageUrl = await uploadProductImage(imageFile, name)
-        if (newImageUrl) {
-          imageUrl = newImageUrl
+        for (const img of normalizedNewImages) {
+          const uploaded = await uploadProductImage(img, name)
+          if (uploaded) uploadedImageUrls.push(uploaded)
         }
       } catch (error) {
         console.error("Image upload error during update:", error)
         return {
           success: false,
-          message: error instanceof Error ? error.message : "Failed to upload product image",
+          message: error instanceof Error ? error.message : "Failed to upload product image(s)",
+        }
+      }
+    }
+
+    const finalImageUrls = [...parsedExistingImageUrls, ...uploadedImageUrls].slice(0, 4)
+    let imageUrl = finalImageUrls[0] || null
+
+    let videoUrl: string | null = currentProduct[0].video_url || null
+    if (removeVideo) {
+      videoUrl = null
+    }
+    if (videoFile && videoFile.size > 0) {
+      try {
+        const uploadedVideo = await uploadProductVideo(videoFile, name)
+        if (uploadedVideo) {
+          videoUrl = uploadedVideo
+        }
+      } catch (error) {
+        console.error("Video upload error during update:", error)
+        return {
+          success: false,
+          message: error instanceof Error ? error.message : "Failed to upload product video",
         }
       }
     }
@@ -890,12 +1058,18 @@ export async function updateProduct(formData: FormData) {
           msp = ${msp},
           shelf = ${shelf || ""},
           image_url = ${imageUrl},
+          image_urls = ${JSON.stringify(finalImageUrls)},
+          video_url = ${videoUrl},
           barcode = ${barcode || currentProduct[0].barcode},
           color = ${color},
           size = ${size},
           suitable_for = ${suitableFor},
           attributes = ${JSON.stringify(attributes)},
-          link = ${link}
+          link = ${link},
+          amazon_status = ${amazonStatus},
+          flipkart_status = ${flipkartStatus},
+          meesho_status = ${meeshoStatus},
+          own_ecom_status = ${ownEcomStatus}
         WHERE id = ${id}
         AND created_by IN (
           SELECT d2.id
@@ -919,12 +1093,18 @@ export async function updateProduct(formData: FormData) {
           msp = ${msp},
           shelf = ${shelf || ""},
           image_url = ${imageUrl},
+          image_urls = ${JSON.stringify(finalImageUrls)},
+          video_url = ${videoUrl},
           barcode = ${barcode || currentProduct[0].barcode},
           color = ${color},
           size = ${size},
           suitable_for = ${suitableFor},
           attributes = ${JSON.stringify(attributes)},
-          link = ${link}
+          link = ${link},
+          amazon_status = ${amazonStatus},
+          flipkart_status = ${flipkartStatus},
+          meesho_status = ${meeshoStatus},
+          own_ecom_status = ${ownEcomStatus}
         WHERE id = ${id}
         RETURNING *
       `
@@ -1044,6 +1224,82 @@ export async function deleteProduct(id: number) {
   } catch (error) {
     await sql`ROLLBACK`
     console.error("Delete product error:", error)
+    return {
+      success: false,
+      message: `Database error: ${getLastError()?.message || "Unknown error"}. Please try again later.`,
+    }
+  }
+}
+
+export async function updateProductPlatformStatus(
+  productId: number,
+  platform: PlatformKey,
+  status: PlatformStatus,
+  userId?: number,
+) {
+  if (!productId) {
+    return { success: false, message: "Product ID is required" }
+  }
+
+  if (!PLATFORM_KEYS.includes(platform)) {
+    return { success: false, message: "Invalid platform" }
+  }
+
+  const normalizedStatus = normalizePlatformStatus(status)
+
+  resetConnectionState()
+
+  try {
+    await ensureProductPlatformColumns()
+
+    const columnName =
+      platform === "amazon"
+        ? "amazon_status"
+        : platform === "flipkart"
+          ? "flipkart_status"
+          : platform === "meesho"
+            ? "meesho_status"
+            : "own_ecom_status"
+
+    let result
+    if (userId) {
+      result =
+        await sql`
+          SELECT *
+          FROM products
+          WHERE id = ${productId}
+          AND created_by IN (
+            SELECT d2.id
+            FROM devices d1
+            JOIN devices d2 ON d2.company_id = d1.company_id
+            WHERE d1.id = ${userId}
+          )
+        `
+    } else {
+      result = await sql`SELECT * FROM products WHERE id = ${productId}`
+    }
+
+    if (!result.length) {
+      return { success: false, message: "Product not found" }
+    }
+
+    if (columnName === "amazon_status") {
+      result = await sql`UPDATE products SET amazon_status = ${normalizedStatus}, updated_at = NOW() WHERE id = ${productId} RETURNING *`
+    } else if (columnName === "flipkart_status") {
+      result = await sql`UPDATE products SET flipkart_status = ${normalizedStatus}, updated_at = NOW() WHERE id = ${productId} RETURNING *`
+    } else if (columnName === "meesho_status") {
+      result = await sql`UPDATE products SET meesho_status = ${normalizedStatus}, updated_at = NOW() WHERE id = ${productId} RETURNING *`
+    } else {
+      result = await sql`UPDATE products SET own_ecom_status = ${normalizedStatus}, updated_at = NOW() WHERE id = ${productId} RETURNING *`
+    }
+
+    if (!result.length) {
+      return { success: false, message: "Failed to update platform status" }
+    }
+
+    return { success: true, data: result[0], message: "Platform status updated" }
+  } catch (error) {
+    console.error("Update platform status error:", error)
     return {
       success: false,
       message: `Database error: ${getLastError()?.message || "Unknown error"}. Please try again later.`,

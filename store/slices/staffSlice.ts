@@ -5,6 +5,7 @@ interface Staff {
   name: string
   phone: string
   email?: string
+  role?: "admin" | "staff"
   position: string
   salary: number
   salary_date: string

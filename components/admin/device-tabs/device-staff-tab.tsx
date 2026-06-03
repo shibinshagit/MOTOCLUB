@@ -15,6 +15,7 @@ type StaffMember = {
   name: string
   phone: string
   email?: string
+  role?: "admin" | "staff"
   position: string
   salary: number
   salary_date: string
@@ -29,6 +30,7 @@ type StaffFormState = {
   name: string
   phone: string
   email: string
+  role: "admin" | "staff"
   position: string
   salary: string
   salaryDate: string
@@ -43,6 +45,7 @@ const emptyForm: StaffFormState = {
   name: "",
   phone: "",
   email: "",
+  role: "staff",
   position: "",
   salary: "",
   salaryDate: "",
@@ -103,6 +106,7 @@ export default function DeviceStaffTab({ deviceId }: DeviceStaffTabProps) {
       name: member.name || "",
       phone: member.phone || "",
       email: member.email || "",
+      role: member.role === "admin" ? "admin" : "staff",
       position: member.position || "",
       salary: String(member.salary || ""),
       salaryDate: member.salary_date || "",
@@ -175,6 +179,7 @@ export default function DeviceStaffTab({ deviceId }: DeviceStaffTabProps) {
           name: form.name.trim(),
           phone: form.phone.trim(),
           email: form.email.trim() || undefined,
+          role: form.role,
           position: form.position.trim(),
           salary: Number.parseFloat(form.salary),
           salaryDate: form.salaryDate,
@@ -194,6 +199,7 @@ export default function DeviceStaffTab({ deviceId }: DeviceStaffTabProps) {
           name: form.name.trim(),
           phone: form.phone.trim(),
           email: form.email.trim() || undefined,
+          role: form.role,
           position: form.position.trim(),
           salary: Number.parseFloat(form.salary),
           salaryDate: form.salaryDate,
@@ -263,6 +269,9 @@ export default function DeviceStaffTab({ deviceId }: DeviceStaffTabProps) {
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="font-medium text-white">{member.name}</span>
+                    <Badge className={member.role === "admin" ? "bg-purple-600/20 text-purple-300 border-purple-600/30" : "bg-slate-600/20 text-slate-300 border-slate-600/30"}>
+                      {member.role === "admin" ? "Admin" : "Staff"}
+                    </Badge>
                     {member.is_active && (
                       <Badge className="bg-green-600/20 text-green-300 border-green-600/30">Active</Badge>
                     )}
@@ -316,6 +325,17 @@ export default function DeviceStaffTab({ deviceId }: DeviceStaffTabProps) {
             <div>
               <Label className="text-[#94A3B8]">Phone *</Label>
               <Input value={form.phone} onChange={(e) => setForm((prev) => ({ ...prev, phone: e.target.value }))} className="mt-1 border-[#334155] bg-[#0F172A]" />
+            </div>
+            <div>
+              <Label className="text-[#94A3B8]">Role *</Label>
+              <select
+                value={form.role}
+                onChange={(e) => setForm((prev) => ({ ...prev, role: e.target.value === "admin" ? "admin" : "staff" }))}
+                className="mt-1 h-10 w-full rounded-md border border-[#334155] bg-[#0F172A] px-3 text-sm text-white"
+              >
+                <option value="staff">Normal Staff</option>
+                <option value="admin">Admin</option>
+              </select>
             </div>
             <div>
               <Label className="text-[#94A3B8]">Position *</Label>

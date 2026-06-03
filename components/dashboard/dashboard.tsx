@@ -18,6 +18,7 @@ import {
   ChevronDown,
   UserCircle2,
   LogOut,
+  Store,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/components/ui/use-toast"
@@ -39,14 +40,16 @@ import CustomerTab from "./customer-tab"
 import TransferTab from "./transfer-tab"
 import AccountingTab from "./accounting-tab"
 import SupplierTab from "./supplier-tab"
+import PlatformTab from "./platform-tab"
 import { AnimatedThemeToggle } from "@/components/ui/animated-theme-toggle"
 import StaffAuthModal from "../staff/staff-auth-modal"
 
 import { useAppSelector, useAppDispatch } from "@/store/hooks"
 import { selectUser, selectCompany, selectDevice, clearDeviceData } from "@/store/slices/deviceSlice"
-import { clearStaff, selectActiveStaff } from "@/store/slices/staffSlice"
+import { activateStaff, clearStaff, selectActiveStaff, setStaff } from "@/store/slices/staffSlice"
+import { getStaffForAuthentication } from "@/app/actions/staff-actions"
 
-type TabType = "home" | "sale" | "purchase" | "product" | "customer" | "transfer" | "accounting" | "supplier"
+type TabType = "home" | "sale" | "purchase" | "product" | "customer" | "transfer" | "accounting" | "supplier" | "platform"
 
 interface DashboardProps {
   mockMode?: boolean
@@ -90,9 +93,13 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [mounted, setMounted] = useState(false)
   const [staffAuthOpen, setStaffAuthOpen] = useState(false)
+  const [isRestoringStaffSession, setIsRestoringStaffSession] = useState(false)
   
   const router = useRouter()
   const { toast } = useToast()
+  const getStaffSessionKey = useCallback((deviceId?: number | null) => {
+    return deviceId ? `staff_session_device_${deviceId}` : ""
+  }, [])
 
   // Refs for stable references
   const routerRef = useRef(router)
@@ -121,17 +128,57 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
   }, [mounted, user?.id])
 
   useEffect(() => {
-    if (!mounted || !user?.id || !device?.id) return
-    if (!activeStaff) {
-      setStaffAuthOpen(true)
+    const restoreStaffSession = async () => {
+      if (!mounted || !user?.id || !device?.id || activeStaff || isRestoringStaffSession) return
+
+      setIsRestoringStaffSession(true)
+      try {
+        const sessionKey = getStaffSessionKey(device.id)
+        const storedStaffIdRaw = typeof window !== "undefined" ? localStorage.getItem(sessionKey) : null
+        const storedStaffId = storedStaffIdRaw ? Number.parseInt(storedStaffIdRaw, 10) : NaN
+
+        if (!storedStaffId || Number.isNaN(storedStaffId)) {
+          setStaffAuthOpen(true)
+          return
+        }
+
+        const staffRes = await getStaffForAuthentication(device.id)
+        if (!staffRes.success || !staffRes.data?.length) {
+          setStaffAuthOpen(true)
+          return
+        }
+
+        const staffList = staffRes.data as any[]
+        const matchedStaff = staffList.find((member) => member.id === storedStaffId)
+        if (!matchedStaff) {
+          localStorage.removeItem(sessionKey)
+          setStaffAuthOpen(true)
+          return
+        }
+
+        dispatchRef.current(setStaff(staffList))
+        dispatchRef.current(
+          activateStaff({
+            staffId: storedStaffId,
+            allStaff: staffList,
+          }),
+        )
+        setStaffAuthOpen(false)
+      } catch {
+        setStaffAuthOpen(true)
+      } finally {
+        setIsRestoringStaffSession(false)
+      }
     }
-  }, [mounted, user?.id, device?.id, activeStaff])
+
+    restoreStaffSession()
+  }, [mounted, user?.id, device?.id, activeStaff, isRestoringStaffSession, getStaffSessionKey])
 
   // Tab parameter synchronization
   useEffect(() => {
     if (
       tabParam &&
-      ["home", "sale", "purchase", "product", "customer", "transfer", "accounting", "supplier"].includes(
+      ["home", "sale", "purchase", "product", "customer", "transfer", "accounting", "supplier", "platform"].includes(
         tabParam,
       )
     ) {
@@ -160,6 +207,9 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
   const handleLogout = useCallback(async () => {
     try {
       // Clear Redux store first
+      if (device?.id && typeof window !== "undefined") {
+        localStorage.removeItem(getStaffSessionKey(device.id))
+      }
       dispatchRef.current(clearDeviceData())
       dispatchRef.current(clearStaff())
 
@@ -177,13 +227,19 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
       })
 
       // Even if server logout fails, clear Redux and redirect
+      if (device?.id && typeof window !== "undefined") {
+        localStorage.removeItem(getStaffSessionKey(device.id))
+      }
       dispatchRef.current(clearDeviceData())
       dispatchRef.current(clearStaff())
       routerRef.current.push("/")
     }
-  }, [mockMode, toast])
+  }, [mockMode, toast, device?.id, getStaffSessionKey])
 
   const handleStaffLogout = useCallback(() => {
+    if (device?.id && typeof window !== "undefined") {
+      localStorage.removeItem(getStaffSessionKey(device.id))
+    }
     dispatchRef.current(clearStaff())
     setStaffAuthOpen(true)
     setIsMobileMenuOpen(false)
@@ -191,7 +247,7 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
       title: "Staff logged out",
       description: "Please log in with staff password to continue.",
     })
-  }, [toast])
+  }, [toast, device?.id, getStaffSessionKey])
 
   // Don't render anything until mounted (prevents hydration issues)
   if (!mounted || isLoading) {
@@ -258,6 +314,8 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
           return <TransferTab userId={user?.id || 0} />
         case "accounting":
           return <AccountingTab userId={user?.id || 0} companyId={companyId} deviceId={deviceId || 0} />
+        case "platform":
+          return <PlatformTab userId={user?.id || 0} />
         default:
           return <ErrorTab name={activeTab} />
       }
@@ -276,12 +334,13 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
     { id: "customer", icon: <User className="h-4 w-4" />, label: "Customers" },
     { id: "supplier", icon: <Truck className="h-4 w-4" />, label: "Suppliers" },
     { id: "transfer", icon: <ArrowRightLeft className="h-4 w-4" />, label: "Transfers" },
+    { id: "platform", icon: <Store className="h-4 w-4" />, label: "Platforms" },
     { id: "accounting", icon: <Calculator className="h-4 w-4" />, label: "Accounting" },
   ]
 
   // Primary tabs for bottom navigation (most used)
   const primaryTabs = ["home", "sale", "purchase", "product"]
-  const secondaryTabs = ["customer", "supplier", "transfer", "accounting"]
+  const secondaryTabs = ["customer", "supplier", "transfer", "platform", "accounting"]
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-gray-50 dark:bg-gray-900">
@@ -372,7 +431,9 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
                   <>
                     <div className="px-2 py-2">
                       <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{activeStaff.name}</p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">Active staff session</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        {activeStaff.role === "admin" ? "Admin role" : "Normal staff role"}
+                      </p>
                     </div>
                     <DropdownMenuSeparator className="bg-gray-200 dark:bg-gray-700" />
                     <DropdownMenuItem
@@ -418,7 +479,9 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
                   <>
                     <div className="px-2 py-2">
                       <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{activeStaff.name}</p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">Active staff session</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        {activeStaff.role === "admin" ? "Admin role" : "Normal staff role"}
+                      </p>
                     </div>
                     <DropdownMenuSeparator className="bg-gray-200 dark:bg-gray-700" />
                     <DropdownMenuItem
@@ -505,7 +568,7 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
               ? 'translate-y-0 opacity-100' 
               : 'translate-y-full opacity-0 pointer-events-none'
           }`}>
-            <div className="grid grid-cols-4 h-14 border-b border-gray-100 dark:border-gray-700 safe-area-inset-bottom">
+            <div className="grid grid-cols-5 h-14 border-b border-gray-100 dark:border-gray-700 safe-area-inset-bottom">
               {secondaryTabs.map((tabId) => {
                 const item = navItems.find(nav => nav.id === tabId)
                 if (!item) return null
@@ -584,7 +647,11 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
         <StaffAuthModal
           deviceId={device.id}
           isOpen={staffAuthOpen}
-          onAuthenticated={() => setStaffAuthOpen(false)}
+          onAuthenticated={(staffId) => {
+            localStorage.setItem(getStaffSessionKey(device.id), String(staffId))
+            setStaffAuthOpen(false)
+          }}
+          onLogout={handleLogout}
         />
       ) : null}
     </div>

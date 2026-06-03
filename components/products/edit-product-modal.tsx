@@ -12,7 +12,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { useToast } from "@/components/ui/use-toast"
 import { updateProduct } from "@/app/actions/product-actions"
 import { getCategories, createCategory } from "@/app/actions/category-actions"
-import { AlertCircle, Check, ChevronRight, Loader2, Plus, Search, Tag, X, ImageIcon, Link2, Trash2 } from "lucide-react"
+import { AlertCircle, Check, ChevronRight, Loader2, Plus, Search, Tag, X, ImageIcon, Link2, Trash2, Film } from "lucide-react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { getDeviceCurrency } from "@/app/actions/dashboard-actions"
@@ -31,6 +31,16 @@ interface AttributeEntry {
   value: string
 }
 
+type PlatformKey = "amazon" | "flipkart" | "meesho" | "own_ecom"
+type PlatformStatus = "not_listed" | "active" | "archived"
+
+const PLATFORM_OPTIONS: { key: PlatformKey; label: string }[] = [
+  { key: "amazon", label: "Amazon" },
+  { key: "flipkart", label: "Flipkart" },
+  { key: "meesho", label: "Meesho" },
+  { key: "own_ecom", label: "Own Ecom" },
+]
+
 interface Product {
   id: number
   name: string
@@ -45,12 +55,18 @@ interface Product {
   shelf?: string
   barcode?: string
   image_url?: string
+  image_urls?: string[] | string
+  video_url?: string
   created_by?: number
   color?: string
   size?: string
   suitable_for?: string
   attributes?: AttributeEntry[] | string
   link?: string
+  amazon_status?: PlatformStatus
+  flipkart_status?: PlatformStatus
+  meesho_status?: PlatformStatus
+  own_ecom_status?: PlatformStatus
 }
 
 interface EditProductModalProps {
@@ -66,10 +82,14 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [currency, setCurrency] = useState("QAR")
-  const [selectedImage, setSelectedImage] = useState<File | null>(null)
-  const [imagePreview, setImagePreview] = useState<string | null>(null)
-  const [currentImageUrl, setCurrentImageUrl] = useState<string | null>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [selectedImages, setSelectedImages] = useState<File[]>([])
+  const [imagePreviews, setImagePreviews] = useState<string[]>([])
+  const [currentImageUrls, setCurrentImageUrls] = useState<string[]>([])
+  const [selectedVideo, setSelectedVideo] = useState<File | null>(null)
+  const [videoPreview, setVideoPreview] = useState<string | null>(null)
+  const [currentVideoUrl, setCurrentVideoUrl] = useState<string | null>(null)
+  const imageInputRef = useRef<HTMLInputElement>(null)
+  const videoInputRef = useRef<HTMLInputElement>(null)
   const [formData, setFormData] = useState({
     name: "",
     companyName: "",
@@ -88,6 +108,12 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
     link: "",
   })
   const [attributes, setAttributes] = useState<AttributeEntry[]>([])
+  const [platformStatus, setPlatformStatus] = useState<Record<PlatformKey, PlatformStatus>>({
+    amazon: "not_listed",
+    flipkart: "not_listed",
+    meesho: "not_listed",
+    own_ecom: "not_listed",
+  })
 
   const [categories, setCategories] = useState<Category[]>([])
   const [filteredCategories, setFilteredCategories] = useState<Category[]>([])
@@ -146,9 +172,34 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
         link: product.link || "",
       })
       setAttributes(parseAttributes(product.attributes))
-      setCurrentImageUrl(product.image_url || null)
-      setImagePreview(null)
-      setSelectedImage(null)
+      let initialImageUrls: string[] = []
+      if (Array.isArray(product.image_urls)) {
+        initialImageUrls = product.image_urls.filter((url) => typeof url === "string" && url.trim().length > 0)
+      } else if (typeof product.image_urls === "string" && product.image_urls.trim()) {
+        try {
+          const parsed = JSON.parse(product.image_urls)
+          if (Array.isArray(parsed)) {
+            initialImageUrls = parsed.filter((url) => typeof url === "string" && url.trim().length > 0)
+          }
+        } catch {
+          initialImageUrls = []
+        }
+      }
+      if (initialImageUrls.length === 0 && product.image_url) {
+        initialImageUrls = [product.image_url]
+      }
+      setCurrentImageUrls(initialImageUrls.slice(0, 4))
+      setSelectedImages([])
+      setImagePreviews([])
+      setSelectedVideo(null)
+      setVideoPreview(null)
+      setCurrentVideoUrl(product.video_url || null)
+      setPlatformStatus({
+        amazon: product.amazon_status || "not_listed",
+        flipkart: product.flipkart_status || "not_listed",
+        meesho: product.meesho_status || "not_listed",
+        own_ecom: product.own_ecom_status || "not_listed",
+      })
 
       if (product.category_id) {
         const category = categories.find((cat) => cat.id === product.category_id)
@@ -196,6 +247,13 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
     }
   }, [isAddingNewCategory])
 
+  useEffect(() => {
+    return () => {
+      imagePreviews.forEach((url) => URL.revokeObjectURL(url))
+      if (videoPreview) URL.revokeObjectURL(videoPreview)
+    }
+  }, [imagePreviews, videoPreview])
+
   const fetchCategories = async () => {
     setIsLoadingCategories(true)
     setCategorySearchQuery("")
@@ -225,27 +283,75 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
   }
 
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (file) {
+    const files = Array.from(e.target.files || [])
+    if (!files.length) return
+
+    const currentTotal = currentImageUrls.length + selectedImages.length
+    const maxCanAdd = Math.max(0, 4 - currentTotal)
+    if (maxCanAdd === 0) {
+      toast({ title: "Limit reached", description: "Maximum 4 images allowed.", variant: "destructive" })
+      return
+    }
+
+    const accepted: File[] = []
+    const previews: string[] = []
+    for (const file of files.slice(0, maxCanAdd)) {
       if (!file.type.startsWith("image/")) {
-        toast({ title: "Error", description: "Please select a valid image file", variant: "destructive" })
-        return
+        toast({ title: "Invalid file", description: `${file.name} is not an image.`, variant: "destructive" })
+        continue
       }
       if (file.size > 5 * 1024 * 1024) {
-        toast({ title: "Error", description: "Image size should be less than 5MB", variant: "destructive" })
-        return
+        toast({ title: "Too large", description: `${file.name} exceeds 5MB.`, variant: "destructive" })
+        continue
       }
-      setSelectedImage(file)
-      const reader = new FileReader()
-      reader.onload = (e) => setImagePreview(e.target?.result as string)
-      reader.readAsDataURL(file)
+      accepted.push(file)
+      previews.push(URL.createObjectURL(file))
     }
+
+    if (accepted.length > 0) {
+      setSelectedImages((prev) => [...prev, ...accepted].slice(0, 4))
+      setImagePreviews((prev) => [...prev, ...previews].slice(0, 4))
+    }
+
+    if (imageInputRef.current) imageInputRef.current.value = ""
   }
 
-  const removeImage = () => {
-    setSelectedImage(null)
-    setImagePreview(null)
-    if (fileInputRef.current) fileInputRef.current.value = ""
+  const removeCurrentImageAt = (index: number) => {
+    setCurrentImageUrls((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  const removeNewImageAt = (index: number) => {
+    setSelectedImages((prev) => prev.filter((_, i) => i !== index))
+    setImagePreviews((prev) => {
+      const url = prev[index]
+      if (url) URL.revokeObjectURL(url)
+      return prev.filter((_, i) => i !== index)
+    })
+  }
+
+  const handleVideoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (!file.type.startsWith("video/")) {
+      toast({ title: "Invalid file", description: "Please select a video file.", variant: "destructive" })
+      return
+    }
+    if (file.size > 25 * 1024 * 1024) {
+      toast({ title: "Too large", description: "Video must be under 25MB.", variant: "destructive" })
+      return
+    }
+    if (videoPreview) URL.revokeObjectURL(videoPreview)
+    setSelectedVideo(file)
+    setVideoPreview(URL.createObjectURL(file))
+    if (videoInputRef.current) videoInputRef.current.value = ""
+  }
+
+  const removeVideo = () => {
+    if (videoPreview) URL.revokeObjectURL(videoPreview)
+    setSelectedVideo(null)
+    setVideoPreview(null)
+    setCurrentVideoUrl(null)
+    if (videoInputRef.current) videoInputRef.current.value = ""
   }
 
   const handleAddAttribute = () => {
@@ -360,8 +466,17 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
       submitFormData.append("link", formData.link)
       const validAttributes = attributes.filter((a) => a.key.trim() && a.value.trim())
       submitFormData.append("attributes", JSON.stringify(validAttributes))
+      submitFormData.append("amazon_status", platformStatus.amazon)
+      submitFormData.append("flipkart_status", platformStatus.flipkart)
+      submitFormData.append("meesho_status", platformStatus.meesho)
+      submitFormData.append("own_ecom_status", platformStatus.own_ecom)
+      submitFormData.append("existing_image_urls", JSON.stringify(currentImageUrls))
+      if (!currentVideoUrl && !selectedVideo) {
+        submitFormData.append("remove_video", "true")
+      }
       if (userId) submitFormData.append("user_id", userId.toString())
-      if (selectedImage) submitFormData.append("image", selectedImage)
+      selectedImages.forEach((img) => submitFormData.append("images", img))
+      if (selectedVideo) submitFormData.append("video", selectedVideo)
 
       const result = await updateProduct(submitFormData)
 
@@ -397,24 +512,100 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
 
             <form onSubmit={handleSubmit} className="space-y-4 mt-4">
               <div className="grid gap-4">
-                {/* Product Image */}
+                {/* Product Media */}
                 <div className="grid gap-2">
-                  <Label className="text-gray-700 dark:text-gray-300">Product Image</Label>
+                  <Label className="text-gray-700 dark:text-gray-300">Product Media</Label>
                   <div className="flex flex-col gap-2">
-                    {imagePreview || currentImageUrl ? (
-                      <div className="relative">
-                        <img src={imagePreview || currentImageUrl || "/placeholder.svg"} alt="Product preview" className="w-full h-32 object-cover rounded-md border border-gray-300 dark:border-gray-600" />
-                        <Button type="button" variant="destructive" size="sm" onClick={removeImage} className="absolute top-2 right-2"><X className="h-4 w-4" /></Button>
-                        {imagePreview && <div className="absolute bottom-2 left-2 bg-blue-600 text-white text-xs px-2 py-1 rounded">New Image</div>}
-                      </div>
-                    ) : (
-                      <div onClick={() => fileInputRef.current?.click()} className="w-full h-32 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-md flex flex-col items-center justify-center cursor-pointer hover:border-gray-400 dark:hover:border-gray-500 transition-colors">
-                        <ImageIcon className="h-8 w-8 text-gray-400 dark:text-gray-500 mb-2" />
-                        <p className="text-sm text-gray-500 dark:text-gray-400">Click to upload image</p>
-                        <p className="text-xs text-gray-400 dark:text-gray-500">Max 5MB</p>
+                    {(currentImageUrls.length > 0 || imagePreviews.length > 0) && (
+                      <div className="grid grid-cols-2 gap-2">
+                        {currentImageUrls.map((url, index) => (
+                          <div key={`current-${index}`} className="relative">
+                            <img src={url} alt={`Current product ${index + 1}`} className="w-full h-24 object-cover rounded-md border border-gray-300 dark:border-gray-600" />
+                            <Button type="button" variant="destructive" size="sm" onClick={() => removeCurrentImageAt(index)} className="absolute top-1 right-1 h-6 w-6 p-0"><X className="h-3 w-3" /></Button>
+                          </div>
+                        ))}
+                        {imagePreviews.map((preview, index) => (
+                          <div key={`new-${index}`} className="relative">
+                            <img src={preview} alt={`New product ${index + 1}`} className="w-full h-24 object-cover rounded-md border border-blue-400" />
+                            <Button type="button" variant="destructive" size="sm" onClick={() => removeNewImageAt(index)} className="absolute top-1 right-1 h-6 w-6 p-0"><X className="h-3 w-3" /></Button>
+                            <div className="absolute bottom-1 left-1 bg-blue-600 text-white text-[10px] px-1.5 py-0.5 rounded">New</div>
+                          </div>
+                        ))}
                       </div>
                     )}
-                    <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageSelect} className="hidden" />
+                    {currentImageUrls.length + selectedImages.length < 4 && (
+                      <div onClick={() => imageInputRef.current?.click()} className="w-full h-24 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-md flex flex-col items-center justify-center cursor-pointer hover:border-gray-400 dark:hover:border-gray-500 transition-colors">
+                        <ImageIcon className="h-6 w-6 text-gray-400 dark:text-gray-500 mb-1" />
+                        <p className="text-sm text-gray-500 dark:text-gray-400">Add Image ({currentImageUrls.length + selectedImages.length}/4)</p>
+                      </div>
+                    )}
+                    <input ref={imageInputRef} type="file" accept="image/*" multiple onChange={handleImageSelect} className="hidden" />
+                  </div>
+
+                  <div className="flex flex-col gap-2 mt-2">
+                    {(videoPreview || currentVideoUrl) ? (
+                      <div className="relative">
+                        <video controls className="w-full h-32 rounded-md border border-gray-300 dark:border-gray-600">
+                          <source src={videoPreview || currentVideoUrl || ""} />
+                        </video>
+                        <Button type="button" variant="destructive" size="sm" onClick={removeVideo} className="absolute top-2 right-2"><X className="h-4 w-4" /></Button>
+                        {videoPreview && <div className="absolute bottom-2 left-2 bg-blue-600 text-white text-xs px-2 py-1 rounded">New Video</div>}
+                      </div>
+                    ) : (
+                      <div onClick={() => videoInputRef.current?.click()} className="w-full h-24 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-md flex flex-col items-center justify-center cursor-pointer hover:border-gray-400 dark:hover:border-gray-500 transition-colors">
+                        <Film className="h-6 w-6 text-gray-400 dark:text-gray-500 mb-1" />
+                        <p className="text-sm text-gray-500 dark:text-gray-400">Add Video (optional)</p>
+                        <p className="text-xs text-gray-400 dark:text-gray-500">Max 25MB</p>
+                      </div>
+                    )}
+                    <input ref={videoInputRef} type="file" accept="video/*" onChange={handleVideoSelect} className="hidden" />
+                  </div>
+                </div>
+
+                <div className="grid gap-2">
+                  <Label className="text-gray-700 dark:text-gray-300">Marketplace Availability</Label>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Active means currently selling. Archived means listed before but intentionally paused.
+                  </p>
+                  <div className="space-y-2">
+                    {PLATFORM_OPTIONS.map((platform) => (
+                      <div
+                        key={platform.key}
+                        className="rounded-md border border-gray-200 dark:border-gray-700 p-2 bg-gray-50 dark:bg-gray-900/30"
+                      >
+                        <div className="text-sm font-medium text-gray-800 dark:text-gray-200 mb-2">{platform.label}</div>
+                        <div className="grid grid-cols-3 gap-2">
+                          {[
+                            { value: "not_listed" as PlatformStatus, label: "Not Listed" },
+                            { value: "active" as PlatformStatus, label: "Active" },
+                            { value: "archived" as PlatformStatus, label: "Archived" },
+                          ].map((option) => {
+                            const isActive = platformStatus[platform.key] === option.value
+                            return (
+                              <Button
+                                key={option.value}
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() =>
+                                  setPlatformStatus((prev) => ({
+                                    ...prev,
+                                    [platform.key]: option.value,
+                                  }))
+                                }
+                                className={`text-xs ${
+                                  isActive
+                                    ? "border-blue-500 text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/20"
+                                    : "border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300"
+                                }`}
+                              >
+                                {option.label}
+                              </Button>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
 
