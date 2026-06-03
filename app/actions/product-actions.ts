@@ -1,7 +1,7 @@
 "use server"
 
 import { sql, getLastError, resetConnectionState } from "@/lib/db"
-import { put } from "@vercel/blob"
+import { put, del } from "@vercel/blob"
 
 
 // Generate a unique barcode for a product
@@ -116,6 +116,23 @@ async function uploadProductVideo(file: File, productName: string): Promise<stri
       throw new Error(`Video upload failed: ${error.message}`)
     }
     return null
+  }
+}
+
+async function deleteProductMediaUrls(urls: string[]) {
+  const validUrls = urls.filter((url) => typeof url === "string" && url.trim().length > 0)
+  if (!validUrls.length) return
+
+  try {
+    const token = process.env.BLOB_READ_WRITE_TOKEN
+    if (!token) {
+      console.error("BLOB_READ_WRITE_TOKEN environment variable is not set for media deletion")
+      return
+    }
+
+    await del(validUrls, { token })
+  } catch (error) {
+    console.error("Error deleting media from blob storage:", error)
   }
 }
 
@@ -902,6 +919,7 @@ export async function updateProduct(formData: FormData) {
   const videoFile = formData.get("video") as File | null
   const removeVideo = String(formData.get("remove_video") || "false") === "true"
   const existingImageUrlsRaw = (formData.get("existing_image_urls") as string) || ""
+  const hasExistingImageUrlsInput = formData.has("existing_image_urls")
   const userId = formData.get("user_id") ? Number.parseInt(formData.get("user_id") as string) : undefined
   const color = (formData.get("color") as string) || ""
   const size = (formData.get("size") as string) || ""
@@ -933,6 +951,25 @@ export async function updateProduct(formData: FormData) {
     }
 
     const productUserId = userId || currentProduct[0].created_by
+    const currentVideoUrl = currentProduct[0].video_url || null
+    let currentImageUrls: string[] = []
+    if (Array.isArray(currentProduct[0].image_urls)) {
+      currentImageUrls = currentProduct[0].image_urls.filter(
+        (url: unknown) => typeof url === "string" && url.trim().length > 0,
+      ) as string[]
+    } else if (typeof currentProduct[0].image_urls === "string" && currentProduct[0].image_urls.trim()) {
+      try {
+        const parsed = JSON.parse(currentProduct[0].image_urls)
+        if (Array.isArray(parsed)) {
+          currentImageUrls = parsed.filter((url) => typeof url === "string" && url.trim().length > 0)
+        }
+      } catch {
+        currentImageUrls = []
+      }
+    }
+    if (currentImageUrls.length === 0 && currentProduct[0].image_url) {
+      currentImageUrls = [currentProduct[0].image_url]
+    }
 
     // Check for duplicates within user's products before proceeding
     const duplicateCheck = await checkProductDuplicates(name, barcode, productUserId, id)
@@ -969,7 +1006,7 @@ export async function updateProduct(formData: FormData) {
       parsedExistingImageUrls = []
     }
 
-    if (parsedExistingImageUrls.length === 0) {
+    if (!hasExistingImageUrlsInput && parsedExistingImageUrls.length === 0) {
       if (Array.isArray(currentProduct[0].image_urls)) {
         parsedExistingImageUrls = currentProduct[0].image_urls.filter((url: unknown) => typeof url === "string") as string[]
       } else if (typeof currentProduct[0].image_urls === "string" && currentProduct[0].image_urls.trim()) {
@@ -1147,6 +1184,15 @@ export async function updateProduct(formData: FormData) {
       const updatedProduct = result[0]
       updatedProduct.stock = stock
       updatedProduct.category = categoryName
+
+      const removedImageUrls = currentImageUrls.filter((oldUrl) => !finalImageUrls.includes(oldUrl))
+      const removedMediaUrls = [...removedImageUrls]
+      if (currentVideoUrl && currentVideoUrl !== videoUrl) {
+        removedMediaUrls.push(currentVideoUrl)
+      }
+      if (removedMediaUrls.length > 0) {
+        await deleteProductMediaUrls(removedMediaUrls)
+      }
 
       return { success: true, message: "Product updated successfully", data: updatedProduct }
     }
