@@ -114,7 +114,7 @@ export default function PlatformTab({ userId }: PlatformTabProps) {
 
   return (
     <div className="space-y-4">
-      <Card className="border-gray-200 dark:border-gray-700">
+      <Card className="border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
         <CardContent className="p-4 space-y-3">
           <div className="flex items-center justify-between gap-2">
             <div>
@@ -123,7 +123,12 @@ export default function PlatformTab({ userId }: PlatformTabProps) {
                 Track product status in Amazon, Flipkart, Meesho, and your own ecommerce store.
               </p>
             </div>
-            <Button variant="outline" size="sm" onClick={fetchProducts}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={fetchProducts}
+              className="border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200"
+            >
               <RefreshCw className="h-4 w-4 mr-1" />
               Refresh
             </Button>
@@ -136,13 +141,13 @@ export default function PlatformTab({ userId }: PlatformTabProps) {
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 placeholder="Search by name, barcode, or ID"
-                className="pl-8"
+                className="pl-8 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 border-gray-300 dark:border-gray-600"
               />
             </div>
             <select
               value={platformFilter}
               onChange={(e) => setPlatformFilter(e.target.value as "all" | PlatformKey)}
-              className="h-10 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 text-sm"
+              className="h-10 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 text-sm text-gray-900 dark:text-gray-100"
             >
               <option value="all">All Platforms</option>
               {PLATFORM_OPTIONS.map((platform) => (
@@ -154,7 +159,7 @@ export default function PlatformTab({ userId }: PlatformTabProps) {
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value as "all" | PlatformStatus)}
-              className="h-10 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 text-sm"
+              className="h-10 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 text-sm text-gray-900 dark:text-gray-100"
             >
               <option value="all">All Status</option>
               {STATUS_OPTIONS.map((status) => (
@@ -167,7 +172,7 @@ export default function PlatformTab({ userId }: PlatformTabProps) {
         </CardContent>
       </Card>
 
-      <Card className="border-gray-200 dark:border-gray-700">
+      <Card className="border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
         <CardContent className="p-0">
           {loading ? (
             <div className="flex justify-center items-center py-8">
@@ -196,7 +201,7 @@ export default function PlatformTab({ userId }: PlatformTabProps) {
                     ))}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                <tbody className="divide-y divide-gray-200 dark:divide-gray-700 bg-white dark:bg-gray-900">
                   {filteredProducts.map((product) => (
                     <tr key={product.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/40">
                       <td className="px-4 py-3 text-sm">
@@ -216,7 +221,7 @@ export default function PlatformTab({ userId }: PlatformTabProps) {
                               onChange={(e) =>
                                 updateStatus(product.id, platform.key, e.target.value as PlatformStatus)
                               }
-                              className="h-8 w-full min-w-[120px] rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 text-xs"
+                              className="h-8 w-full min-w-[120px] rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 text-xs text-gray-900 dark:text-gray-100"
                             >
                               {STATUS_OPTIONS.map((status) => (
                                 <option key={status.key} value={status.key}>
