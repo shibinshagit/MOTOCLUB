@@ -119,6 +119,10 @@ async function uploadProductVideo(file: File, productName: string): Promise<stri
   }
 }
 
+const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024
+const MAX_VIDEO_SIZE_BYTES = 50 * 1024 * 1024
+const MAX_TOTAL_MEDIA_PAYLOAD_BYTES = 95 * 1024 * 1024
+
 async function deleteProductMediaUrls(urls: string[]) {
   const validUrls = urls.filter((url) => typeof url === "string" && url.trim().length > 0)
   if (!validUrls.length) return
@@ -133,6 +137,20 @@ async function deleteProductMediaUrls(urls: string[]) {
     await del(validUrls, { token })
   } catch (error) {
     console.error("Error deleting media from blob storage:", error)
+  }
+}
+
+export async function cleanupProductMediaUrls(urls: string[]) {
+  if (!Array.isArray(urls) || urls.length === 0) {
+    return { success: true, message: "No media URLs to clean up" }
+  }
+
+  try {
+    await deleteProductMediaUrls(urls)
+    return { success: true, message: "Media cleanup completed" }
+  } catch (error) {
+    console.error("Cleanup product media error:", error)
+    return { success: false, message: "Failed to clean up media" }
   }
 }
 
@@ -707,6 +725,8 @@ export async function createProduct(formData: FormData) {
   const imageFile = formData.get("image") as File | null
   const imageFiles = formData.getAll("images").filter((item): item is File => item instanceof File && item.size > 0)
   const videoFile = formData.get("video") as File | null
+  const uploadedImageUrlsRaw = (formData.get("uploaded_image_urls") as string) || ""
+  const uploadedVideoUrlRaw = (formData.get("uploaded_video_url") as string) || ""
   const color = (formData.get("color") as string) || ""
   const size = (formData.get("size") as string) || ""
   const suitableFor = (formData.get("suitable_for") as string) || ""
@@ -720,6 +740,22 @@ export async function createProduct(formData: FormData) {
 
   if (!name || isNaN(price)) {
     return { success: false, error: "Name and valid price are required" }
+  }
+
+  const normalizedImages =
+    imageFiles.length > 0 ? imageFiles.slice(0, 4) : imageFile && imageFile.size > 0 ? [imageFile] : []
+  for (const image of normalizedImages) {
+    if (image.size > MAX_IMAGE_SIZE_BYTES) {
+      return { success: false, error: `Image "${image.name}" exceeds 10MB limit` }
+    }
+  }
+  if (videoFile && videoFile.size > MAX_VIDEO_SIZE_BYTES) {
+    return { success: false, error: "Video exceeds 50MB limit" }
+  }
+  const totalMediaSize =
+    normalizedImages.reduce((total, image) => total + image.size, 0) + (videoFile?.size || 0)
+  if (totalMediaSize > MAX_TOTAL_MEDIA_PAYLOAD_BYTES) {
+    return { success: false, error: "Total media payload exceeds 95MB limit" }
   }
 
   // Reset connection state to allow a fresh attempt
@@ -739,10 +775,22 @@ export async function createProduct(formData: FormData) {
     await ensureProductMediaColumns()
     await ensureProductPlatformColumns()
 
-    // Upload images if provided (max 4)
-    const normalizedImages = imageFiles.length > 0 ? imageFiles.slice(0, 4) : imageFile && imageFile.size > 0 ? [imageFile] : []
-    const uploadedImageUrls: string[] = []
-    if (normalizedImages.length > 0) {
+    let uploadedImageUrls: string[] = []
+    if (uploadedImageUrlsRaw) {
+      try {
+        const parsed = JSON.parse(uploadedImageUrlsRaw)
+        if (Array.isArray(parsed)) {
+          uploadedImageUrls = parsed
+            .filter((url) => typeof url === "string" && url.trim().length > 0)
+            .slice(0, 4)
+        }
+      } catch {
+        uploadedImageUrls = []
+      }
+    }
+
+    // Fallback: upload from server if client URLs are not provided.
+    if (uploadedImageUrls.length === 0 && normalizedImages.length > 0) {
       try {
         for (const image of normalizedImages) {
           const uploaded = await uploadProductImage(image, name)
@@ -757,8 +805,8 @@ export async function createProduct(formData: FormData) {
       }
     }
 
-    let videoUrl: string | null = null
-    if (videoFile && videoFile.size > 0) {
+    let videoUrl: string | null = uploadedVideoUrlRaw && uploadedVideoUrlRaw.trim() ? uploadedVideoUrlRaw.trim() : null
+    if (!videoUrl && videoFile && videoFile.size > 0) {
       try {
         videoUrl = await uploadProductVideo(videoFile, name)
       } catch (error) {
@@ -917,6 +965,8 @@ export async function updateProduct(formData: FormData) {
   const imageFile = formData.get("image") as File | null
   const imageFiles = formData.getAll("images").filter((item): item is File => item instanceof File && item.size > 0)
   const videoFile = formData.get("video") as File | null
+  const uploadedImageUrlsRaw = (formData.get("uploaded_image_urls") as string) || ""
+  const uploadedVideoUrlRaw = (formData.get("uploaded_video_url") as string) || ""
   const removeVideo = String(formData.get("remove_video") || "false") === "true"
   const existingImageUrlsRaw = (formData.get("existing_image_urls") as string) || ""
   const hasExistingImageUrlsInput = formData.has("existing_image_urls")
@@ -934,6 +984,22 @@ export async function updateProduct(formData: FormData) {
 
   if (!id || !name || isNaN(price)) {
     return { success: false, message: "ID, name, and valid price are required" }
+  }
+
+  const normalizedNewImages =
+    imageFiles.length > 0 ? imageFiles.slice(0, 4) : imageFile && imageFile.size > 0 ? [imageFile] : []
+  for (const image of normalizedNewImages) {
+    if (image.size > MAX_IMAGE_SIZE_BYTES) {
+      return { success: false, message: `Image "${image.name}" exceeds 10MB limit` }
+    }
+  }
+  if (videoFile && videoFile.size > MAX_VIDEO_SIZE_BYTES) {
+    return { success: false, message: "Video exceeds 50MB limit" }
+  }
+  const totalMediaSize =
+    normalizedNewImages.reduce((total, image) => total + image.size, 0) + (videoFile?.size || 0)
+  if (totalMediaSize > MAX_TOTAL_MEDIA_PAYLOAD_BYTES) {
+    return { success: false, message: "Total media payload exceeds 95MB limit" }
   }
 
   // Reset connection state to allow a fresh attempt
@@ -1024,9 +1090,22 @@ export async function updateProduct(formData: FormData) {
       }
     }
 
-    const normalizedNewImages = imageFiles.length > 0 ? imageFiles.slice(0, 4) : imageFile && imageFile.size > 0 ? [imageFile] : []
-    const uploadedImageUrls: string[] = []
-    if (normalizedNewImages.length > 0) {
+    let uploadedImageUrls: string[] = []
+    if (uploadedImageUrlsRaw) {
+      try {
+        const parsed = JSON.parse(uploadedImageUrlsRaw)
+        if (Array.isArray(parsed)) {
+          uploadedImageUrls = parsed
+            .filter((url) => typeof url === "string" && url.trim().length > 0)
+            .slice(0, 4)
+        }
+      } catch {
+        uploadedImageUrls = []
+      }
+    }
+
+    // Fallback: upload from server if client URLs are not provided.
+    if (uploadedImageUrls.length === 0 && normalizedNewImages.length > 0) {
       try {
         for (const img of normalizedNewImages) {
           const uploaded = await uploadProductImage(img, name)
@@ -1048,7 +1127,9 @@ export async function updateProduct(formData: FormData) {
     if (removeVideo) {
       videoUrl = null
     }
-    if (videoFile && videoFile.size > 0) {
+    if (uploadedVideoUrlRaw && uploadedVideoUrlRaw.trim()) {
+      videoUrl = uploadedVideoUrlRaw.trim()
+    } else if (videoFile && videoFile.size > 0) {
       try {
         const uploadedVideo = await uploadProductVideo(videoFile, name)
         if (uploadedVideo) {

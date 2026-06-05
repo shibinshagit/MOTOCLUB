@@ -10,13 +10,20 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { useToast } from "@/components/ui/use-toast"
-import { updateProduct } from "@/app/actions/product-actions"
+import { cleanupProductMediaUrls, updateProduct } from "@/app/actions/product-actions"
 import { getCategories, createCategory } from "@/app/actions/category-actions"
-import { AlertCircle, Check, ChevronRight, Loader2, Plus, Search, Tag, X, ImageIcon, Link2, Trash2, Film } from "lucide-react"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Check, ChevronRight, Loader2, Plus, Search, Tag, X, ImageIcon, Link2, Trash2, Film } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { getDeviceCurrency } from "@/app/actions/dashboard-actions"
 import { FormError } from "@/components/ui/form-error"
+import {
+  compressImageForUpload,
+  formatBytes,
+  MAX_IMAGE_SIZE_BYTES,
+  MAX_TOTAL_MEDIA_PAYLOAD_BYTES,
+  MAX_VIDEO_SIZE_BYTES,
+} from "@/lib/media-upload-utils"
+import { uploadProductFileFromClient } from "@/lib/blob-client-upload"
 
 interface Category {
   id: number
@@ -84,10 +91,13 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
   const [currency, setCurrency] = useState("QAR")
   const [selectedImages, setSelectedImages] = useState<File[]>([])
   const [imagePreviews, setImagePreviews] = useState<string[]>([])
+  const [uploadedImageUrls, setUploadedImageUrls] = useState<string[]>([])
   const [currentImageUrls, setCurrentImageUrls] = useState<string[]>([])
   const [selectedVideo, setSelectedVideo] = useState<File | null>(null)
   const [videoPreview, setVideoPreview] = useState<string | null>(null)
+  const [uploadedVideoUrl, setUploadedVideoUrl] = useState<string | null>(null)
   const [currentVideoUrl, setCurrentVideoUrl] = useState<string | null>(null)
+  const [isUploadingMedia, setIsUploadingMedia] = useState(false)
   const imageInputRef = useRef<HTMLInputElement>(null)
   const videoInputRef = useRef<HTMLInputElement>(null)
   const [formData, setFormData] = useState({
@@ -191,8 +201,10 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
       setCurrentImageUrls(initialImageUrls.slice(0, 4))
       setSelectedImages([])
       setImagePreviews([])
+      setUploadedImageUrls([])
       setSelectedVideo(null)
       setVideoPreview(null)
+      setUploadedVideoUrl(null)
       setCurrentVideoUrl(product.video_url || null)
       setPlatformStatus({
         amazon: product.amazon_status || "not_listed",
@@ -254,6 +266,67 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
     }
   }, [imagePreviews, videoPreview])
 
+  const hasPendingDraftMedia =
+    selectedImages.length > 0 || !!selectedVideo || uploadedImageUrls.length > 0 || !!uploadedVideoUrl
+
+  const clearSelectedDraftMedia = () => {
+    imagePreviews.forEach((url) => URL.revokeObjectURL(url))
+    if (videoPreview) URL.revokeObjectURL(videoPreview)
+    setSelectedImages([])
+    setImagePreviews([])
+    setSelectedVideo(null)
+    setVideoPreview(null)
+  }
+
+  const cleanupUploadedDraftMedia = async () => {
+    const urlsToCleanup = [...uploadedImageUrls, ...(uploadedVideoUrl ? [uploadedVideoUrl] : [])]
+    if (urlsToCleanup.length > 0) {
+      await cleanupProductMediaUrls(urlsToCleanup)
+    }
+    setUploadedImageUrls([])
+    setUploadedVideoUrl(null)
+  }
+
+  const handleAttemptClose = async () => {
+    if (hasPendingDraftMedia) {
+      const shouldDiscard = window.confirm(
+        "Are you sure? Unsaved uploaded media will be removed from cloud storage.",
+      )
+      if (!shouldDiscard) return
+      await cleanupUploadedDraftMedia()
+      clearSelectedDraftMedia()
+    }
+    onClose()
+  }
+
+  useEffect(() => {
+    if (!isOpen || !hasPendingDraftMedia) return
+
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ""
+    }
+
+    const handleReloadShortcut = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase()
+      const isReload = event.key === "F5" || ((event.ctrlKey || event.metaKey) && key === "r")
+      if (!isReload) return
+      event.preventDefault()
+      toast({
+        title: "Unsaved media present",
+        description: "Discard and remove uploaded media before reloading.",
+        variant: "destructive",
+      })
+    }
+
+    window.addEventListener("beforeunload", handleBeforeUnload)
+    window.addEventListener("keydown", handleReloadShortcut)
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload)
+      window.removeEventListener("keydown", handleReloadShortcut)
+    }
+  }, [isOpen, hasPendingDraftMedia, toast])
+
   const fetchCategories = async () => {
     setIsLoadingCategories(true)
     setCategorySearchQuery("")
@@ -282,30 +355,50 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
     setFormData((prev) => ({ ...prev, [name]: value }))
   }
 
-  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || [])
     if (!files.length) return
 
-    const currentTotal = currentImageUrls.length + selectedImages.length
+    const currentTotal = currentImageUrls.length + uploadedImageUrls.length + selectedImages.length
     const maxCanAdd = Math.max(0, 4 - currentTotal)
     if (maxCanAdd === 0) {
-      toast({ title: "Limit reached", description: "Maximum 4 images allowed.", variant: "destructive" })
+      const message = "Maximum 4 images allowed."
+      setError(message)
+      toast({ title: "Limit reached", description: message, variant: "destructive" })
+      if (imageInputRef.current) imageInputRef.current.value = ""
       return
+    }
+
+    if (files.length > maxCanAdd) {
+      toast({
+        title: "Image limit reached",
+        description: `Only ${maxCanAdd} more image${maxCanAdd === 1 ? "" : "s"} can be selected.`,
+        variant: "destructive",
+      })
     }
 
     const accepted: File[] = []
     const previews: string[] = []
     for (const file of files.slice(0, maxCanAdd)) {
       if (!file.type.startsWith("image/")) {
-        toast({ title: "Invalid file", description: `${file.name} is not an image.`, variant: "destructive" })
+        const message = `${file.name} is not an image.`
+        setError(message)
+        toast({ title: "Invalid file", description: message, variant: "destructive" })
         continue
       }
-      if (file.size > 5 * 1024 * 1024) {
-        toast({ title: "Too large", description: `${file.name} exceeds 5MB.`, variant: "destructive" })
+      const processedImage = await compressImageForUpload(file)
+      if (processedImage.size > MAX_IMAGE_SIZE_BYTES) {
+        const message = `${file.name} exceeds 10MB even after compression.`
+        setError(message)
+        toast({
+          title: "Too large",
+          description: message,
+          variant: "destructive",
+        })
         continue
       }
-      accepted.push(file)
-      previews.push(URL.createObjectURL(file))
+      accepted.push(processedImage)
+      previews.push(URL.createObjectURL(processedImage))
     }
 
     if (accepted.length > 0) {
@@ -318,6 +411,13 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
 
   const removeCurrentImageAt = (index: number) => {
     setCurrentImageUrls((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  const removeUploadedImageAt = async (index: number) => {
+    const urlToRemove = uploadedImageUrls[index]
+    if (!urlToRemove) return
+    await cleanupProductMediaUrls([urlToRemove])
+    setUploadedImageUrls((prev) => prev.filter((_, i) => i !== index))
   }
 
   const removeNewImageAt = (index: number) => {
@@ -333,11 +433,17 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
     const file = e.target.files?.[0]
     if (!file) return
     if (!file.type.startsWith("video/")) {
-      toast({ title: "Invalid file", description: "Please select a video file.", variant: "destructive" })
+      const message = "Please select a video file."
+      setError(message)
+      toast({ title: "Invalid file", description: message, variant: "destructive" })
+      if (videoInputRef.current) videoInputRef.current.value = ""
       return
     }
-    if (file.size > 25 * 1024 * 1024) {
-      toast({ title: "Too large", description: "Video must be under 25MB.", variant: "destructive" })
+    if (file.size > MAX_VIDEO_SIZE_BYTES) {
+      const message = "Video must be under 50MB."
+      setError(message)
+      toast({ title: "Too large", description: message, variant: "destructive" })
+      if (videoInputRef.current) videoInputRef.current.value = ""
       return
     }
     if (videoPreview) URL.revokeObjectURL(videoPreview)
@@ -352,6 +458,54 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
     setVideoPreview(null)
     setCurrentVideoUrl(null)
     if (videoInputRef.current) videoInputRef.current.value = ""
+  }
+
+  const removeUploadedVideo = async () => {
+    if (!uploadedVideoUrl) return
+    await cleanupProductMediaUrls([uploadedVideoUrl])
+    setUploadedVideoUrl(null)
+  }
+
+  const handleUploadSelectedMedia = async () => {
+    if (!product) return
+    if (selectedImages.length === 0 && !selectedVideo) return
+
+    setIsUploadingMedia(true)
+    try {
+      const newlyUploadedImageUrls: string[] = []
+      for (const image of selectedImages) {
+        const uploadedUrl = await uploadProductFileFromClient(image, formData.name || product.name, "image")
+        newlyUploadedImageUrls.push(uploadedUrl)
+      }
+
+      let newlyUploadedVideoUrl: string | null = null
+      if (selectedVideo) {
+        newlyUploadedVideoUrl = await uploadProductFileFromClient(selectedVideo, formData.name || product.name, "video")
+      }
+
+      if (newlyUploadedImageUrls.length > 0) {
+        setUploadedImageUrls((prev) => [...prev, ...newlyUploadedImageUrls].slice(0, 4))
+      }
+      if (newlyUploadedVideoUrl) {
+        if (uploadedVideoUrl) {
+          await cleanupProductMediaUrls([uploadedVideoUrl])
+        }
+        setUploadedVideoUrl(newlyUploadedVideoUrl)
+      }
+
+      clearSelectedDraftMedia()
+      toast({ title: "Uploaded", description: "Selected media uploaded successfully." })
+    } catch (error) {
+      console.error("Media upload failed:", error)
+      const message = error instanceof Error ? error.message : "Failed to upload selected media. Please try again."
+      toast({
+        title: "Upload failed",
+        description: message,
+        variant: "destructive",
+      })
+    } finally {
+      setIsUploadingMedia(false)
+    }
   }
 
   const handleAddAttribute = () => {
@@ -447,6 +601,12 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
         return
       }
 
+      if (selectedImages.length > 0 || selectedVideo) {
+        setError("Please click 'Upload Selected Media' before saving the product.")
+        setIsSubmitting(false)
+        return
+      }
+
       const submitFormData = new FormData()
       submitFormData.append("id", product.id.toString())
       submitFormData.append("name", formData.name)
@@ -471,29 +631,39 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
       submitFormData.append("meesho_status", platformStatus.meesho)
       submitFormData.append("own_ecom_status", platformStatus.own_ecom)
       submitFormData.append("existing_image_urls", JSON.stringify(currentImageUrls))
+      if (uploadedImageUrls.length > 0) {
+        submitFormData.append("uploaded_image_urls", JSON.stringify(uploadedImageUrls))
+      }
       if (!currentVideoUrl && !selectedVideo) {
         submitFormData.append("remove_video", "true")
       }
+      if (uploadedVideoUrl) {
+        submitFormData.append("uploaded_video_url", uploadedVideoUrl)
+      }
       if (userId) submitFormData.append("user_id", userId.toString())
-      selectedImages.forEach((img) => submitFormData.append("images", img))
-      if (selectedVideo) submitFormData.append("video", selectedVideo)
 
       const result = await updateProduct(submitFormData)
 
       if (result && result.success) {
         toast({ title: "Success", description: "Product updated successfully" })
+        setUploadedImageUrls([])
+        setUploadedVideoUrl(null)
         if (onSuccess) onSuccess(result.data)
         onClose()
       } else {
         if (result?.field) {
           setFieldErrors({ [result.field]: result.error || result.message })
         } else {
-          setError(result?.error || result?.message || "Failed to update product. Please try again.")
+          const message = result?.error || result?.message || "Failed to update product. Please try again."
+          setError(message)
+          toast({ title: "Error", description: message, variant: "destructive" })
         }
       }
     } catch (error) {
       console.error("Error updating product:", error)
-      setError(error instanceof Error ? error.message : String(error))
+      const message = error instanceof Error ? error.message : String(error)
+      setError(message)
+      toast({ title: "Error", description: message, variant: "destructive" })
     } finally {
       setIsSubmitting(false)
     }
@@ -503,7 +673,12 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
 
   return (
     <>
-      <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <Dialog
+        open={isOpen}
+        onOpenChange={(open) => {
+          if (!open) void handleAttemptClose()
+        }}
+      >
         <DialogContent className="sm:max-w-md p-0 max-h-[90vh] overflow-hidden flex flex-col bg-white dark:bg-gray-800 border dark:border-gray-700">
           <ScrollableContent className="p-6 overflow-y-auto">
             <DialogHeader>
@@ -516,7 +691,7 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
                 <div className="grid gap-2">
                   <Label className="text-gray-700 dark:text-gray-300">Product Media</Label>
                   <div className="flex flex-col gap-2">
-                    {(currentImageUrls.length > 0 || imagePreviews.length > 0) && (
+                    {(currentImageUrls.length > 0 || uploadedImageUrls.length > 0 || imagePreviews.length > 0) && (
                       <div className="grid grid-cols-2 gap-2">
                         {currentImageUrls.map((url, index) => (
                           <div key={`current-${index}`} className="relative">
@@ -524,42 +699,82 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
                             <Button type="button" variant="destructive" size="sm" onClick={() => removeCurrentImageAt(index)} className="absolute top-1 right-1 h-6 w-6 p-0"><X className="h-3 w-3" /></Button>
                           </div>
                         ))}
+                        {uploadedImageUrls.map((url, index) => (
+                          <div key={`uploaded-${index}`} className="relative">
+                            <img src={url} alt={`Uploaded product ${index + 1}`} className="w-full h-24 object-cover rounded-md border border-green-400" />
+                            <Button type="button" variant="destructive" size="sm" onClick={() => void removeUploadedImageAt(index)} className="absolute top-1 right-1 h-6 w-6 p-0"><X className="h-3 w-3" /></Button>
+                            <div className="absolute bottom-1 left-1 bg-green-600 text-white text-[10px] px-1.5 py-0.5 rounded">Uploaded</div>
+                          </div>
+                        ))}
                         {imagePreviews.map((preview, index) => (
                           <div key={`new-${index}`} className="relative">
                             <img src={preview} alt={`New product ${index + 1}`} className="w-full h-24 object-cover rounded-md border border-blue-400" />
                             <Button type="button" variant="destructive" size="sm" onClick={() => removeNewImageAt(index)} className="absolute top-1 right-1 h-6 w-6 p-0"><X className="h-3 w-3" /></Button>
-                            <div className="absolute bottom-1 left-1 bg-blue-600 text-white text-[10px] px-1.5 py-0.5 rounded">New</div>
+                            <div className="absolute bottom-1 left-1 bg-blue-600 text-white text-[10px] px-1.5 py-0.5 rounded">Selected</div>
                           </div>
                         ))}
                       </div>
                     )}
-                    {currentImageUrls.length + selectedImages.length < 4 && (
+                    {currentImageUrls.length + uploadedImageUrls.length + selectedImages.length < 4 && (
                       <div onClick={() => imageInputRef.current?.click()} className="w-full h-24 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-md flex flex-col items-center justify-center cursor-pointer hover:border-gray-400 dark:hover:border-gray-500 transition-colors">
                         <ImageIcon className="h-6 w-6 text-gray-400 dark:text-gray-500 mb-1" />
-                        <p className="text-sm text-gray-500 dark:text-gray-400">Add Image ({currentImageUrls.length + selectedImages.length}/4)</p>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">Add Image ({currentImageUrls.length + uploadedImageUrls.length + selectedImages.length}/4)</p>
                       </div>
                     )}
                     <input ref={imageInputRef} type="file" accept="image/*" multiple onChange={handleImageSelect} className="hidden" />
                   </div>
 
                   <div className="flex flex-col gap-2 mt-2">
-                    {(videoPreview || currentVideoUrl) ? (
+                    {(videoPreview || uploadedVideoUrl || currentVideoUrl) ? (
                       <div className="relative">
                         <video controls className="w-full h-32 rounded-md border border-gray-300 dark:border-gray-600">
-                          <source src={videoPreview || currentVideoUrl || ""} />
+                          <source src={videoPreview || uploadedVideoUrl || currentVideoUrl || ""} />
                         </video>
-                        <Button type="button" variant="destructive" size="sm" onClick={removeVideo} className="absolute top-2 right-2"><X className="h-4 w-4" /></Button>
-                        {videoPreview && <div className="absolute bottom-2 left-2 bg-blue-600 text-white text-xs px-2 py-1 rounded">New Video</div>}
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => {
+                            if (uploadedVideoUrl) {
+                              void removeUploadedVideo()
+                            } else {
+                              removeVideo()
+                            }
+                          }}
+                          className="absolute top-2 right-2"
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                        {videoPreview && <div className="absolute bottom-2 left-2 bg-blue-600 text-white text-xs px-2 py-1 rounded">Selected</div>}
+                        {!videoPreview && uploadedVideoUrl && <div className="absolute bottom-2 left-2 bg-green-600 text-white text-xs px-2 py-1 rounded">Uploaded</div>}
                       </div>
                     ) : (
                       <div onClick={() => videoInputRef.current?.click()} className="w-full h-24 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-md flex flex-col items-center justify-center cursor-pointer hover:border-gray-400 dark:hover:border-gray-500 transition-colors">
                         <Film className="h-6 w-6 text-gray-400 dark:text-gray-500 mb-1" />
                         <p className="text-sm text-gray-500 dark:text-gray-400">Add Video (optional)</p>
-                        <p className="text-xs text-gray-400 dark:text-gray-500">Max 25MB</p>
+                        <p className="text-xs text-gray-400 dark:text-gray-500">Max 50MB</p>
                       </div>
                     )}
                     <input ref={videoInputRef} type="file" accept="video/*" onChange={handleVideoSelect} className="hidden" />
                   </div>
+
+                  {(selectedImages.length > 0 || selectedVideo) && (
+                    <Button
+                      type="button"
+                      onClick={handleUploadSelectedMedia}
+                      disabled={isUploadingMedia}
+                      className="w-full mt-2 bg-green-600 hover:bg-green-700 text-white"
+                    >
+                      {isUploadingMedia ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          Uploading Media...
+                        </>
+                      ) : (
+                        "Upload Selected Media"
+                      )}
+                    </Button>
+                  )}
                 </div>
 
                 <div className="grid gap-2">
@@ -728,17 +943,20 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
                 </div>
               </div>
 
-              {error && (
-                <Alert variant="destructive" className="mt-4 border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20">
-                  <AlertCircle className="h-4 w-4" />
-                  <AlertTitle className="text-red-800 dark:text-red-300">Error</AlertTitle>
-                  <AlertDescription className="text-red-700 dark:text-red-400">{error}</AlertDescription>
-                </Alert>
-              )}
-
               <DialogFooter className="flex flex-col sm:flex-row gap-2 pt-4">
-                <Button type="button" variant="outline" onClick={onClose} className="w-full sm:w-auto border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 bg-transparent">Cancel</Button>
-                <Button type="submit" disabled={isSubmitting} className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void handleAttemptClose()}
+                  className="w-full sm:w-auto border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 bg-transparent"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={isSubmitting || isUploadingMedia}
+                  className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600"
+                >
                   {isSubmitting ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" />Updating...</>) : "Update Product"}
                 </Button>
               </DialogFooter>
