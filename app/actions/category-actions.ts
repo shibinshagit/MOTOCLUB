@@ -13,6 +13,15 @@ export interface Category {
   updated_at?: string
 }
 
+async function ensureCategoryCompanyColumn() {
+  await sql`ALTER TABLE product_categories ADD COLUMN IF NOT EXISTS company_id INTEGER`
+}
+
+async function getCompanyIdForDevice(deviceId: number) {
+  const rows = await sql`SELECT company_id FROM devices WHERE id = ${deviceId} LIMIT 1`
+  return rows.length > 0 ? Number(rows[0].company_id || 0) : 0
+}
+
 export async function getCategories(userId?: number) {
   resetConnectionState()
 
@@ -20,13 +29,27 @@ export async function getCategories(userId?: number) {
     let categories
 
     if (userId) {
+      await ensureCategoryCompanyColumn()
+      const companyId = await getCompanyIdForDevice(userId)
+
       categories = await sql`
         SELECT 
           c.*,
           p.name as parent_name
         FROM product_categories c
         LEFT JOIN product_categories p ON c.parent_id = p.id
-        WHERE c.created_by = ${userId}
+        WHERE (
+          c.company_id = ${companyId}
+          OR (
+            c.company_id IS NULL
+            AND c.created_by IN (
+              SELECT d2.id
+              FROM devices d1
+              JOIN devices d2 ON d2.company_id = d1.company_id
+              WHERE d1.id = ${userId}
+            )
+          )
+        )
         ORDER BY COALESCE(c.parent_id, c.id), c.parent_id NULLS FIRST, c.name ASC
       `
 
@@ -81,17 +104,36 @@ export async function createCategory(formData: FormData | { name: string; descri
   resetConnectionState()
 
   try {
-    const existingCategory = await sql`
-      SELECT * FROM product_categories WHERE LOWER(name) = LOWER(${name}) AND COALESCE(parent_id, 0) = COALESCE(${parentId}, 0)
-    `
+    await ensureCategoryCompanyColumn()
+
+    let companyId: number | null = null
+    if (userId) {
+      const resolvedCompanyId = await getCompanyIdForDevice(userId)
+      companyId = resolvedCompanyId > 0 ? resolvedCompanyId : null
+    }
+
+    const existingCategory =
+      companyId !== null
+        ? await sql`
+            SELECT * FROM product_categories
+            WHERE LOWER(name) = LOWER(${name})
+              AND COALESCE(parent_id, 0) = COALESCE(${parentId}, 0)
+              AND company_id = ${companyId}
+          `
+        : await sql`
+            SELECT * FROM product_categories
+            WHERE LOWER(name) = LOWER(${name})
+              AND COALESCE(parent_id, 0) = COALESCE(${parentId}, 0)
+              AND created_by = ${userId}
+          `
 
     if (existingCategory.length > 0) {
       return { success: true, message: "Category already exists", data: existingCategory[0] }
     }
 
     const result = await sql`
-      INSERT INTO product_categories (name, description, parent_id, created_by)
-      VALUES (${name}, ${description}, ${parentId}, ${userId})
+      INSERT INTO product_categories (name, description, parent_id, created_by, company_id)
+      VALUES (${name}, ${description}, ${parentId}, ${userId}, ${companyId})
       RETURNING *
     `
 
