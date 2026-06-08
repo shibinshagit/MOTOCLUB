@@ -355,6 +355,11 @@ async function createStaffServiceTables() {
         from_device_id INTEGER NOT NULL,
         to_device_id INTEGER NOT NULL,
         status VARCHAR(30) NOT NULL DEFAULT 'completed',
+        total_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+        payment_status VARCHAR(30) NOT NULL DEFAULT 'unpaid',
+        payment_method VARCHAR(50),
+        paid_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+        payment_notes TEXT,
         notes TEXT,
         created_by INTEGER NOT NULL,
         created_at TIMESTAMP DEFAULT NOW(),
@@ -372,6 +377,8 @@ async function createStaffServiceTables() {
         transfer_id INTEGER NOT NULL,
         product_id INTEGER NOT NULL,
         quantity INTEGER NOT NULL,
+        unit_cost DECIMAL(12,2) NOT NULL DEFAULT 0,
+        total_cost DECIMAL(12,2) NOT NULL DEFAULT 0,
         created_at TIMESTAMP DEFAULT NOW()
       )
     `
@@ -585,6 +592,17 @@ async function addColumns() {
   await runSafe("products.suitable_for", () => sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS suitable_for TEXT`)
   await runSafe("products.attributes", () => sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS attributes JSONB DEFAULT '[]'`)
   await runSafe("products.link", () => sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS link TEXT`)
+
+  // ── stock_transfers ──
+  await runSafe("stock_transfers.total_amount", () => sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS total_amount DECIMAL(12,2) NOT NULL DEFAULT 0`)
+  await runSafe("stock_transfers.payment_status", () => sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS payment_status VARCHAR(30) NOT NULL DEFAULT 'unpaid'`)
+  await runSafe("stock_transfers.payment_method", () => sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50)`)
+  await runSafe("stock_transfers.paid_amount", () => sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS paid_amount DECIMAL(12,2) NOT NULL DEFAULT 0`)
+  await runSafe("stock_transfers.payment_notes", () => sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS payment_notes TEXT`)
+
+  // ── stock_transfer_items ──
+  await runSafe("stock_transfer_items.unit_cost", () => sql`ALTER TABLE stock_transfer_items ADD COLUMN IF NOT EXISTS unit_cost DECIMAL(12,2) NOT NULL DEFAULT 0`)
+  await runSafe("stock_transfer_items.total_cost", () => sql`ALTER TABLE stock_transfer_items ADD COLUMN IF NOT EXISTS total_cost DECIMAL(12,2) NOT NULL DEFAULT 0`)
 
   // ── product_categories ──
   await runSafe("product_categories.parent_id", () => sql`ALTER TABLE product_categories ADD COLUMN IF NOT EXISTS parent_id INTEGER`)

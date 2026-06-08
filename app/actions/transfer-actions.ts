@@ -6,6 +6,12 @@ import { revalidatePath } from "next/cache"
 type TransferItemInput = {
   product_id: number
   quantity: number
+  unit_cost: number
+}
+
+type StockMoveItemInput = {
+  product_id: number
+  quantity: number
 }
 
 async function ensureTransferTables() {
@@ -16,6 +22,11 @@ async function ensureTransferTables() {
       from_device_id INTEGER NOT NULL,
       to_device_id INTEGER NOT NULL,
       status VARCHAR(30) NOT NULL DEFAULT 'completed',
+      total_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+      payment_status VARCHAR(30) NOT NULL DEFAULT 'unpaid',
+      payment_method VARCHAR(50),
+      paid_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+      payment_notes TEXT,
       notes TEXT,
       created_by INTEGER NOT NULL,
       created_at TIMESTAMP DEFAULT NOW(),
@@ -25,15 +36,26 @@ async function ensureTransferTables() {
     )
   `
 
+  await sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS total_amount DECIMAL(12,2) NOT NULL DEFAULT 0`
+  await sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS payment_status VARCHAR(30) NOT NULL DEFAULT 'unpaid'`
+  await sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50)`
+  await sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS paid_amount DECIMAL(12,2) NOT NULL DEFAULT 0`
+  await sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS payment_notes TEXT`
+
   await sql`
     CREATE TABLE IF NOT EXISTS stock_transfer_items (
       id SERIAL PRIMARY KEY,
       transfer_id INTEGER NOT NULL,
       product_id INTEGER NOT NULL,
       quantity INTEGER NOT NULL,
+      unit_cost DECIMAL(12,2) NOT NULL DEFAULT 0,
+      total_cost DECIMAL(12,2) NOT NULL DEFAULT 0,
       created_at TIMESTAMP DEFAULT NOW()
     )
   `
+
+  await sql`ALTER TABLE stock_transfer_items ADD COLUMN IF NOT EXISTS unit_cost DECIMAL(12,2) NOT NULL DEFAULT 0`
+  await sql`ALTER TABLE stock_transfer_items ADD COLUMN IF NOT EXISTS total_cost DECIMAL(12,2) NOT NULL DEFAULT 0`
 }
 
 async function ensureProductDeviceStockTable() {
@@ -50,36 +72,54 @@ async function ensureProductDeviceStockTable() {
 }
 
 function normalizeTransferItems(items: any[]): TransferItemInput[] {
-  const itemMap = new Map<number, number>()
+  const itemMap = new Map<number, { quantity: number; unit_cost: number }>()
 
   for (const item of items || []) {
     const productId = Number(item?.product_id)
     const quantity = Number(item?.quantity)
+    const unitCost = Number(item?.unit_cost ?? 0)
     if (!Number.isFinite(productId) || productId <= 0) continue
     if (!Number.isFinite(quantity) || quantity <= 0) continue
-    itemMap.set(productId, (itemMap.get(productId) || 0) + Math.floor(quantity))
+
+    const nextQuantity = Math.floor(quantity)
+    const safeUnitCost = Number.isFinite(unitCost) && unitCost >= 0 ? unitCost : 0
+    const existing = itemMap.get(productId)
+    if (!existing) {
+      itemMap.set(productId, { quantity: nextQuantity, unit_cost: safeUnitCost })
+    } else {
+      const totalQty = existing.quantity + nextQuantity
+      const weightedCost =
+        totalQty > 0
+          ? (existing.unit_cost * existing.quantity + safeUnitCost * nextQuantity) / totalQty
+          : safeUnitCost
+      itemMap.set(productId, { quantity: totalQty, unit_cost: weightedCost })
+    }
   }
 
-  return Array.from(itemMap.entries()).map(([product_id, quantity]) => ({ product_id, quantity }))
+  return Array.from(itemMap.entries()).map(([product_id, value]) => ({
+    product_id,
+    quantity: value.quantity,
+    unit_cost: Number(value.unit_cost.toFixed(2)),
+  }))
 }
 
 async function getCompanyIdForDevice(deviceId: number): Promise<number | null> {
-  const result = await sql`
+  const result = (await sql`
     SELECT company_id
     FROM devices
     WHERE id = ${deviceId}
     LIMIT 1
-  `
+  `) as any[]
   return result.length > 0 ? Number(result[0].company_id) : null
 }
 
 async function getDeviceStockForUpdate(productId: number, deviceId: number): Promise<number> {
-  const rows = await sql`
+  const rows = (await sql`
     SELECT stock
     FROM product_device_stock
     WHERE product_id = ${productId} AND device_id = ${deviceId}
     FOR UPDATE
-  `
+  `) as any[]
   return rows.length > 0 ? Number(rows[0].stock || 0) : 0
 }
 
@@ -152,7 +192,7 @@ async function moveStockBetweenDevices(
 
 async function reverseTransferItems(
   transferId: number,
-  items: TransferItemInput[],
+  items: StockMoveItemInput[],
   originalFromDeviceId: number,
   originalToDeviceId: number,
   actorDeviceId: number,
@@ -188,18 +228,19 @@ export async function getTransferFormData(userId: number, fromDeviceId?: number)
 
     const sourceDeviceId = Number(fromDeviceId || userId)
 
-    const devices = await sql`
+    const devices = (await sql`
       SELECT id, name
       FROM devices
       WHERE company_id = ${companyId}
       ORDER BY name ASC
-    `
+    `) as any[]
 
-    const products = await sql`
+    const products = (await sql`
       SELECT DISTINCT
         p.id,
         p.name,
         p.barcode,
+        COALESCE(p.wholesale_price, 0) AS default_unit_cost,
         COALESCE(pds.stock, 0) AS source_stock
       FROM products p
       JOIN devices d ON d.id = p.created_by
@@ -207,7 +248,7 @@ export async function getTransferFormData(userId: number, fromDeviceId?: number)
         ON pds.product_id = p.id AND pds.device_id = ${sourceDeviceId}
       WHERE d.company_id = ${companyId}
       ORDER BY p.name ASC
-    `
+    `) as any[]
 
     return {
       success: true,
@@ -217,6 +258,7 @@ export async function getTransferFormData(userId: number, fromDeviceId?: number)
           id: Number(p.id),
           name: p.name,
           barcode: p.barcode || "",
+          default_unit_cost: Number(p.default_unit_cost || 0),
           source_stock: Number(p.source_stock || 0),
         })),
       },
@@ -246,12 +288,16 @@ export async function getWarehouseTransfers(userId: number, searchTerm?: string,
     const status = (statusFilter || "all").trim().toLowerCase()
     const searchPattern = `%${search}%`
 
-    const transfers = await sql`
+    const transfers = (await sql`
       SELECT
         t.id,
         t.from_device_id,
         t.to_device_id,
         t.status,
+        COALESCE(t.total_amount, 0)::numeric AS total_amount,
+        COALESCE(t.payment_status, 'unpaid') AS payment_status,
+        COALESCE(t.payment_method, '') AS payment_method,
+        COALESCE(t.paid_amount, 0)::numeric AS paid_amount,
         t.notes,
         t.created_by,
         t.created_at,
@@ -276,7 +322,7 @@ export async function getWarehouseTransfers(userId: number, searchTerm?: string,
       GROUP BY t.id, df.name, dt.name
       ORDER BY t.created_at DESC
       LIMIT 300
-    `
+    `) as any[]
 
     return { success: true, data: transfers }
   } catch (error) {
@@ -300,7 +346,7 @@ export async function getWarehouseTransferById(transferId: number, userId: numbe
     const companyId = await getCompanyIdForDevice(userId)
     if (!companyId) return { success: false, message: "Device/company not found", data: null }
 
-    const transferRows = await sql`
+    const transferRows = (await sql`
       SELECT
         t.*,
         df.name AS from_device_name,
@@ -310,24 +356,26 @@ export async function getWarehouseTransferById(transferId: number, userId: numbe
       JOIN devices dt ON dt.id = t.to_device_id
       WHERE t.id = ${transferId} AND t.company_id = ${companyId}
       LIMIT 1
-    `
+    `) as any[]
 
     if (transferRows.length === 0) {
       return { success: false, message: "Transfer not found", data: null }
     }
 
-    const items = await sql`
+    const items = (await sql`
       SELECT
         ti.id,
         ti.product_id,
         ti.quantity,
+        COALESCE(ti.unit_cost, 0)::numeric AS unit_cost,
+        COALESCE(ti.total_cost, 0)::numeric AS total_cost,
         p.name AS product_name,
         p.barcode
       FROM stock_transfer_items ti
       LEFT JOIN products p ON p.id = ti.product_id
       WHERE ti.transfer_id = ${transferId}
       ORDER BY ti.id ASC
-    `
+    `) as any[]
 
     return {
       success: true,
@@ -337,6 +385,8 @@ export async function getWarehouseTransferById(transferId: number, userId: numbe
           id: Number(row.id),
           product_id: Number(row.product_id),
           quantity: Number(row.quantity),
+          unit_cost: Number(row.unit_cost || 0),
+          total_cost: Number(row.total_cost || 0),
           product_name: row.product_name || `Product #${row.product_id}`,
           barcode: row.barcode || "",
         })),
@@ -357,6 +407,10 @@ export async function createWarehouseTransfer(formData: FormData) {
   const fromDeviceId = Number(formData.get("from_device_id"))
   const toDeviceId = Number(formData.get("to_device_id"))
   const notes = String(formData.get("notes") || "").trim()
+  const paymentStatus = String(formData.get("payment_status") || "unpaid").trim().toLowerCase()
+  const paymentMethod = String(formData.get("payment_method") || "").trim()
+  const paymentNotes = String(formData.get("payment_notes") || "").trim()
+  const paidAmount = Number(formData.get("paid_amount") || 0)
   const itemsRaw = String(formData.get("items") || "[]")
 
   let parsedItems: any[] = []
@@ -377,6 +431,13 @@ export async function createWarehouseTransfer(formData: FormData) {
   if (items.length === 0) {
     return { success: false, message: "At least one valid product is required" }
   }
+  const allowedPaymentStatuses = new Set(["unpaid", "partial", "paid"])
+  if (!allowedPaymentStatuses.has(paymentStatus)) {
+    return { success: false, message: "Invalid payment status" }
+  }
+  if (!Number.isFinite(paidAmount) || paidAmount < 0) {
+    return { success: false, message: "Paid amount must be a valid non-negative number" }
+  }
 
   resetConnectionState()
   try {
@@ -392,21 +453,29 @@ export async function createWarehouseTransfer(formData: FormData) {
       return { success: false, message: "Devices must belong to the same company" }
     }
 
-    const transferRows = await sql`
+    const totalAmount = Number(
+      items.reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.unit_cost || 0), 0).toFixed(2),
+    )
+    if (paidAmount > totalAmount) {
+      await sql`ROLLBACK`
+      return { success: false, message: "Paid amount cannot exceed transfer amount" }
+    }
+
+    const transferRows = (await sql`
       INSERT INTO stock_transfers (
-        company_id, from_device_id, to_device_id, status, notes, created_by, created_at, updated_at
+        company_id, from_device_id, to_device_id, status, total_amount, payment_status, payment_method, paid_amount, payment_notes, notes, created_by, created_at, updated_at
       ) VALUES (
-        ${actorCompanyId}, ${fromDeviceId}, ${toDeviceId}, 'completed', ${notes}, ${userId}, NOW(), NOW()
+        ${actorCompanyId}, ${fromDeviceId}, ${toDeviceId}, 'completed', ${totalAmount}, ${paymentStatus}, ${paymentMethod || null}, ${paidAmount}, ${paymentNotes || null}, ${notes}, ${userId}, NOW(), NOW()
       )
       RETURNING id
-    `
+    `) as any[]
     const transferId = Number(transferRows[0].id)
 
     for (const item of items) {
       await moveStockBetweenDevices(item.product_id, item.quantity, fromDeviceId, toDeviceId, transferId, userId)
       await sql`
-        INSERT INTO stock_transfer_items (transfer_id, product_id, quantity, created_at)
-        VALUES (${transferId}, ${item.product_id}, ${item.quantity}, NOW())
+        INSERT INTO stock_transfer_items (transfer_id, product_id, quantity, unit_cost, total_cost, created_at)
+        VALUES (${transferId}, ${item.product_id}, ${item.quantity}, ${item.unit_cost}, ${Number((item.quantity * item.unit_cost).toFixed(2))}, NOW())
       `
     }
 
@@ -429,6 +498,10 @@ export async function updateWarehouseTransfer(formData: FormData) {
   const fromDeviceId = Number(formData.get("from_device_id"))
   const toDeviceId = Number(formData.get("to_device_id"))
   const notes = String(formData.get("notes") || "").trim()
+  const paymentStatus = String(formData.get("payment_status") || "unpaid").trim().toLowerCase()
+  const paymentMethod = String(formData.get("payment_method") || "").trim()
+  const paymentNotes = String(formData.get("payment_notes") || "").trim()
+  const paidAmount = Number(formData.get("paid_amount") || 0)
   const itemsRaw = String(formData.get("items") || "[]")
 
   let parsedItems: any[] = []
@@ -449,6 +522,13 @@ export async function updateWarehouseTransfer(formData: FormData) {
   if (items.length === 0) {
     return { success: false, message: "At least one valid product is required" }
   }
+  const allowedPaymentStatuses = new Set(["unpaid", "partial", "paid"])
+  if (!allowedPaymentStatuses.has(paymentStatus)) {
+    return { success: false, message: "Invalid payment status" }
+  }
+  if (!Number.isFinite(paidAmount) || paidAmount < 0) {
+    return { success: false, message: "Paid amount must be a valid non-negative number" }
+  }
 
   resetConnectionState()
   try {
@@ -464,12 +544,20 @@ export async function updateWarehouseTransfer(formData: FormData) {
       return { success: false, message: "Devices must belong to the same company" }
     }
 
-    const transferRows = await sql`
+    const totalAmount = Number(
+      items.reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.unit_cost || 0), 0).toFixed(2),
+    )
+    if (paidAmount > totalAmount) {
+      await sql`ROLLBACK`
+      return { success: false, message: "Paid amount cannot exceed transfer amount" }
+    }
+
+    const transferRows = (await sql`
       SELECT id, status, from_device_id, to_device_id
       FROM stock_transfers
       WHERE id = ${transferId} AND company_id = ${actorCompanyId}
       LIMIT 1
-    `
+    `) as any[]
     if (transferRows.length === 0) {
       await sql`ROLLBACK`
       return { success: false, message: "Transfer not found" }
@@ -481,12 +569,12 @@ export async function updateWarehouseTransfer(formData: FormData) {
       return { success: false, message: "Cancelled transfers cannot be edited" }
     }
 
-    const existingItemsRows = await sql`
+    const existingItemsRows = (await sql`
       SELECT product_id, quantity
       FROM stock_transfer_items
       WHERE transfer_id = ${transferId}
       ORDER BY id ASC
-    `
+    `) as any[]
     const existingItems = existingItemsRows.map((row) => ({
       product_id: Number(row.product_id),
       quantity: Number(row.quantity),
@@ -565,6 +653,11 @@ export async function updateWarehouseTransfer(formData: FormData) {
       UPDATE stock_transfers
       SET from_device_id = ${fromDeviceId},
           to_device_id = ${toDeviceId},
+          total_amount = ${totalAmount},
+          payment_status = ${paymentStatus},
+          payment_method = ${paymentMethod || null},
+          paid_amount = ${paidAmount},
+          payment_notes = ${paymentNotes || null},
           notes = ${notes},
           updated_at = NOW()
       WHERE id = ${transferId}
@@ -572,8 +665,8 @@ export async function updateWarehouseTransfer(formData: FormData) {
 
     for (const item of items) {
       await sql`
-        INSERT INTO stock_transfer_items (transfer_id, product_id, quantity, created_at)
-        VALUES (${transferId}, ${item.product_id}, ${item.quantity}, NOW())
+        INSERT INTO stock_transfer_items (transfer_id, product_id, quantity, unit_cost, total_cost, created_at)
+        VALUES (${transferId}, ${item.product_id}, ${item.quantity}, ${item.unit_cost}, ${Number((item.quantity * item.unit_cost).toFixed(2))}, NOW())
       `
     }
 
@@ -607,12 +700,12 @@ export async function cancelWarehouseTransfer(transferId: number, userId: number
       return { success: false, message: "Device/company not found" }
     }
 
-    const transferRows = await sql`
+    const transferRows = (await sql`
       SELECT id, status, from_device_id, to_device_id
       FROM stock_transfers
       WHERE id = ${transferId} AND company_id = ${actorCompanyId}
       LIMIT 1
-    `
+    `) as any[]
     if (transferRows.length === 0) {
       await sql`ROLLBACK`
       return { success: false, message: "Transfer not found" }
@@ -624,12 +717,12 @@ export async function cancelWarehouseTransfer(transferId: number, userId: number
       return { success: false, message: "Transfer is already cancelled" }
     }
 
-    const itemsRows = await sql`
+    const itemsRows = (await sql`
       SELECT product_id, quantity
       FROM stock_transfer_items
       WHERE transfer_id = ${transferId}
       ORDER BY id ASC
-    `
+    `) as any[]
 
     const items = itemsRows.map((row) => ({
       product_id: Number(row.product_id),

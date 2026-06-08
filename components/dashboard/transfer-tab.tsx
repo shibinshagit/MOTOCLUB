@@ -25,11 +25,16 @@ interface TransferTabProps {
 type TransferItemForm = {
   product_id: number
   quantity: number
+  unit_cost: number
 }
 
 type TransferFormData = {
   fromDeviceId: number
   toDeviceId: number
+  paymentStatus: "unpaid" | "partial" | "paid"
+  paymentMethod: string
+  paidAmount: number
+  paymentNotes: string
   notes: string
   items: TransferItemForm[]
 }
@@ -47,12 +52,18 @@ export default function TransferTab({ userId }: TransferTabProps) {
   const [formData, setFormData] = useState<TransferFormData>({
     fromDeviceId: userId || 0,
     toDeviceId: 0,
+    paymentStatus: "unpaid",
+    paymentMethod: "",
+    paidAmount: 0,
+    paymentNotes: "",
     notes: "",
-    items: [{ product_id: 0, quantity: 1 }],
+    items: [{ product_id: 0, quantity: 1, unit_cost: 0 }],
   })
 
   const [devices, setDevices] = useState<Array<{ id: number; name: string }>>([])
-  const [products, setProducts] = useState<Array<{ id: number; name: string; barcode: string; source_stock: number }>>([])
+  const [products, setProducts] = useState<
+    Array<{ id: number; name: string; barcode: string; source_stock: number; default_unit_cost: number }>
+  >([])
   const [rowProductSearch, setRowProductSearch] = useState<string[]>([""])
   const [rowProductOpen, setRowProductOpen] = useState<boolean[]>([false])
   const [rowWarnings, setRowWarnings] = useState<Record<number, string>>({})
@@ -61,13 +72,22 @@ export default function TransferTab({ userId }: TransferTabProps) {
     return new Map(products.map((p) => [p.id, p.source_stock]))
   }, [products])
 
+  const transferTotalAmount = useMemo(() => {
+    return Number(
+      formData.items
+        .filter((i) => i.product_id > 0 && i.quantity > 0)
+        .reduce((sum, i) => sum + Number(i.quantity || 0) * Number(i.unit_cost || 0), 0)
+        .toFixed(2),
+    )
+  }, [formData.items])
+
   const loadTransfers = useCallback(async () => {
     if (!userId) return
     try {
       setIsLoading(true)
       const result = await getWarehouseTransfers(userId, searchTerm, statusFilter)
       if (result.success) {
-        setTransfers(result.data)
+        setTransfers((result.data || []) as any[])
       } else {
         toast({
           title: "Error",
@@ -123,8 +143,12 @@ export default function TransferTab({ userId }: TransferTabProps) {
     setFormData({
       fromDeviceId: userId || devices[0]?.id || 0,
       toDeviceId: 0,
+      paymentStatus: "unpaid",
+      paymentMethod: "",
+      paidAmount: 0,
+      paymentNotes: "",
       notes: "",
-      items: [{ product_id: 0, quantity: 1 }],
+      items: [{ product_id: 0, quantity: 1, unit_cost: 0 }],
     })
   }
 
@@ -167,14 +191,19 @@ export default function TransferTab({ userId }: TransferTabProps) {
       setFormData({
         fromDeviceId: Number(transfer.from_device_id),
         toDeviceId: Number(transfer.to_device_id),
+        paymentStatus: (String(transfer.payment_status || "unpaid").toLowerCase() as "unpaid" | "partial" | "paid"),
+        paymentMethod: String(transfer.payment_method || ""),
+        paidAmount: Number(transfer.paid_amount || 0),
+        paymentNotes: String(transfer.payment_notes || ""),
         notes: transfer.notes || "",
         items:
           detail.data.items.length > 0
             ? detail.data.items.map((item: any) => ({
                 product_id: Number(item.product_id),
                 quantity: Number(item.quantity),
+                unit_cost: Number(item.unit_cost || 0),
               }))
-            : [{ product_id: 0, quantity: 1 }],
+            : [{ product_id: 0, quantity: 1, unit_cost: 0 }],
       })
 
     } finally {
@@ -240,7 +269,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
   }
 
   const addItemRow = () => {
-    setFormData((prev) => ({ ...prev, items: [...prev.items, { product_id: 0, quantity: 1 }] }))
+    setFormData((prev) => ({ ...prev, items: [...prev.items, { product_id: 0, quantity: 1, unit_cost: 0 }] }))
     setRowProductSearch((prev) => [...prev, ""])
     setRowProductOpen((prev) => [...prev, false])
   }
@@ -248,7 +277,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
   const removeItemRow = (index: number) => {
     setFormData((prev) => {
       const items = prev.items.filter((_, i) => i !== index)
-      return { ...prev, items: items.length > 0 ? items : [{ product_id: 0, quantity: 1 }] }
+      return { ...prev, items: items.length > 0 ? items : [{ product_id: 0, quantity: 1, unit_cost: 0 }] }
     })
     setRowProductSearch((prev) => {
       const terms = prev.filter((_, i) => i !== index)
@@ -289,6 +318,14 @@ export default function TransferTab({ userId }: TransferTabProps) {
       toast({ title: "Validation", description: "Add at least one valid product row", variant: "destructive" })
       return
     }
+    if (!Number.isFinite(formData.paidAmount) || Number(formData.paidAmount) < 0) {
+      toast({ title: "Validation", description: "Paid amount must be a non-negative number", variant: "destructive" })
+      return
+    }
+    if (Number(formData.paidAmount) > transferTotalAmount) {
+      toast({ title: "Validation", description: "Paid amount cannot exceed transfer amount", variant: "destructive" })
+      return
+    }
 
     const requestedByProduct = new Map<number, number>()
     for (const item of validItems) {
@@ -311,6 +348,10 @@ export default function TransferTab({ userId }: TransferTabProps) {
     payload.append("user_id", String(userId))
     payload.append("from_device_id", String(formData.fromDeviceId))
     payload.append("to_device_id", String(formData.toDeviceId))
+    payload.append("payment_status", String(formData.paymentStatus))
+    payload.append("payment_method", String(formData.paymentMethod || ""))
+    payload.append("paid_amount", String(formData.paidAmount || 0))
+    payload.append("payment_notes", String(formData.paymentNotes || ""))
     payload.append("notes", formData.notes || "")
     payload.append("items", JSON.stringify(validItems))
     if (editingTransferId) payload.append("transfer_id", String(editingTransferId))
@@ -406,6 +447,8 @@ export default function TransferTab({ userId }: TransferTabProps) {
                   <th className="text-left p-3 text-xs font-medium text-gray-500 uppercase">To</th>
                   <th className="text-left p-3 text-xs font-medium text-gray-500 uppercase">Items</th>
                   <th className="text-left p-3 text-xs font-medium text-gray-500 uppercase">Qty</th>
+                  <th className="text-left p-3 text-xs font-medium text-gray-500 uppercase">Amount</th>
+                  <th className="text-left p-3 text-xs font-medium text-gray-500 uppercase">Payment</th>
                   <th className="text-left p-3 text-xs font-medium text-gray-500 uppercase">Status</th>
                   <th className="text-left p-3 text-xs font-medium text-gray-500 uppercase">Actions</th>
                 </tr>
@@ -421,6 +464,18 @@ export default function TransferTab({ userId }: TransferTabProps) {
                     <td className="p-3 text-sm text-gray-700 dark:text-gray-300">{transfer.to_device_name}</td>
                     <td className="p-3 text-sm text-gray-700 dark:text-gray-300">{transfer.item_count}</td>
                     <td className="p-3 text-sm text-gray-700 dark:text-gray-300">{transfer.total_quantity}</td>
+                    <td className="p-3 text-sm text-gray-700 dark:text-gray-300">
+                      {Number(transfer.total_amount || 0).toFixed(2)}
+                    </td>
+                    <td className="p-3 text-sm text-gray-700 dark:text-gray-300">
+                      <div className="flex flex-col">
+                        <span className="capitalize">{String(transfer.payment_status || "unpaid")}</span>
+                        <span className="text-xs text-gray-500">
+                          {Number(transfer.paid_amount || 0).toFixed(2)}
+                          {transfer.payment_method ? ` • ${transfer.payment_method}` : ""}
+                        </span>
+                      </div>
+                    </td>
                     <td className="p-3">{getStatusBadge(transfer.status)}</td>
                     <td className="p-3">
                       <div className="flex gap-2">
@@ -503,6 +558,59 @@ export default function TransferTab({ userId }: TransferTabProps) {
             </div>
 
             <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Payment Status</label>
+              <select
+                value={formData.paymentStatus}
+                onChange={(e) =>
+                  setFormData((prev) => ({ ...prev, paymentStatus: e.target.value as "unpaid" | "partial" | "paid" }))
+                }
+                className="w-full h-10 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 text-sm"
+              >
+                <option value="unpaid">Unpaid</option>
+                <option value="partial">Partial</option>
+                <option value="paid">Paid</option>
+              </select>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Payment Method</label>
+                <select
+                  value={formData.paymentMethod || ""}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, paymentMethod: e.target.value }))}
+                  className="w-full h-10 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 text-sm"
+                >
+                  <option value="">Select method</option>
+                  <option value="cash">Cash</option>
+                  <option value="card">Card</option>
+                  <option value="bank">Bank Transfer</option>
+                  <option value="upi">UPI</option>
+                  <option value="credit">Credit</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Paid Amount</label>
+                <Input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={formData.paidAmount}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, paidAmount: Number(e.target.value || 0) }))}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Payment Notes</label>
+              <Textarea
+                value={formData.paymentNotes}
+                onChange={(e) => setFormData((prev) => ({ ...prev, paymentNotes: e.target.value }))}
+                rows={2}
+                placeholder="Optional payment note"
+              />
+            </div>
+
+            <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Notes</label>
               <Textarea
                 value={formData.notes}
@@ -522,9 +630,16 @@ export default function TransferTab({ userId }: TransferTabProps) {
               </div>
 
               <div className="space-y-2">
+                <div className="grid grid-cols-12 gap-2 px-1 text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  <div className="col-span-5">Product</div>
+                  <div className="col-span-3">Qty</div>
+                  <div className="col-span-2">Unit Cost</div>
+                  <div className="col-span-1">Total</div>
+                  <div className="col-span-1">Action</div>
+                </div>
                 {formData.items.map((item, idx) => (
                   <div key={idx} className="grid grid-cols-12 gap-2 items-start">
-                    <div className="col-span-7">
+                    <div className="col-span-5">
                       <Popover open={Boolean(rowProductOpen[idx])} onOpenChange={(open) => setProductOpen(idx, open)}>
                         <PopoverTrigger asChild>
                           <Button
@@ -577,9 +692,11 @@ export default function TransferTab({ userId }: TransferTabProps) {
                                   onClick={() => {
                                     const available = Number(selectedSourceStockMap.get(p.id) || 0)
                                     const currentQty = Number(item.quantity || 1)
+                              const defaultUnitCost = Number(products.find((x) => x.id === p.id)?.default_unit_cost || 0)
                                     setItem(idx, {
                                       product_id: p.id,
                                       quantity: available > 0 ? Math.min(currentQty, available) : 1,
+                                unit_cost: Number(item.unit_cost || defaultUnitCost || 0),
                                     })
                                     setProductOpen(idx, false)
                                   }}
@@ -642,6 +759,22 @@ export default function TransferTab({ userId }: TransferTabProps) {
                       ) : null}
                     </div>
                     <div className="col-span-2">
+                      <Input
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={item.unit_cost || 0}
+                        onChange={(e) => {
+                          const nextUnitCost = Number(e.target.value || 0)
+                          setItem(idx, { unit_cost: Math.max(0, nextUnitCost) })
+                        }}
+                        placeholder="Unit cost"
+                      />
+                    </div>
+                    <div className="col-span-1 h-10 flex items-center text-sm font-medium text-gray-700 dark:text-gray-300">
+                      {(Number(item.quantity || 0) * Number(item.unit_cost || 0)).toFixed(2)}
+                    </div>
+                    <div className="col-span-1">
                       <Button
                         type="button"
                         variant="outline"
@@ -658,6 +791,9 @@ export default function TransferTab({ userId }: TransferTabProps) {
             </div>
 
             <div className="flex justify-end gap-2 pt-2">
+              <div className="mr-auto text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center">
+                Transfer Amount: {transferTotalAmount.toFixed(2)}
+              </div>
               <Button variant="outline" onClick={() => setIsModalOpen(false)} disabled={isSaving}>
                 Cancel
               </Button>
