@@ -33,11 +33,12 @@ import {
   EyeOff,
   CalendarDays,
   Edit,
+  X,
 } from "lucide-react"
 import { getUserSales, deleteSale, addSale, getSaleDetails, updateSale } from "@/app/actions/sale-actions"
 import { useToast } from "@/components/ui/use-toast"
 import ViewSaleModal from "@/components/sales/view-sale-modal"
-import { useRouter, useSearchParams } from "next/navigation"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useSelector, useDispatch } from "react-redux"
 import { selectDeviceId, selectDeviceCurrency } from "@/store/slices/deviceSlice"
 import {
@@ -120,6 +121,26 @@ interface ScanResult {
   productName?: string
 }
 
+interface SaleDraftSnapshot {
+  id: string
+  name: string
+  updatedAt: number
+  date: string
+  customerId: number | null
+  customerName: string
+  staffId: number | null
+  staffName: string
+  status: string
+  paymentMethod: string
+  receivedAmount: number
+  discountAmount: number
+  notes: string
+  products: ProductRow[]
+  isEditMode: boolean
+  editingSaleId: number | null
+  originalSaleStatus: string
+}
+
 const STALE_TIME = 5 * 60 * 1000 // 5 minutes in milliseconds
 
 export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, mode = "entry" }: SaleTabProps) {
@@ -150,9 +171,6 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
   const maxAmountFilter = useSelector(selectSalesMaxAmountFilter)
   const showFilters = useSelector(selectSalesShowFilters)
   const currency = useSelector(selectSalesCurrency)
-
-  // Privacy mode state - enabled by default
-  const [privacyMode, setPrivacyMode] = useState(true)
 
   // Date range picker modal state
   const [isDateRangeModalOpen, setIsDateRangeModalOpen] = useState(false)
@@ -225,6 +243,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
   const { toast } = useToast()
   const router = useRouter()
   const searchParams = useSearchParams()
+  const pathname = usePathname()
 
   // Add pagination state
   const [currentPage, setCurrentPage] = useState(1)
@@ -239,6 +258,56 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
   const [showPrintConfirm, setShowPrintConfirm] = useState(false)
   const [lastSaleResult, setLastSaleResult] = useState<any>(null)
   const [rememberChoice, setRememberChoice] = useState(false)
+  const privacyMode = false
+  const setPrivacyMode = () => {}
+  const [saleDrafts, setSaleDrafts] = useState<SaleDraftSnapshot[]>([])
+  const [activeDraftId, setActiveDraftId] = useState<string>("")
+  const [draftsHydrated, setDraftsHydrated] = useState(false)
+  const [pendingEditSaleId, setPendingEditSaleId] = useState<number | null>(null)
+  const [pendingEditDraftId, setPendingEditDraftId] = useState<string>("")
+  const draftSwitchingRef = useRef(false)
+
+  const createEmptyProductRow = useCallback(
+    (): ProductRow => ({
+      id: crypto.randomUUID(),
+      productId: null,
+      productName: "",
+      quantity: 1,
+      price: 0,
+      cost: 0,
+      stock: 0,
+      total: 0,
+      notes: "",
+    }),
+    [],
+  )
+
+  const createEmptyDraft = useCallback(
+    (label?: string): SaleDraftSnapshot => ({
+      id: crypto.randomUUID(),
+      name: label || "New Sale",
+      updatedAt: Date.now(),
+      date: new Date().toISOString(),
+      customerId: null,
+      customerName: "",
+      staffId: activeStaff?.id || null,
+      staffName: activeStaff?.name || "",
+      status: "Completed",
+      paymentMethod: "Cash",
+      receivedAmount: 0,
+      discountAmount: 0,
+      notes: "",
+      products: [createEmptyProductRow()],
+      isEditMode: false,
+      editingSaleId: null,
+      originalSaleStatus: "",
+    }),
+    [activeStaff?.id, activeStaff?.name, createEmptyProductRow],
+  )
+
+  const saleDraftStorageKey = useMemo(() => {
+    return `sale_entry_drafts_${deviceId || userId || "default"}`
+  }, [deviceId, userId])
 
   // Check if mobile
   useEffect(() => {
@@ -249,6 +318,122 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     window.addEventListener("resize", checkMobile)
     return () => window.removeEventListener("resize", checkMobile)
   }, [])
+
+  useEffect(() => {
+    if (mode !== "entry") return
+    try {
+      const rawDrafts = localStorage.getItem(saleDraftStorageKey)
+      const rawActiveId = localStorage.getItem(`${saleDraftStorageKey}_active`)
+      if (rawDrafts) {
+        const parsed = JSON.parse(rawDrafts) as SaleDraftSnapshot[]
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setSaleDrafts(parsed)
+          const validActiveId = parsed.some((d) => d.id === rawActiveId) ? String(rawActiveId) : parsed[0].id
+          setActiveDraftId(validActiveId)
+          setDraftsHydrated(true)
+          return
+        }
+      }
+    } catch (error) {
+      console.error("Failed to restore sale drafts:", error)
+    }
+
+    const initialDraft = createEmptyDraft("Draft 1")
+    setSaleDrafts([initialDraft])
+    setActiveDraftId(initialDraft.id)
+    setDraftsHydrated(true)
+  }, [mode, saleDraftStorageKey, createEmptyDraft])
+
+  useEffect(() => {
+    if (mode !== "entry" || !draftsHydrated) return
+    const activeDraft = saleDrafts.find((d) => d.id === activeDraftId)
+    if (!activeDraft) return
+
+    draftSwitchingRef.current = true
+    setDate(new Date(activeDraft.date || new Date().toISOString()))
+    setCustomerId(activeDraft.customerId)
+    setCustomerName(activeDraft.customerName || "")
+    setStaffId(activeDraft.staffId)
+    setStaffName(activeDraft.staffName || "")
+    setStatus(activeDraft.status || "Completed")
+    setPaymentMethod(activeDraft.paymentMethod || "Cash")
+    setReceivedAmount(Number(activeDraft.receivedAmount) || 0)
+    setDiscountAmount(Number(activeDraft.discountAmount) || 0)
+    setNotes(activeDraft.notes || "")
+    setProducts(
+      Array.isArray(activeDraft.products) && activeDraft.products.length > 0 ? activeDraft.products : [createEmptyProductRow()],
+    )
+    setIsEditMode(Boolean(activeDraft.isEditMode))
+    setEditingSaleId(activeDraft.editingSaleId || null)
+    setOriginalSaleStatus(activeDraft.originalSaleStatus || "")
+    setFormAlert(null)
+    setBarcodeAlert(null)
+
+    setTimeout(() => {
+      draftSwitchingRef.current = false
+    }, 0)
+  }, [mode, draftsHydrated, activeDraftId, saleDrafts, createEmptyProductRow])
+
+  useEffect(() => {
+    if (mode !== "entry" || !draftsHydrated || !activeDraftId) return
+    if (draftSwitchingRef.current) return
+
+    const computedName = isEditMode
+      ? `Edit #${editingSaleId || ""}`.trim()
+      : customerName?.trim()
+        ? customerName.trim()
+        : "New Sale"
+
+    setSaleDrafts((prev) =>
+      prev.map((draft) =>
+        draft.id === activeDraftId
+          ? {
+              ...draft,
+              name: computedName,
+              updatedAt: Date.now(),
+              date: date?.toISOString() || new Date().toISOString(),
+              customerId,
+              customerName,
+              staffId,
+              staffName,
+              status,
+              paymentMethod,
+              receivedAmount,
+              discountAmount,
+              notes,
+              products,
+              isEditMode,
+              editingSaleId,
+              originalSaleStatus,
+            }
+          : draft,
+      ),
+    )
+  }, [
+    mode,
+    draftsHydrated,
+    activeDraftId,
+    date,
+    customerId,
+    customerName,
+    staffId,
+    staffName,
+    status,
+    paymentMethod,
+    receivedAmount,
+    discountAmount,
+    notes,
+    products,
+    isEditMode,
+    editingSaleId,
+    originalSaleStatus,
+  ])
+
+  useEffect(() => {
+    if (mode !== "entry" || !draftsHydrated) return
+    localStorage.setItem(saleDraftStorageKey, JSON.stringify(saleDrafts))
+    localStorage.setItem(`${saleDraftStorageKey}_active`, activeDraftId)
+  }, [mode, draftsHydrated, saleDrafts, activeDraftId, saleDraftStorageKey])
 
   // Device change handling
   useEffect(() => {
@@ -571,10 +756,17 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
           updatedProduct.quantity > updatedProduct.stock
         ) {
           updatedProduct.quantity = updatedProduct.stock
-          setBarcodeAlert({
-            type: "warning",
-            message: `Only ${updatedProduct.stock} units available for ${updatedProduct.productName}`,
-          })
+          setBarcodeAlert(
+            updatedProduct.stock <= 0
+              ? {
+                  type: "error",
+                  message: `${updatedProduct.productName || "Selected product"} is out of stock`,
+                }
+              : {
+                  type: "warning",
+                  message: `Only ${updatedProduct.stock} units available for ${updatedProduct.productName}`,
+                },
+          )
         }
 
         if (updates.quantity !== undefined || updates.price !== undefined) {
@@ -588,6 +780,35 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     })
 
     setProducts(updatedProducts)
+  }
+
+  const isProductOutOfStock = (product: ProductRow) =>
+    Boolean(product.productId && !product.isService && (product.stock ?? 0) <= 0)
+
+  const handleQuantityInputChange = (product: ProductRow, rawValue: string) => {
+    const parsed = Number.parseInt(rawValue, 10)
+    const requestedQuantity = Number.isFinite(parsed) ? parsed : 0
+
+    if (isProductOutOfStock(product)) {
+      setBarcodeAlert({
+        type: "error",
+        message: `${product.productName || "Selected product"} is out of stock`,
+      })
+      updateProductRow(product.id, { quantity: 0 })
+      return
+    }
+
+    const safeRequested = Math.max(requestedQuantity, 1)
+    if (!product.isService && product.stock !== undefined && safeRequested > product.stock) {
+      setBarcodeAlert({
+        type: "warning",
+        message: `Only ${product.stock} units available for ${product.productName}`,
+      })
+      updateProductRow(product.id, { quantity: product.stock })
+      return
+    }
+
+    updateProductRow(product.id, { quantity: safeRequested })
   }
 
   const handleProductSelect = (
@@ -814,19 +1035,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     }
     setStatus("Completed")
     setPaymentMethod("Cash")
-    setProducts([
-      {
-        id: crypto.randomUUID(),
-        productId: null,
-        productName: "",
-        quantity: 1,
-        price: 0,
-        cost: 0,
-        stock: 0,
-        total: 0,
-        notes: "",
-      },
-    ])
+    setProducts([createEmptyProductRow()])
     setDiscountAmount(0)
     setReceivedAmount(0)
     setNotes("")
@@ -1115,8 +1324,40 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     if (!editSaleIdRaw) return
     const editSaleId = Number(editSaleIdRaw)
     if (!editSaleId || Number.isNaN(editSaleId)) return
-    loadSaleForEdit(editSaleId)
-  }, [mode, searchParams])
+    if (!draftsHydrated) return
+
+    const existingDraft = saleDrafts.find((draft) => draft.isEditMode && draft.editingSaleId === editSaleId)
+    if (existingDraft) {
+      draftSwitchingRef.current = true
+      setActiveDraftId(existingDraft.id)
+      setPendingEditSaleId(editSaleId)
+      setPendingEditDraftId(existingDraft.id)
+    } else {
+      const newEditDraft = createEmptyDraft(`Edit #${editSaleId}`)
+      newEditDraft.isEditMode = true
+      newEditDraft.editingSaleId = editSaleId
+      newEditDraft.originalSaleStatus = "Completed"
+      draftSwitchingRef.current = true
+      setSaleDrafts((prev) => [...prev, newEditDraft])
+      setActiveDraftId(newEditDraft.id)
+      setPendingEditSaleId(editSaleId)
+      setPendingEditDraftId(newEditDraft.id)
+    }
+
+    const params = new URLSearchParams(searchParams.toString())
+    params.delete("editSaleId")
+    const nextQuery = params.toString()
+    router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname)
+  }, [mode, searchParams, router, pathname, draftsHydrated, saleDrafts, createEmptyDraft])
+
+  useEffect(() => {
+    if (!pendingEditSaleId || !pendingEditDraftId) return
+    if (activeDraftId !== pendingEditDraftId) return
+
+    loadSaleForEdit(pendingEditSaleId)
+    setPendingEditSaleId(null)
+    setPendingEditDraftId("")
+  }, [activeDraftId, pendingEditSaleId, pendingEditDraftId])
 
   // Handle delete sale from view modal
   const handleDeleteSaleFromView = async (saleId: number) => {
@@ -1269,6 +1510,23 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     })
   }
 
+  const handleLastWeekFilter = () => {
+    const today = new Date()
+    const fromDate = new Date(today)
+    fromDate.setDate(today.getDate() - 6)
+
+    dispatch(setSearchTerm(""))
+    dispatch(setStatusFilter("all"))
+    dispatch(setPaymentMethodFilter("all"))
+    dispatch(setDateFromFilter(format(fromDate, "yyyy-MM-dd")))
+    dispatch(setDateToFilter(format(today, "yyyy-MM-dd")))
+
+    toast({
+      title: "Last Week Sales",
+      description: `Showing sales from ${format(fromDate, "MMM d")} to ${format(today, "MMM d")}`,
+    })
+  }
+
   // Handle custom date range
   const handleCustomDateRange = () => {
     setTempDateFrom(dateFromFilter ? new Date(dateFromFilter) : new Date())
@@ -1336,12 +1594,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     </div>
   )
 
-  // Privacy mode display value
-  const getPrivacyValue = () => (
-    <div className="flex items-center justify-center">
-      <EyeOff className="h-4 w-4 text-gray-400" />
-    </div>
-  )
+  const getPrivacyValue = () => null
 
   // Mobile Card Component
   const SaleCard = ({ sale, index }: { sale: any; index: number }) => {
@@ -1394,9 +1647,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                   {sale.customer_name || "Walk-in"}
                 </span>
               </div>
-              <div className="text-xs font-bold text-gray-900 dark:text-gray-100">
-                {privacyMode ? getPrivacyValue() : formatCurrency(Number(sale.total_amount))}
-              </div>
+              <div className="text-xs font-bold text-gray-900 dark:text-gray-100">{formatCurrency(Number(sale.total_amount))}</div>
             </div>
 
             {/* Date and payment */}
@@ -1443,7 +1694,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
 
             {sale.status === "Credit" && remainingAmount > 0 && (
               <div className="text-xs text-red-500 dark:text-red-400 mt-1">
-                Remaining: {privacyMode ? getPrivacyValue() : formatCurrency(remainingAmount)}
+                Remaining: {formatCurrency(remainingAmount)}
               </div>
             )}
           </div>
@@ -1452,10 +1703,262 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     )
   }
 
+  const handleCreateDraftTab = () => {
+    if (mode !== "entry") return
+    const draftIndex = saleDrafts.length + 1
+    const newDraft = createEmptyDraft(`Draft ${draftIndex}`)
+    draftSwitchingRef.current = true
+    setSaleDrafts((prev) => [...prev, newDraft])
+    setActiveDraftId(newDraft.id)
+  }
+
+  const handleSwitchDraftTab = (draftId: string) => {
+    if (mode !== "entry" || draftId === activeDraftId) return
+    draftSwitchingRef.current = true
+    setActiveDraftId(draftId)
+  }
+
+  const handleRemoveDraftTab = (draftId: string) => {
+    if (mode !== "entry") return
+    const shouldClose = window.confirm("Are you sure to close this sale tab?")
+    if (!shouldClose) return
+    const targetIndex = saleDrafts.findIndex((draft) => draft.id === draftId)
+    if (targetIndex === -1) return
+
+    if (saleDrafts.length === 1) {
+      const replacement = createEmptyDraft("Draft 1")
+      draftSwitchingRef.current = true
+      setSaleDrafts([replacement])
+      setActiveDraftId(replacement.id)
+      return
+    }
+
+    const remainingDrafts = saleDrafts.filter((draft) => draft.id !== draftId)
+    let nextActiveId = activeDraftId
+
+    if (draftId === activeDraftId) {
+      const fallbackIndex = Math.max(0, targetIndex - 1)
+      nextActiveId = remainingDrafts[fallbackIndex]?.id || remainingDrafts[0].id
+      draftSwitchingRef.current = true
+    }
+
+    setSaleDrafts(remainingDrafts)
+    setActiveDraftId(nextActiveId)
+  }
+
+  if (mode === "info") {
+    const totalSalesAmount = filteredSales.reduce((sum, sale) => sum + Number(sale.total_amount || 0), 0)
+    const receivedAmountTotal = filteredSales.reduce((sum, sale) => {
+      if (sale.status === "Credit") return sum + Number(sale.received_amount || 0)
+      if (sale.status === "Completed") return sum + Number(sale.total_amount || 0)
+      return sum
+    }, 0)
+    const remainingAmountTotal = filteredSales.reduce((sum, sale) => sum + getRemainingAmount(sale), 0)
+    const cogsTotal = filteredSales.reduce((sum, sale) => sum + Number(sale.total_cost || 0), 0)
+    const profitTotal = filteredSales.reduce((sum, sale) => sum + (Number(sale.total_amount || 0) - Number(sale.total_cost || 0)), 0)
+
+    return (
+      <div className="min-h-[calc(100vh-100px)] bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 p-2 sm:p-3">
+        <div className="space-y-3">
+          <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 shadow-sm">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+              <Card className="border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40">
+                <CardContent className="p-3">
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Total Sales</p>
+                  <p className="text-base font-bold text-gray-900 dark:text-gray-100">{formatCurrency(totalSalesAmount)}</p>
+                </CardContent>
+              </Card>
+              <Card className="border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40">
+                <CardContent className="p-3">
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Received</p>
+                  <p className="text-base font-bold text-green-600 dark:text-green-400">{formatCurrency(receivedAmountTotal)}</p>
+                </CardContent>
+              </Card>
+              <Card className="border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40">
+                <CardContent className="p-3">
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Remaining</p>
+                  <p className="text-base font-bold text-orange-600 dark:text-orange-400">{formatCurrency(remainingAmountTotal)}</p>
+                </CardContent>
+              </Card>
+              <Card className="border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40">
+                <CardContent className="p-3">
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Profit</p>
+                  <p className="text-base font-bold text-blue-600 dark:text-blue-400">{formatCurrency(profitTotal)}</p>
+                </CardContent>
+              </Card>
+              <Card className="border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40">
+                <CardContent className="p-3">
+                  <p className="text-xs text-gray-500 dark:text-gray-400">COGS</p>
+                  <p className="text-base font-bold text-gray-700 dark:text-gray-300">{formatCurrency(cogsTotal)}</p>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+
+          <Card className="border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm">
+            <CardContent className="p-3">
+              <div className="flex items-center gap-2 overflow-x-auto">
+                <div className="relative min-w-[220px] sm:min-w-[260px]">
+                  <Search className="absolute left-2.5 top-2.5 h-3 w-3 text-gray-400" />
+                  <Input
+                    aria-label="Search sales"
+                    type="search"
+                    placeholder="Search by id/customer/status..."
+                    className="pl-7 h-8 text-xs bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400"
+                    value={searchTerm}
+                    onChange={(e) => dispatch(setSearchTerm(e.target.value))}
+                  />
+                </div>
+                <Button
+                  onClick={handleStatusFilter}
+                  variant="outline"
+                  size="sm"
+                  className="h-8 shrink-0 text-xs border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100"
+                >
+                  {statusFilter === "all" ? "All Status" : statusFilter}
+                </Button>
+                <Button
+                  onClick={handlePaymentMethodFilter}
+                  variant="outline"
+                  size="sm"
+                  className="h-8 shrink-0 text-xs border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100"
+                >
+                  {paymentMethodFilter === "all" ? "All Payment" : paymentMethodFilter}
+                </Button>
+                <Button
+                  onClick={handleTodayFilter}
+                  variant="outline"
+                  size="sm"
+                  className="h-8 shrink-0 text-xs border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100"
+                >
+                  Today
+                </Button>
+                <Button
+                  onClick={handleLastWeekFilter}
+                  variant="outline"
+                  size="sm"
+                  className="h-8 shrink-0 text-xs border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100"
+                >
+                  Last Week
+                </Button>
+                <Button
+                  onClick={handleCustomDateRange}
+                  variant="outline"
+                  size="sm"
+                  className="h-8 shrink-0 text-xs border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100"
+                >
+                  Custom
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm min-h-[420px]">
+            <CardContent className="p-0">
+              <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 text-xs text-gray-600 dark:text-gray-400 flex items-center justify-between">
+                <span>{filteredSales.length} {filteredSales.length === 1 ? "Sale" : "Sales"}</span>
+                {lastUpdated ? <span>Updated: {format(new Date(lastUpdated), "HH:mm")}</span> : null}
+              </div>
+              <div className="p-2">
+                {isLoading && sales.length === 0 ? (
+                  <SalesTableSkeleton />
+                ) : error ? (
+                  <div className="text-center py-6 text-red-500 dark:text-red-400 text-sm">{error}</div>
+                ) : filteredSales.length === 0 ? (
+                  <div className="text-center py-6 text-gray-500 dark:text-gray-400 text-sm">
+                    {hasActiveFilters ? "No sales found matching your filters" : "No sales found"}
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {paginatedSales.map((sale, index) => (
+                      <SaleCard key={sale.id} sale={sale} index={index} />
+                    ))}
+                    {totalPages > 1 ? (
+                      <div className="flex justify-center mt-3 gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8 w-8"
+                          disabled={currentPage === 1}
+                          onClick={() => setCurrentPage(currentPage - 1)}
+                        >
+                          {"<"}
+                        </Button>
+                        <span className="text-xs self-center text-gray-600 dark:text-gray-300">
+                          {currentPage} / {totalPages}
+                        </span>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8 w-8"
+                          disabled={currentPage === totalPages}
+                          onClick={() => setCurrentPage(currentPage + 1)}
+                        >
+                          {">"}
+                        </Button>
+                      </div>
+                    ) : null}
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-[calc(100vh-100px)] bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 p-2 sm:p-3">
       <div className="mb-4">
         <div className="mt-4">
+            {mode === "entry" && (
+              <div className="mb-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-2">
+                <div className="flex items-center gap-2 overflow-x-auto">
+                  {saleDrafts.map((draft, index) => (
+                    <Button
+                      key={draft.id}
+                      type="button"
+                      variant={draft.id === activeDraftId ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => handleSwitchDraftTab(draft.id)}
+                      className="h-8 shrink-0 text-xs pr-1"
+                    >
+                      <span>{draft.name?.trim() ? draft.name : `Draft ${index + 1}`}</span>
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleRemoveDraftTab(draft.id)
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            handleRemoveDraftTab(draft.id)
+                          }
+                        }}
+                        className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-sm hover:bg-black/10 dark:hover:bg-white/20"
+                        aria-label={`Remove ${(draft.name?.trim() ? draft.name : `Draft ${index + 1}`)}`}
+                      >
+                        <X className="h-3 w-3" />
+                      </span>
+                    </Button>
+                  ))}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleCreateDraftTab}
+                    className="h-8 shrink-0 text-xs border-dashed"
+                  >
+                    <Plus className="h-3.5 w-3.5 mr-1" />
+                    New Tab
+                  </Button>
+                </div>
+              </div>
+            )}
             {/* Sales Tab Content - FIXED SCROLL LAYOUT */}
             <div className="flex flex-col xl:flex-row gap-3 h-full">
               {/* Main Sale Form Section - FIXED SCROLL */}
@@ -1626,7 +2129,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                 <div className="col-span-2">Notes</div>
                                 <div className="col-span-1 text-center">Qty</div>
                                 <div className="col-span-2 text-center">Price</div>
-                                <div className="col-span-2 text-center">{privacyMode ? "****" : "Cost"}</div>
+                                <div className="col-span-2 text-center">Cost</div>
                                 <div className="col-span-1 text-center">Total</div>
                                 <div className="col-span-1"></div>
                               </div>
@@ -1652,6 +2155,11 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                           <span className="truncate flex-1 font-medium text-xs text-gray-900 dark:text-gray-200">
                                             {product.productName}
                                           </span>
+                                          {isProductOutOfStock(product) && (
+                                            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300">
+                                              OOS
+                                            </span>
+                                          )}
                                         </div>
                                         <Button
                                           variant="ghost"
@@ -1698,21 +2206,14 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                   <div className="col-span-1">
                                     <Input
                                       type="number"
-                                      min="1"
+                                      min={isProductOutOfStock(product) ? "0" : "1"}
                                       value={product.quantity}
-                                      onChange={(e) => {
-                                        const newQuantity = Number.parseInt(e.target.value) || 0
-                                        if (product.stock !== undefined && newQuantity > product.stock) {
-                                          setBarcodeAlert({
-                                            type: "warning",
-                                            message: `Only ${product.stock} units available for ${product.productName}`,
-                                          })
-                                          updateProductRow(product.id, { quantity: product.stock })
-                                        } else {
-                                          updateProductRow(product.id, { quantity: newQuantity })
-                                        }
-                                      }}
-                                      className="text-center h-7 text-xs bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100"
+                                      onChange={(e) => handleQuantityInputChange(product, e.target.value)}
+                                      className={`text-center h-7 text-xs bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 ${
+                                        isProductOutOfStock(product)
+                                          ? "border-red-400 dark:border-red-600"
+                                          : "border-gray-300 dark:border-gray-600"
+                                      }`}
                                     />
                                   </div>
                                   <div className="col-span-2">
@@ -1730,24 +2231,18 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                     />
                                   </div>
                                   <div className="col-span-2">
-                                    {privacyMode ? (
-                                      <div className="flex items-center justify-center h-7">
-                                        <EyeOff className="h-3 w-3 text-gray-400" />
-                                      </div>
-                                    ) : (
-                                      <Input
-                                        type="number"
-                                        min="0"
-                                        step="0.01"
-                                        value={product.cost || 0}
-                                        onChange={(e) =>
-                                          updateProductRow(product.id, {
-                                            cost: Number.parseFloat(e.target.value) || 0,
-                                          })
-                                        }
-                                        className="text-center h-7 text-xs bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100"
-                                      />
-                                    )}
+                                    <Input
+                                      type="number"
+                                      min="0"
+                                      step="0.01"
+                                      value={product.cost || 0}
+                                      onChange={(e) =>
+                                        updateProductRow(product.id, {
+                                          cost: Number.parseFloat(e.target.value) || 0,
+                                        })
+                                      }
+                                      className="text-center h-7 text-xs bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100"
+                                    />
                                   </div>
                                   <div className="col-span-1 flex items-center justify-center font-medium text-xs text-gray-900 dark:text-gray-200">
                                     {deviceCurrencyState} {product.total.toFixed(2)}
@@ -1791,6 +2286,11 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                           <span className="text-sm font-medium text-gray-900 dark:text-gray-200">
                                             {product.productName}
                                           </span>
+                                          {isProductOutOfStock(product) && (
+                                            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300">
+                                              OOS
+                                            </span>
+                                          )}
                                         </div>
                                         <Button
                                           variant="ghost"
@@ -1848,22 +2348,18 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                       </Label>
                                       <Input
                                         type="number"
-                                        min="1"
+                                        min={isProductOutOfStock(product) ? "0" : "1"}
                                         value={product.quantity}
-                                        onChange={(e) => {
-                                          const newQuantity = Number.parseInt(e.target.value) || 0
-                                          if (product.stock !== undefined && newQuantity > product.stock) {
-                                            setBarcodeAlert({
-                                              type: "warning",
-                                              message: `Only ${product.stock} units available for ${product.productName}`,
-                                            })
-                                            updateProductRow(product.id, { quantity: product.stock })
-                                          } else {
-                                            updateProductRow(product.id, { quantity: newQuantity })
-                                          }
-                                        }}
-                                        className="text-center h-8 text-sm"
+                                        onChange={(e) => handleQuantityInputChange(product, e.target.value)}
+                                        className={`text-center h-8 text-sm ${
+                                          isProductOutOfStock(product)
+                                            ? "border-red-400 dark:border-red-600"
+                                            : ""
+                                        }`}
                                       />
+                                      {isProductOutOfStock(product) ? (
+                                        <p className="mt-1 text-[10px] text-red-600 dark:text-red-400">Out of stock</p>
+                                      ) : null}
                                     </div>
                                     <div>
                                       <Label className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1 block">
@@ -1884,26 +2380,20 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                     </div>
                                     <div>
                                       <Label className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1 block">
-                                        {privacyMode ? "****" : "Cost"}
+                                        Cost
                                       </Label>
-                                      {privacyMode ? (
-                                        <div className="flex items-center justify-center h-8 bg-gray-100 dark:bg-gray-600 rounded border">
-                                          <EyeOff className="h-3 w-3 text-gray-400" />
-                                        </div>
-                                      ) : (
-                                        <Input
-                                          type="number"
-                                          min="0"
-                                          step="0.01"
-                                          value={product.cost || 0}
-                                          onChange={(e) =>
-                                            updateProductRow(product.id, {
-                                              cost: Number.parseFloat(e.target.value) || 0,
-                                            })
-                                          }
-                                          className="text-center h-8 text-sm"
-                                        />
-                                      )}
+                                      <Input
+                                        type="number"
+                                        min="0"
+                                        step="0.01"
+                                        value={product.cost || 0}
+                                        onChange={(e) =>
+                                          updateProductRow(product.id, {
+                                            cost: Number.parseFloat(e.target.value) || 0,
+                                          })
+                                        }
+                                        className="text-center h-8 text-sm"
+                                      />
                                     </div>
                                   </div>
 

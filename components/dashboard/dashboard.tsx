@@ -3,14 +3,14 @@ import Image from "next/image"
 import React, { useState, useEffect, useCallback, useRef } from "react"
 import {
   Home,
-  ShoppingCart,
+  Plus,
   Receipt,
   Package,
   User,
   AlertTriangle,
   Truck,
   ArrowRightLeft,
-  Calculator,
+  Landmark,
   Power,
   Menu,
   X,
@@ -199,6 +199,7 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
       // Update URL without full page reload
       const url = new URL(window.location.href)
       url.searchParams.set("tab", tab)
+      url.searchParams.delete("editSaleId")
       routerRef.current.replace(url.pathname + url.search)
     },
     [],
@@ -338,20 +339,19 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
   // Navigation items configuration
  const navItems = [
     { id: "home", icon: <Home className="h-4 w-4" />, label: "Home" },
-    { id: "sale", icon: <ShoppingCart className="h-4 w-4" />, label: "Sale" },
     { id: "sales", icon: <Receipt className="h-4 w-4" />, label: "Sales" },
     { id: "purchase", icon: <Receipt className="h-4 w-4" />, label: "Purchase" },
     { id: "product", icon: <Package className="h-4 w-4" />, label: "Inventory" },
+    { id: "sale", icon: <Plus className="h-5 w-5" />, label: "", iconOnly: true },
     { id: "customer", icon: <User className="h-4 w-4" />, label: "Customers" },
     { id: "supplier", icon: <Truck className="h-4 w-4" />, label: "Suppliers" },
     { id: "transfer", icon: <ArrowRightLeft className="h-4 w-4" />, label: "Transfers" },
     { id: "platform", icon: <Store className="h-4 w-4" />, label: "Platforms" },
-    { id: "accounting", icon: <Calculator className="h-4 w-4" />, label: "Accounting" },
   ]
 
   // Primary tabs for bottom navigation (most used)
-  const primaryTabs = ["home", "sale", "sales", "purchase"]
-  const secondaryTabs = ["product", "customer", "supplier", "transfer", "platform", "accounting"]
+  const primaryTabs = ["home", "sales", "sale", "purchase"]
+  const secondaryTabs = ["product", "customer", "supplier", "transfer", "platform"]
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-gray-50 dark:bg-gray-900">
@@ -406,6 +406,15 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
 
           {/* Desktop Controls */}
           <div className="hidden sm:flex items-center space-x-2">
+            <Button
+              onClick={() => handleTabChange("accounting")}
+              variant="ghost"
+              size="sm"
+              className="h-9 w-9 rounded-full p-0 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 hover:text-emerald-800 dark:hover:text-emerald-200"
+              title="Accounting"
+            >
+              <Landmark className="h-4 w-4" />
+            </Button>
             <Button
               onClick={handleLogout}
               variant="ghost"
@@ -464,6 +473,15 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
 
           {/* Mobile Controls */}
           <div className="flex sm:hidden items-center space-x-2">
+            <Button
+              onClick={() => handleTabChange("accounting")}
+              variant="ghost"
+              size="sm"
+              className="h-9 w-9 rounded-full p-0 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300"
+              title="Accounting"
+            >
+              <Landmark className="h-5 w-5" />
+            </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -589,6 +607,7 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
                     key={item.id}
                     icon={item.icon}
                     label={item.label}
+                    iconOnly={Boolean((item as any).iconOnly)}
                     isActive={activeTab === item.id}
                     onClick={() => handleTabChange(item.id as TabType)}
                   />
@@ -609,6 +628,7 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
                     key={item.id}
                     icon={item.icon}
                     label={item.label}
+                    iconOnly={Boolean((item as any).iconOnly)}
                     isActive={activeTab === item.id}
                     onClick={() => handleTabChange(item.id as TabType)}
                   />
@@ -647,6 +667,7 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
               key={item.id}
               icon={item.icon}
               label={item.label}
+              iconOnly={Boolean((item as any).iconOnly)}
               isActive={activeTab === item.id}
               onClick={() => handleTabChange(item.id as TabType)}
             />
@@ -673,11 +694,12 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
 interface NavItemProps {
   icon: React.ReactNode
   label: string
+  iconOnly?: boolean
   isActive: boolean
   onClick: () => void
 }
 
-const NavItem = React.memo(function NavItem({ icon, label, isActive, onClick }: NavItemProps) {
+const NavItem = React.memo(function NavItem({ icon, label, iconOnly = false, isActive, onClick }: NavItemProps) {
   return (
     <button
       className={`flex flex-1 flex-col items-center justify-center transition-all duration-200 py-2 ${
@@ -685,13 +707,25 @@ const NavItem = React.memo(function NavItem({ icon, label, isActive, onClick }: 
       }`}
       onClick={onClick}
     >
-      <div className="mb-1">{icon}</div>
-      <span className="text-xs font-medium leading-tight">{label}</span>
+      <div
+        className={
+          iconOnly
+            ? `flex h-10 w-10 items-center justify-center rounded-full border shadow-sm ${
+                isActive
+                  ? "bg-blue-600 text-white border-blue-600"
+                  : "bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600"
+              }`
+            : "mb-1"
+        }
+      >
+        {icon}
+      </div>
+      {!iconOnly ? <span className="text-xs font-medium leading-tight">{label}</span> : null}
     </button>
   )
 })
 
-const MobileNavItem = React.memo(function MobileNavItem({ icon, label, isActive, onClick }: NavItemProps) {
+const MobileNavItem = React.memo(function MobileNavItem({ icon, label, iconOnly = false, isActive, onClick }: NavItemProps) {
   return (
     <button
       className={`flex flex-col items-center justify-center h-full transition-all duration-200 ${
@@ -699,8 +733,20 @@ const MobileNavItem = React.memo(function MobileNavItem({ icon, label, isActive,
       }`}
       onClick={onClick}
     >
-      <div className="mb-1">{icon}</div>
-      <span className="text-xs font-medium leading-none truncate max-w-full px-0.5">{label}</span>
+      <div
+        className={
+          iconOnly
+            ? `flex h-10 w-10 items-center justify-center rounded-full border shadow-sm ${
+                isActive
+                  ? "bg-blue-600 text-white border-blue-600"
+                  : "bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600"
+              }`
+            : "mb-1"
+        }
+      >
+        {icon}
+      </div>
+      {!iconOnly ? <span className="text-xs font-medium leading-none truncate max-w-full px-0.5">{label}</span> : null}
     </button>
   )
 })
