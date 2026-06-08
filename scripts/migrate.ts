@@ -360,6 +360,7 @@ async function createStaffServiceTables() {
         payment_method VARCHAR(50),
         paid_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
         payment_notes TEXT,
+        transfer_date TIMESTAMP DEFAULT NOW(),
         notes TEXT,
         created_by INTEGER NOT NULL,
         created_at TIMESTAMP DEFAULT NOW(),
@@ -599,6 +600,7 @@ async function addColumns() {
   await runSafe("stock_transfers.payment_method", () => sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50)`)
   await runSafe("stock_transfers.paid_amount", () => sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS paid_amount DECIMAL(12,2) NOT NULL DEFAULT 0`)
   await runSafe("stock_transfers.payment_notes", () => sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS payment_notes TEXT`)
+  await runSafe("stock_transfers.transfer_date", () => sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS transfer_date TIMESTAMP DEFAULT NOW()`)
 
   // ── stock_transfer_items ──
   await runSafe("stock_transfer_items.unit_cost", () => sql`ALTER TABLE stock_transfer_items ADD COLUMN IF NOT EXISTS unit_cost DECIMAL(12,2) NOT NULL DEFAULT 0`)

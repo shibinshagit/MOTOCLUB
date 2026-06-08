@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { ArrowRightLeft, Check, ChevronDown, Loader2, Pencil, Plus, RefreshCw, Search, Trash2 } from "lucide-react"
+import { ArrowRightLeft, Check, ChevronDown, Eye, Loader2, Pencil, Plus, RefreshCw, Search, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -31,6 +31,7 @@ type TransferItemForm = {
 type TransferFormData = {
   fromDeviceId: number
   toDeviceId: number
+  transferDate: string
   paymentStatus: "unpaid" | "partial" | "paid"
   paymentMethod: string
   paidAmount: number
@@ -40,6 +41,7 @@ type TransferFormData = {
 }
 
 export default function TransferTab({ userId }: TransferTabProps) {
+  const getTodayDate = () => new Date().toISOString().slice(0, 10)
   const { toast } = useToast()
   const [transfers, setTransfers] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(false)
@@ -48,10 +50,14 @@ export default function TransferTab({ userId }: TransferTabProps) {
   const [searchTerm, setSearchTerm] = useState("")
   const [statusFilter, setStatusFilter] = useState<"all" | "completed" | "cancelled">("all")
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const [isViewModalOpen, setIsViewModalOpen] = useState(false)
+  const [isViewLoading, setIsViewLoading] = useState(false)
+  const [viewTransferDetail, setViewTransferDetail] = useState<any | null>(null)
   const [editingTransferId, setEditingTransferId] = useState<number | null>(null)
   const [formData, setFormData] = useState<TransferFormData>({
     fromDeviceId: userId || 0,
     toDeviceId: 0,
+    transferDate: getTodayDate(),
     paymentStatus: "unpaid",
     paymentMethod: "",
     paidAmount: 0,
@@ -143,6 +149,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
     setFormData({
       fromDeviceId: userId || devices[0]?.id || 0,
       toDeviceId: 0,
+      transferDate: getTodayDate(),
       paymentStatus: "unpaid",
       paymentMethod: "",
       paidAmount: 0,
@@ -191,6 +198,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
       setFormData({
         fromDeviceId: Number(transfer.from_device_id),
         toDeviceId: Number(transfer.to_device_id),
+        transferDate: String(transfer.transfer_date || transfer.created_at || "").slice(0, 10) || getTodayDate(),
         paymentStatus: (String(transfer.payment_status || "unpaid").toLowerCase() as "unpaid" | "partial" | "paid"),
         paymentMethod: String(transfer.payment_method || ""),
         paidAmount: Number(transfer.paid_amount || 0),
@@ -209,6 +217,26 @@ export default function TransferTab({ userId }: TransferTabProps) {
     } finally {
       setIsPreparingModal(false)
       setIsLoading(false)
+    }
+  }
+
+  const handleOpenView = async (transferId: number) => {
+    try {
+      setIsViewLoading(true)
+      setViewTransferDetail(null)
+      const detail = await getWarehouseTransferById(transferId, userId)
+      if (!detail.success || !detail.data) {
+        toast({
+          title: "Error",
+          description: detail.message || "Failed to load transfer details",
+          variant: "destructive",
+        })
+        return
+      }
+      setViewTransferDetail(detail.data)
+      setIsViewModalOpen(true)
+    } finally {
+      setIsViewLoading(false)
     }
   }
 
@@ -348,6 +376,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
     payload.append("user_id", String(userId))
     payload.append("from_device_id", String(formData.fromDeviceId))
     payload.append("to_device_id", String(formData.toDeviceId))
+    payload.append("transfer_date", String(formData.transferDate || ""))
     payload.append("payment_status", String(formData.paymentStatus))
     payload.append("payment_method", String(formData.paymentMethod || ""))
     payload.append("paid_amount", String(formData.paidAmount || 0))
@@ -458,7 +487,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
                   <tr key={transfer.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
                     <td className="p-3 text-sm font-medium text-blue-600 dark:text-blue-300">#{transfer.id}</td>
                     <td className="p-3 text-sm text-gray-700 dark:text-gray-300">
-                      {new Date(transfer.created_at).toLocaleString()}
+                      {new Date(transfer.transfer_date || transfer.created_at).toLocaleDateString()}
                     </td>
                     <td className="p-3 text-sm text-gray-700 dark:text-gray-300">{transfer.from_device_name}</td>
                     <td className="p-3 text-sm text-gray-700 dark:text-gray-300">{transfer.to_device_name}</td>
@@ -479,6 +508,14 @@ export default function TransferTab({ userId }: TransferTabProps) {
                     <td className="p-3">{getStatusBadge(transfer.status)}</td>
                     <td className="p-3">
                       <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleOpenView(Number(transfer.id))}
+                        >
+                          <Eye className="h-3.5 w-3.5 mr-1" />
+                          View
+                        </Button>
                         <Button
                           size="sm"
                           variant="outline"
@@ -522,6 +559,14 @@ export default function TransferTab({ userId }: TransferTabProps) {
           ) : (
           <div className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Transfer Date</label>
+                <Input
+                  type="date"
+                  value={formData.transferDate}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, transferDate: e.target.value }))}
+                />
+              </div>
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">From Warehouse</label>
                 <select
@@ -803,6 +848,107 @@ export default function TransferTab({ userId }: TransferTabProps) {
               </Button>
             </div>
           </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isViewModalOpen} onOpenChange={setIsViewModalOpen}>
+        <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              {viewTransferDetail?.transfer?.id ? `Transfer #${viewTransferDetail.transfer.id}` : "Transfer Details"}
+            </DialogTitle>
+          </DialogHeader>
+
+          {isViewLoading ? (
+            <div className="py-8 text-center text-gray-500">
+              <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
+              Loading transfer details...
+            </div>
+          ) : !viewTransferDetail?.transfer ? (
+            <div className="py-6 text-center text-gray-500">No details found.</div>
+          ) : (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                <div className="rounded-md border border-gray-200 dark:border-gray-700 p-3">
+                  <p className="text-xs text-gray-500 mb-1">From</p>
+                  <p className="font-medium">{viewTransferDetail.transfer.from_device_name}</p>
+                </div>
+                <div className="rounded-md border border-gray-200 dark:border-gray-700 p-3">
+                  <p className="text-xs text-gray-500 mb-1">To</p>
+                  <p className="font-medium">{viewTransferDetail.transfer.to_device_name}</p>
+                </div>
+                <div className="rounded-md border border-gray-200 dark:border-gray-700 p-3">
+                  <p className="text-xs text-gray-500 mb-1">Transfer Date</p>
+                  <p className="font-medium">
+                    {new Date(
+                      viewTransferDetail.transfer.transfer_date || viewTransferDetail.transfer.created_at,
+                    ).toLocaleDateString()}
+                  </p>
+                </div>
+                <div className="rounded-md border border-gray-200 dark:border-gray-700 p-3">
+                  <p className="text-xs text-gray-500 mb-1">Status</p>
+                  <p className="font-medium capitalize">{String(viewTransferDetail.transfer.status || "completed")}</p>
+                </div>
+                <div className="rounded-md border border-gray-200 dark:border-gray-700 p-3">
+                  <p className="text-xs text-gray-500 mb-1">Payment</p>
+                  <p className="font-medium capitalize">
+                    {String(viewTransferDetail.transfer.payment_status || "unpaid")}
+                    {viewTransferDetail.transfer.payment_method
+                      ? ` • ${viewTransferDetail.transfer.payment_method}`
+                      : ""}
+                  </p>
+                </div>
+                <div className="rounded-md border border-gray-200 dark:border-gray-700 p-3">
+                  <p className="text-xs text-gray-500 mb-1">Amount</p>
+                  <p className="font-medium">
+                    {Number(viewTransferDetail.transfer.total_amount || 0).toFixed(2)}
+                    {" / paid "}
+                    {Number(viewTransferDetail.transfer.paid_amount || 0).toFixed(2)}
+                  </p>
+                </div>
+              </div>
+
+              {(viewTransferDetail.transfer.notes || viewTransferDetail.transfer.payment_notes) && (
+                <div className="rounded-md border border-gray-200 dark:border-gray-700 p-3 text-sm space-y-2">
+                  {viewTransferDetail.transfer.notes ? (
+                    <div>
+                      <p className="text-xs text-gray-500 mb-1">Notes</p>
+                      <p>{viewTransferDetail.transfer.notes}</p>
+                    </div>
+                  ) : null}
+                  {viewTransferDetail.transfer.payment_notes ? (
+                    <div>
+                      <p className="text-xs text-gray-500 mb-1">Payment Notes</p>
+                      <p>{viewTransferDetail.transfer.payment_notes}</p>
+                    </div>
+                  ) : null}
+                </div>
+              )}
+
+              <div className="rounded-md border border-gray-200 dark:border-gray-700 overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 dark:bg-gray-900">
+                    <tr>
+                      <th className="text-left p-2">Product</th>
+                      <th className="text-left p-2">Qty</th>
+                      <th className="text-left p-2">Unit Cost</th>
+                      <th className="text-left p-2">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(viewTransferDetail.items || []).map((item: any) => (
+                      <tr key={item.id} className="border-t border-gray-200 dark:border-gray-700">
+                        <td className="p-2">{item.product_name || `Product #${item.product_id}`}</td>
+                        <td className="p-2">{Number(item.quantity || 0)}</td>
+                        <td className="p-2">{Number(item.unit_cost || 0).toFixed(2)}</td>
+                        <td className="p-2">{Number(item.total_cost || 0).toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           )}
         </DialogContent>
       </Dialog>

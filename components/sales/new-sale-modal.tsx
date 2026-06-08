@@ -1403,7 +1403,7 @@ export default function NewSaleModal({ isOpen, onClose, userId, currency: propCu
                 <div className="flex-1 overflow-hidden flex flex-col">
                   <div className="flex items-center justify-between p-3 bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
                     <h3 className="font-medium text-gray-800 dark:text-gray-200">Products & Services</h3>
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap justify-end gap-2">
                       <Button
                         type="button"
                         variant="outline"
@@ -1411,7 +1411,16 @@ export default function NewSaleModal({ isOpen, onClose, userId, currency: propCu
                         onClick={() => setIsNewServiceModalOpen(true)}
                         className="flex items-center gap-1 border-green-300 dark:border-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 text-green-600 dark:text-green-400"
                       >
-                        <Wrench className="h-4 w-4" /> New Service
+                        <Wrench className="h-4 w-4" /> Service
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setIsNewCustomerModalOpen(true)}
+                        className="flex items-center gap-1 border-purple-300 dark:border-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/20 text-purple-600 dark:text-purple-400"
+                      >
+                        <User className="h-4 w-4" /> Customer
                       </Button>
                       <Button
                         type="button"
@@ -1420,7 +1429,7 @@ export default function NewSaleModal({ isOpen, onClose, userId, currency: propCu
                         onClick={() => setIsNewProductModalOpen(true)}
                         className="flex items-center gap-1 border-blue-300 dark:border-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-blue-600 dark:text-blue-400"
                       >
-                        <Plus className="h-4 w-4" /> New Product
+                        <Plus className="h-4 w-4" /> Product
                       </Button>
                       <Button
                         type="button"
@@ -1601,6 +1610,7 @@ export default function NewSaleModal({ isOpen, onClose, userId, currency: propCu
                               }}
                               onAddNew={() => setIsNewCustomerModalOpen(true)}
                               userId={userId}
+                              showAddNewButton={false}
                               className="bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 text-gray-900 dark:text-gray-100"
                             />
                           </div>

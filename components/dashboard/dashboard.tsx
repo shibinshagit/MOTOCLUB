@@ -49,7 +49,7 @@ import { selectUser, selectCompany, selectDevice, clearDeviceData } from "@/stor
 import { activateStaff, clearStaff, selectActiveStaff, setStaff } from "@/store/slices/staffSlice"
 import { getStaffForAuthentication } from "@/app/actions/staff-actions"
 
-type TabType = "home" | "sale" | "purchase" | "product" | "customer" | "transfer" | "accounting" | "supplier" | "platform"
+type TabType = "home" | "sale" | "sales" | "purchase" | "product" | "customer" | "transfer" | "accounting" | "supplier" | "platform"
 
 interface DashboardProps {
   mockMode?: boolean
@@ -178,7 +178,7 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
   useEffect(() => {
     if (
       tabParam &&
-      ["home", "sale", "purchase", "product", "customer", "transfer", "accounting", "supplier", "platform"].includes(
+      ["home", "sale", "sales", "purchase", "product", "customer", "transfer", "accounting", "supplier", "platform"].includes(
         tabParam,
       )
     ) {
@@ -276,6 +276,16 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
               userId={user?.id}
               isAddModalOpen={activeTab === "sale" && isAddModalOpen}
               onModalClose={() => setIsAddModalOpen(false)}
+              mode="entry"
+            />
+          )
+        case "sales":
+          return (
+            <SaleTab
+              userId={user?.id}
+              isAddModalOpen={false}
+              onModalClose={() => setIsAddModalOpen(false)}
+              mode="info"
             />
           )
         case "purchase":
@@ -329,6 +339,7 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
  const navItems = [
     { id: "home", icon: <Home className="h-4 w-4" />, label: "Home" },
     { id: "sale", icon: <ShoppingCart className="h-4 w-4" />, label: "Sale" },
+    { id: "sales", icon: <Receipt className="h-4 w-4" />, label: "Sales" },
     { id: "purchase", icon: <Receipt className="h-4 w-4" />, label: "Purchase" },
     { id: "product", icon: <Package className="h-4 w-4" />, label: "Inventory" },
     { id: "customer", icon: <User className="h-4 w-4" />, label: "Customers" },
@@ -339,8 +350,8 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
   ]
 
   // Primary tabs for bottom navigation (most used)
-  const primaryTabs = ["home", "sale", "purchase", "product"]
-  const secondaryTabs = ["customer", "supplier", "transfer", "platform", "accounting"]
+  const primaryTabs = ["home", "sale", "sales", "purchase"]
+  const secondaryTabs = ["product", "customer", "supplier", "transfer", "platform", "accounting"]
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-gray-50 dark:bg-gray-900">

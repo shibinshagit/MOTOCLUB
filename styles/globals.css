@@ -170,5 +170,15 @@ body {
   }
 }
 
+.date-input-themed::-webkit-calendar-picker-indicator {
+  filter: invert(0);
+  opacity: 0.9;
+}
+
+.dark .date-input-themed::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+  opacity: 1;
+}
+
 
 

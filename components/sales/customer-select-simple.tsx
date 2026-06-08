@@ -18,6 +18,7 @@ interface CustomerSelectSimpleProps {
   onAddNew: () => void
   onCreateCustomer?: (name: string, phone: string) => Promise<{ success: boolean; data?: any; message?: string }>
   userId?: number
+  showAddNewButton?: boolean
 }
 
 export default function CustomerSelectSimple({
@@ -27,6 +28,7 @@ export default function CustomerSelectSimple({
   onAddNew,
   onCreateCustomer,
   userId = 1,
+  showAddNewButton = true,
 }: CustomerSelectSimpleProps) {
   const dispatch = useAppDispatch()
 
@@ -298,13 +300,6 @@ export default function CustomerSelectSimple({
     }
   }
 
-  const handleShowInlineForm = () => {
-    setFormData({ name: "", phone: "" })
-    setFormErrors({})
-    setShowForm(true)
-    setSearchTerm("")
-  }
-
   return (
     <div className="relative w-full" ref={containerRef}>
       <Button
@@ -517,9 +512,18 @@ export default function CustomerSelectSimple({
                 )}
 
                 {/* Add New inline trigger */}
-                {!searchTerm && !showForm && (
+                {!searchTerm && !showForm && showAddNewButton && (
                   <div className="mt-2 pt-2 border-t border-gray-100 dark:border-gray-600 px-2">
-                    <Button variant="outline" size="sm" className="w-full bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-600" onClick={handleShowInlineForm}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-600"
+                      onClick={() => {
+                        setOpen(false)
+                        resetSearchAndForm()
+                        onAddNew()
+                      }}
+                    >
                       <Plus className="h-4 w-4 mr-2" />
                       Add New Customer
                     </Button>

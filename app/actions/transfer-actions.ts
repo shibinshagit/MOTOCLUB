@@ -27,6 +27,7 @@ async function ensureTransferTables() {
       payment_method VARCHAR(50),
       paid_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
       payment_notes TEXT,
+      transfer_date TIMESTAMP DEFAULT NOW(),
       notes TEXT,
       created_by INTEGER NOT NULL,
       created_at TIMESTAMP DEFAULT NOW(),
@@ -41,6 +42,7 @@ async function ensureTransferTables() {
   await sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50)`
   await sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS paid_amount DECIMAL(12,2) NOT NULL DEFAULT 0`
   await sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS payment_notes TEXT`
+  await sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS transfer_date TIMESTAMP DEFAULT NOW()`
 
   await sql`
     CREATE TABLE IF NOT EXISTS stock_transfer_items (
@@ -101,6 +103,13 @@ function normalizeTransferItems(items: any[]): TransferItemInput[] {
     quantity: value.quantity,
     unit_cost: Number(value.unit_cost.toFixed(2)),
   }))
+}
+
+function normalizeTransferDate(inputValue: unknown): string | null {
+  const raw = String(inputValue || "").trim()
+  if (!raw) return null
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return "__invalid__"
+  return raw
 }
 
 async function getCompanyIdForDevice(deviceId: number): Promise<number | null> {
@@ -298,6 +307,7 @@ export async function getWarehouseTransfers(userId: number, searchTerm?: string,
         COALESCE(t.payment_status, 'unpaid') AS payment_status,
         COALESCE(t.payment_method, '') AS payment_method,
         COALESCE(t.paid_amount, 0)::numeric AS paid_amount,
+        COALESCE(t.transfer_date, t.created_at) AS transfer_date,
         t.notes,
         t.created_by,
         t.created_at,
@@ -320,7 +330,7 @@ export async function getWarehouseTransfers(userId: number, searchTerm?: string,
           OR LOWER(COALESCE(t.notes, '')) LIKE ${searchPattern}
         )
       GROUP BY t.id, df.name, dt.name
-      ORDER BY t.created_at DESC
+      ORDER BY COALESCE(t.transfer_date, t.created_at) DESC, t.id DESC
       LIMIT 300
     `) as any[]
 
@@ -411,6 +421,7 @@ export async function createWarehouseTransfer(formData: FormData) {
   const paymentMethod = String(formData.get("payment_method") || "").trim()
   const paymentNotes = String(formData.get("payment_notes") || "").trim()
   const paidAmount = Number(formData.get("paid_amount") || 0)
+  const transferDate = normalizeTransferDate(formData.get("transfer_date"))
   const itemsRaw = String(formData.get("items") || "[]")
 
   let parsedItems: any[] = []
@@ -438,6 +449,9 @@ export async function createWarehouseTransfer(formData: FormData) {
   if (!Number.isFinite(paidAmount) || paidAmount < 0) {
     return { success: false, message: "Paid amount must be a valid non-negative number" }
   }
+  if (transferDate === "__invalid__") {
+    return { success: false, message: "Transfer date must be in YYYY-MM-DD format" }
+  }
 
   resetConnectionState()
   try {
@@ -463,9 +477,9 @@ export async function createWarehouseTransfer(formData: FormData) {
 
     const transferRows = (await sql`
       INSERT INTO stock_transfers (
-        company_id, from_device_id, to_device_id, status, total_amount, payment_status, payment_method, paid_amount, payment_notes, notes, created_by, created_at, updated_at
+        company_id, from_device_id, to_device_id, status, total_amount, payment_status, payment_method, paid_amount, payment_notes, transfer_date, notes, created_by, created_at, updated_at
       ) VALUES (
-        ${actorCompanyId}, ${fromDeviceId}, ${toDeviceId}, 'completed', ${totalAmount}, ${paymentStatus}, ${paymentMethod || null}, ${paidAmount}, ${paymentNotes || null}, ${notes}, ${userId}, NOW(), NOW()
+        ${actorCompanyId}, ${fromDeviceId}, ${toDeviceId}, 'completed', ${totalAmount}, ${paymentStatus}, ${paymentMethod || null}, ${paidAmount}, ${paymentNotes || null}, COALESCE(${transferDate}::timestamp, NOW()), ${notes}, ${userId}, NOW(), NOW()
       )
       RETURNING id
     `) as any[]
@@ -502,6 +516,7 @@ export async function updateWarehouseTransfer(formData: FormData) {
   const paymentMethod = String(formData.get("payment_method") || "").trim()
   const paymentNotes = String(formData.get("payment_notes") || "").trim()
   const paidAmount = Number(formData.get("paid_amount") || 0)
+  const transferDate = normalizeTransferDate(formData.get("transfer_date"))
   const itemsRaw = String(formData.get("items") || "[]")
 
   let parsedItems: any[] = []
@@ -528,6 +543,9 @@ export async function updateWarehouseTransfer(formData: FormData) {
   }
   if (!Number.isFinite(paidAmount) || paidAmount < 0) {
     return { success: false, message: "Paid amount must be a valid non-negative number" }
+  }
+  if (transferDate === "__invalid__") {
+    return { success: false, message: "Transfer date must be in YYYY-MM-DD format" }
   }
 
   resetConnectionState()
@@ -658,6 +676,7 @@ export async function updateWarehouseTransfer(formData: FormData) {
           payment_method = ${paymentMethod || null},
           paid_amount = ${paidAmount},
           payment_notes = ${paymentNotes || null},
+          transfer_date = COALESCE(${transferDate}::timestamp, transfer_date, NOW()),
           notes = ${notes},
           updated_at = NOW()
       WHERE id = ${transferId}

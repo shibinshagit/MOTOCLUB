@@ -37,7 +37,7 @@ import {
 import { getUserSales, deleteSale, addSale, getSaleDetails, updateSale } from "@/app/actions/sale-actions"
 import { useToast } from "@/components/ui/use-toast"
 import ViewSaleModal from "@/components/sales/view-sale-modal"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { useSelector, useDispatch } from "react-redux"
 import { selectDeviceId, selectDeviceCurrency } from "@/store/slices/deviceSlice"
 import {
@@ -94,6 +94,7 @@ interface SaleTabProps {
   userId: number
   isAddModalOpen?: boolean
   onModalClose?: () => void
+  mode?: "entry" | "info"
 }
 
 interface ProductRow {
@@ -121,7 +122,7 @@ interface ScanResult {
 
 const STALE_TIME = 5 * 60 * 1000 // 5 minutes in milliseconds
 
-export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }: SaleTabProps) {
+export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, mode = "entry" }: SaleTabProps) {
   // Redux state
   const dispatch = useDispatch()
   const deviceId = useSelector(selectDeviceId)
@@ -223,6 +224,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
 
   const { toast } = useToast()
   const router = useRouter()
+  const searchParams = useSearchParams()
 
   // Add pagination state
   const [currentPage, setCurrentPage] = useState(1)
@@ -1095,6 +1097,10 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
 
   // Handle edit sale - load sale data into form
   const handleEditSale = (sale: any) => {
+    if (mode === "info") {
+      router.push(`/dashboard?tab=sale&editSaleId=${sale.id}`)
+      return
+    }
     loadSaleForEdit(sale.id)
   }
 
@@ -1102,6 +1108,15 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
   const handlePrintInvoiceFromView = (saleId: number) => {
     router.push(`/invoice/sale/${saleId}`)
   }
+
+  useEffect(() => {
+    if (mode !== "entry") return
+    const editSaleIdRaw = searchParams.get("editSaleId")
+    if (!editSaleIdRaw) return
+    const editSaleId = Number(editSaleIdRaw)
+    if (!editSaleId || Number.isNaN(editSaleId)) return
+    loadSaleForEdit(editSaleId)
+  }, [mode, searchParams])
 
   // Handle delete sale from view modal
   const handleDeleteSaleFromView = async (saleId: number) => {
@@ -1444,6 +1459,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
             {/* Sales Tab Content - FIXED SCROLL LAYOUT */}
             <div className="flex flex-col xl:flex-row gap-3 h-full">
               {/* Main Sale Form Section - FIXED SCROLL */}
+              {mode !== "info" && (
               <div className="flex-1 xl:w-3/4 flex flex-col min-h-0">
                 <Card className="flex-1 overflow-hidden bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 shadow-sm flex flex-col">
                   <CardContent className="p-0 h-full flex flex-col">
@@ -1561,6 +1577,16 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
                                 type="button"
                                 variant="outline"
                                 size="sm"
+                                onClick={() => setIsNewCustomerModalOpen(true)}
+                                className="flex items-center gap-1 text-purple-600 dark:text-purple-400 border-purple-300 dark:border-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/20 h-7 text-xs"
+                              >
+                                <User className="h-3 w-3" />
+                                <span className="hidden sm:inline">Customer</span>
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
                                 onClick={() => setIsNewServiceModalOpen(true)}
                                 className="flex items-center gap-1 text-green-600 dark:text-green-400 border-green-300 dark:border-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 h-7 text-xs"
                               >
@@ -1583,7 +1609,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
                                 variant="outline"
                                 size="sm"
                                 onClick={addProductRow}
-                                className="flex items-center gap-1 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 h-7 text-xs bg-transparent"
+                                className="flex items-center gap-1 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 h-7 text-xs bg-transparent"
                               >
                                 <Plus className="h-3 w-3" />
                                 <span className="hidden sm:inline">Row</span>
@@ -1925,6 +1951,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
                                   }}
                                   onAddNew={() => setIsNewCustomerModalOpen(true)}
                                   userId={userId}
+                                  showAddNewButton={false}
                                 />
                               </div>
 
@@ -2112,9 +2139,11 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
                   </CardContent>
                 </Card>
               </div>
+              )}
 
               {/* Right side - Summary and Sales List */}
-              <div className="w-full xl:w-1/4 flex flex-col space-y-3 min-h-0">
+              {mode !== "entry" && (
+              <div className={mode === "info" ? "w-full flex flex-col space-y-3 min-h-0" : "w-full xl:w-1/4 flex flex-col space-y-3 min-h-0"}>
                 {/* Summary Cards - responsive grid */}
                 <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-3 gap-2">
                   <Card className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 shadow-sm">
@@ -2423,6 +2452,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
                   </CardContent>
                 </Card>
               </div>
+              )}
             </div>
         </div>
       </div>
@@ -2498,7 +2528,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
         currency={currency || "AED"}
         onEdit={(saleData) => {
           setIsViewSaleModalOpen(false)
-          loadSaleForEdit(saleData.id)
+          handleEditSale({ id: saleData.id })
         }}
         onDelete={handleDeleteSaleFromView}
         onPrintInvoice={handlePrintInvoiceFromView}
