@@ -42,6 +42,20 @@ type TransferFormData = {
 
 export default function TransferTab({ userId }: TransferTabProps) {
   const getTodayDate = () => new Date().toISOString().slice(0, 10)
+  const toDateInputValue = (value: unknown): string => {
+    if (!value) return ""
+    const raw = String(value)
+    const isoMatch = raw.match(/^\d{4}-\d{2}-\d{2}/)
+    if (isoMatch) return isoMatch[0]
+    const parsed = new Date(raw)
+    if (!Number.isNaN(parsed.getTime())) {
+      const year = parsed.getFullYear()
+      const month = String(parsed.getMonth() + 1).padStart(2, "0")
+      const day = String(parsed.getDate()).padStart(2, "0")
+      return `${year}-${month}-${day}`
+    }
+    return ""
+  }
   const { toast } = useToast()
   const [transfers, setTransfers] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(false)
@@ -228,7 +242,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
       setFormData({
         fromDeviceId: Number(transfer.from_device_id),
         toDeviceId: Number(transfer.to_device_id),
-        transferDate: String(transfer.transfer_date || transfer.created_at || "").slice(0, 10) || getTodayDate(),
+        transferDate: toDateInputValue(transfer.transfer_date || transfer.created_at) || getTodayDate(),
         paymentStatus: (String(transfer.payment_status || "unpaid").toLowerCase() as "unpaid" | "partial" | "paid"),
         paymentMethod: String(transfer.payment_method || ""),
         paidAmount: Number(transfer.paid_amount || 0),
