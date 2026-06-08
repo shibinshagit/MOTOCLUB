@@ -54,6 +54,11 @@ export default function TransferTab({ userId }: TransferTabProps) {
   const [isViewLoading, setIsViewLoading] = useState(false)
   const [viewTransferDetail, setViewTransferDetail] = useState<any | null>(null)
   const [editingTransferId, setEditingTransferId] = useState<number | null>(null)
+  const [editOriginal, setEditOriginal] = useState<{
+    fromDeviceId: number
+    toDeviceId: number
+    qtyByProduct: Map<number, number>
+  } | null>(null)
   const [formData, setFormData] = useState<TransferFormData>({
     fromDeviceId: userId || 0,
     toDeviceId: 0,
@@ -77,6 +82,20 @@ export default function TransferTab({ userId }: TransferTabProps) {
   const selectedSourceStockMap = useMemo(() => {
     return new Map(products.map((p) => [p.id, p.source_stock]))
   }, [products])
+
+  // When editing, the stock this transfer already moved out of the source is
+  // reversible, so it must be added back to the "available" pool. Otherwise a
+  // transfer that fully emptied the source can never be saved again (even when
+  // only changing payment details), because the source now shows 0 stock.
+  const effectiveSourceStockMap = useMemo(() => {
+    const map = new Map(selectedSourceStockMap)
+    if (editOriginal && editOriginal.fromDeviceId === formData.fromDeviceId) {
+      for (const [productId, qty] of editOriginal.qtyByProduct.entries()) {
+        map.set(productId, Number(map.get(productId) || 0) + Number(qty || 0))
+      }
+    }
+    return map
+  }, [selectedSourceStockMap, editOriginal, formData.fromDeviceId])
 
   const transferTotalAmount = useMemo(() => {
     return Number(
@@ -143,6 +162,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
 
   const resetForm = () => {
     setEditingTransferId(null)
+    setEditOriginal(null)
     setRowProductSearch([""])
     setRowProductOpen([false])
     setRowWarnings({})
@@ -191,6 +211,16 @@ export default function TransferTab({ userId }: TransferTabProps) {
       await loadFormData(Number(transfer.from_device_id))
 
       setEditingTransferId(transferId)
+      const originalQtyByProduct = new Map<number, number>()
+      for (const item of detail.data.items) {
+        const pid = Number(item.product_id)
+        originalQtyByProduct.set(pid, (originalQtyByProduct.get(pid) || 0) + Number(item.quantity || 0))
+      }
+      setEditOriginal({
+        fromDeviceId: Number(transfer.from_device_id),
+        toDeviceId: Number(transfer.to_device_id),
+        qtyByProduct: originalQtyByProduct,
+      })
       const rowCount = detail.data.items.length > 0 ? detail.data.items.length : 1
       setRowProductSearch(Array(rowCount).fill(""))
       setRowProductOpen(Array(rowCount).fill(false))
@@ -259,7 +289,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
     setFormData((prev) => {
       const items = [...prev.items]
       items[index] = { ...items[index], ...patch }
-      const sourceStock = Number(selectedSourceStockMap.get(items[index].product_id) || 0)
+      const sourceStock = Number(effectiveSourceStockMap.get(items[index].product_id) || 0)
       if (items[index].quantity > sourceStock) {
         items[index].quantity = sourceStock > 0 ? sourceStock : 1
         setRowWarnings((prevWarnings) => ({
@@ -360,7 +390,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
       requestedByProduct.set(item.product_id, (requestedByProduct.get(item.product_id) || 0) + Number(item.quantity))
     }
     for (const [productId, totalRequested] of requestedByProduct.entries()) {
-      const available = Number(selectedSourceStockMap.get(productId) || 0)
+      const available = Number(effectiveSourceStockMap.get(productId) || 0)
       if (totalRequested > available) {
         const productName = products.find((p) => p.id === productId)?.name || `Product #${productId}`
         toast({
@@ -735,7 +765,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
                                   key={p.id}
                                   type="button"
                                   onClick={() => {
-                                    const available = Number(selectedSourceStockMap.get(p.id) || 0)
+                                    const available = Number(effectiveSourceStockMap.get(p.id) || 0)
                                     const currentQty = Number(item.quantity || 1)
                               const defaultUnitCost = Number(products.find((x) => x.id === p.id)?.default_unit_cost || 0)
                                     setItem(idx, {
@@ -753,7 +783,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
                                   </div>
                                   <div className="flex items-center gap-2 shrink-0">
                                     <span className="text-xs rounded-full bg-blue-100 text-blue-700 px-2 py-0.5 dark:bg-blue-900/30 dark:text-blue-300">
-                                      Avl {Number(p.source_stock || 0)}
+                                      Avl {Number(effectiveSourceStockMap.get(p.id) ?? p.source_stock ?? 0)}
                                     </span>
                                     {item.product_id === p.id ? <Check className="h-4 w-4 text-blue-600" /> : null}
                                   </div>
@@ -771,7 +801,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
                       </Popover>
                       {item.product_id ? (
                         <p className="text-[11px] text-red-600 dark:text-red-400 mt-1">
-                        available stock: {selectedSourceStockMap.get(item.product_id) ?? 0}
+                        available stock: {effectiveSourceStockMap.get(item.product_id) ?? 0}
                         </p>
                       ) : null}
                     </div>
@@ -779,10 +809,10 @@ export default function TransferTab({ userId }: TransferTabProps) {
                       <Input
                         type="number"
                         min={1}
-                        max={Number(selectedSourceStockMap.get(item.product_id) || 1)}
+                        max={Number(effectiveSourceStockMap.get(item.product_id) || 1)}
                         value={item.quantity || 1}
                         onChange={(e) => {
-                          const maxAllowed = Number(selectedSourceStockMap.get(item.product_id) || 1)
+                          const maxAllowed = Number(effectiveSourceStockMap.get(item.product_id) || 1)
                           const nextValue = Number(e.target.value || 1)
                           if (nextValue > maxAllowed) {
                             setRowWarnings((prev) => ({

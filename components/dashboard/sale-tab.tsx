@@ -245,6 +245,17 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
   const searchParams = useSearchParams()
   const pathname = usePathname()
 
+  const clearEditSaleParamFromUrl = useCallback(() => {
+    try {
+      const url = new URL(window.location.href)
+      if (!url.searchParams.has("editSaleId")) return
+      url.searchParams.delete("editSaleId")
+      window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`)
+    } catch (error) {
+      console.error("Failed to clear editSaleId from URL:", error)
+    }
+  }, [])
+
   // Add pagination state
   const [currentPage, setCurrentPage] = useState(1)
   const salesPerPage = 7
@@ -265,6 +276,8 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
   const [draftsHydrated, setDraftsHydrated] = useState(false)
   const [pendingEditSaleId, setPendingEditSaleId] = useState<number | null>(null)
   const [pendingEditDraftId, setPendingEditDraftId] = useState<string>("")
+  const lastClosedEditSaleIdRef = useRef<number | null>(null)
+  const editLoadRequestRef = useRef(0)
   const draftSwitchingRef = useRef(false)
 
   const createEmptyProductRow = useCallback(
@@ -1026,6 +1039,10 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
   }
 
   const resetAddSaleForm = () => {
+    // Invalidate any in-flight edit-load response so cancel always wins.
+    editLoadRequestRef.current += 1
+    const resetDate = new Date()
+    const resetProducts = [createEmptyProductRow()]
     setDate(new Date())
     setCustomerId(null)
     setCustomerName("")
@@ -1035,7 +1052,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     }
     setStatus("Completed")
     setPaymentMethod("Cash")
-    setProducts([createEmptyProductRow()])
+    setProducts(resetProducts)
     setDiscountAmount(0)
     setReceivedAmount(0)
     setNotes("")
@@ -1044,15 +1061,48 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     setIsEditMode(false)
     setEditingSaleId(null)
     setOriginalSaleStatus("")
+    setPendingEditSaleId(null)
+    setPendingEditDraftId("")
+    clearEditSaleParamFromUrl()
+
+    if (mode === "entry" && activeDraftId) {
+      setSaleDrafts((prev) =>
+        prev.map((draft) =>
+          draft.id === activeDraftId
+            ? {
+                ...draft,
+                name: "New Sale",
+                updatedAt: Date.now(),
+                date: resetDate.toISOString(),
+                customerId: null,
+                customerName: "",
+                staffId: activeStaff?.id || null,
+                staffName: activeStaff?.name || "",
+                status: "Completed",
+                paymentMethod: "Cash",
+                receivedAmount: 0,
+                discountAmount: 0,
+                notes: "",
+                products: resetProducts,
+                isEditMode: false,
+                editingSaleId: null,
+                originalSaleStatus: "",
+              }
+            : draft,
+        ),
+      )
+    }
   }
 
   // Load sale data for editing
   const loadSaleForEdit = async (saleId: number) => {
+    const requestId = ++editLoadRequestRef.current
     try {
       setFormAlert(null)
       setBarcodeAlert(null)
 
       const result = await getSaleDetails(saleId)
+      if (requestId !== editLoadRequestRef.current) return
 
       if (result.success) {
         const { sale, items } = result.data
@@ -1132,12 +1182,14 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
           message: `Loaded sale #${saleId} for editing`,
         })
       } else {
+        if (requestId !== editLoadRequestRef.current) return
         setFormAlert({
           type: "error",
           message: result.message || "Failed to load sale details",
         })
       }
     } catch (error) {
+      if (requestId !== editLoadRequestRef.current) return
       console.error("Error loading sale for edit:", error)
       setFormAlert({
         type: "error",
@@ -1306,6 +1358,8 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
 
   // Handle edit sale - load sale data into form
   const handleEditSale = (sale: any) => {
+    // User explicitly requested edit again; clear last closed guard.
+    lastClosedEditSaleIdRef.current = null
     if (mode === "info") {
       router.push(`/dashboard?tab=sale&editSaleId=${sale.id}`)
       return
@@ -1325,6 +1379,14 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     const editSaleId = Number(editSaleIdRaw)
     if (!editSaleId || Number.isNaN(editSaleId)) return
     if (!draftsHydrated) return
+    if (lastClosedEditSaleIdRef.current && lastClosedEditSaleIdRef.current === editSaleId) {
+      clearEditSaleParamFromUrl()
+      return
+    }
+    if (isEditMode && editingSaleId === editSaleId) {
+      clearEditSaleParamFromUrl()
+      return
+    }
 
     const existingDraft = saleDrafts.find((draft) => draft.isEditMode && draft.editingSaleId === editSaleId)
     if (existingDraft) {
@@ -1348,7 +1410,19 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     params.delete("editSaleId")
     const nextQuery = params.toString()
     router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname)
-  }, [mode, searchParams, router, pathname, draftsHydrated, saleDrafts, createEmptyDraft])
+    clearEditSaleParamFromUrl()
+  }, [
+    mode,
+    searchParams,
+    router,
+    pathname,
+    draftsHydrated,
+    saleDrafts,
+    createEmptyDraft,
+    isEditMode,
+    editingSaleId,
+    clearEditSaleParamFromUrl,
+  ])
 
   useEffect(() => {
     if (!pendingEditSaleId || !pendingEditDraftId) return
@@ -1718,32 +1792,58 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     setActiveDraftId(draftId)
   }
 
-  const handleRemoveDraftTab = (draftId: string) => {
+  const handleRemoveDraftTab = (draftId: string, askConfirmation = true) => {
     if (mode !== "entry") return
-    const shouldClose = window.confirm("Are you sure to close this sale tab?")
-    if (!shouldClose) return
-    const targetIndex = saleDrafts.findIndex((draft) => draft.id === draftId)
-    if (targetIndex === -1) return
+    if (askConfirmation) {
+      const shouldClose = window.confirm("Are you sure to close this sale tab?")
+      if (!shouldClose) return
+    }
+    const removingDraft = saleDrafts.find((draft) => draft.id === draftId)
+    if (removingDraft?.isEditMode || (editingSaleId && removingDraft?.editingSaleId === editingSaleId)) {
+      lastClosedEditSaleIdRef.current = Number(removingDraft?.editingSaleId || editingSaleId || 0) || null
+      setIsEditMode(false)
+      setEditingSaleId(null)
+      setOriginalSaleStatus("")
+      setPendingEditSaleId(null)
+      setPendingEditDraftId("")
+      clearEditSaleParamFromUrl()
+    }
+    setSaleDrafts((prev) => {
+      const targetIndex = prev.findIndex((draft) => draft.id === draftId)
+      if (targetIndex === -1) return prev
 
-    if (saleDrafts.length === 1) {
-      const replacement = createEmptyDraft("Draft 1")
-      draftSwitchingRef.current = true
-      setSaleDrafts([replacement])
-      setActiveDraftId(replacement.id)
+      if (prev.length === 1) {
+        const replacement = createEmptyDraft("Draft 1")
+        draftSwitchingRef.current = true
+        setActiveDraftId(replacement.id)
+        setIsEditMode(false)
+        setEditingSaleId(null)
+        setOriginalSaleStatus("")
+        setPendingEditSaleId(null)
+        setPendingEditDraftId("")
+        clearEditSaleParamFromUrl()
+        return [replacement]
+      }
+
+      const remainingDrafts = prev.filter((draft) => draft.id !== draftId)
+
+      if (draftId === activeDraftId) {
+        const fallbackIndex = Math.max(0, targetIndex - 1)
+        const nextActiveId = remainingDrafts[fallbackIndex]?.id || remainingDrafts[0].id
+        draftSwitchingRef.current = true
+        setActiveDraftId(nextActiveId)
+      }
+
+      return remainingDrafts
+    })
+  }
+
+  const handleCancelEditCurrent = () => {
+    if (isEditMode && activeDraftId) {
+      handleRemoveDraftTab(activeDraftId, false)
       return
     }
-
-    const remainingDrafts = saleDrafts.filter((draft) => draft.id !== draftId)
-    let nextActiveId = activeDraftId
-
-    if (draftId === activeDraftId) {
-      const fallbackIndex = Math.max(0, targetIndex - 1)
-      nextActiveId = remainingDrafts[fallbackIndex]?.id || remainingDrafts[0].id
-      draftSwitchingRef.current = true
-    }
-
-    setSaleDrafts(remainingDrafts)
-    setActiveDraftId(nextActiveId)
+    resetAddSaleForm()
   }
 
   if (mode === "info") {
@@ -1904,6 +2004,62 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
             </CardContent>
           </Card>
         </div>
+
+        {/* Date Range Modal (info mode) */}
+        <Dialog open={isDateRangeModalOpen} onOpenChange={setIsDateRangeModalOpen}>
+          <DialogContent className="max-w-md bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700">
+            <DialogHeader>
+              <DialogTitle className="text-gray-900 dark:text-gray-100">Select Date Range</DialogTitle>
+            </DialogHeader>
+            <div className="py-4 space-y-4">
+              <div className="space-y-2">
+                <Label className="text-sm font-medium text-gray-900 dark:text-gray-200">From Date</Label>
+                <div className="[&_button]:text-gray-900 [&_button]:dark:text-gray-100 [&_button]:bg-white [&_button]:dark:bg-gray-700 [&_button]:border-gray-300 [&_button]:dark:border-gray-600">
+                  <DatePickerField date={tempDateFrom} onDateChange={setTempDateFrom} />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label className="text-sm font-medium text-gray-900 dark:text-gray-200">To Date</Label>
+                <div className="[&_button]:text-gray-900 [&_button]:dark:text-gray-100 [&_button]:bg-white [&_button]:dark:bg-gray-700 [&_button]:border-gray-300 [&_button]:dark:border-gray-600">
+                  <DatePickerField date={tempDateTo} onDateChange={setTempDateTo} />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 mt-6">
+                <Button
+                  variant="outline"
+                  onClick={() => setIsDateRangeModalOpen(false)}
+                  className="border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={applyCustomDateRange}
+                  className="bg-blue-600 hover:bg-blue-700 text-white"
+                  disabled={!tempDateFrom || !tempDateTo}
+                >
+                  Apply Range
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* View Sale Modal (info mode) */}
+        <ViewSaleModal
+          isOpen={isViewSaleModalOpen}
+          onClose={() => {
+            setIsViewSaleModalOpen(false)
+            setSelectedSaleId(null)
+          }}
+          saleId={selectedSaleId}
+          currency={currency || "AED"}
+          onEdit={(saleData) => {
+            setIsViewSaleModalOpen(false)
+            handleEditSale({ id: saleData.id })
+          }}
+          onDelete={handleDeleteSaleFromView}
+          onPrintInvoice={handlePrintInvoiceFromView}
+        />
       </div>
     )
   }
@@ -1916,35 +2072,45 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
               <div className="mb-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-2">
                 <div className="flex items-center gap-2 overflow-x-auto">
                   {saleDrafts.map((draft, index) => (
-                    <Button
+                    <div
                       key={draft.id}
-                      type="button"
-                      variant={draft.id === activeDraftId ? "default" : "outline"}
-                      size="sm"
-                      onClick={() => handleSwitchDraftTab(draft.id)}
-                      className="h-8 shrink-0 text-xs pr-1"
+                      className={`h-8 shrink-0 inline-flex items-center rounded-md border ${
+                        draft.id === activeDraftId
+                          ? draft.isEditMode
+                            ? "bg-orange-500 text-white border-orange-500 dark:bg-orange-600 dark:border-orange-500"
+                            : "bg-primary text-primary-foreground border-primary"
+                          : draft.isEditMode
+                            ? "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-900/30 dark:text-orange-200 dark:border-orange-700"
+                            : "bg-background text-foreground border-input"
+                      }`}
                     >
-                      <span>{draft.name?.trim() ? draft.name : `Draft ${index + 1}`}</span>
-                      <span
-                        role="button"
-                        tabIndex={0}
+                      <button
+                        type="button"
+                        onClick={() => handleSwitchDraftTab(draft.id)}
+                        className="px-3 h-8 text-xs font-medium whitespace-nowrap"
+                      >
+                        {draft.name?.trim() ? draft.name : `Draft ${index + 1}`}
+                      </button>
+                      <button
+                        type="button"
                         onClick={(e) => {
                           e.stopPropagation()
                           handleRemoveDraftTab(draft.id)
                         }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault()
-                            e.stopPropagation()
-                            handleRemoveDraftTab(draft.id)
-                          }
-                        }}
-                        className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-sm hover:bg-black/10 dark:hover:bg-white/20"
+                        className={`mr-1 inline-flex h-5 w-5 items-center justify-center rounded-sm ${
+                          draft.id === activeDraftId
+                            ? draft.isEditMode
+                              ? "hover:bg-white/20"
+                              : "hover:bg-primary-foreground/20"
+                            : draft.isEditMode
+                              ? "hover:bg-orange-100 dark:hover:bg-orange-800/40"
+                              : "hover:bg-black/10 dark:hover:bg-white/20"
+                        }`}
                         aria-label={`Remove ${(draft.name?.trim() ? draft.name : `Draft ${index + 1}`)}`}
                       >
                         <X className="h-3 w-3" />
-                      </span>
-                    </Button>
+                      </button>
+                    </div>
                   ))}
                   <Button
                     type="button"
@@ -1972,21 +2138,11 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                       {/* Edit mode indicator */}
                       {isEditMode && (
                         <div className="p-2 bg-orange-50 dark:bg-orange-900/30 border-b border-orange-200 dark:border-orange-600">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <Edit className="h-4 w-4 text-orange-600 dark:text-orange-400" />
-                              <span className="text-sm font-medium text-orange-800 dark:text-orange-200">
-                                Editing Sale #{editingSaleId}
-                              </span>
-                            </div>
-                            <Button
-                              onClick={resetAddSaleForm}
-                              variant="ghost"
-                              size="sm"
-                              className="text-orange-600 dark:text-orange-400 hover:bg-orange-100 dark:hover:bg-orange-900/50"
-                            >
-                              Cancel Edit
-                            </Button>
+                          <div className="flex items-center gap-2">
+                            <Edit className="h-4 w-4 text-orange-600 dark:text-orange-400" />
+                            <span className="text-sm font-medium text-orange-800 dark:text-orange-200">
+                              Editing Sale #{editingSaleId}
+                            </span>
                           </div>
                         </div>
                       )}
