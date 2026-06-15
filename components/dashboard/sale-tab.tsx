@@ -226,6 +226,8 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
   const [isNewServiceModalOpen, setIsNewServiceModalOpen] = useState(false)
   const [isViewSaleModalOpen, setIsViewSaleModalOpen] = useState(false)
   const [selectedSaleId, setSelectedSaleId] = useState<number | null>(null)
+  // Cost is hidden by default so customers don't accidentally see it while billing.
+  const [showCost, setShowCost] = useState(false)
 
   // Local state
   const [isDeleting, setIsDeleting] = useState(false)
@@ -2281,11 +2283,22 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                             {/* Desktop table header */}
                             <div className="hidden lg:block sticky top-0 z-10 min-w-[800px]">
                               <div className="grid grid-cols-12 gap-1 p-2 bg-gray-100 dark:bg-gray-700 font-medium text-xs text-gray-700 dark:text-gray-200 border-b border-gray-200 dark:border-gray-600">
-                                <div className="col-span-4">Product/Service</div>
+                                <div className="col-span-3">Product/Service</div>
                                 <div className="col-span-2">Notes</div>
                                 <div className="col-span-1 text-center">Qty</div>
                                 <div className="col-span-2 text-center">Price</div>
-                                <div className="col-span-2 text-center">Total</div>
+                                <div className="col-span-2 text-center">
+                                  <button
+                                    type="button"
+                                    onClick={() => setShowCost((prev) => !prev)}
+                                    className="inline-flex items-center justify-center gap-1 hover:text-gray-900 dark:hover:text-white transition-colors"
+                                    title={showCost ? "Hide reference price" : "Show reference price"}
+                                  >
+                                    Ref
+                                    {showCost ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                                  </button>
+                                </div>
+                                <div className="col-span-1 text-center">Total</div>
                                 <div className="col-span-1"></div>
                               </div>
                             </div>
@@ -2298,7 +2311,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                     index % 2 === 0 ? "bg-white dark:bg-gray-800" : "bg-gray-50 dark:bg-gray-700"
                                   } hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors duration-150`}
                                 >
-                                  <div className="col-span-4">
+                                  <div className="col-span-3">
                                     {product.productId && product.productName ? (
                                       <div className="flex items-center justify-between">
                                         <div className="flex items-center gap-2 flex-1">
@@ -2385,7 +2398,26 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                       className="text-center h-7 text-xs bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100"
                                     />
                                   </div>
-                                  <div className="col-span-2 flex items-center justify-center font-medium text-xs text-gray-900 dark:text-gray-200">
+                                  <div
+                                    className={`col-span-2 transition-all duration-150 ${
+                                      showCost ? "" : "blur-sm hover:blur-none focus-within:blur-none"
+                                    }`}
+                                    title={showCost ? undefined : "Hidden — hover to view"}
+                                  >
+                                    <Input
+                                      type="number"
+                                      min="0"
+                                      step="0.01"
+                                      value={product.cost || 0}
+                                      onChange={(e) =>
+                                        updateProductRow(product.id, {
+                                          cost: Number.parseFloat(e.target.value) || 0,
+                                        })
+                                      }
+                                      className="text-center h-7 text-xs bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100"
+                                    />
+                                  </div>
+                                  <div className="col-span-1 flex items-center justify-center font-medium text-xs text-gray-900 dark:text-gray-200">
                                     {deviceCurrencyState} {product.total.toFixed(2)}
                                   </div>
                                   <div className="col-span-1 flex justify-center">
@@ -2481,8 +2513,8 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                     />
                                   </div>
 
-                                  {/* Quantity, Price row */}
-                                  <div className="grid grid-cols-2 gap-2 mb-3">
+                                  {/* Quantity, Price, Cost row */}
+                                  <div className="grid grid-cols-3 gap-2 mb-3">
                                     <div>
                                       <Label className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1 block">
                                         Qty
@@ -2518,6 +2550,37 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                         }
                                         className="text-center h-8 text-sm"
                                       />
+                                    </div>
+                                    <div>
+                                      <Label className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1 flex items-center justify-center gap-1">
+                                        <button
+                                          type="button"
+                                          onClick={() => setShowCost((prev) => !prev)}
+                                          className="inline-flex items-center gap-1"
+                                          title={showCost ? "Hide reference price" : "Show reference price"}
+                                        >
+                                          Ref
+                                          {showCost ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                                        </button>
+                                      </Label>
+                                      <div
+                                        className={`transition-all duration-150 ${
+                                          showCost ? "" : "blur-sm focus-within:blur-none active:blur-none"
+                                        }`}
+                                      >
+                                        <Input
+                                          type="number"
+                                          min="0"
+                                          step="0.01"
+                                          value={product.cost || 0}
+                                          onChange={(e) =>
+                                            updateProductRow(product.id, {
+                                              cost: Number.parseFloat(e.target.value) || 0,
+                                            })
+                                          }
+                                          className="text-center h-8 text-sm"
+                                        />
+                                      </div>
                                     </div>
                                   </div>
 
