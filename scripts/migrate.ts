@@ -366,7 +366,12 @@ async function createStaffServiceTables() {
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW(),
         cancelled_at TIMESTAMP,
-        cancelled_by INTEGER
+        cancelled_by INTEGER,
+        rejection_reason TEXT,
+        approved_by INTEGER,
+        approved_at TIMESTAMP,
+        rejected_by INTEGER,
+        rejected_at TIMESTAMP
       )
     `
   })
@@ -601,6 +606,11 @@ async function addColumns() {
   await runSafe("stock_transfers.paid_amount", () => sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS paid_amount DECIMAL(12,2) NOT NULL DEFAULT 0`)
   await runSafe("stock_transfers.payment_notes", () => sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS payment_notes TEXT`)
   await runSafe("stock_transfers.transfer_date", () => sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS transfer_date TIMESTAMP DEFAULT NOW()`)
+  await runSafe("stock_transfers.rejection_reason", () => sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS rejection_reason TEXT`)
+  await runSafe("stock_transfers.approved_by", () => sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS approved_by INTEGER`)
+  await runSafe("stock_transfers.approved_at", () => sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP`)
+  await runSafe("stock_transfers.rejected_by", () => sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS rejected_by INTEGER`)
+  await runSafe("stock_transfers.rejected_at", () => sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS rejected_at TIMESTAMP`)
 
   // ── stock_transfer_items ──
   await runSafe("stock_transfer_items.unit_cost", () => sql`ALTER TABLE stock_transfer_items ADD COLUMN IF NOT EXISTS unit_cost DECIMAL(12,2) NOT NULL DEFAULT 0`)

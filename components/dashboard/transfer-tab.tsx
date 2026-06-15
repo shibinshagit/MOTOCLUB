@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { ArrowRightLeft, Check, ChevronDown, Eye, Loader2, Pencil, Plus, RefreshCw, Search, Trash2 } from "lucide-react"
+import { ArrowRightLeft, Check, ChevronDown, Eye, Loader2, Pencil, Plus, RefreshCw, Search, Trash2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -10,11 +10,13 @@ import { Badge } from "@/components/ui/badge"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { useToast } from "@/components/ui/use-toast"
 import {
+  acceptWarehouseTransfer,
   cancelWarehouseTransfer,
   createWarehouseTransfer,
   getTransferFormData,
   getWarehouseTransferById,
   getWarehouseTransfers,
+  rejectWarehouseTransfer,
   updateWarehouseTransfer,
 } from "@/app/actions/transfer-actions"
 
@@ -62,7 +64,11 @@ export default function TransferTab({ userId }: TransferTabProps) {
   const [isSaving, setIsSaving] = useState(false)
   const [isPreparingModal, setIsPreparingModal] = useState(false)
   const [searchTerm, setSearchTerm] = useState("")
-  const [statusFilter, setStatusFilter] = useState<"all" | "completed" | "cancelled">("all")
+  const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "completed" | "rejected" | "cancelled">("all")
+  const [rejectTransferId, setRejectTransferId] = useState<number | null>(null)
+  const [rejectReason, setRejectReason] = useState("")
+  const [isRejecting, setIsRejecting] = useState(false)
+  const [actioningId, setActioningId] = useState<number | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [isViewModalOpen, setIsViewModalOpen] = useState(false)
   const [isViewLoading, setIsViewLoading] = useState(false)
@@ -299,6 +305,49 @@ export default function TransferTab({ userId }: TransferTabProps) {
     await loadTransfers()
   }
 
+  const handleAcceptTransfer = async (transferId: number) => {
+    if (!confirm("Accept this transfer request? Stock will be moved now.")) return
+    try {
+      setActioningId(transferId)
+      const result = await acceptWarehouseTransfer(transferId, userId)
+      if (!result.success) {
+        toast({ title: "Error", description: result.message || "Failed to accept request", variant: "destructive" })
+        return
+      }
+      toast({ title: "Accepted", description: result.message || "Transfer request accepted" })
+      await loadTransfers()
+    } finally {
+      setActioningId(null)
+    }
+  }
+
+  const openRejectDialog = (transferId: number) => {
+    setRejectTransferId(transferId)
+    setRejectReason("")
+  }
+
+  const handleConfirmReject = async () => {
+    if (rejectTransferId == null) return
+    if (!rejectReason.trim()) {
+      toast({ title: "Validation", description: "Please provide a reason for rejection", variant: "destructive" })
+      return
+    }
+    try {
+      setIsRejecting(true)
+      const result = await rejectWarehouseTransfer(rejectTransferId, userId, rejectReason.trim())
+      if (!result.success) {
+        toast({ title: "Error", description: result.message || "Failed to reject request", variant: "destructive" })
+        return
+      }
+      toast({ title: "Rejected", description: result.message || "Transfer request rejected" })
+      setRejectTransferId(null)
+      setRejectReason("")
+      await loadTransfers()
+    } finally {
+      setIsRejecting(false)
+    }
+  }
+
   const setItem = (index: number, patch: Partial<TransferItemForm>) => {
     setFormData((prev) => {
       const items = [...prev.items]
@@ -451,8 +500,15 @@ export default function TransferTab({ userId }: TransferTabProps) {
   }
 
   const getStatusBadge = (status: string) => {
-    if (String(status).toLowerCase() === "cancelled") {
+    const value = String(status).toLowerCase()
+    if (value === "cancelled") {
       return <Badge className="bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300">CANCELLED</Badge>
+    }
+    if (value === "rejected") {
+      return <Badge className="bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300">REJECTED</Badge>
+    }
+    if (value === "pending") {
+      return <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">PENDING</Badge>
     }
     return <Badge className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">DONE</Badge>
   }
@@ -491,11 +547,15 @@ export default function TransferTab({ userId }: TransferTabProps) {
           </div>
           <select
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as "all" | "completed" | "cancelled")}
+            onChange={(e) =>
+              setStatusFilter(e.target.value as "all" | "pending" | "completed" | "rejected" | "cancelled")
+            }
             className="h-10 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 text-sm"
           >
             <option value="all">All Status</option>
+            <option value="pending">Pending</option>
             <option value="completed">Completed</option>
+            <option value="rejected">Rejected</option>
             <option value="cancelled">Cancelled</option>
           </select>
         </div>
@@ -549,37 +609,76 @@ export default function TransferTab({ userId }: TransferTabProps) {
                         </span>
                       </div>
                     </td>
-                    <td className="p-3">{getStatusBadge(transfer.status)}</td>
                     <td className="p-3">
-                      <div className="flex gap-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleOpenView(Number(transfer.id))}
-                        >
-                          <Eye className="h-3.5 w-3.5 mr-1" />
-                          View
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleOpenEdit(Number(transfer.id))}
-                          disabled={String(transfer.status).toLowerCase() === "cancelled"}
-                        >
-                          <Pencil className="h-3.5 w-3.5 mr-1" />
-                          Edit
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="text-red-600 hover:text-red-700 border-red-200 hover:border-red-300"
-                          onClick={() => handleCancelTransfer(Number(transfer.id))}
-                          disabled={String(transfer.status).toLowerCase() === "cancelled"}
-                        >
-                          <Trash2 className="h-3.5 w-3.5 mr-1" />
-                          Cancel
-                        </Button>
-                      </div>
+                      {getStatusBadge(transfer.status)}
+                      {String(transfer.status).toLowerCase() === "rejected" && transfer.rejection_reason ? (
+                        <div className="text-xs text-rose-600 dark:text-rose-300 mt-1 max-w-[180px]">
+                          Reason: {transfer.rejection_reason}
+                        </div>
+                      ) : null}
+                    </td>
+                    <td className="p-3">
+                      {(() => {
+                        const status = String(transfer.status).toLowerCase()
+                        const isTerminal = status === "cancelled" || status === "rejected"
+                        const isPending = status === "pending"
+                        const isSender = Number(transfer.from_device_id) === userId
+                        const busy = actioningId === Number(transfer.id)
+                        return (
+                          <div className="flex flex-wrap gap-2">
+                            <Button size="sm" variant="outline" onClick={() => handleOpenView(Number(transfer.id))}>
+                              <Eye className="h-3.5 w-3.5 mr-1" />
+                              View
+                            </Button>
+                            {isPending && isSender ? (
+                              <>
+                                <Button
+                                  size="sm"
+                                  className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                                  onClick={() => handleAcceptTransfer(Number(transfer.id))}
+                                  disabled={busy}
+                                >
+                                  {busy ? (
+                                    <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                                  ) : (
+                                    <Check className="h-3.5 w-3.5 mr-1" />
+                                  )}
+                                  Accept
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="text-rose-600 hover:text-rose-700 border-rose-200 hover:border-rose-300"
+                                  onClick={() => openRejectDialog(Number(transfer.id))}
+                                  disabled={busy}
+                                >
+                                  <X className="h-3.5 w-3.5 mr-1" />
+                                  Reject
+                                </Button>
+                              </>
+                            ) : null}
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleOpenEdit(Number(transfer.id))}
+                              disabled={isTerminal}
+                            >
+                              <Pencil className="h-3.5 w-3.5 mr-1" />
+                              Edit
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="text-red-600 hover:text-red-700 border-red-200 hover:border-red-300"
+                              onClick={() => handleCancelTransfer(Number(transfer.id))}
+                              disabled={isTerminal}
+                            >
+                              <Trash2 className="h-3.5 w-3.5 mr-1" />
+                              Cancel
+                            </Button>
+                          </div>
+                        )
+                      })()}
                     </td>
                   </tr>
                 ))}
@@ -645,6 +744,13 @@ export default function TransferTab({ userId }: TransferTabProps) {
                 </select>
               </div>
             </div>
+
+            {!editingTransferId && formData.fromDeviceId && formData.fromDeviceId !== userId ? (
+              <div className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-700 dark:bg-amber-900/30 px-3 py-2 text-xs text-amber-700 dark:text-amber-200">
+                You are requesting stock from another warehouse. This will be sent as a <strong>pending request</strong>,
+                and the source warehouse must accept it before any stock or payment is recorded.
+              </div>
+            ) : null}
 
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Payment Status</label>
@@ -953,6 +1059,14 @@ export default function TransferTab({ userId }: TransferTabProps) {
                 </div>
               </div>
 
+              {String(viewTransferDetail.transfer.status || "").toLowerCase() === "rejected" &&
+              viewTransferDetail.transfer.rejection_reason ? (
+                <div className="rounded-md border border-rose-200 bg-rose-50 dark:border-rose-700 dark:bg-rose-900/30 p-3 text-sm">
+                  <p className="text-xs text-rose-500 mb-1">Rejection Reason</p>
+                  <p className="text-rose-700 dark:text-rose-200">{viewTransferDetail.transfer.rejection_reason}</p>
+                </div>
+              ) : null}
+
               {(viewTransferDetail.transfer.notes || viewTransferDetail.transfer.payment_notes) && (
                 <div className="rounded-md border border-gray-200 dark:border-gray-700 p-3 text-sm space-y-2">
                   {viewTransferDetail.transfer.notes ? (
@@ -994,6 +1108,56 @@ export default function TransferTab({ userId }: TransferTabProps) {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={rejectTransferId != null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRejectTransferId(null)
+            setRejectReason("")
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Reject Transfer Request #{rejectTransferId}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-gray-600 dark:text-gray-300">
+              Let the requester know why this transfer is being rejected. No stock or payment will be recorded.
+            </p>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Reason</label>
+              <Textarea
+                value={rejectReason}
+                onChange={(e) => setRejectReason(e.target.value)}
+                placeholder="e.g. Not enough stock available, price needs revision..."
+                rows={4}
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setRejectTransferId(null)
+                  setRejectReason("")
+                }}
+                disabled={isRejecting}
+              >
+                Cancel
+              </Button>
+              <Button
+                className="bg-rose-600 hover:bg-rose-700 text-white"
+                onClick={handleConfirmReject}
+                disabled={isRejecting || !rejectReason.trim()}
+              >
+                {isRejecting ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <X className="h-4 w-4 mr-1" />}
+                Reject Request
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

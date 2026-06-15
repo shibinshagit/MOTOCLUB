@@ -860,8 +860,54 @@ export async function getFinancialSummary(deviceId: number, dateFrom?: Date, dat
       ORDER BY p.purchase_date DESC
     `
 
-    const accountsReceivable = receivablesQuery.reduce((sum, r) => sum + Number(r.outstanding_amount), 0)
-    const accountsPayable = payablesQuery.reduce((sum, p) => sum + Number(p.outstanding_amount), 0)
+    // Transfer receivables: this device SENT goods and is owed money by the receiving warehouse
+    let transferReceivablesQuery: any[] = []
+    let transferPayablesQuery: any[] = []
+    try {
+      transferReceivablesQuery = await sql`
+        SELECT
+          t.id,
+          COALESCE(t.total_amount, 0) AS total_amount,
+          COALESCE(t.paid_amount, 0) AS received_amount,
+          COALESCE(t.transfer_date, t.created_at) AS due_date,
+          t.payment_status AS status,
+          dt.name AS counterpart_name,
+          (COALESCE(t.total_amount, 0) - COALESCE(t.paid_amount, 0)) AS outstanding_amount
+        FROM stock_transfers t
+        JOIN devices dt ON dt.id = t.to_device_id
+        WHERE t.from_device_id = ${deviceId}
+          AND LOWER(COALESCE(t.status, '')) = 'completed'
+          AND (COALESCE(t.total_amount, 0) - COALESCE(t.paid_amount, 0)) > 0
+        ORDER BY COALESCE(t.transfer_date, t.created_at) DESC
+      `
+
+      // Transfer payables: this device RECEIVED goods and owes money to the sending warehouse
+      transferPayablesQuery = await sql`
+        SELECT
+          t.id,
+          COALESCE(t.total_amount, 0) AS total_amount,
+          COALESCE(t.paid_amount, 0) AS received_amount,
+          COALESCE(t.transfer_date, t.created_at) AS due_date,
+          t.payment_status AS status,
+          df.name AS counterpart_name,
+          (COALESCE(t.total_amount, 0) - COALESCE(t.paid_amount, 0)) AS outstanding_amount
+        FROM stock_transfers t
+        JOIN devices df ON df.id = t.from_device_id
+        WHERE t.to_device_id = ${deviceId}
+          AND LOWER(COALESCE(t.status, '')) = 'completed'
+          AND (COALESCE(t.total_amount, 0) - COALESCE(t.paid_amount, 0)) > 0
+        ORDER BY COALESCE(t.transfer_date, t.created_at) DESC
+      `
+    } catch (transferErr) {
+      console.error("Error loading transfer dues (non-fatal):", transferErr)
+    }
+
+    const accountsReceivable =
+      receivablesQuery.reduce((sum, r) => sum + Number(r.outstanding_amount), 0) +
+      transferReceivablesQuery.reduce((sum, r) => sum + Number(r.outstanding_amount), 0)
+    const accountsPayable =
+      payablesQuery.reduce((sum, p) => sum + Number(p.outstanding_amount), 0) +
+      transferPayablesQuery.reduce((sum, p) => sum + Number(p.outstanding_amount), 0)
     const netProfit = totalIncome - totalExpenses
 
     console.log("Financial summary calculated:", {
@@ -903,6 +949,8 @@ export async function getFinancialSummary(deviceId: number, dateFrom?: Date, dat
           remaining = amount - received
         } else if (status.toLowerCase() === 'completed' && received < amount) {
           remaining = amount - received
+        } else if (type === 'transfer' && received < amount) {
+          remaining = amount - received
         }
 
         return {
@@ -924,35 +972,66 @@ export async function getFinancialSummary(deviceId: number, dateFrom?: Date, dat
           sale_id: tx.reference_type === 'sale' ? tx.reference_id : undefined,
           purchase_id: tx.reference_type === 'purchase' ? tx.reference_id : undefined,
           supplier_payment_id: tx.reference_type === 'supplier' ? tx.reference_id : undefined,
+          transfer_id: tx.reference_type === 'transfer' ? tx.reference_id : undefined,
           reference_id: tx.reference_id,
         }
       }),
-      receivables: receivablesQuery.map((r: any) => ({
-        id: r.id,
-        customer_name: r.customer_name || "Walk-in Customer",
-        amount: Number(r.outstanding_amount),
-        total_amount: Number(r.total_amount),
-        received_amount: Number(r.received_amount) || 0,
-        due_date: r.sale_date,
-        days_overdue: Math.max(
-          0,
-          Math.floor((new Date().getTime() - new Date(r.sale_date).getTime()) / (1000 * 60 * 60 * 24)),
-        ),
-        status: r.status,
-      })),
-      payables: payablesQuery.map((p: any) => ({
-        id: p.id,
-        supplier_name: p.supplier_name || "Unknown Supplier",
-        amount: Number(p.outstanding_amount),
-        total_amount: Number(p.total_amount),
-        received_amount: Number(p.received_amount) || 0,
-        due_date: p.purchase_date,
-        days_overdue: Math.max(
-          0,
-          Math.floor((new Date().getTime() - new Date(p.purchase_date).getTime()) / (1000 * 60 * 60 * 24)),
-        ),
-        status: p.status,
-      })),
+      receivables: [
+        ...receivablesQuery.map((r: any) => ({
+          id: r.id,
+          customer_name: r.customer_name || "Walk-in Customer",
+          amount: Number(r.outstanding_amount),
+          total_amount: Number(r.total_amount),
+          received_amount: Number(r.received_amount) || 0,
+          due_date: r.sale_date,
+          days_overdue: Math.max(
+            0,
+            Math.floor((new Date().getTime() - new Date(r.sale_date).getTime()) / (1000 * 60 * 60 * 24)),
+          ),
+          status: r.status,
+        })),
+        ...transferReceivablesQuery.map((r: any) => ({
+          id: `T-${r.id}`,
+          customer_name: `Transfer → ${r.counterpart_name || "Warehouse"}`,
+          amount: Number(r.outstanding_amount),
+          total_amount: Number(r.total_amount),
+          received_amount: Number(r.received_amount) || 0,
+          due_date: r.due_date,
+          days_overdue: Math.max(
+            0,
+            Math.floor((new Date().getTime() - new Date(r.due_date).getTime()) / (1000 * 60 * 60 * 24)),
+          ),
+          status: r.status,
+        })),
+      ],
+      payables: [
+        ...payablesQuery.map((p: any) => ({
+          id: p.id,
+          supplier_name: p.supplier_name || "Unknown Supplier",
+          amount: Number(p.outstanding_amount),
+          total_amount: Number(p.total_amount),
+          received_amount: Number(p.received_amount) || 0,
+          due_date: p.purchase_date,
+          days_overdue: Math.max(
+            0,
+            Math.floor((new Date().getTime() - new Date(p.purchase_date).getTime()) / (1000 * 60 * 60 * 24)),
+          ),
+          status: p.status,
+        })),
+        ...transferPayablesQuery.map((p: any) => ({
+          id: `T-${p.id}`,
+          supplier_name: `Transfer ← ${p.counterpart_name || "Warehouse"}`,
+          amount: Number(p.outstanding_amount),
+          total_amount: Number(p.total_amount),
+          received_amount: Number(p.received_amount) || 0,
+          due_date: p.due_date,
+          days_overdue: Math.max(
+            0,
+            Math.floor((new Date().getTime() - new Date(p.due_date).getTime()) / (1000 * 60 * 60 * 24)),
+          ),
+          status: p.status,
+        })),
+      ],
     }
   } catch (error) {
     console.error("Error getting financial summary:", error)
@@ -991,6 +1070,8 @@ function getAccountType(transactionType: string): string {
       return "Manual"
     case "supplier_payment":
       return "Supplier Payment"
+    case "transfer":
+      return "Transfer"
     case "adjustment":
       return "Adjustments"
     default:

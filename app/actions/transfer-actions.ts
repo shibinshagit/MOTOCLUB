@@ -43,6 +43,11 @@ async function ensureTransferTables() {
   await sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS paid_amount DECIMAL(12,2) NOT NULL DEFAULT 0`
   await sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS payment_notes TEXT`
   await sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS transfer_date TIMESTAMP DEFAULT NOW()`
+  await sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS rejection_reason TEXT`
+  await sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS approved_by INTEGER`
+  await sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP`
+  await sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS rejected_by INTEGER`
+  await sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS rejected_at TIMESTAMP`
 
   await sql`
     CREATE TABLE IF NOT EXISTS stock_transfer_items (
@@ -199,6 +204,82 @@ async function moveStockBetweenDevices(
   await createTransferHistoryRows(transferId, productId, quantity, fromDeviceId, toDeviceId, actorDeviceId, historyNotes)
 }
 
+async function getDeviceNames(fromDeviceId: number, toDeviceId: number): Promise<{ from: string; to: string }> {
+  const rows = (await sql`
+    SELECT id, name FROM devices WHERE id = ${fromDeviceId} OR id = ${toDeviceId}
+  `) as any[]
+  const map = new Map<number, string>()
+  for (const row of rows) map.set(Number(row.id), row.name)
+  return {
+    from: map.get(fromDeviceId) || `Warehouse #${fromDeviceId}`,
+    to: map.get(toDeviceId) || `Warehouse #${toDeviceId}`,
+  }
+}
+
+// Remove any ledger rows previously recorded for this transfer (both sides).
+async function deleteTransferLedger(transferId: number) {
+  await sql`
+    DELETE FROM financial_transactions
+    WHERE reference_type = 'transfer' AND reference_id = ${transferId}
+  `
+}
+
+// Record the transfer in the shared financial ledger as a two-sided entry:
+//  - Sending warehouse: money IN (treated like a sale / receivable)
+//  - Receiving warehouse: money OUT (treated like a purchase / payable)
+async function recordTransferLedger(params: {
+  transferId: number
+  companyId: number
+  fromDeviceId: number
+  toDeviceId: number
+  totalAmount: number
+  paidAmount: number
+  paymentStatus: string
+  paymentMethod: string
+  paymentNotes: string
+  userId: number
+  transferDate: string | null
+}) {
+  // Nothing meaningful to record for a zero-value, fully-unpaid transfer.
+  if (Number(params.totalAmount) <= 0 && Number(params.paidAmount) <= 0) return
+
+  const { from: fromName, to: toName } = await getDeviceNames(params.fromDeviceId, params.toDeviceId)
+  const statusLabel = params.paymentStatus
+    ? params.paymentStatus.charAt(0).toUpperCase() + params.paymentStatus.slice(1)
+    : "Unpaid"
+  const txDate = params.transferDate ? `${params.transferDate} 00:00:00` : new Date().toISOString()
+  const method = params.paymentMethod || null
+  const notes = params.paymentNotes || null
+
+  // Sending warehouse — money in
+  await sql`
+    INSERT INTO financial_transactions (
+      transaction_type, reference_type, reference_id,
+      amount, received_amount, cost_amount, debit_amount, credit_amount,
+      status, payment_method, description, notes, device_id, company_id, created_by, transaction_date
+    ) VALUES (
+      'transfer', 'transfer', ${params.transferId},
+      ${params.totalAmount}, ${params.paidAmount}, 0, 0, ${params.paidAmount},
+      ${statusLabel}, ${method}, ${`Transfer #${params.transferId} - Sent to ${toName}`}, ${notes},
+      ${params.fromDeviceId}, ${params.companyId}, ${params.userId}, ${txDate}
+    )
+  `
+
+  // Receiving warehouse — money out
+  await sql`
+    INSERT INTO financial_transactions (
+      transaction_type, reference_type, reference_id,
+      amount, received_amount, cost_amount, debit_amount, credit_amount,
+      status, payment_method, description, notes, device_id, company_id, created_by, transaction_date
+    ) VALUES (
+      'transfer', 'transfer', ${params.transferId},
+      ${params.totalAmount}, ${params.paidAmount}, 0, ${params.paidAmount}, 0,
+      ${statusLabel}, ${method}, ${`Transfer #${params.transferId} - Received from ${fromName}`}, ${notes},
+      ${params.toDeviceId}, ${params.companyId}, ${params.userId}, ${txDate}
+    )
+  `
+}
+
 async function reverseTransferItems(
   transferId: number,
   items: StockMoveItemInput[],
@@ -309,6 +390,7 @@ export async function getWarehouseTransfers(userId: number, searchTerm?: string,
         COALESCE(t.paid_amount, 0)::numeric AS paid_amount,
         COALESCE(t.transfer_date, t.created_at) AS transfer_date,
         t.notes,
+        t.rejection_reason,
         t.created_by,
         t.created_at,
         t.updated_at,
@@ -475,27 +557,58 @@ export async function createWarehouseTransfer(formData: FormData) {
       return { success: false, message: "Paid amount cannot exceed transfer amount" }
     }
 
+    // A transfer is a "request" (pending the sender's approval) whenever the
+    // creating device is NOT the source warehouse. When the source warehouse
+    // itself creates the transfer (pushing its own stock out), it completes
+    // immediately.
+    const isRequest = fromDeviceId !== userId
+    const initialStatus = isRequest ? "pending" : "completed"
+
     const transferRows = (await sql`
       INSERT INTO stock_transfers (
         company_id, from_device_id, to_device_id, status, total_amount, payment_status, payment_method, paid_amount, payment_notes, transfer_date, notes, created_by, created_at, updated_at
       ) VALUES (
-        ${actorCompanyId}, ${fromDeviceId}, ${toDeviceId}, 'completed', ${totalAmount}, ${paymentStatus}, ${paymentMethod || null}, ${paidAmount}, ${paymentNotes || null}, COALESCE(${transferDate}::timestamp, NOW()), ${notes}, ${userId}, NOW(), NOW()
+        ${actorCompanyId}, ${fromDeviceId}, ${toDeviceId}, ${initialStatus}, ${totalAmount}, ${paymentStatus}, ${paymentMethod || null}, ${paidAmount}, ${paymentNotes || null}, COALESCE(${transferDate}::timestamp, NOW()), ${notes}, ${userId}, NOW(), NOW()
       )
       RETURNING id
     `) as any[]
     const transferId = Number(transferRows[0].id)
 
     for (const item of items) {
-      await moveStockBetweenDevices(item.product_id, item.quantity, fromDeviceId, toDeviceId, transferId, userId)
+      // Pending requests don't move stock yet — that happens on acceptance.
+      if (!isRequest) {
+        await moveStockBetweenDevices(item.product_id, item.quantity, fromDeviceId, toDeviceId, transferId, userId)
+      }
       await sql`
         INSERT INTO stock_transfer_items (transfer_id, product_id, quantity, unit_cost, total_cost, created_at)
         VALUES (${transferId}, ${item.product_id}, ${item.quantity}, ${item.unit_cost}, ${Number((item.quantity * item.unit_cost).toFixed(2))}, NOW())
       `
     }
 
+    // No financial impact until a request is accepted.
+    if (!isRequest) {
+      await recordTransferLedger({
+        transferId,
+        companyId: actorCompanyId,
+        fromDeviceId,
+        toDeviceId,
+        totalAmount,
+        paidAmount,
+        paymentStatus,
+        paymentMethod,
+        paymentNotes,
+        userId,
+        transferDate,
+      })
+    }
+
     await sql`COMMIT`
     revalidatePath("/dashboard")
-    return { success: true, message: "Transfer completed successfully", data: { id: transferId } }
+    return {
+      success: true,
+      message: isRequest ? "Transfer request sent for approval" : "Transfer completed successfully",
+      data: { id: transferId, status: initialStatus },
+    }
   } catch (error: any) {
     await sql`ROLLBACK`
     console.error("Create warehouse transfer error:", error)
@@ -582,10 +695,19 @@ export async function updateWarehouseTransfer(formData: FormData) {
     }
 
     const transfer = transferRows[0]
-    if (String(transfer.status).toLowerCase() === "cancelled") {
+    const currentStatus = String(transfer.status).toLowerCase()
+    if (currentStatus === "cancelled") {
       await sql`ROLLBACK`
       return { success: false, message: "Cancelled transfers cannot be edited" }
     }
+    if (currentStatus === "rejected") {
+      await sql`ROLLBACK`
+      return { success: false, message: "Rejected transfers cannot be edited" }
+    }
+
+    // A pending request hasn't moved any stock or recorded any financials yet,
+    // so editing it only updates the proposed details/items.
+    const isPending = currentStatus === "pending"
 
     const existingItemsRows = (await sql`
       SELECT product_id, quantity
@@ -602,7 +724,9 @@ export async function updateWarehouseTransfer(formData: FormData) {
     const originalToDeviceId = Number(transfer.to_device_id)
     const isSameRoute = originalFromDeviceId === fromDeviceId && originalToDeviceId === toDeviceId
 
-    if (isSameRoute) {
+    if (isPending) {
+      // No stock has moved for a pending request — nothing to reconcile here.
+    } else if (isSameRoute) {
       const oldQtyMap = new Map<number, number>()
       for (const item of existingItems) {
         oldQtyMap.set(item.product_id, (oldQtyMap.get(item.product_id) || 0) + item.quantity)
@@ -689,6 +813,23 @@ export async function updateWarehouseTransfer(formData: FormData) {
       `
     }
 
+    if (!isPending) {
+      await deleteTransferLedger(transferId)
+      await recordTransferLedger({
+        transferId,
+        companyId: actorCompanyId,
+        fromDeviceId,
+        toDeviceId,
+        totalAmount,
+        paidAmount,
+        paymentStatus,
+        paymentMethod,
+        paymentNotes,
+        userId,
+        transferDate,
+      })
+    }
+
     await sql`COMMIT`
     revalidatePath("/dashboard")
     return { success: true, message: "Transfer updated successfully" }
@@ -731,31 +872,42 @@ export async function cancelWarehouseTransfer(transferId: number, userId: number
     }
 
     const transfer = transferRows[0]
-    if (String(transfer.status).toLowerCase() === "cancelled") {
+    const cancelStatus = String(transfer.status).toLowerCase()
+    if (cancelStatus === "cancelled") {
       await sql`ROLLBACK`
       return { success: false, message: "Transfer is already cancelled" }
     }
+    if (cancelStatus === "rejected") {
+      await sql`ROLLBACK`
+      return { success: false, message: "Rejected transfers cannot be cancelled" }
+    }
 
-    const itemsRows = (await sql`
-      SELECT product_id, quantity
-      FROM stock_transfer_items
-      WHERE transfer_id = ${transferId}
-      ORDER BY id ASC
-    `) as any[]
+    // Only completed transfers have moved stock / recorded financials that need
+    // to be reversed. Pending requests have done neither.
+    if (cancelStatus !== "pending") {
+      const itemsRows = (await sql`
+        SELECT product_id, quantity
+        FROM stock_transfer_items
+        WHERE transfer_id = ${transferId}
+        ORDER BY id ASC
+      `) as any[]
 
-    const items = itemsRows.map((row) => ({
-      product_id: Number(row.product_id),
-      quantity: Number(row.quantity),
-    }))
+      const items = itemsRows.map((row) => ({
+        product_id: Number(row.product_id),
+        quantity: Number(row.quantity),
+      }))
 
-    await reverseTransferItems(
-      transferId,
-      items,
-      Number(transfer.from_device_id),
-      Number(transfer.to_device_id),
-      userId,
-      "Transfer cancellation reversal",
-    )
+      await reverseTransferItems(
+        transferId,
+        items,
+        Number(transfer.from_device_id),
+        Number(transfer.to_device_id),
+        userId,
+        "Transfer cancellation reversal",
+      )
+
+      await deleteTransferLedger(transferId)
+    }
 
     await sql`
       UPDATE stock_transfers
@@ -772,6 +924,184 @@ export async function cancelWarehouseTransfer(transferId: number, userId: number
   } catch (error: any) {
     await sql`ROLLBACK`
     console.error("Cancel warehouse transfer error:", error)
+    return {
+      success: false,
+      message: error?.message || `Database error: ${getLastError()?.message || "Unknown error"}.`,
+    }
+  }
+}
+
+// Sender (source warehouse) approves a pending transfer request: the stock
+// physically moves now and the financial entries are recorded.
+export async function acceptWarehouseTransfer(transferId: number, userId: number) {
+  if (!transferId || !userId) {
+    return { success: false, message: "Transfer ID and user ID are required" }
+  }
+
+  resetConnectionState()
+  try {
+    await sql`BEGIN`
+    await ensureTransferTables()
+    await ensureProductDeviceStockTable()
+
+    const actorCompanyId = await getCompanyIdForDevice(userId)
+    if (!actorCompanyId) {
+      await sql`ROLLBACK`
+      return { success: false, message: "Device/company not found" }
+    }
+
+    const transferRows = (await sql`
+      SELECT id, status, from_device_id, to_device_id, total_amount, paid_amount,
+             payment_status, payment_method, payment_notes,
+             TO_CHAR(COALESCE(transfer_date, created_at), 'YYYY-MM-DD') AS transfer_date_str
+      FROM stock_transfers
+      WHERE id = ${transferId} AND company_id = ${actorCompanyId}
+      LIMIT 1
+    `) as any[]
+    if (transferRows.length === 0) {
+      await sql`ROLLBACK`
+      return { success: false, message: "Transfer not found" }
+    }
+
+    const transfer = transferRows[0]
+    if (String(transfer.status).toLowerCase() !== "pending") {
+      await sql`ROLLBACK`
+      return { success: false, message: "Only pending requests can be accepted" }
+    }
+
+    const fromDeviceId = Number(transfer.from_device_id)
+    const toDeviceId = Number(transfer.to_device_id)
+
+    // Only the source warehouse (the one giving up stock) can approve.
+    if (userId !== fromDeviceId) {
+      await sql`ROLLBACK`
+      return { success: false, message: "Only the source warehouse can accept this request" }
+    }
+
+    const itemsRows = (await sql`
+      SELECT product_id, quantity
+      FROM stock_transfer_items
+      WHERE transfer_id = ${transferId}
+      ORDER BY id ASC
+    `) as any[]
+    const items = itemsRows.map((row) => ({
+      product_id: Number(row.product_id),
+      quantity: Number(row.quantity),
+    }))
+
+    if (items.length === 0) {
+      await sql`ROLLBACK`
+      return { success: false, message: "This request has no items to transfer" }
+    }
+
+    // Authoritative stock check + movement happens here, at acceptance time.
+    for (const item of items) {
+      await moveStockBetweenDevices(
+        item.product_id,
+        item.quantity,
+        fromDeviceId,
+        toDeviceId,
+        transferId,
+        userId,
+        `Transfer request accepted #${transferId}`,
+      )
+    }
+
+    await recordTransferLedger({
+      transferId,
+      companyId: actorCompanyId,
+      fromDeviceId,
+      toDeviceId,
+      totalAmount: Number(transfer.total_amount || 0),
+      paidAmount: Number(transfer.paid_amount || 0),
+      paymentStatus: String(transfer.payment_status || "unpaid"),
+      paymentMethod: String(transfer.payment_method || ""),
+      paymentNotes: String(transfer.payment_notes || ""),
+      userId,
+      transferDate: transfer.transfer_date_str || null,
+    })
+
+    await sql`
+      UPDATE stock_transfers
+      SET status = 'completed',
+          approved_by = ${userId},
+          approved_at = NOW(),
+          updated_at = NOW()
+      WHERE id = ${transferId}
+    `
+
+    await sql`COMMIT`
+    revalidatePath("/dashboard")
+    return { success: true, message: "Transfer request accepted" }
+  } catch (error: any) {
+    await sql`ROLLBACK`
+    console.error("Accept warehouse transfer error:", error)
+    return {
+      success: false,
+      message: error?.message || `Database error: ${getLastError()?.message || "Unknown error"}.`,
+    }
+  }
+}
+
+// Sender rejects a pending request with a reason. No stock or money moves.
+export async function rejectWarehouseTransfer(transferId: number, userId: number, reason: string) {
+  if (!transferId || !userId) {
+    return { success: false, message: "Transfer ID and user ID are required" }
+  }
+
+  const rejectionReason = String(reason || "").trim()
+  if (!rejectionReason) {
+    return { success: false, message: "A reason is required to reject a request" }
+  }
+
+  resetConnectionState()
+  try {
+    await sql`BEGIN`
+    await ensureTransferTables()
+
+    const actorCompanyId = await getCompanyIdForDevice(userId)
+    if (!actorCompanyId) {
+      await sql`ROLLBACK`
+      return { success: false, message: "Device/company not found" }
+    }
+
+    const transferRows = (await sql`
+      SELECT id, status, from_device_id
+      FROM stock_transfers
+      WHERE id = ${transferId} AND company_id = ${actorCompanyId}
+      LIMIT 1
+    `) as any[]
+    if (transferRows.length === 0) {
+      await sql`ROLLBACK`
+      return { success: false, message: "Transfer not found" }
+    }
+
+    const transfer = transferRows[0]
+    if (String(transfer.status).toLowerCase() !== "pending") {
+      await sql`ROLLBACK`
+      return { success: false, message: "Only pending requests can be rejected" }
+    }
+    if (userId !== Number(transfer.from_device_id)) {
+      await sql`ROLLBACK`
+      return { success: false, message: "Only the source warehouse can reject this request" }
+    }
+
+    await sql`
+      UPDATE stock_transfers
+      SET status = 'rejected',
+          rejection_reason = ${rejectionReason},
+          rejected_by = ${userId},
+          rejected_at = NOW(),
+          updated_at = NOW()
+      WHERE id = ${transferId}
+    `
+
+    await sql`COMMIT`
+    revalidatePath("/dashboard")
+    return { success: true, message: "Transfer request rejected" }
+  } catch (error: any) {
+    await sql`ROLLBACK`
+    console.error("Reject warehouse transfer error:", error)
     return {
       success: false,
       message: error?.message || `Database error: ${getLastError()?.message || "Unknown error"}.`,
