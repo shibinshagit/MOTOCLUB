@@ -2,26 +2,14 @@
 
 import { getFinancialSummary } from "./simplified-accounting"
 
-export async function getFinancialData(deviceId: number, dateFrom?: Date, dateTo?: Date) {
+export async function getFinancialData(deviceId: number, dateFrom?: string, dateTo?: string) {
   try {
     console.log("Getting financial data for device:", deviceId, "from:", dateFrom, "to:", dateTo)
 
-    // Ensure dates are properly set with time components
-    const fromDate = dateFrom ? new Date(dateFrom) : new Date()
-    const toDate = dateTo ? new Date(dateTo) : new Date()
+    const fromDateStr = dateFrom?.slice(0, 10)
+    const toDateStr = dateTo?.slice(0, 10)
 
-    // Set time to beginning/end of day in local time
-    fromDate.setHours(0, 0, 0, 0)
-    toDate.setHours(23, 59, 59, 999)
-
-    console.log("Adjusted date range:", {
-      from: fromDate.toISOString(),
-      to: toDate.toISOString(),
-      fromLocal: fromDate.toLocaleString(),
-      toLocal: toDate.toLocaleString(),
-    })
-
-    const result = await getFinancialSummary(deviceId, fromDate, toDate)
+    const result = await getFinancialSummary(deviceId, fromDateStr, toDateStr)
 
     console.log("Financial summary:", {
       totalIncome: result.totalIncome,

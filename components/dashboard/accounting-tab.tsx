@@ -299,16 +299,16 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
         return
       }
 
-      const fromDateFixed = new Date(dateFrom)
-      const toDateFixed = new Date(dateTo)
+      const fromDateStr = format(dateFrom, "yyyy-MM-dd")
+      const toDateStr = format(dateTo, "yyyy-MM-dd")
 
       console.log("Fetching financial data with date range:", {
-        from: format(fromDateFixed, "yyyy-MM-dd HH:mm:ss"),
-        to: format(toDateFixed, "yyyy-MM-dd HH:mm:ss"),
+        from: fromDateStr,
+        to: toDateStr,
       })
 
       const cacheBuster = Date.now()
-      const data = await getFinancialSummary(deviceId, fromDateFixed, toDateFixed, cacheBuster)
+      const data = await getFinancialSummary(deviceId, fromDateStr, toDateStr, cacheBuster)
 
       console.log("Received financial data:", {
         transactionCount: data.transactions?.length || 0,
@@ -343,32 +343,15 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
         return
       }
 
-      const startOfFromDate = new Date(
-        fromDate.getFullYear(),
-        fromDate.getMonth(),
-        fromDate.getDate(),
-        0,
-        0,
-        0,
-        0
-      )
-
-      const endOfToDate = new Date(
-        toDate.getFullYear(),
-        toDate.getMonth(),
-        toDate.getDate(),
-        23,
-        59,
-        59,
-        999
-      )
+      const fromDateStr = format(fromDate, "yyyy-MM-dd")
+      const toDateStr = format(toDate, "yyyy-MM-dd")
 
       console.log("Fetching balances with dates:", {
-        start: format(startOfFromDate, "yyyy-MM-dd HH:mm:ss"),
-        end: format(endOfToDate, "yyyy-MM-dd HH:mm:ss"),
+        from: fromDateStr,
+        to: toDateStr,
       })
 
-      const balanceData = await getAccountingBalances(deviceId, startOfFromDate, endOfToDate)
+      const balanceData = await getAccountingBalances(deviceId, fromDateStr, toDateStr)
       dispatch(setBalances(balanceData))
 
       console.log("Balances loaded successfully:", {
@@ -377,7 +360,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
         periodCredits: balanceData.periodCredits,
         periodDebits: balanceData.periodDebits,
         periodNet: balanceData.periodNet,
-        dateRange: `${format(startOfFromDate, "MMM dd")} - ${format(endOfToDate, "MMM dd")}`
+        dateRange: `${format(fromDate, "MMM dd")} - ${format(toDate, "MMM dd")}`
       })
     } catch (error) {
       console.error("Error loading accounting balances:", error)
@@ -1637,19 +1620,7 @@ const getOpeningBalance = () => {
 }
 
 const getClosingBalance = () => {
-  const opening = getOpeningBalance()
-  const totalReceived = getTotalReceived()
-  const totalSpends = getTotalSpends()
-  
-  console.log('Closing balance calculation:', {
-    opening,
-    totalReceived,
-    totalSpends,
-    net: totalReceived - totalSpends,
-    closing: opening + totalReceived - totalSpends
-  })
-  
-  return opening + totalReceived - totalSpends
+  return balances?.closingBalance ?? 0
 }
 
 const getTransactionTypeIcon = (type: string) => {

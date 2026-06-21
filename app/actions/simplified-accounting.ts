@@ -742,9 +742,14 @@ export async function deletePurchaseTransaction(purchaseId: number, deviceId: nu
 }
 
 // FIXED: Get financial summary from the simplified structure - PROPER cash balance calculation
-export async function getFinancialSummary(deviceId: number, dateFrom?: Date, dateTo?: Date, cacheBuster?: number) {
+export async function getFinancialSummary(
+  deviceId: number,
+  fromDateStr?: string,
+  toDateStr?: string,
+  cacheBuster?: number,
+) {
   try {
-    console.log("Getting financial summary for device:", deviceId, "date range:", dateFrom, "to", dateTo)
+    console.log("Getting financial summary for device:", deviceId, "date range:", fromDateStr, "to", toDateStr)
 
     // Ensure table exists first
     const tableCreated = await createFinancialTransactionsTable()
@@ -766,19 +771,7 @@ export async function getFinancialSummary(deviceId: number, dateFrom?: Date, dat
       }
     }
 
-    // Fix timezone issues by using explicit date strings in SQL query
-    let fromDateStr = null
-    let toDateStr = null
-
-    if (dateFrom) {
-      fromDateStr = `${dateFrom.getFullYear()}-${String(dateFrom.getMonth() + 1).padStart(2, "0")}-${String(dateFrom.getDate()).padStart(2, "0")} 00:00:00`
-    }
-
-    if (dateTo) {
-      toDateStr = `${dateTo.getFullYear()}-${String(dateTo.getMonth() + 1).padStart(2, "0")}-${String(dateTo.getDate()).padStart(2, "0")} 23:59:59`
-    }
-
-    // Query transactions
+    // Query transactions (fromDateStr/toDateStr are YYYY-MM-DD from the client calendar)
     let transactions
     if (fromDateStr && toDateStr) {
       console.log("Querying with date range:", fromDateStr, "to", toDateStr)
@@ -1080,29 +1073,19 @@ function getAccountType(transactionType: string): string {
 }
 
 // FIXED: Get opening and closing balances based on actual transaction data with date range
-export async function getAccountingBalances(deviceId: number, openingDate: Date, closingDate?: Date) {
+export async function getAccountingBalances(deviceId: number, fromDateStr: string, toDateStr?: string) {
   try {
-    console.log(
-      "Getting accounting balances for device:",
-      deviceId,
-      "opening date:",
-      openingDate,
-      "closing date:",
-      closingDate,
-    )
+    const closingDateStr = toDateStr ?? fromDateStr
+
+    console.log("Getting accounting balances for device:", deviceId, "from:", fromDateStr, "to:", closingDateStr)
 
     // Ensure table exists
     await createFinancialTransactionsTable()
 
-    // Format dates properly without timezone conversion
-    const openingDateStr = `${openingDate.getFullYear()}-${String(openingDate.getMonth() + 1).padStart(2, "0")}-${String(openingDate.getDate()).padStart(2, "0")} 00:00:00`
+    const openingCutoff = `${fromDateStr} 00:00:00`
+    const closingCutoff = `${closingDateStr} 23:59:59`
 
-    let closingDateStr = `${openingDate.getFullYear()}-${String(openingDate.getMonth() + 1).padStart(2, "0")}-${String(openingDate.getDate()).padStart(2, "0")} 23:59:59`
-    if (closingDate) {
-      closingDateStr = `${closingDate.getFullYear()}-${String(closingDate.getMonth() + 1).padStart(2, "0")}-${String(closingDate.getDate()).padStart(2, "0")} 23:59:59`
-    }
-
-    console.log("Date strings for balance calculation:", { openingDateStr, closingDateStr })
+    console.log("Date strings for balance calculation:", { openingCutoff, closingCutoff })
 
     // FIXED: Calculate CASH BALANCE = Total Money In (credits) - Total Money Out (debits)
     // Money In: credit_amount (sales income, payments received)
@@ -1115,7 +1098,7 @@ export async function getAccountingBalances(deviceId: number, openingDate: Date,
         COALESCE(SUM(debit_amount), 0) as total_debits
       FROM financial_transactions 
       WHERE device_id = ${deviceId} 
-        AND transaction_date < ${openingDateStr}::timestamp
+        AND transaction_date < ${openingCutoff}::timestamp
     `
 
     // Closing balance: All transactions UP TO closing date
@@ -1125,7 +1108,7 @@ export async function getAccountingBalances(deviceId: number, openingDate: Date,
         COALESCE(SUM(debit_amount), 0) as total_debits
       FROM financial_transactions 
       WHERE device_id = ${deviceId} 
-        AND transaction_date <= ${closingDateStr}::timestamp
+        AND transaction_date <= ${closingCutoff}::timestamp
     `
 
     const openingCredits = Number(openingTransactions[0]?.total_credits) || 0
