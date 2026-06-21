@@ -776,19 +776,28 @@ function calculateSaleChanges(original: any, newData: any, originalItems: any[],
   } else if (isCancelled) {
     newReceivedAmount = 0 // No payment for cancelled sales
   } else if (isCredit) {
-    // 🚨 FIXED: For credit sales, allow partial payments and proper updates
     const currentReceived = Number(original.received_amount || 0)
     const requestedReceived = Number(newData.receivedAmount) || 0
-    
-    // Validate: Can only increase received_amount for credit sales (no refunds via this method)
-    if (requestedReceived < currentReceived) {
-      throw new Error(`Cannot decrease received amount for credit sales. Current: ${currentReceived}, Requested: ${requestedReceived}`)
-    }
-    
+    const wasAlreadyCredit = original.status?.toLowerCase() === "credit"
+
     if (requestedReceived > newTotal) {
-      throw new Error(`Received amount (${requestedReceived}) cannot be greater than total amount (${newTotal}) for credit sales`)
+      throw new Error(
+        `Received amount (${requestedReceived}) cannot be greater than total amount (${newTotal}) for credit sales`,
+      )
     }
-    
+
+    if (requestedReceived < 0) {
+      throw new Error("Received amount cannot be negative")
+    }
+
+    // Only block decreases when updating an existing credit sale (partial payment already recorded).
+    // Allow any received amount when converting from Completed/Pending/etc. to Credit.
+    if (wasAlreadyCredit && requestedReceived < currentReceived) {
+      throw new Error(
+        `Cannot decrease received amount for credit sales. Current: ${currentReceived}, Requested: ${requestedReceived}`,
+      )
+    }
+
     newReceivedAmount = requestedReceived
     
     console.log(`🔄 CREDIT SALE UPDATE: received_amount ${currentReceived} → ${newReceivedAmount}`)
@@ -1304,12 +1313,17 @@ export async function updateSale(saleData: any) {
           adjustmentDescription = `Sale #${saleData.id} status changed from ${changes.originalStatus} to ${changes.newStatus}`
         }
 
-        // FIXED: Only record accounting transaction if there are actual cash movements
-        const hasCashMovement = changes.receivedDiff !== 0 || 
-                               (changes.statusChanged && 
-                                (changes.originalStatus.toLowerCase() === "completed" && changes.newStatus.toLowerCase() === "cancelled"))
+        // Record accounting when cash, bill, or cost changes
+        const hasAccountingChange =
+          changes.receivedDiff !== 0 ||
+          changes.discountChanged ||
+          changes.totalChanged ||
+          changes.itemsChanged ||
+          (changes.statusChanged &&
+            changes.originalStatus.toLowerCase() === "completed" &&
+            changes.newStatus.toLowerCase() === "cancelled")
 
-        if (hasCashMovement) {
+        if (hasAccountingChange) {
           const accountingResult = await recordSaleAdjustment({
             saleId: saleData.id,
             changeType: "consolidated_edit",
@@ -1341,7 +1355,7 @@ export async function updateSale(saleData: any) {
             console.log("Accounting:", accountingResult.message)
           }
         } else {
-          console.log("No cash movement detected, skipping accounting entry")
+          console.log("No accounting changes detected, skipping accounting entry")
         }
       } catch (accountingError) {
         console.error("Error creating accounting entry:", accountingError)

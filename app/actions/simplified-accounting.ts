@@ -238,22 +238,39 @@ export async function recordSaleAdjustment(adjustmentData: {
       const previousStatus = adjustmentData.previousValues.status?.toLowerCase() || ""
       const newStatus = adjustmentData.newValues.status?.toLowerCase() || ""
 
+      // When a completed sale gets a discount, received drops by the same amount — record once
+      const discountMirrorsReceived =
+        discountDiff !== 0 && Math.abs(receivedDiff + discountDiff) < 0.01
+
+      // Handle discount changes (revenue reduction / reversal)
+      if (discountDiff !== 0) {
+        console.log(`Discount change detected: ${previousDiscount} → ${newDiscount} (diff: ${discountDiff})`)
+
+        if (discountDiff > 0) {
+          debitAmount += discountDiff
+        } else {
+          creditAmount += Math.abs(discountDiff)
+        }
+      }
+
       // Special handling for CREDIT SALES - record cash when money is actually received with proportional COGS
       if (previousStatus === "credit" && receivedDiff > 0) {
         // Payment received for credit sale: credit = received amount increase, cost = proportional COGS
-        creditAmount = receivedDiff
+        creditAmount += receivedDiff
         const paymentRatio = receivedDiff / newAmount
         costAmount = newCogs * paymentRatio // Only recognize COGS for the portion paid
         
         console.log(`Credit sale payment: Received ${receivedDiff}, COGS recognized: ${costAmount}`)
-      } else if (receivedDiff > 0 && newStatus !== "credit") {
+      } else if (!discountMirrorsReceived && receivedDiff > 0 && newStatus !== "credit") {
         // More money received for non-credit sales: credit = received amount increase
-        creditAmount = receivedDiff
+        creditAmount += receivedDiff
         costAmount = cogsDiff
-      } else if (receivedDiff < 0) {
+      } else if (!discountMirrorsReceived && receivedDiff < 0) {
         // Money refunded: debit = received amount decrease
         debitAmount += Math.abs(receivedDiff)
-        costAmount = -Math.abs(cogsDiff) // Reverse COGS for refunds
+        if (cogsDiff !== 0) {
+          costAmount = -Math.abs(cogsDiff) // Reverse COGS for refunds
+        }
       }
 
       // Handle status changes for COGS and returns
@@ -278,19 +295,6 @@ export async function recordSaleAdjustment(adjustmentData: {
       } else if (previousStatus !== "cancelled" && newStatus === "cancelled") {
         // Changing to cancelled (but not from completed) - include negative COGS
         costAmount = -previousCogs
-      }
-
-      // Handle discount changes - simple accounting
-      if (discountDiff !== 0) {
-        console.log(`Discount change detected: ${previousDiscount} → ${newDiscount} (diff: ${discountDiff})`)
-
-        if (discountDiff > 0) {
-          // Discount increased = debit amount
-          debitAmount += discountDiff
-        } else {
-          // Discount decreased = credit amount
-          creditAmount += Math.abs(discountDiff)
-        }
       }
 
       // Update description to show actual changes and returns

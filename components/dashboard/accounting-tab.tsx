@@ -861,6 +861,25 @@ const filteredTransactions =
 
 const isDataLoading = isLoading && !financialData
 
+const isSaleAdjustment = (transaction: any) =>
+  transaction?.type?.toLowerCase() === "adjustment" &&
+  (transaction.description || "").includes("Sale")
+
+const getSaleAdjustmentNetCash = (transaction: any) => {
+  const credit = n(transaction.credit)
+  const debit = n(transaction.debit)
+  const received = n(transaction.received)
+  if (credit !== 0 || debit !== 0) return credit - debit
+  return received
+}
+
+const isSaleRefundOrDiscount = (transaction: any) => {
+  if (!isSaleAdjustment(transaction)) return false
+  const description = transaction.description || ""
+  if (description.includes("Discount change")) return true
+  return getSaleAdjustmentNetCash(transaction) < 0
+}
+
 // FIXED: Profit calculation with proportional cost for partial payments
 // FIXED: Profit calculation - ONLY includes sales profit, excludes purchases
 // FIXED: Profit calculation - purchase adjustments should not affect profit
@@ -879,9 +898,13 @@ const getProfit = (transaction: any) => {
     return received - cost
   }
   
-  // For sale adjustments (additional payments)
-  if (type === 'adjustment' && description.includes('Sale')) {
-    const additionalMoneyIn = received || credit
+  // For sale adjustments (additional payments, discounts, refunds)
+  if (isSaleAdjustment(transaction)) {
+    if (isSaleRefundOrDiscount(transaction)) {
+      return getSaleAdjustmentNetCash(transaction)
+    }
+
+    const additionalMoneyIn = getSaleAdjustmentNetCash(transaction)
     const saleId = extractIdFromDescription(description)
     
     if (saleId) {
@@ -966,9 +989,13 @@ const getCashImpact = (transaction: any) => {
     return received - cost
   }
   
-  // For sale adjustments - cash impact = profit only (received - proportional cost)
-  if (type === 'adjustment' && description.includes('Sale')) {
-    const additionalMoneyIn = received || credit
+  // For sale adjustments - cash impact from payments, discounts, or refunds
+  if (isSaleAdjustment(transaction)) {
+    if (isSaleRefundOrDiscount(transaction)) {
+      return getSaleAdjustmentNetCash(transaction)
+    }
+
+    const additionalMoneyIn = getSaleAdjustmentNetCash(transaction)
     const saleId = extractIdFromDescription(description)
     
     if (saleId) {
@@ -1092,9 +1119,9 @@ const getMoneyFlowAmount = (transaction: any) => {
     return received
   }
   
-  // For sale adjustments - money in is the additional payment received
-  if (type === 'adjustment' && description.includes('Sale')) {
-    return received || credit
+  // For sale adjustments - net money movement from ledger
+  if (isSaleAdjustment(transaction)) {
+    return getSaleAdjustmentNetCash(transaction)
   }
   
   // For purchases - money out is the actual paid amount
@@ -1164,13 +1191,33 @@ const getMoneyFlowInfo = (transaction: any) => {
     }
   }
   
-  // Sale adjustments - Money In
-  if (type === 'adjustment' && description.includes('Sale')) {
+  // Sale adjustments - payment in, discount/refund out, or bill-only update
+  if (isSaleAdjustment(transaction)) {
+    const flowAmount = getMoneyFlowAmount(transaction)
+
+    if (flowAmount < 0 || isSaleRefundOrDiscount(transaction)) {
+      return {
+        type: "out",
+        text: description.includes("Discount change") ? "Discount Applied" : "Refund",
+        color: "text-red-600 dark:text-red-400",
+        amount: Math.abs(flowAmount),
+      }
+    }
+
+    if (flowAmount > 0) {
+      return {
+        type: "in",
+        text: "Additional Payment",
+        color: "text-green-600 dark:text-green-400",
+        amount: flowAmount,
+      }
+    }
+
     return {
-      type: 'in',
-      text: 'Additional Payment',
-      color: 'text-green-600 dark:text-green-400',
-      amount: amount
+      type: "none",
+      text: "Bill Updated",
+      color: "text-gray-600 dark:text-gray-400",
+      amount: 0,
     }
   }
   
@@ -1317,38 +1364,33 @@ const getRemainingAmount = (transaction: any) => {
   const totalAmount = n(transaction.amount)
   const receivedAmount = n(transaction.received)
   
-  // For sale adjustments - calculate remaining based on original sale
-  if (type === 'adjustment' && description.includes('Sale')) {
+  // For sale adjustments - use effective totals after all adjustments
+  if (isSaleAdjustment(transaction)) {
     const saleId = extractIdFromDescription(description)
-    
+
     if (saleId) {
-      // Find the original sale
       const originalSale = financialData?.transactions?.find(
-        st => st && st.sale_id === saleId && st.type?.toLowerCase() === 'sale'
+        (st) => st && st.sale_id === saleId && st.type?.toLowerCase() === "sale",
       )
-      
+
       if (originalSale) {
-        const originalTotal = n(originalSale.amount)
-        const originalReceived = n(originalSale.received)
-        
-        // Find all adjustments for this sale to calculate total received so far
-        const saleAdjustments = financialData?.transactions?.filter(
-          t => t && t.type?.toLowerCase() === 'adjustment' && 
-               t.description?.includes(`#${saleId}`) &&
-               t !== transaction // Exclude current transaction
-        ) || []
-        
-        let totalReceivedSoFar = originalReceived
-        saleAdjustments.forEach(adj => {
-          totalReceivedSoFar += n(adj.received) || n(adj.credit)
+        const saleAdjustments =
+          financialData?.transactions?.filter(
+            (t) =>
+              t &&
+              t.type?.toLowerCase() === "adjustment" &&
+              t.description?.includes(`#${saleId}`),
+          ) || []
+
+        let effectiveTotal = n(originalSale.amount)
+        let effectiveReceived = n(originalSale.received)
+
+        saleAdjustments.forEach((adj) => {
+          effectiveTotal += n(adj.amount)
+          effectiveReceived += n(adj.received)
         })
-        
-        // Add current transaction amount
-        const currentAmount = n(transaction.received) || n(transaction.credit)
-        totalReceivedSoFar += currentAmount
-        
-        const remaining = Math.max(0, originalTotal - totalReceivedSoFar)
-        return remaining
+
+        return Math.max(0, effectiveTotal - effectiveReceived)
       }
     }
     return 0
@@ -1542,8 +1584,7 @@ const getSalesTotal = () => {
           const currentAmount = saleAmounts.get(saleId) || 0
           const increaseAmount = n(increasedByMatch[1])
           saleAmounts.set(saleId, currentAmount + increaseAmount)
-        } else if (n(t.amount) > 0) {
-          // Fallback: if adjustment has an amount, use it as the delta
+        } else if (n(t.amount) !== 0) {
           const currentAmount = saleAmounts.get(saleId) || 0
           saleAmounts.set(saleId, currentAmount + n(t.amount))
         }
@@ -1662,6 +1703,57 @@ const setLastWeek = () => {
   handleDateToChange(todayEnd)
 }
 
+// Parse raw adjustment descriptions into short, readable labels
+const formatSaleAdjustmentDescription = (description: string) => {
+  const saleId = extractIdFromDescription(description)
+  const prefix = `Sale #${saleId || "N/A"}`
+
+  if (description.includes("RETURNED") || description.includes("RETURN")) {
+    return `${prefix} · Returned`
+  }
+  if (description.includes("Credit Payment Received")) {
+    const paymentMatch = description.match(/Payment:\s*([\d.]+)/i)
+    return paymentMatch
+      ? `${prefix} · Credit payment ${currency} ${paymentMatch[1]}`
+      : `${prefix} · Credit payment received`
+  }
+
+  const details: string[] = []
+  const discountMatch = description.match(/Discount change:\s*([+-]?[\d.]+)/i)
+  if (discountMatch) {
+    details.push(`Discount ${discountMatch[1]}`)
+  }
+
+  const statusMatch = description.match(/Status:\s*(.+?)(?:\s*\||$)/i)
+  if (statusMatch) {
+    details.push(statusMatch[1].trim())
+  }
+
+  const paymentIncreasedMatch = description.match(/Payment increased by\s*([\d.]+)/i)
+  if (paymentIncreasedMatch) {
+    details.push(`Payment +${currency} ${paymentIncreasedMatch[1]}`)
+  }
+
+  const paymentDecreasedMatch = description.match(/Payment decreased by\s*([\d.]+)/i)
+  if (paymentDecreasedMatch) {
+    details.push(`Refund ${currency} ${paymentDecreasedMatch[1]}`)
+  }
+
+  if (details.length > 0) {
+    return `${prefix} · ${details.join(" · ")}`
+  }
+
+  const cleaned = description.replace(/^Sale #\d+\s*-\s*/i, "").replace(/\s*\|\s*/g, " · ")
+  return cleaned ? `${prefix} · ${cleaned}` : `${prefix} · Updated`
+}
+
+const formatPurchaseAdjustmentDescription = (description: string) => {
+  const purchaseId = extractIdFromDescription(description)
+  const prefix = `Purchase #${purchaseId || "N/A"}`
+  const cleaned = description.replace(/^Purchase #\d+\s*-\s*/i, "").replace(/\s*-\s*/g, " · ")
+  return cleaned ? `${prefix} · ${cleaned}` : `${prefix} · Updated`
+}
+
 // NEW: Enhanced description generator
 const getEnhancedDescription = (transaction: any) => {
   if (!transaction) return "Unknown Transaction"
@@ -1703,14 +1795,12 @@ const getEnhancedDescription = (transaction: any) => {
   // Adjustment transactions
   if (type === 'adjustment') {
     if (description.includes('Sale')) {
-      const saleId = extractIdFromDescription(description)
-      return `Sale Adjustment #${saleId || 'N/A'} - ${description}`
+      return formatSaleAdjustmentDescription(description)
     }
     if (description.includes('Purchase')) {
-      const purchaseId = extractIdFromDescription(description)
-      return `Purchase Adjustment #${purchaseId || 'N/A'} - ${description}`
+      return formatPurchaseAdjustmentDescription(description)
     }
-    return `Adjustment: ${description}`
+    return `Adjustment · ${description.replace(/\s*\|\s*/g, " · ")}`
   }
   
   // Supplier payments
@@ -2114,8 +2204,11 @@ const getEnhancedDescription = (transaction: any) => {
                         <div className="text-gray-500 dark:text-gray-400">
                           {getTransactionTypeIcon(transaction.type)}
                         </div>
-                        <div className="min-w-0">
-                          <div className="font-medium text-gray-900 dark:text-gray-100 text-sm truncate">
+                        <div className="min-w-0 flex-1">
+                          <div
+                            className="font-medium text-gray-900 dark:text-gray-100 text-sm break-words leading-snug"
+                            title={transaction.description || enhancedDescription}
+                          >
                             {enhancedDescription}
                           </div>
                         </div>
