@@ -305,18 +305,8 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
       const fromDateStr = format(dateFrom, "yyyy-MM-dd")
       const toDateStr = format(dateTo, "yyyy-MM-dd")
 
-      console.log("Fetching financial data with date range:", {
-        from: fromDateStr,
-        to: toDateStr,
-      })
-
       const cacheBuster = Date.now()
       const data = await getFinancialSummary(deviceId, fromDateStr, toDateStr, cacheBuster)
-
-      console.log("Received financial data:", {
-        transactionCount: data.transactions?.length || 0,
-        firstTransactionDate: data.transactions?.[0]?.date,
-      })
 
       dispatch(setFinancialData(data))
     } catch (error) {
@@ -336,11 +326,6 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
   // Load accounting balances based on our date range
   const loadAccountingBalances = async (fromDate: Date, toDate: Date) => {
     try {
-      console.log("Loading accounting balances for date range:", {
-        from: format(fromDate, "yyyy-MM-dd HH:mm:ss"),
-        to: format(toDate, "yyyy-MM-dd HH:mm:ss"),
-      })
-
       if (!deviceId) {
         console.error("No device ID provided for balance calculation")
         return
@@ -349,22 +334,8 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
       const fromDateStr = format(fromDate, "yyyy-MM-dd")
       const toDateStr = format(toDate, "yyyy-MM-dd")
 
-      console.log("Fetching balances with dates:", {
-        from: fromDateStr,
-        to: toDateStr,
-      })
-
       const balanceData = await getAccountingBalances(deviceId, fromDateStr, toDateStr)
       dispatch(setBalances(balanceData))
-
-      console.log("Balances loaded successfully:", {
-        openingBalance: balanceData.openingBalance,
-        closingBalance: balanceData.closingBalance,
-        periodCredits: balanceData.periodCredits,
-        periodDebits: balanceData.periodDebits,
-        periodNet: balanceData.periodNet,
-        dateRange: `${format(fromDate, "MMM dd")} - ${format(toDate, "MMM dd")}`
-      })
     } catch (error) {
       console.error("Error loading accounting balances:", error)
       toast.error("Failed to load account balances")
@@ -553,7 +524,6 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
 
   // Enhanced sale handlers for ViewSaleModal
   const handleEditSale = (saleId: number) => {
-    console.log("Opening edit sale modal for:", saleId)
     setViewSaleId(null)
     setEditSaleId(saleId)
   }
@@ -565,7 +535,6 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
 
     try {
       setDeletingSaleId(saleId)
-      console.log(`Deleting sale ${saleId}...`)
       
       const response = await deleteSale(saleId, deviceId)
       
@@ -573,7 +542,6 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
         toast.success(response.message || "Sale deleted successfully")
         await forceRefreshData()
         setViewSaleId(null)
-        console.log(`Sale ${saleId} deleted successfully`)
       } else {
         throw new Error(response.message || "Failed to delete sale")
       }
@@ -587,7 +555,6 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
 
   // Enhanced purchase handlers for ViewPurchaseModal
   const handleEditPurchase = (purchaseId: number) => {
-    console.log("Opening edit purchase modal for:", purchaseId)
     setViewPurchaseId(null)
     setEditPurchaseId(purchaseId)
   }
@@ -599,7 +566,6 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
 
     try {
       setDeletingPurchaseId(purchaseId)
-      console.log(`Deleting purchase ${purchaseId}...`)
       
       const response = await deletePurchase(purchaseId, deviceId)
       
@@ -607,7 +573,6 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
         toast.success(response.message || "Purchase deleted successfully")
         await forceRefreshData()
         setViewPurchaseId(null)
-        console.log(`Purchase ${purchaseId} deleted successfully`)
       } else {
         throw new Error(response.message || "Failed to delete purchase")
       }
@@ -621,7 +586,6 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
 
   // Supplier payment handlers
   const handleEditSupplierPayment = (paymentId: number) => {
-    console.log("Opening edit supplier payment modal for:", paymentId)
     setViewSupplierPaymentId(null)
     setEditSupplierPaymentId(paymentId)
   }
@@ -1430,14 +1394,6 @@ const getRemainingAmount = (transaction: any) => {
         totalPaidSoFar += currentAmount
         
         const remaining = Math.max(0, originalTotal - totalPaidSoFar)
-        console.log(`Purchase adjustment remaining calculation for #${purchaseId}:`, {
-          originalTotal,
-          originalPaid,
-          adjustmentsCount: purchaseAdjustments.length,
-          currentAmount,
-          totalPaidSoFar,
-          remaining
-        })
         
         return remaining
       }
@@ -2170,14 +2126,12 @@ const getEnhancedDescription = (transaction: any) => {
                                     transaction.reference_id || 
                                     extractIdFromDescription(transaction.description) ||
                                     transaction.id
-                      console.log('Opening sale modal with ID:', saleId, 'Transaction:', transaction)
                       setViewSaleId(saleId)
                     } else if (isPurchase) {
                       const purchaseId = transaction.purchase_id || 
                                         transaction.reference_id || 
                                         extractIdFromDescription(transaction.description) ||
                                         transaction.id
-                      console.log('Opening purchase modal with ID:', purchaseId, 'Transaction:', transaction)
                       setViewPurchaseId(purchaseId)
                     } else if (isManual) {
                       setViewManualTransactionId(transaction.id)
@@ -2185,7 +2139,6 @@ const getEnhancedDescription = (transaction: any) => {
                       const paymentId = transaction.supplier_payment_id || 
                                        transaction.reference_id || 
                                        transaction.id
-                      console.log('Opening supplier payment modal with ID:', paymentId, 'Transaction:', transaction)
                       setViewSupplierPaymentId(paymentId)
                     }
                   }

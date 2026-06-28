@@ -68,35 +68,6 @@ export async function getComprehensiveDashboardData(
         previousEndDate = new Date(startDate.getTime() - 1)
     }
 
-    // Enhanced logging
-    console.log("=== DASHBOARD DEBUG INFO ===")
-    console.log("Parameters:", { userId, deviceId, period })
-    console.log("Date ranges:", {
-      startDate: startDate.toISOString(),
-      endDate: now.toISOString(),
-      previousStartDate: previousStartDate.toISOString(),
-      previousEndDate: previousEndDate.toISOString()
-    })
-
-    // First, let's check if we have any data at all for this user
-    const dataCheckQueries = await Promise.all([
-      // Check if user has any sales
-      sql`SELECT COUNT(*) as count FROM sales WHERE created_by = ${userId}`,
-      // Check if user has any products  
-      sql`SELECT COUNT(*) as count FROM products WHERE created_by = ${userId}`,
-      // Check if user has any customers
-      sql`SELECT COUNT(*) as count FROM customers WHERE created_by = ${userId}`,
-      // Check if user has any purchases
-      sql`SELECT COUNT(*) as count FROM purchases WHERE created_by = ${userId}`,
-    ])
-
-    console.log("Data existence check:", {
-      totalSales: dataCheckQueries[0][0]?.count || 0,
-      totalProducts: dataCheckQueries[1][0]?.count || 0,
-      totalCustomers: dataCheckQueries[2][0]?.count || 0,
-      totalPurchases: dataCheckQueries[3][0]?.count || 0,
-    })
-
     // Build chart data query for the selected period
     let chartDataQuery
     if (period === "today") {
@@ -162,7 +133,6 @@ export async function getComprehensiveDashboardData(
     }
 
     // Execute all queries in parallel for better performance
-    console.log("Executing main queries...")
     const [
       // Financial Overview
       currentPeriodSales,
@@ -362,18 +332,6 @@ export async function getComprehensiveDashboardData(
       chartDataQuery,
     ])
 
-    // Enhanced logging for query results
-    console.log("=== RAW QUERY RESULTS ===")
-    console.log("Current period sales:", currentPeriodSales[0])
-    console.log("Previous period sales:", previousPeriodSales[0])
-    console.log("Current period purchases:", currentPeriodPurchases[0])
-    console.log("Current period income:", currentPeriodIncome[0])
-    console.log("Current period expenses:", currentPeriodExpenses[0])
-    console.log("Customer count:", customerCount[0])
-    console.log("Supplier count:", supplierCount[0])
-    console.log("Product count:", productCount[0])
-    console.log("Chart data length:", chartData?.length || 0)
-
     // Process the data with better error handling
     const currentSalesTotal = Number(currentPeriodSales[0]?.total || 0)
     const currentIncomeTotal = Number(currentPeriodIncome[0]?.total || 0)
@@ -395,12 +353,6 @@ export async function getComprehensiveDashboardData(
     const revenueChange = previousRevenue > 0 ? ((totalRevenue - previousRevenue) / previousRevenue) * 100 : 0
     const expenseChange = previousExpenses > 0 ? ((totalExpenses - previousExpenses) / previousExpenses) * 100 : 0
     const profitChange = previousProfit > 0 ? ((netProfit - previousProfit) / previousProfit) * 100 : 0
-
-    console.log("=== CALCULATED VALUES ===")
-    console.log("Total Revenue:", totalRevenue)
-    console.log("Total Expenses:", totalExpenses)
-    console.log("Net Profit:", netProfit)
-    console.log("Profit Margin:", profitMargin)
 
     // Build quick stats
     const quickStats: HomeDashboardData["quickStats"] = [
@@ -556,12 +508,6 @@ export async function getComprehensiveDashboardData(
     const totalSuppliersCount = Number(supplierCount[0]?.count || 0)
     const totalProductsCount = Number(productCount[0]?.count || 0)
 
-    console.log("=== PROCESSED COUNTS ===")
-    console.log("Customers:", totalCustomersCount)
-    console.log("Suppliers:", totalSuppliersCount)
-    console.log("Products:", totalProductsCount)
-    console.log("Low Stock:", lowStockCount)
-
     const dashboardData: HomeDashboardData = {
       totalRevenue,
       totalExpenses,
@@ -598,13 +544,6 @@ export async function getComprehensiveDashboardData(
       overdueInvoices: overdueCount,
       pendingPayments: pendingCount,
     }
-
-    console.log("=== FINAL DASHBOARD DATA ===")
-    console.log("Total Revenue:", dashboardData.totalRevenue)
-    console.log("Total Customers:", dashboardData.totalCustomers)
-    console.log("Total Suppliers:", dashboardData.totalSuppliers)
-    console.log("Total Products:", dashboardData.totalProducts)
-    console.log("============================")
 
     const staff = await resolveStaffSessionContext(deviceId)
     const filteredDashboardData = filterHomeDashboardForStaff(

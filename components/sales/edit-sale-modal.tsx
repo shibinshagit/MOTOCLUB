@@ -74,7 +74,6 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [currency, setCurrency] = useState(propCurrency || "QAR")
-  const [hasPaymentMethodColumn, setHasPaymentMethodColumn] = useState(true)
 
   const [date, setDate] = useState<Date>(new Date())
   const [customerId, setCustomerId] = useState<number | null>(null)
@@ -142,31 +141,6 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
     }
   }, [isOpen])
 
-  // Check if payment_method column exists
-  useEffect(() => {
-    const checkPaymentMethodColumn = async () => {
-      try {
-        const response = await fetch("/api/db-check?column=payment_method&table=sales", {
-          method: "GET",
-        })
-
-        if (response.ok) {
-          const data = await response.json()
-          setHasPaymentMethodColumn(data.exists)
-        } else {
-          setHasPaymentMethodColumn(false)
-        }
-      } catch (error) {
-        console.error("Error checking payment_method column:", error)
-        setHasPaymentMethodColumn(false)
-      }
-    }
-
-    if (isOpen) {
-      checkPaymentMethodColumn()
-    }
-  }, [isOpen])
-
   // Fetch sale details when modal opens
   useEffect(() => {
     const fetchSaleDetails = async () => {
@@ -203,19 +177,10 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
           if (sale.staff_id) {
             setStaffId(sale.staff_id)
           } else if (activeStaff) {
-            // If no staff in sale but we have active staff, use that
             setStaffId(activeStaff.id)
-            console.log("Auto-selected active staff for edit:", activeStaff.name)
           }
 
-          // Check if payment_method exists in the sale object
-          if ("payment_method" in sale) {
-            setPaymentMethod(sale.payment_method || "Cash")
-            setHasPaymentMethodColumn(true)
-          } else {
-            setPaymentMethod("Cash")
-            setHasPaymentMethodColumn(false)
-          }
+          setPaymentMethod(sale.payment_method || "Cash")
 
           setTotalAmount(Number(sale.total_amount) || 0)
 
@@ -761,8 +726,6 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
         staffId: staffId,
       }
 
-      console.log("Updating sale data:", saleData)
-
       const result = await updateSale(saleData)
 
       if (result.success) {
@@ -1212,7 +1175,7 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
                       </div>
 
                       {/* Payment Method - compact layout when status is Completed */}
-                      {status === "Completed" && hasPaymentMethodColumn && (
+                      {status === "Completed" && (
                         <div className="space-y-2">
                           <Label
                             htmlFor="payment-method"

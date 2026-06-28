@@ -1538,8 +1538,6 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
 
   // FIXED: Handle forced refresh - properly reset state
   const handleForcedRefresh = () => {
-    console.log("Forced refresh initiated...")
-
     // Clear all data and filters
     dispatch(forceClearSales())
     dispatch(clearFilters())

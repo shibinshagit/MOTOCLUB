@@ -471,43 +471,6 @@ export async function deleteSupplierPayment(paymentId: number, deviceId: number)
 }
 
 /**
- * Diagnostic functions for testing
- */
-export async function runFinancialTransactionsDiagnostics(deviceId: number) {
-  const results: any = {
-    timestamp: new Date().toISOString(),
-    deviceId,
-    tests: [],
-  }
-
-  try {
-    const samplePayment = await sql`
-      SELECT *
-      FROM financial_transactions
-      WHERE device_id = ${deviceId}
-        AND transaction_type = 'supplier_payment'
-      ORDER BY transaction_date DESC
-      LIMIT 1
-    `
-
-    if (samplePayment.length > 0) {
-      results.samplePayment = samplePayment[0]
-    }
-
-    return results
-  } catch (error: any) {
-    results.error = error.message
-    return results
-  }
-}
-
-export async function testSupplierPaymentFetch(paymentId: number) {
-  console.log(`Testing supplier payment fetch for ID: ${paymentId}`)
-  return await getSupplierPaymentById(paymentId)
-}
-
-
-/**
  * FIXED: Update supplier payment in financial_transactions
  * This handles changes to amount, payment method, date, and notes
  * 

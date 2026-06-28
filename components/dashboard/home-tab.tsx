@@ -78,21 +78,18 @@ function useDashboardData(userId?: number, deviceId?: number, selectedPeriod?: s
     if (!forceFetch) {
       // Skip if recent successful fetch (within 10 seconds)
       if (now - fetchStateRef.current.lastSuccessfulFetch < 10000) {
-        console.log('⏭️ Skipping fetch - too recent')
         return
       }
 
       // Check cache timestamp
       const lastRequestTime = requestTimestamps.get(cacheKey) || 0
-      if (now - lastRequestTime < 3000) { // 3 second minimum between requests
-        console.log('⏭️ Skipping fetch - rate limited')
+      if (now - lastRequestTime < 3000) {
         return
       }
     }
 
     // Check for existing request in cache
     if (requestCache.has(cacheKey) && !forceFetch) {
-      console.log('⏳ Using existing request promise')
       return requestCache.get(cacheKey)
     }
 
@@ -100,19 +97,15 @@ function useDashboardData(userId?: number, deviceId?: number, selectedPeriod?: s
     if (fetchStateRef.current.consecutiveErrors > 0 && !forceFetch) {
       const backoffTime = Math.min(1000 * Math.pow(2, fetchStateRef.current.consecutiveErrors), 30000)
       if (now - (requestTimestamps.get(cacheKey) || 0) < backoffTime) {
-        console.log(`⏸️ Backing off for ${backoffTime}ms due to errors`)
         return
       }
     }
 
-    console.log('🚀 Starting dashboard fetch:', { userId, deviceId, selectedPeriod, forceFetch })
-    
     // Create and cache the request promise
     const fetchPromise = (async () => {
       try {
         // Check if component is still mounted
         if (!fetchStateRef.current.isComponentMounted) {
-          console.log('⚠️ Component unmounted, aborting fetch')
           return
         }
 
@@ -135,7 +128,6 @@ function useDashboardData(userId?: number, deviceId?: number, selectedPeriod?: s
 
         // Check if component is still mounted after async operation
         if (!fetchStateRef.current.isComponentMounted) {
-          console.log('⚠️ Component unmounted during fetch, discarding results')
           return
         }
 
@@ -146,11 +138,9 @@ function useDashboardData(userId?: number, deviceId?: number, selectedPeriod?: s
           dispatch(setError(null))
           fetchStateRef.current.lastSuccessfulFetch = now
           fetchStateRef.current.consecutiveErrors = 0
-          console.log('✅ Dashboard fetch successful')
         } else {
           fetchStateRef.current.consecutiveErrors++
           dispatch(setError(dataRes.message || "Failed to load dashboard data"))
-          console.log('❌ Dashboard fetch failed:', dataRes.message)
         }
       } catch (err) {
         fetchStateRef.current.consecutiveErrors++
@@ -225,12 +215,10 @@ export default function HomeTab({ userId: propUserId, deviceId: propDeviceId }: 
     const currentParams = `${userId}-${deviceId}-${selectedPeriod}`
     
     if (userId && deviceId && !initRef.current.hasInitialized) {
-      console.log('🔄 Initializing dashboard data fetch')
       initRef.current.hasInitialized = true
       initRef.current.initParams = currentParams
       fetchDashboardData(true, true)
     } else if (currentParams !== initRef.current.initParams && userId && deviceId) {
-      console.log('🔄 Parameters changed, refetching')
       initRef.current.initParams = currentParams
       fetchDashboardData(true, true)
     }
@@ -246,11 +234,9 @@ export default function HomeTab({ userId: propUserId, deviceId: propDeviceId }: 
 
     // Only set up auto-refresh if we have data and valid params
     if (userId && deviceId && dashboardData && initRef.current.hasInitialized) {
-      console.log('⏰ Setting up auto-refresh (5 minutes)')
       fetchStateRef.current.autoRefreshInterval = setInterval(() => {
-        console.log('🔄 Auto-refresh triggered')
         fetchDashboardData(false, true)
-      }, 5 * 60 * 1000) // 5 minutes
+      }, 5 * 60 * 1000)
     }
 
     return () => {
@@ -262,14 +248,11 @@ export default function HomeTab({ userId: propUserId, deviceId: propDeviceId }: 
   }, [dashboardData, userId, deviceId]) // Stable dependencies only
 
   const handlePeriodChange = useCallback((period: "today" | "week" | "month" | "quarter" | "year") => {
-    console.log('📅 Period changed to:', period)
     dispatch(setPeriod(period))
-    // Reset initialization to allow fetch with new period
     initRef.current.hasInitialized = false
   }, [dispatch])
 
   const handleRefresh = useCallback(() => {
-    console.log('🔄 Manual refresh triggered')
     fetchDashboardData(false, true)
   }, [fetchDashboardData])
   

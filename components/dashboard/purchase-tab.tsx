@@ -200,7 +200,6 @@ export default function PurchaseTab({
       
       // Prevent duplicate requests within 1 second
       if (now - lastFetchRef.current < 1000) {
-        console.log('Skipping duplicate fetch request')
         return
       }
 
@@ -208,9 +207,6 @@ export default function PurchaseTab({
       isLoadingRef.current = true
       
       try {
-        console.log('Loading initial purchase data...')
-        
-        // Fetch currency and suppliers in parallel - these are lightweight
         const [currencyResult, suppliersResult] = await Promise.allSettled([
           dispatch(fetchCurrency(userId)).unwrap(),
           dispatch(fetchSuppliers()).unwrap()
@@ -226,18 +222,13 @@ export default function PurchaseTab({
 
         // Handle purchases based on cache status
         if (needsRefresh()) {
-          console.log('Cache expired, forcing refresh')
           dispatch(clearCache())
           await dispatch(fetchPurchases({ deviceId, forceRefresh: true })).unwrap()
         } else if (purchases.length === 0) {
-          console.log('No purchases in cache, fetching...')
           await dispatch(fetchPurchases({ deviceId })).unwrap()
-        } else {
-          console.log('Using cached purchases data')
         }
 
         isInitializedRef.current = true
-        console.log('Initial data loading completed')
       } catch (error) {
         console.error('Error loading initial data:', error)
         toast({
@@ -281,7 +272,6 @@ export default function PurchaseTab({
     }
 
     try {
-      console.log(`Deleting purchase ${id}...`)
       const response = await deletePurchase(id, deviceId)
       
       if (response.success) {
@@ -290,7 +280,6 @@ export default function PurchaseTab({
           title: "Success",
           description: response.message || "Purchase deleted successfully",
         })
-        console.log(`Purchase ${id} deleted successfully`)
       } else {
         throw new Error(response.message || "Failed to delete purchase")
       }
@@ -332,7 +321,6 @@ export default function PurchaseTab({
     }
 
     lastFetchRef.current = now
-    console.log('Manual refresh triggered')
     
     dispatch(clearCache())
     dispatch(fetchPurchases({ deviceId, forceRefresh: true }))
@@ -546,14 +534,12 @@ export default function PurchaseTab({
   // Optimized data refresh handlers
   const handlePurchaseAdded = useCallback(() => {
     if (deviceId && !mockMode && !isLoadingRef.current) {
-      console.log('Purchase added, refreshing data...')
       dispatch(fetchPurchases({ deviceId }))
     }
   }, [deviceId, mockMode, dispatch])
 
   const handlePurchaseUpdated = useCallback(() => {
     if (deviceId && !mockMode && !isLoadingRef.current) {
-      console.log('Purchase updated, refreshing data...')
       dispatch(fetchPurchases({ deviceId }))
     }
   }, [deviceId, mockMode, dispatch])
@@ -803,7 +789,6 @@ export default function PurchaseTab({
       `)
 
       printWindow.document.close()
-      console.log('Print report generated successfully')
     } catch (error) {
       console.error('Print error:', error)
       toast({
