@@ -2,6 +2,12 @@ export const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024
 export const MAX_VIDEO_SIZE_BYTES = 50 * 1024 * 1024
 export const MAX_TOTAL_MEDIA_PAYLOAD_BYTES = 95 * 1024 * 1024
 
+type CompressImageOptions = {
+  maxDimension?: number
+  skipIfUnderBytes?: number
+  preferredMime?: "image/jpeg" | "image/webp"
+}
+
 function toFileName(name: string, mimeType: string) {
   const base = name.replace(/\.[^/.]+$/, "")
   if (mimeType === "image/webp") return `${base}.webp`
@@ -19,17 +25,20 @@ export function formatBytes(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-export async function compressImageForUpload(file: File): Promise<File> {
+export async function compressImageForUpload(file: File, options?: CompressImageOptions): Promise<File> {
   if (typeof window === "undefined") return file
-  if (!file.type.startsWith("image/")) return file
+  if (!file.type.startsWith("image/") || file.type === "image/svg+xml") return file
 
-  // Keep small files unchanged.
-  if (file.size <= 2 * 1024 * 1024) return file
+  const maxDimension = options?.maxDimension ?? 2200
+  const skipIfUnderBytes = options?.skipIfUnderBytes ?? 2 * 1024 * 1024
+  const preferredMime = options?.preferredMime
+
+  // Keep small files unchanged unless caller opts into a lower threshold.
+  if (file.size <= skipIfUnderBytes) return file
 
   let bitmap: ImageBitmap | null = null
   try {
     bitmap = await createImageBitmap(file)
-    const maxDimension = 2200
     const scale = Math.min(1, maxDimension / Math.max(bitmap.width, bitmap.height))
     const width = Math.max(1, Math.round(bitmap.width * scale))
     const height = Math.max(1, Math.round(bitmap.height * scale))
@@ -42,8 +51,11 @@ export async function compressImageForUpload(file: File): Promise<File> {
 
     ctx.drawImage(bitmap, 0, 0, width, height)
 
-    const targetMime = file.type === "image/jpeg" || file.type === "image/webp" ? file.type : "image/jpeg"
-    const qualitySteps = [0.9, 0.82, 0.74, 0.66, 0.58]
+    const targetMime =
+      file.type === "image/jpeg" || file.type === "image/webp"
+        ? file.type
+        : preferredMime || "image/jpeg"
+    const qualitySteps = [0.88, 0.8, 0.72, 0.64, 0.56]
 
     let bestBlob: Blob | null = null
     for (const quality of qualitySteps) {
@@ -70,4 +82,20 @@ export async function compressImageForUpload(file: File): Promise<File> {
   } finally {
     if (bitmap) bitmap.close()
   }
+}
+
+export async function compressBrandingLogoForUpload(file: File): Promise<File> {
+  return compressImageForUpload(file, {
+    maxDimension: 1200,
+    skipIfUnderBytes: 120 * 1024,
+    preferredMime: "image/webp",
+  })
+}
+
+export async function compressBrandingIconForUpload(file: File): Promise<File> {
+  return compressImageForUpload(file, {
+    maxDimension: 512,
+    skipIfUnderBytes: 80 * 1024,
+    preferredMime: "image/webp",
+  })
 }

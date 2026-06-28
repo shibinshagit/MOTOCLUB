@@ -65,7 +65,7 @@ export function printBarcodeSticker(product: any, currency = "AED") {
   const encodedWholesalePrice = encodeNumberAsLetters(Math.round(wholesalePrice))
 
   // Truncate long names
-  const companyName = truncateText(product.company_name || "Al Aneeq", 20) // Max 20 chars for company name
+  const companyName = truncateText(product.company_name || "MotoCart", 20) // Max 20 chars for company name
   const productName = truncateText(product.name || "Product", 15) // Max 15 chars for product name
 
   const printWindow = window.open("", "_blank")
@@ -217,7 +217,7 @@ export function printMultipleBarcodeStickers(products: any[], copies = 1, curren
     const encodedWholesalePrice = encodeNumberAsLetters(Math.round(wholesalePrice))
 
     // Truncate long names for multiple stickers
-    const companyName = truncateText(product.company_name || "Al Aneeq", 20)
+    const companyName = truncateText(product.company_name || "MotoCart", 20)
     const productName = truncateText(product.name || "Product", 15)
 
     for (let copy = 0; copy < copies; copy++) {

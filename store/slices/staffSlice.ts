@@ -1,4 +1,5 @@
 import { createSlice, type PayloadAction } from "@reduxjs/toolkit"
+import type { StaffPageId, StaffValueRestriction } from "@/lib/staff-restrictions"
 
 interface Staff {
   id: number
@@ -6,6 +7,8 @@ interface Staff {
   phone: string
   email?: string
   role?: "admin" | "staff"
+  restricted_pages?: StaffPageId[] | string[] | null
+  restricted_values?: StaffValueRestriction[] | string[] | null
   position: string
   salary: number
   salary_date: string
@@ -49,7 +52,6 @@ const staffSlice = createSlice({
     },
     setStaff: (state, action: PayloadAction<Staff[]>) => {
       state.staff = action.payload
-      state.activeStaff = action.payload.find((member) => member.is_active) || null
       state.lastFetch = Date.now()
       state.error = null
     },

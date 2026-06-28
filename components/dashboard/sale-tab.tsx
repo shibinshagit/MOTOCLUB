@@ -9,7 +9,6 @@ import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { format } from "date-fns"
-import { QuickDebugPanel } from "../debug/Quickdebugpanel"
 import {
   Search,
   Loader2,
@@ -88,6 +87,7 @@ import { getProductByBarcode } from "@/app/actions/product-actions"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { FormAlert } from "@/components/ui/form-alert"
 import { selectActiveStaff } from "@/store/slices/staffSlice"
+import { useStaffRestrictions } from "@/hooks/use-staff-restrictions"
 import { printSalesReceipt } from "@/lib/receipt-utils"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
@@ -149,6 +149,9 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
   const deviceId = useSelector(selectDeviceId)
   const deviceCurrency = useSelector(selectDeviceCurrency)
   const activeStaff = useSelector(selectActiveStaff)
+  const { isValueHidden } = useStaffRestrictions()
+  const hideCogs = isValueHidden("cogs")
+  const hideStockCount = isValueHidden("stock_count")
 
   // Sales data from Redux
   const sales = useSelector(selectSales)
@@ -767,6 +770,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
 
         if (
           updates.quantity !== undefined &&
+          !hideStockCount &&
           updatedProduct.stock !== undefined &&
           updatedProduct.quantity > updatedProduct.stock
         ) {
@@ -798,7 +802,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
   }
 
   const isProductOutOfStock = (product: ProductRow) =>
-    Boolean(product.productId && !product.isService && (product.stock ?? 0) <= 0)
+    Boolean(!hideStockCount && product.productId && !product.isService && (product.stock ?? 0) <= 0)
 
   const handleQuantityInputChange = (product: ProductRow, rawValue: string) => {
     const parsed = Number.parseInt(rawValue, 10)
@@ -814,7 +818,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     }
 
     const safeRequested = Math.max(requestedQuantity, 1)
-    if (!product.isService && product.stock !== undefined && safeRequested > product.stock) {
+    if (!hideStockCount && !product.isService && product.stock !== undefined && safeRequested > product.stock) {
       setBarcodeAlert({
         type: "warning",
         message: `Only ${product.stock} units available for ${product.productName}`,
@@ -834,7 +838,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     wholesalePrice?: number,
     stock?: number,
   ) => {
-    if (stock !== undefined && stock <= 0) {
+    if (!hideStockCount && stock !== undefined && stock <= 0) {
       setBarcodeAlert({
         type: "error",
         message: `${productName} is out of stock`,
@@ -1888,12 +1892,14 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                   <p className="text-base font-bold text-blue-600 dark:text-blue-400">{formatCurrency(profitTotal)}</p>
                 </CardContent>
               </Card>
+              {!hideCogs && (
               <Card className="border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40">
                 <CardContent className="p-3">
                   <p className="text-xs text-gray-500 dark:text-gray-400">COGS</p>
                   <p className="text-base font-bold text-gray-700 dark:text-gray-300">{formatCurrency(cogsTotal)}</p>
                 </CardContent>
               </Card>
+              )}
             </div>
           </div>
 
@@ -2530,9 +2536,9 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                             : ""
                                         }`}
                                       />
-                                      {isProductOutOfStock(product) ? (
+                                      {isProductOutOfStock(product) && (
                                         <p className="mt-1 text-[10px] text-red-600 dark:text-red-400">Out of stock</p>
-                                      ) : null}
+                                      )}
                                     </div>
                                     <div>
                                       <Label className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1 block">
@@ -2897,6 +2903,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                     </CardContent>
                   </Card>
 
+                  {!hideCogs && (
                   <Card className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 shadow-sm">
                     <CardContent className="p-2">
                       <div className="text-center">
@@ -2917,6 +2924,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                       </div>
                     </CardContent>
                   </Card>
+                  )}
 
                   <Card className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 shadow-sm">
                     <CardContent className="p-2">

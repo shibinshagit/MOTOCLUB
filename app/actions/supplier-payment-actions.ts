@@ -477,34 +477,10 @@ export async function runFinancialTransactionsDiagnostics(deviceId: number) {
   const results: any = {
     timestamp: new Date().toISOString(),
     deviceId,
-    tests: []
+    tests: [],
   }
 
   try {
-    console.log("=== Financial Transactions Diagnostics ===")
-    
-    const tableExists = await sql`
-      SELECT EXISTS (
-        SELECT FROM information_schema.tables 
-        WHERE table_name = 'financial_transactions'
-      ) as exists
-    `
-    
-    if (!tableExists[0]?.exists) {
-      results.error = "Table does not exist"
-      return results
-    }
-
-    const columns = await sql`
-      SELECT column_name, data_type
-      FROM information_schema.columns
-      WHERE table_name = 'financial_transactions'
-      ORDER BY ordinal_position
-    `
-    
-    console.log("Table columns:", columns.map((c: any) => c.column_name).join(", "))
-    results.columns = columns
-
     const samplePayment = await sql`
       SELECT *
       FROM financial_transactions
@@ -515,13 +491,11 @@ export async function runFinancialTransactionsDiagnostics(deviceId: number) {
     `
 
     if (samplePayment.length > 0) {
-      console.log("Sample payment structure:", Object.keys(samplePayment[0]))
       results.samplePayment = samplePayment[0]
     }
 
     return results
   } catch (error: any) {
-    console.error("Diagnostics failed:", error)
     results.error = error.message
     return results
   }

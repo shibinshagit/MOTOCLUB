@@ -23,7 +23,7 @@ import {
   Package,
 } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
-import CustomerSelect from "./customer-select"
+import CustomerSelectSimple from "./customer-select-simple"
 import ProductSelectSimple from "./product-select-simple"
 import NewCustomerModal from "./new-customer-modal"
 import NewProductModal from "./new-product-modal"
@@ -1100,7 +1100,7 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
                             <User className="h-3.5 w-3.5 mr-1 text-blue-600 dark:text-blue-400" />
                             Customer
                           </Label>
-                          <CustomerSelect
+                          <CustomerSelectSimple
                             value={customerId}
                             onChange={(value, name) => {
                               setCustomerId(value)

@@ -2,6 +2,13 @@
 
 import { sql } from "@/lib/db"
 import { revalidatePath } from "next/cache"
+import {
+  DEFAULT_STAFF_VALUE_RESTRICTIONS,
+  parseStringArray,
+  type StaffPageId,
+  type StaffValueRestriction,
+} from "@/lib/staff-restrictions"
+import { clearStaffSessionCookie, setStaffSessionCookie } from "@/lib/staff-session"
 
 async function generatePasswordHash(password: string): Promise<string> {
   const encoder = new TextEncoder()
@@ -11,32 +18,32 @@ async function generatePasswordHash(password: string): Promise<string> {
   return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("")
 }
 
-async function ensureStaffPasswordColumn() {
-  try {
-    await sql`ALTER TABLE staff ADD COLUMN IF NOT EXISTS staff_password_hash TEXT`
-  } catch (error) {
-    console.error("Failed ensuring staff_password_hash column:", error)
-  }
-}
-
-async function ensureStaffRoleColumn() {
-  try {
-    await sql`ALTER TABLE staff ADD COLUMN IF NOT EXISTS role VARCHAR(20) NOT NULL DEFAULT 'staff'`
-  } catch (error) {
-    console.error("Failed ensuring staff.role column:", error)
-  }
-}
-
 function normalizeStaffRole(role?: string): "admin" | "staff" {
   return role === "admin" ? "admin" : "staff"
 }
 
-// Schema is now managed by `npm run migrate`
-export async function initializeStaffSchema() {
-  return { success: true, message: "Schema managed by migration script — run `npm run migrate`" }
+function normalizeRestrictedPages(pages?: StaffPageId[]): StaffPageId[] {
+  return parseStringArray<StaffPageId>(pages)
 }
 
-// Get all staff for a device (including inactive for management)
+function normalizeRestrictedValues(
+  role: "admin" | "staff",
+  values?: StaffValueRestriction[],
+): StaffValueRestriction[] {
+  if (role === "admin") return []
+  const parsed = parseStringArray<StaffValueRestriction>(values)
+  return parsed.length > 0 ? parsed : [...DEFAULT_STAFF_VALUE_RESTRICTIONS]
+}
+
+function normalizeRestrictedValuesForUpdate(
+  role: "admin" | "staff",
+  values?: StaffValueRestriction[],
+): StaffValueRestriction[] {
+  if (role === "admin") return []
+  return parseStringArray<StaffValueRestriction>(values)
+}
+
+// Schema is managed by `npm run migrate`
 export async function getDeviceStaff(deviceId: number) {
   try {
 
@@ -80,6 +87,8 @@ export async function updateStaff(
     phone: string
     email?: string
     role?: "admin" | "staff"
+    restrictedPages?: StaffPageId[]
+    restrictedValues?: StaffValueRestriction[]
     position: string
     salary: number
     salaryDate: string
@@ -89,12 +98,10 @@ export async function updateStaff(
     address?: string
     deviceId: number
     password?: string
+    isActive?: boolean
   },
 ) {
   try {
-    await ensureStaffPasswordColumn()
-    await ensureStaffRoleColumn()
-
     // Validate required IDs
     if (!staffData.deviceId || staffData.deviceId === null || staffData.deviceId === undefined) {
       console.error("❌ Device ID is missing or null:", staffData.deviceId)
@@ -124,13 +131,33 @@ export async function updateStaff(
         ? await generatePasswordHash(staffData.password.trim())
         : null
 
+    const role = normalizeStaffRole(staffData.role)
+    const restrictedPages = normalizeRestrictedPages(staffData.restrictedPages)
+    const restrictedValues = normalizeRestrictedValuesForUpdate(role, staffData.restrictedValues)
+    const isActive = staffData.isActive !== false
+
+    if (!isActive) {
+      const activeCount = await sql`
+        SELECT COUNT(*)::int AS count
+        FROM staff
+        WHERE device_id = ${staffData.deviceId}
+          AND is_active = true
+          AND id != ${staffId}
+      `
+      if (activeCount[0].count === 0) {
+        return { success: false, message: "At least one staff member must remain active." }
+      }
+    }
+
     // Update the staff member
     const result = await sql`
       UPDATE staff SET
         name = ${staffData.name},
         phone = ${staffData.phone},
         email = ${staffData.email || null},
-        role = ${normalizeStaffRole(staffData.role)},
+        role = ${role},
+        restricted_pages = ${JSON.stringify(restrictedPages)}::jsonb,
+        restricted_values = ${JSON.stringify(restrictedValues)}::jsonb,
         position = ${staffData.position},
         salary = ${staffData.salary},
         salary_date = ${staffData.salaryDate},
@@ -138,6 +165,7 @@ export async function updateStaff(
         age = ${staffData.age || null},
         id_card_number = ${staffData.idCardNumber || null},
         address = ${staffData.address || null},
+        is_active = ${isActive},
         staff_password_hash = COALESCE(${newPasswordHash}, staff_password_hash),
         updated_at = NOW()
       WHERE id = ${staffId} AND device_id = ${staffData.deviceId}
@@ -150,6 +178,7 @@ export async function updateStaff(
 
     console.log("✅ Staff member updated successfully:", result[0])
     revalidatePath("/dashboard")
+    revalidatePath("/admin")
 
     return {
       success: true,
@@ -162,10 +191,9 @@ export async function updateStaff(
   }
 }
 
-// Activate staff (automatically deactivates all others)
+// Activate staff (does not deactivate others — multiple staff can be active)
 export async function activateStaff(staffId: number, deviceId: number) {
   try {
-    await ensureStaffRoleColumn()
     // Enable selected staff without changing others (multi-active support)
     const result = await sql`
       UPDATE staff 
@@ -204,6 +232,8 @@ export async function addStaff(staffData: {
   phone: string
   email?: string
   role?: "admin" | "staff"
+  restrictedPages?: StaffPageId[]
+  restrictedValues?: StaffValueRestriction[]
   position: string
   salary: number
   salaryDate: string
@@ -214,11 +244,9 @@ export async function addStaff(staffData: {
   deviceId: number
   userId?: number
   password: string
+  isActive?: boolean
 }) {
   try {
-    await ensureStaffPasswordColumn()
-    await ensureStaffRoleColumn()
-
     // Validate required IDs
     if (!staffData.deviceId || staffData.deviceId === null || staffData.deviceId === undefined) {
       console.error("❌ Device ID is missing or null:", staffData.deviceId)
@@ -233,18 +261,24 @@ export async function addStaff(staffData: {
     const staffPasswordHash = await generatePasswordHash(staffData.password.trim())
 
 
-    // New staff should be active by default (supports multi-active staff)
-    const isActive = true
+    // New staff is active by default unless explicitly disabled
+    const isActive = staffData.isActive !== false
+
+    const role = normalizeStaffRole(staffData.role)
+    const restrictedPages = normalizeRestrictedPages(staffData.restrictedPages)
+    const restrictedValues = normalizeRestrictedValues(role, staffData.restrictedValues)
 
     const result = await sql`
       INSERT INTO staff (
-        name, phone, email, role, position, salary, salary_date, joined_on, 
+        name, phone, email, role, restricted_pages, restricted_values, position, salary, salary_date, joined_on, 
         age, id_card_number, address, device_id, created_by, is_active, staff_password_hash
       ) VALUES (
         ${staffData.name},
         ${staffData.phone},
         ${staffData.email || null},
-        ${normalizeStaffRole(staffData.role)},
+        ${role},
+        ${JSON.stringify(restrictedPages)}::jsonb,
+        ${JSON.stringify(restrictedValues)}::jsonb,
         ${staffData.position},
         ${staffData.salary},
         ${staffData.salaryDate},
@@ -273,11 +307,8 @@ export async function addStaff(staffData: {
 
 export async function getStaffForAuthentication(deviceId: number) {
   try {
-    await ensureStaffPasswordColumn()
-    await ensureStaffRoleColumn()
-
     const staff = await sql`
-      SELECT id, name, position, role, is_active
+      SELECT id, name, position, role, is_active, restricted_pages, restricted_values
       FROM staff
       WHERE device_id = ${deviceId}
       ORDER BY is_active DESC, name ASC
@@ -296,9 +327,6 @@ export async function authenticateStaff(
   password: string,
 ) {
   try {
-    await ensureStaffPasswordColumn()
-    await ensureStaffRoleColumn()
-
     if (!password?.trim()) {
       return { success: false, message: "Staff password is required" }
     }
@@ -326,6 +354,8 @@ export async function authenticateStaff(
     if (!activateResult.success) {
       return { success: false, message: activateResult.message || "Failed to activate staff session" }
     }
+
+    await setStaffSessionCookie(deviceId, staffId)
 
     return {
       success: true,
@@ -443,15 +473,107 @@ export async function deleteStaff(staffId: number, deviceId: number) {
   }
 }
 
-// Legacy function for compatibility - now redirects to activateStaff
+// Toggle staff active status (multiple staff can be active at once)
 export async function updateStaffStatus(staffId: number, deviceId: number, isActive: boolean) {
-  // Only allow activation, not deactivation
-  if (!isActive) {
-    return {
-      success: false,
-      message: "Cannot manually deactivate staff. Activate another staff member instead.",
-    }
-  }
+  try {
+    const existingStaff = await sql`
+      SELECT id, is_active FROM staff
+      WHERE id = ${staffId} AND device_id = ${deviceId}
+      LIMIT 1
+    `
 
-  return await activateStaff(staffId, deviceId)
+    if (existingStaff.length === 0) {
+      return { success: false, message: "Staff member not found" }
+    }
+
+    if (!isActive) {
+      const activeCount = await sql`
+        SELECT COUNT(*)::int AS count
+        FROM staff
+        WHERE device_id = ${deviceId}
+          AND is_active = true
+          AND id != ${staffId}
+      `
+      if (activeCount[0].count === 0) {
+        return {
+          success: false,
+          message: "At least one staff member must remain active.",
+        }
+      }
+    }
+
+    const result = await sql`
+      UPDATE staff
+      SET is_active = ${isActive}, updated_at = NOW()
+      WHERE id = ${staffId} AND device_id = ${deviceId}
+      RETURNING *
+    `
+
+    const allStaff = await sql`
+      SELECT * FROM staff
+      WHERE device_id = ${deviceId}
+      ORDER BY is_active DESC, name ASC
+    `
+
+    revalidatePath("/dashboard")
+
+    return {
+      success: true,
+      data: result[0],
+      allStaff,
+      message: isActive ? "Staff member activated" : "Staff member deactivated",
+    }
+  } catch (error) {
+    console.error("Error updating staff status:", error)
+    return { success: false, message: "Failed to update staff status" }
+  }
+}
+
+export async function restoreStaffSession(staffId: number, deviceId: number) {
+  try {
+
+    const staff = await sql`
+      SELECT id, name, position, role, is_active, restricted_pages, restricted_values
+      FROM staff
+      WHERE id = ${staffId}
+        AND device_id = ${deviceId}
+      LIMIT 1
+    `
+
+    if (staff.length === 0) {
+      return { success: false, message: "Staff member not found" }
+    }
+
+    if (!staff[0].is_active) {
+      return { success: false, message: "Staff member is inactive" }
+    }
+
+    await setStaffSessionCookie(deviceId, staffId)
+
+    const allStaff = await sql`
+      SELECT id, name, position, role, is_active, restricted_pages, restricted_values
+      FROM staff
+      WHERE device_id = ${deviceId}
+      ORDER BY is_active DESC, name ASC
+    `
+
+    return {
+      success: true,
+      data: staff[0],
+      allStaff,
+    }
+  } catch (error) {
+    console.error("Error restoring staff session:", error)
+    return { success: false, message: "Failed to restore staff session" }
+  }
+}
+
+export async function clearStaffSession(deviceId: number) {
+  try {
+    await clearStaffSessionCookie(deviceId)
+    return { success: true }
+  } catch (error) {
+    console.error("Error clearing staff session:", error)
+    return { success: false, message: "Failed to clear staff session" }
+  }
 }

@@ -12,6 +12,12 @@ import { useToast } from "@/components/ui/use-toast"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { getDevicesByCompany, createDevice, updateDevice } from "@/app/actions/admin-actions"
+import {
+  ADMIN_DIALOG_CONTENT_CLASS,
+  ADMIN_DIALOG_INPUT_CLASS,
+  ADMIN_DIALOG_LABEL_CLASS,
+  ADMIN_DIALOG_MUTED_CLASS,
+} from "@/lib/staff-restrictions"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 type Device = {
@@ -153,70 +159,70 @@ export default function DevicesTab({ companyId, onDeviceSelect }: DevicesTabProp
     <div className="space-y-6">
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div>
-          <h3 className="font-orbitron text-lg font-medium text-white">DEVICES</h3>
-          <p className="text-sm text-[#94A3B8]">Manage devices for this company</p>
+          <h3 className="text-lg font-medium text-gray-900">Devices</h3>
+          <p className="text-sm text-gray-500">Manage devices for this company</p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#94A3B8]" />
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
             <Input
               placeholder="Search devices..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-9 border-[#334155] bg-[#0F172A] text-white focus:border-[#6366F1]"
+              className="pl-9 "
             />
           </div>
           <Button
             onClick={() => setIsAddDialogOpen(true)}
-            className="bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] hover:from-[#4F46E5] hover:to-[#7C3AED]"
+            
           >
             <Plus className="mr-2 h-4 w-4" /> ADD DEVICE
           </Button>
         </div>
       </div>
 
-      <Card className="border-[#334155] bg-[#1E293B]">
+      <Card className="border-gray-200 bg-white shadow-sm">
         <CardContent className="p-0">
           {isLoading ? (
             <div className="flex justify-center py-8">
-              <Loader2 className="h-8 w-8 animate-spin text-[#6366F1]" />
+              <Loader2 className="h-8 w-8 animate-spin text-gray-600" />
             </div>
           ) : filteredDevices.length === 0 ? (
-            <div className="py-8 text-center text-[#94A3B8]">
-              <Monitor className="mx-auto mb-2 h-10 w-10 text-[#334155]" />
+            <div className="py-8 text-center text-gray-500">
+              <Monitor className="mx-auto mb-2 h-10 w-10 text-gray-300" />
               <p>No devices found. Add your first device to get started.</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
-                  <tr className="border-b border-[#334155]">
-                    <th className="px-4 py-3 text-left text-sm font-medium text-[#94A3B8]">Name</th>
-                    <th className="px-4 py-3 text-left text-sm font-medium text-[#94A3B8]">Email</th>
-                    <th className="px-4 py-3 text-left text-sm font-medium text-[#94A3B8]">Currency</th>
-                    <th className="px-4 py-3 text-left text-sm font-medium text-[#94A3B8]">Created</th>
-                    <th className="px-4 py-3 text-left text-sm font-medium text-[#94A3B8]">Actions</th>
+                  <tr className="border-b border-gray-200">
+                    <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Name</th>
+                    <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Email</th>
+                    <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Currency</th>
+                    <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Created</th>
+                    <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredDevices.map((device) => (
-                    <tr key={device.id} className="border-b border-[#334155] hover:bg-[#0F172A]/50">
-                      <td className="px-4 py-3 text-sm text-white">
+                    <tr key={device.id} className="border-b border-gray-200 hover:bg-gray-50/50">
+                      <td className="px-4 py-3 text-sm text-gray-900">
                         <div className="flex items-center">
-                          <Monitor className="mr-2 h-4 w-4 text-[#6366F1]" />
+                          <Monitor className="mr-2 h-4 w-4 text-gray-600" />
                           <span>{device.name}</span>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-sm text-white">{device.email}</td>
-                      <td className="px-4 py-3 text-sm text-white">{device.currency || "QAR"}</td>
-                      <td className="px-4 py-3 text-sm text-white">{formatDate(device.created_at)}</td>
+                      <td className="px-4 py-3 text-sm text-gray-900">{device.email}</td>
+                      <td className="px-4 py-3 text-sm text-gray-900">{device.currency || "QAR"}</td>
+                      <td className="px-4 py-3 text-sm text-gray-900">{formatDate(device.created_at)}</td>
                       <td className="px-4 py-3 text-sm">
                         <div className="flex space-x-2">
                           <Button
                             variant="ghost"
                             size="icon"
                             onClick={() => onDeviceSelect && onDeviceSelect(device)}
-                            className="text-[#94A3B8] hover:bg-[#334155] hover:text-white"
+                            className="text-gray-500 hover:bg-gray-100 hover:text-gray-900"
                           >
                             <Monitor className="h-4 w-4" />
                           </Button>
@@ -227,7 +233,7 @@ export default function DevicesTab({ companyId, onDeviceSelect }: DevicesTabProp
                               setSelectedDevice(device)
                               setIsEditDialogOpen(true)
                             }}
-                            className="text-[#94A3B8] hover:bg-[#334155] hover:text-white"
+                            className="text-gray-500 hover:bg-gray-100 hover:text-gray-900"
                           >
                             <Edit className="h-4 w-4" />
                           </Button>
@@ -244,33 +250,33 @@ export default function DevicesTab({ companyId, onDeviceSelect }: DevicesTabProp
 
       {/* Add Device Dialog */}
       <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-        <DialogContent className="border-[#334155] bg-[#1E293B] text-white sm:max-w-md">
+        <DialogContent className={`${ADMIN_DIALOG_CONTENT_CLASS} sm:max-w-md`}>
           <DialogHeader>
-            <DialogTitle className="font-orbitron text-xl text-white">ADD NEW DEVICE</DialogTitle>
-            <DialogDescription className="text-[#94A3B8]">
+            <DialogTitle className="text-xl text-gray-900">Add device</DialogTitle>
+            <DialogDescription className={ADMIN_DIALOG_MUTED_CLASS}>
               Create a new device account for this company.
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleAddDevice} className="space-y-4">
             {formError && (
-              <Alert variant="destructive" className="border-red-500 bg-red-900/20 text-red-200">
+              <Alert variant="destructive">
                 <AlertCircle className="h-4 w-4" />
                 <AlertDescription className="ml-2">{formError}</AlertDescription>
               </Alert>
             )}
             <div className="space-y-2">
-              <Label htmlFor="name" className="text-[#94A3B8]">
+              <Label htmlFor="name" className={ADMIN_DIALOG_LABEL_CLASS}>
                 Device Name
               </Label>
               <Input
                 id="name"
                 name="name"
                 required
-                className="border-[#334155] bg-[#0F172A] text-white focus:border-[#6366F1]"
+                className={ADMIN_DIALOG_INPUT_CLASS}
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="email" className="text-[#94A3B8]">
+              <Label htmlFor="email" className={ADMIN_DIALOG_LABEL_CLASS}>
                 Email
               </Label>
               <Input
@@ -278,21 +284,18 @@ export default function DevicesTab({ companyId, onDeviceSelect }: DevicesTabProp
                 name="email"
                 type="email"
                 required
-                className="border-[#334155] bg-[#0F172A] text-white focus:border-[#6366F1]"
+                className={ADMIN_DIALOG_INPUT_CLASS}
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="currency" className="text-[#94A3B8]">
+              <Label htmlFor="currency" className={ADMIN_DIALOG_LABEL_CLASS}>
                 Currency
               </Label>
               <Select name="currency" defaultValue="QAR">
-                <SelectTrigger
-                  id="currency"
-                  className="border-[#334155] bg-[#0F172A] text-white focus:border-[#6366F1]"
-                >
+                <SelectTrigger id="currency" className={ADMIN_DIALOG_INPUT_CLASS}>
                   <SelectValue placeholder="Select currency" />
                 </SelectTrigger>
-                <SelectContent className="border-[#334155] bg-[#1E293B] text-white">
+                <SelectContent >
                   {currencyOptions.map((currency) => (
                     <SelectItem key={currency.value} value={currency.value}>
                       {currency.label}
@@ -302,7 +305,7 @@ export default function DevicesTab({ companyId, onDeviceSelect }: DevicesTabProp
               </Select>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password" className="text-[#94A3B8]">
+              <Label htmlFor="password" className={ADMIN_DIALOG_LABEL_CLASS}>
                 Password
               </Label>
               <Input
@@ -310,7 +313,7 @@ export default function DevicesTab({ companyId, onDeviceSelect }: DevicesTabProp
                 name="password"
                 type="password"
                 required
-                className="border-[#334155] bg-[#0F172A] text-white focus:border-[#6366F1]"
+                className={ADMIN_DIALOG_INPUT_CLASS}
               />
             </div>
             <div className="flex justify-end space-x-2 pt-4">
@@ -318,14 +321,14 @@ export default function DevicesTab({ companyId, onDeviceSelect }: DevicesTabProp
                 type="button"
                 variant="outline"
                 onClick={() => setIsAddDialogOpen(false)}
-                className="border-[#334155] bg-transparent text-[#94A3B8] hover:bg-[#334155] hover:text-white"
+                
               >
                 CANCEL
               </Button>
               <Button
                 type="submit"
                 disabled={isSubmitting}
-                className="bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] hover:from-[#4F46E5] hover:to-[#7C3AED]"
+                
               >
                 {isSubmitting ? (
                   <>
@@ -342,21 +345,21 @@ export default function DevicesTab({ companyId, onDeviceSelect }: DevicesTabProp
 
       {/* Edit Device Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent className="border-[#334155] bg-[#1E293B] text-white sm:max-w-md">
+        <DialogContent className={`${ADMIN_DIALOG_CONTENT_CLASS} sm:max-w-md`}>
           <DialogHeader>
-            <DialogTitle className="font-orbitron text-xl text-white">EDIT DEVICE</DialogTitle>
-            <DialogDescription className="text-[#94A3B8]">Update device account details.</DialogDescription>
+            <DialogTitle className="text-xl text-gray-900">Edit device</DialogTitle>
+            <DialogDescription className={ADMIN_DIALOG_MUTED_CLASS}>Update device account details.</DialogDescription>
           </DialogHeader>
           {selectedDevice && (
             <form onSubmit={handleUpdateDevice} className="space-y-4">
               {formError && (
-                <Alert variant="destructive" className="border-red-500 bg-red-900/20 text-red-200">
+                <Alert variant="destructive">
                   <AlertCircle className="h-4 w-4" />
                   <AlertDescription className="ml-2">{formError}</AlertDescription>
                 </Alert>
               )}
               <div className="space-y-2">
-                <Label htmlFor="edit-name" className="text-[#94A3B8]">
+                <Label htmlFor="edit-name" className={ADMIN_DIALOG_LABEL_CLASS}>
                   Name
                 </Label>
                 <Input
@@ -364,11 +367,11 @@ export default function DevicesTab({ companyId, onDeviceSelect }: DevicesTabProp
                   name="name"
                   defaultValue={selectedDevice.name}
                   required
-                  className="border-[#334155] bg-[#0F172A] text-white focus:border-[#6366F1]"
+                className={ADMIN_DIALOG_INPUT_CLASS}  
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="edit-email" className="text-[#94A3B8]">
+                <Label htmlFor="edit-email" className={ADMIN_DIALOG_LABEL_CLASS}>
                   Email
                 </Label>
                 <Input
@@ -377,21 +380,21 @@ export default function DevicesTab({ companyId, onDeviceSelect }: DevicesTabProp
                   type="email"
                   defaultValue={selectedDevice.email}
                   required
-                  className="border-[#334155] bg-[#0F172A] text-white focus:border-[#6366F1]"
+                className={ADMIN_DIALOG_INPUT_CLASS}  
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="edit-currency" className="text-[#94A3B8]">
+                <Label htmlFor="edit-currency" className={ADMIN_DIALOG_LABEL_CLASS}>
                   Currency
                 </Label>
                 <Select name="currency" defaultValue={selectedDevice.currency || "QAR"}>
                   <SelectTrigger
                     id="edit-currency"
-                    className="border-[#334155] bg-[#0F172A] text-white focus:border-[#6366F1]"
+                    
                   >
                     <SelectValue placeholder="Select currency" />
                   </SelectTrigger>
-                  <SelectContent className="border-[#334155] bg-[#1E293B] text-white">
+                  <SelectContent >
                     {currencyOptions.map((currency) => (
                       <SelectItem key={currency.value} value={currency.value}>
                         {currency.label}
@@ -401,14 +404,14 @@ export default function DevicesTab({ companyId, onDeviceSelect }: DevicesTabProp
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="edit-password" className="text-[#94A3B8]">
+                <Label htmlFor="edit-password" className={ADMIN_DIALOG_LABEL_CLASS}>
                   Password (leave blank to keep current)
                 </Label>
                 <Input
                   id="edit-password"
                   name="password"
                   type="password"
-                  className="border-[#334155] bg-[#0F172A] text-white focus:border-[#6366F1]"
+                  
                 />
               </div>
               <div className="flex justify-end space-x-2 pt-4">
@@ -416,14 +419,14 @@ export default function DevicesTab({ companyId, onDeviceSelect }: DevicesTabProp
                   type="button"
                   variant="outline"
                   onClick={() => setIsEditDialogOpen(false)}
-                  className="border-[#334155] bg-transparent text-[#94A3B8] hover:bg-[#334155] hover:text-white"
+                  
                 >
                   CANCEL
                 </Button>
                 <Button
                   type="submit"
                   disabled={isSubmitting}
-                  className="bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] hover:from-[#4F46E5] hover:to-[#7C3AED]"
+                  
                 >
                   {isSubmitting ? (
                     <>

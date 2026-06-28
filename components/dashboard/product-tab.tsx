@@ -26,6 +26,7 @@ import { printBarcodeSticker } from "@/lib/barcode-utils"
 import { FormAlert } from "@/components/ui/form-alert"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useNotification } from "@/components/ui/global-notification"
+import { useStaffRestrictions } from "@/hooks/use-staff-restrictions"
 import { exportProductsToPDF } from "@/lib/pdf-export-utils"
 import { useSelector, useDispatch } from "react-redux"
 import type { RootState, AppDispatch } from "@/store/store"
@@ -52,6 +53,9 @@ export default function ProductTab({ userId, isAddModalOpen = false, onModalClos
   const dispatch = useDispatch<AppDispatch>()
   const { products, searchTerm, isLoading, lastUpdated, error } = useSelector((state: RootState) => state.product)
   const currency = useSelector(selectDeviceCurrency)
+  const { isValueHidden } = useStaffRestrictions()
+  const hideCogs = isValueHidden("cogs")
+  const hideStockCount = isValueHidden("stock_count")
 
   const [isProductModalOpen, setIsProductModalOpen] = useState(isAddModalOpen)
   const [selectedProduct, setSelectedProduct] = useState<any>(null)
@@ -446,6 +450,7 @@ export default function ProductTab({ userId, isAddModalOpen = false, onModalClos
         {/* Mobile Filter Section */}
         <div className="lg:hidden bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 shadow-sm">
           {/* Status Filter */}
+          {!hideStockCount && (
           <div className="mb-4">
             <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Status</p>
             <div className="grid grid-cols-4 gap-2">
@@ -469,6 +474,7 @@ export default function ProductTab({ userId, isAddModalOpen = false, onModalClos
               ))}
             </div>
           </div>
+          )}
 
           {/* Filter Mode Tabs */}
           <div className="flex bg-gray-100 dark:bg-gray-700 rounded-lg p-1 mb-4">
@@ -589,18 +595,24 @@ export default function ProductTab({ userId, isAddModalOpen = false, onModalClos
                   <th className="text-left p-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                     Retail Price
                   </th>
-                  <th className="text-left p-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    Cost Price
-                  </th>
-                  <th className="text-left p-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    Stock
-                  </th>
-                  <th className="text-left p-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    Other Devices
-                  </th>
-                  <th className="text-left p-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    Status
-                  </th>
+                  {!hideCogs && (
+                    <th className="text-left p-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      Cost Price
+                    </th>
+                  )}
+                  {!hideStockCount && (
+                    <>
+                      <th className="text-left p-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                        Stock
+                      </th>
+                      <th className="text-left p-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                        Other Devices
+                      </th>
+                      <th className="text-left p-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                        Status
+                      </th>
+                    </>
+                  )}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
@@ -629,7 +641,7 @@ export default function ProductTab({ userId, isAddModalOpen = false, onModalClos
                   ))
                 ) : filteredProducts.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="p-8 text-center text-gray-500 dark:text-gray-400">
+                    <td colSpan={3 + (hideCogs ? 0 : 1) + (hideStockCount ? 0 : 3)} className="p-8 text-center text-gray-500 dark:text-gray-400">
                       {searchTerm || selectedCategory !== "All" || selectedCompany !== "All"
                         ? "No products found"
                         : "No products available"}
@@ -664,28 +676,34 @@ export default function ProductTab({ userId, isAddModalOpen = false, onModalClos
                       <td className="p-3 text-sm font-medium text-gray-900 dark:text-gray-100">
                         {currency} {Number(product.price).toFixed(2)}
                       </td>
-                      <td className="p-3 text-sm font-medium text-gray-900 dark:text-gray-100">
-                        <span className="group/cost inline-flex items-center">
-                          <span className="text-gray-400 dark:text-gray-500 group-hover/cost:hidden select-none">******</span>
-                          <span className="hidden group-hover/cost:inline">
-                          {currency} {Number(product.wholesale_price || 0).toFixed(2)}
+                      {!hideCogs && (
+                        <td className="p-3 text-sm font-medium text-gray-900 dark:text-gray-100">
+                          <span className="group/cost inline-flex items-center">
+                            <span className="text-gray-400 dark:text-gray-500 group-hover/cost:hidden select-none">******</span>
+                            <span className="hidden group-hover/cost:inline">
+                            {currency} {Number(product.wholesale_price || 0).toFixed(2)}
+                            </span>
                           </span>
-                        </span>
-                      </td>
-                      <td className="p-3 text-sm font-medium text-gray-900 dark:text-gray-100">
-                        {product.stock}
-                      </td>
-                      <td className="p-3 text-sm font-medium text-blue-600 dark:text-blue-300">
-                        {Number(product.other_devices_stock || 0)}
-                      </td>
-                      <td className="p-3">
-                        <span
-                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold tracking-wide ${getStatusTag(product.stock).className}`}
-                        >
-                          <span className="h-1.5 w-1.5 rounded-full bg-current opacity-80"></span>
-                          {getStatusTag(product.stock).label}
-                        </span>
-                      </td>
+                        </td>
+                      )}
+                      {!hideStockCount && (
+                        <>
+                          <td className="p-3 text-sm font-medium text-gray-900 dark:text-gray-100">
+                            {product.stock}
+                          </td>
+                          <td className="p-3 text-sm font-medium text-blue-600 dark:text-blue-300">
+                            {Number(product.other_devices_stock || 0)}
+                          </td>
+                          <td className="p-3">
+                            <span
+                              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold tracking-wide ${getStatusTag(product.stock).className}`}
+                            >
+                              <span className="h-1.5 w-1.5 rounded-full bg-current opacity-80"></span>
+                              {getStatusTag(product.stock).label}
+                            </span>
+                          </td>
+                        </>
+                      )}
                     </tr>
                   ))
                 )}
@@ -741,46 +759,62 @@ export default function ProductTab({ userId, isAddModalOpen = false, onModalClos
                         </p>
                       </div>
                       <div className="flex flex-col items-end gap-2 ml-4">
-                        <span
-                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold tracking-wide ${getStatusTag(product.stock).className}`}
-                        >
-                          <span className="h-1.5 w-1.5 rounded-full bg-current opacity-80"></span>
-                          {getStatusTag(product.stock).label}
-                        </span>
+                        {!hideStockCount && (
+                          <span
+                            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold tracking-wide ${getStatusTag(product.stock).className}`}
+                          >
+                            <span className="h-1.5 w-1.5 rounded-full bg-current opacity-80"></span>
+                            {getStatusTag(product.stock).label}
+                          </span>
+                        )}
                         <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200">
                           {product.category || "Uncategorized"}
                         </span>
                       </div>
                     </div>
                     
-                    <div className="grid grid-cols-4 gap-4 text-sm">
+                    <div
+                      className={`grid gap-4 text-sm ${
+                        hideCogs && hideStockCount
+                          ? "grid-cols-1"
+                          : hideCogs || hideStockCount
+                            ? "grid-cols-2"
+                            : "grid-cols-4"
+                      }`}
+                    >
                       <div>
                         <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Retail</p>
                         <p className="font-medium text-gray-900 dark:text-gray-100">
                           {currency} {Number(product.price).toFixed(2)}
                         </p>
                       </div>
-                      <div>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Cost</p>
-                        <p className="font-medium group/cost inline-flex items-center">
-                          <span className="text-gray-400 dark:text-gray-500 group-hover/cost:hidden select-none">
-                            ******
-                          </span>
-                          <span className="hidden group-hover/cost:inline text-gray-900 dark:text-gray-100">
-                            {currency} {Number(product.wholesale_price || 0).toFixed(2)}
-                          </span>
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Stock</p>
-                        <p className="font-medium text-gray-900 dark:text-gray-100">{product.stock}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Other Devices</p>
-                        <p className="font-medium text-blue-600 dark:text-blue-300">
-                          {Number(product.other_devices_stock || 0)}
-                        </p>
-                      </div>
+                      {!hideCogs && (
+                        <div>
+                          <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Cost</p>
+                          <p className="font-medium group/cost inline-flex items-center">
+                            <span className="text-gray-400 dark:text-gray-500 group-hover/cost:hidden select-none">
+                              ******
+                            </span>
+                            <span className="hidden group-hover/cost:inline text-gray-900 dark:text-gray-100">
+                              {currency} {Number(product.wholesale_price || 0).toFixed(2)}
+                            </span>
+                          </p>
+                        </div>
+                      )}
+                      {!hideStockCount && (
+                        <>
+                          <div>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Stock</p>
+                            <p className="font-medium text-gray-900 dark:text-gray-100">{product.stock}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Other Devices</p>
+                            <p className="font-medium text-blue-600 dark:text-blue-300">
+                              {Number(product.other_devices_stock || 0)}
+                            </p>
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -804,6 +838,7 @@ export default function ProductTab({ userId, isAddModalOpen = false, onModalClos
             </Button>
 
             {/* Status Filter */}
+            {!hideStockCount && (
             <div>
               <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Status</p>
               <div className="grid grid-cols-4 gap-2">
@@ -827,6 +862,7 @@ export default function ProductTab({ userId, isAddModalOpen = false, onModalClos
                 ))}
               </div>
             </div>
+            )}
 
             {/* Filter Mode Tabs */}
             <div className="flex bg-gray-100 dark:bg-gray-700 rounded-lg p-1">
@@ -925,10 +961,14 @@ export default function ProductTab({ userId, isAddModalOpen = false, onModalClos
           isOpen={isViewModalOpen}
           onClose={() => setIsViewModalOpen(false)}
           product={selectedProduct}
-          onAdjustStock={() => {
-            setIsViewModalOpen(false)
-            setIsAdjustStockModalOpen(true)
-          }}
+          onAdjustStock={
+            hideStockCount
+              ? undefined
+              : () => {
+                  setIsViewModalOpen(false)
+                  setIsAdjustStockModalOpen(true)
+                }
+          }
           currency={currency}
           privacyMode={false}
           userId={userId}
@@ -983,7 +1023,8 @@ export default function ProductTab({ userId, isAddModalOpen = false, onModalClos
         position={popupState.position}
         onView={() => handleViewProduct(popupState.product)}
         onEdit={() => handleEditProduct(popupState.product)}
-        onAdjustStock={() => handleAdjustStock(popupState.product)}
+        onAdjustStock={hideStockCount ? undefined : () => handleAdjustStock(popupState.product)}
+        showAdjustStock={!hideStockCount}
         onPrint={() => printBarcodeSticker(popupState.product, currency)}
         onDelete={() => handleDeleteProduct(popupState.product)}
       />

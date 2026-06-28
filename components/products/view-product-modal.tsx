@@ -10,6 +10,7 @@ import { printBarcodeSticker, printMultipleBarcodeStickers, encodeNumberAsLetter
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { getDeviceCurrency } from "@/app/actions/dashboard-actions"
+import { useStaffRestrictions } from "@/hooks/use-staff-restrictions"
 
 interface ViewProductModalProps {
   isOpen: boolean
@@ -30,6 +31,9 @@ export default function ViewProductModal({
   privacyMode = true,
   userId,
 }: ViewProductModalProps) {
+  const { isValueHidden } = useStaffRestrictions()
+  const hideCogs = isValueHidden("cogs")
+  const hideStockCount = isValueHidden("stock_count")
   const [stockHistory, setStockHistory] = useState<any[]>([])
   const [deviceStocks, setDeviceStocks] = useState<any[]>([])
   const [historyFilter, setHistoryFilter] = useState<"current" | "other" | "all">("current")
@@ -286,7 +290,7 @@ export default function ViewProductModal({
                             {mediaImageUrls.map((url, index) => (
                               <div key={`${url}-${index}`} className="rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 p-1 overflow-hidden">
                                 <img
-                                  src={url || "/placeholder.svg"}
+                                  src={url}
                                   alt={`${product.name} ${index + 1}`}
                                   className="w-full h-20 object-cover rounded-md"
                                 />
@@ -348,23 +352,25 @@ export default function ViewProductModal({
                       </p>
                     </div>
 
-                    <div className="space-y-2">
-                      <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Cost Price</h3>
-                      <p className="font-medium text-gray-900 dark:text-gray-100">
-                        {privacyMode ? (
-                          <span className="text-gray-400 dark:text-gray-500">*** ***</span>
-                        ) : (
-                          <>
-                            {currency} {product.wholesale_price || "0.00"}
-                            {encodedWholesalePrice && (
-                              <span className="ml-2 px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded text-xs">
-                                Code: {encodedWholesalePrice}
-                              </span>
-                            )}
-                          </>
-                        )}
-                      </p>
-                    </div>
+                    {!hideCogs && (
+                      <div className="space-y-2">
+                        <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Cost Price</h3>
+                        <p className="font-medium text-gray-900 dark:text-gray-100">
+                          {privacyMode ? (
+                            <span className="text-gray-400 dark:text-gray-500">*** ***</span>
+                          ) : (
+                            <>
+                              {currency} {product.wholesale_price || "0.00"}
+                              {encodedWholesalePrice && (
+                                <span className="ml-2 px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded text-xs">
+                                  Code: {encodedWholesalePrice}
+                                </span>
+                              )}
+                            </>
+                          )}
+                        </p>
+                      </div>
+                    )}
 
                     {msp > 0 && (
                       <div className="space-y-2">
@@ -381,29 +387,31 @@ export default function ViewProductModal({
                       </div>
                     )}
 
-                    <div className="space-y-2">
-                      <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Current Stock</h3>
-                      <p className="font-medium">
-                        {privacyMode ? (
-                          <span className="inline-block rounded-full px-2.5 py-0.5 text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400">
-                            *** Stock
-                          </span>
-                        ) : (
-                          <span
-                            className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                              product.stock === 0
-                                ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
-                                : product.stock < 5
-                                  ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200"
-                                  : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
-                            }`}
-                          >
-                            {product.stock}{" "}
-                            {product.stock === 0 ? "Out of Stock" : product.stock < 5 ? "Low Stock" : "In Stock"}
-                          </span>
-                        )}
-                      </p>
-                    </div>
+                    {!hideStockCount && (
+                      <div className="space-y-2">
+                        <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Current Stock</h3>
+                        <p className="font-medium">
+                          {privacyMode ? (
+                            <span className="inline-block rounded-full px-2.5 py-0.5 text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400">
+                              *** Stock
+                            </span>
+                          ) : (
+                            <span
+                              className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                                product.stock === 0
+                                  ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
+                                  : product.stock < 5
+                                    ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200"
+                                    : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
+                              }`}
+                            >
+                              {product.stock}{" "}
+                              {product.stock === 0 ? "Out of Stock" : product.stock < 5 ? "Low Stock" : "In Stock"}
+                            </span>
+                          )}
+                        </p>
+                      </div>
+                    )}
 
                     <div className="space-y-2">
                       <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Created At</h3>
@@ -513,7 +521,7 @@ export default function ViewProductModal({
                 </div>
               </div>
 
-              {!privacyMode && deviceStocks.length > 0 && (
+              {!hideStockCount && !privacyMode && deviceStocks.length > 0 && (
                 <div className="space-y-3">
                   <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Stock by Warehouse/Device</h3>
                   <div className="border rounded-md overflow-hidden border-gray-200 dark:border-gray-600">
@@ -598,7 +606,7 @@ export default function ViewProductModal({
                     >
                       <Copy className="mr-2 h-4 w-4" /> Print Multiple Copies
                     </Button>
-                    {onAdjustStock && (
+                    {onAdjustStock && !hideStockCount && (
                       <Button
                         onClick={onAdjustStock}
                         variant="secondary"
@@ -612,6 +620,7 @@ export default function ViewProductModal({
               </div>
 
               {/* Stock History Section - Show with masked data in privacy mode */}
+              {!hideStockCount && (
               <div className="space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                   <div className="flex items-center gap-2">
@@ -762,6 +771,7 @@ export default function ViewProductModal({
                   </p>
                 )}
               </div>
+              )}
             </div>
           </div>
 

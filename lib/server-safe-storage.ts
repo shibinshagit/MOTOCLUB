@@ -1,8 +1,5 @@
 /**
- * Creates a very small, non-persistent `localStorage` polyfill when code
- * executes on the server (where `window` is undefined).  Import this module
- * once at application start-up to ensure slices and utilities that reference
- * `localStorage` do not crash during SSR or the build step.
+ * Non-persistent localStorage polyfill for SSR/build when window is undefined.
  */
 
 function createStorageShim(): Storage {
@@ -30,9 +27,6 @@ function createStorageShim(): Storage {
   } as Storage
 }
 
-// Attach shim ONLY in non-browser environments
 if (typeof window === "undefined" && (globalThis as any).localStorage === undefined) {
-  // eslint-disable-next-line no-console
-  console.info("[polyfill] injecting localStorage shim for SSR/build")
   ;(globalThis as any).localStorage = createStorageShim()
 }

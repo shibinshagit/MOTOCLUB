@@ -2,6 +2,7 @@
 
 import { format } from "date-fns"
 import { formatCurrency as formatCurrencyOriginal } from "./utils"
+import { BRAND_NAME } from "@/lib/brand"
 import { jsPDF } from "jspdf"
 import "jspdf-autotable"
 
@@ -58,12 +59,7 @@ export async function generateDetailedSalePDF(saleData: any) {
   // Add company header
   doc.setFontSize(18)
   doc.setFont("helvetica", "bold")
-  doc.text("Moto Club", 105, 15, { align: "center" })
-
-  doc.setFontSize(10)
-  doc.setFont("helvetica", "normal")
-  doc.text("kottakkal, malappuram, kerala, india", 105, 22, { align: "center" })
-  doc.text("Phone: +91 9995442239", 105, 27, { align: "center" })
+  doc.text(BRAND_NAME, 105, 15, { align: "center" })
 
   // Add title
   doc.setFillColor(245, 245, 245)

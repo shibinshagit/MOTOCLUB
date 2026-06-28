@@ -13,6 +13,7 @@ import { adjustProductStock } from "@/app/actions/product-actions"
 import { getDeviceCurrency } from "@/app/actions/dashboard-actions"
 import { FormAlert } from "@/components/ui/form-alert"
 import { Loader2 } from "lucide-react"
+import { useStaffRestrictions } from "@/hooks/use-staff-restrictions"
 
 interface AdjustStockModalProps {
   isOpen: boolean
@@ -31,6 +32,8 @@ export default function AdjustStockModal({
   currency: currencyProp,
   onSuccess,
 }: AdjustStockModalProps) {
+  const { isValueHidden } = useStaffRestrictions()
+  const hideStockCount = isValueHidden("stock_count")
   const [stockHistory, setStockHistory] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [adjustType, setAdjustType] = useState<"increase" | "decrease">("increase")
@@ -176,6 +179,14 @@ export default function AdjustStockModal({
             />
           )}
 
+          {hideStockCount ? (
+            <FormAlert
+              variant="destructive"
+              title="Access restricted"
+              message="Stock adjustments are not available for your staff role."
+              className="mt-4"
+            />
+          ) : (
           <div className="grid gap-4 py-4">
             <div className="space-y-2">
               <Label className="text-base">
@@ -236,11 +247,13 @@ export default function AdjustStockModal({
               />
             </div>
           </div>
+          )}
 
           <DialogFooter className="flex flex-col sm:flex-row gap-2 pt-4">
             <Button variant="outline" onClick={onClose} disabled={isSubmitting} className="w-full sm:w-auto">
               Cancel
             </Button>
+            {!hideStockCount && (
             <Button
               onClick={handleSubmit}
               disabled={isSubmitting}
@@ -255,6 +268,7 @@ export default function AdjustStockModal({
                 "Adjust Stock"
               )}
             </Button>
+            )}
           </DialogFooter>
         </ScrollableContent>
       </DialogContent>

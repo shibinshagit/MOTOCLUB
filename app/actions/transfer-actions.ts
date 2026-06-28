@@ -14,70 +14,6 @@ type StockMoveItemInput = {
   quantity: number
 }
 
-async function ensureTransferTables() {
-  await sql`
-    CREATE TABLE IF NOT EXISTS stock_transfers (
-      id SERIAL PRIMARY KEY,
-      company_id INTEGER NOT NULL,
-      from_device_id INTEGER NOT NULL,
-      to_device_id INTEGER NOT NULL,
-      status VARCHAR(30) NOT NULL DEFAULT 'completed',
-      total_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
-      payment_status VARCHAR(30) NOT NULL DEFAULT 'unpaid',
-      payment_method VARCHAR(50),
-      paid_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
-      payment_notes TEXT,
-      transfer_date TIMESTAMP DEFAULT NOW(),
-      notes TEXT,
-      created_by INTEGER NOT NULL,
-      created_at TIMESTAMP DEFAULT NOW(),
-      updated_at TIMESTAMP DEFAULT NOW(),
-      cancelled_at TIMESTAMP,
-      cancelled_by INTEGER
-    )
-  `
-
-  await sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS total_amount DECIMAL(12,2) NOT NULL DEFAULT 0`
-  await sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS payment_status VARCHAR(30) NOT NULL DEFAULT 'unpaid'`
-  await sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50)`
-  await sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS paid_amount DECIMAL(12,2) NOT NULL DEFAULT 0`
-  await sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS payment_notes TEXT`
-  await sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS transfer_date TIMESTAMP DEFAULT NOW()`
-  await sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS rejection_reason TEXT`
-  await sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS approved_by INTEGER`
-  await sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP`
-  await sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS rejected_by INTEGER`
-  await sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS rejected_at TIMESTAMP`
-
-  await sql`
-    CREATE TABLE IF NOT EXISTS stock_transfer_items (
-      id SERIAL PRIMARY KEY,
-      transfer_id INTEGER NOT NULL,
-      product_id INTEGER NOT NULL,
-      quantity INTEGER NOT NULL,
-      unit_cost DECIMAL(12,2) NOT NULL DEFAULT 0,
-      total_cost DECIMAL(12,2) NOT NULL DEFAULT 0,
-      created_at TIMESTAMP DEFAULT NOW()
-    )
-  `
-
-  await sql`ALTER TABLE stock_transfer_items ADD COLUMN IF NOT EXISTS unit_cost DECIMAL(12,2) NOT NULL DEFAULT 0`
-  await sql`ALTER TABLE stock_transfer_items ADD COLUMN IF NOT EXISTS total_cost DECIMAL(12,2) NOT NULL DEFAULT 0`
-}
-
-async function ensureProductDeviceStockTable() {
-  await sql`
-    CREATE TABLE IF NOT EXISTS product_device_stock (
-      id SERIAL PRIMARY KEY,
-      product_id INTEGER NOT NULL,
-      device_id INTEGER NOT NULL,
-      stock INTEGER NOT NULL DEFAULT 0,
-      updated_at TIMESTAMP DEFAULT NOW(),
-      UNIQUE(product_id, device_id)
-    )
-  `
-}
-
 function normalizeTransferItems(items: any[]): TransferItemInput[] {
   const itemMap = new Map<number, { quantity: number; unit_cost: number }>()
 
@@ -308,9 +244,6 @@ export async function getTransferFormData(userId: number, fromDeviceId?: number)
 
   resetConnectionState()
   try {
-    await ensureTransferTables()
-    await ensureProductDeviceStockTable()
-
     const companyId = await getCompanyIdForDevice(userId)
     if (!companyId) {
       return { success: false, message: "Device/company not found", data: { devices: [], products: [] } }
@@ -370,7 +303,6 @@ export async function getWarehouseTransfers(userId: number, searchTerm?: string,
 
   resetConnectionState()
   try {
-    await ensureTransferTables()
     const companyId = await getCompanyIdForDevice(userId)
     if (!companyId) return { success: false, message: "Device/company not found", data: [] }
 
@@ -434,7 +366,6 @@ export async function getWarehouseTransferById(transferId: number, userId: numbe
 
   resetConnectionState()
   try {
-    await ensureTransferTables()
     const companyId = await getCompanyIdForDevice(userId)
     if (!companyId) return { success: false, message: "Device/company not found", data: null }
 
@@ -538,9 +469,6 @@ export async function createWarehouseTransfer(formData: FormData) {
   resetConnectionState()
   try {
     await sql`BEGIN`
-    await ensureTransferTables()
-    await ensureProductDeviceStockTable()
-
     const actorCompanyId = await getCompanyIdForDevice(userId)
     const fromCompanyId = await getCompanyIdForDevice(fromDeviceId)
     const toCompanyId = await getCompanyIdForDevice(toDeviceId)
@@ -664,9 +592,6 @@ export async function updateWarehouseTransfer(formData: FormData) {
   resetConnectionState()
   try {
     await sql`BEGIN`
-    await ensureTransferTables()
-    await ensureProductDeviceStockTable()
-
     const actorCompanyId = await getCompanyIdForDevice(userId)
     const fromCompanyId = await getCompanyIdForDevice(fromDeviceId)
     const toCompanyId = await getCompanyIdForDevice(toDeviceId)
@@ -851,9 +776,6 @@ export async function cancelWarehouseTransfer(transferId: number, userId: number
   resetConnectionState()
   try {
     await sql`BEGIN`
-    await ensureTransferTables()
-    await ensureProductDeviceStockTable()
-
     const actorCompanyId = await getCompanyIdForDevice(userId)
     if (!actorCompanyId) {
       await sql`ROLLBACK`
@@ -941,9 +863,6 @@ export async function acceptWarehouseTransfer(transferId: number, userId: number
   resetConnectionState()
   try {
     await sql`BEGIN`
-    await ensureTransferTables()
-    await ensureProductDeviceStockTable()
-
     const actorCompanyId = await getCompanyIdForDevice(userId)
     if (!actorCompanyId) {
       await sql`ROLLBACK`
@@ -1057,8 +976,6 @@ export async function rejectWarehouseTransfer(transferId: number, userId: number
   resetConnectionState()
   try {
     await sql`BEGIN`
-    await ensureTransferTables()
-
     const actorCompanyId = await getCompanyIdForDevice(userId)
     if (!actorCompanyId) {
       await sql`ROLLBACK`

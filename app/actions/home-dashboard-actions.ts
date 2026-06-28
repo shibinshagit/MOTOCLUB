@@ -2,6 +2,7 @@
 
 import { sql, resetConnectionState, isConnected } from "@/lib/db"
 import type { HomeDashboardData } from "@/store/slices/homeDashboardSlice"
+import { filterHomeDashboardForStaff, resolveStaffSessionContext } from "@/lib/staff-restrictions-server"
 
 const DEFAULT_CURRENCY = "INR"
 
@@ -402,30 +403,30 @@ export async function getComprehensiveDashboardData(
     console.log("Profit Margin:", profitMargin)
 
     // Build quick stats
-    const quickStats = [
+    const quickStats: HomeDashboardData["quickStats"] = [
       {
         label: "Revenue",
         value: totalRevenue,
         change: revenueChange,
-        changeType: revenueChange >= 0 ? "increase" : ("decrease" as const),
+        changeType: revenueChange >= 0 ? "increase" : "decrease",
       },
       {
         label: "Expenses",
         value: totalExpenses,
         change: Math.abs(expenseChange),
-        changeType: expenseChange <= 0 ? "increase" : ("decrease" as const),
+        changeType: expenseChange <= 0 ? "increase" : "decrease",
       },
       {
         label: "Net Profit",
         value: netProfit,
         change: profitChange,
-        changeType: profitChange >= 0 ? "increase" : ("decrease" as const),
+        changeType: profitChange >= 0 ? "increase" : "decrease",
       },
       {
         label: "Profit Margin",
         value: profitMargin,
         change: 0,
-        changeType: "neutral" as const,
+        changeType: "neutral",
       },
     ]
 
@@ -605,9 +606,15 @@ export async function getComprehensiveDashboardData(
     console.log("Total Products:", dashboardData.totalProducts)
     console.log("============================")
 
+    const staff = await resolveStaffSessionContext(deviceId)
+    const filteredDashboardData = filterHomeDashboardForStaff(
+      dashboardData as unknown as Record<string, unknown>,
+      staff,
+    ) as unknown as HomeDashboardData
+
     return {
       success: true,
-      data: dashboardData,
+      data: filteredDashboardData,
     }
   } catch (error) {
     console.error("=== DASHBOARD ERROR ===")

@@ -2,6 +2,13 @@
 
 import { sql, getLastError, resetConnectionState } from "@/lib/db"
 import { put, del } from "@vercel/blob"
+import {
+  assertStaffPageAccess,
+  assertStaffValueAccess,
+  filterProductForStaff,
+  filterProductsForStaff,
+  resolveStaffSessionContext,
+} from "@/lib/staff-restrictions-server"
 
 
 // Generate a unique barcode for a product
@@ -154,24 +161,6 @@ export async function cleanupProductMediaUrls(urls: string[]) {
   }
 }
 
-async function ensureProductDeviceStockTable() {
-  await sql`
-    CREATE TABLE IF NOT EXISTS product_device_stock (
-      id SERIAL PRIMARY KEY,
-      product_id INTEGER NOT NULL,
-      device_id INTEGER NOT NULL,
-      stock INTEGER NOT NULL DEFAULT 0,
-      updated_at TIMESTAMP DEFAULT NOW(),
-      UNIQUE(product_id, device_id)
-    )
-  `
-}
-
-async function ensureProductMediaColumns() {
-  await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS image_urls JSONB DEFAULT '[]'`
-  await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS video_url TEXT`
-}
-
 const PLATFORM_KEYS = ["amazon", "flipkart", "meesho", "own_ecom"] as const
 type PlatformKey = (typeof PLATFORM_KEYS)[number]
 type PlatformStatus = "not_listed" | "active" | "archived"
@@ -183,13 +172,6 @@ function normalizePlatformStatus(value: unknown): PlatformStatus {
   return "not_listed"
 }
 
-async function ensureProductPlatformColumns() {
-  await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS amazon_status VARCHAR(20) DEFAULT 'not_listed'`
-  await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS flipkart_status VARCHAR(20) DEFAULT 'not_listed'`
-  await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS meesho_status VARCHAR(20) DEFAULT 'not_listed'`
-  await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS own_ecom_status VARCHAR(20) DEFAULT 'not_listed'`
-}
-
 function resolveDeviceStock(product: any, stockMap: Map<number, number>) {
   if (stockMap.has(product.id)) {
     return Number(stockMap.get(product.id) || 0)
@@ -199,8 +181,6 @@ function resolveDeviceStock(product: any, stockMap: Map<number, number>) {
 }
 
 async function upsertDeviceStock(productId: number, deviceId: number, stock: number) {
-  await ensureProductDeviceStockTable()
-
   await sql`
     INSERT INTO product_device_stock (product_id, device_id, stock, updated_at)
     VALUES (${productId}, ${deviceId}, ${Math.max(0, stock)}, NOW())
@@ -219,7 +199,6 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
   console.log("getProducts called with:", { userId, limit, searchTerm })
 
   try {
-    await ensureProductPlatformColumns()
     let products
 
     // Check if searchTerm is a pure number (likely an ID lookup)
@@ -265,7 +244,7 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
         }))
         
         console.log(`Found exact product match for ID ${productId}:`, mappedProducts[0])
-        return { success: true, data: mappedProducts }
+        return { success: true, data: await filterProductsForStaff(mappedProducts, userId) }
       }
     }
 
@@ -436,7 +415,6 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
     let stockMap = new Map<number, number>()
     let companyTotalStockMap = new Map<number, number>()
     if (userId) {
-      await ensureProductDeviceStockTable()
       const deviceStocks = await sql`
         SELECT product_id, stock
         FROM product_device_stock
@@ -476,7 +454,7 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
 
     console.log(`Found ${mappedProducts.length} products`)
 
-    return { success: true, data: mappedProducts }
+    return { success: true, data: await filterProductsForStaff(mappedProducts, userId) }
   } catch (error) {
     console.error("Get products error:", error)
     return {
@@ -497,7 +475,6 @@ export async function getProductById(id: number, userId?: number) {
   resetConnectionState()
 
   try {
-    await ensureProductPlatformColumns()
     const result = await sql`
       SELECT 
         p.*,
@@ -513,7 +490,6 @@ export async function getProductById(id: number, userId?: number) {
 
     let resolvedStock = 0
     if (userId) {
-      await ensureProductDeviceStockTable()
       const deviceStock = await sql`
         SELECT stock
         FROM product_device_stock
@@ -534,7 +510,8 @@ export async function getProductById(id: number, userId?: number) {
       category: result[0].category_name || result[0].category || "",
     }
 
-    return { success: true, data: product }
+    const staff = userId ? await resolveStaffSessionContext(userId) : null
+    return { success: true, data: filterProductForStaff(product, staff) }
   } catch (error) {
     console.error("Get product error:", error)
     return {
@@ -772,9 +749,6 @@ export async function createProduct(formData: FormData) {
       }
     }
 
-    await ensureProductMediaColumns()
-    await ensureProductPlatformColumns()
-
     let uploadedImageUrls: string[] = []
     if (uploadedImageUrlsRaw) {
       try {
@@ -1006,9 +980,6 @@ export async function updateProduct(formData: FormData) {
   resetConnectionState()
 
   try {
-    await ensureProductMediaColumns()
-    await ensureProductPlatformColumns()
-
     // Get current product to get the userId if not provided
     const currentProduct = await sql`SELECT * FROM products WHERE id = ${id}`
 
@@ -1148,8 +1119,6 @@ export async function updateProduct(formData: FormData) {
     await sql`BEGIN`
 
     const stockDeviceId = userId || currentProduct[0].created_by
-    await ensureProductDeviceStockTable()
-
     const existingDeviceStock = await sql`
       SELECT stock
       FROM product_device_stock
@@ -1377,8 +1346,6 @@ export async function updateProductPlatformStatus(
   resetConnectionState()
 
   try {
-    await ensureProductPlatformColumns()
-
     const columnName =
       platform === "amazon"
         ? "amazon_status"
@@ -1512,8 +1479,6 @@ export async function getProductStockByDevice(productId: number, userId: number)
   resetConnectionState()
 
   try {
-    await ensureProductDeviceStockTable()
-
     const devices = await sql`
       SELECT d.id AS device_id, d.name AS device_name, COALESCE(pds.stock, 0) AS stock
       FROM devices d
@@ -1555,6 +1520,16 @@ export async function adjustProductStock(formData: FormData) {
     return { success: false, message: "Product ID, valid quantity, and adjustment type are required" }
   }
 
+  const pageAccess = await assertStaffPageAccess(userId, "product")
+  if (!pageAccess.allowed) {
+    return { success: false, message: pageAccess.message }
+  }
+
+  const valueAccess = await assertStaffValueAccess(userId, "stock_count")
+  if (!valueAccess.allowed) {
+    return { success: false, message: valueAccess.message }
+  }
+
   if (type !== "increase" && type !== "decrease") {
     return { success: false, message: "Type must be 'increase' or 'decrease'" }
   }
@@ -1573,8 +1548,6 @@ export async function adjustProductStock(formData: FormData) {
       await sql`ROLLBACK`
       return { success: false, message: "Product not found" }
     }
-
-    await ensureProductDeviceStockTable()
 
     const existingDeviceStock = await sql`
       SELECT stock
@@ -1680,7 +1653,6 @@ export async function getProductByBarcode(barcode: string, userId?: number) {
 
     let resolvedStock = 0
     if (userId) {
-      await ensureProductDeviceStockTable()
       const deviceStock = await sql`
         SELECT stock
         FROM product_device_stock
@@ -1699,7 +1671,8 @@ export async function getProductByBarcode(barcode: string, userId?: number) {
       category: result[0].category_name || result[0].category || "",
     }
 
-    return { success: true, data: product }
+    const staff = userId ? await resolveStaffSessionContext(userId) : null
+    return { success: true, data: filterProductForStaff(product, staff) }
   } catch (error) {
     console.error("Get product by barcode error:", error)
     return {
@@ -1731,7 +1704,6 @@ export async function getUserProducts(userId: number) {
       ORDER BY p.name ASC
     `
 
-    await ensureProductDeviceStockTable()
     const deviceStocks = await sql`
       SELECT product_id, stock
       FROM product_device_stock
@@ -1746,7 +1718,7 @@ export async function getUserProducts(userId: number) {
       category: product.category_name || product.category || "",
     }))
 
-    return { success: true, data: mappedProducts }
+    return { success: true, data: await filterProductsForStaff(mappedProducts, userId) }
   } catch (error) {
     console.error("Get user products error:", error)
     return {

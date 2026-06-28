@@ -1,12 +1,12 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { Suspense, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import Dashboard from "@/components/dashboard/dashboard"
 import { useAppSelector, useAppDispatch } from "@/store/hooks"
 import { selectDevice, loadFromStorage, clearDeviceData } from "@/store/slices/deviceSlice"
 
-export default function DashboardPage() {
+function DashboardPageContent() {
   const [isLoading, setIsLoading] = useState(true)
   
   const device = useAppSelector(selectDevice)
@@ -47,4 +47,21 @@ export default function DashboardPage() {
   }
 
   return <Dashboard onLogout={handleLogout} />
+}
+
+export default function DashboardPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex items-center justify-center min-h-screen">
+          <div className="text-center">
+            <div className="mb-4 h-8 w-8 animate-spin rounded-full border-4 border-blue-600 border-t-transparent mx-auto" />
+            <p>Loading...</p>
+          </div>
+        </div>
+      }
+    >
+      <DashboardPageContent />
+    </Suspense>
+  )
 }

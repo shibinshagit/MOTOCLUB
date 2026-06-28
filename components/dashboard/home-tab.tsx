@@ -21,6 +21,7 @@ import {
   setDashboardData, setLoading, setBackgroundLoading, setError, setPeriod,
 } from "@/store/slices/homeDashboardSlice"
 import { selectDeviceCurrency, selectUser, selectDevice } from "@/store/slices/deviceSlice"
+import { useStaffRestrictions } from "@/hooks/use-staff-restrictions"
 
 interface HomeTabProps {
   userId?: number
@@ -201,6 +202,8 @@ export default function HomeTab({ userId: propUserId, deviceId: propDeviceId }: 
 
   const userId = propUserId || user?.id
   const deviceId = propDeviceId || device?.id
+  const { isValueHidden } = useStaffRestrictions()
+  const hideStockCount = isValueHidden("stock_count")
 
   const { fetchDashboardData, currency, fetchStateRef } = useDashboardData(userId, deviceId, selectedPeriod)
 
@@ -325,7 +328,7 @@ export default function HomeTab({ userId: propUserId, deviceId: propDeviceId }: 
     }
 
     // Stock insight
-    if (lowStockCount > 0) {
+    if (!hideStockCount && lowStockCount > 0) {
       insights.push({
         type: "warning" as const,
         title: "Stock Alert",
@@ -335,7 +338,7 @@ export default function HomeTab({ userId: propUserId, deviceId: propDeviceId }: 
     }
 
     return insights.slice(0, 3)
-  }, [dashboardData])
+  }, [dashboardData, hideStockCount])
 
   // Memoize time since update calculation
   const timeSinceUpdate = useMemo(() => {
@@ -562,11 +565,13 @@ export default function HomeTab({ userId: propUserId, deviceId: propDeviceId }: 
                   status={dashboardData.accountsReceivable === 0 ? "good" : "warning"}
                   value={formatCurrency(dashboardData.accountsReceivable)}
                 />
-                <HealthIndicator
-                  label="Stock Status"
-                  status={dashboardData.lowStockCount === 0 ? "good" : "warning"}
-                  value={`${dashboardData.lowStockCount} items low`}
-                />
+                {!hideStockCount && (
+                  <HealthIndicator
+                    label="Stock Status"
+                    status={dashboardData.lowStockCount === 0 ? "good" : "warning"}
+                    value={`${dashboardData.lowStockCount} items low`}
+                  />
+                )}
               </CardContent>
             </Card>
           </div>
@@ -634,11 +639,13 @@ export default function HomeTab({ userId: propUserId, deviceId: propDeviceId }: 
               value={dashboardData.totalSuppliers}
               icon={<Package className="h-5 w-5 text-green-500" />}
             />
-            <QuickStat
-              label="Low Stock"
-              value={dashboardData.lowStockCount}
-              icon={<AlertCircle className="h-5 w-5 text-red-500" />}
-            />
+            {!hideStockCount && (
+              <QuickStat
+                label="Low Stock"
+                value={dashboardData.lowStockCount}
+                icon={<AlertCircle className="h-5 w-5 text-red-500" />}
+              />
+            )}
             <QuickStat
               label="Overdue"
               value={dashboardData.overdueInvoices}

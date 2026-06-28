@@ -1,19 +1,21 @@
 "use client"
 
+import { BRAND_NAME } from "@/lib/brand"
+import { getDefaultCompanyLogoUrl } from "@/lib/platform-branding"
+
 // Function to get company info from the DOM
 const getCompanyInfoFromDOM = (): { name: string; address: string; phone: string } => {
   if (typeof document === "undefined") {
     return {
-      name: "Moto Club",
-      address: "kottakkal, malappuram, kerala, india",
-      phone: "+91 9995442239",
+      name: BRAND_NAME,
+      address: "",
+      phone: "",
     }
   }
-  // Always return the fixed company info 
   return {
-    name: "Moto Club",
-    address: "kottakkal, malappuram, kerala, india",
-    phone: "+91 9995442239",
+    name: BRAND_NAME,
+    address: "",
+    phone: "",
   }
 }
 
@@ -35,11 +37,18 @@ export function printSalesReceipt(sale: any, items: any[], currency = "AED", bus
 
   // Use the company info from the DOM or fallback to provided info
   const business = {
-    name: "Moto Club",
-    address: "kottakkal, malappuram, kerala, india",
-    phone: "+91 9995442239",
+    name: BRAND_NAME,
+    address: "",
+    phone: "",
+    logo: getDefaultCompanyLogoUrl() || "",
     ...businessInfo,
   }
+
+  const logoUrl =
+    business.logo ||
+    business.logo_url ||
+    getDefaultCompanyLogoUrl() ||
+    ""
 
   // Create a new window for printing
   const printWindow = window.open("", "_blank", "width=800,height=900,scrollbars=yes")
@@ -113,7 +122,7 @@ export function printSalesReceipt(sale: any, items: any[], currency = "AED", bus
     <head>
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-      <title>Invoice - Moto Club</title>
+      <title>Invoice - ${business.name}</title>
       <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
         
@@ -483,14 +492,14 @@ export function printSalesReceipt(sale: any, items: any[], currency = "AED", bus
       <div class="invoice-container">
         <div class="invoice-header">
           <div class="company-info">
-            <div class="company-name">Moto Club</div>
+            <div class="company-name">${business.name}</div>
             <div class="company-details">
-              kottakkal, malappuram, kerala, india<br>
-              Phone: +91 9995442239
+              ${business.address ? `${business.address}<br>` : ""}
+              ${business.phone ? `Phone: ${business.phone}` : ""}
             </div>
           </div>
           <div class="logo-container">
-            <img src="https://res.cloudinary.com/dxishiq9x/image/upload/v1751969415/286709952_155636793670880_4247278441893099316_n_unlqm6.jpg" alt="Moto Club" class="logo">
+            <img src="${logoUrl}" alt="${business.name}" class="logo">
           </div>
         </div>
         
@@ -672,26 +681,7 @@ export function printSalesReceipt(sale: any, items: any[], currency = "AED", bus
   printWindow.document.close()
 }
 
-// Helper function to print invoice from sale ID - fetches data and prints
-export async function printInvoiceById(saleId: number, currency = "AED", autoprint = false) {
-  try {
-    // Fetch sale details
-    const response = await fetch(`/api/sales/${saleId}`)
-    const result = await response.json()
-
-    if (result.success && result.data) {
-      printSalesReceipt(result.data.sale, result.data.items, currency, {}, autoprint)
-    } else {
-      console.error("Failed to fetch sale data for printing:", result.message)
-      alert("Failed to load sale data for printing")
-    }
-  } catch (error) {
-    console.error("Error fetching sale data for printing:", error)
-    alert("Error loading sale data for printing")
-  }
-}
-
-export function printPurchaseReceipt(purchase: any, items: any[], currency = "AED") {
+export function printPurchaseReceipt(purchase: any, items: any[], currency = "AED", businessInfo: any = {}) {
   if (!purchase || !items.length) return
 
   // Check if we're in a browser environment
@@ -699,6 +689,20 @@ export function printPurchaseReceipt(purchase: any, items: any[], currency = "AE
     console.warn("Cannot print receipt: Not in browser environment")
     return
   }
+
+  const business = {
+    name: BRAND_NAME,
+    address: "",
+    phone: "",
+    logo: getDefaultCompanyLogoUrl() || "",
+    ...businessInfo,
+  }
+
+  const logoUrl =
+    business.logo ||
+    business.logo_url ||
+    getDefaultCompanyLogoUrl() ||
+    ""
 
   // Create a new window for printing
   const printWindow = window.open("", "_blank", "width=800,height=900,scrollbars=yes")
@@ -749,7 +753,7 @@ export function printPurchaseReceipt(purchase: any, items: any[], currency = "AE
     <head>
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-      <title>Purchase Invoice - Moto Club</title>
+      <title>Purchase Invoice - ${business.name}</title>
       <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
         
@@ -1057,14 +1061,14 @@ export function printPurchaseReceipt(purchase: any, items: any[], currency = "AE
       <div class="receipt-container">
         <div class="receipt-header">
           <div class="company-info">
-            <div class="company-name">Moto Club</div>
+            <div class="company-name">${business.name}</div>
             <div class="company-details">
-              kottakkal, malappuram, kerala, india<br>
-              Phone: +91 9995442239
+              ${business.address ? `${business.address}<br>` : ""}
+              ${business.phone ? `Phone: ${business.phone}` : ""}
             </div>
           </div>
           <div class="logo-container">
-            <img src="https://res.cloudinary.com/dxishiq9x/image/upload/v1751969415/286709952_155636793670880_4247278441893099316_n_unlqm6.jpg" alt="Moto Club" class="logo">
+            <img src="${logoUrl}" alt="${business.name}" class="logo">
           </div>
         </div>
         

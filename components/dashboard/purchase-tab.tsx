@@ -13,6 +13,7 @@ import ViewPurchaseModal from "../purchases/view-purchase-modal"
 import EditPurchaseModal from "../purchases/edit-purchase-modal"
 import { Input } from "@/components/ui/input"
 import { PdfExportButton } from "@/components/ui/pdf-export-button"
+import { BRAND_NAME } from "@/lib/brand"
 import { useSelector, useDispatch } from "react-redux"
 import { selectDeviceId } from "@/store/slices/deviceSlice"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -607,7 +608,7 @@ export default function PurchaseTab({
         <!DOCTYPE html>
         <html>
         <head>
-          <title>Purchase Report - Moto Club</title>
+          <title>Purchase Report - ${BRAND_NAME}</title>
           <style>
             @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
             
@@ -729,8 +730,8 @@ export default function PurchaseTab({
         </head>
         <body>
           <div class="header">
-            <div class="company-name">Moto Club</div>
-            <div style="font-size: 0.7rem; color: #6b7280;">kottakkal, malappuram, kerala, india | +91 9995442239</div>
+            <div class="company-name">${BRAND_NAME}</div>
+            <div style="font-size: 0.7rem; color: #6b7280;">Purchase summary report</div>
             <div class="report-title">Purchase Report</div>
             <div class="report-info">Generated on ${currentDate} at ${currentTime}</div>
           </div> 

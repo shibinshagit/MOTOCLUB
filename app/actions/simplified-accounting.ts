@@ -2,11 +2,6 @@
 
 import { sql } from "@/lib/db"
 
-// Schema is now managed by `npm run migrate` — this is kept as a no-op for call-site compatibility
-async function createFinancialTransactionsTable() {
-  return true
-}
-
 // Record supplier payment transaction
 export async function recordSupplierPayment(paymentData: {
   supplierId: number
@@ -29,13 +24,6 @@ export async function recordSupplierPayment(paymentData: {
       userId: paymentData.userId,
       notes: paymentData.notes,
     })
-
-    // Ensure table exists
-    const tableCreated = await createFinancialTransactionsTable()
-    if (!tableCreated) {
-      console.error("Failed to ensure financial_transactions table exists")
-      return { success: false, error: "Failed to create financial_transactions table" }
-    }
 
     // For supplier payments: debit = payment amount (money going out), credit = 0
     const paymentAmount = Number(paymentData.paymentAmount) || 0
@@ -95,13 +83,6 @@ export async function recordSaleTransaction(saleData: {
       userId: saleData.userId,
       saleDate: saleData.saleDate,
     })
-
-    // Ensure table exists
-    const tableCreated = await createFinancialTransactionsTable()
-    if (!tableCreated) {
-      console.error("Failed to ensure financial_transactions table exists")
-      return { success: false, error: "Failed to create financial_transactions table" }
-    }
 
     // Validate required fields
     if (!saleData.saleId || !saleData.deviceId || !saleData.userId) {
@@ -207,8 +188,6 @@ export async function recordSaleAdjustment(adjustmentData: {
 }) {
   try {
     // Ensure table exists
-    await createFinancialTransactionsTable()
-
     // Calculate the differences
     const previousAmount = Number(adjustmentData.previousValues.totalAmount) || 0
     const newAmount = Number(adjustmentData.newValues.totalAmount) || 0
@@ -428,8 +407,6 @@ export async function recordPurchaseTransaction(purchaseData: {
 }) {
   try {
     // Ensure table exists
-    await createFinancialTransactionsTable()
-
     const totalAmount = Number(purchaseData.totalAmount) || 0
     const receivedAmount = Number(purchaseData.receivedAmount) || 0
     const status = purchaseData.status?.toLowerCase()
@@ -504,8 +481,6 @@ export async function recordPurchaseAdjustment(adjustmentData: {
   adjustmentDate?: Date
 }) {
   try {
-    await createFinancialTransactionsTable()
-
     // Calculate the NET differences
     const previousAmount = Number(adjustmentData.previousValues.totalAmount) || 0
     const newAmount = Number(adjustmentData.newValues.totalAmount) || 0
@@ -673,8 +648,6 @@ export async function recordManualTransaction(transactionData: {
 }) {
   try {
     // Ensure table exists
-    await createFinancialTransactionsTable()
-
     const amount = Number(transactionData.amount) || 0
     const debitAmount = transactionData.type === "debit" ? amount : 0
     const creditAmount = transactionData.type === "credit" ? amount : 0
@@ -706,8 +679,6 @@ export async function recordManualTransaction(transactionData: {
 // Delete transaction when sale/purchase is deleted
 export async function deleteSaleTransaction(saleId: number, deviceId: number) {
   try {
-    await createFinancialTransactionsTable()
-
     const result = await sql`
       DELETE FROM financial_transactions 
       WHERE reference_type = 'sale' 
@@ -727,8 +698,6 @@ export async function deleteSaleTransaction(saleId: number, deviceId: number) {
 // Delete transaction when purchase is deleted
 export async function deletePurchaseTransaction(purchaseId: number, deviceId: number) {
   try {
-    await createFinancialTransactionsTable()
-
     const result = await sql`
       DELETE FROM financial_transactions 
       WHERE reference_type = 'purchase' 
@@ -754,26 +723,6 @@ export async function getFinancialSummary(
 ) {
   try {
     console.log("Getting financial summary for device:", deviceId, "date range:", fromDateStr, "to", toDateStr)
-
-    // Ensure table exists first
-    const tableCreated = await createFinancialTransactionsTable()
-    if (!tableCreated) {
-      console.error("Failed to ensure financial_transactions table exists")
-      return {
-        totalIncome: 0,
-        totalCogs: 0,
-        totalProfit: 0,
-        totalExpenses: 0,
-        netProfit: 0,
-        accountsReceivable: 0,
-        accountsPayable: 0,
-        outstandingReceivables: 0,
-        cashBalance: 0,
-        transactions: [],
-        receivables: [],
-        payables: [],
-      }
-    }
 
     // Query transactions (fromDateStr/toDateStr are YYYY-MM-DD from the client calendar)
     let transactions
@@ -1084,8 +1033,6 @@ export async function getAccountingBalances(deviceId: number, fromDateStr: strin
     console.log("Getting accounting balances for device:", deviceId, "from:", fromDateStr, "to:", closingDateStr)
 
     // Ensure table exists
-    await createFinancialTransactionsTable()
-
     const openingCutoff = `${fromDateStr} 00:00:00`
     const closingCutoff = `${closingDateStr} 23:59:59`
 

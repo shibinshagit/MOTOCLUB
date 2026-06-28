@@ -1,6 +1,7 @@
 "use server"
 
 import { sql, isMockMode } from "@/lib/db"
+import { getDefaultCompanyLogo } from "@/app/actions/brand-actions"
 import { cookies } from "next/headers"
 
 // Helper function for password hashing - same as in admin-actions.ts
@@ -53,7 +54,7 @@ export async function login(formData: FormData) {
           company: {
             id: 1,
             name: "Demo Company",
-            logo_url: "/images/ap-logo.png",
+            logo_url: (await getDefaultCompanyLogo()) || "",
           },
         },
       }
@@ -115,7 +116,7 @@ export async function login(formData: FormData) {
           company: {
             id: 1,
             name: "Demo Company",
-            logo_url: "/images/ap-logo.png",
+            logo_url: (await getDefaultCompanyLogo()) || "",
           },
         },
       }
@@ -173,7 +174,7 @@ export async function login(formData: FormData) {
           company: {
             id: deviceInfo.company_id || 1,
             name: deviceInfo.company_name || user.company_name || "Default Company",
-            logo_url: deviceInfo.company_logo || user.company_logo || "/images/ap-logo.png",
+            logo_url: deviceInfo.company_logo || user.company_logo || (await getDefaultCompanyLogo()) || "",
           },
         },
       }
@@ -200,7 +201,7 @@ export async function login(formData: FormData) {
           company: {
             id: 1,
             name: user.company_name || "Default Company",
-            logo_url: user.company_logo || "/images/ap-logo.png",
+            logo_url: user.company_logo || (await getDefaultCompanyLogo()) || "",
           },
         },
       }
@@ -239,7 +240,7 @@ export async function login(formData: FormData) {
         company: {
           id: 1,
           name: "Demo Company",
-          logo_url: "/images/ap-logo.png",
+          logo_url: (await getDefaultCompanyLogo()) || "",
         },
       },
     }
@@ -275,7 +276,7 @@ export async function getCurrentUser() {
         name: "Demo User",
         email: "demo@example.com",
         company_name: "Demo Company",
-        company_logo: "/images/ap-logo.png",
+        company_logo: (await getDefaultCompanyLogo()) || "",
       }
     }
 
@@ -295,7 +296,7 @@ export async function getCurrentUser() {
           name: "Demo User",
           email: "demo@example.com",
           company_name: "Demo Company",
-          company_logo: "/images/ap-logo.png",
+          company_logo: (await getDefaultCompanyLogo()) || "",
         }
       }
 
@@ -309,7 +310,7 @@ export async function getCurrentUser() {
         name: "Demo User",
         email: "demo@example.com",
         company_name: "Demo Company",
-        company_logo: "/images/ap-logo.png",
+        company_logo: (await getDefaultCompanyLogo()) || "",
       }
     }
   } catch (error) {
@@ -321,7 +322,7 @@ export async function getCurrentUser() {
       name: "Demo User",
       email: "demo@example.com",
       company_name: "Demo Company",
-      company_logo: "/images/ap-logo.png",
+      company_logo: (await getDefaultCompanyLogo()) || "",
     }
   }
 }

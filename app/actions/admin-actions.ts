@@ -2,10 +2,13 @@
 
 import { sql } from "@/lib/db"
 import { isMockMode, setMockMode } from "@/lib/db"
+import { getDefaultCompanyLogo } from "@/app/actions/brand-actions"
+import { requireAdmin } from "./admin-auth-actions"
 import { revalidatePath } from "next/cache"
 
 // Company Management
 export async function getCompanies() {
+  await requireAdmin()
   try {
     // If we encounter a database error, switch to mock mode
     try {
@@ -24,12 +27,12 @@ export async function getCompanies() {
         data: [
           {
             id: 1,
-            name: "Al Aneeq",
+            name: "Demo Company",
             email: "info@alaneeq.com",
             phone: "+971 50 123 4567",
             address: "Dubai, UAE",
             description: "Retail company specializing in fashion",
-            logo_url: "/images/al-aneeq-logo.png",
+            logo_url: (await getDefaultCompanyLogo()) || "",
             device_count: 5,
           },
           {
@@ -84,7 +87,7 @@ export async function getCompanies() {
         `
 
         // Add device_count = 0 to each company
-        const companiesWithDeviceCount = simpleResult.map((company) => ({
+        const companiesWithDeviceCount = simpleResult.map((company: Record<string, unknown>) => ({
           ...company,
           device_count: 0,
         }))
@@ -102,12 +105,12 @@ export async function getCompanies() {
           data: [
             {
               id: 1,
-              name: "Al Aneeq (Mock)",
+              name: "Demo Company (Mock)",
               email: "info@alaneeq.com",
               phone: "+971 50 123 4567",
               address: "Dubai, UAE",
               description: "Retail company specializing in fashion",
-              logo_url: "/images/al-aneeq-logo.png",
+              logo_url: (await getDefaultCompanyLogo()) || "",
               device_count: 5,
             },
             {
@@ -134,12 +137,12 @@ export async function getCompanies() {
       data: [
         {
           id: 1,
-          name: "Al Aneeq (Fallback)",
+          name: "Demo Company (Fallback)",
           email: "info@alaneeq.com",
           phone: "+971 50 123 4567",
           address: "Dubai, UAE",
           description: "Retail company specializing in fashion",
-          logo_url: "/images/al-aneeq-logo.png",
+          logo_url: (await getDefaultCompanyLogo()) || "",
           device_count: 5,
         },
         {
@@ -158,18 +161,19 @@ export async function getCompanies() {
 }
 
 export async function getCompanyById(id: number) {
+  await requireAdmin()
   try {
     if (isMockMode()) {
       return {
         success: true,
         data: {
           id: 1,
-          name: "Al Aneeq",
-          email: "info@alaneeq.com",
+          name: "Demo Company",
+          email: "info@example.com",
           phone: "+971 50 123 4567",
           address: "Dubai, UAE",
           description: "Retail company specializing in fashion",
-          logo_url: "/images/al-aneeq-logo.png",
+          logo_url: (await getDefaultCompanyLogo()) || "",
         },
       }
     }
@@ -201,6 +205,7 @@ export async function getCompanyById(id: number) {
 }
 
 export async function createCompany(formData: FormData) {
+  await requireAdmin()
   try {
     if (isMockMode()) {
       return {
@@ -246,6 +251,7 @@ export async function createCompany(formData: FormData) {
 }
 
 export async function updateCompany(formData: FormData) {
+  await requireAdmin()
   try {
     if (isMockMode()) {
       return {
@@ -299,6 +305,7 @@ export async function updateCompany(formData: FormData) {
 }
 
 export async function deleteCompany(id: number) {
+  await requireAdmin()
   try {
     if (isMockMode()) {
       return {
@@ -424,6 +431,7 @@ export async function deleteCompany(id: number) {
 
 // Device Management
 export async function getDevices(companyId?: number) {
+  await requireAdmin()
   try {
     if (isMockMode()) {
       const devices = [
@@ -432,7 +440,7 @@ export async function getDevices(companyId?: number) {
           name: "Store Device 1",
           email: "device1@alaneeq.com",
           company_id: 1,
-          company_name: "Al Aneeq",
+          company_name: "Demo Company",
           created_at: new Date().toISOString(),
           currency: "QAR",
         },
@@ -441,7 +449,7 @@ export async function getDevices(companyId?: number) {
           name: "Store Device 2",
           email: "device2@alaneeq.com",
           company_id: 1,
-          company_name: "Al Aneeq",
+          company_name: "Demo Company",
           created_at: new Date().toISOString(),
           currency: "USD",
         },
@@ -450,7 +458,7 @@ export async function getDevices(companyId?: number) {
           name: "Warehouse Device",
           email: "warehouse@alaneeq.com",
           company_id: 1,
-          company_name: "Al Aneeq",
+          company_name: "Demo Company",
           created_at: new Date().toISOString(),
           currency: "AED",
         },
@@ -506,18 +514,21 @@ export async function getDevices(companyId?: number) {
 
 // Add this function to get users (which are devices in our system)
 export async function getUsers(companyId?: number) {
+  await requireAdmin()
   // This is just an alias for getDevices for backward compatibility
   return getDevices(companyId)
 }
 
 // Add the missing getDevicesByCompany function after the getDevices function
 export async function getDevicesByCompany(companyId: number) {
+  await requireAdmin()
   // This is just a wrapper around getDevices with a companyId parameter
   return getDevices(companyId)
 }
 
 // Add new functions to fetch products, sales, purchases, and stock by company ID
 export async function getProductsByCompany(companyId: number) {
+  await requireAdmin()
   try {
     if (isMockMode()) {
       return {
@@ -575,6 +586,7 @@ export async function getProductsByCompany(companyId: number) {
 }
 
 export async function getSalesByCompany(companyId: number) {
+  await requireAdmin()
   try {
     if (isMockMode()) {
       return {
@@ -633,6 +645,7 @@ export async function getSalesByCompany(companyId: number) {
 }
 
 export async function getPurchasesByCompany(companyId: number) {
+  await requireAdmin()
   try {
     if (isMockMode()) {
       return {
@@ -690,6 +703,7 @@ export async function getPurchasesByCompany(companyId: number) {
 }
 
 export async function getStockByCompany(companyId: number) {
+  await requireAdmin()
   try {
     if (isMockMode()) {
       return {
@@ -766,6 +780,7 @@ export async function getStockByCompany(companyId: number) {
 }
 
 export async function getDeviceById(id: number) {
+  await requireAdmin()
   try {
     if (isMockMode()) {
       return {
@@ -775,7 +790,7 @@ export async function getDeviceById(id: number) {
           name: "Store Device 1",
           email: "device1@alaneeq.com",
           company_id: 1,
-          company_name: "Al Aneeq",
+          company_name: "Demo Company",
           created_at: new Date().toISOString(),
           currency: "QAR",
         },
@@ -811,6 +826,7 @@ export async function getDeviceById(id: number) {
 
 // Replace the createDevice function with this updated version:
 export async function createDevice(formData: FormData) {
+  await requireAdmin()
   try {
     if (isMockMode()) {
       return {
@@ -820,7 +836,7 @@ export async function createDevice(formData: FormData) {
           name: formData.get("name") as string,
           email: formData.get("email") as string,
           company_id: Number.parseInt(formData.get("company_id") as string),
-          company_name: "Al Aneeq",
+          company_name: "Demo Company",
           currency: (formData.get("currency") as string) || "QAR",
           created_at: new Date().toISOString(),
         },
@@ -895,6 +911,7 @@ async function generatePasswordHash(password: string): Promise<string> {
 
 // Also update the updateDevice function to handle password hashing
 export async function updateDevice(formData: FormData) {
+  await requireAdmin()
   try {
     if (isMockMode()) {
       return {
@@ -905,7 +922,7 @@ export async function updateDevice(formData: FormData) {
           email: formData.get("email") as string,
           company_id: Number.parseInt(formData.get("company_id") as string),
           currency: (formData.get("currency") as string) || "QAR",
-          company_name: "Al Aneeq",
+          company_name: "Demo Company",
           updated_at: new Date().toISOString(),
         },
       }
@@ -987,6 +1004,7 @@ export async function updateDevice(formData: FormData) {
 }
 
 export async function deleteDevice(id: number) {
+  await requireAdmin()
   try {
     if (isMockMode()) {
       return {
@@ -1080,74 +1098,26 @@ export async function deleteDevice(id: number) {
   }
 }
 
-// System Stats
-export async function getSystemStats() {
-  try {
-    if (isMockMode()) {
-      return {
-        success: true,
-        data: {
-          companyCount: 2,
-          deviceCount: 8,
-          productCount: 120,
-          saleCount: 450,
-          purchaseCount: 85,
-          customerCount: 230,
-        },
-      }
-    }
-
-    const companyCount = await sql`SELECT COUNT(*) as count FROM companies`
-    const deviceCount = await sql`SELECT COUNT(*) as count FROM devices`
-    const productCount = await sql`SELECT COUNT(*) as count FROM products`
-    const saleCount = await sql`SELECT COUNT(*) as count FROM sales`
-    const purchaseCount = await sql`SELECT COUNT(*) as count FROM purchases`
-    const customerCount = await sql`SELECT COUNT(*) as count FROM customers`
-
-    return {
-      success: true,
-      data: {
-        companyCount: Number.parseInt(companyCount[0].count),
-        deviceCount: Number.parseInt(deviceCount[0].count),
-        productCount: Number.parseInt(productCount[0].count),
-        saleCount: Number.parseInt(saleCount[0].count),
-        purchaseCount: Number.parseInt(purchaseCount[0].count),
-        customerCount: Number.parseInt(customerCount[0].count),
-      },
-    }
-  } catch (error) {
-    console.error("Error fetching system stats:", error)
-    return {
-      success: false,
-      message: "Failed to fetch system stats",
-      data: {
-        companyCount: 0,
-        deviceCount: 0,
-        productCount: 0,
-        saleCount: 0,
-        purchaseCount: 0,
-        customerCount: 0,
-      },
-    }
-  }
-}
-
 // Backward compatibility functions
 export async function createUser(formData: FormData) {
+  await requireAdmin()
   return createDevice(formData)
 }
 
 export async function updateUser(formData: FormData) {
+  await requireAdmin()
   return updateDevice(formData)
 }
 
 export async function deleteUser(id: number) {
+  await requireAdmin()
   return deleteDevice(id)
 }
 
 // Add these new functions to support our device-specific data fetching
 
 export async function getProductsByDevice(deviceId: number) {
+  await requireAdmin()
   try {
     if (isMockMode()) {
       return {
@@ -1204,6 +1174,7 @@ export async function getProductsByDevice(deviceId: number) {
 }
 
 export async function getSalesByDevice(deviceId: number) {
+  await requireAdmin()
   try {
     if (isMockMode()) {
       return {
@@ -1261,6 +1232,7 @@ export async function getSalesByDevice(deviceId: number) {
 }
 
 export async function getPurchasesByDevice(deviceId: number) {
+  await requireAdmin()
   try {
     if (isMockMode()) {
       return {
@@ -1317,6 +1289,7 @@ export async function getPurchasesByDevice(deviceId: number) {
 }
 
 export async function getStockByDevice(deviceId: number) {
+  await requireAdmin()
   try {
     if (isMockMode()) {
       return {
@@ -1393,6 +1366,7 @@ export async function getStockByDevice(deviceId: number) {
 }
 
 export async function getCustomersByDevice(deviceId: number) {
+  await requireAdmin()
   try {
     if (isMockMode()) {
       return {
@@ -1451,6 +1425,7 @@ export async function getCustomersByDevice(deviceId: number) {
 }
 
 export async function getDeviceFinanceData(deviceId: number, timeframe = "all") {
+  await requireAdmin()
   try {
     if (isMockMode()) {
       return {
@@ -1477,14 +1452,13 @@ export async function getDeviceFinanceData(deviceId: number, timeframe = "all") 
       }
     }
 
-    // Get finance data for this device based on timeframe
-    let timeframeFilter = ""
+    let timeframeCondition = sql``
     if (timeframe === "week") {
-      timeframeFilter = "AND transaction_date >= NOW() - INTERVAL '7 days'"
+      timeframeCondition = sql`AND transaction_date >= NOW() - INTERVAL '7 days'`
     } else if (timeframe === "month") {
-      timeframeFilter = "AND transaction_date >= NOW() - INTERVAL '30 days'"
+      timeframeCondition = sql`AND transaction_date >= NOW() - INTERVAL '30 days'`
     } else if (timeframe === "year") {
-      timeframeFilter = "AND transaction_date >= NOW() - INTERVAL '365 days'"
+      timeframeCondition = sql`AND transaction_date >= NOW() - INTERVAL '365 days'`
     }
 
     // Get income data
@@ -1493,7 +1467,7 @@ export async function getDeviceFinanceData(deviceId: number, timeframe = "all") 
       FROM financial_transactions
       WHERE created_by = ${deviceId}
       AND transaction_type = 'INCOME'
-      ${timeframeFilter ? sql(timeframeFilter) : sql``}
+      ${timeframeCondition}
     `
 
     // Get expense data
@@ -1502,7 +1476,7 @@ export async function getDeviceFinanceData(deviceId: number, timeframe = "all") 
       FROM financial_transactions
       WHERE created_by = ${deviceId}
       AND transaction_type = 'EXPENSE'
-      ${timeframeFilter ? sql(timeframeFilter) : sql``}
+      ${timeframeCondition}
     `
 
     // Get income by category
@@ -1511,7 +1485,7 @@ export async function getDeviceFinanceData(deviceId: number, timeframe = "all") 
       FROM financial_transactions
       WHERE created_by = ${deviceId}
       AND transaction_type = 'INCOME'
-      ${timeframeFilter ? sql(timeframeFilter) : sql``}
+      ${timeframeCondition}
       GROUP BY category
       ORDER BY amount DESC
     `
@@ -1522,7 +1496,7 @@ export async function getDeviceFinanceData(deviceId: number, timeframe = "all") 
       FROM financial_transactions
       WHERE created_by = ${deviceId}
       AND transaction_type = 'EXPENSE'
-      ${timeframeFilter ? sql(timeframeFilter) : sql``}
+      ${timeframeCondition}
       GROUP BY category
       ORDER BY amount DESC
     `
@@ -1532,7 +1506,7 @@ export async function getDeviceFinanceData(deviceId: number, timeframe = "all") 
       SELECT id, transaction_type as type, category, amount, description
       FROM financial_transactions
       WHERE created_by = ${deviceId}
-      ${timeframeFilter ? sql(timeframeFilter) : sql``}
+      ${timeframeCondition}
       ORDER BY transaction_date DESC
       LIMIT 10
     `
@@ -1568,245 +1542,3 @@ export async function getDeviceFinanceData(deviceId: number, timeframe = "all") 
   }
 }
 
-export async function getDeviceAnalytics(deviceId: number) {
-  try {
-    if (isMockMode()) {
-      return {
-        success: true,
-        data: {
-          productCount: 25,
-          saleCount: 42,
-          purchaseCount: 15,
-          customerCount: 30,
-          totalRevenue: 3500.75,
-          totalExpenses: 1800.5,
-          inventoryValue: 5200.0,
-          repeatCustomers: 12,
-          topProducts: [
-            { id: 1, name: "T-Shirt", sales: 15, revenue: 299.85 },
-            { id: 3, name: "Sneakers", sales: 10, revenue: 599.9 },
-            { id: 2, name: "Jeans", sales: 8, revenue: 319.92 },
-          ],
-          recentSales: [
-            { id: 42, amount: 119.97, date: new Date().toISOString() },
-            { id: 41, amount: 59.99, date: new Date().toISOString() },
-            { id: 40, amount: 39.99, date: new Date().toISOString() },
-          ],
-          stockAlerts: [
-            { id: 4, name: "Hat", stock: 5 },
-            { id: 5, name: "Socks", stock: 0 },
-          ],
-        },
-      }
-    }
-
-    // Get product count
-    const productCountResult = await sql`
-      SELECT COUNT(*) as count
-      FROM products
-      WHERE created_by = ${deviceId}
-    `
-
-    // Get sale count and total revenue
-    const salesResult = await sql`
-      SELECT COUNT(*) as count, SUM(total_amount) as total_revenue
-      FROM sales
-      WHERE created_by = ${deviceId}
-    `
-
-    // Get purchase count and total expenses
-    const purchasesResult = await sql`
-      SELECT COUNT(*) as count, SUM(total_amount) as total_expenses
-      FROM purchases
-      WHERE created_by = ${deviceId}
-    `
-
-    // Get customer count and repeat customers
-    const customersResult = await sql`
-      SELECT COUNT(DISTINCT c.id) as count,
-             COUNT(DISTINCT CASE WHEN sale_count > 1 THEN c.id END) as repeat_customers
-      FROM customers c
-      LEFT JOIN (
-        SELECT customer_id, COUNT(*) as sale_count
-        FROM sales
-        WHERE customer_id IS NOT NULL
-        GROUP BY customer_id
-      ) s ON c.id = s.customer_id
-      WHERE c.created_by = ${deviceId}
-    `
-
-    // Get inventory value
-    const inventoryValueResult = await sql`
-      SELECT SUM(stock * price) as value
-      FROM products
-      WHERE created_by = ${deviceId}
-    `
-
-    // Get top products
-    const topProductsResult = await sql`
-      SELECT p.id, p.name, COUNT(si.id) as sales, SUM(si.quantity * si.price) as revenue
-      FROM products p
-      JOIN sale_items si ON p.id = si.product_id
-      JOIN sales s ON si.sale_id = s.id
-      WHERE p.created_by = ${deviceId}
-      GROUP BY p.id, p.name
-      ORDER BY sales DESC
-      LIMIT 5
-    `
-
-    // Get recent sales
-    const recentSalesResult = await sql`
-      SELECT id, total_amount as amount, sale_date as date
-      FROM sales
-      WHERE created_by = ${deviceId}
-      ORDER BY sale_date DESC
-      LIMIT 5
-    `
-
-    // Get stock alerts
-    const stockAlertsResult = await sql`
-      SELECT id, name, stock
-      FROM products
-      WHERE created_by = ${deviceId} AND stock < 10
-      ORDER BY stock ASC
-      LIMIT 5
-    `
-
-    return {
-      success: true,
-      data: {
-        productCount: Number.parseInt(productCountResult[0]?.count || "0"),
-        saleCount: Number.parseInt(salesResult[0]?.count || "0"),
-        purchaseCount: Number.parseInt(purchasesResult[0]?.count || "0"),
-        customerCount: Number.parseInt(customersResult[0]?.count || "0"),
-        totalRevenue: Number.parseFloat(salesResult[0]?.total_revenue || "0"),
-        totalExpenses: Number.parseFloat(purchasesResult[0]?.total_expenses || "0"),
-        inventoryValue: Number.parseFloat(inventoryValueResult[0]?.value || "0"),
-        repeatCustomers: Number.parseInt(customersResult[0]?.repeat_customers || "0"),
-        topProducts: topProductsResult,
-        recentSales: recentSalesResult,
-        stockAlerts: stockAlertsResult,
-      },
-    }
-  } catch (error) {
-    console.error("Error fetching device analytics:", error)
-    return {
-      success: false,
-      message: "Failed to fetch analytics data",
-      data: {
-        productCount: 0,
-        saleCount: 0,
-        purchaseCount: 0,
-        customerCount: 0,
-        totalRevenue: 0,
-        totalExpenses: 0,
-        inventoryValue: 0,
-        repeatCustomers: 0,
-        topProducts: [],
-        recentSales: [],
-        stockAlerts: [],
-      },
-    }
-  }
-}
-
-export async function getCompanyStats(companyId: number, timeframe = "all") {
-  try {
-    if (isMockMode()) {
-      return {
-        success: true,
-        data: {
-          totalProducts: 120,
-          totalSales: 450,
-          totalPurchases: 85,
-          totalCustomers: 230,
-          totalRevenue: 25000.75,
-          totalExpenses: 15000.5,
-          activeDevices: 4,
-        },
-      }
-    }
-
-    // Get timeframe filter
-    let timeframeFilter = ""
-    if (timeframe === "week") {
-      timeframeFilter = "AND created_at >= NOW() - INTERVAL '7 days'"
-    } else if (timeframe === "month") {
-      timeframeFilter = "AND created_at >= NOW() - INTERVAL '30 days'"
-    } else if (timeframe === "year") {
-      timeframeFilter = "AND created_at >= NOW() - INTERVAL '365 days'"
-    }
-
-    // Get device count and active devices
-    const devicesResult = await sql`
-      SELECT COUNT(*) as count,
-             COUNT(CASE WHEN last_active >= NOW() - INTERVAL '30 days' THEN 1 END) as active_devices
-      FROM devices
-      WHERE company_id = ${companyId}
-    `
-
-    // Get total products across all devices
-    const productsResult = await sql`
-      SELECT COUNT(*) as count
-      FROM products p
-      JOIN devices d ON p.created_by = d.id
-      WHERE d.company_id = ${companyId}
-      ${timeframeFilter ? sql(timeframeFilter) : sql``}
-    `
-
-    // Get total sales and revenue
-    const salesResult = await sql`
-      SELECT COUNT(*) as count, SUM(total_amount) as total_revenue
-      FROM sales s
-      JOIN devices d ON s.created_by = d.id
-      WHERE d.company_id = ${companyId}
-      ${timeframeFilter ? sql(timeframeFilter) : sql``}
-    `
-
-    // Get total purchases and expenses
-    const purchasesResult = await sql`
-      SELECT COUNT(*) as count, SUM(total_amount) as total_expenses
-      FROM purchases p
-      JOIN devices d ON p.created_by = d.id
-      WHERE d.company_id = ${companyId}
-      ${timeframeFilter ? sql(timeframeFilter) : sql``}
-    `
-
-    // Get total customers
-    const customersResult = await sql`
-      SELECT COUNT(DISTINCT c.id) as count
-      FROM customers c
-      JOIN devices d ON c.created_by = d.id
-      WHERE d.company_id = ${companyId}
-      ${timeframeFilter ? sql(timeframeFilter) : sql``}
-    `
-
-    return {
-      success: true,
-      data: {
-        totalProducts: Number.parseInt(productsResult[0]?.count || "0"),
-        totalSales: Number.parseInt(salesResult[0]?.count || "0"),
-        totalPurchases: Number.parseInt(purchasesResult[0]?.count || "0"),
-        totalCustomers: Number.parseInt(customersResult[0]?.count || "0"),
-        totalRevenue: Number.parseFloat(salesResult[0]?.total_revenue || "0"),
-        totalExpenses: Number.parseFloat(purchasesResult[0]?.total_expenses || "0"),
-        activeDevices: Number.parseInt(devicesResult[0]?.active_devices || "0"),
-      },
-    }
-  } catch (error) {
-    console.error("Error fetching company stats:", error)
-    return {
-      success: false,
-      message: "Failed to fetch company statistics",
-      data: {
-        totalProducts: 0,
-        totalSales: 0,
-        totalPurchases: 0,
-        totalCustomers: 0,
-        totalRevenue: 0,
-        totalExpenses: 0,
-        activeDevices: 0,
-      },
-    }
-  }
-}

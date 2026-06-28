@@ -3,54 +3,7 @@
 import { sql, getLastError, resetConnectionState, executeWithRetry } from "@/lib/db"
 import { revalidatePath } from "next/cache"
 import { recordSaleTransaction, recordSaleAdjustment, deleteSaleTransaction } from "./simplified-accounting"
-
-const CACHE_DURATION = 60000 // 1 minute
-let schemaCache: any = null
-
-async function getSchemaInfo() {
-  const now = Date.now()
-
-  // Use cached info if recent
-  if (schemaCache && now - schemaCache.lastChecked < CACHE_DURATION) {
-    return schemaCache
-  }
-
-  // Check schema once, cache result
-  const checkResult = await sql`
-    SELECT 
-      EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sales' AND column_name = 'payment_method') as has_payment_method,
-      EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sales' AND column_name = 'discount') as has_discount,
-      EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sales' AND column_name = 'device_id') as has_device_id,
-      EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sales' AND column_name = 'received_amount') as has_received_amount,
-      EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sales' AND column_name = 'staff_id') as has_staff_id,
-      EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sales' AND column_name = 'sale_type') as has_sale_type
-  `
-
-  schemaCache = {
-    hasPaymentMethod: checkResult[0]?.has_payment_method || false,
-    hasDiscount: checkResult[0]?.has_discount || false,
-    hasDeviceId: checkResult[0]?.has_device_id || false,
-    hasReceivedAmount: checkResult[0]?.has_received_amount || false,
-    hasStaffId: checkResult[0]?.has_staff_id || false,
-    hasSaleType: checkResult[0]?.has_sale_type || false,
-    lastChecked: now,
-  }
-
-  return schemaCache
-}
-
-async function ensureProductDeviceStockTable() {
-  await sql`
-    CREATE TABLE IF NOT EXISTS product_device_stock (
-      id SERIAL PRIMARY KEY,
-      product_id INTEGER NOT NULL,
-      device_id INTEGER NOT NULL,
-      stock INTEGER NOT NULL DEFAULT 0,
-      updated_at TIMESTAMP DEFAULT NOW(),
-      UNIQUE(product_id, device_id)
-    )
-  `
-}
+import { filterSalesForStaff } from "@/lib/staff-restrictions-server"
 
 // Helper function to safely update product stock with proper validation
 async function updateProductStock(
@@ -60,8 +13,6 @@ async function updateProductStock(
   deviceId: number,
 ) {
   try {
-    await ensureProductDeviceStockTable()
-
     // First, verify this is actually a product (not a service)
     const productCheck = await sql`
       SELECT id, name FROM products WHERE id = ${productId}
@@ -132,8 +83,6 @@ async function createStockHistoryEntry(
       console.log(`Skipping stock history for ID ${productId} - not found in products table (likely a service)`)
       return { success: true, message: "Item is not a product, stock history skipped" }
     }
-
-    await ensureProductDeviceStockTable()
 
     await sql`
       INSERT INTO product_stock_history (
@@ -304,7 +253,7 @@ export async function getUserSales(deviceId: number, limit?: number, searchTerm?
       }
     }
 
-    return { success: true, data: sales }
+    return { success: true, data: await filterSalesForStaff(sales, deviceId) }
   } catch (error) {
     console.error("Get device sales error:", error)
     return {
@@ -324,38 +273,20 @@ export async function getSaleDetails(saleId: number) {
   resetConnectionState()
 
   try {
-    // Check if staff_id column exists first
-    const schema = await getSchemaInfo()
-
-    // Update the sale query to conditionally include staff information:
     const saleResult = await executeWithRetry(async () => {
-      if (schema.hasStaffId) {
-        return await sql`
-          SELECT 
-            s.*,
-            c.name as customer_name,
-            c.phone as customer_phone,
-            c.email as customer_email,
-            c.address as customer_address,
-            st.name as staff_name
-          FROM sales s
-          LEFT JOIN customers c ON s.customer_id = c.id
-          LEFT JOIN staff st ON s.staff_id = st.id
-          WHERE s.id = ${saleId}
-        `
-      } else {
-        return await sql`
-          SELECT 
-            s.*,
-            c.name as customer_name,
-            c.phone as customer_phone,
-            c.email as customer_email,
-            c.address as customer_address
-          FROM sales s
-          LEFT JOIN customers c ON s.customer_id = c.id
-          WHERE s.id = ${saleId}
-        `
-      }
+      return await sql`
+        SELECT 
+          s.*,
+          c.name as customer_name,
+          c.phone as customer_phone,
+          c.email as customer_email,
+          c.address as customer_address,
+          st.name as staff_name
+        FROM sales s
+        LEFT JOIN customers c ON s.customer_id = c.id
+        LEFT JOIN staff st ON s.staff_id = st.id
+        WHERE s.id = ${saleId}
+      `
     })
 
     if (saleResult.length === 0) {
@@ -397,29 +328,10 @@ export async function getSaleDetails(saleId: number) {
     // Calculate subtotal from items
     const subtotal = itemsResult.reduce((sum, item) => sum + Number(item.quantity) * Number(item.price), 0)
 
-    // Check if discount column exists and handle discount calculation
-    let hasDiscountColumn = false
-    try {
-      const checkResult = await sql`
-        SELECT EXISTS (
-          SELECT 1 FROM information_schema.columns 
-          WHERE table_name = 'sales' AND column_name = 'discount'
-        ) as has_column
-      `
-      hasDiscountColumn = checkResult[0]?.has_column || false
-    } catch (err) {
-      console.error("Error checking for discount column:", err)
-    }
-
-    // Handle discount value
-    let discountValue = 0
-    if (hasDiscountColumn && saleResult[0].discount !== null && saleResult[0].discount !== undefined) {
-      discountValue = Number(saleResult[0].discount)
-    } else {
-      // Calculate discount from the difference if column doesn't exist
-      const total = Number(saleResult[0].total_amount)
-      discountValue = subtotal - total > 0 ? subtotal - total : 0
-    }
+    const discountValue =
+      saleResult[0].discount !== null && saleResult[0].discount !== undefined
+        ? Number(saleResult[0].discount)
+        : Math.max(0, subtotal - Number(saleResult[0].total_amount))
 
     // Calculate outstanding amount
     const totalAmount = Number(saleResult[0].total_amount)
@@ -465,9 +377,6 @@ export async function addSale(saleData: any) {
   try {
     console.log("Adding sale with data:", JSON.stringify(saleData, null, 2))
 
-    // Get schema info (cached)
-    const schema = await getSchemaInfo()
-
     // Start transaction
     await sql`BEGIN`
 
@@ -511,58 +420,26 @@ export async function addSale(saleData: any) {
 
       const outstandingAmount = total - receivedAmount
 
-      // Build INSERT query based on available columns
-      let saleResult
-      if (
-        schema.hasDeviceId &&
-        schema.hasPaymentMethod &&
-        schema.hasDiscount &&
-        schema.hasReceivedAmount &&
-        schema.hasStaffId &&
-        saleData.staffId
-      ) {
-        // All columns available
-        saleResult = await sql`
-          INSERT INTO sales (customer_id, created_by, total_amount, status, sale_date, device_id, payment_method, discount, received_amount, staff_id) 
-          VALUES (${saleData.customerId || null}, ${saleData.userId}, ${total}, ${saleData.paymentStatus || "Completed"}, ${saleData.saleDate || new Date()}, ${saleData.deviceId}, ${saleData.paymentMethod || "Cash"}, ${discountAmount}, ${receivedAmount}, ${saleData.staffId}) 
-          RETURNING *
-        `
-      } else if (schema.hasDeviceId && schema.hasPaymentMethod && schema.hasDiscount && schema.hasReceivedAmount) {
-        // Without staff_id
-        saleResult = await sql`
-          INSERT INTO sales (customer_id, created_by, total_amount, status, sale_date, device_id, payment_method, discount, received_amount) 
-          VALUES (${saleData.customerId || null}, ${saleData.userId}, ${total}, ${saleData.paymentStatus || "Completed"}, ${saleData.saleDate || new Date()}, ${saleData.deviceId}, ${saleData.paymentMethod || "Cash"}, ${discountAmount}, ${receivedAmount}) 
-          RETURNING *
-        `
-      } else if (schema.hasDeviceId && schema.hasPaymentMethod && schema.hasDiscount) {
-        // Without received_amount
-        saleResult = await sql`
-          INSERT INTO sales (customer_id, created_by, total_amount, status, sale_date, device_id, payment_method, discount) 
-          VALUES (${saleData.customerId || null}, ${saleData.userId}, ${total}, ${saleData.paymentStatus || "Completed"}, ${saleData.saleDate || new Date()}, ${saleData.deviceId}, ${saleData.paymentMethod || "Cash"}, ${discountAmount}) 
-          RETURNING *
-        `
-      } else if (schema.hasDeviceId && schema.hasPaymentMethod) {
-        // Without discount and received_amount
-        saleResult = await sql`
-          INSERT INTO sales (customer_id, created_by, total_amount, status, sale_date, device_id, payment_method) 
-          VALUES (${saleData.customerId || null}, ${saleData.userId}, ${total}, ${saleData.paymentStatus || "Completed"}, ${saleData.saleDate || new Date()}, ${saleData.deviceId}, ${saleData.paymentMethod || "Cash"}) 
-          RETURNING *
-        `
-      } else if (schema.hasDeviceId) {
-        // Only device_id available
-        saleResult = await sql`
-          INSERT INTO sales (customer_id, created_by, total_amount, status, sale_date, device_id) 
-          VALUES (${saleData.customerId || null}, ${saleData.userId}, ${total}, ${saleData.paymentStatus || "Completed"}, ${saleData.saleDate || new Date()}, ${saleData.deviceId}) 
-          RETURNING *
-        `
-      } else {
-        // Basic columns only
-        saleResult = await sql`
-          INSERT INTO sales (customer_id, created_by, total_amount, status, sale_date) 
-          VALUES (${saleData.customerId || null}, ${saleData.userId}, ${total}, ${saleData.paymentStatus || "Completed"}, ${saleData.saleDate || new Date()}) 
-          RETURNING *
-        `
-      }
+      const saleResult = await sql`
+        INSERT INTO sales (
+          customer_id, created_by, total_amount, status, sale_date,
+          device_id, payment_method, discount, received_amount, staff_id, sale_type
+        )
+        VALUES (
+          ${saleData.customerId || null},
+          ${saleData.userId},
+          ${total},
+          ${saleData.paymentStatus || "Completed"},
+          ${saleData.saleDate || new Date()},
+          ${saleData.deviceId},
+          ${saleData.paymentMethod || "Cash"},
+          ${discountAmount},
+          ${receivedAmount},
+          ${saleData.staffId || null},
+          ${saleData.saleType || "product"}
+        )
+        RETURNING *
+      `
 
       const sale = saleResult[0]
       const saleId = sale.id
@@ -658,28 +535,25 @@ export async function addSale(saleData: any) {
 
       // Determine sale type - check if any items are services
       let saleType = "product"
-      if (schema.hasSaleType) {
-        try {
-          const serviceCheck = await sql`
-            SELECT COUNT(*) as service_count
-            FROM sale_items si
-            WHERE si.sale_id = ${saleId}
-            AND EXISTS (SELECT 1 FROM services s WHERE s.id = si.product_id)
-          `
+      try {
+        const serviceCheck = await sql`
+          SELECT COUNT(*) as service_count
+          FROM sale_items si
+          WHERE si.sale_id = ${saleId}
+          AND EXISTS (SELECT 1 FROM services s WHERE s.id = si.product_id)
+        `
 
-          if (serviceCheck[0]?.service_count > 0) {
-            saleType = "service"
-          }
-
-          // Update sale with type
-          await sql`
-            UPDATE sales 
-            SET sale_type = ${saleType}
-            WHERE id = ${saleId}
-          `
-        } catch (err) {
-          console.log("Error determining sale type, defaulting to product type")
+        if (serviceCheck[0]?.service_count > 0) {
+          saleType = "service"
         }
+
+        await sql`
+          UPDATE sales 
+          SET sale_type = ${saleType}
+          WHERE id = ${saleId}
+        `
+      } catch (err) {
+        console.log("Error determining sale type, defaulting to product type")
       }
 
       // Calculate COGS using the actual wholesale prices from the sale items
@@ -994,88 +868,39 @@ export async function updateSale(saleData: any) {
         }
       }
 
-      // 5. Check schema info
-      const schema = await getSchemaInfo()
-
-      // 6. Update the sale record with optimized query
-      // Build the UPDATE query - Fixed version
-      if (saleData.deviceId) {
-        if (
-          schema.hasPaymentMethod &&
-          schema.hasDiscount &&
-          schema.hasReceivedAmount &&
-          schema.hasStaffId &&
-          saleData.staffId
-        ) {
+      const updateSaleRecord = async (whereDeviceScoped: boolean) => {
+        if (whereDeviceScoped) {
           await sql`
             UPDATE sales 
-            SET customer_id = ${saleData.customerId || null}, total_amount = ${changes.newTotal}, status = ${changes.newStatus}, sale_date = ${changes.newDate}, updated_at = ${new Date()}, payment_method = ${saleData.paymentMethod || "Cash"}, discount = ${changes.newDiscount}, received_amount = ${changes.newReceived}, staff_id = ${saleData.staffId}
-            WHERE id = ${saleData.id} AND device_id = ${saleData.deviceId}
-          `
-        } else if (schema.hasPaymentMethod && schema.hasDiscount && schema.hasReceivedAmount) {
-          await sql`
-            UPDATE sales 
-            SET customer_id = ${saleData.customerId || null}, total_amount = ${changes.newTotal}, status = ${changes.newStatus}, sale_date = ${changes.newDate}, updated_at = ${new Date()}, payment_method = ${saleData.paymentMethod || "Cash"}, discount = ${changes.newDiscount}, received_amount = ${changes.newReceived}
-            WHERE id = ${saleData.id} AND device_id = ${saleData.deviceId}
-          `
-        } else if (schema.hasPaymentMethod && schema.hasDiscount) {
-          await sql`
-            UPDATE sales 
-            SET customer_id = ${saleData.customerId || null}, total_amount = ${changes.newTotal}, status = ${changes.newStatus}, sale_date = ${changes.newDate}, updated_at = ${new Date()}, payment_method = ${saleData.paymentMethod || "Cash"}, discount = ${changes.newDiscount}
-            WHERE id = ${saleData.id} AND device_id = ${saleData.deviceId}
-          `
-        } else if (schema.hasPaymentMethod) {
-          await sql`
-            UPDATE sales 
-            SET customer_id = ${saleData.customerId || null}, total_amount = ${changes.newTotal}, status = ${changes.newStatus}, sale_date = ${changes.newDate}, updated_at = ${new Date()}, payment_method = ${saleData.paymentMethod || "Cash"}
+            SET customer_id = ${saleData.customerId || null},
+                total_amount = ${changes.newTotal},
+                status = ${changes.newStatus},
+                sale_date = ${changes.newDate},
+                updated_at = ${new Date()},
+                payment_method = ${saleData.paymentMethod || "Cash"},
+                discount = ${changes.newDiscount},
+                received_amount = ${changes.newReceived},
+                staff_id = ${saleData.staffId || null}
             WHERE id = ${saleData.id} AND device_id = ${saleData.deviceId}
           `
         } else {
           await sql`
             UPDATE sales 
-            SET customer_id = ${saleData.customerId || null}, total_amount = ${changes.newTotal}, status = ${changes.newStatus}, sale_date = ${changes.newDate}, updated_at = ${new Date()}
-            WHERE id = ${saleData.id} AND device_id = ${saleData.deviceId}
-          `
-        }
-      } else {
-        if (
-          schema.hasPaymentMethod &&
-          schema.hasDiscount &&
-          schema.hasReceivedAmount &&
-          schema.hasStaffId &&
-          saleData.staffId
-        ) {
-          await sql`
-            UPDATE sales 
-            SET customer_id = ${saleData.customerId || null}, total_amount = ${changes.newTotal}, status = ${changes.newStatus}, sale_date = ${changes.newDate}, updated_at = ${new Date()}, payment_method = ${saleData.paymentMethod || "Cash"}, discount = ${changes.newDiscount}, received_amount = ${changes.newReceived}, staff_id = ${saleData.staffId}
-            WHERE id = ${saleData.id}
-          `
-        } else if (schema.hasPaymentMethod && schema.hasDiscount && schema.hasReceivedAmount) {
-          await sql`
-            UPDATE sales 
-            SET customer_id = ${saleData.customerId || null}, total_amount = ${changes.newTotal}, status = ${changes.newStatus}, sale_date = ${changes.newDate}, updated_at = ${new Date()}, payment_method = ${saleData.paymentMethod || "Cash"}, discount = ${changes.newDiscount}, received_amount = ${changes.newReceived}
-            WHERE id = ${saleData.id}
-          `
-        } else if (schema.hasPaymentMethod && schema.hasDiscount) {
-          await sql`
-            UPDATE sales 
-            SET customer_id = ${saleData.customerId || null}, total_amount = ${changes.newTotal}, status = ${changes.newStatus}, sale_date = ${changes.newDate}, updated_at = ${new Date()}, payment_method = ${saleData.paymentMethod || "Cash"}, discount = ${changes.newDiscount}
-            WHERE id = ${saleData.id}
-          `
-        } else if (schema.hasPaymentMethod) {
-          await sql`
-            UPDATE sales 
-            SET customer_id = ${saleData.customerId || null}, total_amount = ${changes.newTotal}, status = ${changes.newStatus}, sale_date = ${changes.newDate}, updated_at = ${new Date()}, payment_method = ${saleData.paymentMethod || "Cash"}
-            WHERE id = ${saleData.id}
-          `
-        } else {
-          await sql`
-            UPDATE sales 
-            SET customer_id = ${saleData.customerId || null}, total_amount = ${changes.newTotal}, status = ${changes.newStatus}, sale_date = ${changes.newDate}, updated_at = ${new Date()}
+            SET customer_id = ${saleData.customerId || null},
+                total_amount = ${changes.newTotal},
+                status = ${changes.newStatus},
+                sale_date = ${changes.newDate},
+                updated_at = ${new Date()},
+                payment_method = ${saleData.paymentMethod || "Cash"},
+                discount = ${changes.newDiscount},
+                received_amount = ${changes.newReceived},
+                staff_id = ${saleData.staffId || null}
             WHERE id = ${saleData.id}
           `
         }
       }
+
+      await updateSaleRecord(Boolean(saleData.deviceId))
 
       // 7. Handle sale items updates with improved stock management and stock history
       console.log("Updating sale items with stock tracking...")
@@ -1271,31 +1096,26 @@ export async function updateSale(saleData: any) {
 
       console.log("Sale items updated successfully with stock history")
 
-      // 7.5. Update sale type based on current items - ADD THIS SECTION
-      if (schema.hasSaleType) {
-        try {
-          // Check if any of the current sale items are services
-          const serviceCheck = await sql`
-            SELECT COUNT(*) as service_count
-            FROM sale_items si
-            WHERE si.sale_id = ${saleData.id}
-            AND EXISTS (SELECT 1 FROM services s WHERE s.id = si.product_id)
-          `
+      // 7.5. Update sale type based on current items
+      try {
+        const serviceCheck = await sql`
+          SELECT COUNT(*) as service_count
+          FROM sale_items si
+          WHERE si.sale_id = ${saleData.id}
+          AND EXISTS (SELECT 1 FROM services s WHERE s.id = si.product_id)
+        `
 
-          const hasServices = serviceCheck[0]?.service_count > 0
-          const newSaleType = hasServices ? "service" : "product"
+        const newSaleType = serviceCheck[0]?.service_count > 0 ? "service" : "product"
 
-          // Update sale with the correct type
-          await sql`
-            UPDATE sales 
-            SET sale_type = ${newSaleType}
-            WHERE id = ${saleData.id}
-          `
+        await sql`
+          UPDATE sales 
+          SET sale_type = ${newSaleType}
+          WHERE id = ${saleData.id}
+        `
 
-          console.log(`Sale type updated to: ${newSaleType} (has ${serviceCheck[0]?.service_count || 0} services)`)
-        } catch (err) {
-          console.log("Error updating sale type:", err)
-        }
+        console.log(`Sale type updated to: ${newSaleType} (has ${serviceCheck[0]?.service_count || 0} services)`)
+      } catch (err) {
+        console.log("Error updating sale type:", err)
       }
 
       // 8. FIXED: Create accounting entry only if there are actual financial changes
@@ -1652,237 +1472,6 @@ async function testPartialPaymentBusinessRules() {
       passed: false,
       actual: `Error: ${error.message}`,
       message: "❌ Test failed due to error"
-    }
-  }
-}
-
-// =============================================================================
-// DEBUG FUNCTIONS
-// =============================================================================
-
-export async function debugSalesTableSchema() {
-  try {
-    const schema = await sql`
-      SELECT 
-        column_name,
-        data_type,
-        is_nullable,
-        column_default,
-        character_maximum_length,
-        numeric_precision,
-        numeric_scale
-      FROM information_schema.columns 
-      WHERE table_name = 'sales' 
-      ORDER BY ordinal_position
-    `
-    
-    console.log("=== SALES TABLE SCHEMA ===")
-    console.table(schema)
-    
-    return {
-      success: true,
-      data: schema,
-      message: `Found ${schema.length} columns in sales table`
-    }
-  } catch (error) {
-    console.error("Error checking sales table schema:", error)
-    return {
-      success: false,
-      message: `Error checking schema: ${error.message}`
-    }
-  }
-}
-
-// Debug function to check specific sale data
-export async function debugSaleData(saleId: number) {
-  try {
-    // Get raw sale data
-    const saleData = await sql`
-      SELECT * FROM sales WHERE id = ${saleId}
-    `
-    
-    if (saleData.length === 0) {
-      return {
-        success: false,
-        message: `Sale ${saleId} not found`
-      }
-    }
-
-    // Get sale items
-    const saleItems = await sql`
-      SELECT * FROM sale_items WHERE sale_id = ${saleId}
-    `
-
-    console.log("=== SALE DATA DEBUG ===")
-    console.log(`Sale ID: ${saleId}`)
-    console.log("Raw sale data:", JSON.stringify(saleData[0], null, 2))
-    console.log(`Sale items: ${saleItems.length} items`)
-    console.table(saleItems)
-
-    return {
-      success: true,
-      data: {
-        sale: saleData[0],
-        items: saleItems
-      },
-      message: `Found sale ${saleId} with ${saleItems.length} items`
-    }
-  } catch (error) {
-    console.error("Error debugging sale data:", error)
-    return {
-      success: false,
-      message: `Error debugging sale: ${error.message}`
-    }
-  }
-}
-
-// Debug function to check recent sales with their status and amounts
-export async function debugRecentSales(limit: number = 10) {
-  try {
-    const recentSales = await sql`
-      SELECT 
-        id,
-        status,
-        total_amount,
-        received_amount,
-        (total_amount - received_amount) as calculated_outstanding,
-        payment_method,
-        sale_date,
-        created_at
-      FROM sales 
-      ORDER BY created_at DESC 
-      LIMIT ${limit}
-    `
-    
-    console.log("=== RECENT SALES DEBUG ===")
-    console.log(`Showing ${recentSales.length} most recent sales:`)
-    console.table(recentSales)
-
-    // Count by status
-    const statusCount = await sql`
-      SELECT 
-        status,
-        COUNT(*) as count,
-        SUM(total_amount) as total_amount_sum,
-        SUM(received_amount) as received_amount_sum,
-        AVG(total_amount) as avg_total_amount,
-        AVG(received_amount) as avg_received_amount
-      FROM sales 
-      GROUP BY status
-    `
-
-    console.log("=== SALES BY STATUS ===")
-    console.table(statusCount)
-
-    return {
-      success: true,
-      data: {
-        recentSales,
-        statusCount
-      },
-      message: `Analyzed ${recentSales.length} recent sales`
-    }
-  } catch (error) {
-    console.error("Error debugging recent sales:", error)
-    return {
-      success: false,
-      message: `Error debugging recent sales: ${error.message}`
-    }
-  }
-}
-
-// Debug function to check database schema for all relevant tables
-export async function debugAllRelevantTables() {
-  try {
-    const tables = ['sales', 'sale_items', 'products', 'services', 'customers', 'staff']
-    
-    const schemas = {}
-    
-    for (const table of tables) {
-      try {
-        const schema = await sql`
-          SELECT 
-            column_name,
-            data_type,
-            is_nullable,
-            column_default
-          FROM information_schema.columns 
-          WHERE table_name = ${table} 
-          ORDER BY ordinal_position
-        `
-        schemas[table] = schema
-        console.log(`=== ${table.toUpperCase()} TABLE SCHEMA ===`)
-        console.table(schema)
-      } catch (error) {
-        console.error(`Error getting schema for ${table}:`, error)
-        schemas[table] = { error: error.message }
-      }
-    }
-
-    return {
-      success: true,
-      data: schemas,
-      message: `Checked schemas for ${tables.length} tables`
-    }
-  } catch (error) {
-    console.error("Error debugging all tables:", error)
-    return {
-      success: false,
-      message: `Error debugging tables: ${error.message}`
-    }
-  }
-}
-
-// Debug function to trace a specific sale creation
-export async function debugSaleCreation(saleData: any) {
-  try {
-    console.log("=== SALE CREATION DEBUG ===")
-    console.log("Incoming sale data:", JSON.stringify(saleData, null, 2))
-    
-    // Log the critical fields
-    console.log("Critical fields:")
-    console.log("- Status:", saleData.paymentStatus)
-    console.log("- Total Amount:", saleData.items?.reduce((sum, item) => sum + (item.price * item.quantity), 0))
-    console.log("- Received Amount:", saleData.receivedAmount)
-    console.log("- Discount:", saleData.discount)
-    
-    return {
-      success: true,
-      message: "Sale creation data logged"
-    }
-  } catch (error) {
-    console.error("Error debugging sale creation:", error)
-    return {
-      success: false,
-      message: `Error debugging sale creation: ${error.message}`
-    }
-  }
-}
-
-// Debug function to check financial transactions for a sale
-export async function debugSaleFinancialTransactions(saleId: number) {
-  try {
-    const transactions = await sql`
-      SELECT * FROM financial_transactions 
-      WHERE sale_id = ${saleId} 
-      ORDER BY created_at
-    `
-    
-    console.log("=== FINANCIAL TRANSACTIONS DEBUG ===")
-    console.log(`Sale ID: ${saleId}`)
-    console.log(`Found ${transactions.length} transactions:`)
-    console.table(transactions)
-
-    return {
-      success: true,
-      data: transactions,
-      message: `Found ${transactions.length} financial transactions for sale ${saleId}`
-    }
-  } catch (error) {
-    console.error("Error debugging financial transactions:", error)
-    return {
-      success: false,
-      message: `Error debugging transactions: ${error.message}`
     }
   }
 }

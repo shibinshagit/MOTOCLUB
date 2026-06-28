@@ -1,25 +1,17 @@
 import type React from "react"
 import type { Metadata } from "next"
-import { Poppins, Orbitron } from "next/font/google"
-import "../globals.css"
+import { Inter } from "next/font/google"
 import { Toaster } from "@/components/ui/toaster"
+import { BRAND_NAME, BRAND_TAGLINE } from "@/lib/brand"
 
-// Define fonts using Next.js font optimization
-const poppins = Poppins({
+const inter = Inter({
   subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700"],
-  variable: "--font-poppins",
-})
-
-const orbitron = Orbitron({
-  subsets: ["latin"],
-  weight: ["400", "500", "700"],
-  variable: "--font-orbitron",
+  variable: "--font-admin",
 })
 
 export const metadata: Metadata = {
-  title: "EzzyCartz Admin",
-  description: "Admin dashboard for managing the EzzyCartz platform",
+  title: `${BRAND_NAME} Admin`,
+  description: `${BRAND_NAME} admin dashboard — ${BRAND_TAGLINE}`,
 }
 
 export default function AdminLayout({
@@ -28,11 +20,9 @@ export default function AdminLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en">
-      <body className={`${poppins.variable} ${orbitron.variable} font-sans bg-[#0F172A] text-white`}>
-        <div className="flex min-h-screen w-full">{children}</div>
-        <Toaster />
-      </body>
-    </html>
+    <div className={`admin-portal ${inter.variable} min-h-screen w-full font-sans`}>
+      {children}
+      <Toaster />
+    </div>
   )
 }

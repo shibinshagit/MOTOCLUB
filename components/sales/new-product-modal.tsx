@@ -24,6 +24,7 @@ import {
   MAX_VIDEO_SIZE_BYTES,
 } from "@/lib/media-upload-utils"
 import { uploadProductFileFromClient } from "@/lib/blob-client-upload"
+import { useStaffRestrictions } from "@/hooks/use-staff-restrictions"
 
 interface Category {
   id: number
@@ -57,6 +58,9 @@ interface NewProductModalProps {
 }
 
 export default function NewProductModal({ isOpen, onClose, onSuccess, userId, initialBarcode = "" }: NewProductModalProps) {
+  const { isValueHidden } = useStaffRestrictions()
+  const hideCogs = isValueHidden("cogs")
+  const hideStockCount = isValueHidden("stock_count")
   const { toast } = useToast()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -502,8 +506,8 @@ export default function NewProductModal({ isOpen, onClose, onSuccess, userId, in
       const errors: Record<string, string> = {}
       if (!formData.name) errors.name = "Product name is required"
       if (!formData.price) errors.price = "MRP is required"
-      if (!formData.wholesalePrice) errors.wholesalePrice = "Cost price is required"
-      if (!formData.stock) errors.stock = "Stock is required"
+      if (!hideCogs && !formData.wholesalePrice) errors.wholesalePrice = "Cost price is required"
+      if (!hideStockCount && !formData.stock) errors.stock = "Stock is required"
 
       if (Object.keys(errors).length > 0) {
         setFieldErrors(errors)
@@ -604,7 +608,7 @@ export default function NewProductModal({ isOpen, onClose, onSuccess, userId, in
                         {uploadedImageUrls.map((url, index) => (
                           <div key={`${url}-${index}`} className="relative">
                             <img
-                              src={url || "/placeholder.svg"}
+                              src={url}
                               alt={`Uploaded image ${index + 1}`}
                               className="w-full h-24 object-cover rounded-md border border-green-400"
                             />
@@ -629,7 +633,7 @@ export default function NewProductModal({ isOpen, onClose, onSuccess, userId, in
                         {imagePreviews.map((preview, index) => (
                           <div key={`${preview}-${index}`} className="relative">
                             <img
-                              src={preview || "/placeholder.svg"}
+                              src={preview}
                               alt={`Product preview ${index + 1}`}
                               className="w-full h-24 object-cover rounded-md border border-gray-300 dark:border-gray-600"
                             />
@@ -827,11 +831,13 @@ export default function NewProductModal({ isOpen, onClose, onSuccess, userId, in
 
                 {/* Price Fields */}
                 <div className="grid grid-cols-1 gap-4">
+                  {!hideCogs && (
                   <div className="grid gap-2">
                     <Label htmlFor="wholesalePrice" className="text-gray-700 dark:text-gray-300">Cost Price ({currency}) *</Label>
                     <Input id="wholesalePrice" name="wholesalePrice" type="number" step="0.01" min="0" value={formData.wholesalePrice} onChange={handleChange} placeholder="0.00" className={`bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400 ${fieldErrors.wholesalePrice ? "border-red-500 dark:border-red-400" : ""}`} />
                     <FormError message={fieldErrors.wholesalePrice || ""} />
                   </div>
+                  )}
 
                   <div className="grid gap-2">
                     <Label htmlFor="msp" className="text-gray-700 dark:text-gray-300">MSP - Minimum Selling Price ({currency})</Label>
@@ -845,7 +851,7 @@ export default function NewProductModal({ isOpen, onClose, onSuccess, userId, in
                   </div>
                 </div>
 
-                {/* Stock & Shelf */}
+                {!hideStockCount && (
                 <div className="grid grid-cols-2 gap-4">
                   <div className="grid gap-2">
                     <Label htmlFor="stock" className="text-gray-700 dark:text-gray-300">Stock *</Label>
@@ -857,6 +863,13 @@ export default function NewProductModal({ isOpen, onClose, onSuccess, userId, in
                     <Input id="shelf" name="shelf" value={formData.shelf} onChange={handleChange} placeholder="e.g. A1, B3" className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400" />
                   </div>
                 </div>
+                )}
+                {!hideStockCount ? null : (
+                <div className="grid gap-2">
+                  <Label htmlFor="shelf" className="text-gray-700 dark:text-gray-300">Shelf</Label>
+                  <Input id="shelf" name="shelf" value={formData.shelf} onChange={handleChange} placeholder="e.g. A1, B3" className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400" />
+                </div>
+                )}
 
                 {/* Barcode */}
                 <div className="grid gap-2">

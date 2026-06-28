@@ -13,10 +13,6 @@ export interface Category {
   updated_at?: string
 }
 
-async function ensureCategoryCompanyColumn() {
-  await sql`ALTER TABLE product_categories ADD COLUMN IF NOT EXISTS company_id INTEGER`
-}
-
 async function getCompanyIdForDevice(deviceId: number) {
   const rows = await sql`SELECT company_id FROM devices WHERE id = ${deviceId} LIMIT 1`
   return rows.length > 0 ? Number(rows[0].company_id || 0) : 0
@@ -29,7 +25,6 @@ export async function getCategories(userId?: number) {
     let categories
 
     if (userId) {
-      await ensureCategoryCompanyColumn()
       const companyId = await getCompanyIdForDevice(userId)
 
       categories = await sql`
@@ -104,8 +99,6 @@ export async function createCategory(formData: FormData | { name: string; descri
   resetConnectionState()
 
   try {
-    await ensureCategoryCompanyColumn()
-
     let companyId: number | null = null
     if (userId) {
       const resolvedCompanyId = await getCompanyIdForDevice(userId)

@@ -5,7 +5,9 @@ import { useParams, useRouter } from "next/navigation"
 import { getSaleDetails } from "@/app/actions/sale-actions"
 import { Loader2, Printer } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { printInvoiceById } from "@/lib/receipt-utils"
+import { printSalesReceipt } from "@/lib/receipt-utils"
+import { BrandLogo } from "@/components/brand-logo"
+import { BRAND_NAME } from "@/lib/brand"
 
 export default function SaleInvoicePage() {
   const params = useParams()
@@ -18,9 +20,9 @@ export default function SaleInvoicePage() {
   const [error, setError] = useState<string | null>(null)
   const [currency] = useState<string>("AED") // Default to AED
   const [companyInfo] = useState<any>({
-    name: "Moto Club",
-    address: "kottakkal, malappuram, kerala, india",
-    phone: "+91 9995442239",
+    name: BRAND_NAME,
+    address: "",
+    phone: "",
   })
 
   const [receivedAmount, setReceivedAmount] = useState(0)
@@ -35,17 +37,16 @@ export default function SaleInvoicePage() {
         const result = await getSaleDetails(Number(params.id))
 
         if (result.success) {
-          console.log("Sale details:", result.data.sale)
-          console.log("Items:", result.data.items)
-
           setSale(result.data.sale)
           setItems(result.data.items)
           setReceivedAmount(Number(result.data.sale.received_amount) || 0)
 
-          // Set staff name if available
           if (result.data.sale.staff_name) {
             setStaffName(result.data.sale.staff_name)
           }
+
+          printSalesReceipt(result.data.sale, result.data.items, currency, companyInfo, false)
+          setTimeout(() => router.push("/dashboard"), 1000)
         } else {
           setError(result.message || "Failed to load sale details")
         }
@@ -58,21 +59,11 @@ export default function SaleInvoicePage() {
     }
 
     fetchSaleDetails()
-
-    if (saleId) {
-      // Use the unified print function and redirect back
-      printInvoiceById(saleId, "AED", false)
-
-      // Redirect back to dashboard after a short delay
-      setTimeout(() => {
-        router.push("/dashboard")
-      }, 1000)
-    }
-  }, [saleId, params.id, router])
+  }, [saleId, params.id, router, currency, companyInfo])
 
   const printReceipt = () => {
     if (!sale || !items.length) return
-    printInvoiceById(saleId, "AED", true)
+    printSalesReceipt(sale, items, currency, companyInfo, true)
   }
 
   // Format currency with the device's currency
@@ -148,21 +139,17 @@ export default function SaleInvoicePage() {
         <div className="bg-white p-8 rounded-lg shadow-md">
           <div className="flex justify-between items-start mb-8">
             <div className="company-info">
-              <div className="text-2xl font-bold mb-2">Moto Club</div>
-              <div className="text-gray-600">
-             office address:
-                <br />
-                kottakkal, malappuram, kerala, india
-                <br />
-                Phone: +91 9995442239
-              </div>
+              <div className="text-2xl font-bold mb-2">{companyInfo.name}</div>
+              {companyInfo.address && (
+                <div className="text-gray-600">
+                  {companyInfo.address}
+                  <br />
+                  {companyInfo.phone && `Phone: ${companyInfo.phone}`}
+                </div>
+              )}
             </div>
             <div className="logo-container">
-              <img
-                src="https://res.cloudinary.com/dxishiq9x/image/upload/v1751969415/286709952_155636793670880_4247278441893099316_n_unlqm6.jpg"
-                alt="Moto Club"
-                className="h-20"
-              />
+              <BrandLogo variant="icon" width={80} height={80} className="h-20 w-20 rounded-md" />
             </div>
           </div>
 

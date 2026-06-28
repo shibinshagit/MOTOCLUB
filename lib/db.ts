@@ -1,3 +1,5 @@
+import "server-only"
+
 import { neon, neonConfig } from "@neondatabase/serverless"
 
 // Configure Neon with optimized settings
@@ -5,6 +7,17 @@ neonConfig.fetchConnectionCache = true
 neonConfig.fetchTimeout = 30000 // 30 seconds timeout
 neonConfig.webSocketConstructor = undefined // Disable WebSocket for better compatibility
 neonConfig.pipelineFetch = false // Disable pipeline fetch for better compatibility
+
+function isLocalDatabaseUrl(url: string): boolean {
+  try {
+    const normalized = url.replace(/^postgres:\/\//, "postgresql://")
+    const parsed = new URL(normalized)
+    const host = parsed.hostname
+    return host === "localhost" || host === "127.0.0.1" || host === "::1"
+  } catch {
+    return false
+  }
+}
 
 // Global connection state
 const connectionState = {
@@ -17,13 +30,24 @@ const connectionState = {
   connectionChecked: false,
 }
 
+let dbInitLogged = false
+
+function logDbInit(message: string) {
+  if (dbInitLogged) return
+  console.log(message)
+}
+
+function logDbInitOnce() {
+  dbInitLogged = true
+}
+
 // Try to get the database URL from environment variables with enhanced logging
 const getDatabaseUrl = () => {
   const possibleEnvVars = [
+    "DATABASE_URL",
     "NEON_DATABASE_URL",
     "NEON_POSTGRES_URL",
     "NEON_POSTGRES_URL_NON_POOLING",
-    "DATABASE_URL",
     "POSTGRES_URL",
   ]
 
@@ -32,12 +56,12 @@ const getDatabaseUrl = () => {
     (key) => key.includes("NEON") || key.includes("DATABASE") || key.includes("PG"),
   )
 
-  console.log(`Available database environment variables: ${dbEnvVars.length > 0 ? dbEnvVars.join(", ") : "none"}`)
+  logDbInit(`Available database environment variables: ${dbEnvVars.length > 0 ? dbEnvVars.join(", ") : "none"}`)
 
   // Try each possible environment variable
   for (const envVar of possibleEnvVars) {
     if (process.env[envVar]) {
-      console.log(`Using database URL from ${envVar}`)
+      logDbInit(`Using database URL from ${envVar}`)
       return process.env[envVar]
     }
   }
@@ -49,7 +73,8 @@ const getDatabaseUrl = () => {
 
 // Improve the createMockSql function to return more realistic mock data
 const createMockSql = () => {
-  console.warn("Using MOCK database mode - no real database connection")
+  logDbInit("Using MOCK database mode - no real database connection")
+  logDbInitOnce()
 
   return async (strings: TemplateStringsArray, ...values: any[]) => {
     const query = strings.join("?")
@@ -62,9 +87,6 @@ const createMockSql = () => {
 
 // Create a SQL client that always works, even without a database URL
 const createSqlClient = () => {
-  // Always create a mock SQL function first
-  const mockSql = createMockSql()
-
   // Try to get a real database URL
   const dbUrl = getDatabaseUrl()
 
@@ -75,15 +97,31 @@ const createSqlClient = () => {
     connectionState.lastError = new Error("Database URL not configured")
 
     return {
-      sql: mockSql,
+      sql: createMockSql(),
     }
   }
 
   try {
-    console.log("Attempting to connect to database...")
+    const useLocalDriver = isLocalDatabaseUrl(dbUrl)
+    logDbInit(
+      useLocalDriver
+        ? "Attempting to connect to local PostgreSQL..."
+        : "Attempting to connect to database...",
+    )
 
-    // Create the SQL function with the database URL
-    const sqlFn = neon(dbUrl)
+    const sqlFn = useLocalDriver
+      ? (() => {
+          // Lazy-load postgres so client bundles never pull in Node-only modules.
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const postgres = require("postgres") as typeof import("postgres").default
+          return postgres(dbUrl, {
+            max: 10,
+            idle_timeout: 20,
+            connect_timeout: 10,
+            onnotice: () => {},
+          })
+        })()
+      : neon(dbUrl)
 
     // Create a wrapped version that handles errors
     const wrappedSql = async (...args: any[]) => {
@@ -147,7 +185,8 @@ const createSqlClient = () => {
         connectionState.lastSuccessfulConnection = Date.now()
         connectionState.mockMode = false
         connectionState.connectionChecked = true
-        console.log("Database connection successful")
+        logDbInit("Database connection successful")
+        logDbInitOnce()
       } catch (error) {
         connectionState.isConnected = false
         connectionState.lastError = error instanceof Error ? error : new Error(String(error))
@@ -322,10 +361,9 @@ async function checkDatabaseHealth(): Promise<{ isHealthy: boolean; message: str
 }
 
 // Function to manually set mock mode (useful for testing)
-function setMockMode(mode: boolean): void {
+function setMockMode(_mode: boolean): void {
   // Always set mock mode to false regardless of the input parameter
   connectionState.mockMode = false
-  console.log("Mock mode disabled by configuration")
 }
 
 // Force disable mock mode

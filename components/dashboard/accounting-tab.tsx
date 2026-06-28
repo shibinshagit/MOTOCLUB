@@ -31,6 +31,7 @@ import {
   Loader2,
 } from "lucide-react"
 import { useAppSelector, useAppDispatch } from "@/store/hooks"
+import { useStaffRestrictions } from "@/hooks/use-staff-restrictions"
 import { selectDevice, selectCompany } from "@/store/slices/deviceSlice"
 import {
   selectFinancialData,
@@ -162,6 +163,8 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
   const isLoading = useAppSelector(selectIsLoading)
   const isBackgroundLoading = useAppSelector(selectIsBackgroundLoading)
   const balances = useAppSelector(selectBalances)
+  const { isValueHidden } = useStaffRestrictions()
+  const hideCogs = isValueHidden("cogs")
 
   // Local state
   const [searchTerm, setSearchTerm] = useState("")
@@ -736,7 +739,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                   <th>Status</th>
                   <th>Transaction Amount</th>
                   <th>Money Flow</th>
-                  <th>Product Cost (COGS)</th>
+                  ${hideCogs ? "" : "<th>Product Cost (COGS)</th>"}
                   <th>Cash Impact</th>
                 </tr>
               </thead>
@@ -757,7 +760,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                       <td style="color: ${moneyFlow.color.includes('green') ? "#059669" : moneyFlow.color.includes('red') ? "#dc2626" : "#6b7280"}">
                         ${moneyFlow.showAmount ? (netImpact >= 0 ? "+" : "-") + currency + " " + moneyFlow.value.toFixed(2) : moneyFlow.text}
                       </td>
-                      <td>${currency} ${t.cost.toFixed(2)}</td>
+                      ${hideCogs ? "" : `<td>${currency} ${t.cost.toFixed(2)}</td>`}
                       <td style="color: ${cashImpact > 0 ? "#059669" : cashImpact < 0 ? "#dc2626" : "#6b7280"}; font-weight: bold;">
                         ${cashImpact > 0 ? "+" : cashImpact < 0 ? "-" : ""}${currency} ${Math.abs(cashImpact).toFixed(2)}
                       </td>
@@ -2031,9 +2034,11 @@ const getEnhancedDescription = (transaction: any) => {
                     <span className="text-xs">Profit</span>
                   </div>
                   <div className="text-lg font-bold">{`${currency} ${getTotalProfit().toFixed(2)}`}</div>
-                  <div className="text-[10px] mt-1">
-                    COGS: {currency} {getFilteredCogs().toFixed(2)}
-                  </div>
+                  {!hideCogs && (
+                    <div className="text-[10px] mt-1">
+                      COGS: {currency} {getFilteredCogs().toFixed(2)}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 
@@ -2138,7 +2143,7 @@ const getEnhancedDescription = (transaction: any) => {
                   <div className="col-span-1 text-right">Total Bill</div>
                   <div className="col-span-1 text-right">Money In/Out</div>
                   <div className="col-span-1 text-right">Remaining</div>
-                  <div className="col-span-1 text-right">Product Cost</div>
+                  {!hideCogs && <div className="col-span-1 text-right">Product Cost</div>}
                   <div className="col-span-1 text-right">Cash Impact</div>
                   <div className="col-span-2 text-right">Date & Time</div>
                 </div>
@@ -2259,11 +2264,13 @@ const getEnhancedDescription = (transaction: any) => {
                       </div>
 
                       {/* Product Cost */}
+                      {!hideCogs && (
                       <div className="col-span-1 text-right">
                         <div className="text-sm font-medium text-orange-600 dark:text-orange-400">
                           {currency} {n(transaction.cost).toFixed(2)}
                         </div>
                       </div>
+                      )}
 
                       {/* Cash Impact */}
                       <div className="col-span-1 text-right">

@@ -31,7 +31,7 @@ import NewProductModal from "@/components/sales/new-product-modal"
 import { addSale } from "@/app/actions/sale-actions"
 import { printSalesReceipt } from "@/lib/receipt-utils"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { checkDatabaseHealth } from "@/lib/db"
+import { getDatabaseHealth } from "@/app/actions/db-status-actions"
 import { getProductByBarcode } from "@/app/actions/product-actions"
 import { getDeviceCurrency } from "@/app/actions/dashboard-actions"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -178,7 +178,7 @@ export default function NewSalePage() {
   const checkDbHealth = async () => {
     setIsCheckingDb(true)
     try {
-      const status = await checkDatabaseHealth()
+      const status = await getDatabaseHealth()
       setDbStatus(status)
       console.log("Database health check result:", status)
 

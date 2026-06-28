@@ -12,7 +12,8 @@ interface ProductActionPopupProps {
   position: { x: number; y: number }
   onView: () => void
   onEdit: () => void
-  onAdjustStock: () => void
+  onAdjustStock?: () => void
+  showAdjustStock?: boolean
   onPrint: () => void
   onDelete: () => void
 }
@@ -25,6 +26,7 @@ export default function ProductActionPopup({
   onView,
   onEdit,
   onAdjustStock,
+  showAdjustStock = true,
   onPrint,
   onDelete,
 }: ProductActionPopupProps) {
@@ -102,12 +104,16 @@ export default function ProductActionPopup({
       onClick: onEdit,
       className: "hover:bg-green-50 dark:hover:bg-green-900/30 hover:text-green-600 dark:hover:text-green-400",
     },
-    {
-      icon: BarChart2,
-      label: "Stock",
-      onClick: onAdjustStock,
-      className: "hover:bg-purple-50 dark:hover:bg-purple-900/30 hover:text-purple-600 dark:hover:text-purple-400",
-    },
+    ...(showAdjustStock && onAdjustStock
+      ? [
+          {
+            icon: BarChart2,
+            label: "Stock",
+            onClick: onAdjustStock,
+            className: "hover:bg-purple-50 dark:hover:bg-purple-900/30 hover:text-purple-600 dark:hover:text-purple-400",
+          },
+        ]
+      : []),
     {
       icon: Printer,
       label: "Print",

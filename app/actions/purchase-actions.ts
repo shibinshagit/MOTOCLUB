@@ -4,22 +4,7 @@ import { sql, getLastError, resetConnectionState } from "@/lib/db"
 import { revalidatePath } from "next/cache"
 import { recordPurchaseTransaction, recordPurchaseAdjustment, deletePurchaseTransaction } from "./simplified-accounting"
 
-async function ensureProductDeviceStockTable() {
-  await sql`
-    CREATE TABLE IF NOT EXISTS product_device_stock (
-      id SERIAL PRIMARY KEY,
-      product_id INTEGER NOT NULL,
-      device_id INTEGER NOT NULL,
-      stock INTEGER NOT NULL DEFAULT 0,
-      updated_at TIMESTAMP DEFAULT NOW(),
-      UNIQUE(product_id, device_id)
-    )
-  `
-}
-
 async function adjustDeviceProductStock(productId: number, deviceId: number, delta: number) {
-  await ensureProductDeviceStockTable()
-
   const productCheck = await sql`
     SELECT id FROM products WHERE id = ${productId}
   `
