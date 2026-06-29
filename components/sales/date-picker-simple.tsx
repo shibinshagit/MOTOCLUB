@@ -33,7 +33,6 @@ export default function DatePickerSimple({ date, onDateChange }: DatePickerSimpl
               setOpen(false)
             }
           }}
-          initialFocus
         />
       </PopoverContent>
     </Popover>

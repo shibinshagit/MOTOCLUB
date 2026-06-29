@@ -1139,7 +1139,6 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
                                   mode="single"
                                   selected={date}
                                   onSelect={(newDate) => newDate && setDate(newDate)}
-                                  initialFocus
                                   className=""
                                 />
                               </PopoverContent>
