@@ -49,7 +49,6 @@ export function DatePickerField({
             onDateChange(newDate)
             setOpen(false)
           }}
-          initialFocus
           {...props}
         />
       </PopoverContent>
