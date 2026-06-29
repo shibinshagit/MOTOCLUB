@@ -3,6 +3,30 @@
 import { sql, getLastError, resetConnectionState } from "@/lib/db"
 import { revalidatePath } from "next/cache"
 
+export async function getCustomerById(customerId: number) {
+  if (!customerId) {
+    return { success: false as const, message: "Customer ID is required" }
+  }
+
+  try {
+    const rows = await sql`
+      SELECT *
+      FROM customers
+      WHERE id = ${customerId}
+      LIMIT 1
+    `
+
+    if (rows.length === 0) {
+      return { success: false as const, message: "Customer not found" }
+    }
+
+    return { success: true as const, data: rows[0] }
+  } catch (error) {
+    console.error("getCustomerById error:", error)
+    return { success: false as const, message: "Failed to load customer" }
+  }
+}
+
 export async function getCustomers(userId?: number, limit?: number, searchTerm?: string) {
   // Reset connection state to allow a fresh attempt
   resetConnectionState()

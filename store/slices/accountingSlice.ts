@@ -181,7 +181,7 @@ export const getMoneyFlowDisplay = (transaction: Transaction) => {
         text: 'Partial Payment',
         value: actualReceived,
         showAmount: true,
-        color: 'text-blue-600 dark:text-blue-400'
+        color: 'text-blue-600'
       };
     } else if (actualReceived === 0) {
       // Full credit sale - no payment received
@@ -189,7 +189,7 @@ export const getMoneyFlowDisplay = (transaction: Transaction) => {
         text: 'Pending',
         value: 0,
         showAmount: false,
-        color: 'text-yellow-600 dark:text-yellow-400'
+        color: 'text-yellow-600'
       };
     }
   }
@@ -200,21 +200,21 @@ export const getMoneyFlowDisplay = (transaction: Transaction) => {
       text: 'Paid',
       value: amount,
       showAmount: true,
-      color: 'text-green-600 dark:text-green-400'
+      color: 'text-green-600'
     };
   } else if (type === 'sale' && status === 'credit') {
     return {
       text: 'Pending',
       value: 0,
       showAmount: false,
-      color: 'text-yellow-600 dark:text-yellow-400'
+      color: 'text-yellow-600'
     };
   } else if (type === 'purchase') {
     return {
       text: 'Paid',
       value: received,
       showAmount: true,
-      color: 'text-orange-600 dark:text-orange-400'
+      color: 'text-orange-600'
     };
   } else if (type === 'manual') {
     const netAmount = credit - (Number(transaction.debit) || 0);
@@ -222,14 +222,14 @@ export const getMoneyFlowDisplay = (transaction: Transaction) => {
       text: netAmount >= 0 ? 'Income' : 'Expense',
       value: Math.abs(netAmount),
       showAmount: true,
-      color: netAmount >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+      color: netAmount >= 0 ? 'text-green-600' : 'text-red-600'
     };
   } else {
     return {
       text: 'Processed',
       value: amount,
       showAmount: true,
-      color: 'text-gray-600 dark:text-gray-400'
+      color: 'text-gray-600'
     };
   }
 };

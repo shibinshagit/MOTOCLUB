@@ -99,24 +99,6 @@ export async function filterSalesForStaff<T extends Record<string, unknown>>(
   return sales.map((sale) => filterSaleForStaff(sale, staff))
 }
 
-export function filterHomeDashboardForStaff<T extends Record<string, unknown>>(
-  data: T,
-  staff: StaffSessionContext | null,
-): T {
-  if (!staff || !isStaffValueHidden(staff, "stock_count")) return data
-  return {
-    ...data,
-    lowStockCount: 0,
-    alerts: Array.isArray(data.alerts)
-      ? (data.alerts as unknown[]).filter((alert) => {
-          if (!alert || typeof alert !== "object") return true
-          const title = String((alert as { title?: string }).title || "").toLowerCase()
-          return !title.includes("stock")
-        })
-      : data.alerts,
-  }
-}
-
 export function filterFinanceResponseForStaff<T extends Record<string, unknown>>(
   payload: T,
   staff: StaffSessionContext | null,

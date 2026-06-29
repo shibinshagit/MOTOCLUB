@@ -1,6 +1,6 @@
 import { cookies } from "next/headers"
 
-const STAFF_SESSION_PREFIX = "motocart_staff_session_"
+const STAFF_SESSION_PREFIX = "ims_staff_session_"
 
 export function getStaffSessionCookieName(deviceId: number) {
   return `${STAFF_SESSION_PREFIX}${deviceId}`

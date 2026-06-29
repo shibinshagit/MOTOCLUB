@@ -1,36 +1,123 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
+import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { Button } from "@/components/ui/button"
 import { format } from "date-fns"
-import { Loader2, Printer, Copy, Settings, ImageIcon, Film } from "lucide-react"
+import { Loader2, Printer, Copy, Settings, ChevronLeft, Link2 } from "lucide-react"
 import { getProductStockHistory, getProductStockByDevice } from "@/app/actions/product-actions"
+import { createProductShareLink } from "@/app/actions/product-share-actions"
 import { printBarcodeSticker, printMultipleBarcodeStickers, encodeNumberAsLetters } from "@/lib/barcode-utils"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { getDeviceCurrency } from "@/app/actions/dashboard-actions"
 import { useStaffRestrictions } from "@/hooks/use-staff-restrictions"
+import { useToast } from "@/components/ui/use-toast"
+import { notifyError, notifySuccess } from "@/lib/notifications"
+import { cn } from "@/lib/utils"
 
-interface ViewProductModalProps {
-  isOpen: boolean
+interface ProductDetailBaseProps {
   onClose: () => void
   product: any
   onAdjustStock?: () => void
+  onEdit?: () => void
+  onDelete?: () => void
   currency?: string
   privacyMode?: boolean
   userId?: number
 }
 
-export default function ViewProductModal({
-  isOpen,
+export type ProductDetailPanelProps = ProductDetailBaseProps
+
+function InfoCell({
+  label,
+  value,
+  className = "",
+  copyText,
+}: {
+  label: string
+  value: ReactNode
+  className?: string
+  copyText?: string
+}) {
+  const { toast } = useToast()
+
+  const handleCopy = async () => {
+    if (!copyText) return
+    try {
+      await navigator.clipboard.writeText(copyText)
+      toast({ title: "Copied", description: `${label} copied to clipboard.` })
+    } catch {
+      toast({ title: "Copy failed", description: "Could not copy to clipboard.", variant: "destructive" })
+    }
+  }
+
+  return (
+    <div className={cn("border-b border-slate-200 px-4 py-3", className)}>
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+      <div className="mt-1 flex items-start gap-1.5 text-sm font-medium text-slate-800">
+        <div className="min-w-0 flex-1">{value}</div>
+        {copyText ? (
+          <button
+            type="button"
+            onClick={handleCopy}
+            className="shrink-0 rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+            aria-label={`Copy ${label.toLowerCase()}`}
+          >
+            <Copy className="h-3.5 w-3.5" />
+          </button>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+function SummaryCard({
+  label,
+  value,
+  tone,
+}: {
+  label: string
+  value: ReactNode
+  tone: "violet" | "emerald" | "amber" | "blue" | "slate"
+}) {
+  const tones = {
+    violet: "border-violet-100 bg-violet-50 text-violet-700",
+    emerald: "border-emerald-100 bg-emerald-50 text-emerald-700",
+    amber: "border-amber-100 bg-amber-50 text-amber-700",
+    blue: "border-blue-100 bg-blue-50 text-blue-700",
+    slate: "border-border bg-muted/40 text-foreground",
+  }
+
+  return (
+    <div className={cn("rounded-lg border px-3 py-2", tones[tone])}>
+      <p className="text-[11px] font-medium uppercase tracking-wide opacity-80">{label}</p>
+      <div className="text-sm font-bold">{value}</div>
+    </div>
+  )
+}
+
+function PanelSection({ title, children, action }: { title: string; children: ReactNode; action?: ReactNode }) {
+  return (
+    <div className="overflow-hidden rounded-xl border border-slate-200 bg-card">
+      <div className="flex items-center justify-between border-b border-slate-200 bg-[#F1F4F9] px-4 py-2">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-600">{title}</h3>
+        {action}
+      </div>
+      {children}
+    </div>
+  )
+}
+
+export function ProductDetailPanel({
   onClose,
   product,
   onAdjustStock,
+  onEdit,
+  onDelete,
   currency: currencyProp,
-  privacyMode = true,
+  privacyMode = false,
   userId,
-}: ViewProductModalProps) {
+}: ProductDetailPanelProps) {
   const { isValueHidden } = useStaffRestrictions()
   const hideCogs = isValueHidden("cogs")
   const hideStockCount = isValueHidden("stock_count")
@@ -43,7 +130,9 @@ export default function ViewProductModal({
   const [isHistoryLimited, setIsHistoryLimited] = useState(true)
   const [printCopies, setPrintCopies] = useState(1)
   const [showPrintOptions, setShowPrintOptions] = useState(false)
+  const [isSharingLink, setIsSharingLink] = useState(false)
   const [currency, setCurrency] = useState(currencyProp || "AED") // Use prop or default to AED
+  const { toast } = useToast()
 
   // Get encoded wholesale price
   const wholesalePrice =
@@ -83,12 +172,6 @@ export default function ViewProductModal({
     { key: "own_ecom", label: "Own Ecom", status: product.own_ecom_status || "not_listed" },
   ]
 
-  const getPlatformBadgeClass = (status: string) => {
-    if (status === "active") return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
-    if (status === "archived") return "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200"
-    return "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200"
-  }
-
   const getPlatformStatusLabel = (status: string) => {
     if (status === "active") return "Active"
     if (status === "archived") return "Archived"
@@ -106,7 +189,7 @@ export default function ViewProductModal({
 
   useEffect(() => {
     const fetchStockHistory = async () => {
-      if (!isOpen || !product?.id) return
+      if (!product?.id) return
 
       try {
         setIsLoading(true)
@@ -156,14 +239,12 @@ export default function ViewProductModal({
         })
         .catch((err) => console.error("Failed to load JsBarcode:", err))
     }
-  }, [isOpen, product?.id, currencyProp, product.barcode, userId, product.created_by])
+  }, [product?.id, currencyProp, product.barcode, userId, product.created_by])
 
   useEffect(() => {
-    if (isOpen) {
-      setHistoryFilter("current")
-      setIsHistoryLimited(true)
-    }
-  }, [isOpen, product?.id])
+    setHistoryFilter("current")
+    setIsHistoryLimited(true)
+  }, [product?.id])
 
   const handleLoadAllHistory = async () => {
     if (!product?.id || isLoadingAllHistory) return
@@ -201,8 +282,8 @@ export default function ViewProductModal({
       return {
         label: `${isUpdate ? "Purchase Update" : "Purchase"} #${referenceId ?? "N/A"}`,
         color: isUpdate
-          ? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
-          : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+          ? "bg-blue-100 text-blue-800"
+          : "bg-green-100 text-green-800",
       }
     }
 
@@ -212,12 +293,12 @@ export default function ViewProductModal({
       if (referenceType === "purchase") {
         return {
           label: `Purchase Deleted #${referenceId ?? "N/A"}`,
-          color: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
+          color: "bg-red-100 text-red-800",
         }
       }
       return {
         label: "Manual Adjustment",
-        color: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200",
+        color: "bg-purple-100 text-purple-800",
       }
     }
 
@@ -225,28 +306,28 @@ export default function ViewProductModal({
     if (type === "sale") {
       return {
         label: `Sale #${referenceId ?? "N/A"}`,
-        color: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
+        color: "bg-red-100 text-red-800",
       }
     }
 
     if (type === "transfer_out") {
       return {
         label: `Transfer Out #${referenceId ?? "N/A"}`,
-        color: "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200",
+        color: "bg-orange-100 text-orange-800",
       }
     }
 
     if (type === "transfer_in") {
       return {
         label: `Transfer In #${referenceId ?? "N/A"}`,
-        color: "bg-teal-100 text-teal-800 dark:bg-teal-900 dark:text-teal-200",
+        color: "bg-teal-100 text-teal-800",
       }
     }
 
     // fallback
     return {
       label: type,
-      color: "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200",
+      color: "bg-gray-100 text-gray-800",
     }
   }
 
@@ -262,529 +343,476 @@ export default function ViewProductModal({
     }
   }
 
-  // Helper function to mask sensitive data
-  const maskValue = (value: string | number, showValue: boolean) => {
-    if (showValue) return value
-    return "***"
+  const handleShareLink = async () => {
+    if (!product?.id || !currentDeviceId) {
+      notifyError(toast, "Device not found")
+      return
+    }
+
+    setIsSharingLink(true)
+    try {
+      const result = await createProductShareLink(product.id, currentDeviceId)
+      if (!result.success || !result.url) {
+        notifyError(toast, result.message || "Failed to create share link")
+        return
+      }
+
+      await navigator.clipboard.writeText(result.url)
+      notifySuccess(
+        toast,
+        result.reused ? "Existing share link copied" : "Share link copied",
+        "Customers can view product details without price or stock.",
+      )
+    } catch {
+      notifyError(toast, "Could not copy share link")
+    } finally {
+      setIsSharingLink(false)
+    }
   }
 
-  return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700">
-        <div className="flex flex-col h-full max-h-[90vh]">
-          <DialogHeader className="px-6 pt-6 pb-2">
-            <DialogTitle className="text-center text-xl text-gray-900 dark:text-gray-100">Product Details</DialogTitle>
-          </DialogHeader>
+  const formatMoney = (amount: number | string) => {
+    const num = typeof amount === "string" ? Number.parseFloat(amount) : amount
+    if (Number.isNaN(num)) return `${currency} 0.00`
+    return `${currency} ${num.toFixed(2)}`
+  }
 
-          <div className="flex-1 overflow-y-auto px-6 pb-6">
-            <div className="space-y-6">
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Product Media */}
-                {(mediaImageUrls.length > 0 || mediaVideoUrl) && (
-                  <div className="lg:col-span-1">
-                    <div className="space-y-2">
-                      <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Product Media</h3>
-                      <div className="space-y-2">
-                        {mediaImageUrls.length > 0 ? (
-                          <div className="grid grid-cols-2 gap-2">
-                            {mediaImageUrls.map((url, index) => (
-                              <div key={`${url}-${index}`} className="rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 p-1 overflow-hidden">
-                                <img
-                                  src={url}
-                                  alt={`${product.name} ${index + 1}`}
-                                  className="w-full h-20 object-cover rounded-md"
-                                />
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="h-24 rounded-lg border border-dashed border-gray-200 dark:border-gray-600 flex items-center justify-center text-gray-400">
-                            <ImageIcon className="h-5 w-5 mr-1" />
-                            <span className="text-xs">No images</span>
-                          </div>
-                        )}
-                        {mediaVideoUrl ? (
-                          <div className="rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 p-1 overflow-hidden">
-                            <video controls className="w-full h-28 rounded-md">
-                              <source src={mediaVideoUrl} />
-                            </video>
-                          </div>
-                        ) : (
-                          <div className="h-16 rounded-lg border border-dashed border-gray-200 dark:border-gray-600 flex items-center justify-center text-gray-400">
-                            <Film className="h-4 w-4 mr-1" />
-                            <span className="text-xs">No video</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
+  const stockDisplay = () => {
+    if (privacyMode) return "***"
+    const stock = Number(product.stock) || 0
+    if (stock === 0) return "Out of stock"
+    if (stock < 5) return `${stock} · Low`
+    return `${stock} · In stock`
+  }
 
-                {/* Product Details */}
-                <div className={`space-y-4 ${(mediaImageUrls.length > 0 || mediaVideoUrl) ? "lg:col-span-2" : "lg:col-span-3"}`}>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Name</h3>
-                      <p className="font-medium text-gray-900 dark:text-gray-100">{product.name}</p>
-                    </div>
+  const costDisplay = () => {
+    if (privacyMode) return "***"
+    const costValue = formatMoney(product.wholesale_price || 0)
+    const code = encodedWholesalePrice ? (
+      <span className="ml-2 text-[11px] font-normal text-slate-500">Code: {encodedWholesalePrice}</span>
+    ) : null
+    return (
+      <span className="group/cost relative inline-block">
+        <span className="group-hover/cost:hidden">****</span>
+        <span className="hidden group-hover/cost:inline">
+          {costValue}
+          {code}
+        </span>
+      </span>
+    )
+  }
 
-                    <div className="space-y-2">
-                      <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Company Name</h3>
-                      <p className="text-gray-900 dark:text-gray-100">{product.company_name || "N/A"}</p>
-                    </div>
+  const tableHeadClass =
+    "border-b border-slate-200 bg-[#F1F4F9] text-xs font-semibold uppercase tracking-wide text-slate-600"
 
-                    <div className="space-y-2">
-                      <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Category</h3>
-                      <p className="text-gray-900 dark:text-gray-100">{product.category || "N/A"}</p>
-                    </div>
+  if (!product) return null
 
-                    {product.shelf && (
-                      <div className="space-y-2">
-                        <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Shelf Location</h3>
-                        <p className="text-gray-900 dark:text-gray-100">{product.shelf}</p>
-                      </div>
-                    )}
+  const toolbarActions = showPrintOptions ? (
+    <>
+      <div className="flex items-center gap-2">
+        <Label htmlFor="copies" className="sr-only">
+          Number of copies
+        </Label>
+        <Input
+          id="copies"
+          type="number"
+          min="1"
+          max="100"
+          value={printCopies}
+          onChange={(e) => setPrintCopies(Number.parseInt(e.target.value) || 1)}
+          className="h-8 w-20 border-slate-200 bg-white text-xs"
+        />
+      </div>
+      <Button size="sm" onClick={handlePrintMultipleTags} className="h-8 px-3 text-xs">
+        <Printer className="mr-1.5 h-3.5 w-3.5" />
+        Print {printCopies}
+      </Button>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => setShowPrintOptions(false)}
+        className="h-8 border-slate-200 bg-white px-3 text-xs"
+      >
+        Cancel
+      </Button>
+    </>
+  ) : (
+    <>
+      <Button size="sm" onClick={handlePrintPriceTag} className="h-8 px-3 text-xs">
+        <Printer className="mr-1.5 h-3.5 w-3.5" />
+        Print tag
+      </Button>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => setShowPrintOptions(true)}
+        className="h-8 border-slate-200 bg-white px-3 text-xs"
+      >
+        <Copy className="mr-1.5 h-3.5 w-3.5" />
+        Multiple
+      </Button>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={handleShareLink}
+        disabled={isSharingLink}
+        className="h-8 border-violet-200 bg-white px-3 text-xs text-violet-700 hover:bg-violet-50"
+      >
+        {isSharingLink ? (
+          <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <Link2 className="mr-1.5 h-3.5 w-3.5" />
+        )}
+        Share link
+      </Button>
+      {onAdjustStock && !hideStockCount ? (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onAdjustStock}
+          className="h-8 border-slate-200 bg-white px-3 text-xs"
+        >
+          <Settings className="mr-1.5 h-3.5 w-3.5" />
+          Adjust stock
+        </Button>
+      ) : null}
+    </>
+  )
 
-                    <div className="space-y-2">
-                      <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">MRP (Retail Price)</h3>
-                      <p className="font-medium text-gray-900 dark:text-gray-100">
-                        {currency} {product.price}
-                      </p>
-                    </div>
-
-                    {!hideCogs && (
-                      <div className="space-y-2">
-                        <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Cost Price</h3>
-                        <p className="font-medium text-gray-900 dark:text-gray-100">
-                          {privacyMode ? (
-                            <span className="text-gray-400 dark:text-gray-500">*** ***</span>
-                          ) : (
-                            <>
-                              {currency} {product.wholesale_price || "0.00"}
-                              {encodedWholesalePrice && (
-                                <span className="ml-2 px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded text-xs">
-                                  Code: {encodedWholesalePrice}
-                                </span>
-                              )}
-                            </>
-                          )}
-                        </p>
-                      </div>
-                    )}
-
-                    {msp > 0 && (
-                      <div className="space-y-2">
-                        <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">
-                          MSP (Minimum Selling Price)
-                        </h3>
-                        <p className="font-medium text-gray-900 dark:text-gray-100">
-                          {privacyMode ? (
-                            <span className="text-gray-400 dark:text-gray-500">*** ***</span>
-                          ) : (
-                            `${currency} ${msp.toFixed(2)}`
-                          )}
-                        </p>
-                      </div>
-                    )}
-
-                    {!hideStockCount && (
-                      <div className="space-y-2">
-                        <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Current Stock</h3>
-                        <p className="font-medium">
-                          {privacyMode ? (
-                            <span className="inline-block rounded-full px-2.5 py-0.5 text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400">
-                              *** Stock
-                            </span>
-                          ) : (
-                            <span
-                              className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                                product.stock === 0
-                                  ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
-                                  : product.stock < 5
-                                    ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200"
-                                    : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
-                              }`}
-                            >
-                              {product.stock}{" "}
-                              {product.stock === 0 ? "Out of Stock" : product.stock < 5 ? "Low Stock" : "In Stock"}
-                            </span>
-                          )}
-                        </p>
-                      </div>
-                    )}
-
-                    <div className="space-y-2">
-                      <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Created At</h3>
-                      <p className="text-gray-900 dark:text-gray-100">
-                        {product.created_at ? format(new Date(product.created_at), "PPP p") : "N/A"}
-                      </p>
-                    </div>
-
-                    <div className="space-y-2">
-                      <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Last Updated</h3>
-                      <p className="text-gray-900 dark:text-gray-100">
-                        {product.updated_at ? format(new Date(product.updated_at), "PPP p") : "N/A"}
-                      </p>
-                    </div>
-
-                    {product.color && (
-                      <div className="space-y-2">
-                        <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Colour</h3>
-                        <p className="text-gray-900 dark:text-gray-100">{product.color}</p>
-                      </div>
-                    )}
-
-                    {product.size && (
-                      <div className="space-y-2">
-                        <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Size</h3>
-                        <p className="text-gray-900 dark:text-gray-100">{product.size}</p>
-                      </div>
-                    )}
-
-                    {product.suitable_for && (
-                      <div className="space-y-2">
-                        <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Suitable For</h3>
-                        <p className="text-gray-900 dark:text-gray-100">{product.suitable_for}</p>
-                      </div>
-                    )}
-
-                    {product.link && (
-                      <div className="space-y-2">
-                        <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Product Link</h3>
-                        <a href={product.link} target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline text-sm break-all">{product.link}</a>
-                      </div>
-                    )}
-
-                    {product.description && (
-                      <div className="space-y-2 md:col-span-2">
-                        <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Description</h3>
-                        <p className="text-gray-900 dark:text-gray-100 text-sm">{product.description}</p>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Attributes Section */}
-                  <div className="mt-4">
-                    <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">Marketplace Availability</h3>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                      {platformStatuses.map((platform) => (
-                        <div
-                          key={platform.key}
-                          className="flex flex-col rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 p-2"
-                        >
-                          <span className="text-xs text-gray-500 dark:text-gray-400">{platform.label}</span>
-                          <span
-                            className={`mt-1 inline-flex w-fit rounded-full px-2 py-0.5 text-xs font-medium ${getPlatformBadgeClass(
-                              platform.status,
-                            )}`}
-                          >
-                            {getPlatformStatusLabel(platform.status)}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Attributes Section */}
-                  {(() => {
-                    let attrs: any[] = []
-                    try {
-                      if (product.attributes) {
-                        attrs = typeof product.attributes === "string" ? JSON.parse(product.attributes) : product.attributes
-                      }
-                    } catch { attrs = [] }
-                    return attrs.length > 0 ? (
-                      <div className="mt-4">
-                        <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">Attributes</h3>
-                        <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                          {attrs.map((attr: any, idx: number) => (
-                            <div key={idx} className="flex flex-col rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 p-2">
-                              <span className="text-xs text-gray-500 dark:text-gray-400">{attr.key}</span>
-                              <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{attr.value}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null
-                  })()}
-
-                  {/* Barcode Section */}
-                  {product.barcode && (
-                    <div className="mt-4">
-                      <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">Barcode</h3>
-                      <div className="flex flex-col items-center justify-center rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 p-4">
-                        <div id="barcodeContainer" className="w-full max-w-xs"></div>
-                        <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">{product.barcode}</p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {!hideStockCount && !privacyMode && deviceStocks.length > 0 && (
-                <div className="space-y-3">
-                  <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Stock by Warehouse/Device</h3>
-                  <div className="border rounded-md overflow-hidden border-gray-200 dark:border-gray-600">
-                    <div className="overflow-x-auto">
-                      <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-600">
-                        <thead className="bg-gray-50 dark:bg-gray-800">
-                          <tr>
-                            <th className="px-4 py-2 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-left">
-                              Device
-                            </th>
-                            <th className="px-4 py-2 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-center">
-                              Stock
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-600">
-                          {deviceStocks.map((row) => (
-                            <tr key={row.device_id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
-                              <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-100">
-                                {row.device_name}
-                                {row.is_current_device ? (
-                                  <span className="ml-2 text-xs text-blue-600 dark:text-blue-300">(Current)</span>
-                                ) : null}
-                              </td>
-                              <td className="px-4 py-2 text-sm text-center text-gray-900 dark:text-gray-100 font-medium">
-                                {row.stock}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Print Price Tag Section */}
-              <div className="border rounded-lg p-4 bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-600">
-                <h3 className="text-lg font-medium mb-3 text-gray-900 dark:text-gray-100">Price Tag Printing</h3>
-
-                {showPrintOptions ? (
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="copies" className="text-gray-700 dark:text-gray-300">
-                          Number of Copies
-                        </Label>
-                        <Input
-                          id="copies"
-                          type="number"
-                          min="1"
-                          max="100"
-                          value={printCopies}
-                          onChange={(e) => setPrintCopies(Number.parseInt(e.target.value) || 1)}
-                          className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap gap-2">
-                      <Button onClick={handlePrintMultipleTags} className="flex-1">
-                        <Printer className="mr-2 h-4 w-4" /> Print {printCopies} {printCopies === 1 ? "Copy" : "Copies"}
-                      </Button>
-                      <Button
-                        variant="outline"
-                        onClick={() => setShowPrintOptions(false)}
-                        className="border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
-                      >
-                        Cancel
-                      </Button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex flex-wrap gap-2">
-                    <Button onClick={handlePrintPriceTag} className="flex-1 sm:flex-none">
-                      <Printer className="mr-2 h-4 w-4" /> Print Single Tag
-                    </Button>
-                    <Button
-                      onClick={() => setShowPrintOptions(true)}
-                      variant="outline"
-                      className="flex-1 sm:flex-none border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
-                    >
-                      <Copy className="mr-2 h-4 w-4" /> Print Multiple Copies
-                    </Button>
-                    {onAdjustStock && !hideStockCount && (
-                      <Button
-                        onClick={onAdjustStock}
-                        variant="secondary"
-                        className="flex-1 sm:flex-none bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600"
-                      >
-                        <Settings className="mr-2 h-4 w-4" /> Adjust Stock
-                      </Button>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Stock History Section - Show with masked data in privacy mode */}
-              {!hideStockCount && (
-              <div className="space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">Stock History</h3>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    {isHistoryLimited && hasMoreHistory && (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={handleLoadAllHistory}
-                        disabled={isLoadingAllHistory}
-                        className="h-8"
-                      >
-                        {isLoadingAllHistory ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : null}
-                        Show Full History
-                      </Button>
-                    )}
-                    <div className="inline-flex rounded-md border border-gray-200 dark:border-gray-600 overflow-hidden">
-                      <button
-                        type="button"
-                        onClick={() => setHistoryFilter("current")}
-                        className={`px-3 py-1.5 text-xs font-medium transition-colors ${
-                          historyFilter === "current"
-                            ? "bg-blue-600 text-white"
-                            : "bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
-                        }`}
-                      >
-                        Current Device
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setHistoryFilter("other")}
-                        className={`px-3 py-1.5 text-xs font-medium transition-colors border-l border-gray-200 dark:border-gray-600 ${
-                          historyFilter === "other"
-                            ? "bg-blue-600 text-white"
-                            : "bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
-                        }`}
-                      >
-                        Other Devices
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setHistoryFilter("all")}
-                        className={`px-3 py-1.5 text-xs font-medium transition-colors border-l border-gray-200 dark:border-gray-600 ${
-                          historyFilter === "all"
-                            ? "bg-blue-600 text-white"
-                            : "bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
-                        }`}
-                      >
-                        All
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                {isLoading ? (
-                  <div className="flex justify-center py-4">
-                    <Loader2 className="animate-spin h-6 w-6 text-gray-400" />
-                  </div>
-                ) : filteredHistory.length > 0 ? (
-                  <div className="border rounded-md overflow-hidden border-gray-200 dark:border-gray-600">
-                    <div className="overflow-x-auto">
-                      <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-600">
-                        <thead className="bg-gray-50 dark:bg-gray-800">
-                          <tr>
-                            <th className="px-4 py-2 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-left">
-                              Date
-                            </th>
-                            <th className="px-4 py-2 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-left">
-                              Type
-                            </th>
-                            <th className="px-4 py-2 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-left">
-                              Device
-                            </th>
-                            <th className="px-4 py-2 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-center">
-                              Quantity
-                            </th>
-                            <th className="px-4 py-2 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-left">
-                              Notes
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-600">
-                          {filteredHistory.map((item) => {
-                            const typeInfo = getTypeInfo(
-                              item.type,
-                              item.reference_type,
-                              item.reference_id,
-                              item.notes,
-                              item.quantity,
-                            )
-                            const isDecrease = item.quantity < 0
-
-                            return (
-                              <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
-                                <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-100">
-                                  {format(new Date(item.date), "PPP")}
-                                </td>
-                                <td className="px-4 py-2 text-sm">
-                                  <span
-                                    className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                                      privacyMode
-                                        ? "bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400"
-                                        : typeInfo.color
-                                    }`}
-                                  >
-                                    {privacyMode ? "*** Transaction" : typeInfo.label}
-                                  </span>
-                                </td>
-                                <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-100">
-                                  {privacyMode ? "***" : item.device_name || "Unknown"}
-                                </td>
-                                <td className="px-4 py-2 text-sm text-center">
-                                  {privacyMode ? (
-                                    <span className="text-gray-400 dark:text-gray-500">***</span>
-                                  ) : (
-                                    <span
-                                      className={
-                                        isDecrease
-                                          ? "text-red-600 dark:text-red-400"
-                                          : "text-green-600 dark:text-green-400"
-                                      }
-                                    >
-                                      {isDecrease ? "" : "+"}
-                                      {item.quantity}
-                                    </span>
-                                  )}
-                                </td>
-                                <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-100">
-                                  {privacyMode ? "***" : item.notes || "-"}
-                                </td>
-                              </tr>
-                            )
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-sm text-gray-500 dark:text-gray-400 py-4">
-                    {historyFilter === "current"
-                      ? "No stock history for current device"
-                      : historyFilter === "other"
-                        ? "No stock history for other devices"
-                        : "No stock history available"}
-                  </p>
-                )}
-              </div>
-              )}
-            </div>
+  const detailBody = (
+    <>
+      <div className={cn("grid grid-cols-2 gap-2", msp > 0 ? "md:grid-cols-4" : "md:grid-cols-3")}>
+            <SummaryCard label="MRP" value={formatMoney(product.price || 0)} tone="violet" />
+            {!hideCogs ? <SummaryCard label="Cost" value={costDisplay()} tone="slate" /> : null}
+            {!hideStockCount ? (
+              <SummaryCard label="Stock" value={stockDisplay()} tone="emerald" />
+            ) : (
+              <SummaryCard label="Stock" value="—" tone="slate" />
+            )}
+            {msp > 0 ? (
+              <SummaryCard label="MSP" value={formatMoney(msp)} tone="blue" />
+            ) : null}
           </div>
 
-          <DialogFooter className="px-6 py-4 border-t border-gray-200 dark:border-gray-600">
-            <Button
-              onClick={onClose}
-              className="bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600"
+          <PanelSection title="Product information">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+              <InfoCell
+                label="Name"
+                value={product.name || "—"}
+                copyText={product.name || undefined}
+                className="sm:col-span-2"
+              />
+              <InfoCell label="Company" value={product.company_name || "—"} />
+              <InfoCell label="Category" value={product.category || "—"} />
+              <InfoCell label="Trending" value={product.trending ? "Yes" : "No"} />
+              {product.shelf ? <InfoCell label="Shelf" value={product.shelf} /> : null}
+              {product.color ? <InfoCell label="Colour" value={product.color} /> : null}
+              {product.size ? <InfoCell label="Size" value={product.size} /> : null}
+              {product.suitable_for ? <InfoCell label="Suitable for" value={product.suitable_for} /> : null}
+              <InfoCell
+                label="Created"
+                value={product.created_at ? format(new Date(product.created_at), "yyyy-MM-dd") : "—"}
+              />
+              <InfoCell
+                label="Updated"
+                value={product.updated_at ? format(new Date(product.updated_at), "yyyy-MM-dd") : "—"}
+              />
+              {product.link ? (
+                <InfoCell
+                  label="Link"
+                  value={
+                    <a
+                      href={product.link}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="break-all text-brand-blue hover:underline"
+                    >
+                      {product.link}
+                    </a>
+                  }
+                  className="sm:col-span-2 lg:col-span-4"
+                />
+              ) : null}
+              {product.description ? (
+                <InfoCell label="Description" value={product.description} className="sm:col-span-2 lg:col-span-4" />
+              ) : null}
+            </div>
+          </PanelSection>
+
+          {(mediaImageUrls.length > 0 || mediaVideoUrl) && (
+            <PanelSection title="Media">
+              <div className="grid grid-cols-2 gap-3 p-4 md:grid-cols-4">
+                {mediaImageUrls.map((url, index) => (
+                  <div key={`${url}-${index}`} className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+                    <img
+                      src={url}
+                      alt={`${product.name} ${index + 1}`}
+                      className="h-24 w-full object-cover"
+                    />
+                  </div>
+                ))}
+                {mediaVideoUrl ? (
+                  <div className="col-span-2 overflow-hidden rounded-lg border border-slate-200 bg-white p-1 md:col-span-4">
+                    <video controls className="max-h-40 w-full rounded-md">
+                      <source src={mediaVideoUrl} />
+                    </video>
+                  </div>
+                ) : null}
+              </div>
+            </PanelSection>
+          )}
+
+          <PanelSection title="Marketplace">
+            <div className="grid grid-cols-2 gap-px bg-slate-200 md:grid-cols-4">
+              {platformStatuses.map((platform) => (
+                <div key={platform.key} className="bg-white px-4 py-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                    {platform.label}
+                  </p>
+                  <span
+                    className={cn(
+                      "mt-1 inline-flex rounded-full border px-2.5 py-0.5 text-xs font-medium",
+                      platform.status === "active"
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                        : platform.status === "archived"
+                          ? "border-amber-200 bg-amber-50 text-amber-700"
+                          : "border-slate-200 bg-slate-50 text-slate-600",
+                    )}
+                  >
+                    {getPlatformStatusLabel(platform.status)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </PanelSection>
+
+          {(() => {
+            let attrs: any[] = []
+            try {
+              if (product.attributes) {
+                attrs =
+                  typeof product.attributes === "string" ? JSON.parse(product.attributes) : product.attributes
+              }
+            } catch {
+              attrs = []
+            }
+            return attrs.length > 0 ? (
+              <PanelSection title="Attributes">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+                  {attrs.map((attr: any, idx: number) => (
+                    <InfoCell key={idx} label={attr.key} value={attr.value || "—"} />
+                  ))}
+                </div>
+              </PanelSection>
+            ) : null
+          })()}
+
+          {product.barcode ? (
+            <PanelSection title="Barcode">
+              <div className="flex flex-col items-center px-4 py-4">
+                <div id="barcodeContainer" className="w-full max-w-xs" />
+                <p className="mt-2 text-sm font-medium text-slate-700">{product.barcode}</p>
+              </div>
+            </PanelSection>
+          ) : null}
+
+          {!hideStockCount && !privacyMode && deviceStocks.length > 0 ? (
+            <PanelSection title="Stock by device">
+              <div className="overflow-x-auto">
+                <table className="min-w-full border-separate border-spacing-0 text-sm">
+                  <thead>
+                    <tr className={tableHeadClass}>
+                      <th className="whitespace-nowrap px-4 py-2.5 text-left">Device</th>
+                      <th className="whitespace-nowrap px-4 py-2.5 text-right">Stock</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {deviceStocks.map((row, index) => (
+                      <tr
+                        key={row.device_id}
+                        className={cn(
+                          "border-b border-slate-200",
+                          index % 2 === 0 ? "bg-white" : "bg-slate-50/60",
+                        )}
+                      >
+                        <td className="px-4 py-2.5 text-slate-800">
+                          {row.device_name}
+                          {row.is_current_device ? (
+                            <span className="ml-2 text-xs text-violet-700">Current</span>
+                          ) : null}
+                        </td>
+                        <td className="px-4 py-2.5 text-right font-medium text-slate-800">{row.stock}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </PanelSection>
+          ) : null}
+
+          {!hideStockCount ? (
+            <PanelSection
+              title="Stock history"
+              action={
+                <div className="flex flex-wrap items-center gap-2">
+                  {isHistoryLimited && hasMoreHistory ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleLoadAllHistory}
+                      disabled={isLoadingAllHistory}
+                      className="h-7 border-slate-200 bg-white px-2 text-[11px]"
+                    >
+                      {isLoadingAllHistory ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
+                      Show all
+                    </Button>
+                  ) : null}
+                  <div className="inline-flex rounded-md border border-slate-200 bg-white p-0.5">
+                    {(["current", "other", "all"] as const).map((filter) => (
+                      <button
+                        key={filter}
+                        type="button"
+                        onClick={() => setHistoryFilter(filter)}
+                        className={cn(
+                          "rounded px-2 py-1 text-[11px] font-medium transition-colors",
+                          historyFilter === filter
+                            ? "bg-violet-600 text-white"
+                            : "text-slate-600 hover:text-slate-900",
+                        )}
+                      >
+                        {filter === "current" ? "Current" : filter === "other" ? "Other" : "All"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              }
             >
-              Close
-            </Button>
-          </DialogFooter>
-        </div>
-      </DialogContent>
-    </Dialog>
+              {isLoading ? (
+                <div className="flex justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
+                </div>
+              ) : filteredHistory.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full border-separate border-spacing-0 text-sm">
+                    <thead>
+                      <tr className={tableHeadClass}>
+                        <th className="whitespace-nowrap px-4 py-2.5 text-left">Date</th>
+                        <th className="whitespace-nowrap px-4 py-2.5 text-left">Type</th>
+                        <th className="whitespace-nowrap px-4 py-2.5 text-left">Device</th>
+                        <th className="whitespace-nowrap px-4 py-2.5 text-center">Qty</th>
+                        <th className="whitespace-nowrap px-4 py-2.5 text-left">Notes</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredHistory.map((item, index) => {
+                        const typeInfo = getTypeInfo(
+                          item.type,
+                          item.reference_type,
+                          item.reference_id,
+                          item.notes,
+                          item.quantity,
+                        )
+                        const isDecrease = item.quantity < 0
+
+                        return (
+                          <tr
+                            key={item.id}
+                            className={cn(
+                              "border-b border-slate-200",
+                              index % 2 === 0 ? "bg-white" : "bg-slate-50/60",
+                            )}
+                          >
+                            <td className="whitespace-nowrap px-4 py-2.5 text-slate-700">
+                              {format(new Date(item.date), "yyyy-MM-dd")}
+                            </td>
+                            <td className="px-4 py-2.5">
+                              <span
+                                className={cn(
+                                  "inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium",
+                                  privacyMode ? "bg-slate-100 text-slate-500" : typeInfo.color,
+                                )}
+                              >
+                                {privacyMode ? "***" : typeInfo.label}
+                              </span>
+                            </td>
+                            <td className="px-4 py-2.5 text-slate-700">
+                              {privacyMode ? "***" : item.device_name || "Unknown"}
+                            </td>
+                            <td className="px-4 py-2.5 text-center">
+                              {privacyMode ? (
+                                <span className="text-slate-400">***</span>
+                              ) : (
+                                <span className={isDecrease ? "text-rose-600" : "text-emerald-700"}>
+                                  {isDecrease ? "" : "+"}
+                                  {item.quantity}
+                                </span>
+                              )}
+                            </td>
+                            <td className="max-w-[200px] truncate px-4 py-2.5 text-slate-600">
+                              {privacyMode ? "***" : item.notes || "—"}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="px-4 py-8 text-center text-sm text-muted-foreground">
+                  {historyFilter === "current"
+                    ? "No stock history for current device"
+                    : historyFilter === "other"
+                      ? "No stock history for other devices"
+                      : "No stock history available"}
+                </p>
+              )}
+            </PanelSection>
+          ) : null}
+    </>
   )
+
+  return (
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-background">
+        <div className="shrink-0 border-b border-slate-200 bg-[#F1F4F9] px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-2">{toolbarActions}</div>
+            <div className="flex shrink-0 items-center gap-2">
+              {onEdit ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 border-slate-200 bg-white px-3 text-xs"
+                  onClick={onEdit}
+                >
+                  Edit
+                </Button>
+              ) : null}
+              {onDelete ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 border-red-200 bg-white px-3 text-xs text-red-600 hover:bg-red-50"
+                  onClick={onDelete}
+                >
+                  Delete
+                </Button>
+              ) : null}
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-md p-1 text-slate-500 hover:bg-white hover:text-slate-800"
+                aria-label="Back"
+              >
+                <ChevronLeft className="h-5 w-5" />
+              </button>
+            </div>
+          </div>
+        </div>
+        <div
+          className="min-h-0 flex-1 touch-pan-y space-y-3 overflow-y-auto overscroll-contain p-4"
+        >
+          {detailBody}
+        </div>
+      </div>
+    )
 }

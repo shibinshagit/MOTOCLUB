@@ -96,13 +96,13 @@ export default function ProductActionPopup({
       icon: Eye,
       label: "View",
       onClick: onView,
-      className: "hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:text-blue-600 dark:hover:text-blue-400",
+      className: "hover:bg-blue-50 hover:text-blue-600",
     },
     {
       icon: Edit,
       label: "Edit",
       onClick: onEdit,
-      className: "hover:bg-green-50 dark:hover:bg-green-900/30 hover:text-green-600 dark:hover:text-green-400",
+      className: "hover:bg-green-50 hover:text-green-600",
     },
     ...(showAdjustStock && onAdjustStock
       ? [
@@ -110,7 +110,7 @@ export default function ProductActionPopup({
             icon: BarChart2,
             label: "Stock",
             onClick: onAdjustStock,
-            className: "hover:bg-purple-50 dark:hover:bg-purple-900/30 hover:text-purple-600 dark:hover:text-purple-400",
+            className: "hover:bg-purple-50 hover:text-purple-600",
           },
         ]
       : []),
@@ -118,20 +118,20 @@ export default function ProductActionPopup({
       icon: Printer,
       label: "Print",
       onClick: onPrint,
-      className: "hover:bg-orange-50 dark:hover:bg-orange-900/30 hover:text-orange-600 dark:hover:text-orange-400",
+      className: "hover:bg-orange-50 hover:text-orange-600",
     },
     {
       icon: Trash2,
       label: "Delete",
       onClick: onDelete,
-      className: "hover:bg-red-50 dark:hover:bg-red-900/30 hover:text-red-600 dark:hover:text-red-400",
+      className: "hover:bg-red-50 hover:text-red-600",
     },
   ]
 
   return (
     <>
       {/* Backdrop */}
-      <div className="fixed inset-0 bg-black/10 dark:bg-black/50 z-40" />
+      <div className="fixed inset-0 bg-black/10 z-40" />
 
       {/* Popup - No animations */}
       <div
@@ -142,7 +142,7 @@ export default function ProductActionPopup({
           top: `${adjustedPosition.y}px`,
         }}
       >
-        <Card className="w-40 shadow-lg border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800">
+        <Card className="w-40 shadow-lg border-gray-200 bg-white">
           <CardContent className="p-1">
             {actions.map((action, index) => {
               const Icon = action.icon

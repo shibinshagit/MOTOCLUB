@@ -1,36 +1,23 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, type ReactNode } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
-
-import {
-  Loader2,
-  User,
-  Calendar,
-  CreditCard,
-  Package,
-  Receipt,
-  DollarSign,
-  Phone,
-  Mail,
-  MapPin,
-  Users,
-  Wrench,
-  Edit,
-  Printer,
-  Trash2,
-  RotateCcw,
-} from "lucide-react"
+import { Edit, Loader2, Package, Printer, RotateCcw, Trash2, Wrench } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
+import { notifyError, notifySuccess } from "@/lib/notifications"
+import { useConfirm } from "@/hooks/use-confirm"
+import { FormAlert } from "@/components/ui/form-alert"
 import { format } from "date-fns"
 import { useSelector } from "react-redux"
-import { selectDeviceCurrency } from "@/store/slices/deviceSlice"
+import { selectDeviceCurrency, selectDeviceId } from "@/store/slices/deviceSlice"
 import { printSalesReceipt } from "@/lib/receipt-utils"
-import { getSaleDetails, updateSale } from "@/app/actions/sale-actions"
+import { getSaleDetails, updateSale, updateSaleDeliveryStatus } from "@/app/actions/sale-actions"
+import { getProductById } from "@/app/actions/product-actions"
+import { ProductDetailSlider } from "@/components/products/product-detail-slider"
+import { buildTrackingUrl, mapSaleShippingFromRecord } from "@/lib/sale-shipping"
+import { cn } from "@/lib/utils"
 
 interface ViewSaleModalProps {
   isOpen: boolean
@@ -38,8 +25,84 @@ interface ViewSaleModalProps {
   saleId: number | null
   currency?: string
   onEdit?: (saleData: any) => void
-  onDelete?: (saleId: number) => void
+  onDelete?: (saleId: number) => void | Promise<void>
   onPrintInvoice?: (saleId: number) => void
+  isDeleting?: boolean
+}
+
+function SaleStatusBadge({ status }: { status: string }) {
+  const styles: Record<string, string> = {
+    Completed: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    Credit: "bg-amber-50 text-amber-700 border-amber-200",
+    Cancelled: "bg-rose-50 text-rose-700 border-rose-200",
+    Pending: "bg-amber-50 text-amber-700 border-amber-200",
+  }
+
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${
+        styles[status] || "border-border bg-muted text-muted-foreground"
+      }`}
+    >
+      {status}
+    </span>
+  )
+}
+
+function DeliveryStatusBadge({ status }: { status: string }) {
+  const styles: Record<string, string> = {
+    Pending: "bg-amber-50 text-amber-700 border-amber-200",
+    Packed: "bg-blue-50 text-blue-700 border-blue-200",
+    Shipped: "bg-violet-50 text-violet-700 border-violet-200",
+    "In transit": "bg-indigo-50 text-indigo-700 border-indigo-200",
+    Delivered: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    Returned: "bg-rose-50 text-rose-700 border-rose-200",
+    Failed: "bg-rose-50 text-rose-700 border-rose-200",
+  }
+
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${
+        styles[status] || "border-border bg-muted text-muted-foreground"
+      }`}
+    >
+      {status}
+    </span>
+  )
+}
+
+function InfoCell({ label, value, className = "" }: { label: string; value: ReactNode; className?: string }) {
+  return (
+    <div className={`border-b border-slate-200 px-4 py-3 ${className}`}>
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+      <div className="mt-1 text-sm font-medium text-slate-800">{value}</div>
+    </div>
+  )
+}
+
+function SummaryCard({
+  label,
+  value,
+  tone,
+}: {
+  label: string
+  value: string
+  tone: "violet" | "emerald" | "amber" | "blue" | "slate"
+}) {
+  const tones = {
+    violet: "border-violet-100 bg-violet-50 text-violet-700",
+    emerald: "border-emerald-100 bg-emerald-50 text-emerald-700",
+    amber: "border-amber-100 bg-amber-50 text-amber-700",
+    blue: "border-blue-100 bg-blue-50 text-blue-700",
+    slate: "border-border bg-muted/40 text-foreground",
+  }
+
+  return (
+    <div className={`rounded-lg border px-3 py-2 ${tones[tone]}`}>
+      <p className="text-[11px] font-medium uppercase tracking-wide opacity-80">{label}</p>
+      <p className="text-sm font-bold">{value}</p>
+    </div>
+  )
 }
 
 export default function ViewSaleModal({
@@ -50,78 +113,64 @@ export default function ViewSaleModal({
   onEdit,
   onDelete,
   onPrintInvoice,
+  isDeleting = false,
 }: ViewSaleModalProps) {
   const [saleData, setSaleData] = useState<any>(null)
   const [saleItems, setSaleItems] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(false)
+  const [isDeletingLocal, setIsDeletingLocal] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [detailProduct, setDetailProduct] = useState<any>(null)
+  const [selectedServiceItem, setSelectedServiceItem] = useState<any>(null)
+  const [isServiceViewOpen, setIsServiceViewOpen] = useState(false)
+  const [isItemLoading, setIsItemLoading] = useState(false)
+  const [isUpdatingDelivery, setIsUpdatingDelivery] = useState(false)
   const { toast } = useToast()
+  const { confirm, ConfirmDialog, isConfirmOpen } = useConfirm()
 
-  // Get currency from Redux store
+  const closeDetailProduct = () => setDetailProduct(null)
+
   const deviceCurrency = useSelector(selectDeviceCurrency) || currency || "AED"
+  const deviceId = useSelector(selectDeviceId)
 
-  // Format currency with the device currency
   const formatCurrency = (amount: number | string) => {
     const numAmount = typeof amount === "string" ? Number.parseFloat(amount) : amount
     if (isNaN(numAmount)) return `${deviceCurrency} 0.00`
     return `${deviceCurrency} ${numAmount.toFixed(2)}`
   }
 
-  // Fetch complete sale data when modal opens
   useEffect(() => {
     const fetchSaleData = async () => {
       if (!isOpen || !saleId) {
         setSaleData(null)
         setSaleItems([])
         setError(null)
+        setDetailProduct(null)
         return
       }
 
       try {
         setIsLoading(true)
         setError(null)
-        console.log("Fetching complete sale data for sale ID:", saleId)
 
         const result = await getSaleDetails(saleId)
 
         if (result.success && result.data) {
           setSaleData(result.data.sale)
           setSaleItems(result.data.items || [])
-          console.log("Sale data loaded successfully:", {
-            saleId,
-            customerName: result.data.sale.customer_name,
-            itemsCount: result.data.items?.length || 0,
-            totalAmount: result.data.sale.total_amount,
-            receivedAmount: result.data.sale.received_amount,
-            outstandingAmount: result.data.sale.outstanding_amount,
-            status: result.data.sale.status,
-          })
         } else {
-          console.error("Failed to fetch sale details:", result.message)
           setError(result.message || "Failed to load sale details")
-          toast({
-            title: "Error",
-            description: result.message || "Failed to load sale details",
-            variant: "destructive",
-          })
         }
-      } catch (error) {
-        console.error("Error fetching sale details:", error)
+      } catch {
         setError("An error occurred while loading sale details")
-        toast({
-          title: "Error",
-          description: "An error occurred while loading sale details",
-          variant: "destructive",
-        })
       } finally {
         setIsLoading(false)
       }
     }
 
     fetchSaleData()
-  }, [isOpen, saleId, toast])
+  }, [isOpen, saleId])
 
-  // Calculate totals from items or use sale data
   const calculateTotals = () => {
     if (!saleData) {
       return { subtotal: 0, total: 0, remaining: 0 }
@@ -135,7 +184,6 @@ export default function ViewSaleModal({
         return sum + price * quantity
       }, 0)
     } else {
-      // Fallback to sale data if items not loaded
       const total = Number.parseFloat(saleData.total_amount) || 0
       const discount = Number.parseFloat(saleData.discount) || 0
       subtotal = total + discount
@@ -151,90 +199,115 @@ export default function ViewSaleModal({
 
   const { subtotal, total, remaining } = calculateTotals()
 
-  // Helper function to get display value or N/A
-  const getDisplayValue = (value: any, fallback = "N/A") => {
-    if (value === null || value === undefined || value === "") {
-      return fallback
-    }
+  const getDisplayValue = (value: any, fallback = "—") => {
+    if (value === null || value === undefined || value === "") return fallback
     return value
   }
 
-  // Helper function to get status display
   const getStatusDisplay = (status: any) => {
     if (!status) return "Pending"
     return status
   }
 
-  // Helper function to get payment method display
   const getPaymentMethodDisplay = (paymentMethod: any) => {
     if (!paymentMethod) return "Cash"
     return paymentMethod
   }
 
-  // CORRECTED: Get received amount - use actual received_amount from database
   const getReceivedAmount = () => {
     if (!saleData) return 0
     return Number.parseFloat(saleData.received_amount) || 0
   }
 
-  // CORRECTED: Get remaining amount - use actual outstanding_amount from database or calculate
   const getRemainingAmount = () => {
     if (!saleData) return 0
 
-    // Use outstanding_amount from database if available, otherwise calculate
     if (saleData.outstanding_amount !== undefined && saleData.outstanding_amount !== null) {
       return Number.parseFloat(saleData.outstanding_amount) || 0
     }
-    
-    const total = Number.parseFloat(saleData.total_amount) || 0
+
+    const saleTotal = Number.parseFloat(saleData.total_amount) || 0
     const received = getReceivedAmount()
-    return Math.max(0, total - received)
+    return Math.max(0, saleTotal - received)
   }
 
-  // Handle action buttons
+  const refreshSaleData = async () => {
+    if (!saleId) return
+    const result = await getSaleDetails(saleId)
+    if (result.success && result.data) {
+      setSaleData(result.data.sale)
+      setSaleItems(result.data.items || [])
+    }
+  }
+
+  const handleDeliveryStatusUpdate = async (deliveryStatus: string) => {
+    if (!saleId || !deviceId) return
+
+    setIsUpdatingDelivery(true)
+    try {
+      const result = await updateSaleDeliveryStatus(saleId, deviceId, deliveryStatus)
+      if (result.success) {
+        notifySuccess(toast, result.message || "Delivery status updated")
+        await refreshSaleData()
+      } else {
+        notifyError(toast, result.message || "Failed to update delivery status")
+      }
+    } catch {
+      notifyError(toast, "Failed to update delivery status")
+    } finally {
+      setIsUpdatingDelivery(false)
+    }
+  }
+
   const handleEdit = () => {
     if (onEdit && saleData) {
-      onEdit(saleData.id)
+      onEdit(saleData)
     }
   }
 
-  const handleDelete = () => {
-    if (onDelete && saleId) {
-      if (window.confirm("Are you sure you want to delete this sale? This action cannot be undone.")) {
-        onDelete(saleId)
-        onClose()
-      }
+  const handleDelete = async () => {
+    if (!onDelete || !saleId || isDeleting || isDeletingLocal) return
+
+    const shouldDelete = await confirm({
+      title: "Delete this sale?",
+      description:
+        "This permanently removes the sale, its accounting entries, and restores product stock where applicable. This cannot be undone.",
+      confirmLabel: "Delete sale",
+      destructive: true,
+    })
+    if (!shouldDelete) return
+
+    try {
+      setIsDeletingLocal(true)
+      await onDelete(saleId)
+    } catch {
+      notifyError(toast, "Failed to delete sale")
+    } finally {
+      setIsDeletingLocal(false)
     }
   }
 
-  // Add this after the handleDelete function
   const handleReturn = async () => {
     if (!saleData || !saleId) return
 
-    // Only allow returns for completed sales
     if (saleData.status !== "Completed") {
-      toast({
-        title: "Cannot Return Sale",
-        description: "Only completed sales can be returned",
-        variant: "destructive",
-      })
+      notifyError(toast, "Only completed sales can be returned", "Cannot Return Sale")
       return
     }
 
-    const confirmReturn = window.confirm(
-      "Are you sure you want to return this sale? This will:\n" +
-        "• Change the sale status to Cancelled\n" +
-        "• Restore product stock\n" +
-        "• Create accounting adjustments\n" +
-        "This action cannot be undone.",
-    )
+    const confirmReturn = await confirm({
+      title: "Return this sale?",
+      description:
+        "This will change the sale status to Cancelled, restore product stock, and create accounting adjustments. This action cannot be undone.",
+      destructive: true,
+      confirmLabel: "Return sale",
+    })
 
     if (!confirmReturn) return
 
     try {
       setIsLoading(true)
 
-      // Prepare return data - change status to Cancelled
       const returnData = {
         id: saleId,
         customerId: saleData.customer_id,
@@ -246,720 +319,493 @@ export default function ViewSaleModal({
           cost: item.actual_cost || item.cost || 0,
           notes: item.notes || "",
         })),
-        paymentStatus: "Cancelled", // Change to cancelled
+        paymentStatus: "Cancelled",
         paymentMethod: saleData.payment_method || "Cash",
         saleDate: saleData.sale_date,
         discount: saleData.discount || 0,
-        receivedAmount: 0, // Set to 0 for cancelled sales
+        receivedAmount: 0,
         deviceId: saleData.device_id,
         userId: saleData.created_by,
         staffId: saleData.staff_id,
       }
 
-      console.log("Processing sale return:", returnData)
-
       const result = await updateSale(returnData)
 
       if (result.success) {
-        toast({
-          title: "Sale Returned Successfully",
-          description: "The sale has been cancelled and stock has been restored",
-          variant: "default",
-        })
+        notifySuccess(toast, "The sale has been cancelled and stock has been restored", "Sale Returned Successfully")
 
-        // Refresh the sale data to show updated status
         const refreshResult = await getSaleDetails(saleId)
         if (refreshResult.success && refreshResult.data) {
           setSaleData(refreshResult.data.sale)
           setSaleItems(refreshResult.data.items || [])
         }
       } else {
-        toast({
-          title: "Return Failed",
-          description: result.message || "Failed to process sale return",
-          variant: "destructive",
-        })
+        notifyError(toast, result.message || "Failed to process sale return", "Return Failed")
       }
-    } catch (error) {
-      console.error("Error processing sale return:", error)
-      toast({
-        title: "Return Error",
-        description: "An error occurred while processing the return",
-        variant: "destructive",
-      })
+    } catch {
+      notifyError(toast, "An error occurred while processing the return", "Return Error")
     } finally {
       setIsLoading(false)
     }
   }
 
-  // Updated print handler to use unified approach
   const handlePrintInvoice = () => {
     if (saleData && saleItems.length > 0) {
-      // Use the unified print function with manual print (autoprint = false)
       printSalesReceipt(saleData, saleItems, deviceCurrency, {}, false)
     } else {
-      toast({
-        title: "Error",
-        description: "Cannot print invoice - sale data not loaded",
-        variant: "destructive",
-      })
+      notifyError(toast, "Cannot print invoice - sale data not loaded")
     }
   }
 
-  // Comprehensive Skeleton Component
+  const handleItemRowClick = async (item: any) => {
+    const isService = item.item_type === "service" || !!item.service_name
+
+    if (isService) {
+      setSelectedServiceItem(item)
+      setIsServiceViewOpen(true)
+      return
+    }
+
+    if (!item.product_id) {
+      notifyError(toast, "Product details are not available for this line item")
+      return
+    }
+
+    try {
+      setIsItemLoading(true)
+      const result = await getProductById(item.product_id, deviceId || undefined)
+      if (result.success && result.data) {
+        setDetailProduct(result.data)
+      } else {
+        notifyError(toast, result.message || "Failed to load product details")
+      }
+    } catch {
+      notifyError(toast, "An error occurred while loading product details")
+    } finally {
+      setIsItemLoading(false)
+    }
+  }
+
+  const formatSaleDate = (dateValue: string | null | undefined) => {
+    if (!dateValue) return "—"
+    try {
+      return format(new Date(dateValue), "yyyy-MM-dd")
+    } catch {
+      return "Invalid date"
+    }
+  }
+
   const SaleDetailsSkeleton = () => (
-    <div className="space-y-6 p-6">
-      {/* Sale Information Skeleton */}
-      <Card className="shadow-sm border-0 bg-white dark:bg-gray-800">
-        <CardHeader className="pb-4">
-          <CardTitle className="text-lg font-semibold text-gray-800 dark:text-gray-200 flex items-center">
-            <Package className="h-5 w-5 mr-2 text-blue-600 dark:text-blue-400" />
-            Sale Information
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {/* Sale Details Column */}
-            <div className="space-y-4">
-              <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide border-b border-gray-200 dark:border-gray-600 pb-2">
-                Sale Details
-              </h4>
-              <div className="space-y-3">
-                <div className="flex flex-col">
-                  <span className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Sale ID</span>
-                  <Skeleton className="h-4 w-16 mt-1" />
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide flex items-center">
-                    <Calendar className="h-3 w-3 mr-1" />
-                    Date
-                  </span>
-                  <Skeleton className="h-4 w-32 mt-1" />
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Status</span>
-                  <Skeleton className="h-6 w-20 mt-1 rounded-full" />
-                </div>
-              </div>
-            </div>
-
-            {/* Payment Details Column */}
-            <div className="space-y-4">
-              <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide border-b border-gray-200 dark:border-gray-600 pb-2">
-                Payment Details
-              </h4>
-              <div className="space-y-3">
-                <div className="flex flex-col">
-                  <span className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide flex items-center">
-                    <CreditCard className="h-3 w-3 mr-1" />
-                    Payment Method
-                  </span>
-                  <Skeleton className="h-4 w-24 mt-1" />
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
-                    Received Amount
-                  </span>
-                  <Skeleton className="h-4 w-28 mt-1" />
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
-                    Remaining Amount
-                  </span>
-                  <Skeleton className="h-4 w-28 mt-1" />
-                </div>
-              </div>
-            </div>
-
-            {/* Staff & Customer Column */}
-            <div className="space-y-4">
-              <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide border-b border-gray-200 dark:border-gray-600 pb-2">
-                Staff & Customer
-              </h4>
-              <div className="space-y-3">
-                <div className="flex flex-col">
-                  <span className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide flex items-center">
-                    <Users className="h-3 w-3 mr-1" />
-                    Staff Member
-                  </span>
-                  <Skeleton className="h-4 w-32 mt-1" />
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide flex items-center">
-                    <User className="h-3 w-3 mr-1" />
-                    Customer
-                  </span>
-                  <Skeleton className="h-4 w-36 mt-1" />
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide flex items-center">
-                    <Phone className="h-3 w-3 mr-1" />
-                    Phone
-                  </span>
-                  <Skeleton className="h-4 w-28 mt-1" />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Additional Customer Information Skeleton */}
-          <div className="border-t border-gray-200 dark:border-gray-600 pt-4">
-            <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide mb-3">
-              Additional Customer Details
-            </h4>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="flex flex-col">
-                <span className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide flex items-center">
-                  <Mail className="h-3 w-3 mr-1" />
-                  Email Address
-                </span>
-                <Skeleton className="h-4 w-48 mt-1" />
-              </div>
-              <div className="flex flex-col">
-                <span className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide flex items-center">
-                  <MapPin className="h-3 w-3 mr-1" />
-                  Address
-                </span>
-                <Skeleton className="h-4 w-56 mt-1" />
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Sale Items Skeleton */}
-      <Card className="shadow-sm border-0 bg-white dark:bg-gray-800">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg font-semibold text-gray-800 dark:text-gray-200 flex items-center">
-            <Package className="h-5 w-5 mr-2 text-purple-600 dark:text-purple-400" />
-            Sale Items
-            <Loader2 className="h-4 w-4 ml-2 animate-spin" />
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600">
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
-                    #
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
-                    Product/Service
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
-                    Barcode
-                  </th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
-                    Quantity
-                  </th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
-                    Unit Price
-                  </th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
-                    Cost
-                  </th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
-                    Total
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200 dark:divide-gray-600">
-                {[...Array(3)].map((_, index) => (
-                  <tr key={index} className="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
-                    <td className="px-4 py-4">
-                      <Skeleton className="h-4 w-4" />
-                    </td>
-                    <td className="px-4 py-4">
-                      <div className="flex items-center gap-2">
-                        <Skeleton className="h-4 w-4 rounded" />
-                        <div className="space-y-1">
-                          <Skeleton className="h-4 w-32" />
-                          <Skeleton className="h-3 w-24" />
-                          <Skeleton className="h-3 w-16" />
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-4">
-                      <Skeleton className="h-4 w-20" />
-                    </td>
-                    <td className="px-4 py-4 text-center">
-                      <Skeleton className="h-4 w-8 mx-auto" />
-                    </td>
-                    <td className="px-4 py-4 text-right">
-                      <Skeleton className="h-4 w-16 ml-auto" />
-                    </td>
-                    <td className="px-4 py-4 text-right">
-                      <Skeleton className="h-4 w-16 ml-auto" />
-                    </td>
-                    <td className="px-4 py-4 text-right">
-                      <Skeleton className="h-4 w-20 ml-auto" />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Sale Summary Skeleton */}
-      <Card className="shadow-sm border-0 bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 dark:bg-gray-800">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg font-semibold text-gray-800 dark:text-gray-200 flex items-center">
-            <DollarSign className="h-5 w-5 mr-2 text-green-600 dark:text-green-400" />
-            Sale Summary
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-            {["Subtotal", "Discount", "Total Amount", "Received"].map((label, index) => (
-              <div key={index} className="text-center p-4 bg-white dark:bg-gray-700 rounded-lg">
-                <Skeleton className="h-8 w-24 mx-auto mb-2" />
-                <div className="text-sm text-gray-600 dark:text-gray-400 font-medium">{label}</div>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Notes Skeleton */}
-      <Card className="shadow-sm border-0 bg-white dark:bg-gray-800">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg font-semibold text-gray-800 dark:text-gray-200">Notes</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg space-y-2">
-            <Skeleton className="h-4 w-full" />
-            <Skeleton className="h-4 w-3/4" />
-            <Skeleton className="h-4 w-1/2" />
-          </div>
-        </CardContent>
-      </Card>
+    <div className="space-y-3 p-4">
+      <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+        {[...Array(4)].map((_, i) => (
+          <Skeleton key={i} className="h-14 rounded-lg" />
+        ))}
+      </div>
+      <Skeleton className="h-40 rounded-xl" />
+      <Skeleton className="h-56 rounded-xl" />
     </div>
   )
 
-  if (!isOpen) return null
+  const status = saleData ? getStatusDisplay(saleData.status) : "Pending"
+  const received = saleData ? getReceivedAmount() : 0
+  const balance = saleData ? getRemainingAmount() : 0
+  const deleteInProgress = isDeleting || isDeletingLocal
 
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto bg-gray-50 dark:bg-gray-900">
-        <DialogHeader className="bg-white dark:bg-gray-800 p-6 rounded-t-lg border-b dark:border-gray-700">
-          <div className="flex flex-col items-center space-y-4">
-            <DialogTitle className="text-2xl font-bold text-gray-900 dark:text-gray-100 flex items-center">
-              <Receipt className="h-6 w-6 mr-2 text-blue-600 dark:text-blue-400" />
-              Sale Details {saleId ? `- #${saleId}` : ""}
-            </DialogTitle>
-
-            {/* Action Buttons - Always visible */}
-            <div className="flex items-center space-x-3">
+    <>
+      <Dialog open={isOpen} modal={!isConfirmOpen} onOpenChange={(open) => !open && !deleteInProgress && onClose()}>
+        <DialogContent
+          overlayClassName={cn(
+            "duration-0 data-[state=open]:animate-none data-[state=closed]:animate-none",
+            isConfirmOpen && "pointer-events-none",
+          )}
+          className="max-w-5xl gap-0 overflow-hidden border-slate-200 p-0 duration-0 data-[state=open]:animate-none data-[state=closed]:animate-none sm:max-w-5xl [&>button]:top-3 [&>button]:right-3"
+          style={isConfirmOpen ? { pointerEvents: "none" } : undefined}
+        >
+          <DialogHeader className="space-y-0 border-b border-slate-200 bg-[#F1F4F9] px-4 py-3 text-left">
+            <DialogTitle className="sr-only">Sale {saleId ? `#${saleId}` : "details"}</DialogTitle>
+            <div className="flex flex-wrap items-center gap-2 pr-10">
               <Button
                 variant="outline"
                 size="sm"
                 onClick={handleEdit}
                 disabled={isLoading || !saleData}
-                className="flex items-center space-x-2 bg-transparent border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
+                className="h-8 border-slate-200 bg-white px-3 text-xs"
               >
-                <Edit className="h-4 w-4" />
-                <span>Edit</span>
+                <Edit className="mr-1.5 h-3.5 w-3.5" />
+                Edit
               </Button>
-
               <Button
                 variant="outline"
                 size="sm"
                 onClick={handleReturn}
                 disabled={isLoading || !saleData || saleData.status !== "Completed"}
-                className="flex items-center space-x-2 bg-transparent border-orange-300 dark:border-orange-600 text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20 transition-colors disabled:opacity-50"
+                className="h-8 border-amber-200 bg-white px-3 text-xs text-amber-700 hover:bg-amber-50"
               >
-                <RotateCcw className="h-4 w-4" />
-                <span>Return</span>
+                <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+                Return
               </Button>
-
               <Button
                 variant="outline"
                 size="sm"
                 onClick={handlePrintInvoice}
                 disabled={isLoading || !saleData || !saleItems.length}
-                className="flex items-center space-x-2 bg-transparent border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
+                className="h-8 border-slate-200 bg-white px-3 text-xs"
               >
-                <Printer className="h-4 w-4" />
-                <span>Print Invoice</span>
+                <Printer className="mr-1.5 h-3.5 w-3.5" />
+                Print
               </Button>
-
               <Button
                 variant="outline"
                 size="sm"
                 onClick={handleDelete}
-                disabled={isLoading}
-                className="flex items-center space-x-2 bg-transparent border-red-300 dark:border-red-600 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors disabled:opacity-50"
+                disabled={isLoading || deleteInProgress}
+                className="h-8 border-rose-200 bg-white px-3 text-xs text-rose-700 hover:bg-rose-50"
               >
-                <Trash2 className="h-4 w-4" />
-                <span>Delete</span>
+                {deleteInProgress ? (
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                )}
+                Delete
               </Button>
             </div>
-          </div>
-        </DialogHeader>
+          </DialogHeader>
 
-        {isLoading ? (
-          <SaleDetailsSkeleton />
-        ) : error ? (
-          <div className="text-center py-12 p-6">
-            <div className="text-red-500 text-lg mb-4">{error}</div>
-            <Button onClick={onClose} variant="outline">
-              Close
-            </Button>
-          </div>
-        ) : !saleData ? (
-          <div className="text-center py-12 p-6">
-            <div className="text-gray-500 text-lg mb-4">Sale not found</div>
-            <Button onClick={onClose} variant="outline">
-              Close
-            </Button>
-          </div>
-        ) : (
-          <div className="space-y-6 p-6">
-            {/* Sale Information */}
-            <Card className="shadow-sm border-0 bg-white dark:bg-gray-800">
-              <CardHeader className="pb-4">
-                <CardTitle className="text-lg font-semibold text-gray-800 dark:text-gray-200 flex items-center">
-                  <Package className="h-5 w-5 mr-2 text-blue-600 dark:text-blue-400" />
-                  Sale Information
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                {/* Basic Sale Details */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  <div className="space-y-4">
-                    <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide border-b border-gray-200 dark:border-gray-600 pb-2">
-                      Sale Details
-                    </h4>
-                    <div className="space-y-3">
-                      <div className="flex flex-col">
-                        <span className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
-                          Sale ID
-                        </span>
-                        <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">#{saleData.id}</span>
-                      </div>
-                      <div className="flex flex-col">
-                        <span className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide flex items-center">
-                          <Calendar className="h-3 w-3 mr-1" />
-                          Date
-                        </span>
-                        <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                          {saleData.sale_date
-                            ? (() => {
-                                try {
-                                  return format(new Date(saleData.sale_date), "PPP")
-                                } catch (error) {
-                                  console.error("Invalid date format:", saleData.sale_date)
-                                  return "Invalid date"
-                                }
-                              })()
-                            : "N/A"}
-                        </span>
-                      </div>
-                      <div className="flex flex-col">
-                        <span className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Status</span>
-                        <Badge
-                          variant="outline"
-                          className={
-                            getStatusDisplay(saleData.status) === "Completed"
-                              ? "bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 border-green-300 dark:border-green-700 w-fit"
-                              : getStatusDisplay(saleData.status) === "Credit"
-                                ? "bg-orange-100 dark:bg-orange-900 text-orange-800 dark:text-orange-200 border-orange-300 dark:border-orange-700 w-fit"
-                                : getStatusDisplay(saleData.status) === "Cancelled"
-                                  ? "bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 border-red-300 dark:border-red-700 w-fit"
-                                  : "bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 border-gray-300 dark:border-gray-600 w-fit"
-                          }
-                        >
-                          {getStatusDisplay(saleData.status)}
-                        </Badge>
-                      </div>
-                    </div>
-                  </div>
+          <div className="relative min-h-0 max-h-[calc(90vh-5.5rem)] overflow-hidden">
+          {isLoading ? (
+            <SaleDetailsSkeleton />
+          ) : error ? (
+            <div className="space-y-4 p-4">
+              <FormAlert type="error" message={error} />
+              <div className="flex justify-end">
+                <Button onClick={onClose} variant="outline" size="sm">
+                  Close
+                </Button>
+              </div>
+            </div>
+          ) : !saleData ? (
+            <div className="space-y-4 p-8 text-center">
+              <p className="text-sm text-muted-foreground">Sale not found</p>
+              <Button onClick={onClose} variant="outline" size="sm">
+                Close
+              </Button>
+            </div>
+          ) : (
+            <div className="h-full space-y-3 overflow-y-auto p-4">
+              <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+                <SummaryCard label="Total" value={formatCurrency(total)} tone="violet" />
+                <SummaryCard label="Received" value={formatCurrency(received)} tone="emerald" />
+                <SummaryCard
+                  label="Balance"
+                  value={balance > 0 ? formatCurrency(balance) : "—"}
+                  tone="amber"
+                />
+                <SummaryCard label="Discount" value={formatCurrency(saleData.discount || 0)} tone="slate" />
+              </div>
 
-                  <div className="space-y-4">
-                    <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide border-b border-gray-200 dark:border-gray-600 pb-2">
-                      Payment Details
-                    </h4>
-                    <div className="space-y-3">
-                      <div className="flex flex-col">
-                        <span className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide flex items-center">
-                          <CreditCard className="h-3 w-3 mr-1" />
-                          Payment Method
-                        </span>
-                        <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                          {getPaymentMethodDisplay(saleData.payment_method)}
-                        </span>
-                      </div>
-                      <div className="flex flex-col">
-                        <span className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
-                          Received Amount
-                        </span>
-                        <span className={`text-sm font-semibold ${
-                          getReceivedAmount() > 0 ? "text-green-600 dark:text-green-400" : "text-gray-600 dark:text-gray-400"
-                        }`}>
-                          {formatCurrency(getReceivedAmount())}
-                        </span>
-                      </div>
-                      {/* Show remaining amount for ALL credit sales */}
-                      {(saleData.status === "Credit" && getRemainingAmount() > 0) && (
-                        <div className="flex flex-col">
-                          <span className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
-                            Remaining Amount
-                          </span>
-                          <span className="text-sm font-semibold text-red-600 dark:text-red-400">
-                            {formatCurrency(getRemainingAmount())}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
+              <div className="overflow-hidden rounded-xl border border-slate-200 bg-card">
+                <div className="border-b border-slate-200 bg-[#F1F4F9] px-4 py-2">
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-600">Sale information</h3>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+                  <InfoCell label="Sale #" value={`#${saleData.id}`} />
+                  <InfoCell label="Date" value={formatSaleDate(saleData.sale_date)} />
+                  <InfoCell label="Status" value={<SaleStatusBadge status={status} />} />
+                  <InfoCell
+                    label="Fulfillment"
+                    value={
+                      saleData.fulfillment_type === "ship" ? (
+                        <DeliveryStatusBadge status={saleData.delivery_status || "Pending"} />
+                      ) : (
+                        "Pickup"
+                      )
+                    }
+                  />
+                  <InfoCell label="Payment" value={getPaymentMethodDisplay(saleData.payment_method)} />
+                  <InfoCell label="Customer" value={saleData.customer_name || "Walk-in Customer"} />
+                  <InfoCell label="Staff" value={saleData.staff_name || "Not assigned"} />
+                  <InfoCell label="Phone" value={getDisplayValue(saleData.customer_phone)} />
+                  <InfoCell label="Email" value={getDisplayValue(saleData.customer_email)} />
+                  {saleData.customer_address ? (
+                    <InfoCell
+                      label="Address"
+                      value={saleData.customer_address}
+                      className="sm:col-span-2 lg:col-span-4"
+                    />
+                  ) : null}
+                </div>
+              </div>
 
-                  <div className="space-y-4">
-                    <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide border-b border-gray-200 dark:border-gray-600 pb-2">
-                      Staff & Customer
-                    </h4>
-                    <div className="space-y-3">
-                      <div className="flex flex-col">
-                        <span className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide flex items-center">
-                          <Users className="h-3 w-3 mr-1" />
-                          Staff Member
-                        </span>
-                        <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                          {saleData.staff_name || "Not assigned"}
-                        </span>
-                      </div>
-                      <div className="flex flex-col">
-                        <span className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide flex items-center">
-                          <User className="h-3 w-3 mr-1" />
-                          Customer
-                        </span>
-                        <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                          {saleData.customer_name || "Walk-in Customer"}
-                        </span>
-                      </div>
-                      {saleData.customer_phone && (
-                        <div className="flex flex-col">
-                          <span className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide flex items-center">
-                            <Phone className="h-3 w-3 mr-1" />
-                            Phone
-                          </span>
-                          <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                            {saleData.customer_phone}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
+              <div className="overflow-hidden rounded-xl border border-slate-200 bg-card">
+                <div className="flex items-center justify-between border-b border-slate-200 bg-[#F1F4F9] px-4 py-2">
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-600">Line items</h3>
+                  <span className="text-xs text-slate-500">
+                    {saleItems.length} item{saleItems.length === 1 ? "" : "s"} · click row for details
+                  </span>
                 </div>
 
-                {/* Additional Customer Information */}
-                {(saleData.customer_email || saleData.customer_address) && (
-                  <div className="border-t border-gray-200 dark:border-gray-600 pt-4">
-                    <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide mb-3">
-                      Additional Customer Details
-                    </h4>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {saleData.customer_email && (
-                        <div className="flex flex-col">
-                          <span className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide flex items-center">
-                            <Mail className="h-3 w-3 mr-1" />
-                            Email Address
-                          </span>
-                          <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                            {saleData.customer_email}
-                          </span>
-                        </div>
-                      )}
-                      {saleData.customer_address && (
-                        <div className="flex flex-col">
-                          <span className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide flex items-center">
-                            <MapPin className="h-3 w-3 mr-1" />
-                            Address
-                          </span>
-                          <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                            {saleData.customer_address}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Sale Items */}
-            <Card className="shadow-sm border-0 bg-white dark:bg-gray-800">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-lg font-semibold text-gray-800 dark:text-gray-200 flex items-center">
-                  <Package className="h-5 w-5 mr-2 text-purple-600 dark:text-purple-400" />
-                  Sale Items ({saleItems.length})
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
                 {saleItems.length === 0 ? (
-                  <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-                    <Package className="h-12 w-12 mx-auto mb-4 text-gray-300 dark:text-gray-600" />
-                    <p className="text-lg font-medium">No items details available</p>
-                    <p className="text-sm">Sale total: {formatCurrency(saleData.total_amount || 0)}</p>
+                  <div className="px-4 py-10 text-center text-sm text-muted-foreground">
+                    No line items available · Total {formatCurrency(saleData.total_amount || 0)}
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
-                    <table className="w-full">
+                    <table className="min-w-full border-separate border-spacing-0 text-sm">
                       <thead>
-                        <tr className="bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600">
-                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
-                            #
-                          </th>
-                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
-                            Product/Service
-                          </th>
-                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
-                            Barcode
-                          </th>
-                          <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
-                            Quantity
-                          </th>
-                          <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
-                            Unit Price
-                          </th>
-                          <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
-                            Cost
-                          </th>
-                          <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
-                            Total
-                          </th>
+                        <tr className="border-b border-slate-200 bg-[#F1F4F9] text-xs font-semibold uppercase tracking-wide text-slate-600">
+                          <th className="whitespace-nowrap px-4 py-2.5 text-left">#</th>
+                          <th className="whitespace-nowrap px-4 py-2.5 text-left">Item</th>
+                          <th className="whitespace-nowrap px-4 py-2.5 text-center">Qty</th>
+                          <th className="whitespace-nowrap px-4 py-2.5 text-right">Unit price</th>
+                          <th className="whitespace-nowrap px-4 py-2.5 text-right">Cost</th>
+                          <th className="whitespace-nowrap px-4 py-2.5 text-right">Total</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-gray-200 dark:divide-gray-600">
+                      <tbody>
                         {saleItems.map((item: any, index: number) => {
-                          // Properly detect if it's a service
                           const isService = item.item_type === "service" || !!item.service_name
                           const itemName = isService ? item.service_name : item.product_name
+                          const lineTotal =
+                            (Number.parseFloat(item.price) || 0) * (Number.parseInt(item.quantity) || 0)
 
                           return (
-                            <tr key={index} className="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
-                              <td className="px-4 py-4 text-sm font-medium text-gray-900 dark:text-gray-100">
+                            <tr
+                              key={item.id ?? index}
+                              onClick={() => handleItemRowClick(item)}
+                              className={`cursor-pointer border-b border-slate-200 transition-colors hover:bg-violet-50/50 ${
+                                index % 2 === 0 ? "bg-white" : "bg-slate-50/60"
+                              } ${isItemLoading ? "pointer-events-none opacity-70" : ""}`}
+                            >
+                              <td className="whitespace-nowrap px-4 py-2.5 text-xs text-muted-foreground">
                                 {index + 1}
                               </td>
-                              <td className="px-4 py-4 text-sm font-medium text-gray-900 dark:text-gray-100">
-                                <div className="flex items-center gap-2">
+                              <td className="max-w-[240px] px-4 py-2.5">
+                                <div className="flex items-start gap-2">
                                   {isService ? (
-                                    <Wrench className="h-4 w-4 text-green-600 dark:text-green-400 flex-shrink-0" />
+                                    <Wrench className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
                                   ) : (
-                                    <Package className="h-4 w-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+                                    <Package className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" />
                                   )}
-                                  <div>
-                                    <div>{getDisplayValue(itemName)}</div>
-                                    {item.notes && (
-                                      <div className="text-xs text-gray-500 dark:text-gray-400 italic mt-1">
-                                        Notes: {item.notes}
-                                      </div>
-                                    )}
-                                    <div className="text-xs font-medium mt-1">
-                                      <span
-                                        className={
-                                          isService
-                                            ? "text-green-600 dark:text-green-400"
-                                            : "text-blue-600 dark:text-blue-400"
-                                        }
-                                      >
-                                        {isService ? "Service" : "Product"}
-                                      </span>
-                                    </div>
+                                  <div className="min-w-0">
+                                    <p className="truncate font-medium text-slate-800">
+                                      {getDisplayValue(itemName)}
+                                    </p>
+                                    <p className="text-[11px] text-slate-500">
+                                      {isService ? "Service" : "Product"}
+                                    </p>
+                                    {item.notes ? (
+                                      <p className="mt-0.5 truncate text-[11px] italic text-slate-500">
+                                        {item.notes}
+                                      </p>
+                                    ) : null}
                                   </div>
                                 </div>
                               </td>
-                              <td className="px-4 py-4 text-sm text-gray-600 dark:text-gray-400">
-                                {getDisplayValue(item.barcode, isService ? "N/A" : "N/A")}
-                              </td>
-                              <td className="px-4 py-4 text-sm text-center text-gray-900 dark:text-gray-100">
+                              <td className="whitespace-nowrap px-4 py-2.5 text-center text-slate-800">
                                 {getDisplayValue(item.quantity, "0")}
                               </td>
-                              <td className="px-4 py-4 text-sm text-right text-gray-900 dark:text-gray-100">
+                              <td className="whitespace-nowrap px-4 py-2.5 text-right text-slate-800">
                                 {formatCurrency(item.price || 0)}
                               </td>
-                              <td className="px-4 py-4 text-sm text-right text-gray-900 dark:text-gray-100">
+                              <td className="whitespace-nowrap px-4 py-2.5 text-right text-slate-600">
                                 {formatCurrency(item.actual_cost || item.cost || 0)}
                               </td>
-                              <td className="px-4 py-4 text-sm text-right font-medium text-gray-900 dark:text-gray-100">
-                                {formatCurrency(
-                                  (Number.parseFloat(item.price) || 0) * (Number.parseInt(item.quantity) || 0),
-                                )}
+                              <td className="whitespace-nowrap px-4 py-2.5 text-right font-medium text-slate-800">
+                                {formatCurrency(lineTotal)}
                               </td>
                             </tr>
                           )
                         })}
                       </tbody>
+                      <tfoot>
+                        <tr className="border-t border-slate-200 bg-[#F1F4F9]">
+                          <td colSpan={5} className="px-4 py-2.5 text-right text-xs font-semibold uppercase text-slate-600">
+                            Subtotal
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-2.5 text-right text-sm font-semibold text-slate-900">
+                            {formatCurrency(subtotal)}
+                          </td>
+                        </tr>
+                      </tfoot>
                     </table>
                   </div>
                 )}
-              </CardContent>
-            </Card>
+              </div>
 
-            {/* Sale Summary */}
-            <Card className="shadow-sm border-0 bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 dark:bg-gray-800">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-lg font-semibold text-gray-800 dark:text-gray-200 flex items-center">
-                  <DollarSign className="h-5 w-5 mr-2 text-green-600 dark:text-green-400" />
-                  Sale Summary
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                  <div className="text-center p-4 bg-white dark:bg-gray-700 rounded-lg">
-                    <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-                      {formatCurrency(subtotal)}
+              {saleData.fulfillment_type === "ship" ? (
+                <div className="overflow-hidden rounded-xl border border-slate-200 bg-card">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-[#F1F4F9] px-4 py-2">
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-600">
+                      Shipping & delivery
+                    </h3>
+                    <div className="flex flex-wrap gap-1.5">
+                      {!["Shipped", "In transit", "Delivered"].includes(
+                        saleData.delivery_status || "Pending",
+                      ) ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 border-slate-200 bg-white px-2 text-[11px]"
+                          disabled={isUpdatingDelivery}
+                          onClick={() => handleDeliveryStatusUpdate("Shipped")}
+                        >
+                          {isUpdatingDelivery ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            "Mark shipped"
+                          )}
+                        </Button>
+                      ) : null}
+                      {saleData.delivery_status !== "Delivered" ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 border-emerald-200 bg-white px-2 text-[11px] text-emerald-700 hover:bg-emerald-50"
+                          disabled={isUpdatingDelivery}
+                          onClick={() => handleDeliveryStatusUpdate("Delivered")}
+                        >
+                          Mark delivered
+                        </Button>
+                      ) : null}
                     </div>
-                    <div className="text-sm text-gray-600 dark:text-gray-400 font-medium">Subtotal</div>
                   </div>
-                  <div className="text-center p-4 bg-white dark:bg-gray-700 rounded-lg">
-                    <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-                      {formatCurrency(saleData.discount || 0)}
-                    </div>
-                    <div className="text-sm text-gray-600 dark:text-gray-400 font-medium">Discount</div>
-                  </div>
-                  <div className="text-center p-4 bg-white dark:bg-gray-700 rounded-lg border-2 border-blue-200 dark:border-blue-700">
-                    <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{formatCurrency(total)}</div>
-                    <div className="text-sm text-blue-600 dark:text-blue-400 font-medium">Total Amount</div>
-                  </div>
-                  <div className="text-center p-4 bg-white dark:bg-gray-700 rounded-lg">
-                    <div className="text-2xl font-bold text-green-600 dark:text-green-400">
-                      {formatCurrency(getReceivedAmount())}
-                    </div>
-                    <div className="text-sm text-green-600 dark:text-green-400 font-medium">Received</div>
-                    
-                    {/* Show remaining amount for ALL credit sales when there's outstanding balance */}
-                    {saleData.status === "Credit" && getRemainingAmount() > 0 && (
-                      <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
-                        <div className="text-lg font-bold text-red-600 dark:text-red-400">
-                          {formatCurrency(getRemainingAmount())}
-                        </div>
-                        <div className="text-xs text-red-600 dark:text-red-400 font-medium">Remaining</div>
-                      </div>
-                    )}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+                    <InfoCell
+                      label="Delivery status"
+                      value={<DeliveryStatusBadge status={saleData.delivery_status || "Pending"} />}
+                    />
+                    <InfoCell label="Courier" value={saleData.courier_service_name || "—"} />
+                    <InfoCell label="Packaging" value={saleData.packaging_type_name || "—"} />
+                    <InfoCell
+                      label="Tracking ID"
+                      value={
+                        saleData.tracking_id ? (
+                          (() => {
+                            const shipping = mapSaleShippingFromRecord(saleData)
+                            const trackingUrl = buildTrackingUrl(
+                              saleData.tracking_url_template,
+                              shipping.trackingId,
+                            )
+                            return trackingUrl ? (
+                              <a
+                                href={trackingUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-violet-700 underline"
+                              >
+                                {saleData.tracking_id}
+                              </a>
+                            ) : (
+                              saleData.tracking_id
+                            )
+                          })()
+                        ) : (
+                          "—"
+                        )
+                      }
+                    />
+                    <InfoCell
+                      label="Package"
+                      value={
+                        saleData.weight_kg
+                          ? `${saleData.weight_kg} kg${
+                              saleData.length_cm
+                                ? ` · ${saleData.length_cm}×${saleData.width_cm}×${saleData.height_cm} cm`
+                                : ""
+                            }`
+                          : saleData.packaging_type_name || "—"
+                      }
+                    />
+                    <InfoCell
+                      label="Shipping address"
+                      value={saleData.shipping_address || saleData.customer_address || "—"}
+                      className="sm:col-span-2 lg:col-span-4"
+                    />
+                    <InfoCell
+                      label="Courier paid (extra)"
+                      value={formatCurrency(saleData.courier_paid_extra || 0)}
+                    />
+                    <InfoCell label="Expense: courier" value={formatCurrency(saleData.expense_courier || 0)} />
+                    <InfoCell label="Expense: packing" value={formatCurrency(saleData.expense_packing || 0)} />
+                    {saleData.shipping_notes ? (
+                      <InfoCell
+                        label="Shipping notes"
+                        value={saleData.shipping_notes}
+                        className="sm:col-span-2 lg:col-span-4"
+                      />
+                    ) : null}
                   </div>
                 </div>
-              </CardContent>
-            </Card>
+              ) : null}
 
-            {/* Notes */}
-            {saleData.notes && (
-              <Card className="shadow-sm border-0 bg-white dark:bg-gray-800">
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-lg font-semibold text-gray-800 dark:text-gray-200">Notes</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-700 p-4 rounded-lg">
-                    {saleData.notes}
-                  </p>
-                </CardContent>
-              </Card>
-            )}
+              {saleData.notes ? (
+                <div className="overflow-hidden rounded-xl border border-slate-200 bg-card">
+                  <div className="border-b border-slate-200 bg-[#F1F4F9] px-4 py-2">
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-600">Notes</h3>
+                  </div>
+                  <div className="px-4 py-3 text-sm text-slate-700">{saleData.notes}</div>
+                </div>
+              ) : null}
+            </div>
+          )}
+
+          {detailProduct ? (
+            <ProductDetailSlider
+              portaled={false}
+              product={detailProduct}
+              onClose={closeDetailProduct}
+              currency={deviceCurrency}
+              privacyMode={false}
+              userId={deviceId || undefined}
+            />
+          ) : null}
           </div>
-        )}
-      </DialogContent>
-    </Dialog>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isServiceViewOpen} onOpenChange={(open) => !open && setIsServiceViewOpen(false)}>
+        <DialogContent className="max-w-lg gap-0 overflow-hidden border-slate-200 p-0 sm:max-w-lg [&>button]:top-3 [&>button]:right-3">
+          <DialogHeader className="border-b border-slate-200 bg-[#F1F4F9] px-4 py-3 pr-10 text-left">
+            <DialogTitle className="text-base font-semibold text-slate-900">Service details</DialogTitle>
+            {selectedServiceItem ? (
+              <p className="text-xs text-slate-600">{selectedServiceItem.service_name}</p>
+            ) : null}
+          </DialogHeader>
+          {selectedServiceItem ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2">
+              <InfoCell label="Service" value={selectedServiceItem.service_name || "—"} />
+              <InfoCell label="Category" value={getDisplayValue(selectedServiceItem.service_category)} />
+              <InfoCell label="Quantity" value={getDisplayValue(selectedServiceItem.quantity, "0")} />
+              <InfoCell label="Unit price" value={formatCurrency(selectedServiceItem.price || 0)} />
+              <InfoCell label="Cost" value={formatCurrency(selectedServiceItem.actual_cost || selectedServiceItem.cost || 0)} />
+              <InfoCell
+                label="Line total"
+                value={formatCurrency(
+                  (Number.parseFloat(selectedServiceItem.price) || 0) *
+                    (Number.parseInt(selectedServiceItem.quantity) || 0),
+                )}
+              />
+              {selectedServiceItem.duration_minutes ? (
+                <InfoCell label="Duration" value={`${selectedServiceItem.duration_minutes} min`} />
+              ) : null}
+              {selectedServiceItem.service_description ? (
+                <InfoCell
+                  label="Description"
+                  value={selectedServiceItem.service_description}
+                  className="sm:col-span-2"
+                />
+              ) : null}
+              {selectedServiceItem.notes ? (
+                <InfoCell label="Notes" value={selectedServiceItem.notes} className="sm:col-span-2" />
+              ) : null}
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
+      {ConfirmDialog}
+    </>
   )
 }

@@ -308,8 +308,8 @@ export default function CustomerSelectSimple({
         role="combobox"
         aria-expanded={open}
         className={cn(
-          "w-full justify-between transition-all duration-200 bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700",
-          value ? "bg-gray-50 dark:bg-gray-700" : ""
+          "w-full justify-between transition-all duration-200 bg-white border-gray-300 text-gray-900 hover:bg-gray-50",
+          value ? "bg-gray-50" : ""
         )}
         type="button"
         onClick={() => {
@@ -334,26 +334,26 @@ export default function CustomerSelectSimple({
       {open && (
         <div
           ref={dropdownRef}
-          className="absolute z-50 mt-1 w-full bg-white dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-600 shadow-lg overflow-hidden"
+          className="absolute z-50 mt-1 w-full bg-white rounded-md border border-gray-200 shadow-lg overflow-hidden"
         >
           {/* Search Header */}
-          <div className="p-2 border-b border-gray-100 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 flex items-center gap-2">
-            <Search className="h-4 w-4 text-gray-500 dark:text-gray-400 flex-shrink-0" />
+          <div className="p-2 border-b border-gray-100 bg-gray-50 flex items-center gap-2">
+            <Search className="h-4 w-4 text-gray-500 flex-shrink-0" />
             <Input
               ref={searchInputRef}
               value={searchTerm}
               onChange={(e) => handleSearchChange(e.target.value)}
               placeholder="Search customers or add new..."
-              className="h-8 border-0 focus-visible:ring-0 focus-visible:ring-offset-0 bg-transparent text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400"
+              className="h-8 border-0 focus-visible:ring-0 focus-visible:ring-offset-0 bg-transparent text-gray-900 placeholder-gray-500"
             />
             {searchTerm && (
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-6 w-6 hover:bg-gray-200 dark:hover:bg-gray-600"
+                className="h-6 w-6 hover:bg-gray-200"
                 onClick={resetSearchAndForm}
               >
-                <X className="h-3 w-3 text-gray-500 dark:text-gray-400" />
+                <X className="h-3 w-3 text-gray-500" />
               </Button>
             )}
           </div>
@@ -362,21 +362,21 @@ export default function CustomerSelectSimple({
           <div className="max-h-[400px] overflow-y-auto p-1">
             {loading ? (
               <div className="py-6 text-center">
-                <Loader2 className="h-6 w-6 animate-spin mx-auto text-blue-600 dark:text-blue-400" />
-                <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">Loading customers...</p>
+                <Loader2 className="h-6 w-6 animate-spin mx-auto text-blue-600" />
+                <p className="text-sm text-gray-500 mt-2">Loading customers...</p>
               </div>
             ) : showForm ? (
-              <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-md border border-blue-200 dark:border-blue-800 m-1">
+              <div className="p-3 bg-blue-50 rounded-md border border-blue-200 m-1">
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2">
-                    <Plus className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-                    <span className="text-sm font-medium text-blue-700 dark:text-blue-300">Create New Customer</span>
+                    <Plus className="h-4 w-4 text-blue-600" />
+                    <span className="text-sm font-medium text-blue-700">Create New Customer</span>
                   </div>
                   <Button
                     type="button"
                     variant="ghost"
                     size="icon"
-                    className="h-6 w-6 hover:bg-blue-200 dark:hover:bg-blue-800"
+                    className="h-6 w-6 hover:bg-blue-200"
                     onClick={resetSearchAndForm}
                   >
                     <X className="h-3 w-3" />
@@ -385,35 +385,35 @@ export default function CustomerSelectSimple({
 
                 <form onSubmit={handleCreateCustomer} className="space-y-3">
                   <div>
-                    <label className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1 block">Name</label>
+                    <label className="text-xs font-medium text-gray-700 mb-1 block">Name</label>
                     <Input
                       ref={nameInputRef}
                       placeholder="Enter customer name"
                       value={formData.name}
                       onChange={(e) => handleFormInputChange("name", e.target.value)}
                       className={cn(
-                        "h-9 text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100",
-                        formErrors.name ? "border-red-300 dark:border-red-600 focus-visible:ring-red-500" : "border-gray-300 dark:border-gray-600"
+                        "h-9 text-sm bg-white text-gray-900",
+                        formErrors.name ? "border-red-300 focus-visible:ring-red-500" : "border-gray-300"
                       )}
                       disabled={formLoading}
                     />
-                    {formErrors.name && <p className="text-xs text-red-600 dark:text-red-400 mt-1">{formErrors.name}</p>}
+                    {formErrors.name && <p className="text-xs text-red-600 mt-1">{formErrors.name}</p>}
                   </div>
 
                   <div>
-                    <label className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1 block">Phone Number</label>
+                    <label className="text-xs font-medium text-gray-700 mb-1 block">Phone Number</label>
                     <Input
                       ref={phoneInputRef}
                       placeholder="Enter phone number"
                       value={formData.phone}
                       onChange={(e) => handleFormInputChange("phone", e.target.value)}
                       className={cn(
-                        "h-9 text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100",
-                        formErrors.phone ? "border-red-300 dark:border-red-600 focus-visible:ring-red-500" : "border-gray-300 dark:border-gray-600"
+                        "h-9 text-sm bg-white text-gray-900",
+                        formErrors.phone ? "border-red-300 focus-visible:ring-red-500" : "border-gray-300"
                       )}
                       disabled={formLoading}
                     />
-                    {formErrors.phone && <p className="text-xs text-red-600 dark:text-red-400 mt-1">{formErrors.phone}</p>}
+                    {formErrors.phone && <p className="text-xs text-red-600 mt-1">{formErrors.phone}</p>}
                   </div>
 
                   <div className="flex gap-2 pt-1">
@@ -438,7 +438,7 @@ export default function CustomerSelectSimple({
                 {/* Recent */}
                 {recentCustomers.length > 0 && !searchTerm && (
                   <div className="mb-2">
-                    <div className="px-2 py-1 text-xs font-medium text-gray-500 dark:text-gray-400 flex items-center">
+                    <div className="px-2 py-1 text-xs font-medium text-gray-500 flex items-center">
                       <span>Recent</span>
                       <Badge variant="outline" className="ml-2 text-xs py-0">
                         {recentCustomers.length}
@@ -450,29 +450,29 @@ export default function CustomerSelectSimple({
                         type="button"
                         className={cn(
                           "w-full text-left px-2 py-1.5 rounded-md text-sm flex items-center gap-2",
-                          "hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors",
-                          value === customer.id ? "bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300" : "text-gray-900 dark:text-gray-100"
+                          "hover:bg-gray-100 transition-colors",
+                          value === customer.id ? "bg-blue-50 text-blue-700" : "text-gray-900"
                         )}
                         onClick={() => handleCustomerSelect(customer.id, customer.name)}
                       >
-                        <div className="flex-shrink-0 h-8 w-8 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
-                          <User className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                        <div className="flex-shrink-0 h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center">
+                          <User className="h-4 w-4 text-blue-600" />
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="font-medium truncate">{customer.name}</div>
-                          <div className="text-xs text-gray-500 dark:text-gray-400 truncate">{customer.phone || customer.email || "No contact info"}</div>
+                          <div className="text-xs text-gray-500 truncate">{customer.phone || customer.email || "No contact info"}</div>
                         </div>
-                        {value === customer.id && <Check className="h-4 w-4 text-blue-600 dark:text-blue-400" />}
+                        {value === customer.id && <Check className="h-4 w-4 text-blue-600" />}
                       </button>
                     ))}
-                    <div className="my-1 border-t border-gray-100 dark:border-gray-600"></div>
+                    <div className="my-1 border-t border-gray-100"></div>
                   </div>
                 )}
 
                 {/* Filtered / All */}
                 {filteredCustomers.length > 0 && (
                   <div>
-                    <div className="px-2 py-1 text-xs font-medium text-gray-500 dark:text-gray-400 flex items-center">
+                    <div className="px-2 py-1 text-xs font-medium text-gray-500 flex items-center">
                       <span>{searchTerm ? "Search Results" : "All Customers"}</span>
                       <Badge variant="outline" className="ml-2 text-xs py-0">
                         {filteredCustomers.length}
@@ -484,19 +484,19 @@ export default function CustomerSelectSimple({
                         type="button"
                         className={cn(
                           "w-full text-left px-2 py-1.5 rounded-md text-sm flex items-center gap-2",
-                          "hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors",
-                          value === customer.id ? "bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300" : "text-gray-900 dark:text-gray-100"
+                          "hover:bg-gray-100 transition-colors",
+                          value === customer.id ? "bg-blue-50 text-blue-700" : "text-gray-900"
                         )}
                         onClick={() => handleCustomerSelect(customer.id, customer.name)}
                       >
-                        <div className="flex-shrink-0 h-8 w-8 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
-                          <User className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                        <div className="flex-shrink-0 h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center">
+                          <User className="h-4 w-4 text-blue-600" />
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="font-medium truncate">{customer.name}</div>
-                          <div className="text-xs text-gray-500 dark:text-gray-400 truncate">{customer.phone || customer.email || "No contact info"}</div>
+                          <div className="text-xs text-gray-500 truncate">{customer.phone || customer.email || "No contact info"}</div>
                         </div>
-                        {value === customer.id && <Check className="h-4 w-4 text-blue-600 dark:text-blue-400" />}
+                        {value === customer.id && <Check className="h-4 w-4 text-blue-600" />}
                       </button>
                     ))}
                   </div>
@@ -506,18 +506,18 @@ export default function CustomerSelectSimple({
                 {filteredCustomers.length === 0 && !showForm && searchTerm && (
                   <div className="py-4 text-center">
                     <User className="h-8 w-8 text-gray-400 mx-auto mb-2" />
-                    <p className="text-sm text-gray-500 dark:text-gray-400">No customers found</p>
-                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Try a different search or create a new customer</p>
+                    <p className="text-sm text-gray-500">No customers found</p>
+                    <p className="text-xs text-gray-400 mt-1">Try a different search or create a new customer</p>
                   </div>
                 )}
 
                 {/* Add New inline trigger */}
                 {!searchTerm && !showForm && showAddNewButton && (
-                  <div className="mt-2 pt-2 border-t border-gray-100 dark:border-gray-600 px-2">
+                  <div className="mt-2 pt-2 border-t border-gray-100 px-2">
                     <Button
                       variant="outline"
                       size="sm"
-                      className="w-full bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-600"
+                      className="w-full bg-white border-gray-300 text-gray-900 hover:bg-gray-50"
                       onClick={() => {
                         setOpen(false)
                         resetSearchAndForm()

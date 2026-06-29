@@ -1,20 +1,20 @@
 "use client"
 
 import type React from "react"
-import { useState, useEffect } from "react"
+import { useState } from "react"
+import { useRouter } from "next/navigation"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { Building2, Edit, Save, X, Loader2, AlertCircle, Monitor } from "lucide-react"
+import { Building2, Edit, Save, X, Loader2, Monitor } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
-import { Alert, AlertDescription } from "@/components/ui/alert"
-import { updateCompany, getDevicesByCompany } from "@/app/actions/admin-actions"
-import { getMockModeStatus } from "@/app/actions/db-status-actions"
+import { notifyError, notifySuccess } from "@/lib/notifications"
+import { FormAlert } from "@/components/ui/form-alert"
+import { updateCompany } from "@/app/actions/admin-actions"
 import DevicesTab from "./devices-tab"
-import DeviceDetails from "./device-details"
 
 type Company = {
   id: number
@@ -23,24 +23,15 @@ type Company = {
   phone?: string
   email?: string
   description?: string
-  logo_url?: string
-}
-
-type Device = {
-  id: number
-  name: string
-  email: string
-  company_id: number
-  created_at?: string
 }
 
 interface CompanyDetailsProps {
   company: Company
-  onBack: () => void
-  onUpdate: (company: Company) => void
+  activeTab: "details" | "devices"
 }
 
-export default function CompanyDetails({ company, onBack, onUpdate }: CompanyDetailsProps) {
+export default function CompanyDetails({ company, activeTab }: CompanyDetailsProps) {
+  const router = useRouter()
   const [isEditing, setIsEditing] = useState(false)
   const [formData, setFormData] = useState({
     name: company.name || "",
@@ -48,44 +39,10 @@ export default function CompanyDetails({ company, onBack, onUpdate }: CompanyDet
     phone: company.phone || "",
     email: company.email || "",
     description: company.description || "",
-    logo_url: company.logo_url || "",
   })
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [devices, setDevices] = useState<Device[]>([])
-  const [isLoadingDevices, setIsLoadingDevices] = useState(true)
-  const [selectedDevice, setSelectedDevice] = useState<Device | null>(null)
   const { toast } = useToast()
-  const [isMockModeActive, setIsMockModeActive] = useState(false)
-
-  useEffect(() => {
-    getMockModeStatus().then(setIsMockModeActive)
-    fetchDevices()
-  }, [company.id])
-
-  const fetchDevices = async () => {
-    setIsLoadingDevices(true)
-    try {
-      const result = await getDevicesByCompany(company.id)
-      if (result.success) {
-        setDevices(result.data || [])
-      } else {
-        toast({
-          title: "Error",
-          description: result.message || "Failed to load devices",
-          variant: "destructive",
-        })
-      }
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "An unexpected error occurred",
-        variant: "destructive",
-      })
-    } finally {
-      setIsLoadingDevices(false)
-    }
-  }
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target
@@ -107,16 +64,13 @@ export default function CompanyDetails({ company, onBack, onUpdate }: CompanyDet
       const result = await updateCompany(formDataObj)
 
       if (result.success) {
-        toast({
-          title: "Success",
-          description: "Company updated successfully",
-        })
-        onUpdate({ ...company, ...formData })
+        notifySuccess(toast, "Company updated successfully")
         setIsEditing(false)
+        router.refresh()
       } else {
         setError(result.message || "Failed to update company")
       }
-    } catch (error) {
+    } catch {
       setError("An unexpected error occurred")
     } finally {
       setIsSubmitting(false)
@@ -130,39 +84,24 @@ export default function CompanyDetails({ company, onBack, onUpdate }: CompanyDet
       phone: company.phone || "",
       email: company.email || "",
       description: company.description || "",
-      logo_url: company.logo_url || "",
     })
     setIsEditing(false)
     setError(null)
   }
 
-  const handleDeviceSelect = (device: Device) => {
-    setSelectedDevice(device)
-  }
-
-  const handleBackToDevices = () => {
-    setSelectedDevice(null)
-    fetchDevices() // Refresh devices list
-  }
-
-  // If a device is selected, show device details
-  if (selectedDevice) {
-    return <DeviceDetails device={selectedDevice} onBack={handleBackToDevices} />
+  const handleTabChange = (value: string) => {
+    const tab = value === "devices" ? "devices" : "details"
+    const href =
+      tab === "devices" ? `/admin/companies/${company.id}?tab=devices` : `/admin/companies/${company.id}`
+    router.push(href)
   }
 
   return (
     <div className="space-y-6">
-      {isMockModeActive && (
-        <Alert className="border-amber-200 bg-amber-50 text-amber-900">
-          <AlertCircle className="h-4 w-4" />
-          <AlertDescription className="ml-2">
-            Running in mock mode. Database operations will be simulated.
-          </AlertDescription>
-        </Alert>
-      )}
-
-      <div className="hidden items-center justify-between md:flex">
-        <h2 className="text-2xl font-bold text-gray-900">{company.name}</h2>
+      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+        <div>
+          <h2 className="text-2xl font-semibold text-gray-900">{company.name}</h2>
+        </div>
         {!isEditing ? (
           <Button
             onClick={() => setIsEditing(true)}
@@ -180,20 +119,16 @@ export default function CompanyDetails({ company, onBack, onUpdate }: CompanyDet
               className="border-gray-200 bg-white text-gray-900 hover:bg-gray-50 hover:text-gray-900"
             >
               <X className="mr-2 h-4 w-4" />
-              CANCEL
+              Cancel
             </Button>
-            <Button
-              onClick={handleSubmit}
-              disabled={isSubmitting}
-              
-            >
+            <Button onClick={handleSubmit} disabled={isSubmitting}>
               {isSubmitting ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" /> SAVING...
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Saving...
                 </>
               ) : (
                 <>
-                  <Save className="mr-2 h-4 w-4" /> SAVE CHANGES
+                  <Save className="mr-2 h-4 w-4" /> Save changes
                 </>
               )}
             </Button>
@@ -201,15 +136,10 @@ export default function CompanyDetails({ company, onBack, onUpdate }: CompanyDet
         )}
       </div>
 
-      {error && (
-        <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" />
-          <AlertDescription className="ml-2">{error}</AlertDescription>
-        </Alert>
-      )}
+      {error && <FormAlert type="error" message={error} />}
 
-      <Tabs defaultValue="details" className="w-full">
-        <TabsList className="mb-6 grid w-full grid-cols-2 gap-2 rounded-lg border border-gray-200 bg-gray-50 p-1">
+      <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
+        <TabsList className="mb-6 grid w-full max-w-md grid-cols-2 gap-2 rounded-lg border border-gray-200 bg-gray-50 p-1">
           <TabsTrigger
             value="details"
             className="rounded-md data-[state=active]:bg-white data-[state=active]:text-gray-900 data-[state=active]:shadow-sm"
@@ -240,14 +170,7 @@ export default function CompanyDetails({ company, onBack, onUpdate }: CompanyDet
                       <Label htmlFor="name" className="text-gray-500">
                         Company Name
                       </Label>
-                      <Input
-                        id="name"
-                        name="name"
-                        value={formData.name}
-                        onChange={handleChange}
-                        required
-                        
-                      />
+                      <Input id="name" name="name" value={formData.name} onChange={handleChange} required />
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="email" className="text-gray-500">
@@ -259,45 +182,20 @@ export default function CompanyDetails({ company, onBack, onUpdate }: CompanyDet
                         type="email"
                         value={formData.email}
                         onChange={handleChange}
-                        
                       />
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="phone" className="text-gray-500">
                         Phone
                       </Label>
-                      <Input
-                        id="phone"
-                        name="phone"
-                        value={formData.phone}
-                        onChange={handleChange}
-                        
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="logo_url" className="text-gray-500">
-                        Logo URL
-                      </Label>
-                      <Input
-                        id="logo_url"
-                        name="logo_url"
-                        value={formData.logo_url}
-                        onChange={handleChange}
-                        
-                      />
+                      <Input id="phone" name="phone" value={formData.phone} onChange={handleChange} />
                     </div>
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="address" className="text-gray-500">
                       Address
                     </Label>
-                    <Input
-                      id="address"
-                      name="address"
-                      value={formData.address}
-                      onChange={handleChange}
-                      
-                    />
+                    <Input id="address" name="address" value={formData.address} onChange={handleChange} />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="description" className="text-gray-500">
@@ -309,58 +207,12 @@ export default function CompanyDetails({ company, onBack, onUpdate }: CompanyDet
                       rows={3}
                       value={formData.description}
                       onChange={handleChange}
-                      
                     />
-                  </div>
-                  <div className="flex justify-end space-x-2 pt-4 md:hidden">
-                    <Button
-                      type="button"
-                      onClick={cancelEdit}
-                      variant="outline"
-                      
-                    >
-                      <X className="mr-2 h-4 w-4" />
-                      CANCEL
-                    </Button>
-                    <Button
-                      type="submit"
-                      disabled={isSubmitting}
-                      
-                    >
-                      {isSubmitting ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" /> SAVING...
-                        </>
-                      ) : (
-                        <>
-                          <Save className="mr-2 h-4 w-4" /> SAVE
-                        </>
-                      )}
-                    </Button>
                   </div>
                 </form>
               ) : (
                 <div className="space-y-6">
-                  <div className="flex md:hidden">
-                    <Button
-            onClick={() => setIsEditing(true)}
-            variant="outline"
-            className="border-gray-200 bg-white text-gray-900 hover:bg-gray-50 hover:text-gray-900"
-          >
-                      <Edit className="mr-2 h-4 w-4" />
-                      Edit company
-                    </Button>
-                  </div>
                   <div className="rounded-lg bg-gray-50 p-6">
-                    <div className="mb-6 flex items-center">
-                      <div className="flex h-12 w-12 items-center justify-center rounded-md bg-gray-100 text-gray-600">
-                        <Building2 className="h-6 w-6" />
-                      </div>
-                      <div className="ml-4">
-                        <h3 className="text-xl font-bold text-gray-900">{company.name}</h3>
-                        <p className="text-sm text-gray-500">ID: {company.id}</p>
-                      </div>
-                    </div>
                     <div className="grid gap-4 md:grid-cols-2">
                       <div>
                         <p className="text-sm font-medium text-gray-500">Email</p>
@@ -370,13 +222,9 @@ export default function CompanyDetails({ company, onBack, onUpdate }: CompanyDet
                         <p className="text-sm font-medium text-gray-500">Phone</p>
                         <p className="text-gray-900">{company.phone || "Not provided"}</p>
                       </div>
-                      <div>
+                      <div className="md:col-span-2">
                         <p className="text-sm font-medium text-gray-500">Address</p>
                         <p className="text-gray-900">{company.address || "Not provided"}</p>
-                      </div>
-                      <div>
-                        <p className="text-sm font-medium text-gray-500">Logo URL</p>
-                        <p className="text-gray-900">{company.logo_url || "Not provided"}</p>
                       </div>
                     </div>
                     {company.description && (
@@ -393,7 +241,7 @@ export default function CompanyDetails({ company, onBack, onUpdate }: CompanyDet
         </TabsContent>
 
         <TabsContent value="devices">
-          <DevicesTab companyId={company.id} onDeviceSelect={handleDeviceSelect} />
+          <DevicesTab companyId={company.id} />
         </TabsContent>
       </Tabs>
     </div>

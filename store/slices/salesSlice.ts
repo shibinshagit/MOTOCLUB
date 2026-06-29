@@ -71,6 +71,7 @@ const salesSlice = createSlice({
   reducers: {
     setSales: (state, action: PayloadAction<Sale[]>) => {
       state.sales = action.payload
+      state.filteredSales = action.payload
       state.fetchedTime = Date.now()
       state.lastUpdated = new Date().toISOString()
       state.error = null

@@ -193,7 +193,7 @@ export function LineChart({
         style={{ height: `${height}px` }}
       />
       {(!data || data.length === 0) && (
-        <div className="flex items-center justify-center h-full text-gray-500 dark:text-gray-400">
+        <div className="flex items-center justify-center h-full text-gray-500">
           <p>No data available for the selected period</p>
         </div>
       )}

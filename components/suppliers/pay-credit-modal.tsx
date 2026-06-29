@@ -163,7 +163,7 @@ export default function PayCreditModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={() => {}}>
-      <DialogContent className="max-w-3xl max-h-[95vh] overflow-hidden p-0 bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 flex flex-col [&>button]:hidden">
+      <DialogContent className="max-w-3xl max-h-[95vh] overflow-hidden p-0 bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col [&>button]:hidden">
         {paymentResult ? (
           // Success View (unchanged)
           <div className="flex flex-col h-full max-h-[90vh]">
@@ -203,7 +203,7 @@ export default function PayCreditModal({
             {/* Success Content */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4 max-h-[50vh]">
               {/* Payment Summary Card */}
-              <Card className="border-0 shadow-lg bg-white dark:bg-gray-800">
+              <Card className="border-0 shadow-lg bg-white">
                 <CardContent className="p-6">
                   <div className="flex items-center justify-between mb-6">
                     <div className="flex items-center space-x-3">
@@ -211,12 +211,12 @@ export default function PayCreditModal({
                         <Receipt className="h-5 w-5 text-blue-600" />
                       </div>
                       <div>
-                        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Payment Summary</h3>
-                        <p className="text-sm text-gray-500 dark:text-gray-400">Transaction details and allocation</p>
+                        <h3 className="text-lg font-semibold text-gray-900">Payment Summary</h3>
+                        <p className="text-sm text-gray-500">Transaction details and allocation</p>
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="text-sm text-gray-500 dark:text-gray-400">Transaction Date</div>
+                      <div className="text-sm text-gray-500">Transaction Date</div>
                       <div className="font-medium">{new Date().toLocaleDateString()}</div>
                     </div>
                   </div>
@@ -226,14 +226,14 @@ export default function PayCreditModal({
                       <div className="flex items-center space-x-3">
                         <Building2 className="h-4 w-4 text-gray-400" />
                         <div>
-                          <div className="text-sm text-gray-500 dark:text-gray-400">Supplier</div>
+                          <div className="text-sm text-gray-500">Supplier</div>
                           <div className="font-medium">{supplier.name}</div>
                         </div>
                       </div>
                       <div className="flex items-center space-x-3">
                         <Banknote className="h-4 w-4 text-gray-400" />
                         <div>
-                          <div className="text-sm text-gray-500 dark:text-gray-400">Payment Method</div>
+                          <div className="text-sm text-gray-500">Payment Method</div>
                           <div className="font-medium">{paymentMethod}</div>
                         </div>
                       </div>
@@ -242,14 +242,14 @@ export default function PayCreditModal({
                       <div className="flex items-center space-x-3">
                         <DollarSign className="h-4 w-4 text-gray-400" />
                         <div>
-                          <div className="text-sm text-gray-500 dark:text-gray-400">Amount Paid</div>
+                          <div className="text-sm text-gray-500">Amount Paid</div>
                           <div className="font-medium text-green-600">{formatCurrency(paymentResult.totalPaid)}</div>
                         </div>
                       </div>
                       <div className="flex items-center space-x-3">
                         <TrendingDown className="h-4 w-4 text-gray-400" />
                         <div>
-                          <div className="text-sm text-gray-500 dark:text-gray-400">Remaining Balance</div>
+                          <div className="text-sm text-gray-500">Remaining Balance</div>
                           <div className="font-medium text-orange-600">
                             {formatCurrency(paymentResult.remainingCredit)}
                           </div>
@@ -261,15 +261,15 @@ export default function PayCreditModal({
               </Card>
 
               {/* Allocation Details */}
-              <Card className="border-0 shadow-lg bg-white dark:bg-gray-800">
+              <Card className="border-0 shadow-lg bg-white">
                 <CardContent className="p-6">
                   <div className="flex items-center space-x-3 mb-6">
                     <div className="bg-purple-100 p-2 rounded-lg">
                       <FileText className="h-5 w-5 text-purple-600" />
                     </div>
                     <div>
-                      <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Payment Allocation</h3>
-                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                      <h3 className="text-lg font-semibold text-gray-900">Payment Allocation</h3>
+                      <p className="text-sm text-gray-500">
                         How the payment was distributed across purchases
                       </p>
                     </div>
@@ -279,17 +279,17 @@ export default function PayCreditModal({
                     {paymentResult.allocations.map((allocation, index) => (
                       <div
                         key={allocation.purchaseId}
-                        className="flex items-center justify-between p-4 bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-700 dark:to-gray-600 rounded-xl border border-gray-200 dark:border-gray-600 hover:shadow-md transition-all duration-200"
+                        className="flex items-center justify-between p-4 bg-gradient-to-r from-gray-50 to-gray-100 rounded-xl border border-gray-200 hover:shadow-md transition-all duration-200"
                       >
                         <div className="flex items-center space-x-4">
                           <div className="bg-white p-2 rounded-lg shadow-sm">
                             <Receipt className="h-4 w-4 text-gray-600" />
                           </div>
                           <div>
-                            <div className="font-medium text-gray-900 dark:text-gray-100">
+                            <div className="font-medium text-gray-900">
                               Purchase #{allocation.purchaseId}
                             </div>
-                            <div className="text-sm text-gray-500 dark:text-gray-400">
+                            <div className="text-sm text-gray-500">
                               {allocation.remainingBalance > 0
                                 ? `Balance: ${formatCurrency(allocation.remainingBalance)}`
                                 : "Fully Paid"}
@@ -298,10 +298,10 @@ export default function PayCreditModal({
                         </div>
                         <div className="flex items-center space-x-3">
                           <div className="text-right">
-                            <div className="text-lg font-bold text-gray-900 dark:text-gray-100">
+                            <div className="text-lg font-bold text-gray-900">
                               {formatCurrency(allocation.allocatedAmount)}
                             </div>
-                            <div className="text-xs text-gray-500 dark:text-gray-400">Allocated</div>
+                            <div className="text-xs text-gray-500">Allocated</div>
                           </div>
                           <ArrowRight className="h-4 w-4 text-gray-400" />
                           <Badge
@@ -323,9 +323,9 @@ export default function PayCreditModal({
             </div>
 
             {/* Success Footer */}
-            <div className="border-t bg-white dark:bg-gray-800 p-4">
+            <div className="border-t bg-white p-4">
               <div className="flex justify-between items-center">
-                <div className="text-sm text-gray-500 dark:text-gray-400">
+                <div className="text-sm text-gray-500">
                   Payment processed by {company?.name || "System"}
                 </div>
                 <Button
@@ -371,9 +371,9 @@ export default function PayCreditModal({
             <div className="flex-1 overflow-y-auto p-4 space-y-4 max-h-[70vh]">
               {/* Error Display */}
               {error && (
-                <Card className="border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/20">
+                <Card className="border-red-200 bg-red-50">
                   <CardContent className="p-3">
-                    <div className="flex items-center text-red-800 dark:text-red-200">
+                    <div className="flex items-center text-red-800">
                       <AlertCircle className="h-4 w-4 mr-2 flex-shrink-0" />
                       <span className="font-medium text-sm">{error}</span>
                     </div>
@@ -383,7 +383,7 @@ export default function PayCreditModal({
 
               <form onSubmit={handleSubmit} className="space-y-4">
                 {/* Supplier Info Card */}
-                <Card className="border-0 shadow-lg bg-white dark:bg-gray-800">
+                <Card className="border-0 shadow-lg bg-white">
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-3">
@@ -391,12 +391,12 @@ export default function PayCreditModal({
                           <Building2 className="h-5 w-5 text-blue-600" />
                         </div>
                         <div>
-                          <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">{supplier.name}</h3>
-                          <p className="text-gray-500 dark:text-gray-400 text-sm">Supplier ID: #{supplier.id}</p>
+                          <h3 className="text-lg font-bold text-gray-900">{supplier.name}</h3>
+                          <p className="text-gray-500 text-sm">Supplier ID: #{supplier.id}</p>
                         </div>
                       </div>
                       <div className="text-right">
-                        <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">Outstanding Balance</div>
+                        <div className="text-xs text-gray-500 mb-1">Outstanding Balance</div>
                         <div className="text-2xl font-bold text-red-600">{formatCurrency(supplier.balance_amount)}</div>
                       </div>
                     </div>
@@ -404,15 +404,15 @@ export default function PayCreditModal({
                 </Card>
 
                 {/* Payment Form Card */}
-                <Card className="border-0 shadow-lg bg-white dark:bg-gray-800">
+                <Card className="border-0 shadow-lg bg-white">
                   <CardContent className="p-4 space-y-4">
                     <div className="flex items-center space-x-2 mb-3">
                       <div className="bg-green-100 p-1.5 rounded-lg">
                         <DollarSign className="h-4 w-4 text-green-600" />
                       </div>
                       <div>
-                        <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">Payment Details</h3>
-                        <p className="text-xs text-gray-500 dark:text-gray-400">Enter payment information</p>
+                        <h3 className="text-base font-semibold text-gray-900">Payment Details</h3>
+                        <p className="text-xs text-gray-500">Enter payment information</p>
                       </div>
                     </div>
 
@@ -421,7 +421,7 @@ export default function PayCreditModal({
                       <div className="space-y-2">
                         <Label
                           htmlFor="amount"
-                          className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center space-x-1"
+                          className="text-sm font-medium text-gray-700 flex items-center space-x-1"
                         >
                           <DollarSign className="h-3 w-3" />
                           <span>Payment Amount *</span>
@@ -435,10 +435,10 @@ export default function PayCreditModal({
                           value={paymentAmount}
                           onChange={(e) => setPaymentAmount(e.target.value)}
                           placeholder="0.00"
-                          className="text-base font-medium h-10 border-2 focus:border-blue-500 rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100"
+                          className="text-base font-medium h-10 border-2 focus:border-blue-500 rounded-lg"
                           required
                         />
-                        <div className="text-xs text-gray-500 dark:text-gray-400">
+                        <div className="text-xs text-gray-500">
                           Maximum: {formatCurrency(maxAmount)}
                         </div>
                       </div>
@@ -447,13 +447,13 @@ export default function PayCreditModal({
                       <div className="space-y-2">
                         <Label
                           htmlFor="method"
-                          className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center space-x-1"
+                          className="text-sm font-medium text-gray-700 flex items-center space-x-1"
                         >
                           <Banknote className="h-3 w-3" />
                           <span>Payment Method *</span>
                         </Label>
                         <Select value={paymentMethod} onValueChange={setPaymentMethod}>
-                          <SelectTrigger className="h-10 border-2 focus:border-blue-500 rounded-lg dark:bg-gray-700 dark:border-gray-600">
+                          <SelectTrigger className="h-10 border-2 focus:border-blue-500 rounded-lg">
                             <SelectValue placeholder="Select payment method" />
                           </SelectTrigger>
                           <SelectContent>
@@ -472,7 +472,7 @@ export default function PayCreditModal({
                       <div className="space-y-2">
                         <Label
                           htmlFor="paymentDate"
-                          className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center space-x-1"
+                          className="text-sm font-medium text-gray-700 flex items-center space-x-1"
                         >
                           <CalendarIcon className="h-3 w-3" />
                           <span>Payment Date (Optional)</span>
@@ -483,9 +483,9 @@ export default function PayCreditModal({
                           value={paymentDate}
                           onChange={(e) => setPaymentDate(e.target.value)}
                           max={today}
-                          className="h-10 border-2 focus:border-blue-500 rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100"
+                          className="h-10 border-2 focus:border-blue-500 rounded-lg"
                         />
-                        <div className="text-xs text-gray-500 dark:text-gray-400">
+                        <div className="text-xs text-gray-500">
                           {paymentDate ? `Selected: ${new Date(paymentDate).toLocaleDateString()}` : 'Leave empty to use current date'}
                         </div>
                       </div>
@@ -493,7 +493,7 @@ export default function PayCreditModal({
 
                     {/* Quick Amount Buttons */}
                     <div className="space-y-2">
-                      <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">Quick Amounts</Label>
+                      <Label className="text-sm font-medium text-gray-700">Quick Amounts</Label>
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                         {quickAmounts.map((amount) => (
                           <Button
@@ -501,7 +501,7 @@ export default function PayCreditModal({
                             type="button"
                             variant="outline"
                             onClick={() => setPaymentAmount(amount.toString())}
-                            className="h-9 text-xs rounded-lg border-2 hover:border-blue-500 hover:bg-blue-50 transition-all duration-200 dark:border-gray-600 dark:hover:border-blue-400 dark:hover:bg-blue-900/20 dark:bg-gray-700 dark:text-gray-200"
+                            className="h-9 text-xs rounded-lg border-2 hover:border-blue-500 hover:bg-blue-50 transition-all duration-200"
                           >
                             {amount === maxAmount ? "Full" : formatCurrency(amount)}
                           </Button>
@@ -513,7 +513,7 @@ export default function PayCreditModal({
                     <div className="space-y-2">
                       <Label
                         htmlFor="notes"
-                        className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center space-x-1"
+                        className="text-sm font-medium text-gray-700 flex items-center space-x-1"
                       >
                         <FileText className="h-3 w-3" />
                         <span>Notes (Optional)</span>
@@ -524,7 +524,7 @@ export default function PayCreditModal({
                         onChange={(e) => setNotes(e.target.value)}
                         placeholder="Add any notes about this payment..."
                         rows={2}
-                        className="border-2 focus:border-blue-500 rounded-lg resize-none text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100"
+                        className="border-2 focus:border-blue-500 rounded-lg resize-none text-sm"
                       />
                     </div>
                   </CardContent>
@@ -533,9 +533,9 @@ export default function PayCreditModal({
             </div>
 
             {/* Footer */}
-            <div className="border-t bg-white dark:bg-gray-800 p-4">
+            <div className="border-t bg-white p-4">
               <div className="flex flex-col sm:flex-row justify-between items-center space-y-2 sm:space-y-0 sm:space-x-3">
-                <div className="text-xs text-gray-500 dark:text-gray-400">
+                <div className="text-xs text-gray-500">
                   Payment will be allocated to oldest purchases first
                 </div>
                 <div className="flex space-x-2">

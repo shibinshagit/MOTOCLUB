@@ -2,16 +2,21 @@
 
 import type React from "react"
 
-import { useState, useEffect } from "react"
+import Link from "next/link"
+import Image from "next/image"
+import { useCallback, useEffect, useState } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Plus, Edit, Monitor, Search, Loader2, AlertCircle } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
+import { notifyError, notifySuccess, notifyWarning } from "@/lib/notifications"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Alert, AlertDescription } from "@/components/ui/alert"
+import { FormAlert } from "@/components/ui/form-alert"
 import { getDevicesByCompany, createDevice, updateDevice } from "@/app/actions/admin-actions"
+import ImageUploadField from "@/components/admin/image-upload-field"
+import { compressBrandingLogoForUpload, formatBytes } from "@/lib/media-upload-utils"
 import {
   ADMIN_DIALOG_CONTENT_CLASS,
   ADMIN_DIALOG_INPUT_CLASS,
@@ -27,14 +32,14 @@ type Device = {
   company_id: number
   created_at?: string
   currency?: string
+  logo_url?: string | null
 }
 
 interface DevicesTabProps {
   companyId: number
-  onDeviceSelect?: (device: Device) => void
 }
 
-export default function DevicesTab({ companyId, onDeviceSelect }: DevicesTabProps) {
+export default function DevicesTab({ companyId }: DevicesTabProps) {
   const [devices, setDevices] = useState<Device[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
@@ -44,6 +49,58 @@ export default function DevicesTab({ companyId, onDeviceSelect }: DevicesTabProp
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [searchTerm, setSearchTerm] = useState("")
   const { toast } = useToast()
+
+  const [logoFile, setLogoFile] = useState<File | null>(null)
+  const [logoPreview, setLogoPreview] = useState<string | null>(null)
+  const [removeLogo, setRemoveLogo] = useState(false)
+  const [isCompressingLogo, setIsCompressingLogo] = useState(false)
+
+  const resetLogoDraft = useCallback(() => {
+    setLogoPreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev)
+      return null
+    })
+    setLogoFile(null)
+    setRemoveLogo(false)
+    setIsCompressingLogo(false)
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (logoPreview) URL.revokeObjectURL(logoPreview)
+    }
+  }, [logoPreview])
+
+  const handleLogoFile = async (file: File | null) => {
+    if (logoPreview) URL.revokeObjectURL(logoPreview)
+    setRemoveLogo(false)
+
+    if (!file) {
+      setLogoFile(null)
+      setLogoPreview(null)
+      return
+    }
+
+    setIsCompressingLogo(true)
+    try {
+      const compressed = file.type === "image/svg+xml" ? file : await compressBrandingLogoForUpload(file)
+      setLogoFile(compressed)
+      setLogoPreview(URL.createObjectURL(compressed))
+      if (compressed.size < file.size) {
+        notifySuccess(toast, `Reduced from ${formatBytes(file.size)} to ${formatBytes(compressed.size)}.`, "Logo optimized")
+      }
+    } catch {
+      setLogoFile(file)
+      setLogoPreview(URL.createObjectURL(file))
+    } finally {
+      setIsCompressingLogo(false)
+    }
+  }
+
+  const appendLogoToFormData = (formData: FormData) => {
+    if (logoFile) formData.append("deviceLogo", logoFile)
+    if (removeLogo) formData.append("removeLogo", "true")
+  }
 
   const currencyOptions = [
     { value: "QAR", label: "Qatari Riyal (QAR)" },
@@ -70,18 +127,10 @@ export default function DevicesTab({ companyId, onDeviceSelect }: DevicesTabProp
       if (result.success) {
         setDevices(result.data || [])
       } else {
-        toast({
-          title: "Error",
-          description: result.message || "Failed to load devices",
-          variant: "destructive",
-        })
+        notifyError(toast, result.message || "Failed to load devices")
       }
     } catch (error) {
-      toast({
-        title: "Error",
-        description: "An unexpected error occurred",
-        variant: "destructive",
-      })
+      notifyError(toast, "An unexpected error occurred")
     } finally {
       setIsLoading(false)
     }
@@ -95,14 +144,13 @@ export default function DevicesTab({ companyId, onDeviceSelect }: DevicesTabProp
     try {
       const formData = new FormData(e.currentTarget)
       formData.append("company_id", companyId.toString())
+      appendLogoToFormData(formData)
       const result = await createDevice(formData)
 
       if (result.success) {
-        toast({
-          title: "Success",
-          description: "Device added successfully",
-        })
+        notifySuccess(toast, "Device added successfully")
         setIsAddDialogOpen(false)
+        resetLogoDraft()
         fetchDevices()
       } else {
         setFormError(result.message)
@@ -125,14 +173,13 @@ export default function DevicesTab({ companyId, onDeviceSelect }: DevicesTabProp
       const formData = new FormData(e.currentTarget)
       formData.append("id", selectedDevice.id.toString())
       formData.append("company_id", companyId.toString())
+      appendLogoToFormData(formData)
       const result = await updateDevice(formData)
 
       if (result.success) {
-        toast({
-          title: "Success",
-          description: "Device updated successfully",
-        })
+        notifySuccess(toast, "Device updated successfully")
         setIsEditDialogOpen(false)
+        resetLogoDraft()
         fetchDevices()
       } else {
         setFormError(result.message)
@@ -173,7 +220,10 @@ export default function DevicesTab({ companyId, onDeviceSelect }: DevicesTabProp
             />
           </div>
           <Button
-            onClick={() => setIsAddDialogOpen(true)}
+            onClick={() => {
+              resetLogoDraft()
+              setIsAddDialogOpen(true)
+            }}
             
           >
             <Plus className="mr-2 h-4 w-4" /> ADD DEVICE
@@ -197,7 +247,7 @@ export default function DevicesTab({ companyId, onDeviceSelect }: DevicesTabProp
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-gray-200">
-                    <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Name</th>
+                    <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Device</th>
                     <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Email</th>
                     <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Currency</th>
                     <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Created</th>
@@ -208,9 +258,23 @@ export default function DevicesTab({ companyId, onDeviceSelect }: DevicesTabProp
                   {filteredDevices.map((device) => (
                     <tr key={device.id} className="border-b border-gray-200 hover:bg-gray-50/50">
                       <td className="px-4 py-3 text-sm text-gray-900">
-                        <div className="flex items-center">
-                          <Monitor className="mr-2 h-4 w-4 text-gray-600" />
-                          <span>{device.name}</span>
+                        <div className="flex items-center gap-3">
+                          <div className="relative h-9 w-9 shrink-0 overflow-hidden rounded-md border border-gray-200 bg-gray-50">
+                            {device.logo_url ? (
+                              <Image
+                                src={device.logo_url}
+                                alt=""
+                                fill
+                                className="object-contain p-0.5"
+                                unoptimized={device.logo_url.includes("blob.vercel-storage.com")}
+                              />
+                            ) : (
+                              <div className="flex h-full w-full items-center justify-center">
+                                <Monitor className="h-4 w-4 text-gray-400" />
+                              </div>
+                            )}
+                          </div>
+                          <span className="font-medium">{device.name}</span>
                         </div>
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-900">{device.email}</td>
@@ -221,15 +285,21 @@ export default function DevicesTab({ companyId, onDeviceSelect }: DevicesTabProp
                           <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() => onDeviceSelect && onDeviceSelect(device)}
+                            asChild
                             className="text-gray-500 hover:bg-gray-100 hover:text-gray-900"
                           >
-                            <Monitor className="h-4 w-4" />
+                            <Link
+                              href={`/admin/companies/${companyId}/devices/${device.id}`}
+                              aria-label={`Open ${device.name}`}
+                            >
+                              <Monitor className="h-4 w-4" />
+                            </Link>
                           </Button>
                           <Button
                             variant="ghost"
                             size="icon"
                             onClick={() => {
+                              resetLogoDraft()
                               setSelectedDevice(device)
                               setIsEditDialogOpen(true)
                             }}
@@ -249,8 +319,14 @@ export default function DevicesTab({ companyId, onDeviceSelect }: DevicesTabProp
       </Card>
 
       {/* Add Device Dialog */}
-      <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-        <DialogContent className={`${ADMIN_DIALOG_CONTENT_CLASS} sm:max-w-md`}>
+      <Dialog
+        open={isAddDialogOpen}
+        onOpenChange={(open) => {
+          setIsAddDialogOpen(open)
+          if (!open) resetLogoDraft()
+        }}
+      >
+        <DialogContent className={`${ADMIN_DIALOG_CONTENT_CLASS} sm:max-w-lg`}>
           <DialogHeader>
             <DialogTitle className="text-xl text-gray-900">Add device</DialogTitle>
             <DialogDescription className={ADMIN_DIALOG_MUTED_CLASS}>
@@ -258,12 +334,7 @@ export default function DevicesTab({ companyId, onDeviceSelect }: DevicesTabProp
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleAddDevice} className="space-y-4">
-            {formError && (
-              <Alert variant="destructive">
-                <AlertCircle className="h-4 w-4" />
-                <AlertDescription className="ml-2">{formError}</AlertDescription>
-              </Alert>
-            )}
+            {formError && <FormAlert type="error" message={formError} />}
             <div className="space-y-2">
               <Label htmlFor="name" className={ADMIN_DIALOG_LABEL_CLASS}>
                 Device Name
@@ -316,6 +387,17 @@ export default function DevicesTab({ companyId, onDeviceSelect }: DevicesTabProp
                 className={ADMIN_DIALOG_INPUT_CLASS}
               />
             </div>
+            <ImageUploadField
+              label="Device logo"
+              description="Shown on the device dashboard header and receipts. Images are resized and compressed before upload."
+              currentUrl={null}
+              previewUrl={logoPreview}
+              onFileChange={handleLogoFile}
+              onRemove={() => {
+                handleLogoFile(null)
+                setRemoveLogo(true)
+              }}
+            />
             <div className="flex justify-end space-x-2 pt-4">
               <Button
                 type="button"
@@ -327,7 +409,7 @@ export default function DevicesTab({ companyId, onDeviceSelect }: DevicesTabProp
               </Button>
               <Button
                 type="submit"
-                disabled={isSubmitting}
+                disabled={isSubmitting || isCompressingLogo}
                 
               >
                 {isSubmitting ? (
@@ -344,20 +426,21 @@ export default function DevicesTab({ companyId, onDeviceSelect }: DevicesTabProp
       </Dialog>
 
       {/* Edit Device Dialog */}
-      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent className={`${ADMIN_DIALOG_CONTENT_CLASS} sm:max-w-md`}>
+      <Dialog
+        open={isEditDialogOpen}
+        onOpenChange={(open) => {
+          setIsEditDialogOpen(open)
+          if (!open) resetLogoDraft()
+        }}
+      >
+        <DialogContent className={`${ADMIN_DIALOG_CONTENT_CLASS} sm:max-w-lg`}>
           <DialogHeader>
             <DialogTitle className="text-xl text-gray-900">Edit device</DialogTitle>
             <DialogDescription className={ADMIN_DIALOG_MUTED_CLASS}>Update device account details.</DialogDescription>
           </DialogHeader>
           {selectedDevice && (
             <form onSubmit={handleUpdateDevice} className="space-y-4">
-              {formError && (
-                <Alert variant="destructive">
-                  <AlertCircle className="h-4 w-4" />
-                  <AlertDescription className="ml-2">{formError}</AlertDescription>
-                </Alert>
-              )}
+              {formError && <FormAlert type="error" message={formError} />}
               <div className="space-y-2">
                 <Label htmlFor="edit-name" className={ADMIN_DIALOG_LABEL_CLASS}>
                   Name
@@ -414,6 +497,17 @@ export default function DevicesTab({ companyId, onDeviceSelect }: DevicesTabProp
                   
                 />
               </div>
+              <ImageUploadField
+                label="Device logo"
+                description="Shown on the device dashboard header and receipts. Images are resized and compressed before upload."
+                currentUrl={removeLogo ? null : selectedDevice.logo_url || null}
+                previewUrl={logoPreview}
+                onFileChange={handleLogoFile}
+                onRemove={() => {
+                  handleLogoFile(null)
+                  setRemoveLogo(true)
+                }}
+              />
               <div className="flex justify-end space-x-2 pt-4">
                 <Button
                   type="button"
@@ -425,7 +519,7 @@ export default function DevicesTab({ companyId, onDeviceSelect }: DevicesTabProp
                 </Button>
                 <Button
                   type="submit"
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || isCompressingLogo}
                   
                 >
                   {isSubmitting ? (

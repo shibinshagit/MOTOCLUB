@@ -223,6 +223,14 @@ export async function deleteCategory(id: number) {
       }
     }
 
+    const childCategories = await sql`SELECT id FROM product_categories WHERE parent_id = ${id}`
+    if (childCategories.length > 0) {
+      return {
+        success: false,
+        message: "Cannot delete category that has subcategories. Remove or reassign them first.",
+      }
+    }
+
     console.log("Executing DELETE query...")
     const result = await sql`DELETE FROM product_categories WHERE id = ${id} RETURNING id`
     console.log("Delete query result:", result)

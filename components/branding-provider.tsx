@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react"
 import { getPlatformBranding } from "@/app/actions/brand-actions"
+import { resolvePlatformName } from "@/lib/brand"
 import {
   EMPTY_PLATFORM_BRANDING,
   setPlatformBrandingCache,
@@ -10,12 +11,14 @@ import {
 
 type BrandingContextValue = {
   branding: PlatformBranding
+  platformName: string
   refreshBranding: () => Promise<void>
   isLoading: boolean
 }
 
 const BrandingContext = createContext<BrandingContextValue>({
   branding: EMPTY_PLATFORM_BRANDING,
+  platformName: resolvePlatformName(null),
   refreshBranding: async () => {},
   isLoading: true,
 })
@@ -50,13 +53,16 @@ export function BrandingProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  const platformName = resolvePlatformName(branding.name)
+
   const value = useMemo(
     () => ({
       branding,
+      platformName,
       refreshBranding,
       isLoading,
     }),
-    [branding, isLoading],
+    [branding, platformName, isLoading],
   )
 
   return <BrandingContext.Provider value={value}>{children}</BrandingContext.Provider>

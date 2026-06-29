@@ -758,10 +758,10 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
   return (
     <>
       <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-        <DialogContent className="max-w-full max-h-[95vh] w-[98vw] h-[95vh] overflow-hidden p-0 bg-white dark:bg-gray-900">
+        <DialogContent className="max-w-full max-h-[95vh] w-[98vw] h-[95vh] overflow-hidden p-0 bg-white">
           <div className="flex h-full flex-col">
             {/* Header */}
-            <div className="bg-gradient-to-r from-blue-600 to-blue-700 dark:from-blue-700 dark:to-blue-800 text-white p-4 flex justify-between items-center">
+            <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white p-4 flex justify-between items-center">
               <div className="flex items-center gap-2">
                 <Receipt className="h-5 w-5" />
                 <DialogTitle className="text-xl font-bold text-white">Edit Sale #{saleId}</DialogTitle>
@@ -784,31 +784,31 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
 
             {isLoading ? (
               <div className="flex justify-center items-center py-12">
-                <Loader2 className="h-8 w-8 animate-spin text-blue-600 dark:text-blue-400" />
+                <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
               </div>
             ) : error ? (
-              <div className="text-center py-8 text-red-500 dark:text-red-400">{error}</div>
+              <div className="text-center py-8 text-red-500">{error}</div>
             ) : (
               <div className="flex flex-col md:flex-row h-[calc(90vh-80px)] overflow-hidden">
                 {/* Left side - Products */}
-                <div className="md:w-2/3 flex flex-col h-full overflow-hidden border-r border-gray-200 dark:border-gray-700">
+                <div className="md:w-2/3 flex flex-col h-full overflow-hidden border-r border-gray-200">
                   {/* Barcode scanner section */}
-                  <div className="p-3 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+                  <div className="p-3 bg-gray-50 border-b border-gray-200">
                     <div className="flex items-center gap-2">
                       <div className="relative flex-1">
-                        <Barcode className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-500 dark:text-gray-400" />
+                        <Barcode className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-500" />
                         <Input
                           id="barcode-input"
                           ref={barcodeInputRef}
                           placeholder="Scan barcode or search product..."
-                          className={`pl-8 transition-all duration-200 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100 ${
+                          className={`pl-8 transition-all duration-200 ${
                             scanStatus === "processing"
-                              ? "border-yellow-500 bg-yellow-50 dark:bg-yellow-900/20"
+                              ? "border-yellow-500 bg-yellow-50"
                               : scanStatus === "success"
-                                ? "border-green-500 bg-green-50 dark:bg-green-900/20"
+                                ? "border-green-500 bg-green-50"
                                 : scanStatus === "error"
-                                  ? "border-red-500 bg-red-50 dark:bg-red-900/20"
-                                  : "border-blue-200 focus:border-blue-500 dark:border-gray-600 dark:focus:border-blue-400"
+                                  ? "border-red-500 bg-red-50"
+                                  : "border-blue-200 focus:border-blue-500"
                           }`}
                           value={barcodeInput}
                           onChange={(e) => {
@@ -874,7 +874,7 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
                           }
                         }}
                         disabled={isBarcodeProcessing || !barcodeInput}
-                        className="bg-blue-600 hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-800 text-white"
+                        className="bg-blue-600 hover:bg-blue-700 text-white"
                       >
                         Add
                       </Button>
@@ -883,41 +883,41 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
 
                   {/* Products table */}
                   <div className="flex-1 overflow-hidden flex flex-col">
-                    <div className="flex items-center justify-between p-3 bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-                      <h3 className="font-medium text-gray-800 dark:text-gray-200">Products & Services</h3>
+                    <div className="flex items-center justify-between p-3 bg-gray-100 border-b border-gray-200">
+                      <h3 className="font-medium text-gray-800">Products & Services</h3>
                       <div className="flex gap-2">
                         <Button
                           type="button"
                           variant="outline"
                           size="sm"
                           onClick={() => setIsNewServiceModalOpen(true)}
-                          className="flex items-center gap-1 border-green-300 hover:bg-green-50 dark:border-green-600 dark:hover:bg-green-900/20 dark:text-green-400"
+                          className="flex items-center gap-1 border-green-300 hover:bg-green-50"
                         >
-                          <Wrench className="h-4 w-4 text-green-600 dark:text-green-400" /> New Service
+                          <Wrench className="h-4 w-4 text-green-600" /> New Service
                         </Button>
                         <Button
                           type="button"
                           variant="outline"
                           size="sm"
                           onClick={() => setIsNewProductModalOpen(true)}
-                          className="flex items-center gap-1 border-blue-300 hover:bg-blue-50 dark:border-blue-600 dark:hover:bg-blue-900/20 dark:text-blue-400"
+                          className="flex items-center gap-1 border-blue-300 hover:bg-blue-50"
                         >
-                          <Package className="h-4 w-4 text-blue-600 dark:text-blue-400" /> New Product
+                          <Package className="h-4 w-4 text-blue-600" /> New Product
                         </Button>
                         <Button
                           type="button"
                           variant="outline"
                           size="sm"
                           onClick={addProductRow}
-                          className="flex items-center gap-1 border-blue-300 hover:bg-blue-50 dark:border-blue-600 dark:hover:bg-blue-900/20 dark:text-blue-400 bg-transparent"
+                          className="flex items-center gap-1 border-blue-300 hover:bg-blue-50 bg-transparent"
                         >
-                          <Plus className="h-4 w-4 text-blue-600 dark:text-blue-400" /> Add Row
+                          <Plus className="h-4 w-4 text-blue-600" /> Add Row
                         </Button>
                       </div>
                     </div>
 
                     <div className="flex-1 overflow-y-auto">
-                      <div className="sticky top-0 z-10 grid grid-cols-12 gap-2 p-2 bg-blue-50 dark:bg-blue-900/30 font-medium text-sm text-blue-800 dark:text-blue-200 border-b border-gray-200 dark:border-gray-600">
+                      <div className="sticky top-0 z-10 grid grid-cols-12 gap-2 p-2 bg-blue-50 font-medium text-sm text-blue-800 border-b border-gray-200">
                         <div className="col-span-3">Product/Service</div>
                         <div className="col-span-2">Notes</div>
                         <div className="col-span-1 text-center">Quantity</div>
@@ -930,27 +930,27 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
                       {products.map((product, index) => (
                         <div
                           key={product.id}
-                          className={`grid grid-cols-12 gap-2 p-2 border-b border-gray-200 dark:border-gray-600 ${
-                            index % 2 === 0 ? "bg-white dark:bg-gray-900" : "bg-gray-50 dark:bg-gray-800"
-                          } hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors`}
+                          className={`grid grid-cols-12 gap-2 p-2 border-b border-gray-200 ${
+                            index % 2 === 0 ? "bg-white" : "bg-gray-50"
+                          } hover:bg-blue-50 transition-colors`}
                         >
                           <div className="col-span-3">
                             {product.productId && product.productName ? (
                               <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-2 flex-1">
                                   {product.isService ? (
-                                    <Wrench className="h-4 w-4 text-green-600 dark:text-green-400 flex-shrink-0" />
+                                    <Wrench className="h-4 w-4 text-green-600 flex-shrink-0" />
                                   ) : (
-                                    <Package className="h-4 w-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+                                    <Package className="h-4 w-4 text-blue-600 flex-shrink-0" />
                                   )}
-                                  <span className="truncate flex-1 font-medium text-gray-900 dark:text-gray-100">
+                                  <span className="truncate flex-1 font-medium text-gray-900">
                                     {product.productName}
                                   </span>
                                 </div>
                                 <Button
                                   variant="ghost"
                                   size="sm"
-                                  className="h-8 w-8 p-0 text-gray-500 hover:text-blue-600 dark:text-gray-400 dark:hover:text-blue-400"
+                                  className="h-8 w-8 p-0 text-gray-500 hover:text-blue-600"
                                   onClick={() => {
                                     updateProductRow(product.id, {
                                       productId: null,
@@ -988,7 +988,7 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
                               onChange={(e) => {
                                 updateProductRow(product.id, { notes: e.target.value })
                               }}
-                              className="h-9 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100"
+                              className="h-9"
                             />
                           </div>
                           <div className="col-span-1">
@@ -1000,7 +1000,7 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
                                 const newQuantity = Number.parseInt(e.target.value) || 0
                                 updateProductRow(product.id, { quantity: newQuantity })
                               }}
-                              className="text-center h-9 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100"
+                              className="text-center h-9"
                             />
                           </div>
                           <div className="col-span-2">
@@ -1012,7 +1012,7 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
                               onChange={(e) =>
                                 updateProductRow(product.id, { price: Number.parseFloat(e.target.value) || 0 })
                               }
-                              className="text-center h-9 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100"
+                              className="text-center h-9"
                             />
                           </div>
                           <div className="col-span-2">
@@ -1024,10 +1024,10 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
                               onChange={(e) =>
                                 updateProductRow(product.id, { cost: Number.parseFloat(e.target.value) || 0 })
                               }
-                              className="text-center h-9 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100"
+                              className="text-center h-9"
                             />
                           </div>
-                          <div className="col-span-1 flex items-center justify-center font-medium text-gray-900 dark:text-gray-100">
+                          <div className="col-span-1 flex items-center justify-center font-medium text-gray-900">
                             {currency} {product.total.toFixed(2)}
                           </div>
                           <div className="col-span-1 flex justify-center">
@@ -1037,7 +1037,7 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
                               size="icon"
                               onClick={() => removeProductRow(product.id)}
                               disabled={products.length === 1}
-                              className="h-8 w-8 p-0 text-gray-400 hover:text-red-500 dark:text-gray-500 dark:hover:text-red-400"
+                              className="h-8 w-8 p-0 text-gray-400 hover:text-red-500"
                             >
                               <Trash2 className="h-4 w-4" />
                             </Button>
@@ -1049,8 +1049,8 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
                 </div>
 
                 {/* Right side - Sale details */}
-                <div className="md:w-1/3 flex flex-col h-full overflow-hidden bg-gray-50 dark:bg-gray-800">
-                  <div className="p-4 border-b border-gray-200 dark:border-gray-700">
+                <div className="md:w-1/3 flex flex-col h-full overflow-hidden bg-gray-50">
+                  <div className="p-4 border-b border-gray-200">
                     <div className="space-y-4">
                       {/* Customer and Staff in single row */}
                       <div className="grid grid-cols-1 gap-3">
@@ -1058,9 +1058,9 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
                         <div className="space-y-1">
                           <Label
                             htmlFor="customer"
-                            className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center"
+                            className="text-sm font-medium text-gray-700 flex items-center"
                           >
-                            <User className="h-3.5 w-3.5 mr-1 text-blue-600 dark:text-blue-400" />
+                            <User className="h-3.5 w-3.5 mr-1 text-blue-600" />
                             Customer
                           </Label>
                           <CustomerSelectSimple
@@ -1079,35 +1079,35 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
                           <div className="space-y-1">
                             <Label
                               htmlFor="staff"
-                              className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center"
+                              className="text-sm font-medium text-gray-700 flex items-center"
                             >
-                              <User className="h-3.5 w-3.5 mr-1 text-green-600 dark:text-green-400" />
+                              <User className="h-3.5 w-3.5 mr-1 text-green-600" />
                               Staff *
                             </Label>
-                            <div className="h-9 rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 flex items-center text-sm text-gray-900 dark:text-gray-100">
+                            <div className="h-9 rounded-md border border-gray-200 bg-white px-3 flex items-center text-sm text-gray-900">
                               {activeStaff?.name || "Authenticate staff from dashboard"}
                             </div>
                           </div>
 
                           <div className="space-y-1">
-                            <Label htmlFor="status" className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                            <Label htmlFor="status" className="text-sm font-medium text-gray-700">
                               Status
                             </Label>
                             <Select value={status} onValueChange={setStatus}>
-                              <SelectTrigger className="h-9 bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100">
+                              <SelectTrigger className="h-9 bg-white border-gray-300 text-gray-900">
                                 <SelectValue />
                               </SelectTrigger>
-                              <SelectContent className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-600">
-                                <SelectItem value="Completed" className="text-gray-900 dark:text-gray-100">
+                              <SelectContent className="bg-white border-gray-200">
+                                <SelectItem value="Completed" className="text-gray-900">
                                   Completed
                                 </SelectItem>
-                                <SelectItem value="Credit" className="text-gray-900 dark:text-gray-100">
+                                <SelectItem value="Credit" className="text-gray-900">
                                   Credit
                                 </SelectItem>
-                                <SelectItem value="Pending" className="text-gray-900 dark:text-gray-100">
+                                <SelectItem value="Pending" className="text-gray-900">
                                   Pending
                                 </SelectItem>
-                                <SelectItem value="Cancelled" className="text-gray-900 dark:text-gray-100">
+                                <SelectItem value="Cancelled" className="text-gray-900">
                                   Cancelled
                                 </SelectItem>
                               </SelectContent>
@@ -1115,7 +1115,7 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
                           </div>
 
                           <div className="space-y-1">
-                            <Label htmlFor="date" className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                            <Label htmlFor="date" className="text-sm font-medium text-gray-700">
                               Date
                             </Label>
                             <Popover>
@@ -1123,7 +1123,7 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
                                 <Button
                                   variant="outline"
                                   className={cn(
-                                    "w-full h-9 justify-start text-left font-normal bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 text-xs",
+                                    "w-full h-9 justify-start text-left font-normal bg-white border-gray-300 text-gray-900 text-xs",
                                     !date && "text-muted-foreground",
                                   )}
                                 >
@@ -1132,7 +1132,7 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
                                 </Button>
                               </PopoverTrigger>
                               <PopoverContent
-                                className="w-auto p-0 bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-600"
+                                className="w-auto p-0 bg-white border-gray-200"
                                 align="start"
                               >
                                 <Calendar
@@ -1140,7 +1140,7 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
                                   selected={date}
                                   onSelect={(newDate) => newDate && setDate(newDate)}
                                   initialFocus
-                                  className="dark:bg-gray-800"
+                                  className=""
                                 />
                               </PopoverContent>
                             </Popover>
@@ -1152,7 +1152,7 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
                           <div className="space-y-1">
                             <Label
                               htmlFor="received_amount"
-                              className="text-sm font-medium text-gray-700 dark:text-gray-300"
+                              className="text-sm font-medium text-gray-700"
                             >
                               Received Amount
                             </Label>
@@ -1164,10 +1164,10 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
                               step="0.01"
                               value={receivedAmount}
                               onChange={(e) => setReceivedAmount(Number.parseFloat(e.target.value) || 0)}
-                              className="h-9 bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100"
+                              className="h-9 bg-white border-gray-300 text-gray-900"
                               placeholder="0.00"
                             />
-                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                            <p className="text-xs text-gray-500">
                               Remaining: {currency} {(totalAmount - receivedAmount).toFixed(2)}
                             </p>
                           </div>
@@ -1179,9 +1179,9 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
                         <div className="space-y-2">
                           <Label
                             htmlFor="payment-method"
-                            className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center"
+                            className="text-sm font-medium text-gray-700 flex items-center"
                           >
-                            <CreditCard className="h-3.5 w-3.5 mr-1 text-blue-600 dark:text-blue-400" />
+                            <CreditCard className="h-3.5 w-3.5 mr-1 text-blue-600" />
                             Payment Method
                           </Label>
                           <RadioGroup
@@ -1190,23 +1190,23 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
                             className="grid grid-cols-3 gap-2"
                             id="payment-method"
                           >
-                            <div className="flex items-center space-x-2 bg-white dark:bg-gray-700 p-2 rounded-md border border-gray-200 dark:border-gray-600">
+                            <div className="flex items-center space-x-2 bg-white p-2 rounded-md border border-gray-200">
                               <RadioGroupItem value="Cash" id="cash" />
-                              <Label htmlFor="cash" className="cursor-pointer text-gray-700 dark:text-gray-300 text-sm">
+                              <Label htmlFor="cash" className="cursor-pointer text-gray-700 text-sm">
                                 Cash
                               </Label>
                             </div>
-                            <div className="flex items-center space-x-2 bg-white dark:bg-gray-700 p-2 rounded-md border border-gray-200 dark:border-gray-600">
+                            <div className="flex items-center space-x-2 bg-white p-2 rounded-md border border-gray-200">
                               <RadioGroupItem value="Card" id="card" />
-                              <Label htmlFor="card" className="cursor-pointer text-gray-700 dark:text-gray-300 text-sm">
+                              <Label htmlFor="card" className="cursor-pointer text-gray-700 text-sm">
                                 Card
                               </Label>
                             </div>
-                            <div className="flex items-center space-x-2 bg-white dark:bg-gray-700 p-2 rounded-md border border-gray-200 dark:border-gray-600">
+                            <div className="flex items-center space-x-2 bg-white p-2 rounded-md border border-gray-200">
                               <RadioGroupItem value="Online" id="online" />
                               <Label
                                 htmlFor="online"
-                                className="cursor-pointer text-gray-700 dark:text-gray-300 text-sm"
+                                className="cursor-pointer text-gray-700 text-sm"
                               >
                                 Online
                               </Label>
@@ -1219,20 +1219,20 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
 
                   {/* Sale summary */}
                   <div className="flex-1 p-4 flex flex-col overflow-y-auto">
-                    <Card className="bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700">
-                      <CardHeader className="p-3 bg-blue-50 dark:bg-blue-900/30 border-b border-gray-200 dark:border-gray-700">
-                        <h3 className="font-medium text-blue-800 dark:text-blue-200">Sale Summary</h3>
+                    <Card className="bg-white border-gray-200">
+                      <CardHeader className="p-3 bg-blue-50 border-b border-gray-200">
+                        <h3 className="font-medium text-blue-800">Sale Summary</h3>
                       </CardHeader>
                       <CardContent className="p-4 space-y-3">
-                        <div className="flex justify-between items-center py-2 text-gray-700 dark:text-gray-300">
+                        <div className="flex justify-between items-center py-2 text-gray-700">
                           <span className="font-medium">Subtotal:</span>
                           <span className="text-lg">
                             {currency} {(typeof subtotal === "number" ? subtotal : 0).toFixed(2)}
                           </span>
                         </div>
 
-                        <div className="flex justify-between items-center py-2 border-t border-gray-200 dark:border-gray-700">
-                          <span className="font-medium text-gray-700 dark:text-gray-300">Discount:</span>
+                        <div className="flex justify-between items-center py-2 border-t border-gray-200">
+                          <span className="font-medium text-gray-700">Discount:</span>
                           <div className="w-28">
                             <Input
                               type="number"
@@ -1240,14 +1240,14 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
                               step="0.01"
                               value={discountAmount}
                               onChange={(e) => setDiscountAmount(Number.parseFloat(e.target.value) || 0)}
-                              className="text-right h-8 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100"
+                              className="text-right h-8"
                             />
                           </div>
                         </div>
 
-                        <div className="flex justify-between items-center py-3 border-t border-gray-200 dark:border-gray-700 bg-blue-50 dark:bg-blue-900/30 p-3 rounded-md">
-                          <span className="font-bold text-blue-800 dark:text-blue-200 text-lg">Total Amount:</span>
-                          <div className="font-bold text-blue-800 dark:text-blue-200 text-xl">
+                        <div className="flex justify-between items-center py-3 border-t border-gray-200 bg-blue-50 p-3 rounded-md">
+                          <span className="font-bold text-blue-800 text-lg">Total Amount:</span>
+                          <div className="font-bold text-blue-800 text-xl">
                             {currency} {(typeof totalAmount === "number" ? totalAmount : 0).toFixed(2)}
                           </div>
                         </div>
@@ -1259,7 +1259,7 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
                       <Button
                         onClick={handleSubmit}
                         disabled={isSubmitting}
-                        className="w-full bg-blue-600 hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-800 text-white h-auto py-3"
+                        className="w-full bg-blue-600 hover:bg-blue-700 text-white h-auto py-3"
                       >
                         {isSubmitting ? (
                           <span className="flex items-center justify-center">
@@ -1307,20 +1307,20 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
 
       {/* Not Found Product Modal */}
       <Dialog open={isNotFoundModalOpen} onOpenChange={setIsNotFoundModalOpen}>
-        <DialogContent className="max-w-md bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700">
+        <DialogContent className="max-w-md bg-white border-gray-200">
           <DialogHeader>
-            <DialogTitle className="text-gray-900 dark:text-gray-100">Add New Product</DialogTitle>
+            <DialogTitle className="text-gray-900">Add New Product</DialogTitle>
           </DialogHeader>
           <div className="py-4">
             <FormAlert type="error" message="No product found with this barcode" className="mb-4" />
-            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+            <p className="text-sm text-gray-600 mb-4">
               Would you like to add a new product with this barcode?
             </p>
             <div className="flex justify-end gap-2 mt-4">
               <Button
                 variant="outline"
                 onClick={() => setIsNotFoundModalOpen(false)}
-                className="border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300"
+                className="border-gray-300 text-gray-700"
               >
                 Cancel
               </Button>
@@ -1329,7 +1329,7 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
                   setIsNotFoundModalOpen(false)
                   setIsNewProductModalOpen(true)
                 }}
-                className="bg-blue-600 hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-800 text-white"
+                className="bg-blue-600 hover:bg-blue-700 text-white"
               >
                 Add New Product
               </Button>

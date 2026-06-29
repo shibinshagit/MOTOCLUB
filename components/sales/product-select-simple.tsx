@@ -279,7 +279,7 @@ export default function ProductSelectSimple({
         variant="outline"
         role="combobox"
         aria-expanded={open}
-        className="w-full justify-between h-9 bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100"
+        className="w-full justify-between h-9 bg-white border-gray-300 text-gray-900"
         type="button"
         onClick={handleDialogOpen}
       >
@@ -287,9 +287,9 @@ export default function ProductSelectSimple({
           {selectedProduct ? (
             <>
               {isServiceMode || (selectedProduct && "category" in selectedProduct) ? (
-                <Wrench className="mr-2 h-4 w-4 text-green-600 dark:text-green-400 flex-shrink-0" />
+                <Wrench className="mr-2 h-4 w-4 text-green-600 flex-shrink-0" />
               ) : (
-                <Package className="mr-2 h-4 w-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+                <Package className="mr-2 h-4 w-4 text-blue-600 flex-shrink-0" />
               )}
               <span className="truncate" title={selectedProduct.name}>
                 {truncateName(selectedProduct.name)}
@@ -298,9 +298,9 @@ export default function ProductSelectSimple({
           ) : (
             <>
               {isServiceMode ? (
-                <Wrench className="mr-2 h-4 w-4 text-green-600 dark:text-green-400 flex-shrink-0" />
+                <Wrench className="mr-2 h-4 w-4 text-green-600 flex-shrink-0" />
               ) : (
-                <Package className="mr-2 h-4 w-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+                <Package className="mr-2 h-4 w-4 text-blue-600 flex-shrink-0" />
               )}
               <span className="truncate">Select {isServiceMode ? "service" : "product"}...</span>
             </>
@@ -310,20 +310,20 @@ export default function ProductSelectSimple({
       </Button>
 
       <Dialog open={open} onOpenChange={handleDialogClose}>
-        <DialogContent className="sm:max-w-md p-0 gap-0 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
-          <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 p-4 bg-gray-50 dark:bg-gray-700">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+        <DialogContent className="sm:max-w-md p-0 gap-0 bg-white border border-gray-200">
+          <div className="flex items-center justify-between border-b border-gray-200 p-4 bg-gray-50">
+            <h2 className="text-lg font-semibold text-gray-900">
               Select {isServiceMode ? "Service" : "Product"}
             </h2>
           </div>
 
-          <div className="p-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+          <div className="p-4 border-b border-gray-200 bg-white">
             <div className="space-y-3">
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500 dark:text-gray-400" />
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
                 <Input
                   placeholder={`Search ${isServiceMode ? "services" : "products"}...`}
-                  className="pl-9 bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100"
+                  className="pl-9 bg-white border-gray-300 text-gray-900"
                   value={localSearchTerm}
                   onChange={(e) => setLocalSearchTerm(e.target.value)}
                   autoFocus
@@ -346,7 +346,7 @@ export default function ProductSelectSimple({
                   <Switch id="service-mode" checked={isServiceMode} onCheckedChange={handleModeSwitch} />
                   <Label
                     htmlFor="service-mode"
-                    className="flex items-center gap-2 cursor-pointer text-gray-700 dark:text-gray-300"
+                    className="flex items-center gap-2 cursor-pointer text-gray-700"
                   >
                     {isServiceMode ? (
                       <>
@@ -365,28 +365,28 @@ export default function ProductSelectSimple({
             </div>
           </div>
 
-          <div className="max-h-[300px] overflow-y-auto bg-white dark:bg-gray-800">
+          <div className="max-h-[300px] overflow-y-auto bg-white">
             {loading ? (
               <div className="py-8 text-center">
                 <Loader2 className="h-6 w-6 animate-spin mx-auto text-blue-600" />
-                <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
+                <p className="text-sm text-gray-500 mt-2">
                   Searching {isServiceMode ? "services" : "products"}...
                 </p>
               </div>
             ) : !hasSearched && !isServiceMode && localSearchTerm.trim() === "" ? (
               <div className="p-4 text-center">
                 <Search className="h-8 w-8 mx-auto text-gray-400 mb-2" />
-                <p className="text-sm text-gray-500 dark:text-gray-400">Start typing to search products...</p>
+                <p className="text-sm text-gray-500">Start typing to search products...</p>
               </div>
             ) : filteredItems.length === 0 ? (
               <div className="p-4 text-center">
-                <p className="py-3 text-sm text-gray-500 dark:text-gray-400">
+                <p className="py-3 text-sm text-gray-500">
                   No {isServiceMode ? "services" : "products"} found.
                 </p>
               </div>
             ) : (
               <div className="p-1">
-                <div className="text-xs font-medium text-gray-500 dark:text-gray-400 px-3 py-2">
+                <div className="text-xs font-medium text-gray-500 px-3 py-2">
                   {isServiceMode ? "Services" : "Products"} ({filteredItems.length}
                   {!isServiceMode && filteredItems.length === searchBufferSize ? "+" : ""})
                 </div>
@@ -396,8 +396,8 @@ export default function ProductSelectSimple({
                       key={item.id}
                       type="button"
                       className={cn(
-                        "relative flex w-full cursor-pointer select-none items-center rounded-md px-3 py-2 text-sm outline-none hover:bg-gray-100 dark:hover:bg-gray-700 text-left text-gray-900 dark:text-gray-100 font-normal",
-                        value === item.id && "bg-blue-50 dark:bg-blue-900/20"
+                        "relative flex w-full cursor-pointer select-none items-center rounded-md px-3 py-2 text-sm outline-none hover:bg-gray-100 text-left text-gray-900 font-normal",
+                        value === item.id && "bg-blue-50"
                       )}
                       onClick={() =>
                         handleItemSelect(
@@ -412,15 +412,15 @@ export default function ProductSelectSimple({
                       <Check className={cn("mr-2 h-4 w-4", value === item.id ? "opacity-100" : "opacity-0")} />
                       <div className="flex items-center gap-2 flex-1">
                         {isServiceMode ? (
-                          <Wrench className="h-4 w-4 text-green-600 dark:text-green-400 flex-shrink-0" />
+                          <Wrench className="h-4 w-4 text-green-600 flex-shrink-0" />
                         ) : (
-                          <Package className="h-4 w-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+                          <Package className="h-4 w-4 text-blue-600 flex-shrink-0" />
                         )}
                         <div className="flex flex-col flex-1 min-w-0">
-                          <span className="text-gray-900 dark:text-gray-100 truncate" title={item.name}>
+                          <span className="text-gray-900 truncate" title={item.name}>
                             {item.name}
                           </span>
-                          <span className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                          <span className="text-xs text-gray-500 truncate">
                             {!isServiceMode && item.company_name && `Company: ${item.company_name} • `}
                             Price: {item.price}
                             {!isServiceMode && item.wholesale_price > 0 && ` • Wholesale: ${item.wholesale_price}`}
@@ -437,10 +437,10 @@ export default function ProductSelectSimple({
             )}
           </div>
 
-          <div className="border-t border-gray-200 dark:border-gray-700 p-4 bg-gray-50 dark:bg-gray-700">
+          <div className="border-t border-gray-200 p-4 bg-gray-50">
             <Button
               variant="outline"
-              className="w-full border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 bg-transparent"
+              className="w-full border-gray-300 text-gray-700 hover:bg-gray-100 bg-transparent"
               onClick={handleAddNew}
             >
               <Plus className="mr-2 h-4 w-4" />

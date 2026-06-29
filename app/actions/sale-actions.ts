@@ -1,9 +1,118 @@
 "use server"
 
+import { addDays, parseISO, format } from "date-fns"
 import { sql, getLastError, resetConnectionState, executeWithRetry } from "@/lib/db"
 import { revalidatePath } from "next/cache"
-import { recordSaleTransaction, recordSaleAdjustment, deleteSaleTransaction } from "./simplified-accounting"
+import { recordSaleTransaction, recordSaleAdjustment, deleteSaleTransaction, syncSaleShippingTransactions } from "./simplified-accounting"
 import { filterSalesForStaff } from "@/lib/staff-restrictions-server"
+import { normalizeSaleShippingInput } from "@/lib/sale-shipping"
+
+function getShippingAmounts(shipping: ReturnType<typeof normalizeSaleShippingInput>) {
+  if (shipping.fulfillment_type !== "ship") {
+    return { courierPaidExtra: 0, expenseCourier: 0, expensePacking: 0 }
+  }
+
+  return {
+    courierPaidExtra: Number(shipping.courier_paid_extra) || 0,
+    expenseCourier: Number(shipping.expense_courier) || 0,
+    expensePacking: Number(shipping.expense_packing) || 0,
+  }
+}
+
+async function resolveCourierServiceName(
+  deviceId: number,
+  courierServiceId?: number | null,
+  fallbackName?: string | null,
+) {
+  if (fallbackName?.trim()) return fallbackName.trim()
+  if (!courierServiceId || !deviceId) return null
+
+  const rows = await sql`
+    SELECT name
+    FROM master_data
+    WHERE id = ${courierServiceId}
+      AND device_id = ${deviceId}
+    LIMIT 1
+  `
+
+  return rows[0]?.name || null
+}
+
+async function resolvePackagingTypeName(
+  deviceId: number,
+  packagingTypeId?: number | null,
+  fallbackName?: string | null,
+) {
+  if (fallbackName?.trim()) return fallbackName.trim()
+  if (!packagingTypeId || !deviceId) return null
+
+  const rows = await sql`
+    SELECT name
+    FROM master_data
+    WHERE id = ${packagingTypeId}
+      AND device_id = ${deviceId}
+    LIMIT 1
+  `
+
+  return rows[0]?.name || null
+}
+
+async function buildShippingFieldsForSave(saleData: any, deviceId: number, existing?: any) {
+  const normalized = normalizeSaleShippingInput(saleData)
+
+  if (normalized.fulfillment_type === "ship") {
+    normalized.courier_service_name = await resolveCourierServiceName(
+      deviceId,
+      normalized.courier_service_id,
+      normalized.courier_service_name,
+    )
+    normalized.packaging_type_name = await resolvePackagingTypeName(
+      deviceId,
+      normalized.packaging_type_id,
+      normalized.packaging_type_name,
+    )
+
+    if (existing?.shipped_at) {
+      normalized.shipped_at = existing.shipped_at
+    }
+    if (existing?.delivered_at) {
+      normalized.delivered_at = existing.delivered_at
+    }
+
+    if (
+      ["Shipped", "In transit", "Delivered"].includes(String(normalized.delivery_status)) &&
+      !normalized.shipped_at
+    ) {
+      normalized.shipped_at = new Date().toISOString()
+    }
+    if (normalized.delivery_status === "Delivered" && !normalized.delivered_at) {
+      normalized.delivered_at = new Date().toISOString()
+    }
+  }
+
+  return normalized
+}
+
+function shippingFieldsChanged(original: any, shipping: ReturnType<typeof normalizeSaleShippingInput>) {
+  return (
+    (original.fulfillment_type || "pickup") !== shipping.fulfillment_type ||
+    (original.delivery_status || null) !== shipping.delivery_status ||
+    (original.courier_service_id || null) !== shipping.courier_service_id ||
+    (original.courier_service_name || null) !== shipping.courier_service_name ||
+    (original.packaging_type_id || null) !== shipping.packaging_type_id ||
+    (original.packaging_type_name || null) !== shipping.packaging_type_name ||
+    (original.tracking_id || null) !== shipping.tracking_id ||
+    (original.shipping_address || null) !== shipping.shipping_address ||
+    Number(original.weight_kg || 0) !== Number(shipping.weight_kg || 0) ||
+    Number(original.length_cm || 0) !== Number(shipping.length_cm || 0) ||
+    Number(original.width_cm || 0) !== Number(shipping.width_cm || 0) ||
+    Number(original.height_cm || 0) !== Number(shipping.height_cm || 0) ||
+    Number(original.courier_paid_extra || 0) !== Number(shipping.courier_paid_extra || 0) ||
+    Number(original.expense_courier || 0) !== Number(shipping.expense_courier || 0) ||
+    Number(original.expense_packing || 0) !== Number(shipping.expense_packing || 0) ||
+    (original.shipping_notes || null) !== shipping.shipping_notes
+  )
+}
 
 // Helper function to safely update product stock with proper validation
 async function updateProductStock(
@@ -153,105 +262,194 @@ async function calculateCOGS(items: any[], saleId?: number) {
   return totalCogs
 }
 
-export async function getUserSales(deviceId: number, limit?: number, searchTerm?: string) {
+export type GetUserSalesOptions = {
+  limit?: number
+  searchTerm?: string
+  dateFrom?: string
+  dateTo?: string
+}
+
+function getExclusiveEndDate(dateTo: string): string {
+  return format(addDays(parseISO(dateTo), 1), "yyyy-MM-dd")
+}
+
+async function queryDeviceSales(deviceId: number, options: GetUserSalesOptions = {}) {
+  const { limit, searchTerm, dateFrom, dateTo } = options
+  const searchPattern = searchTerm?.trim() ? `%${searchTerm.trim().toLowerCase()}%` : null
+  const endExclusive = dateTo ? getExclusiveEndDate(dateTo) : null
+
+  if (dateFrom && endExclusive && !searchPattern && !limit) {
+    return sql`
+      SELECT s.*, c.name as customer_name, st.name as staff_name,
+      COALESCE(
+        (SELECT SUM(si.quantity * COALESCE(si.cost, si.wholesale_price, 0))
+         FROM sale_items si 
+         WHERE si.sale_id = s.id), 0
+      ) as total_cost
+      FROM sales s
+      LEFT JOIN customers c ON s.customer_id = c.id
+      LEFT JOIN staff st ON s.staff_id = st.id
+      WHERE s.device_id = ${deviceId}
+        AND s.sale_date >= ${dateFrom}
+        AND s.sale_date < ${endExclusive}
+      ORDER BY s.sale_date DESC, s.id DESC
+    `
+  }
+
+  if (dateFrom && endExclusive && searchPattern && limit) {
+    return sql`
+      SELECT s.*, c.name as customer_name, st.name as staff_name,
+      COALESCE(
+        (SELECT SUM(si.quantity * COALESCE(si.cost, si.wholesale_price, 0))
+         FROM sale_items si 
+         WHERE si.sale_id = s.id), 0
+      ) as total_cost
+      FROM sales s
+      LEFT JOIN customers c ON s.customer_id = c.id
+      LEFT JOIN staff st ON s.staff_id = st.id
+      WHERE s.device_id = ${deviceId}
+        AND s.sale_date >= ${dateFrom}
+        AND s.sale_date < ${endExclusive}
+        AND (
+          LOWER(c.name) LIKE ${searchPattern}
+          OR CAST(s.id AS TEXT) LIKE ${searchPattern}
+          OR LOWER(s.status) LIKE ${searchPattern}
+          OR CAST(s.total_amount AS TEXT) LIKE ${searchPattern}
+        )
+      ORDER BY s.sale_date DESC, s.id DESC
+      LIMIT ${limit}
+    `
+  }
+
+  if (dateFrom && endExclusive && searchPattern) {
+    return sql`
+      SELECT s.*, c.name as customer_name, st.name as staff_name,
+      COALESCE(
+        (SELECT SUM(si.quantity * COALESCE(si.cost, si.wholesale_price, 0))
+         FROM sale_items si 
+         WHERE si.sale_id = s.id), 0
+      ) as total_cost
+      FROM sales s
+      LEFT JOIN customers c ON s.customer_id = c.id
+      LEFT JOIN staff st ON s.staff_id = st.id
+      WHERE s.device_id = ${deviceId}
+        AND s.sale_date >= ${dateFrom}
+        AND s.sale_date < ${endExclusive}
+        AND (
+          LOWER(c.name) LIKE ${searchPattern}
+          OR CAST(s.id AS TEXT) LIKE ${searchPattern}
+          OR LOWER(s.status) LIKE ${searchPattern}
+          OR CAST(s.total_amount AS TEXT) LIKE ${searchPattern}
+        )
+      ORDER BY s.sale_date DESC, s.id DESC
+    `
+  }
+
+  if (dateFrom && endExclusive && limit) {
+    return sql`
+      SELECT s.*, c.name as customer_name, st.name as staff_name,
+      COALESCE(
+        (SELECT SUM(si.quantity * COALESCE(si.cost, si.wholesale_price, 0))
+         FROM sale_items si 
+         WHERE si.sale_id = s.id), 0
+      ) as total_cost
+      FROM sales s
+      LEFT JOIN customers c ON s.customer_id = c.id
+      LEFT JOIN staff st ON s.staff_id = st.id
+      WHERE s.device_id = ${deviceId}
+        AND s.sale_date >= ${dateFrom}
+        AND s.sale_date < ${endExclusive}
+      ORDER BY s.sale_date DESC, s.id DESC
+      LIMIT ${limit}
+    `
+  }
+
+  if (searchPattern && limit) {
+    return sql`
+      SELECT s.*, c.name as customer_name, st.name as staff_name,
+      COALESCE(
+        (SELECT SUM(si.quantity * COALESCE(si.cost, si.wholesale_price, 0))
+         FROM sale_items si 
+         WHERE si.sale_id = s.id), 0
+      ) as total_cost
+      FROM sales s
+      LEFT JOIN customers c ON s.customer_id = c.id
+      LEFT JOIN staff st ON s.staff_id = st.id
+      WHERE s.device_id = ${deviceId}
+        AND (
+          LOWER(c.name) LIKE ${searchPattern}
+          OR CAST(s.id AS TEXT) LIKE ${searchPattern}
+          OR LOWER(s.status) LIKE ${searchPattern}
+          OR CAST(s.total_amount AS TEXT) LIKE ${searchPattern}
+        )
+      ORDER BY s.sale_date DESC, s.id DESC
+      LIMIT ${limit}
+    `
+  }
+
+  if (searchPattern) {
+    return sql`
+      SELECT s.*, c.name as customer_name, st.name as staff_name,
+      COALESCE(
+        (SELECT SUM(si.quantity * COALESCE(si.cost, si.wholesale_price, 0))
+         FROM sale_items si 
+         WHERE si.sale_id = s.id), 0
+      ) as total_cost
+      FROM sales s
+      LEFT JOIN customers c ON s.customer_id = c.id
+      LEFT JOIN staff st ON s.staff_id = st.id
+      WHERE s.device_id = ${deviceId}
+        AND (
+          LOWER(c.name) LIKE ${searchPattern}
+          OR CAST(s.id AS TEXT) LIKE ${searchPattern}
+          OR LOWER(s.status) LIKE ${searchPattern}
+          OR CAST(s.total_amount AS TEXT) LIKE ${searchPattern}
+        )
+      ORDER BY s.sale_date DESC, s.id DESC
+    `
+  }
+
+  if (limit) {
+    return sql`
+      SELECT s.*, c.name as customer_name, st.name as staff_name,
+      COALESCE(
+        (SELECT SUM(si.quantity * COALESCE(si.cost, si.wholesale_price, 0))
+         FROM sale_items si 
+         WHERE si.sale_id = s.id), 0
+      ) as total_cost
+      FROM sales s
+      LEFT JOIN customers c ON s.customer_id = c.id
+      LEFT JOIN staff st ON s.staff_id = st.id
+      WHERE s.device_id = ${deviceId}
+      ORDER BY s.sale_date DESC, s.id DESC
+      LIMIT ${limit}
+    `
+  }
+
+  return sql`
+    SELECT s.*, c.name as customer_name, st.name as staff_name,
+    COALESCE(
+      (SELECT SUM(si.quantity * COALESCE(si.cost, si.wholesale_price, 0))
+       FROM sale_items si 
+       WHERE si.sale_id = s.id), 0
+    ) as total_cost
+    FROM sales s
+    LEFT JOIN customers c ON s.customer_id = c.id
+    LEFT JOIN staff st ON s.staff_id = st.id
+    WHERE s.device_id = ${deviceId}
+    ORDER BY s.sale_date DESC, s.id DESC
+  `
+}
+
+export async function getUserSales(deviceId: number, options: GetUserSalesOptions = {}) {
   if (!deviceId) {
     return { success: false, message: "Device ID is required", data: [] }
   }
 
-  // Reset connection state to allow a fresh attempt
   resetConnectionState()
 
   try {
-    let sales
-
-    // In getUserSales function, update the sales query to include staff information and fix cost calculation:
-    if (searchTerm && searchTerm.trim() !== "") {
-      // Search query - search across customer name, sale ID, and status
-      const searchPattern = `%${searchTerm.toLowerCase()}%`
-
-      if (limit) {
-        sales = await executeWithRetry(async () => {
-          return await sql`
-            SELECT s.*, c.name as customer_name, st.name as staff_name,
-            COALESCE(
-              (SELECT SUM(si.quantity * COALESCE(si.cost, si.wholesale_price, 0))
-               FROM sale_items si 
-               WHERE si.sale_id = s.id), 0
-            ) as total_cost
-            FROM sales s
-            LEFT JOIN customers c ON s.customer_id = c.id
-            LEFT JOIN staff st ON s.staff_id = st.id
-            WHERE s.device_id = ${deviceId}
-            AND (
-              LOWER(c.name) LIKE ${searchPattern}
-              OR CAST(s.id AS TEXT) LIKE ${searchPattern}
-              OR LOWER(s.status) LIKE ${searchPattern}
-              OR CAST(s.total_amount AS TEXT) LIKE ${searchPattern}
-            )
-            ORDER BY s.sale_date DESC
-            LIMIT ${limit}
-          `
-        })
-      } else {
-        sales = await executeWithRetry(async () => {
-          return await sql`
-            SELECT s.*, c.name as customer_name, st.name as staff_name,
-            COALESCE(
-              (SELECT SUM(si.quantity * COALESCE(si.cost, si.wholesale_price, 0))
-               FROM sale_items si 
-               WHERE si.sale_id = s.id), 0
-            ) as total_cost
-            FROM sales s
-            LEFT JOIN customers c ON s.customer_id = c.id
-            LEFT JOIN staff st ON s.staff_id = st.id
-            WHERE s.device_id = ${deviceId}
-            AND (
-              LOWER(c.name) LIKE ${searchPattern}
-              OR CAST(s.id AS TEXT) LIKE ${searchPattern}
-              OR LOWER(s.status) LIKE ${searchPattern}
-              OR CAST(s.total_amount AS TEXT) LIKE ${searchPattern}
-            )
-            ORDER BY s.sale_date DESC
-          `
-        })
-      }
-    } else {
-      // Regular query without search
-      if (limit) {
-        sales = await executeWithRetry(async () => {
-          return await sql`
-            SELECT s.*, c.name as customer_name, st.name as staff_name,
-            COALESCE(
-              (SELECT SUM(si.quantity * COALESCE(si.cost, si.wholesale_price, 0))
-               FROM sale_items si 
-               WHERE si.sale_id = s.id), 0
-            ) as total_cost
-            FROM sales s
-            LEFT JOIN customers c ON s.customer_id = c.id
-            LEFT JOIN staff st ON s.staff_id = st.id
-            WHERE s.device_id = ${deviceId}
-            ORDER BY s.sale_date DESC
-            LIMIT ${limit}
-          `
-        })
-      } else {
-        sales = await executeWithRetry(async () => {
-          return await sql`
-            SELECT s.*, c.name as customer_name, st.name as staff_name,
-            COALESCE(
-              (SELECT SUM(si.quantity * COALESCE(si.cost, si.wholesale_price, 0))
-               FROM sale_items si 
-               WHERE si.sale_id = s.id), 0
-            ) as total_cost
-            FROM sales s
-            LEFT JOIN customers c ON s.customer_id = c.id
-            LEFT JOIN staff st ON s.staff_id = st.id
-            WHERE s.device_id = ${deviceId}
-            ORDER BY s.sale_date DESC
-          `
-        })
-      }
-    }
+    const sales = await executeWithRetry(async () => queryDeviceSales(deviceId, options))
 
     return { success: true, data: await filterSalesForStaff(sales, deviceId) }
   } catch (error) {
@@ -281,10 +479,12 @@ export async function getSaleDetails(saleId: number) {
           c.phone as customer_phone,
           c.email as customer_email,
           c.address as customer_address,
-          st.name as staff_name
+          st.name as staff_name,
+          md.tracking_url_template as tracking_url_template
         FROM sales s
         LEFT JOIN customers c ON s.customer_id = c.id
         LEFT JOIN staff st ON s.staff_id = st.id
+        LEFT JOIN master_data md ON md.id = s.courier_service_id
         WHERE s.id = ${saleId}
       `
     })
@@ -374,217 +574,264 @@ export async function getSaleDetails(saleId: number) {
 
 // FIXED addSale function with proper partial payment support for credit sales
 export async function addSale(saleData: any) {
+  let saleId: number | null = null
+
   try {
     console.log("Adding sale with data:", JSON.stringify(saleData, null, 2))
 
-    // Start transaction
-    await sql`BEGIN`
+    // Calculate totals once
+    const subtotal = saleData.items.reduce(
+      (sum: number, item: any) => sum + Number.parseFloat(item.price) * Number.parseInt(item.quantity),
+      0,
+    )
+    const discountAmount = Number(saleData.discount) || 0
+    const shipping = await buildShippingFieldsForSave(saleData, saleData.deviceId)
+    const { courierPaidExtra, expenseCourier, expensePacking } = getShippingAmounts(shipping)
+    const productTotal = Math.max(0, subtotal - discountAmount)
+    const total = productTotal + courierPaidExtra
 
-    try {
-      // Calculate totals once
-      const subtotal = saleData.items.reduce(
-        (sum: number, item: any) => sum + Number.parseFloat(item.price) * Number.parseInt(item.quantity),
-        0,
-      )
-      const discountAmount = Number(saleData.discount) || 0
-      const total = Math.max(0, subtotal - discountAmount)
+    // 🚨 FIXED: Handle received amount based on status - PROPER partial payment support for credit sales
+    let receivedAmount = 0
+    const isCompleted = saleData.paymentStatus?.toLowerCase() === "completed"
+    const isCancelled = saleData.paymentStatus?.toLowerCase() === "cancelled"
+    const isCredit = saleData.paymentStatus?.toLowerCase() === "credit"
 
-      // 🚨 FIXED: Handle received amount based on status - PROPER partial payment support for credit sales
-      let receivedAmount = 0
-      const isCompleted = saleData.paymentStatus?.toLowerCase() === "completed"
-      const isCancelled = saleData.paymentStatus?.toLowerCase() === "cancelled"
-      const isCredit = saleData.paymentStatus?.toLowerCase() === "credit"
+    if (isCompleted) {
+      // Completed sales: full amount received
+      receivedAmount = total
+      console.log(`✅ COMPLETED SALE: received_amount = total_amount = ${total}`)
+    } else if (isCancelled) {
+      // Cancelled sales: no payment received
+      receivedAmount = 0
+      console.log(`❌ CANCELLED SALE: received_amount = 0`)
+    } else if (isCredit) {
+      // 🚨 FIXED: Credit sales can have partial payments
+      // Use the receivedAmount from frontend, but validate it
+      const requestedReceived = Number(saleData.receivedAmount) || 0
 
-      if (isCompleted) {
-        // Completed sales: full amount received
-        receivedAmount = total
-        console.log(`✅ COMPLETED SALE: received_amount = total_amount = ${total}`)
-      } else if (isCancelled) {
-        // Cancelled sales: no payment received
-        receivedAmount = 0
-        console.log(`❌ CANCELLED SALE: received_amount = 0`)
-      } else if (isCredit) {
-        // 🚨 FIXED: Credit sales can have partial payments
-        // Use the receivedAmount from frontend, but validate it
-        const requestedReceived = Number(saleData.receivedAmount) || 0
-        
-        if (requestedReceived > total) {
-          receivedAmount = total // Cap at total amount
-          console.warn(`⚠️ Received amount ${requestedReceived} capped to total ${total}`)
-        } else {
-          receivedAmount = requestedReceived
-        }
-        
-        console.log(`🔄 CREDIT SALE: Total=${total}, Received=${receivedAmount}, Outstanding=${total - receivedAmount}`)
+      if (requestedReceived > total) {
+        receivedAmount = total // Cap at total amount
+        console.warn(`⚠️ Received amount ${requestedReceived} capped to total ${total}`)
+      } else {
+        receivedAmount = requestedReceived
       }
 
-      const outstandingAmount = total - receivedAmount
+      console.log(`🔄 CREDIT SALE: Total=${total}, Received=${receivedAmount}, Outstanding=${total - receivedAmount}`)
+    }
 
-      const saleResult = await sql`
-        INSERT INTO sales (
-          customer_id, created_by, total_amount, status, sale_date,
-          device_id, payment_method, discount, received_amount, staff_id, sale_type
-        )
-        VALUES (
-          ${saleData.customerId || null},
-          ${saleData.userId},
-          ${total},
-          ${saleData.paymentStatus || "Completed"},
-          ${saleData.saleDate || new Date()},
-          ${saleData.deviceId},
-          ${saleData.paymentMethod || "Cash"},
-          ${discountAmount},
-          ${receivedAmount},
-          ${saleData.staffId || null},
-          ${saleData.saleType || "product"}
-        )
-        RETURNING *
+    const outstandingAmount = total - receivedAmount
+
+    const saleResult = await sql`
+      INSERT INTO sales (
+        customer_id, created_by, total_amount, status, sale_date,
+        device_id, payment_method, discount, received_amount, staff_id, sale_type,
+        fulfillment_type, delivery_status, courier_service_id, courier_service_name,
+        packaging_type_id, packaging_type_name,
+        tracking_id, shipping_address, weight_kg, length_cm, width_cm, height_cm,
+        courier_paid_extra, expense_courier, expense_packing, shipped_at, delivered_at, shipping_notes
+      )
+      VALUES (
+        ${saleData.customerId || null},
+        ${saleData.userId},
+        ${total},
+        ${saleData.paymentStatus || "Completed"},
+        ${saleData.saleDate || new Date()},
+        ${saleData.deviceId},
+        ${saleData.paymentMethod || "Cash"},
+        ${discountAmount},
+        ${receivedAmount},
+        ${saleData.staffId || null},
+        ${saleData.saleType || "product"},
+        ${shipping.fulfillment_type},
+        ${shipping.delivery_status},
+        ${shipping.courier_service_id},
+        ${shipping.courier_service_name},
+        ${shipping.packaging_type_id},
+        ${shipping.packaging_type_name},
+        ${shipping.tracking_id},
+        ${shipping.shipping_address},
+        ${shipping.weight_kg},
+        ${shipping.length_cm},
+        ${shipping.width_cm},
+        ${shipping.height_cm},
+        ${shipping.courier_paid_extra},
+        ${shipping.expense_courier},
+        ${shipping.expense_packing},
+        ${shipping.shipped_at},
+        ${shipping.delivered_at},
+        ${shipping.shipping_notes}
+      )
+      RETURNING *
+    `
+
+    const sale = saleResult[0]
+    saleId = sale.id
+
+    // Insert sale items individually and update stock with improved validation
+    const saleItems = []
+    for (const item of saleData.items) {
+      // Validate that the product/service exists before inserting
+      let itemExists = false
+      let isService = false
+      let itemName = "Unknown Item"
+
+      try {
+        // Check if it's a product first
+        const productCheck = await sql`SELECT id, name FROM products WHERE id = ${item.productId}`
+        if (productCheck.length > 0) {
+          itemExists = true
+          isService = false
+          itemName = productCheck[0].name
+        } else {
+          // Check if it's a service
+          const serviceCheck = await sql`SELECT id, name FROM services WHERE id = ${item.productId}`
+          if (serviceCheck.length > 0) {
+            itemExists = true
+            isService = true
+            itemName = serviceCheck[0].name
+          }
+        }
+      } catch (checkError) {
+        console.error("Error checking product/service existence:", checkError)
+      }
+
+      if (!itemExists) {
+        await sql`DELETE FROM sale_items WHERE sale_id = ${saleId}`
+        await sql`DELETE FROM sales WHERE id = ${saleId}`
+        return {
+          success: false,
+          message: `Item with ID ${item.productId} not found in products or services`,
+        }
+      }
+
+      // Check if cost and notes columns exist in sale_items table
+      const hasCostColumn = true
+      const hasNotesColumn = true
+
+      // Insert sale item - now works without foreign key constraint
+      let itemResult
+      try {
+        if (hasCostColumn && hasNotesColumn) {
+          itemResult = await sql`
+            INSERT INTO sale_items (sale_id, product_id, quantity, price, cost, notes)
+            VALUES (${saleId}, ${item.productId}, ${item.quantity}, ${item.price}, ${item.cost || 0}, ${item.notes || ""})
+            RETURNING *
+          `
+        } else if (hasCostColumn) {
+          itemResult = await sql`
+            INSERT INTO sale_items (sale_id, product_id, quantity, price, cost)
+            VALUES (${saleId}, ${item.productId}, ${item.quantity}, ${item.price}, ${item.cost || 0})
+            RETURNING *
+          `
+        } else {
+          itemResult = await sql`
+            INSERT INTO sale_items (sale_id, product_id, quantity, price)
+            VALUES (${saleId}, ${item.productId}, ${item.quantity}, ${item.price})
+            RETURNING *
+          `
+        }
+
+        // Add the item name for display purposes
+        itemResult[0].product_name = itemName
+        itemResult[0].item_type = isService ? "service" : "product"
+
+        saleItems.push(itemResult[0])
+
+        // Update stock using the safe helper function - only for products and if not cancelled
+        if (!isCancelled && !isService) {
+          const stockResult = await updateProductStock(item.productId, item.quantity, "subtract", saleData.deviceId)
+          if (!stockResult.success) {
+            console.warn(`Stock update warning for product ${itemName}:`, stockResult.message)
+            // Don't fail the sale, just log the warning
+          }
+        }
+
+        console.log(`Successfully added ${isService ? "service" : "product"}: ${itemName} (ID: ${item.productId})`)
+      } catch (insertError) {
+        console.error("Error inserting sale item:", insertError)
+        await sql`DELETE FROM sale_items WHERE sale_id = ${saleId}`
+        await sql`DELETE FROM sales WHERE id = ${saleId}`
+        return {
+          success: false,
+          message: `Failed to add item to sale: ${insertError instanceof Error ? insertError.message : "Unknown error"}`,
+        }
+      }
+    }
+
+    // Determine sale type - check if any items are services
+    let saleType = "product"
+    try {
+      const serviceCheck = await sql`
+        SELECT COUNT(*) as service_count
+        FROM sale_items si
+        WHERE si.sale_id = ${saleId}
+        AND EXISTS (SELECT 1 FROM services s WHERE s.id = si.product_id)
       `
 
-      const sale = saleResult[0]
-      const saleId = sale.id
-
-      // Insert sale items individually and update stock with improved validation
-      const saleItems = []
-      for (const item of saleData.items) {
-        // Validate that the product/service exists before inserting
-        let itemExists = false
-        let isService = false
-        let itemName = "Unknown Item"
-
-        try {
-          // Check if it's a product first
-          const productCheck = await sql`SELECT id, name FROM products WHERE id = ${item.productId}`
-          if (productCheck.length > 0) {
-            itemExists = true
-            isService = false
-            itemName = productCheck[0].name
-          } else {
-            // Check if it's a service
-            const serviceCheck = await sql`SELECT id, name FROM services WHERE id = ${item.productId}`
-            if (serviceCheck.length > 0) {
-              itemExists = true
-              isService = true
-              itemName = serviceCheck[0].name
-            }
-          }
-        } catch (checkError) {
-          console.error("Error checking product/service existence:", checkError)
-        }
-
-        if (!itemExists) {
-          await sql`ROLLBACK`
-          return {
-            success: false,
-            message: `Item with ID ${item.productId} not found in products or services`,
-          }
-        }
-
-        // Check if cost and notes columns exist in sale_items table
-        const hasCostColumn = true
-        const hasNotesColumn = true
-
-        // Insert sale item - now works without foreign key constraint
-        let itemResult
-        try {
-          if (hasCostColumn && hasNotesColumn) {
-            itemResult = await sql`
-              INSERT INTO sale_items (sale_id, product_id, quantity, price, cost, notes)
-              VALUES (${saleId}, ${item.productId}, ${item.quantity}, ${item.price}, ${item.cost || 0}, ${item.notes || ""})
-              RETURNING *
-            `
-          } else if (hasCostColumn) {
-            itemResult = await sql`
-              INSERT INTO sale_items (sale_id, product_id, quantity, price, cost)
-              VALUES (${saleId}, ${item.productId}, ${item.quantity}, ${item.price}, ${item.cost || 0})
-              RETURNING *
-            `
-          } else {
-            itemResult = await sql`
-              INSERT INTO sale_items (sale_id, product_id, quantity, price)
-              VALUES (${saleId}, ${item.productId}, ${item.quantity}, ${item.price})
-              RETURNING *
-            `
-          }
-
-          // Add the item name for display purposes
-          itemResult[0].product_name = itemName
-          itemResult[0].item_type = isService ? "service" : "product"
-
-          saleItems.push(itemResult[0])
-
-          // Update stock using the safe helper function - only for products and if not cancelled
-          if (!isCancelled && !isService) {
-            const stockResult = await updateProductStock(item.productId, item.quantity, "subtract", saleData.deviceId)
-            if (!stockResult.success) {
-              console.warn(`Stock update warning for product ${itemName}:`, stockResult.message)
-              // Don't fail the sale, just log the warning
-            }
-          }
-
-          console.log(`Successfully added ${isService ? "service" : "product"}: ${itemName} (ID: ${item.productId})`)
-        } catch (insertError) {
-          console.error("Error inserting sale item:", insertError)
-          await sql`ROLLBACK`
-          return {
-            success: false,
-            message: `Failed to add item to sale: ${insertError.message}`,
-          }
-        }
+      if (serviceCheck[0]?.service_count > 0) {
+        saleType = "service"
       }
 
-      // Determine sale type - check if any items are services
-      let saleType = "product"
-      try {
-        const serviceCheck = await sql`
-          SELECT COUNT(*) as service_count
-          FROM sale_items si
-          WHERE si.sale_id = ${saleId}
-          AND EXISTS (SELECT 1 FROM services s WHERE s.id = si.product_id)
-        `
+      await sql`
+        UPDATE sales 
+        SET sale_type = ${saleType}
+        WHERE id = ${saleId}
+      `
+    } catch (err) {
+      console.log("Error determining sale type, defaulting to product type")
+    }
 
-        if (serviceCheck[0]?.service_count > 0) {
-          saleType = "service"
-        }
+    // Calculate COGS using the actual wholesale prices from the sale items
+    const cogsAmount = await calculateCOGS(saleData.items)
 
-        await sql`
-          UPDATE sales 
-          SET sale_type = ${saleType}
-          WHERE id = ${saleId}
-        `
-      } catch (err) {
-        console.log("Error determining sale type, defaulting to product type")
+    // Record simplified accounting transaction with new logic
+    try {
+      console.log("Recording accounting transaction for sale:", saleId, "with status:", saleData.paymentStatus)
+
+      const accountingResult = await recordSaleTransaction({
+        saleId: sale.id,
+        totalAmount: total,
+        cogsAmount,
+        receivedAmount,
+        outstandingAmount,
+        status: saleData.paymentStatus || "Completed",
+        paymentMethod: saleData.paymentMethod || "Cash",
+        deviceId: saleData.deviceId,
+        userId: saleData.userId,
+        customerId: saleData.customerId,
+        saleDate: new Date(saleData.saleDate || new Date()),
+        productCreditAmount: productTotal,
+      })
+
+      console.log("Accounting transaction result:", accountingResult)
+
+      if (!accountingResult.success) {
+        console.error("Failed to record accounting transaction:", accountingResult.error)
       }
 
-      // Calculate COGS using the actual wholesale prices from the sale items
-      const cogsAmount = await calculateCOGS(saleData.items)
+      const shippingAccountingResult = await syncSaleShippingTransactions({
+        saleId: sale.id,
+        deviceId: saleData.deviceId,
+        userId: saleData.userId,
+        saleDate: new Date(saleData.saleDate || new Date()),
+        paymentMethod: saleData.paymentMethod || "Cash",
+        status: saleData.paymentStatus || "Completed",
+        fulfillmentType: shipping.fulfillment_type,
+        courierPaidExtra,
+        expenseCourier,
+        expensePacking,
+        receivedAmount,
+        totalAmount: total,
+        productCreditAmount: productTotal,
+      })
 
-      // Record simplified accounting transaction with new logic
-      try {
-        console.log("Recording accounting transaction for sale:", saleId, "with status:", saleData.paymentStatus)
-
-        const accountingResult = await recordSaleTransaction({
-          saleId,
-          totalAmount: total,
-          cogsAmount,
-          receivedAmount,
-          outstandingAmount,
-          status: saleData.paymentStatus || "Completed",
-          paymentMethod: saleData.paymentMethod || "Cash",
-          deviceId: saleData.deviceId,
-          userId: saleData.userId,
-          customerId: saleData.customerId,
-          saleDate: new Date(saleData.saleDate || new Date()),
-        })
-
-        console.log("Accounting transaction result:", accountingResult)
-
-        if (!accountingResult.success) {
-          console.error("Failed to record accounting transaction:", accountingResult.error)
-        }
-      } catch (accountingError) {
-        console.error("Error recording accounting transaction:", accountingError)
-        // Don't fail the sale if accounting fails, but log the detailed error
+      if (!shippingAccountingResult.success) {
+        console.error("Failed to record shipping accounting:", shippingAccountingResult.error)
+      }
+    } catch (accountingError) {
+      console.error("Error recording accounting transaction:", accountingError)
+      // Don't fail the sale if accounting fails, but log the detailed error
+      if (accountingError instanceof Error) {
         console.error("Accounting error details:", {
           message: accountingError.message,
           stack: accountingError.stack,
@@ -596,48 +843,61 @@ export async function addSale(saleData: any) {
           },
         })
       }
+    }
 
-      // Commit transaction
-      await sql`COMMIT`
-      revalidatePath("/dashboard")
+    revalidatePath("/dashboard")
 
-      console.log(`Sale ${saleId} created successfully with ${saleItems.length} items (${saleType} sale)`)
-      console.log(`Sale financial summary: Total=${total}, Received=${receivedAmount}, Outstanding=${outstandingAmount}, Status=${saleData.paymentStatus}`)
+    console.log(`Sale ${saleId} created successfully with ${saleItems.length} items (${saleType} sale)`)
+    console.log(`Sale financial summary: Total=${total}, Received=${receivedAmount}, Outstanding=${outstandingAmount}, Status=${saleData.paymentStatus}`)
 
-      return {
-        success: true,
-        message: "Sale added successfully",
-        data: {
-          sale: { 
-            ...sale, 
-            discount: discountAmount, 
-            received_amount: receivedAmount,
-            outstanding_amount: outstandingAmount 
-          },
-          items: saleItems,
+    return {
+      success: true,
+      message: "Sale added successfully",
+      data: {
+        sale: {
+          ...sale,
+          discount: discountAmount,
+          received_amount: receivedAmount,
+          outstanding_amount: outstandingAmount,
         },
-      }
-    } catch (error) {
-      await sql`ROLLBACK`
-      throw error
+        items: saleItems,
+      },
     }
   } catch (error) {
+    if (saleId) {
+      try {
+        await sql`DELETE FROM sale_items WHERE sale_id = ${saleId}`
+        await sql`DELETE FROM sales WHERE id = ${saleId}`
+      } catch (cleanupError) {
+        console.error("Failed to clean up partial sale:", cleanupError)
+      }
+    }
+
     console.error("Database query error:", error)
     return {
       success: false,
-      message: `Database error: ${error.message}. Please try again later.`,
+      message: `Database error: ${error instanceof Error ? error.message : "Unknown error"}. Please try again later.`,
     }
   }
 }
 
 // CORRECTED Helper function to calculate all changes in one place
-function calculateSaleChanges(original: any, newData: any, originalItems: any[], newItems: any[]) {
+function calculateSaleChanges(
+  original: any,
+  newData: any,
+  originalItems: any[],
+  newItems: any[],
+  shipping?: ReturnType<typeof normalizeSaleShippingInput>,
+) {
   const subtotal = newData.items.reduce(
     (sum: number, item: any) => sum + Number.parseFloat(item.price) * Number.parseInt(item.quantity),
     0,
   )
   const newDiscountAmount = Number(newData.discount) || 0
-  const newTotal = Math.max(0, subtotal - newDiscountAmount)
+  const courierPaidExtra =
+    shipping?.fulfillment_type === "ship" ? Number(shipping.courier_paid_extra) || 0 : 0
+  const productTotal = Math.max(0, subtotal - newDiscountAmount)
+  const newTotal = productTotal + courierPaidExtra
 
   // CORRECTED: Calculate new received amount based on status with proper partial payment handling
   let newReceivedAmount = 0
@@ -687,14 +947,16 @@ function calculateSaleChanges(original: any, newData: any, originalItems: any[],
     (sum: number, item: any) => sum + Number(item.price) * Number(item.quantity),
     0,
   )
-  const originalTotal = Number(original.total_amount)
-  const originalDiscountAmount = Math.max(0, originalSubtotal - originalTotal)
+  const originalCourierExtra =
+    original.fulfillment_type === "ship" ? Number(original.courier_paid_extra) || 0 : 0
+  const originalProductTotal = Number(original.total_amount) - originalCourierExtra
+  const originalDiscountAmount = Math.max(0, originalSubtotal - originalProductTotal)
 
   const outstandingAmount = newTotal - newReceivedAmount
 
   console.log("Sale changes calculation:", {
     originalSubtotal,
-    originalTotal,
+    originalProductTotal,
     originalDiscount: originalDiscountAmount,
     newDiscount: newDiscountAmount,
     discountDiff: newDiscountAmount - originalDiscountAmount,
@@ -724,6 +986,9 @@ function calculateSaleChanges(original: any, newData: any, originalItems: any[],
     newDiscount: newDiscountAmount,
     originalReceived: Number(original.received_amount || 0),
     newReceived: newReceivedAmount,
+
+    // Product revenue (excludes courier charge collected)
+    productTotal,
 
     // Differences
     totalDiff: newTotal - Number(original.total_amount),
@@ -798,77 +1063,70 @@ export async function updateSale(saleData: any) {
   try {
     console.log("Updating sale with consolidated approach:", JSON.stringify(saleData, null, 2))
 
-    // Start a transaction
-    await sql`BEGIN`
-
-    try {
-      // 1. Get the original sale
-      let originalSale
-      if (saleData.deviceId) {
-        originalSale = await sql`
-          SELECT * FROM sales WHERE id = ${saleData.id} AND device_id = ${saleData.deviceId}
-        `
-      } else {
-        originalSale = await sql`
-          SELECT * FROM sales WHERE id = ${saleData.id}
-        `
-      }
-
-      if (originalSale.length === 0) {
-        await sql`ROLLBACK`
-        return { success: false, message: "Sale not found" }
-      }
-
-      const original = originalSale[0]
-
-      // Get original sale items for comparison
-      const originalItems = await sql`
-        SELECT id, product_id, quantity, price FROM sale_items WHERE sale_id = ${saleData.id}
+    // 1. Get the original sale
+    let originalSale
+    if (saleData.deviceId) {
+      originalSale = await sql`
+        SELECT * FROM sales WHERE id = ${saleData.id} AND device_id = ${saleData.deviceId}
       `
+    } else {
+      originalSale = await sql`
+        SELECT * FROM sales WHERE id = ${saleData.id}
+      `
+    }
 
-      // Calculate original and new COGS using the sale ID to get actual wholesale prices
-      const originalCogs = await calculateCOGS([], saleData.id)
-      const newCogs = await calculateCOGS(saleData.items)
+    if (originalSale.length === 0) {
+      return { success: false, message: "Sale not found" }
+    }
 
-      // 2. Calculate all changes in one place
-      const changes = calculateSaleChanges(original, saleData, originalItems, saleData.items)
+    const original = originalSale[0]
+    const shipping = await buildShippingFieldsForSave(saleData, saleData.deviceId || original.device_id, original)
 
-      // 3. Check if there are any actual changes
-      const hasActualChanges =
-        changes.dateChanged ||
-        changes.statusChanged ||
-        changes.totalChanged ||
-        changes.discountChanged ||
-        changes.receivedChanged ||
-        changes.itemsChanged
+    // Get original sale items for comparison
+    const originalItems = await sql`
+      SELECT id, product_id, quantity, price FROM sale_items WHERE sale_id = ${saleData.id}
+    `
 
-      if (!hasActualChanges) {
-        await sql`ROLLBACK`
-        return {
-          success: true,
-          message: "No changes detected",
-          data: {
-            discount: changes.newDiscount,
-            received_amount: changes.newReceived,
-            outstanding_amount: changes.outstandingAmount,
-          },
-        }
+    // Calculate original and new COGS using the sale ID to get actual wholesale prices
+    const originalCogs = await calculateCOGS([], saleData.id)
+    const newCogs = await calculateCOGS(saleData.items)
+
+    // 2. Calculate all changes in one place
+    const changes = calculateSaleChanges(original, saleData, originalItems, saleData.items, shipping)
+
+    // 3. Check if there are any actual changes
+    const hasActualChanges =
+      changes.dateChanged ||
+      changes.statusChanged ||
+      changes.totalChanged ||
+      changes.discountChanged ||
+      changes.receivedChanged ||
+      changes.itemsChanged ||
+      shippingFieldsChanged(original, shipping)
+
+    if (!hasActualChanges) {
+      return {
+        success: true,
+        message: "No changes detected",
+        data: {
+          discount: changes.newDiscount,
+          received_amount: changes.newReceived,
+          outstanding_amount: changes.outstandingAmount,
+        },
       }
+    }
 
-      // 4. CORRECTED: Validate received amount for credit sales with proper logic
-      const isCompleted = changes.newStatus.toLowerCase() === "completed"
-      const isCancelled = changes.newStatus.toLowerCase() === "cancelled"
-      const isCredit = changes.newStatus.toLowerCase() === "credit"
+    // 4. CORRECTED: Validate received amount for credit sales with proper logic
+    const isCredit = changes.newStatus.toLowerCase() === "credit"
 
-      if (isCredit && changes.newReceived > changes.newTotal) {
-        await sql`ROLLBACK`
-        return {
-          success: false,
-          message: `Received amount (${changes.newReceived}) cannot be greater than total amount (${changes.newTotal})`,
-        }
+    if (isCredit && changes.newReceived > changes.newTotal) {
+      return {
+        success: false,
+        message: `Received amount (${changes.newReceived}) cannot be greater than total amount (${changes.newTotal})`,
       }
+    }
 
-      const updateSaleRecord = async (whereDeviceScoped: boolean) => {
+    const updateSaleRecord = async (whereDeviceScoped: boolean) => {
         if (whereDeviceScoped) {
           await sql`
             UPDATE sales 
@@ -880,7 +1138,25 @@ export async function updateSale(saleData: any) {
                 payment_method = ${saleData.paymentMethod || "Cash"},
                 discount = ${changes.newDiscount},
                 received_amount = ${changes.newReceived},
-                staff_id = ${saleData.staffId || null}
+                staff_id = ${saleData.staffId || null},
+                fulfillment_type = ${shipping.fulfillment_type},
+                delivery_status = ${shipping.delivery_status},
+                courier_service_id = ${shipping.courier_service_id},
+                courier_service_name = ${shipping.courier_service_name},
+                packaging_type_id = ${shipping.packaging_type_id},
+                packaging_type_name = ${shipping.packaging_type_name},
+                tracking_id = ${shipping.tracking_id},
+                shipping_address = ${shipping.shipping_address},
+                weight_kg = ${shipping.weight_kg},
+                length_cm = ${shipping.length_cm},
+                width_cm = ${shipping.width_cm},
+                height_cm = ${shipping.height_cm},
+                courier_paid_extra = ${shipping.courier_paid_extra},
+                expense_courier = ${shipping.expense_courier},
+                expense_packing = ${shipping.expense_packing},
+                shipped_at = ${shipping.shipped_at},
+                delivered_at = ${shipping.delivered_at},
+                shipping_notes = ${shipping.shipping_notes}
             WHERE id = ${saleData.id} AND device_id = ${saleData.deviceId}
           `
         } else {
@@ -894,7 +1170,25 @@ export async function updateSale(saleData: any) {
                 payment_method = ${saleData.paymentMethod || "Cash"},
                 discount = ${changes.newDiscount},
                 received_amount = ${changes.newReceived},
-                staff_id = ${saleData.staffId || null}
+                staff_id = ${saleData.staffId || null},
+                fulfillment_type = ${shipping.fulfillment_type},
+                delivery_status = ${shipping.delivery_status},
+                courier_service_id = ${shipping.courier_service_id},
+                courier_service_name = ${shipping.courier_service_name},
+                packaging_type_id = ${shipping.packaging_type_id},
+                packaging_type_name = ${shipping.packaging_type_name},
+                tracking_id = ${shipping.tracking_id},
+                shipping_address = ${shipping.shipping_address},
+                weight_kg = ${shipping.weight_kg},
+                length_cm = ${shipping.length_cm},
+                width_cm = ${shipping.width_cm},
+                height_cm = ${shipping.height_cm},
+                courier_paid_extra = ${shipping.courier_paid_extra},
+                expense_courier = ${shipping.expense_courier},
+                expense_packing = ${shipping.expense_packing},
+                shipped_at = ${shipping.shipped_at},
+                delivered_at = ${shipping.delivered_at},
+                shipping_notes = ${shipping.shipping_notes}
             WHERE id = ${saleData.id}
           `
         }
@@ -902,8 +1196,8 @@ export async function updateSale(saleData: any) {
 
       await updateSaleRecord(Boolean(saleData.deviceId))
 
-      // 7. Handle sale items updates with improved stock management and stock history
-      console.log("Updating sale items with stock tracking...")
+    // 7. Handle sale items updates with improved stock management and stock history
+    console.log("Updating sale items with stock tracking...")
 
       // Get existing sale items with more details
       const existingItems = await sql`
@@ -1177,42 +1471,109 @@ export async function updateSale(saleData: any) {
         } else {
           console.log("No accounting changes detected, skipping accounting entry")
         }
+
+        const { courierPaidExtra, expenseCourier, expensePacking } = getShippingAmounts(shipping)
+        const shippingAccountingResult = await syncSaleShippingTransactions({
+          saleId: saleData.id,
+          deviceId: saleData.deviceId,
+          userId: saleData.userId,
+          saleDate: changes.newDate,
+          paymentMethod: saleData.paymentMethod || "Cash",
+          status: changes.newStatus,
+          fulfillmentType: shipping.fulfillment_type,
+          courierPaidExtra,
+          expenseCourier,
+          expensePacking,
+          receivedAmount: changes.newReceived,
+          totalAmount: changes.newTotal,
+          productCreditAmount: changes.productTotal,
+        })
+
+        if (!shippingAccountingResult.success) {
+          console.error("Failed to sync shipping accounting:", shippingAccountingResult.error)
+        }
       } catch (accountingError) {
         console.error("Error creating accounting entry:", accountingError)
         // Don't fail the sale update if accounting fails
       }
 
-      // 9. Commit the transaction
-      await sql`COMMIT`
+    // 9. Revalidate the dashboard page to show the updated sale
+    revalidatePath("/dashboard")
 
-      // Revalidate the dashboard page to show the updated sale
-      revalidatePath("/dashboard")
+    console.log(`Sale ${saleData.id} updated successfully:`, {
+      status: changes.newStatus,
+      total: changes.newTotal,
+      received: changes.newReceived,
+      outstanding: changes.outstandingAmount,
+    })
 
-      console.log(`Sale ${saleData.id} updated successfully:`, {
-        status: changes.newStatus,
-        total: changes.newTotal,
-        received: changes.newReceived,
-        outstanding: changes.outstandingAmount
-      })
-
-      return {
-        success: true,
-        message: "Sale updated successfully",
-        data: {
-          discount: changes.newDiscount,
-          received_amount: changes.newReceived,
-          outstanding_amount: changes.outstandingAmount,
-        },
-      }
-    } catch (error) {
-      await sql`ROLLBACK`
-      throw error
+    return {
+      success: true,
+      message: "Sale updated successfully",
+      data: {
+        discount: changes.newDiscount,
+        received_amount: changes.newReceived,
+        outstanding_amount: changes.outstandingAmount,
+      },
     }
   } catch (error) {
     console.error("Database query error:", error)
     return {
       success: false,
-      message: `Database error: ${error.message}. Please try again later.`,
+      message: `Database error: ${error instanceof Error ? error.message : "Unknown error"}. Please try again later.`,
+    }
+  }
+}
+
+export async function updateSaleDeliveryStatus(
+  saleId: number,
+  deviceId: number,
+  deliveryStatus: string,
+) {
+  if (!saleId || !deviceId) {
+    return { success: false as const, message: "Sale ID and device ID are required" }
+  }
+
+  try {
+    const rows = await sql`
+      SELECT fulfillment_type, shipped_at, delivered_at
+      FROM sales
+      WHERE id = ${saleId}
+        AND device_id = ${deviceId}
+      LIMIT 1
+    `
+
+    if (rows.length === 0) {
+      return { success: false as const, message: "Sale not found" }
+    }
+
+    if (rows[0].fulfillment_type !== "ship") {
+      return { success: false as const, message: "This sale is not a shipped order" }
+    }
+
+    const shippedAt =
+      rows[0].shipped_at ||
+      (["Shipped", "In transit", "Delivered"].includes(deliveryStatus) ? new Date() : null)
+    const deliveredAt =
+      rows[0].delivered_at || (deliveryStatus === "Delivered" ? new Date() : null)
+
+    await sql`
+      UPDATE sales
+      SET delivery_status = ${deliveryStatus},
+          shipped_at = ${shippedAt},
+          delivered_at = ${deliveredAt},
+          updated_at = NOW()
+      WHERE id = ${saleId}
+        AND device_id = ${deviceId}
+    `
+
+    revalidatePath("/dashboard")
+    return { success: true as const, message: "Delivery status updated" }
+  } catch (error) {
+    console.error("updateSaleDeliveryStatus error:", error)
+    return {
+      success: false as const,
+      message: `Database error: ${error instanceof Error ? error.message : "Unknown error"}`,
     }
   }
 }
@@ -1226,75 +1587,75 @@ export async function deleteSale(saleId: number, deviceId: number) {
   resetConnectionState()
 
   try {
-    // Use executeWithRetry for the entire transaction
     return await executeWithRetry(async () => {
-      // Start a transaction
-      await sql`BEGIN`
+      const saleRows = await sql`
+        SELECT id, device_id, status
+        FROM sales
+        WHERE id = ${saleId}
+        LIMIT 1
+      `
+
+      if (saleRows.length === 0) {
+        return { success: false, message: "Sale not found" }
+      }
+
+      const sale = saleRows[0]
+      const saleDeviceId = Number(sale.device_id || deviceId)
+
+      if (sale.device_id != null && Number(sale.device_id) !== Number(deviceId)) {
+        return { success: false, message: "Sale not found for this device" }
+      }
+
+      const status = String(sale.status || "")
+      const statusLower = status.toLowerCase()
+      const isCancelled = statusLower === "cancelled"
+      const shouldRestoreStock =
+        !isCancelled && (statusLower === "completed" || statusLower === "credit" || statusLower === "delivered")
+
+      const saleItems = await sql`
+        SELECT product_id, quantity
+        FROM sale_items
+        WHERE sale_id = ${saleId}
+      `
+
+      if (shouldRestoreStock) {
+        for (const item of saleItems) {
+          await updateProductStock(item.product_id, item.quantity, "add", saleDeviceId)
+        }
+      }
 
       try {
-        // Get sale status first to check if we need to restore stock
-        const saleStatus = await sql`
-          SELECT status FROM sales WHERE id = ${saleId} AND device_id = ${deviceId}
-        `
-
-        if (saleStatus.length === 0) {
-          await sql`ROLLBACK`
-          return { success: false, message: "Sale not found" }
-        }
-
-        const status = saleStatus[0].status
-        const isCancelled = status.toLowerCase() === "cancelled"
-
-        // Get sale items to restore stock
-        const saleItems = await sql`
-          SELECT product_id, quantity
-          FROM sale_items
-          WHERE sale_id = ${saleId}
-        `
-
-        // Only restore stock if the sale was completed/delivered and not cancelled
-        if ((status.toLowerCase() === "completed" || status.toLowerCase() === "delivered") && !isCancelled) {
-          // Restore stock for each product (not services) using the safe helper function
-          for (const item of saleItems) {
-            await updateProductStock(item.product_id, item.quantity, "add", deviceId)
-          }
-        }
-
-        // Delete accounting entries for this sale
-        try {
-          await deleteSaleTransaction(saleId, deviceId)
-        } catch (accountingError) {
-          console.error("Error deleting accounting records:", accountingError)
-          // Continue with sale deletion even if accounting cleanup fails
-        }
-
-        // Delete sale items
-        await sql`DELETE FROM sale_items WHERE sale_id = ${saleId}`
-
-        // Delete the sale with device_id check
-        const result = await sql`DELETE FROM sales WHERE id = ${saleId} AND device_id = ${deviceId} RETURNING id`
-
-        if (result.length === 0) {
-          await sql`ROLLBACK`
-          return { success: false, message: "Failed to delete sale" }
-        }
-
-        // Commit the transaction
-        await sql`COMMIT`
-
-        revalidatePath("/dashboard")
-        return { success: true, message: "Sale deleted successfully" }
-      } catch (error) {
-        // If any error occurs during the transaction, roll back
-        await sql`ROLLBACK`
-        throw error
+        await deleteSaleTransaction(saleId, saleDeviceId)
+      } catch (accountingError) {
+        console.error("Error deleting accounting records:", accountingError)
       }
+
+      try {
+        await sql`
+          DELETE FROM financial_transactions
+          WHERE reference_type = 'sale'
+            AND reference_id = ${saleId}
+        `
+      } catch (accountingError) {
+        console.error("Error deleting remaining accounting records:", accountingError)
+      }
+
+      await sql`DELETE FROM sale_items WHERE sale_id = ${saleId}`
+
+      const result = await sql`DELETE FROM sales WHERE id = ${saleId} RETURNING id`
+
+      if (result.length === 0) {
+        return { success: false, message: "Failed to delete sale" }
+      }
+
+      revalidatePath("/dashboard")
+      return { success: true, message: "Sale deleted successfully" }
     })
   } catch (error) {
     console.error("Delete sale error:", error)
     return {
       success: false,
-      message: `Database error: ${getLastError()?.message || "Unknown error"}. Please try again later.`,
+      message: `Database error: ${error instanceof Error ? error.message : getLastError()?.message || "Unknown error"}. Please try again later.`,
     }
   }
 }

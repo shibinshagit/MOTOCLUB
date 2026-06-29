@@ -7,9 +7,10 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Loader2, AlertCircle, DollarSign, Calendar, CreditCard, FileText } from "lucide-react"
-import { toast } from "sonner" // Add this import
+import { FormAlert } from "@/components/ui/form-alert"
+import { useToast } from "@/components/ui/use-toast"
+import { notifySuccess } from "@/lib/notifications"
+import { Loader2, DollarSign, Calendar, CreditCard, FileText } from "lucide-react"
 
 interface EditSupplierPaymentModalProps {
   isOpen: boolean
@@ -53,6 +54,7 @@ export default function EditSupplierPaymentModal({
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({})
+  const { toast } = useToast()
 
   // Format date for input (YYYY-MM-DD)
   const formatDateForInput = (dateStr: string | Date) => {
@@ -163,7 +165,7 @@ export default function EditSupplierPaymentModal({
       const result = await updateSupplierPayment(updateData)
       
       if (result.success) {
-        toast.success("Supplier payment updated successfully")
+        notifySuccess(toast, "Supplier payment updated successfully")
         onPaymentUpdated?.()
         onClose()
       } else {
@@ -172,7 +174,6 @@ export default function EditSupplierPaymentModal({
     } catch (err) {
       console.error("Error saving payment:", err)
       setError(err instanceof Error ? err.message : "An unexpected error occurred")
-      toast.error("Failed to update supplier payment")
     } finally {
       setIsSaving(false)
     }
@@ -192,26 +193,21 @@ export default function EditSupplierPaymentModal({
           <div className="flex justify-center items-center py-12">
             <div className="text-center">
               <Loader2 className="h-8 w-8 animate-spin text-orange-600 mx-auto mb-4" />
-              <p className="text-gray-600 dark:text-gray-400">Loading payment details...</p>
+              <p className="text-gray-600">Loading payment details...</p>
             </div>
           </div>
         ) : (
           <div className="space-y-6 py-4">
             {/* Error Alert */}
-            {error && (
-              <Alert variant="destructive">
-                <AlertCircle className="h-4 w-4" />
-                <AlertDescription>{error}</AlertDescription>
-              </Alert>
-            )}
+            {error && <FormAlert type="error" message={error} />}
 
             {/* Supplier Info (Read-only) */}
-            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
-              <div className="flex items-center gap-2 text-blue-900 dark:text-blue-300">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <div className="flex items-center gap-2 text-blue-900">
                 <FileText className="h-4 w-4" />
                 <span className="font-medium">Supplier: {supplierName}</span>
               </div>
-              <p className="text-sm text-blue-700 dark:text-blue-400 mt-1">
+              <p className="text-sm text-blue-700 mt-1">
                 Payment ID: #{paymentId}
               </p>
             </div>
@@ -238,7 +234,7 @@ export default function EditSupplierPaymentModal({
                 className={validationErrors.amount ? "border-red-500" : ""}
               />
               {validationErrors.amount && (
-                <p className="text-sm text-red-600 dark:text-red-400">{validationErrors.amount}</p>
+                <p className="text-sm text-red-600">{validationErrors.amount}</p>
               )}
             </div>
 
@@ -269,7 +265,7 @@ export default function EditSupplierPaymentModal({
                 </SelectContent>
               </Select>
               {validationErrors.paymentMethod && (
-                <p className="text-sm text-red-600 dark:text-red-400">{validationErrors.paymentMethod}</p>
+                <p className="text-sm text-red-600">{validationErrors.paymentMethod}</p>
               )}
             </div>
 
@@ -292,7 +288,7 @@ export default function EditSupplierPaymentModal({
                 className={validationErrors.paymentDate ? "border-red-500" : ""}
               />
               {validationErrors.paymentDate && (
-                <p className="text-sm text-red-600 dark:text-red-400">{validationErrors.paymentDate}</p>
+                <p className="text-sm text-red-600">{validationErrors.paymentDate}</p>
               )}
             </div>
 
@@ -309,13 +305,11 @@ export default function EditSupplierPaymentModal({
             </div>
 
             {/* Warning Note */}
-            <Alert className="bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800">
-              <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
-              <AlertDescription className="text-amber-800 dark:text-amber-300">
-                <strong>Note:</strong> Changing the payment amount will affect supplier balances and purchase records. 
-                Make sure this change is accurate.
-              </AlertDescription>
-            </Alert>
+            <FormAlert
+              type="warning"
+              message="Changing the payment amount will affect supplier balances and purchase records. Make sure this change is accurate."
+              title="Note"
+            />
           </div>
         )}
 

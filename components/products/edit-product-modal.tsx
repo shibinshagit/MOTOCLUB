@@ -3,19 +3,20 @@
 import type React from "react"
 
 import { useState, useEffect, useRef } from "react"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
-import { ScrollableContent } from "@/components/ui/custom-dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { useToast } from "@/components/ui/use-toast"
+import { notifyError, notifySuccess, notifyWarning } from "@/lib/notifications"
+import { useConfirm } from "@/hooks/use-confirm"
 import { cleanupProductMediaUrls, updateProduct } from "@/app/actions/product-actions"
-import { getCategories, createCategory } from "@/app/actions/category-actions"
-import { Check, ChevronRight, Loader2, Plus, Search, Tag, X, ImageIcon, Link2, Trash2, Film } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
+import { getCategories, createCategory, updateCategory, deleteCategory } from "@/app/actions/category-actions"
+import { Check, ChevronRight, Loader2, Plus, Search, Tag, X, ImageIcon, Link2, Trash2, Film, Pencil } from "lucide-react"
 import { getDeviceCurrency } from "@/app/actions/dashboard-actions"
-import { FormError } from "@/components/ui/form-error"
+import { FormAlert } from "@/components/ui/form-alert"
+import { Switch } from "@/components/ui/switch"
 import {
   compressImageForUpload,
   formatBytes,
@@ -25,6 +26,8 @@ import {
 } from "@/lib/media-upload-utils"
 import { uploadProductFileFromClient } from "@/lib/blob-client-upload"
 import { useStaffRestrictions } from "@/hooks/use-staff-restrictions"
+import { cn } from "@/lib/utils"
+import type { ReactNode } from "react"
 
 interface Category {
   id: number
@@ -48,6 +51,145 @@ const PLATFORM_OPTIONS: { key: PlatformKey; label: string }[] = [
   { key: "meesho", label: "Meesho" },
   { key: "own_ecom", label: "Own Ecom" },
 ]
+
+function PanelSection({
+  title,
+  subtitle,
+  children,
+  action,
+}: {
+  title: string
+  subtitle?: string
+  children: ReactNode
+  action?: ReactNode
+}) {
+  return (
+    <div className="overflow-hidden rounded-xl border border-slate-200 bg-card">
+      <div className="flex items-center justify-between border-b border-slate-200 bg-[#F1F4F9] px-4 py-2">
+        <div>
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-600">{title}</h3>
+          {subtitle ? <p className="mt-0.5 text-[11px] text-slate-500">{subtitle}</p> : null}
+        </div>
+        {action}
+      </div>
+      <div className="p-4">{children}</div>
+    </div>
+  )
+}
+
+function FieldLabel({ htmlFor, children, required }: { htmlFor?: string; children: ReactNode; required?: boolean }) {
+  return (
+    <Label htmlFor={htmlFor} className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+      {children}
+      {required ? <span className="text-rose-500"> *</span> : null}
+    </Label>
+  )
+}
+
+function SummaryCard({
+  label,
+  value,
+  tone,
+}: {
+  label: string
+  value: string
+  tone: "violet" | "emerald" | "amber" | "blue" | "slate"
+}) {
+  const tones = {
+    violet: "border-violet-100 bg-violet-50 text-violet-700",
+    emerald: "border-emerald-100 bg-emerald-50 text-emerald-700",
+    amber: "border-amber-100 bg-amber-50 text-amber-700",
+    blue: "border-blue-100 bg-blue-50 text-blue-700",
+    slate: "border-border bg-muted/40 text-foreground",
+  }
+
+  return (
+    <div className={cn("rounded-lg border px-3 py-2", tones[tone])}>
+      <p className="text-[11px] font-medium uppercase tracking-wide opacity-80">{label}</p>
+      <p className="truncate text-sm font-bold">{value || "—"}</p>
+    </div>
+  )
+}
+
+function CategoryListRow({
+  category,
+  displayName,
+  level = 0,
+  isSelected,
+  onSelect,
+  onEdit,
+  onDelete,
+  disabled,
+}: {
+  category: Category
+  displayName: string
+  level?: 0 | 1 | 2
+  isSelected: boolean
+  onSelect: (category: Category) => void
+  onEdit: (category: Category) => void
+  onDelete: (category: Category) => void
+  disabled?: boolean
+}) {
+  const tagClass = level === 0 ? "h-4 w-4 text-violet-600" : level === 1 ? "h-3.5 w-3.5 text-slate-400" : "h-3 w-3 text-slate-300"
+  const textClass = level === 0 ? "font-medium" : level === 1 ? "text-sm" : "text-xs"
+  const rowPad = level === 0 ? "py-3" : "py-2"
+
+  return (
+    <div
+      className={cn(
+        "group flex items-center gap-1 rounded-md",
+        isSelected ? "bg-violet-50" : "hover:bg-violet-50/50",
+      )}
+    >
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onSelect(category)}
+        className={cn(
+          "flex min-w-0 flex-1 items-center justify-between px-3 text-left text-slate-900 disabled:opacity-50",
+          rowPad,
+          textClass,
+        )}
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          <Tag className={cn("shrink-0", tagClass)} />
+          <span className="truncate">{displayName}</span>
+        </span>
+        {isSelected ? <Check className="h-4 w-4 shrink-0 text-emerald-600" /> : null}
+      </button>
+      <div className="flex shrink-0 items-center gap-0.5 pr-1">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          disabled={disabled}
+          onClick={(e) => {
+            e.stopPropagation()
+            onEdit(category)
+          }}
+          className="h-7 w-7 text-slate-500 hover:bg-white hover:text-violet-700"
+          aria-label={`Edit ${category.name}`}
+        >
+          <Pencil className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          disabled={disabled}
+          onClick={(e) => {
+            e.stopPropagation()
+            onDelete(category)
+          }}
+          className="h-7 w-7 text-rose-500 hover:bg-rose-50 hover:text-rose-700"
+          aria-label={`Delete ${category.name}`}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+    </div>
+  )
+}
 
 interface Product {
   id: number
@@ -75,6 +217,7 @@ interface Product {
   flipkart_status?: PlatformStatus
   meesho_status?: PlatformStatus
   own_ecom_status?: PlatformStatus
+  trending?: boolean
 }
 
 interface EditProductModalProps {
@@ -90,6 +233,7 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
   const hideCogs = isValueHidden("cogs")
   const hideStockCount = isValueHidden("stock_count")
   const { toast } = useToast()
+  const { confirm, ConfirmDialog } = useConfirm()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [currency, setCurrency] = useState("QAR")
@@ -128,6 +272,7 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
     meesho: "not_listed",
     own_ecom: "not_listed",
   })
+  const [trending, setTrending] = useState(false)
 
   const [categories, setCategories] = useState<Category[]>([])
   const [filteredCategories, setFilteredCategories] = useState<Category[]>([])
@@ -136,8 +281,12 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
   const [selectedCategory, setSelectedCategory] = useState<Category | null>(null)
   const [isCategoryDialogOpen, setIsCategoryDialogOpen] = useState(false)
   const [isAddingNewCategory, setIsAddingNewCategory] = useState(false)
+  const [isEditingCategory, setIsEditingCategory] = useState(false)
+  const [editingCategory, setEditingCategory] = useState<Category | null>(null)
+  const [editCategoryName, setEditCategoryName] = useState("")
   const [newCategoryName, setNewCategoryName] = useState("")
   const [newCategoryParentId, setNewCategoryParentId] = useState<number | null>(null)
+  const editCategoryInputRef = useRef<HTMLInputElement>(null)
   const categorySearchInputRef = useRef<HTMLInputElement>(null)
   const newCategoryInputRef = useRef<HTMLInputElement>(null)
 
@@ -216,6 +365,7 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
         meesho: product.meesho_status || "not_listed",
         own_ecom: product.own_ecom_status || "not_listed",
       })
+      setTrending(Boolean(product.trending))
 
       if (product.category_id) {
         const category = categories.find((cat) => cat.id === product.category_id)
@@ -264,6 +414,12 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
   }, [isAddingNewCategory])
 
   useEffect(() => {
+    if (isEditingCategory && editCategoryInputRef.current) {
+      setTimeout(() => editCategoryInputRef.current?.focus(), 100)
+    }
+  }, [isEditingCategory])
+
+  useEffect(() => {
     return () => {
       imagePreviews.forEach((url) => URL.revokeObjectURL(url))
       if (videoPreview) URL.revokeObjectURL(videoPreview)
@@ -293,9 +449,11 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
 
   const handleAttemptClose = async () => {
     if (hasPendingDraftMedia) {
-      const shouldDiscard = window.confirm(
-        "Are you sure? Unsaved uploaded media will be removed from cloud storage.",
-      )
+      const shouldDiscard = await confirm({
+        description: "Are you sure? Unsaved uploaded media will be removed from cloud storage.",
+        destructive: true,
+        confirmLabel: "Discard",
+      })
       if (!shouldDiscard) return
       await cleanupUploadedDraftMedia()
       clearSelectedDraftMedia()
@@ -316,11 +474,7 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
       const isReload = event.key === "F5" || ((event.ctrlKey || event.metaKey) && key === "r")
       if (!isReload) return
       event.preventDefault()
-      toast({
-        title: "Unsaved media present",
-        description: "Discard and remove uploaded media before reloading.",
-        variant: "destructive",
-      })
+      notifyError(toast, "Discard and remove uploaded media before reloading.", "Unsaved media present")
     }
 
     window.addEventListener("beforeunload", handleBeforeUnload)
@@ -344,11 +498,11 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
           setSelectedCategory(category || null)
         }
       } else {
-        toast({ title: "Error", description: result.message || "Failed to load categories", variant: "destructive" })
+        notifyError(toast, result.message || "Failed to load categories")
       }
     } catch (error) {
       console.error("Error fetching categories:", error)
-      toast({ title: "Error", description: "Failed to load categories", variant: "destructive" })
+      notifyError(toast, "Failed to load categories")
     } finally {
       setIsLoadingCategories(false)
     }
@@ -368,17 +522,13 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
     if (maxCanAdd === 0) {
       const message = "Maximum 4 images allowed."
       setError(message)
-      toast({ title: "Limit reached", description: message, variant: "destructive" })
+      notifyError(toast, message, "Limit reached")
       if (imageInputRef.current) imageInputRef.current.value = ""
       return
     }
 
     if (files.length > maxCanAdd) {
-      toast({
-        title: "Image limit reached",
-        description: `Only ${maxCanAdd} more image${maxCanAdd === 1 ? "" : "s"} can be selected.`,
-        variant: "destructive",
-      })
+      notifyError(toast, `Only ${maxCanAdd} more image${maxCanAdd === 1 ? "" : "s"} can be selected.`, "Image limit reached")
     }
 
     const accepted: File[] = []
@@ -387,18 +537,14 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
       if (!file.type.startsWith("image/")) {
         const message = `${file.name} is not an image.`
         setError(message)
-        toast({ title: "Invalid file", description: message, variant: "destructive" })
+        notifyError(toast, message, "Invalid file")
         continue
       }
       const processedImage = await compressImageForUpload(file)
       if (processedImage.size > MAX_IMAGE_SIZE_BYTES) {
         const message = `${file.name} exceeds 10MB even after compression.`
         setError(message)
-        toast({
-          title: "Too large",
-          description: message,
-          variant: "destructive",
-        })
+        notifyError(toast, message, "Too large")
         continue
       }
       accepted.push(processedImage)
@@ -439,14 +585,14 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
     if (!file.type.startsWith("video/")) {
       const message = "Please select a video file."
       setError(message)
-      toast({ title: "Invalid file", description: message, variant: "destructive" })
+      notifyError(toast, message, "Invalid file")
       if (videoInputRef.current) videoInputRef.current.value = ""
       return
     }
     if (file.size > MAX_VIDEO_SIZE_BYTES) {
       const message = "Video must be under 50MB."
       setError(message)
-      toast({ title: "Too large", description: message, variant: "destructive" })
+      notifyError(toast, message, "Too large")
       if (videoInputRef.current) videoInputRef.current.value = ""
       return
     }
@@ -498,15 +644,11 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
       }
 
       clearSelectedDraftMedia()
-      toast({ title: "Uploaded", description: "Selected media uploaded successfully." })
+      notifySuccess(toast, "Selected media uploaded successfully." , "Uploaded")
     } catch (error) {
       console.error("Media upload failed:", error)
       const message = error instanceof Error ? error.message : "Failed to upload selected media. Please try again."
-      toast({
-        title: "Upload failed",
-        description: message,
-        variant: "destructive",
-      })
+      notifyError(toast, message, "Upload failed")
     } finally {
       setIsUploadingMedia(false)
     }
@@ -532,9 +674,115 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
     return cat.name
   }
 
+  const resetCategoryDialogModes = () => {
+    setIsAddingNewCategory(false)
+    setIsEditingCategory(false)
+    setEditingCategory(null)
+    setEditCategoryName("")
+    setNewCategoryName("")
+    setNewCategoryParentId(null)
+  }
+
+  const handleStartEditCategory = (category: Category) => {
+    setIsAddingNewCategory(false)
+    setIsEditingCategory(true)
+    setEditingCategory(category)
+    setEditCategoryName(category.name)
+  }
+
+  const handleCancelEditCategory = () => {
+    setIsEditingCategory(false)
+    setEditingCategory(null)
+    setEditCategoryName("")
+  }
+
+  const handleSaveEditCategory = async () => {
+    if (!editingCategory || !editCategoryName.trim()) {
+      notifyError(toast, "Category name cannot be empty")
+      return
+    }
+
+    setIsSubmitting(true)
+    try {
+      const result = await updateCategory({
+        id: editingCategory.id,
+        name: editCategoryName.trim(),
+        description: editingCategory.description,
+      })
+
+      if (result.success && result.data) {
+        const updatedCategory: Category = {
+          ...editingCategory,
+          ...result.data,
+          parent_name: editingCategory.parent_name,
+        }
+
+        setCategories((prev) => prev.map((cat) => (cat.id === editingCategory.id ? updatedCategory : cat)))
+
+        if (selectedCategory?.id === editingCategory.id) {
+          setSelectedCategory(updatedCategory)
+          setFormData((prev) => ({
+            ...prev,
+            category: getCategoryDisplayName(updatedCategory),
+            categoryId: updatedCategory.id,
+          }))
+        }
+
+        notifySuccess(toast, `Category renamed to "${updatedCategory.name}"`)
+        handleCancelEditCategory()
+      } else {
+        notifyError(toast, result.message || "Failed to update category")
+      }
+    } catch (error) {
+      console.error("Error updating category:", error)
+      notifyError(toast, "An unexpected error occurred")
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleDeleteCategory = async (category: Category) => {
+    const childCount = categories.filter((cat) => cat.parent_id === category.id).length
+    if (childCount > 0) {
+      notifyError(toast, "Remove or reassign subcategories before deleting this category.")
+      return
+    }
+
+    const shouldDelete = await confirm({
+      title: `Delete "${category.name}"?`,
+      description: "Categories used by products cannot be deleted.",
+      destructive: true,
+      confirmLabel: "Delete",
+    })
+    if (!shouldDelete) return
+
+    setIsSubmitting(true)
+    try {
+      const result = await deleteCategory(category.id)
+      if (result.success) {
+        setCategories((prev) => prev.filter((cat) => cat.id !== category.id))
+        if (selectedCategory?.id === category.id) {
+          setSelectedCategory(null)
+          setFormData((prev) => ({ ...prev, category: "", categoryId: null }))
+        }
+        if (editingCategory?.id === category.id) {
+          handleCancelEditCategory()
+        }
+        notifySuccess(toast, `Category "${category.name}" deleted`)
+      } else {
+        notifyError(toast, result.message || "Failed to delete category")
+      }
+    } catch (error) {
+      console.error("Error deleting category:", error)
+      notifyError(toast, "An unexpected error occurred")
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
   const handleAddNewCategory = async () => {
     if (!newCategoryName.trim()) {
-      toast({ title: "Error", description: "Category name cannot be empty", variant: "destructive" })
+      notifyError(toast, "Category name cannot be empty")
       return
     }
     setIsSubmitting(true)
@@ -555,17 +803,17 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
           category: result.data.parent_name ? `${result.data.parent_name} › ${result.data.name}` : result.data.name,
           categoryId: result.data.id,
         }))
-        toast({ title: "Success", description: `Category "${result.data.name}" added successfully` })
+        notifySuccess(toast, `Category "${result.data.name}" added successfully`)
         setNewCategoryName("")
         setNewCategoryParentId(null)
         setIsAddingNewCategory(false)
         setIsCategoryDialogOpen(false)
       } else {
-        toast({ title: "Error", description: result.message || "Failed to add category", variant: "destructive" })
+        notifyError(toast, result.message || "Failed to add category")
       }
     } catch (error) {
       console.error("Error adding category:", error)
-      toast({ title: "Error", description: "An unexpected error occurred", variant: "destructive" })
+      notifyError(toast, "An unexpected error occurred")
     } finally {
       setIsSubmitting(false)
     }
@@ -579,7 +827,7 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
       categoryId: category.id,
     }))
     setIsCategoryDialogOpen(false)
-    toast({ title: "Category Selected", description: `"${getCategoryDisplayName(category)}" has been selected`, duration: 2000 })
+    notifySuccess(toast, `"${getCategoryDisplayName(category)}" has been selected`, "Category Selected")
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -634,6 +882,7 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
       submitFormData.append("flipkart_status", platformStatus.flipkart)
       submitFormData.append("meesho_status", platformStatus.meesho)
       submitFormData.append("own_ecom_status", platformStatus.own_ecom)
+      submitFormData.append("trending", trending ? "true" : "false")
       submitFormData.append("existing_image_urls", JSON.stringify(currentImageUrls))
       if (uploadedImageUrls.length > 0) {
         submitFormData.append("uploaded_image_urls", JSON.stringify(uploadedImageUrls))
@@ -649,7 +898,7 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
       const result = await updateProduct(submitFormData)
 
       if (result && result.success) {
-        toast({ title: "Success", description: "Product updated successfully" })
+        notifySuccess(toast, "Product updated successfully" )
         setUploadedImageUrls([])
         setUploadedVideoUrl(null)
         if (onSuccess) onSuccess(result.data)
@@ -660,20 +909,29 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
         } else {
           const message = result?.error || result?.message || "Failed to update product. Please try again."
           setError(message)
-          toast({ title: "Error", description: message, variant: "destructive" })
+          notifyError(toast, message)
         }
       }
     } catch (error) {
       console.error("Error updating product:", error)
       const message = error instanceof Error ? error.message : String(error)
       setError(message)
-      toast({ title: "Error", description: message, variant: "destructive" })
+      notifyError(toast, message)
     } finally {
       setIsSubmitting(false)
     }
   }
 
   if (!product) return null
+
+  const inputClass = (field?: string) =>
+    cn(
+      "h-9 bg-white border-slate-300 text-slate-900 placeholder:text-slate-400 text-sm",
+      field && fieldErrors[field] ? "border-rose-500" : "",
+    )
+
+  const totalImageCount = currentImageUrls.length + uploadedImageUrls.length + selectedImages.length
+  const activeVideoSrc = videoPreview || uploadedVideoUrl || currentVideoUrl
 
   return (
     <>
@@ -683,461 +941,787 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
           if (!open) void handleAttemptClose()
         }}
       >
-        <DialogContent className="sm:max-w-md p-0 max-h-[90vh] overflow-hidden flex flex-col bg-white dark:bg-gray-800 border dark:border-gray-700">
-          <ScrollableContent className="p-6 overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle className="text-gray-900 dark:text-gray-100">Edit Product</DialogTitle>
-            </DialogHeader>
-
-            <form onSubmit={handleSubmit} className="space-y-4 mt-4">
-              <div className="grid gap-4">
-                {/* Product Media */}
-                <div className="grid gap-2">
-                  <Label className="text-gray-700 dark:text-gray-300">Product Media</Label>
-                  <div className="flex flex-col gap-2">
-                    {(currentImageUrls.length > 0 || uploadedImageUrls.length > 0 || imagePreviews.length > 0) && (
-                      <div className="grid grid-cols-2 gap-2">
-                        {currentImageUrls.map((url, index) => (
-                          <div key={`current-${index}`} className="relative">
-                            <img src={url} alt={`Current product ${index + 1}`} className="w-full h-24 object-cover rounded-md border border-gray-300 dark:border-gray-600" />
-                            <Button type="button" variant="destructive" size="sm" onClick={() => removeCurrentImageAt(index)} className="absolute top-1 right-1 h-6 w-6 p-0"><X className="h-3 w-3" /></Button>
-                          </div>
-                        ))}
-                        {uploadedImageUrls.map((url, index) => (
-                          <div key={`uploaded-${index}`} className="relative">
-                            <img src={url} alt={`Uploaded product ${index + 1}`} className="w-full h-24 object-cover rounded-md border border-green-400" />
-                            <Button type="button" variant="destructive" size="sm" onClick={() => void removeUploadedImageAt(index)} className="absolute top-1 right-1 h-6 w-6 p-0"><X className="h-3 w-3" /></Button>
-                            <div className="absolute bottom-1 left-1 bg-green-600 text-white text-[10px] px-1.5 py-0.5 rounded">Uploaded</div>
-                          </div>
-                        ))}
-                        {imagePreviews.map((preview, index) => (
-                          <div key={`new-${index}`} className="relative">
-                            <img src={preview} alt={`New product ${index + 1}`} className="w-full h-24 object-cover rounded-md border border-blue-400" />
-                            <Button type="button" variant="destructive" size="sm" onClick={() => removeNewImageAt(index)} className="absolute top-1 right-1 h-6 w-6 p-0"><X className="h-3 w-3" /></Button>
-                            <div className="absolute bottom-1 left-1 bg-blue-600 text-white text-[10px] px-1.5 py-0.5 rounded">Selected</div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    {currentImageUrls.length + uploadedImageUrls.length + selectedImages.length < 4 && (
-                      <div onClick={() => imageInputRef.current?.click()} className="w-full h-24 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-md flex flex-col items-center justify-center cursor-pointer hover:border-gray-400 dark:hover:border-gray-500 transition-colors">
-                        <ImageIcon className="h-6 w-6 text-gray-400 dark:text-gray-500 mb-1" />
-                        <p className="text-sm text-gray-500 dark:text-gray-400">Add Image ({currentImageUrls.length + uploadedImageUrls.length + selectedImages.length}/4)</p>
-                      </div>
-                    )}
-                    <input ref={imageInputRef} type="file" accept="image/*" multiple onChange={handleImageSelect} className="hidden" />
-                  </div>
-
-                  <div className="flex flex-col gap-2 mt-2">
-                    {(videoPreview || uploadedVideoUrl || currentVideoUrl) ? (
-                      <div className="relative">
-                        <video controls className="w-full h-32 rounded-md border border-gray-300 dark:border-gray-600">
-                          <source src={videoPreview || uploadedVideoUrl || currentVideoUrl || ""} />
-                        </video>
-                        <Button
-                          type="button"
-                          variant="destructive"
-                          size="sm"
-                          onClick={() => {
-                            if (uploadedVideoUrl) {
-                              void removeUploadedVideo()
-                            } else {
-                              removeVideo()
-                            }
-                          }}
-                          className="absolute top-2 right-2"
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
-                        {videoPreview && <div className="absolute bottom-2 left-2 bg-blue-600 text-white text-xs px-2 py-1 rounded">Selected</div>}
-                        {!videoPreview && uploadedVideoUrl && <div className="absolute bottom-2 left-2 bg-green-600 text-white text-xs px-2 py-1 rounded">Uploaded</div>}
-                      </div>
-                    ) : (
-                      <div onClick={() => videoInputRef.current?.click()} className="w-full h-24 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-md flex flex-col items-center justify-center cursor-pointer hover:border-gray-400 dark:hover:border-gray-500 transition-colors">
-                        <Film className="h-6 w-6 text-gray-400 dark:text-gray-500 mb-1" />
-                        <p className="text-sm text-gray-500 dark:text-gray-400">Add Video (optional)</p>
-                        <p className="text-xs text-gray-400 dark:text-gray-500">Max 50MB</p>
-                      </div>
-                    )}
-                    <input ref={videoInputRef} type="file" accept="video/*" onChange={handleVideoSelect} className="hidden" />
-                  </div>
-
-                  {(selectedImages.length > 0 || selectedVideo) && (
-                    <Button
-                      type="button"
-                      onClick={handleUploadSelectedMedia}
-                      disabled={isUploadingMedia}
-                      className="w-full mt-2 bg-green-600 hover:bg-green-700 text-white"
-                    >
-                      {isUploadingMedia ? (
-                        <>
-                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                          Uploading Media...
-                        </>
-                      ) : (
-                        "Upload Selected Media"
-                      )}
-                    </Button>
-                  )}
-                </div>
-
-                <div className="grid gap-2">
-                  <Label className="text-gray-700 dark:text-gray-300">Marketplace Availability</Label>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">
-                    Active means currently selling. Archived means listed before but intentionally paused.
-                  </p>
-                  <div className="space-y-2">
-                    {PLATFORM_OPTIONS.map((platform) => (
-                      <div
-                        key={platform.key}
-                        className="rounded-md border border-gray-200 dark:border-gray-700 p-2 bg-gray-50 dark:bg-gray-900/30"
-                      >
-                        <div className="text-sm font-medium text-gray-800 dark:text-gray-200 mb-2">{platform.label}</div>
-                        <div className="grid grid-cols-3 gap-2">
-                          {[
-                            { value: "not_listed" as PlatformStatus, label: "Not Listed" },
-                            { value: "active" as PlatformStatus, label: "Active" },
-                            { value: "archived" as PlatformStatus, label: "Archived" },
-                          ].map((option) => {
-                            const isActive = platformStatus[platform.key] === option.value
-                            return (
-                              <Button
-                                key={option.value}
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                onClick={() =>
-                                  setPlatformStatus((prev) => ({
-                                    ...prev,
-                                    [platform.key]: option.value,
-                                  }))
-                                }
-                                className={`text-xs ${
-                                  isActive
-                                    ? "border-blue-500 text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/20"
-                                    : "border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300"
-                                }`}
-                              >
-                                {option.label}
-                              </Button>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Link */}
-                <div className="grid gap-2">
-                  <Label htmlFor="link" className="text-gray-700 dark:text-gray-300">
-                    <span className="flex items-center gap-1"><Link2 className="h-3.5 w-3.5" /> Product Link</span>
-                  </Label>
-                  <Input id="link" name="link" value={formData.link} onChange={handleChange} placeholder="https://..." className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400" />
-                </div>
-
-                {/* Name */}
-                <div className="grid gap-2">
-                  <Label htmlFor="name" className="text-gray-700 dark:text-gray-300">Product Name *</Label>
-                  <Input id="name" name="name" value={formData.name} onChange={handleChange} placeholder="Enter product name" required className={`bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400 ${fieldErrors.name ? "border-red-500 dark:border-red-400" : ""}`} />
-                  <FormError message={fieldErrors.name || ""} />
-                </div>
-
-                {/* Company Name */}
-                <div className="grid gap-2">
-                  <Label htmlFor="companyName" className="text-gray-700 dark:text-gray-300">Company / Brand</Label>
-                  <Input id="companyName" name="companyName" value={formData.companyName} onChange={handleChange} placeholder="Enter company or brand name" className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400" />
-                </div>
-
-                {/* Category */}
-                <div className="grid gap-2">
-                  <Label htmlFor="category" className="text-gray-700 dark:text-gray-300">Category *</Label>
-                  <div className="flex gap-2 items-center">
-                    <Button type="button" variant="outline" className="w-full justify-between bg-white dark:bg-gray-700 text-left border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-600" onClick={() => setIsCategoryDialogOpen(true)}>
-                      {selectedCategory ? (
-                        <span className="flex items-center gap-2"><Tag className="h-4 w-4" />{getCategoryDisplayName(selectedCategory)}</span>
-                      ) : "Select category..."}
-                      <ChevronRight className="h-4 w-4 opacity-50" />
-                    </Button>
-                  </div>
-                  {selectedCategory && (
-                    <p className="text-xs text-gray-500 dark:text-gray-400">Selected: <Badge variant="outline" className="border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300">{getCategoryDisplayName(selectedCategory)}</Badge></p>
-                  )}
-                </div>
-
-                {/* Description */}
-                <div className="grid gap-2">
-                  <Label htmlFor="description" className="text-gray-700 dark:text-gray-300">Description</Label>
-                  <Textarea id="description" name="description" value={formData.description} onChange={handleChange} placeholder="Enter product description" className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400" rows={3} />
-                </div>
-
-                {/* Price Fields */}
-                <div className="grid grid-cols-1 gap-4">
-                  {!hideCogs && (
-                  <div className="grid gap-2">
-                    <Label htmlFor="wholesalePrice" className="text-gray-700 dark:text-gray-300">Cost Price ({currency}) *</Label>
-                    <Input id="wholesalePrice" name="wholesalePrice" type="number" step="0.01" min="0" value={formData.wholesalePrice} onChange={handleChange} placeholder="0.00" className={`bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400 ${fieldErrors.wholesalePrice ? "border-red-500 dark:border-red-400" : ""}`} />
-                    <FormError message={fieldErrors.wholesalePrice || ""} />
-                  </div>
-                  )}
-
-                  <div className="grid gap-2">
-                    <Label htmlFor="msp" className="text-gray-700 dark:text-gray-300">MSP - Minimum Selling Price ({currency})</Label>
-                    <Input id="msp" name="msp" type="number" step="0.01" min="0" value={formData.msp} onChange={handleChange} placeholder="0.00" className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400" />
-                  </div>
-
-                  <div className="grid gap-2">
-                    <Label htmlFor="price" className="text-gray-700 dark:text-gray-300">MRP ({currency}) *</Label>
-                    <Input id="price" name="price" type="number" step="0.01" min="0" value={formData.price} onChange={handleChange} placeholder="0.00" required className={`bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400 ${fieldErrors.price ? "border-red-500 dark:border-red-400" : ""}`} />
-                    <FormError message={fieldErrors.price || ""} />
-                  </div>
-                </div>
-
-                {!hideStockCount && (
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="grid gap-2">
-                    <Label htmlFor="stock" className="text-gray-700 dark:text-gray-300">Stock *</Label>
-                    <Input id="stock" name="stock" type="number" min="0" value={formData.stock} onChange={handleChange} onFocus={(e) => e.target.select()} placeholder="0" className={`bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400 ${fieldErrors.stock ? "border-red-500 dark:border-red-400" : ""}`} />
-                    <FormError message={fieldErrors.stock || ""} />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="shelf" className="text-gray-700 dark:text-gray-300">Shelf</Label>
-                    <Input id="shelf" name="shelf" value={formData.shelf} onChange={handleChange} placeholder="e.g. A1, B3" className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400" />
-                  </div>
-                </div>
+        <DialogContent className="max-w-4xl gap-0 overflow-hidden border-slate-200 p-0 sm:max-w-4xl [&>button]:top-3 [&>button]:right-3">
+          <DialogHeader className="space-y-0 border-b border-slate-200 bg-[#F1F4F9] px-4 py-3 text-left">
+            <DialogTitle className="sr-only">Edit product</DialogTitle>
+            <div className="flex flex-wrap items-center gap-2 pr-10">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => void handleAttemptClose()}
+                className="h-8 border-slate-200 bg-white px-3 text-xs"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                form="edit-product-form"
+                size="sm"
+                disabled={isSubmitting || isUploadingMedia}
+                className="h-8 bg-violet-600 px-3 text-xs hover:bg-violet-700"
+              >
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                    Updating...
+                  </>
+                ) : (
+                  "Update Product"
                 )}
-                {hideStockCount && (
-                <div className="grid gap-2">
-                  <Label htmlFor="shelf" className="text-gray-700 dark:text-gray-300">Shelf</Label>
-                  <Input id="shelf" name="shelf" value={formData.shelf} onChange={handleChange} placeholder="e.g. A1, B3" className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400" />
-                </div>
-                )}
-
-                {/* Barcode */}
-                <div className="grid gap-2">
-                  <Label htmlFor="barcode" className="text-gray-700 dark:text-gray-300">Barcode + Code</Label>
-                  <Input id="barcode" name="barcode" value={formData.barcode} onChange={handleChange} placeholder="Enter or scan barcode" className={`bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400 ${fieldErrors.barcode ? "border-red-500 dark:border-red-400" : ""}`} />
-                  <FormError message={fieldErrors.barcode || ""} />
-                </div>
-
-                {/* Attributes */}
-                <div className="grid gap-2">
-                  <Label className="text-gray-700 dark:text-gray-300">Attributes (Model, Year, etc.)</Label>
-                  <div className="space-y-2">
-                    {attributes.map((attr, index) => (
-                      <div key={index} className="flex gap-2 items-center">
-                        <Input value={attr.key} onChange={(e) => handleAttributeChange(index, "key", e.target.value)} placeholder="e.g. Model" className="flex-1 bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400 text-sm h-9" />
-                        <Input value={attr.value} onChange={(e) => handleAttributeChange(index, "value", e.target.value)} placeholder="e.g. CBR600" className="flex-1 bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400 text-sm h-9" />
-                        <Button type="button" variant="ghost" size="sm" onClick={() => handleRemoveAttribute(index)} className="h-9 w-9 p-0 text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20"><Trash2 className="h-4 w-4" /></Button>
-                      </div>
-                    ))}
-                    <Button type="button" variant="outline" size="sm" onClick={handleAddAttribute} className="w-full border-dashed border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 bg-transparent">
-                      <Plus className="h-4 w-4 mr-1" /> Add Attribute
-                    </Button>
-                  </div>
-                </div>
-
-                {/* Suitable For */}
-                <div className="grid gap-2">
-                  <Label htmlFor="suitableFor" className="text-gray-700 dark:text-gray-300">Suitable For (Optional)</Label>
-                  <Input id="suitableFor" name="suitableFor" value={formData.suitableFor} onChange={handleChange} placeholder="e.g. Honda CBR, Yamaha R15" className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400" />
-                </div>
-
-                {/* Colour & Size */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="grid gap-2">
-                    <Label htmlFor="color" className="text-gray-700 dark:text-gray-300">Colour (Optional)</Label>
-                    <Input id="color" name="color" value={formData.color} onChange={handleChange} placeholder="e.g. Red, Black" className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400" />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="size" className="text-gray-700 dark:text-gray-300">Size (Optional)</Label>
-                    <Input id="size" name="size" value={formData.size} onChange={handleChange} placeholder="e.g. M, L, XL" className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400" />
-                  </div>
-                </div>
-              </div>
-
-              <DialogFooter className="flex flex-col sm:flex-row gap-2 pt-4">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => void handleAttemptClose()}
-                  className="w-full sm:w-auto border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 bg-transparent"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  disabled={isSubmitting || isUploadingMedia}
-                  className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600"
-                >
-                  {isSubmitting ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" />Updating...</>) : "Update Product"}
-                </Button>
-              </DialogFooter>
-            </form>
-          </ScrollableContent>
-        </DialogContent>
-      </Dialog>
-
-      {/* Category Selection Dialog with Hierarchy */}
-      <Dialog open={isCategoryDialogOpen} onOpenChange={setIsCategoryDialogOpen}>
-        <DialogContent className="sm:max-w-md p-0 max-h-[90vh] overflow-hidden flex flex-col bg-white dark:bg-gray-800 border dark:border-gray-700">
-          <DialogHeader className="p-4 border-b border-gray-200 dark:border-gray-700">
-            <div className="flex items-center justify-between">
-              <DialogTitle className="text-gray-900 dark:text-gray-100">Select Category</DialogTitle>
-              <Button variant="ghost" size="icon" onClick={() => setIsCategoryDialogOpen(false)} className="h-8 w-8 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"><X className="h-4 w-4" /></Button>
+              </Button>
             </div>
           </DialogHeader>
 
-          {isAddingNewCategory ? (
-            <div className="p-4 border-b border-gray-200 dark:border-gray-700">
+          <form id="edit-product-form" onSubmit={handleSubmit} className="max-h-[calc(90vh-4.5rem)] space-y-3 overflow-y-auto p-4">
+            {(error || Object.keys(fieldErrors).length > 0) && (
+              <div className="space-y-2">
+                {error ? <FormAlert type="error" message={error} /> : null}
+                {Object.entries(fieldErrors).map(([field, message]) =>
+                  message ? <FormAlert key={field} type="error" message={message} /> : null,
+                )}
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+              <SummaryCard label="MRP" value={formData.price ? `${currency} ${formData.price}` : ""} tone="violet" />
+              {!hideCogs && (
+                <SummaryCard
+                  label="Cost"
+                  value={formData.wholesalePrice ? `${currency} ${formData.wholesalePrice}` : ""}
+                  tone="slate"
+                />
+              )}
+              <SummaryCard label="MSP" value={formData.msp ? `${currency} ${formData.msp}` : ""} tone="blue" />
+              {!hideStockCount && <SummaryCard label="Stock" value={formData.stock || ""} tone="emerald" />}
+            </div>
+
+            <PanelSection title="Basic information">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-1.5 sm:col-span-2">
+                  <FieldLabel htmlFor="name" required>
+                    Product name
+                  </FieldLabel>
+                  <Input
+                    id="name"
+                    name="name"
+                    value={formData.name}
+                    onChange={handleChange}
+                    placeholder="Enter product name"
+                    required
+                    className={inputClass("name")}
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <FieldLabel htmlFor="companyName">Company / brand</FieldLabel>
+                  <Input
+                    id="companyName"
+                    name="companyName"
+                    value={formData.companyName}
+                    onChange={handleChange}
+                    placeholder="Brand name"
+                    className={inputClass()}
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <FieldLabel required>Category</FieldLabel>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-9 w-full justify-between border-slate-300 bg-white text-left text-sm text-slate-900 hover:bg-slate-50"
+                    onClick={() => setIsCategoryDialogOpen(true)}
+                  >
+                    {selectedCategory ? (
+                      <span className="flex items-center gap-2 truncate">
+                        <Tag className="h-3.5 w-3.5 shrink-0 text-violet-600" />
+                        <span className="truncate">{getCategoryDisplayName(selectedCategory)}</span>
+                      </span>
+                    ) : (
+                      <span className="text-slate-500">Select category...</span>
+                    )}
+                    <ChevronRight className="h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </div>
+
+                <div className="space-y-1.5 sm:col-span-2">
+                  <FieldLabel htmlFor="description">Description</FieldLabel>
+                  <Textarea
+                    id="description"
+                    name="description"
+                    value={formData.description}
+                    onChange={handleChange}
+                    placeholder="Enter product description"
+                    className="min-h-[72px] border-slate-300 bg-white text-sm text-slate-900 placeholder:text-slate-400"
+                    rows={3}
+                  />
+                </div>
+
+                <div className="space-y-1.5 sm:col-span-2">
+                  <FieldLabel htmlFor="link">
+                    <span className="inline-flex items-center gap-1">
+                      <Link2 className="h-3 w-3" /> Product link
+                    </span>
+                  </FieldLabel>
+                  <Input
+                    id="link"
+                    name="link"
+                    value={formData.link}
+                    onChange={handleChange}
+                    placeholder="https://..."
+                    className={inputClass()}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2.5 sm:col-span-2">
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Trending</p>
+                    <p className="text-[11px] text-slate-500">Mark this product as trending</p>
+                  </div>
+                  <Switch
+                    checked={trending}
+                    onCheckedChange={setTrending}
+                    aria-label="Mark product as trending"
+                  />
+                </div>
+              </div>
+            </PanelSection>
+
+            <PanelSection title="Pricing">
+              <div className="grid gap-4 sm:grid-cols-3">
+                {!hideCogs && (
+                  <div className="space-y-1.5">
+                    <FieldLabel htmlFor="wholesalePrice" required>
+                      Cost ({currency})
+                    </FieldLabel>
+                    <Input
+                      id="wholesalePrice"
+                      name="wholesalePrice"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={formData.wholesalePrice}
+                      onChange={handleChange}
+                      placeholder="0.00"
+                      className={inputClass("wholesalePrice")}
+                    />
+                  </div>
+                )}
+
+                <div className="space-y-1.5">
+                  <FieldLabel htmlFor="msp">MSP ({currency})</FieldLabel>
+                  <Input
+                    id="msp"
+                    name="msp"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={formData.msp}
+                    onChange={handleChange}
+                    placeholder="0.00"
+                    className={inputClass()}
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <FieldLabel htmlFor="price" required>
+                    MRP ({currency})
+                  </FieldLabel>
+                  <Input
+                    id="price"
+                    name="price"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={formData.price}
+                    onChange={handleChange}
+                    placeholder="0.00"
+                    required
+                    className={inputClass("price")}
+                  />
+                </div>
+              </div>
+            </PanelSection>
+
+            <PanelSection title="Inventory & barcode">
+              <div className="grid gap-4 sm:grid-cols-3">
+                {!hideStockCount && (
+                  <>
+                    <div className="space-y-1.5">
+                      <FieldLabel htmlFor="stock" required>
+                        Stock
+                      </FieldLabel>
+                      <Input
+                        id="stock"
+                        name="stock"
+                        type="number"
+                        min="0"
+                        value={formData.stock}
+                        onChange={handleChange}
+                        onFocus={(e) => e.target.select()}
+                        placeholder="0"
+                        className={inputClass("stock")}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <FieldLabel htmlFor="shelf">Shelf</FieldLabel>
+                      <Input
+                        id="shelf"
+                        name="shelf"
+                        value={formData.shelf}
+                        onChange={handleChange}
+                        placeholder="e.g. A1, B3"
+                        className={inputClass()}
+                      />
+                    </div>
+                  </>
+                )}
+                {hideStockCount && (
+                  <div className="space-y-1.5">
+                    <FieldLabel htmlFor="shelf">Shelf</FieldLabel>
+                    <Input
+                      id="shelf"
+                      name="shelf"
+                      value={formData.shelf}
+                      onChange={handleChange}
+                      placeholder="e.g. A1, B3"
+                      className={inputClass()}
+                    />
+                  </div>
+                )}
+                <div className={cn("space-y-1.5", hideStockCount ? "sm:col-span-2" : "")}>
+                  <FieldLabel htmlFor="barcode">Barcode + code</FieldLabel>
+                  <Input
+                    id="barcode"
+                    name="barcode"
+                    value={formData.barcode}
+                    onChange={handleChange}
+                    placeholder="Enter or scan barcode"
+                    className={inputClass("barcode")}
+                  />
+                </div>
+              </div>
+            </PanelSection>
+
+            <PanelSection
+              title="Product media"
+              subtitle="Up to 4 images (max 10MB each) · optional 1 video (max 50MB)"
+            >
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <FieldLabel>Images ({totalImageCount}/4)</FieldLabel>
+                  {(currentImageUrls.length > 0 || uploadedImageUrls.length > 0 || imagePreviews.length > 0) && (
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                      {currentImageUrls.map((url, index) => (
+                        <div key={`current-${url}-${index}`} className="relative overflow-hidden rounded-lg border border-slate-200">
+                          <img src={url} alt={`Current image ${index + 1}`} className="h-24 w-full object-cover" />
+                          <Button
+                            type="button"
+                            variant="destructive"
+                            size="sm"
+                            onClick={() => removeCurrentImageAt(index)}
+                            className="absolute right-1 top-1 h-6 w-6 p-0"
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      ))}
+                      {uploadedImageUrls.map((url, index) => (
+                        <div key={`uploaded-${url}-${index}`} className="relative overflow-hidden rounded-lg border border-emerald-200">
+                          <img src={url} alt={`Uploaded image ${index + 1}`} className="h-24 w-full object-cover" />
+                          <Button
+                            type="button"
+                            variant="destructive"
+                            size="sm"
+                            onClick={() => void removeUploadedImageAt(index)}
+                            className="absolute right-1 top-1 h-6 w-6 p-0"
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                          <span className="absolute bottom-1 left-1 rounded bg-emerald-600 px-1.5 py-0.5 text-[10px] text-white">
+                            Uploaded
+                          </span>
+                        </div>
+                      ))}
+                      {imagePreviews.map((preview, index) => (
+                        <div key={`new-${preview}-${index}`} className="relative overflow-hidden rounded-lg border border-slate-200">
+                          <img src={preview} alt={`Selected image ${index + 1}`} className="h-24 w-full object-cover" />
+                          <Button
+                            type="button"
+                            variant="destructive"
+                            size="sm"
+                            onClick={() => removeNewImageAt(index)}
+                            className="absolute right-1 top-1 h-6 w-6 p-0"
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                          <span className="absolute bottom-1 left-1 rounded bg-blue-600 px-1.5 py-0.5 text-[10px] text-white">
+                            Selected
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {totalImageCount < 4 ? (
+                    <button
+                      type="button"
+                      onClick={() => imageInputRef.current?.click()}
+                      className="flex h-24 w-full flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-200 bg-slate-50/50 transition-colors hover:border-violet-300 hover:bg-violet-50/30"
+                    >
+                      <ImageIcon className="mb-1 h-6 w-6 text-slate-400" />
+                      <p className="text-xs text-slate-500">Add images</p>
+                    </button>
+                  ) : null}
+                  <input ref={imageInputRef} type="file" accept="image/*" multiple onChange={handleImageSelect} className="hidden" />
+                </div>
+
+                <div className="space-y-2">
+                  <FieldLabel>Video (optional)</FieldLabel>
+                  {activeVideoSrc ? (
+                    <div className="relative overflow-hidden rounded-lg border border-slate-200">
+                      <video controls className="h-32 w-full">
+                        <source src={activeVideoSrc} />
+                      </video>
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => {
+                          if (uploadedVideoUrl) {
+                            void removeUploadedVideo()
+                          } else {
+                            removeVideo()
+                          }
+                        }}
+                        className="absolute right-2 top-2"
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                      {videoPreview ? (
+                        <span className="absolute bottom-2 left-2 rounded bg-blue-600 px-2 py-1 text-xs text-white">
+                          Selected
+                        </span>
+                      ) : uploadedVideoUrl ? (
+                        <span className="absolute bottom-2 left-2 rounded bg-emerald-600 px-2 py-1 text-xs text-white">
+                          Uploaded
+                        </span>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => videoInputRef.current?.click()}
+                      className="flex h-24 w-full flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-200 bg-slate-50/50 transition-colors hover:border-violet-300 hover:bg-violet-50/30"
+                    >
+                      <Film className="mb-1 h-6 w-6 text-slate-400" />
+                      <p className="text-xs text-slate-500">Add video</p>
+                    </button>
+                  )}
+                  <input ref={videoInputRef} type="file" accept="video/*" onChange={handleVideoSelect} className="hidden" />
+                </div>
+
+                {(selectedImages.length > 0 || selectedVideo) && (
+                  <Button
+                    type="button"
+                    onClick={handleUploadSelectedMedia}
+                    disabled={isUploadingMedia}
+                    className="w-full bg-emerald-600 hover:bg-emerald-700"
+                  >
+                    {isUploadingMedia ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Uploading media...
+                      </>
+                    ) : (
+                      "Upload selected media"
+                    )}
+                  </Button>
+                )}
+              </div>
+            </PanelSection>
+
+            <PanelSection
+              title="Marketplace availability"
+              subtitle="Use Archived when a listing was live before but is currently stopped."
+            >
+              <div className="grid gap-2 sm:grid-cols-2">
+                {PLATFORM_OPTIONS.map((platform) => (
+                  <div key={platform.key} className="rounded-lg border border-slate-200 bg-slate-50/50 p-3">
+                    <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                      {platform.label}
+                    </div>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {(
+                        [
+                          { value: "not_listed" as PlatformStatus, label: "Not listed" },
+                          { value: "active" as PlatformStatus, label: "Active" },
+                          { value: "archived" as PlatformStatus, label: "Archived" },
+                        ] as const
+                      ).map((option) => {
+                        const isActive = platformStatus[platform.key] === option.value
+                        return (
+                          <button
+                            key={option.value}
+                            type="button"
+                            onClick={() =>
+                              setPlatformStatus((prev) => ({
+                                ...prev,
+                                [platform.key]: option.value,
+                              }))
+                            }
+                            className={cn(
+                              "rounded-md border px-2 py-1.5 text-[11px] font-medium transition-colors",
+                              isActive
+                                ? "border-violet-300 bg-white text-violet-700 shadow-sm"
+                                : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50",
+                            )}
+                          >
+                            {option.label}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </PanelSection>
+
+            <PanelSection title="Attributes & details">
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <FieldLabel>Custom attributes</FieldLabel>
+                  {attributes.map((attr, index) => (
+                    <div key={index} className="flex items-center gap-2">
+                      <Input
+                        value={attr.key}
+                        onChange={(e) => handleAttributeChange(index, "key", e.target.value)}
+                        placeholder="e.g. Model"
+                        className="h-8 flex-1 border-slate-300 bg-white text-sm"
+                      />
+                      <Input
+                        value={attr.value}
+                        onChange={(e) => handleAttributeChange(index, "value", e.target.value)}
+                        placeholder="e.g. CBR600"
+                        className="h-8 flex-1 border-slate-300 bg-white text-sm"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleRemoveAttribute(index)}
+                        className="h-8 w-8 p-0 text-rose-500 hover:bg-rose-50 hover:text-rose-700"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleAddAttribute}
+                    className="w-full border-dashed border-slate-300 bg-transparent text-slate-600 hover:bg-slate-50"
+                  >
+                    <Plus className="mr-1 h-4 w-4" /> Add attribute
+                  </Button>
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <div className="space-y-1.5 sm:col-span-3">
+                    <FieldLabel htmlFor="suitableFor">Suitable for</FieldLabel>
+                    <Input
+                      id="suitableFor"
+                      name="suitableFor"
+                      value={formData.suitableFor}
+                      onChange={handleChange}
+                      placeholder="e.g. Honda CBR, Yamaha R15"
+                      className={inputClass()}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <FieldLabel htmlFor="color">Colour</FieldLabel>
+                    <Input
+                      id="color"
+                      name="color"
+                      value={formData.color}
+                      onChange={handleChange}
+                      placeholder="e.g. Red"
+                      className={inputClass()}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <FieldLabel htmlFor="size">Size</FieldLabel>
+                    <Input
+                      id="size"
+                      name="size"
+                      value={formData.size}
+                      onChange={handleChange}
+                      placeholder="e.g. M, L"
+                      className={inputClass()}
+                    />
+                  </div>
+                </div>
+              </div>
+            </PanelSection>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isCategoryDialogOpen}
+        onOpenChange={(open) => {
+          setIsCategoryDialogOpen(open)
+          if (!open) resetCategoryDialogModes()
+        }}
+      >
+        <DialogContent className="max-w-md gap-0 overflow-hidden border-slate-200 p-0 sm:max-w-md [&>button]:top-3 [&>button]:right-3">
+          <DialogHeader className="border-b border-slate-200 bg-[#F1F4F9] px-4 py-3 text-left">
+            <DialogTitle className="text-sm font-semibold text-slate-900">Select category</DialogTitle>
+          </DialogHeader>
+
+          {isEditingCategory && editingCategory ? (
+            <div className="border-b border-slate-200 p-4">
               <div className="space-y-3">
-                <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100">Add New Category</h3>
-                <div className="grid gap-2">
-                  <Label className="text-xs text-gray-600 dark:text-gray-400">Parent Category (optional)</Label>
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-600">Edit category</h3>
+                {editingCategory.parent_name ? (
+                  <p className="text-xs text-slate-500">Parent: {editingCategory.parent_name}</p>
+                ) : null}
+                <div className="flex gap-2">
+                  <Input
+                    ref={editCategoryInputRef}
+                    value={editCategoryName}
+                    onChange={(e) => setEditCategoryName(e.target.value)}
+                    placeholder="Category name"
+                    className="h-9 flex-1 border-slate-300 bg-white text-sm"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault()
+                        void handleSaveEditCategory()
+                      }
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    onClick={handleSaveEditCategory}
+                    disabled={!editCategoryName.trim() || isSubmitting}
+                    className="bg-violet-600 hover:bg-violet-700"
+                  >
+                    {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save"}
+                  </Button>
+                  <Button type="button" variant="outline" onClick={handleCancelEditCategory} className="border-slate-300">
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : isAddingNewCategory ? (
+            <div className="border-b border-slate-200 p-4">
+              <div className="space-y-3">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-600">Add new category</h3>
+                <div className="space-y-1.5">
+                  <FieldLabel>Parent category (optional)</FieldLabel>
                   <select
                     value={newCategoryParentId || ""}
                     onChange={(e) => setNewCategoryParentId(e.target.value ? Number(e.target.value) : null)}
-                    className="w-full h-9 px-3 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm"
+                    className="h-9 w-full rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-900"
                   >
                     <option value="">None (Top-level)</option>
                     {parentCategories.map((cat) => (
-                      <option key={cat.id} value={cat.id}>{cat.name}</option>
+                      <option key={cat.id} value={cat.id}>
+                        {cat.name}
+                      </option>
                     ))}
                   </select>
                 </div>
                 <div className="flex gap-2">
-                  <Input ref={newCategoryInputRef} value={newCategoryName} onChange={(e) => setNewCategoryName(e.target.value)} placeholder="Enter category name" className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400 flex-1" />
-                  <Button type="button" onClick={handleAddNewCategory} disabled={!newCategoryName.trim() || isSubmitting} className="bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600">
+                  <Input
+                    ref={newCategoryInputRef}
+                    value={newCategoryName}
+                    onChange={(e) => setNewCategoryName(e.target.value)}
+                    placeholder="Enter category name"
+                    className="h-9 flex-1 border-slate-300 bg-white text-sm"
+                  />
+                  <Button
+                    type="button"
+                    onClick={handleAddNewCategory}
+                    disabled={!newCategoryName.trim() || isSubmitting}
+                    className="bg-violet-600 hover:bg-violet-700"
+                  >
                     {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Add"}
                   </Button>
-                  <Button type="button" variant="outline" onClick={() => { setIsAddingNewCategory(false); setNewCategoryParentId(null) }} className="border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700">Cancel</Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      setIsAddingNewCategory(false)
+                      setNewCategoryParentId(null)
+                    }}
+                    className="border-slate-300"
+                  >
+                    Cancel
+                  </Button>
                 </div>
               </div>
             </div>
           ) : (
-            <div className="p-4 border-b border-gray-200 dark:border-gray-700">
+            <div className="border-b border-slate-200 p-4">
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-500 dark:text-gray-400" />
-                <Input ref={categorySearchInputRef} value={categorySearchQuery} onChange={(e) => setCategorySearchQuery(e.target.value)} placeholder="Search categories..." className="pl-9 pr-4 py-2 bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400" />
-                {categorySearchQuery && (
-                  <Button type="button" variant="ghost" size="icon" onClick={() => setCategorySearchQuery("")} className="absolute right-2 top-1/2 transform -translate-y-1/2 h-6 w-6 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"><X className="h-4 w-4" /></Button>
-                )}
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <Input
+                  ref={categorySearchInputRef}
+                  value={categorySearchQuery}
+                  onChange={(e) => setCategorySearchQuery(e.target.value)}
+                  placeholder="Search categories..."
+                  className="h-9 border-slate-300 bg-white pl-9 pr-9 text-sm"
+                />
+                {categorySearchQuery ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setCategorySearchQuery("")}
+                    className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 text-slate-500"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                ) : null}
               </div>
             </div>
           )}
 
-          <div className="flex-1 overflow-y-auto p-1">
+          <div className="max-h-[50vh] flex-1 overflow-y-auto p-1">
             {isLoadingCategories ? (
-              <div className="py-8 flex flex-col items-center justify-center text-sm text-gray-500 dark:text-gray-400">
-                <Loader2 className="h-6 w-6 animate-spin mb-2" />
+              <div className="flex flex-col items-center justify-center py-8 text-sm text-slate-500">
+                <Loader2 className="mb-2 h-6 w-6 animate-spin" />
                 <p>Loading categories...</p>
               </div>
             ) : (
-              !isAddingNewCategory && (
+              !isAddingNewCategory &&
+              !isEditingCategory && (
                 <>
                   {categorySearchQuery.trim() ? (
                     filteredCategories.length > 0 ? (
                       <div className="grid gap-1 p-2">
                         {filteredCategories.map((category) => (
-                          <Button key={category.id} type="button" variant="ghost"
-                            className={`w-full justify-start text-left h-auto py-3 text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700 ${selectedCategory?.id === category.id ? "bg-gray-100 dark:bg-gray-700" : ""}`}
-                            onClick={() => handleCategorySelect(category)}>
-                            <div className="flex items-center justify-between w-full">
-                              <div className="flex items-center gap-2">
-                                <Tag className="h-4 w-4 text-gray-500 dark:text-gray-400" />
-                                <span>{getCategoryDisplayName(category)}</span>
-                              </div>
-                              {selectedCategory?.id === category.id && <Check className="h-4 w-4 text-green-600 dark:text-green-400" />}
-                            </div>
-                          </Button>
+                          <CategoryListRow
+                            key={category.id}
+                            category={category}
+                            displayName={getCategoryDisplayName(category)}
+                            isSelected={selectedCategory?.id === category.id}
+                            onSelect={handleCategorySelect}
+                            onEdit={handleStartEditCategory}
+                            onDelete={(cat) => void handleDeleteCategory(cat)}
+                            disabled={isSubmitting}
+                          />
                         ))}
                       </div>
                     ) : (
-                      <div className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+                      <div className="py-8 text-center text-sm text-slate-500">
                         <p>No categories found</p>
+                        <p className="mt-1 text-xs">Try a different search or add a new category</p>
                       </div>
                     )
+                  ) : categories.length > 0 ? (
+                    <div className="space-y-1 p-2">
+                      {parentCategories.map((parent) => {
+                        const children = childrenOf(parent.id)
+                        return (
+                          <div key={parent.id}>
+                            <CategoryListRow
+                              category={parent}
+                              displayName={parent.name}
+                              isSelected={selectedCategory?.id === parent.id}
+                              onSelect={handleCategorySelect}
+                              onEdit={handleStartEditCategory}
+                              onDelete={(cat) => void handleDeleteCategory(cat)}
+                              disabled={isSubmitting}
+                            />
+                            {children.length > 0 && (
+                              <div className="ml-6 space-y-1 border-l-2 border-slate-200 pl-2">
+                                {children.map((child) => {
+                                  const grandchildren = childrenOf(child.id)
+                                  return (
+                                    <div key={child.id}>
+                                      <CategoryListRow
+                                        category={child}
+                                        displayName={child.name}
+                                        level={1}
+                                        isSelected={selectedCategory?.id === child.id}
+                                        onSelect={handleCategorySelect}
+                                        onEdit={handleStartEditCategory}
+                                        onDelete={(cat) => void handleDeleteCategory(cat)}
+                                        disabled={isSubmitting}
+                                      />
+                                      {grandchildren.length > 0 && (
+                                        <div className="ml-4 space-y-1 border-l-2 border-slate-100 pl-2">
+                                          {grandchildren.map((gc) => (
+                                            <CategoryListRow
+                                              key={gc.id}
+                                              category={gc}
+                                              displayName={gc.name}
+                                              level={2}
+                                              isSelected={selectedCategory?.id === gc.id}
+                                              onSelect={handleCategorySelect}
+                                              onEdit={handleStartEditCategory}
+                                              onDelete={(cat) => void handleDeleteCategory(cat)}
+                                              disabled={isSubmitting}
+                                            />
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                      {categories
+                        .filter((c) => c.parent_id && !categories.some((p) => p.id === c.parent_id))
+                        .map((orphan) => (
+                          <CategoryListRow
+                            key={orphan.id}
+                            category={orphan}
+                            displayName={orphan.name}
+                            isSelected={selectedCategory?.id === orphan.id}
+                            onSelect={handleCategorySelect}
+                            onEdit={handleStartEditCategory}
+                            onDelete={(cat) => void handleDeleteCategory(cat)}
+                            disabled={isSubmitting}
+                          />
+                        ))}
+                    </div>
                   ) : (
-                    categories.length > 0 ? (
-                      <div className="p-2 space-y-1">
-                        {parentCategories.map((parent) => {
-                          const children = childrenOf(parent.id)
-                          return (
-                            <div key={parent.id}>
-                              <Button type="button" variant="ghost"
-                                className={`w-full justify-start text-left h-auto py-3 text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700 font-medium ${selectedCategory?.id === parent.id ? "bg-gray-100 dark:bg-gray-700" : ""}`}
-                                onClick={() => handleCategorySelect(parent)}>
-                                <div className="flex items-center justify-between w-full">
-                                  <div className="flex items-center gap-2">
-                                    <Tag className="h-4 w-4 text-blue-500 dark:text-blue-400" />
-                                    <span>{parent.name}</span>
-                                  </div>
-                                  {selectedCategory?.id === parent.id && <Check className="h-4 w-4 text-green-600 dark:text-green-400" />}
-                                </div>
-                              </Button>
-                              {children.length > 0 && (
-                                <div className="ml-6 border-l-2 border-gray-200 dark:border-gray-600 pl-2 space-y-1">
-                                  {children.map((child) => {
-                                    const grandchildren = childrenOf(child.id)
-                                    return (
-                                      <div key={child.id}>
-                                        <Button type="button" variant="ghost"
-                                          className={`w-full justify-start text-left h-auto py-2 text-gray-800 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 text-sm ${selectedCategory?.id === child.id ? "bg-gray-100 dark:bg-gray-700" : ""}`}
-                                          onClick={() => handleCategorySelect(child)}>
-                                          <div className="flex items-center justify-between w-full">
-                                            <div className="flex items-center gap-2">
-                                              <Tag className="h-3.5 w-3.5 text-gray-400 dark:text-gray-500" />
-                                              <span>{child.name}</span>
-                                            </div>
-                                            {selectedCategory?.id === child.id && <Check className="h-4 w-4 text-green-600 dark:text-green-400" />}
-                                          </div>
-                                        </Button>
-                                        {grandchildren.length > 0 && (
-                                          <div className="ml-4 border-l-2 border-gray-100 dark:border-gray-700 pl-2 space-y-1">
-                                            {grandchildren.map((gc) => (
-                                              <Button key={gc.id} type="button" variant="ghost"
-                                                className={`w-full justify-start text-left h-auto py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 text-xs ${selectedCategory?.id === gc.id ? "bg-gray-100 dark:bg-gray-700" : ""}`}
-                                                onClick={() => handleCategorySelect(gc)}>
-                                                <div className="flex items-center justify-between w-full">
-                                                  <div className="flex items-center gap-2">
-                                                    <Tag className="h-3 w-3 text-gray-300 dark:text-gray-600" />
-                                                    <span>{gc.name}</span>
-                                                  </div>
-                                                  {selectedCategory?.id === gc.id && <Check className="h-4 w-4 text-green-600 dark:text-green-400" />}
-                                                </div>
-                                              </Button>
-                                            ))}
-                                          </div>
-                                        )}
-                                      </div>
-                                    )
-                                  })}
-                                </div>
-                              )}
-                            </div>
-                          )
-                        })}
-                      </div>
-                    ) : (
-                      <div className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
-                        <p>No categories found</p>
-                      </div>
-                    )
+                    <div className="py-8 text-center text-sm text-slate-500">
+                      <p>No categories found</p>
+                      <p className="mt-1 text-xs">Add a new category below</p>
+                    </div>
                   )}
                 </>
               )
             )}
           </div>
 
-          {!isAddingNewCategory && (
-            <div className="p-4 border-t border-gray-200 dark:border-gray-700">
-              <Button type="button" variant="outline" className="w-full border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 bg-transparent" onClick={() => setIsAddingNewCategory(true)}>
-                <Plus className="h-4 w-4 mr-2" /> Add New Category
+          {!isAddingNewCategory && !isEditingCategory && (
+            <div className="border-t border-slate-200 p-4">
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full border-slate-300 bg-transparent hover:bg-slate-50"
+                onClick={() => {
+                  handleCancelEditCategory()
+                  setIsAddingNewCategory(true)
+                }}
+              >
+                <Plus className="mr-2 h-4 w-4" /> Add new category
               </Button>
             </div>
           )}
         </DialogContent>
       </Dialog>
+      {ConfirmDialog}
     </>
   )
 }

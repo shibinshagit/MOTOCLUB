@@ -1,0 +1,379 @@
+"use client"
+
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react"
+import { Flame, RefreshCw, Search, X } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
+import ProductsExcelTable from "@/components/products/products-excel-table"
+import { EXCEL_COLUMN_FILTER_POPOVER_ATTR } from "@/components/sales/excel-column-filter"
+import { ProductDetailSlider } from "@/components/products/product-detail-slider"
+import EditProductModal from "@/components/products/edit-product-modal"
+import AdjustStockModal from "@/components/products/adjust-stock-modal"
+import { deleteProduct, getTrendingProducts } from "@/app/actions/product-actions"
+import { useToast } from "@/components/ui/use-toast"
+import { notifyError, notifySuccess } from "@/lib/notifications"
+import { useStaffRestrictions } from "@/hooks/use-staff-restrictions"
+import { useSelector } from "react-redux"
+import { selectDeviceCurrency } from "@/store/slices/deviceSlice"
+
+const SHEET_ANIMATION_MS = 300
+
+interface TrendingDrawerProps {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  userId: number
+}
+
+export default function TrendingDrawer({ open, onOpenChange, userId }: TrendingDrawerProps) {
+  const currency = useSelector(selectDeviceCurrency)
+  const { isValueHidden } = useStaffRestrictions()
+  const hideCogs = isValueHidden("cogs")
+  const hideStockCount = isValueHidden("stock_count")
+  const { toast } = useToast()
+
+  const [products, setProducts] = useState<any[]>([])
+  const [searchTerm, setSearchTerm] = useState("")
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [hasLoaded, setHasLoaded] = useState(false)
+  const [detailProduct, setDetailProduct] = useState<any>(null)
+  const [selectedProduct, setSelectedProduct] = useState<any>(null)
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false)
+  const [isAdjustStockModalOpen, setIsAdjustStockModalOpen] = useState(false)
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [contentReady, setContentReady] = useState(false)
+  const [, startTableTransition] = useTransition()
+
+  useEffect(() => {
+    if (open) {
+      setContentReady(false)
+      const openTimer = window.setTimeout(() => {
+        startTableTransition(() => setContentReady(true))
+      }, SHEET_ANIMATION_MS)
+      return () => window.clearTimeout(openTimer)
+    }
+
+    const closeTimer = window.setTimeout(() => {
+      setContentReady(false)
+      setDetailProduct(null)
+      setSearchTerm("")
+    }, SHEET_ANIMATION_MS)
+    return () => window.clearTimeout(closeTimer)
+  }, [open])
+
+  const fetchTrendingProducts = useCallback(async () => {
+    if (!userId) return
+
+    try {
+      setLoading(true)
+      setError(null)
+      const result = await getTrendingProducts(userId)
+      if (result.success) {
+        setProducts(result.data || [])
+      } else {
+        setProducts([])
+        setError(result.message || "Failed to load trending products")
+        notifyError(toast, result.message || "Failed to load trending products")
+      }
+      setHasLoaded(true)
+    } catch (err) {
+      console.error("Error fetching trending products:", err)
+      setProducts([])
+      setError("Failed to load trending products. Please try again later.")
+      notifyError(toast, "Failed to load trending products. Please try again later.")
+      setHasLoaded(true)
+    } finally {
+      setLoading(false)
+    }
+  }, [userId, toast])
+
+  useEffect(() => {
+    if (open && !hasLoaded) {
+      fetchTrendingProducts()
+    }
+  }, [open, hasLoaded, fetchTrendingProducts])
+
+  const handleRefresh = () => {
+    setHasLoaded(false)
+    fetchTrendingProducts()
+  }
+
+  const searchedProducts = useMemo(() => {
+    if (!searchTerm.trim()) return products
+    const query = searchTerm.toLowerCase()
+    return products.filter(
+      (product) =>
+        product.name?.toLowerCase().includes(query) ||
+        product.category?.toLowerCase().includes(query) ||
+        product.company_name?.toLowerCase().includes(query) ||
+        product.barcode?.toLowerCase().includes(query) ||
+        product.shelf?.toLowerCase().includes(query) ||
+        String(product.id).includes(query),
+    )
+  }, [products, searchTerm])
+
+  const handleProductUpdated = (updatedProduct: any) => {
+    if (!updatedProduct.trending) {
+      setProducts((prev) => prev.filter((p) => p.id !== updatedProduct.id))
+      if (detailProduct?.id === updatedProduct.id) {
+        setDetailProduct(null)
+      }
+    } else {
+      setProducts((prev) => prev.map((p) => (p.id === updatedProduct.id ? updatedProduct : p)))
+      if (detailProduct?.id === updatedProduct.id) {
+        setDetailProduct(updatedProduct)
+      }
+    }
+    notifySuccess(toast, "Product updated successfully")
+  }
+
+  const handleStockAdjusted = (updatedProduct: any) => {
+    setProducts((prev) => prev.map((p) => (p.id === updatedProduct.id ? updatedProduct : p)))
+    if (detailProduct?.id === updatedProduct.id) {
+      setDetailProduct(updatedProduct)
+    }
+    notifySuccess(toast, "Stock adjusted successfully")
+  }
+
+  const confirmDelete = async () => {
+    if (!selectedProduct) return
+
+    setIsDeleting(true)
+    try {
+      const result = await deleteProduct(selectedProduct.id)
+      if (result.success) {
+        notifySuccess(toast, "Product deleted successfully")
+        setProducts((prev) => prev.filter((p) => p.id !== selectedProduct.id))
+        if (detailProduct?.id === selectedProduct.id) {
+          setDetailProduct(null)
+        }
+      } else {
+        notifyError(toast, result.message || "Failed to delete product")
+      }
+    } catch (err) {
+      console.error("Delete product error:", err)
+      notifyError(toast, "An unexpected error occurred")
+    } finally {
+      setIsDeleting(false)
+      setIsDeleteModalOpen(false)
+    }
+  }
+
+  const sheetOutsideGuard = (event: { preventDefault: () => void; target: EventTarget | null }) => {
+    const target = event.target as HTMLElement | null
+    if (target?.closest(`[${EXCEL_COLUMN_FILTER_POPOVER_ATTR}]`)) {
+      event.preventDefault()
+    }
+  }
+
+  return (
+    <>
+      <Sheet open={open} onOpenChange={onOpenChange}>
+        <SheetContent
+          side="right"
+          className="flex h-full w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-xl md:max-w-3xl lg:max-w-[min(96vw,1200px)]"
+          onInteractOutside={sheetOutsideGuard}
+          onPointerDownOutside={sheetOutsideGuard}
+          onFocusOutside={sheetOutsideGuard}
+        >
+          <SheetTitle className="sr-only">Trending products</SheetTitle>
+
+          <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+            <div className="relative z-10 flex shrink-0 items-center gap-3 border-b border-slate-200 bg-[#F1F4F9] px-4 py-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-orange-500 to-rose-500 text-white shadow-sm">
+                  <Flame className="h-5 w-5" />
+                </div>
+                <div className="min-w-0">
+                  <h2 className="truncate text-base font-semibold text-slate-900">Trending</h2>
+                  <p className="text-xs text-slate-500">
+                    {products.length} trending product{products.length === 1 ? "" : "s"}
+                    {error ? ` · ${error}` : ""}
+                  </p>
+                </div>
+              </div>
+
+              <div className="ml-auto flex flex-wrap items-center gap-2">
+                <div className="relative hidden sm:block">
+                  <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+                  <Input
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    placeholder="Search trending..."
+                    className="h-8 w-44 border-slate-200 bg-white pl-8 pr-8 text-xs lg:w-52"
+                  />
+                  {searchTerm ? (
+                    <button
+                      type="button"
+                      onClick={() => setSearchTerm("")}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  ) : null}
+                </div>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 border-slate-200 bg-white px-2.5 text-xs"
+                  onClick={handleRefresh}
+                  disabled={loading}
+                >
+                  <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+                  Refresh
+                </Button>
+              </div>
+            </div>
+
+            <div className="relative z-10 border-b border-slate-200 bg-white px-4 py-2 sm:hidden">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+                <Input
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Search trending..."
+                  className="h-8 border-slate-200 bg-white pl-8 pr-8 text-xs"
+                />
+                {searchTerm ? (
+                  <button
+                    type="button"
+                    onClick={() => setSearchTerm("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="relative z-0 min-h-0 flex-1 p-4">
+              {contentReady ? (
+                searchedProducts.length > 0 || loading ? (
+                  <ProductsExcelTable
+                    products={searchedProducts}
+                    isLoading={loading}
+                    hasLoaded={hasLoaded}
+                    hideCogs={hideCogs}
+                    hideStockCount={hideStockCount}
+                    currency={currency}
+                    onViewProduct={setDetailProduct}
+                    onEditProduct={(product) => {
+                      setSelectedProduct(product)
+                      setDetailProduct(null)
+                      setIsEditModalOpen(true)
+                    }}
+                  />
+                ) : (
+                  <div className="flex h-full min-h-[320px] flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50/50 px-6 text-center">
+                    <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-orange-50 text-orange-500">
+                      <Flame className="h-6 w-6" />
+                    </div>
+                    <p className="text-sm font-medium text-slate-800">No trending products yet</p>
+                    <p className="mt-1 max-w-sm text-xs text-slate-500">
+                      Turn on the Trending toggle when adding or editing a product to show it here.
+                    </p>
+                  </div>
+                )
+              ) : (
+                <div className="flex h-full min-h-[320px] flex-col overflow-hidden rounded-xl border border-slate-200 bg-card">
+                  <div className="border-b border-slate-200 bg-[#F1F4F9] px-4 py-2">
+                    <div className="h-4 w-40 animate-pulse rounded bg-slate-200" />
+                  </div>
+                  <div className="flex-1 space-y-3 p-4">
+                    {[...Array(8)].map((_, index) => (
+                      <div key={index} className="h-4 animate-pulse rounded bg-slate-100" />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {detailProduct ? (
+              <ProductDetailSlider
+                portaled={false}
+                product={detailProduct}
+                onClose={() => setDetailProduct(null)}
+                onEdit={() => {
+                  setSelectedProduct(detailProduct)
+                  setDetailProduct(null)
+                  setIsEditModalOpen(true)
+                }}
+                onDelete={() => {
+                  setSelectedProduct(detailProduct)
+                  setIsDeleteModalOpen(true)
+                }}
+                onAdjustStock={
+                  hideStockCount
+                    ? undefined
+                    : () => {
+                        setSelectedProduct(detailProduct)
+                        setDetailProduct(null)
+                        setIsAdjustStockModalOpen(true)
+                      }
+                }
+                currency={currency}
+                privacyMode={false}
+                userId={userId}
+              />
+            ) : null}
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      {selectedProduct ? (
+        <EditProductModal
+          isOpen={isEditModalOpen}
+          onClose={() => setIsEditModalOpen(false)}
+          product={selectedProduct}
+          onSuccess={handleProductUpdated}
+          userId={userId}
+        />
+      ) : null}
+
+      {selectedProduct ? (
+        <AdjustStockModal
+          isOpen={isAdjustStockModalOpen}
+          onClose={() => setIsAdjustStockModalOpen(false)}
+          product={selectedProduct}
+          userId={userId}
+          currency={currency}
+          onSuccess={handleStockAdjusted}
+        />
+      ) : null}
+
+      <AlertDialog open={isDeleteModalOpen} onOpenChange={setIsDeleteModalOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete product</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete &quot;{selectedProduct?.name}&quot;? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDelete}
+              disabled={isDeleting}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {isDeleting ? "Deleting..." : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  )
+}

@@ -1,7 +1,6 @@
 import type { Config } from "tailwindcss"
 
 const config = {
-  darkMode: ["class"],
   content: [
     "./pages/**/*.{ts,tsx}",
     "./components/**/*.{ts,tsx}",
@@ -20,9 +19,18 @@ const config = {
     },
     extend: {
       fontFamily: {
-        sans: ["var(--font-poppins)", "sans-serif"],
-        serif: ["var(--font-playfair)", "serif"],
-        orbitron: ["var(--font-orbitron)", "monospace"],
+        sans: [
+          "var(--font-inter)",
+          "Inter",
+          "system-ui",
+          "-apple-system",
+          "BlinkMacSystemFont",
+          "Segoe UI",
+          "Roboto",
+          "Helvetica Neue",
+          "Arial",
+          "sans-serif",
+        ],
       },
       colors: {
         border: "hsl(var(--border))",
@@ -42,6 +50,14 @@ const config = {
           DEFAULT: "hsl(var(--destructive))",
           foreground: "hsl(var(--destructive-foreground))",
         },
+        success: {
+          DEFAULT: "hsl(var(--success))",
+          foreground: "hsl(var(--success-foreground))",
+        },
+        warning: {
+          DEFAULT: "hsl(var(--warning))",
+          foreground: "hsl(var(--warning-foreground))",
+        },
         muted: {
           DEFAULT: "hsl(var(--muted))",
           foreground: "hsl(var(--muted-foreground))",
@@ -58,14 +74,17 @@ const config = {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
-        gaming: {
-          dark: "#0F172A",
-          card: "#1E293B",
-          border: "#334155",
-          accent: "#6366F1",
-          accent2: "#8B5CF6",
-          accent3: "#EC4899",
-          text: "#94A3B8",
+        brand: {
+          violet: "#7C3AED",
+          "violet-soft": "#F5F3FF",
+          amber: "#F59E0B",
+          "amber-soft": "#FFFBEB",
+          blue: "#3B82F6",
+          "blue-soft": "#EFF6FF",
+          emerald: "#10B981",
+          "emerald-soft": "#ECFDF5",
+          rose: "#EF4444",
+          "rose-soft": "#FEF2F2",
         },
       },
       borderRadius: {
@@ -82,20 +101,10 @@ const config = {
           from: { height: "var(--radix-accordion-content-height)" },
           to: { height: "0" },
         },
-        pulse: {
-          "0%, 100%": { opacity: "1" },
-          "50%": { opacity: "0.5" },
-        },
-        glow: {
-          "0%, 100%": { boxShadow: "0 0 5px rgba(99, 102, 241, 0.5)" },
-          "50%": { boxShadow: "0 0 20px rgba(99, 102, 241, 0.8)" },
-        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
-        pulse: "pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite",
-        glow: "glow 2s ease-in-out infinite",
       },
     },
   },

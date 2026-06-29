@@ -7,7 +7,8 @@ import { User, Plus, Search, X, Loader2, RefreshCw, Phone, Mail, MapPin } from "
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import EditCustomerModal from "../customers/edit-customer-modal"
 import ViewCustomerModal from "../customers/view-customer-modal"
-import { useNotification } from "@/components/ui/global-notification"
+import { useToast } from "@/components/ui/use-toast"
+import { notifyError, notifySuccess } from "@/lib/notifications"
 import { exportCustomersToPDF } from "@/lib/pdf-export-utils"
 import { getCustomers } from "@/app/actions/customer-actions"
 import { useAppDispatch, useAppSelector } from "@/store/hooks"
@@ -55,7 +56,7 @@ export function CustomerTab({ userId }: { userId: number }) {
   const [isSearching, setIsSearching] = useState(false)
   const [isBackgroundRefreshing, setIsBackgroundRefreshing] = useState(false)
 
-  const { showNotification } = useNotification()
+  const { toast } = useToast()
 
   // Initial load and background refresh
   useEffect(() => {
@@ -99,11 +100,11 @@ export function CustomerTab({ userId }: { userId: number }) {
         dispatch(setCustomers(response.data))
         dispatch(setShowingLimited(!showAll && !searchTerm && response.data.length >= 5))
       } else {
-        showNotification("error", "Failed to load customers")
+        notifyError(toast, "Failed to load customers")
       }
     } catch (error) {
       console.error("Error fetching customers:", error)
-      showNotification("error", "Failed to load customers")
+      notifyError(toast, "Failed to load customers")
     } finally {
       setIsSearching(false)
       dispatch(setIsLoading(false))
@@ -129,15 +130,15 @@ export function CustomerTab({ userId }: { userId: number }) {
         // Add the new customer to Redux
         dispatch(addCustomer(result.data))
         setIsAddModalOpen(false)
-        showNotification("success", "Customer added successfully")
+        notifySuccess(toast, "Customer added successfully")
         return { success: true }
       } else {
-        showNotification("error", result.message || "Failed to add customer")
+        notifyError(toast, result.message || "Failed to add customer")
         return { success: false, message: result.message }
       }
     } catch (error) {
       console.error("Error adding customer:", error)
-      showNotification("error", "An unexpected error occurred")
+      notifyError(toast, "An unexpected error occurred")
       return { success: false, message: "An unexpected error occurred" }
     }
   }
@@ -155,15 +156,15 @@ export function CustomerTab({ userId }: { userId: number }) {
         // Update the customer in Redux
         dispatch(updateCustomer(result.data))
         setIsEditModalOpen(false)
-        showNotification("success", "Customer updated successfully")
+        notifySuccess(toast, "Customer updated successfully")
         return { success: true }
       } else {
-        showNotification("error", result.message || "Failed to update customer")
+        notifyError(toast, result.message || "Failed to update customer")
         return { success: false, message: result.message }
       }
     } catch (error) {
       console.error("Error updating customer:", error)
-      showNotification("error", "An unexpected error occurred")
+      notifyError(toast, "An unexpected error occurred")
       return { success: false, message: "An unexpected error occurred" }
     }
   }
@@ -182,13 +183,13 @@ export function CustomerTab({ userId }: { userId: number }) {
         // Remove the customer from Redux
         dispatch(deleteCustomer(selectedCustomer.id))
         setIsDeleteModalOpen(false)
-        showNotification("success", "Customer deleted successfully")
+        notifySuccess(toast, "Customer deleted successfully")
       } else {
-        showNotification("error", result.message || "Failed to delete customer")
+        notifyError(toast, result.message || "Failed to delete customer")
       }
     } catch (error) {
       console.error("Error deleting customer:", error)
-      showNotification("error", "An unexpected error occurred")
+      notifyError(toast, "An unexpected error occurred")
     }
   }
 
@@ -250,16 +251,16 @@ const renderSkeletonLoading = () => (
     {[...Array(5)].map((_, i) => (
       <div
         key={i}
-        className="flex items-center space-x-4 p-3 sm:p-4 bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 animate-pulse"
+        className="flex items-center space-x-4 p-3 sm:p-4 bg-white rounded-xl border animate-pulse"
       >
-        <div className="h-10 w-10 sm:h-12 sm:w-12 bg-gray-200 dark:bg-gray-600 rounded-full flex-shrink-0"></div>
+        <div className="h-10 w-10 sm:h-12 sm:w-12 bg-gray-200 rounded-full flex-shrink-0"></div>
         <div className="flex-1 space-y-2 min-w-0">
-          <div className="h-4 bg-gray-200 dark:bg-gray-600 rounded w-1/3"></div>
-          <div className="h-3 bg-gray-200 dark:bg-gray-600 rounded w-1/2"></div>
+          <div className="h-4 bg-gray-200 rounded w-1/3"></div>
+          <div className="h-3 bg-gray-200 rounded w-1/2"></div>
         </div>
         <div className="flex flex-col sm:flex-row space-y-1 sm:space-y-0 sm:space-x-2">
-          <div className="h-6 sm:h-8 w-12 sm:w-16 bg-gray-200 dark:bg-gray-600 rounded"></div>
-          <div className="h-6 sm:h-8 w-12 sm:w-16 bg-gray-200 dark:bg-gray-600 rounded"></div>
+          <div className="h-6 sm:h-8 w-12 sm:w-16 bg-gray-200 rounded"></div>
+          <div className="h-6 sm:h-8 w-12 sm:w-16 bg-gray-200 rounded"></div>
         </div>
       </div>
     ))}
@@ -270,7 +271,7 @@ return (
   <div className="space-y-4 sm:space-y-6 p-4 sm:p-0">
     {/* Header */}
     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-      <h1 className="text-xl sm:text-2xl font-bold dark:text-gray-100">Customers</h1>
+      <h1 className="text-xl sm:text-2xl font-bold">Customers</h1>
       
       {/* Action Buttons - Responsive Grid */}
       <div className="flex flex-wrap gap-2 w-full sm:w-auto">
@@ -346,7 +347,7 @@ return (
 
     {/* Last Updated - Mobile Responsive */}
     {lastUpdated && (
-      <div className="text-xs text-gray-500 dark:text-gray-400 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-0">
+      <div className="text-xs text-gray-500 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-0">
         <span>Last updated: {formatDistanceToNow(lastUpdated)} ago</span>
         {isBackgroundRefreshing && (
           <span className="flex items-center text-blue-500">
@@ -357,7 +358,7 @@ return (
     )}
 
     {/* Search Bar */}
-    <Card className="dark:bg-gray-800 dark:border-gray-700">
+    <Card className="">
       <CardContent className="p-3 sm:p-4">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4 flex-shrink-0" />
@@ -386,14 +387,14 @@ return (
     {reduxIsLoading && customers.length === 0 ? (
       renderSkeletonLoading()
     ) : customers.length === 0 ? (
-      <div className="text-center py-12 sm:py-16 bg-gray-50 dark:bg-gray-800 rounded-2xl border border-dashed dark:border-gray-600 mx-2 sm:mx-0">
+      <div className="text-center py-12 sm:py-16 bg-gray-50 rounded-2xl border border-dashed mx-2 sm:mx-0">
         <div className="flex justify-center mb-4">
-          <div className="p-3 sm:p-4 bg-gray-100 dark:bg-gray-700 rounded-full">
+          <div className="p-3 sm:p-4 bg-gray-100 rounded-full">
             <User className="h-6 w-6 sm:h-8 sm:w-8 text-gray-400" />
           </div>
         </div>
-        <h3 className="text-base sm:text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">No customers found</h3>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mb-4 sm:mb-6 px-4">
+        <h3 className="text-base sm:text-lg font-medium text-gray-900 mb-2">No customers found</h3>
+        <p className="text-sm text-gray-500 mb-4 sm:mb-6 px-4">
           {reduxSearchTerm ? "Try a different search term" : "Get started by adding your first customer"}
         </p>
         {!reduxSearchTerm && (
@@ -407,7 +408,7 @@ return (
         {customers.map((customer) => (
           <div
             key={customer.id}
-            className="flex items-center p-3 sm:p-4 bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 hover:shadow-md dark:hover:bg-gray-750 transition-all duration-200 cursor-pointer group"
+            className="flex items-center p-3 sm:p-4 bg-white rounded-xl border hover:shadow-md transition-all duration-200 cursor-pointer group"
             onClick={() => openViewModal(customer)}
           >
             {/* Avatar - Responsive Size */}
@@ -421,15 +422,15 @@ return (
             <div className="flex-1 min-w-0">
               <div className="flex items-start justify-between">
                 <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 min-w-0 flex-1">
-                  <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{customer.name}</h3>
+                  <h3 className="text-sm font-semibold text-gray-900 truncate">{customer.name}</h3>
                   <div className="flex items-center gap-1 sm:gap-2">
-                    <div className="bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-xs font-semibold px-2 py-1 rounded-full min-w-[24px] h-5 sm:h-6 flex items-center justify-center">
+                    <div className="bg-blue-100 text-blue-800 text-xs font-semibold px-2 py-1 rounded-full min-w-[24px] h-5 sm:h-6 flex items-center justify-center">
                       {customer.order_count || 0}
                     </div>
                     {/* Check if customer is new (created within last 7 days) */}
                     {customer.created_at &&
                       new Date(customer.created_at) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) && (
-                        <span className="bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 text-xs font-semibold px-2 py-1 rounded-full">
+                        <span className="bg-yellow-100 text-yellow-800 text-xs font-semibold px-2 py-1 rounded-full">
                           New
                         </span>
                       )}
@@ -438,7 +439,7 @@ return (
               </div>
 
               {/* Contact Info - Responsive Stacking */}
-              <div className="mt-1 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4 text-xs text-gray-500 dark:text-gray-400">
+              <div className="mt-1 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4 text-xs text-gray-500">
                 {customer.phone && (
                   <div className="flex items-center">
                     <Phone className="h-3 w-3 mr-1 flex-shrink-0" />
@@ -455,7 +456,7 @@ return (
 
               {/* Address - Responsive Display */}
               {customer.address && (
-                <div className="mt-1 flex items-center text-xs text-gray-500 dark:text-gray-400">
+                <div className="mt-1 flex items-center text-xs text-gray-500">
                   <MapPin className="h-3 w-3 mr-1 flex-shrink-0" />
                   <span className="truncate">{customer.address}</span>
                 </div>
@@ -482,7 +483,7 @@ return (
                 }}
                 size="sm"
                 variant="outline"
-                className="border-red-200 text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-900/20 px-2 sm:px-3 py-1 text-xs rounded-lg min-w-0 w-12 sm:w-auto"
+                className="border-red-200 text-red-600 hover:bg-red-50 px-2 sm:px-3 py-1 text-xs rounded-lg min-w-0 w-12 sm:w-auto"
               >
                 <span className="hidden sm:inline">Delete</span>
                 <span className="sm:hidden">🗑️</span>

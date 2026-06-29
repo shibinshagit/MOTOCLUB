@@ -89,7 +89,6 @@ async function createTables() {
         phone VARCHAR(50),
         address TEXT,
         description TEXT,
-        logo_url TEXT,
         created_at TIMESTAMP DEFAULT NOW()
       )
     `
@@ -104,6 +103,7 @@ async function createTables() {
         password_hash TEXT NOT NULL,
         company_id INTEGER,
         currency VARCHAR(10) DEFAULT 'QAR',
+        logo_url TEXT,
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()
       )
@@ -129,6 +129,7 @@ async function createTables() {
     await sql`
       CREATE TABLE IF NOT EXISTS platform_settings (
         id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+        platform_name TEXT,
         brand_logo_url TEXT,
         brand_icon_url TEXT,
         updated_at TIMESTAMP DEFAULT NOW()
@@ -190,6 +191,7 @@ async function createTables() {
         flipkart_status VARCHAR(20) DEFAULT 'not_listed',
         meesho_status VARCHAR(20) DEFAULT 'not_listed',
         own_ecom_status VARCHAR(20) DEFAULT 'not_listed',
+        trending BOOLEAN DEFAULT false,
         shelf VARCHAR(255),
         color VARCHAR(255),
         size VARCHAR(255),
@@ -364,6 +366,45 @@ async function createTables() {
     `
   })
 
+  await run("master_data", async () => {
+    await sql`
+      CREATE TABLE IF NOT EXISTS master_data (
+        id SERIAL PRIMARY KEY,
+        device_id INTEGER NOT NULL,
+        category VARCHAR(50) NOT NULL,
+        name VARCHAR(255) NOT NULL,
+        code VARCHAR(50),
+        contact_phone VARCHAR(50),
+        contact_email VARCHAR(255),
+        website VARCHAR(255),
+        tracking_url_template VARCHAR(500),
+        notes TEXT,
+        metadata JSONB DEFAULT '{}'::jsonb,
+        is_active BOOLEAN DEFAULT true,
+        sort_order INTEGER DEFAULT 0,
+        created_by INTEGER,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `
+  })
+
+  await run("product_share_links", async () => {
+    await sql`
+      CREATE TABLE IF NOT EXISTS product_share_links (
+        id SERIAL PRIMARY KEY,
+        token VARCHAR(64) NOT NULL UNIQUE,
+        product_id INTEGER NOT NULL,
+        device_id INTEGER NOT NULL,
+        created_by INTEGER,
+        expires_at TIMESTAMP,
+        revoked_at TIMESTAMP,
+        view_count INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `
+  })
+
   await run("stock_transfers", async () => {
     await sql`
       CREATE TABLE IF NOT EXISTS stock_transfers (
@@ -487,13 +528,16 @@ async function upgradeLegacyColumns() {
   console.log("\n── Upgrading legacy databases ──\n")
 
   const columns: Array<[string, () => Promise<any>]> = [
+    ["platform_settings.platform_name", () => sql`ALTER TABLE platform_settings ADD COLUMN IF NOT EXISTS platform_name TEXT`],
     ["devices.currency", () => sql`ALTER TABLE devices ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT 'QAR'`],
+    ["devices.logo_url", () => sql`ALTER TABLE devices ADD COLUMN IF NOT EXISTS logo_url TEXT`],
     ["products.image_urls", () => sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS image_urls JSONB DEFAULT '[]'`],
     ["products.video_url", () => sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS video_url TEXT`],
     ["products.amazon_status", () => sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS amazon_status VARCHAR(20) DEFAULT 'not_listed'`],
     ["products.flipkart_status", () => sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS flipkart_status VARCHAR(20) DEFAULT 'not_listed'`],
     ["products.meesho_status", () => sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS meesho_status VARCHAR(20) DEFAULT 'not_listed'`],
     ["products.own_ecom_status", () => sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS own_ecom_status VARCHAR(20) DEFAULT 'not_listed'`],
+    ["products.trending", () => sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS trending BOOLEAN DEFAULT false`],
     ["product_stock_history.device_id", () => sql`ALTER TABLE product_stock_history ADD COLUMN IF NOT EXISTS device_id INTEGER`],
     ["sales.device_id", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS device_id INTEGER`],
     ["sales.received_amount", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS received_amount DECIMAL(12,2) DEFAULT 0`],
@@ -503,12 +547,32 @@ async function upgradeLegacyColumns() {
     ["sales.discount", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS discount DECIMAL(12,2) DEFAULT 0`],
     ["sales.total_cost", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS total_cost DECIMAL(12,2) DEFAULT 0`],
     ["sales.updated_at", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()`],
+    ["sales.fulfillment_type", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS fulfillment_type VARCHAR(20) DEFAULT 'pickup'`],
+    ["sales.delivery_status", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS delivery_status VARCHAR(50)`],
+    ["sales.courier_service_id", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS courier_service_id INTEGER`],
+    ["sales.courier_service_name", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS courier_service_name VARCHAR(255)`],
+    ["sales.tracking_id", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS tracking_id VARCHAR(255)`],
+    ["sales.shipping_address", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS shipping_address TEXT`],
+    ["sales.weight_kg", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS weight_kg DECIMAL(10,3)`],
+    ["sales.length_cm", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS length_cm DECIMAL(10,2)`],
+    ["sales.width_cm", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS width_cm DECIMAL(10,2)`],
+    ["sales.height_cm", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS height_cm DECIMAL(10,2)`],
+    ["sales.courier_paid_extra", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS courier_paid_extra DECIMAL(12,2) DEFAULT 0`],
+    ["sales.expense_courier", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS expense_courier DECIMAL(12,2) DEFAULT 0`],
+    ["sales.expense_packing", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS expense_packing DECIMAL(12,2) DEFAULT 0`],
+    ["sales.shipped_at", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS shipped_at TIMESTAMP`],
+    ["sales.delivered_at", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMP`],
+    ["sales.shipping_notes", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS shipping_notes TEXT`],
+    ["sales.packaging_type_id", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS packaging_type_id INTEGER`],
+    ["sales.packaging_type_name", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS packaging_type_name VARCHAR(255)`],
     ["sale_items.cost", () => sql`ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS cost DECIMAL(12,2) DEFAULT 0`],
     ["sale_items.notes", () => sql`ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS notes TEXT`],
     ["purchases.device_id", () => sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS device_id INTEGER`],
     ["purchases.payment_method", () => sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50)`],
     ["purchases.purchase_status", () => sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS purchase_status VARCHAR(50) DEFAULT 'Delivered'`],
     ["purchases.received_amount", () => sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS received_amount DECIMAL(12,2) DEFAULT 0`],
+    ["purchases.created_at", () => sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`],
+    ["purchases.updated_at", () => sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()`],
     ["staff.staff_password_hash", () => sql`ALTER TABLE staff ADD COLUMN IF NOT EXISTS staff_password_hash TEXT`],
     ["staff.role", () => sql`ALTER TABLE staff ADD COLUMN IF NOT EXISTS role VARCHAR(20) NOT NULL DEFAULT 'staff'`],
     ["staff.restricted_pages", () => sql`ALTER TABLE staff ADD COLUMN IF NOT EXISTS restricted_pages JSONB DEFAULT '[]'::jsonb`],
@@ -533,6 +597,57 @@ async function upgradeLegacyColumns() {
   for (const [label, fn] of columns) {
     await runSafe(label, fn)
   }
+
+  await runSafe("purchases.created_at from purchase_date", async () => {
+    await sql`
+      UPDATE purchases
+      SET created_at = purchase_date
+      WHERE created_at IS NULL AND purchase_date IS NOT NULL
+    `
+  })
+
+  await runSafe("purchases.updated_at from purchase_date", async () => {
+    await sql`
+      UPDATE purchases
+      SET updated_at = COALESCE(purchase_date, created_at, NOW())
+      WHERE updated_at IS NULL
+    `
+  })
+
+  await runSafe("devices.logo_url from companies.logo_url", async () => {
+    await sql`
+      UPDATE devices d
+      SET logo_url = c.logo_url
+      FROM companies c
+      WHERE d.company_id = c.id
+        AND c.logo_url IS NOT NULL
+        AND TRIM(c.logo_url) <> ''
+        AND (d.logo_url IS NULL OR TRIM(d.logo_url) = '')
+    `
+  })
+
+  await runSafe("companies.logo_url drop", () => sql`ALTER TABLE companies DROP COLUMN IF EXISTS logo_url`)
+
+  await runSafe("products.stock drop", () => sql`ALTER TABLE products DROP COLUMN IF EXISTS stock`)
+}
+
+async function dropLegacyTables() {
+  console.log("\n── Dropping unused legacy tables ──\n")
+
+  const legacyTables: Array<[string, () => Promise<any>]> = [
+    ["service_items", () => sql`DROP TABLE IF EXISTS service_items CASCADE`],
+    ["financial_ledger", () => sql`DROP TABLE IF EXISTS financial_ledger CASCADE`],
+    ["payments", () => sql`DROP TABLE IF EXISTS payments CASCADE`],
+    ["cogs_entries", () => sql`DROP TABLE IF EXISTS cogs_entries CASCADE`],
+    ["accounts_receivable", () => sql`DROP TABLE IF EXISTS accounts_receivable CASCADE`],
+    ["accounts_payable", () => sql`DROP TABLE IF EXISTS accounts_payable CASCADE`],
+    ["income_categories", () => sql`DROP TABLE IF EXISTS income_categories CASCADE`],
+    ["stock_history", () => sql`DROP TABLE IF EXISTS stock_history CASCADE`],
+  ]
+
+  for (const [label, fn] of legacyTables) {
+    await runSafe(`drop ${label}`, fn)
+  }
 }
 
 async function createIndexes() {
@@ -550,6 +665,8 @@ async function createIndexes() {
     ["idx_stock_transfers_from", () => sql`CREATE INDEX IF NOT EXISTS idx_stock_transfers_from ON stock_transfers(from_device_id)`],
     ["idx_stock_transfers_to", () => sql`CREATE INDEX IF NOT EXISTS idx_stock_transfers_to ON stock_transfers(to_device_id)`],
     ["idx_product_device_stock", () => sql`CREATE INDEX IF NOT EXISTS idx_product_device_stock ON product_device_stock(device_id, product_id)`],
+    ["idx_product_share_links_token", () => sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_product_share_links_token ON product_share_links(token)`],
+    ["idx_product_share_links_product", () => sql`CREATE INDEX IF NOT EXISTS idx_product_share_links_product ON product_share_links(product_id, device_id)`],
   ]
 
   for (const [label, fn] of indexes) {
@@ -600,6 +717,7 @@ async function migrate() {
   try {
     await createTables()
     await upgradeLegacyColumns()
+    await dropLegacyTables()
     await createIndexes()
     await seedAdmin()
   } catch {

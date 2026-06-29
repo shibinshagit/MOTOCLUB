@@ -1,161 +1,99 @@
 "use server"
 
+import { del, put } from "@vercel/blob"
 import { sql } from "@/lib/db"
-import { isMockMode, setMockMode } from "@/lib/db"
-import { getDefaultCompanyLogo } from "@/app/actions/brand-actions"
 import { requireAdmin } from "./admin-auth-actions"
 import { revalidatePath } from "next/cache"
+
+async function deleteManagedBlob(url: string | null | undefined) {
+  if (!url || !url.includes("blob.vercel-storage.com")) return
+
+  const token = process.env.BLOB_READ_WRITE_TOKEN
+  if (!token) return
+
+  try {
+    await del(url, { token })
+  } catch (error) {
+    console.warn("Failed to delete old blob:", error)
+  }
+}
+
+async function uploadDeviceLogo(file: File, deviceId: number): Promise<string> {
+  const token = process.env.BLOB_READ_WRITE_TOKEN
+  if (!token) {
+    throw new Error("Blob storage is not configured")
+  }
+
+  const extension = file.name.split(".").pop()?.toLowerCase() || "png"
+  const filename = `devices/${deviceId}/logo-${Date.now()}.${extension}`
+
+  const blob = await put(filename, file, {
+    access: "public",
+    token,
+  })
+
+  return blob.url
+}
+
+async function resolveDeviceLogoFromForm(
+  formData: FormData,
+  deviceId: number,
+  existingLogoUrl: string | null,
+): Promise<string | null> {
+  const removeLogo = formData.get("removeLogo") === "true"
+  const logoFile = formData.get("deviceLogo")
+
+  if (removeLogo) {
+    await deleteManagedBlob(existingLogoUrl)
+    return null
+  }
+
+  if (logoFile instanceof File && logoFile.size > 0) {
+    if (!logoFile.type.startsWith("image/")) {
+      throw new Error("Logo must be an image file")
+    }
+    if (logoFile.size > 5 * 1024 * 1024) {
+      throw new Error("Logo must be 5MB or smaller")
+    }
+    await deleteManagedBlob(existingLogoUrl)
+    return uploadDeviceLogo(logoFile, deviceId)
+  }
+
+  return existingLogoUrl
+}
 
 // Company Management
 export async function getCompanies() {
   await requireAdmin()
   try {
-    // If we encounter a database error, switch to mock mode
-    try {
-      // Try a simple query first to test connection
-      await sql`SELECT 1`
-    } catch (error) {
-      console.error("Database connection test failed in getCompanies:", error)
-      // Force mock mode
-      setMockMode(true)
-    }
+    const result = await sql`
+      SELECT 
+        c.id, 
+        c.name, 
+        c.email, 
+        c.phone, 
+        c.address, 
+        c.description, 
+        COUNT(d.id) as device_count
+      FROM 
+        companies c
+      LEFT JOIN 
+        devices d ON d.company_id = c.id
+      GROUP BY 
+        c.id, c.name, c.email, c.phone, c.address, c.description
+      ORDER BY 
+        c.name
+    `
 
-    if (isMockMode()) {
-      console.log("Using mock data for getCompanies")
-      return {
-        success: true,
-        data: [
-          {
-            id: 1,
-            name: "Demo Company",
-            email: "info@alaneeq.com",
-            phone: "+971 50 123 4567",
-            address: "Dubai, UAE",
-            description: "Retail company specializing in fashion",
-            logo_url: (await getDefaultCompanyLogo()) || "",
-            device_count: 5,
-          },
-          {
-            id: 2,
-            name: "Fashion Hub",
-            email: "contact@fashionhub.com",
-            phone: "+971 50 987 6543",
-            address: "Abu Dhabi, UAE",
-            description: "Premium fashion retailer",
-            logo_url: "",
-            device_count: 3,
-          },
-        ],
-      }
-    }
-
-    // Improved query with better error handling
-    try {
-      const result = await sql`
-        SELECT 
-          c.id, 
-          c.name, 
-          c.email, 
-          c.phone, 
-          c.address, 
-          c.description, 
-          c.logo_url,
-          COUNT(d.id) as device_count
-        FROM 
-          companies c
-        LEFT JOIN 
-          devices d ON d.company_id = c.id
-        GROUP BY 
-          c.id, c.name, c.email, c.phone, c.address, c.description, c.logo_url
-        ORDER BY 
-          c.name
-      `
-
-      return {
-        success: true,
-        data: result,
-      }
-    } catch (dbError) {
-      console.error("Database error fetching companies:", dbError)
-
-      // If we get here, try a simpler query
-      try {
-        const simpleResult = await sql`
-          SELECT id, name, email, phone, address, description, logo_url
-          FROM companies
-          ORDER BY name
-        `
-
-        // Add device_count = 0 to each company
-        const companiesWithDeviceCount = simpleResult.map((company: Record<string, unknown>) => ({
-          ...company,
-          device_count: 0,
-        }))
-
-        return {
-          success: true,
-          data: companiesWithDeviceCount,
-        }
-      } catch (simpleError) {
-        console.error("Simple query also failed:", simpleError)
-        // Force mock mode and return mock data
-        setMockMode(true)
-        return {
-          success: true,
-          data: [
-            {
-              id: 1,
-              name: "Demo Company (Mock)",
-              email: "info@alaneeq.com",
-              phone: "+971 50 123 4567",
-              address: "Dubai, UAE",
-              description: "Retail company specializing in fashion",
-              logo_url: (await getDefaultCompanyLogo()) || "",
-              device_count: 5,
-            },
-            {
-              id: 2,
-              name: "Fashion Hub (Mock)",
-              email: "contact@fashionhub.com",
-              phone: "+971 50 987 6543",
-              address: "Abu Dhabi, UAE",
-              description: "Premium fashion retailer",
-              logo_url: "",
-              device_count: 3,
-            },
-          ],
-        }
-      }
+    return {
+      success: true,
+      data: result,
     }
   } catch (error) {
     console.error("Error fetching companies:", error)
-    // Force mock mode as a last resort
-    setMockMode(true)
     return {
-      success: true, // Return success with mock data instead of failure
-      message: "Using mock data due to database error",
-      data: [
-        {
-          id: 1,
-          name: "Demo Company (Fallback)",
-          email: "info@alaneeq.com",
-          phone: "+971 50 123 4567",
-          address: "Dubai, UAE",
-          description: "Retail company specializing in fashion",
-          logo_url: (await getDefaultCompanyLogo()) || "",
-          device_count: 5,
-        },
-        {
-          id: 2,
-          name: "Fashion Hub (Fallback)",
-          email: "contact@fashionhub.com",
-          phone: "+971 50 987 6543",
-          address: "Abu Dhabi, UAE",
-          description: "Premium fashion retailer",
-          logo_url: "",
-          device_count: 3,
-        },
-      ],
+      success: false,
+      message: error instanceof Error ? error.message : "Failed to load companies",
     }
   }
 }
@@ -163,23 +101,8 @@ export async function getCompanies() {
 export async function getCompanyById(id: number) {
   await requireAdmin()
   try {
-    if (isMockMode()) {
-      return {
-        success: true,
-        data: {
-          id: 1,
-          name: "Demo Company",
-          email: "info@example.com",
-          phone: "+971 50 123 4567",
-          address: "Dubai, UAE",
-          description: "Retail company specializing in fashion",
-          logo_url: (await getDefaultCompanyLogo()) || "",
-        },
-      }
-    }
-
-    const result = await sql`
-      SELECT id, name, email, phone, address, description, logo_url
+        const result = await sql`
+      SELECT id, name, email, phone, address, description
       FROM companies
       WHERE id = ${id}
     `
@@ -207,35 +130,19 @@ export async function getCompanyById(id: number) {
 export async function createCompany(formData: FormData) {
   await requireAdmin()
   try {
-    if (isMockMode()) {
-      return {
-        success: true,
-        data: {
-          id: 3,
-          name: formData.get("name") as string,
-          email: formData.get("email") as string,
-          phone: formData.get("phone") as string,
-          address: formData.get("address") as string,
-          description: formData.get("description") as string,
-          logo_url: formData.get("logo_url") as string,
-        },
-      }
-    }
-
-    const name = formData.get("name") as string
+        const name = formData.get("name") as string
     const email = formData.get("email") as string
     const phone = formData.get("phone") as string
     const address = formData.get("address") as string
     const description = formData.get("description") as string
-    const logo_url = formData.get("logo_url") as string
 
     const result = await sql`
-      INSERT INTO companies (name, email, phone, address, description, logo_url, created_at)
-      VALUES (${name}, ${email}, ${phone}, ${address}, ${description}, ${logo_url}, NOW())
-      RETURNING id, name, email, phone, address, description, logo_url
+      INSERT INTO companies (name, email, phone, address, description, created_at)
+      VALUES (${name}, ${email}, ${phone}, ${address}, ${description}, NOW())
+      RETURNING id, name, email, phone, address, description
     `
 
-    revalidatePath("/admin")
+    revalidatePath("/admin", "layout")
 
     return {
       success: true,
@@ -253,28 +160,12 @@ export async function createCompany(formData: FormData) {
 export async function updateCompany(formData: FormData) {
   await requireAdmin()
   try {
-    if (isMockMode()) {
-      return {
-        success: true,
-        data: {
-          id: Number.parseInt(formData.get("id") as string),
-          name: formData.get("name") as string,
-          email: formData.get("email") as string,
-          phone: formData.get("phone") as string,
-          address: formData.get("address") as string,
-          description: formData.get("description") as string,
-          logo_url: formData.get("logo_url") as string,
-        },
-      }
-    }
-
-    const id = Number.parseInt(formData.get("id") as string)
+        const id = Number.parseInt(formData.get("id") as string)
     const name = formData.get("name") as string
     const email = formData.get("email") as string
     const phone = formData.get("phone") as string
     const address = formData.get("address") as string
     const description = formData.get("description") as string
-    const logo_url = formData.get("logo_url") as string
 
     const result = await sql`
       UPDATE companies
@@ -283,13 +174,12 @@ export async function updateCompany(formData: FormData) {
         email = ${email},
         phone = ${phone},
         address = ${address},
-        description = ${description},
-        logo_url = ${logo_url}
+        description = ${description}
       WHERE id = ${id}
-      RETURNING id, name, email, phone, address, description, logo_url
+      RETURNING id, name, email, phone, address, description
     `
 
-    revalidatePath("/admin")
+    revalidatePath("/admin", "layout")
 
     return {
       success: true,
@@ -307,13 +197,7 @@ export async function updateCompany(formData: FormData) {
 export async function deleteCompany(id: number) {
   await requireAdmin()
   try {
-    if (isMockMode()) {
-      return {
-        success: true,
-      }
-    }
-
-    // First, get all devices associated with this company
+        // First, get all devices associated with this company
     let devices = []
     try {
       devices = await sql`SELECT id FROM devices WHERE company_id = ${id}`
@@ -396,7 +280,7 @@ export async function deleteCompany(id: number) {
       // Commit the transaction
       await sql`COMMIT`
 
-      revalidatePath("/admin")
+      revalidatePath("/admin", "layout")
 
       return {
         success: true,
@@ -413,15 +297,6 @@ export async function deleteCompany(id: number) {
   } catch (error) {
     console.error("Error deleting company:", error)
 
-    // If in production, fall back to mock mode
-    if (!isMockMode()) {
-      setMockMode(true)
-      return {
-        success: true,
-        message: "Company deleted successfully (mock mode)",
-      }
-    }
-
     return {
       success: false,
       message: "Failed to delete company. " + (error instanceof Error ? error.message : "Unknown error"),
@@ -433,54 +308,10 @@ export async function deleteCompany(id: number) {
 export async function getDevices(companyId?: number) {
   await requireAdmin()
   try {
-    if (isMockMode()) {
-      const devices = [
-        {
-          id: 1,
-          name: "Store Device 1",
-          email: "device1@alaneeq.com",
-          company_id: 1,
-          company_name: "Demo Company",
-          created_at: new Date().toISOString(),
-          currency: "QAR",
-        },
-        {
-          id: 2,
-          name: "Store Device 2",
-          email: "device2@alaneeq.com",
-          company_id: 1,
-          company_name: "Demo Company",
-          created_at: new Date().toISOString(),
-          currency: "USD",
-        },
-        {
-          id: 3,
-          name: "Warehouse Device",
-          email: "warehouse@alaneeq.com",
-          company_id: 1,
-          company_name: "Demo Company",
-          created_at: new Date().toISOString(),
-          currency: "AED",
-        },
-      ]
-
-      if (companyId) {
-        return {
-          success: true,
-          data: devices.filter((device) => device.company_id === companyId),
-        }
-      }
-
-      return {
-        success: true,
-        data: devices,
-      }
-    }
-
-    let query
+        let query
     if (companyId) {
       query = sql`
-        SELECT d.id, d.name, d.email, d.company_id, c.name as company_name, d.currency, d.created_at, d.updated_at
+        SELECT d.id, d.name, d.email, d.company_id, c.name as company_name, d.currency, d.logo_url, d.created_at, d.updated_at
         FROM devices d
         JOIN companies c ON d.company_id = c.id
         WHERE d.company_id = ${companyId}
@@ -488,7 +319,7 @@ export async function getDevices(companyId?: number) {
       `
     } else {
       query = sql`
-        SELECT d.id, d.name, d.email, d.company_id, c.name as company_name, d.currency, d.created_at, d.updated_at
+        SELECT d.id, d.name, d.email, d.company_id, c.name as company_name, d.currency, d.logo_url, d.created_at, d.updated_at
         FROM devices d
         JOIN companies c ON d.company_id = c.id
         ORDER BY d.name
@@ -530,39 +361,7 @@ export async function getDevicesByCompany(companyId: number) {
 export async function getProductsByCompany(companyId: number) {
   await requireAdmin()
   try {
-    if (isMockMode()) {
-      return {
-        success: true,
-        data: [
-          {
-            id: 1,
-            name: "T-Shirt",
-            category: "Clothing",
-            price: 19.99,
-            stock: 50,
-            barcode: "2001000000015",
-          },
-          {
-            id: 2,
-            name: "Jeans",
-            category: "Clothing",
-            price: 39.99,
-            stock: 30,
-            barcode: "2001000000022",
-          },
-          {
-            id: 3,
-            name: "Sneakers",
-            category: "Footwear",
-            price: 59.99,
-            stock: 25,
-            barcode: "2001000000039",
-          },
-        ],
-      }
-    }
-
-    // Get all products associated with devices from this company
+        // Get all products associated with devices from this company
     const result = await sql`
       SELECT p.*
       FROM products p
@@ -588,39 +387,7 @@ export async function getProductsByCompany(companyId: number) {
 export async function getSalesByCompany(companyId: number) {
   await requireAdmin()
   try {
-    if (isMockMode()) {
-      return {
-        success: true,
-        data: [
-          {
-            id: 1,
-            customer_name: "John Doe",
-            total_amount: 59.98,
-            status: "Completed",
-            sale_date: new Date().toISOString(),
-            created_by: 1,
-          },
-          {
-            id: 2,
-            customer_name: "Jane Smith",
-            total_amount: 119.97,
-            status: "Completed",
-            sale_date: new Date().toISOString(),
-            created_by: 2,
-          },
-          {
-            id: 3,
-            customer_name: null,
-            total_amount: 39.99,
-            status: "Pending",
-            sale_date: new Date().toISOString(),
-            created_by: 1,
-          },
-        ],
-      }
-    }
-
-    // Get all sales associated with devices from this company
+        // Get all sales associated with devices from this company
     const result = await sql`
       SELECT s.*, c.name as customer_name
       FROM sales s
@@ -647,39 +414,7 @@ export async function getSalesByCompany(companyId: number) {
 export async function getPurchasesByCompany(companyId: number) {
   await requireAdmin()
   try {
-    if (isMockMode()) {
-      return {
-        success: true,
-        data: [
-          {
-            id: 1,
-            supplier: "Supplier A",
-            total_amount: 500.0,
-            status: "Completed",
-            purchase_date: new Date().toISOString(),
-            created_by: 1,
-          },
-          {
-            id: 2,
-            supplier: "Supplier B",
-            total_amount: 750.5,
-            status: "Pending",
-            purchase_date: new Date().toISOString(),
-            created_by: 2,
-          },
-          {
-            id: 3,
-            supplier: "Supplier C",
-            total_amount: 1200.75,
-            status: "Completed",
-            purchase_date: new Date().toISOString(),
-            created_by: 1,
-          },
-        ],
-      }
-    }
-
-    // Get all purchases associated with devices from this company
+        // Get all purchases associated with devices from this company
     const result = await sql`
       SELECT p.*
       FROM purchases p
@@ -705,49 +440,7 @@ export async function getPurchasesByCompany(companyId: number) {
 export async function getStockByCompany(companyId: number) {
   await requireAdmin()
   try {
-    if (isMockMode()) {
-      return {
-        success: true,
-        data: [
-          {
-            id: 1,
-            name: "T-Shirt",
-            category: "Clothing",
-            stock: 50,
-            price: 19.99,
-          },
-          {
-            id: 2,
-            name: "Jeans",
-            category: "Clothing",
-            stock: 30,
-            price: 39.99,
-          },
-          {
-            id: 3,
-            name: "Sneakers",
-            category: "Footwear",
-            price: 59.99,
-          },
-          {
-            id: 4,
-            name: "Hat",
-            category: "Accessories",
-            stock: 5,
-            price: 14.99,
-          },
-          {
-            id: 5,
-            name: "Socks",
-            category: "Clothing",
-            stock: 0,
-            price: 9.99,
-          },
-        ],
-      }
-    }
-
-    // Get all products with aggregated stock across company devices
+        // Get all products with aggregated stock across company devices
     const result = await sql`
       SELECT
         p.id,
@@ -782,23 +475,8 @@ export async function getStockByCompany(companyId: number) {
 export async function getDeviceById(id: number) {
   await requireAdmin()
   try {
-    if (isMockMode()) {
-      return {
-        success: true,
-        data: {
-          id: 1,
-          name: "Store Device 1",
-          email: "device1@alaneeq.com",
-          company_id: 1,
-          company_name: "Demo Company",
-          created_at: new Date().toISOString(),
-          currency: "QAR",
-        },
-      }
-    }
-
-    const result = await sql`
-      SELECT d.id, d.name, d.email, d.company_id, c.name as company_name, d.currency, d.created_at, d.updated_at
+        const result = await sql`
+      SELECT d.id, d.name, d.email, d.company_id, c.name as company_name, d.currency, d.logo_url, d.created_at, d.updated_at
       FROM devices d
       JOIN companies c ON d.company_id = c.id
       WHERE d.id = ${id}
@@ -828,22 +506,7 @@ export async function getDeviceById(id: number) {
 export async function createDevice(formData: FormData) {
   await requireAdmin()
   try {
-    if (isMockMode()) {
-      return {
-        success: true,
-        data: {
-          id: 4,
-          name: formData.get("name") as string,
-          email: formData.get("email") as string,
-          company_id: Number.parseInt(formData.get("company_id") as string),
-          company_name: "Demo Company",
-          currency: (formData.get("currency") as string) || "QAR",
-          created_at: new Date().toISOString(),
-        },
-      }
-    }
-
-    const name = formData.get("name") as string
+        const name = formData.get("name") as string
     const email = formData.get("email") as string
     const password = formData.get("password") as string
     const company_id = Number.parseInt(formData.get("company_id") as string)
@@ -869,8 +532,29 @@ export async function createDevice(formData: FormData) {
     const result = await sql`
       INSERT INTO devices (name, email, password_hash, company_id, currency, created_at, updated_at)
       VALUES (${name}, ${email}, ${password_hash}, ${company_id}, ${currency}, NOW(), NOW())
-      RETURNING id, name, email, company_id, currency, created_at, updated_at
+      RETURNING id, name, email, company_id, currency, logo_url, created_at, updated_at
     `
+
+    let deviceRecord = result[0]
+
+    try {
+      const logoUrl = await resolveDeviceLogoFromForm(formData, deviceRecord.id, deviceRecord.logo_url || null)
+      if (logoUrl !== (deviceRecord.logo_url || null)) {
+        const updated = await sql`
+          UPDATE devices
+          SET logo_url = ${logoUrl}, updated_at = NOW()
+          WHERE id = ${deviceRecord.id}
+          RETURNING id, name, email, company_id, currency, logo_url, created_at, updated_at
+        `
+        deviceRecord = updated[0]
+      }
+    } catch (logoError) {
+      await sql`DELETE FROM devices WHERE id = ${deviceRecord.id}`
+      return {
+        success: false,
+        message: logoError instanceof Error ? logoError.message : "Failed to upload device logo",
+      }
+    }
 
     // Get company name
     const companyResult = await sql`
@@ -878,11 +562,11 @@ export async function createDevice(formData: FormData) {
     `
 
     const device = {
-      ...result[0],
+      ...deviceRecord,
       company_name: companyResult[0].name,
     }
 
-    revalidatePath("/admin")
+    revalidatePath("/admin", "layout")
 
     return {
       success: true,
@@ -913,22 +597,7 @@ async function generatePasswordHash(password: string): Promise<string> {
 export async function updateDevice(formData: FormData) {
   await requireAdmin()
   try {
-    if (isMockMode()) {
-      return {
-        success: true,
-        data: {
-          id: Number.parseInt(formData.get("id") as string),
-          name: formData.get("name") as string,
-          email: formData.get("email") as string,
-          company_id: Number.parseInt(formData.get("company_id") as string),
-          currency: (formData.get("currency") as string) || "QAR",
-          company_name: "Demo Company",
-          updated_at: new Date().toISOString(),
-        },
-      }
-    }
-
-    const id = Number.parseInt(formData.get("id") as string)
+        const id = Number.parseInt(formData.get("id") as string)
     const name = formData.get("name") as string
     const email = formData.get("email") as string
     const password = formData.get("password") as string
@@ -947,6 +616,21 @@ export async function updateDevice(formData: FormData) {
       }
     }
 
+    const existingDevice = await sql`
+      SELECT logo_url FROM devices WHERE id = ${id} LIMIT 1
+    `
+    const existingLogoUrl = (existingDevice[0]?.logo_url as string | null) || null
+
+    let logoUrl = existingLogoUrl
+    try {
+      logoUrl = await resolveDeviceLogoFromForm(formData, id, existingLogoUrl)
+    } catch (logoError) {
+      return {
+        success: false,
+        message: logoError instanceof Error ? logoError.message : "Failed to upload device logo",
+      }
+    }
+
     let result
     if (password) {
       // Generate a password hash
@@ -960,9 +644,10 @@ export async function updateDevice(formData: FormData) {
           password_hash = ${password_hash},
           company_id = ${company_id},
           currency = ${currency},
+          logo_url = ${logoUrl},
           updated_at = NOW()
         WHERE id = ${id}
-        RETURNING id, name, email, company_id, currency, updated_at
+        RETURNING id, name, email, company_id, currency, logo_url, updated_at
       `
     } else {
       result = await sql`
@@ -972,9 +657,10 @@ export async function updateDevice(formData: FormData) {
           email = ${email},
           company_id = ${company_id},
           currency = ${currency},
+          logo_url = ${logoUrl},
           updated_at = NOW()
         WHERE id = ${id}
-        RETURNING id, name, email, company_id, currency, updated_at
+        RETURNING id, name, email, company_id, currency, logo_url, updated_at
       `
     }
 
@@ -988,7 +674,7 @@ export async function updateDevice(formData: FormData) {
       company_name: companyResult[0].name,
     }
 
-    revalidatePath("/admin")
+    revalidatePath("/admin", "layout")
 
     return {
       success: true,
@@ -1006,13 +692,7 @@ export async function updateDevice(formData: FormData) {
 export async function deleteDevice(id: number) {
   await requireAdmin()
   try {
-    if (isMockMode()) {
-      return {
-        success: true,
-      }
-    }
-
-    // Begin a transaction to ensure data integrity
+        // Begin a transaction to ensure data integrity
     await sql`BEGIN`
 
     try {
@@ -1075,7 +755,7 @@ export async function deleteDevice(id: number) {
       // Commit the transaction
       await sql`COMMIT`
 
-      revalidatePath("/admin")
+      revalidatePath("/admin", "layout")
 
       return {
         success: true,
@@ -1119,39 +799,7 @@ export async function deleteUser(id: number) {
 export async function getProductsByDevice(deviceId: number) {
   await requireAdmin()
   try {
-    if (isMockMode()) {
-      return {
-        success: true,
-        data: [
-          {
-            id: 1,
-            name: "T-Shirt",
-            category: "Clothing",
-            price: 19.99,
-            stock: 50,
-            barcode: "2001000000015",
-          },
-          {
-            id: 2,
-            name: "Jeans",
-            category: "Clothing",
-            price: 39.99,
-            stock: 30,
-            barcode: "2001000000022",
-          },
-          {
-            id: 3,
-            name: "Sneakers",
-            category: "Footwear",
-            price: 59.99,
-            stock: 25,
-            barcode: "2001000000039",
-          },
-        ],
-      }
-    }
-
-    // Get all products created by this device
+        // Get all products created by this device
     const result = await sql`
       SELECT *
       FROM products
@@ -1176,39 +824,7 @@ export async function getProductsByDevice(deviceId: number) {
 export async function getSalesByDevice(deviceId: number) {
   await requireAdmin()
   try {
-    if (isMockMode()) {
-      return {
-        success: true,
-        data: [
-          {
-            id: 1,
-            customer_name: "John Doe",
-            total_amount: 59.98,
-            status: "Completed",
-            sale_date: new Date().toISOString(),
-            created_by: deviceId,
-          },
-          {
-            id: 2,
-            customer_name: "Jane Smith",
-            total_amount: 119.97,
-            status: "Completed",
-            sale_date: new Date().toISOString(),
-            created_by: deviceId,
-          },
-          {
-            id: 3,
-            customer_name: null,
-            total_amount: 39.99,
-            status: "Pending",
-            sale_date: new Date().toISOString(),
-            created_by: deviceId,
-          },
-        ],
-      }
-    }
-
-    // Get all sales created by this device
+        // Get all sales created by this device
     const result = await sql`
       SELECT s.*, c.name as customer_name
       FROM sales s
@@ -1234,39 +850,7 @@ export async function getSalesByDevice(deviceId: number) {
 export async function getPurchasesByDevice(deviceId: number) {
   await requireAdmin()
   try {
-    if (isMockMode()) {
-      return {
-        success: true,
-        data: [
-          {
-            id: 1,
-            supplier: "Supplier A",
-            total_amount: 500.0,
-            status: "Completed",
-            purchase_date: new Date().toISOString(),
-            created_by: deviceId,
-          },
-          {
-            id: 2,
-            supplier: "Supplier B",
-            total_amount: 750.5,
-            status: "Pending",
-            purchase_date: new Date().toISOString(),
-            created_by: deviceId,
-          },
-          {
-            id: 3,
-            supplier: "Supplier C",
-            total_amount: 1200.75,
-            status: "Completed",
-            purchase_date: new Date().toISOString(),
-            created_by: deviceId,
-          },
-        ],
-      }
-    }
-
-    // Get all purchases created by this device
+        // Get all purchases created by this device
     const result = await sql`
       SELECT *
       FROM purchases
@@ -1291,49 +875,7 @@ export async function getPurchasesByDevice(deviceId: number) {
 export async function getStockByDevice(deviceId: number) {
   await requireAdmin()
   try {
-    if (isMockMode()) {
-      return {
-        success: true,
-        data: [
-          {
-            id: 1,
-            name: "T-Shirt",
-            category: "Clothing",
-            stock: 50,
-            price: 19.99,
-          },
-          {
-            id: 2,
-            name: "Jeans",
-            category: "Clothing",
-            stock: 30,
-            price: 39.99,
-          },
-          {
-            id: 3,
-            name: "Sneakers",
-            category: "Footwear",
-            price: 59.99,
-          },
-          {
-            id: 4,
-            name: "Hat",
-            category: "Accessories",
-            stock: 5,
-            price: 14.99,
-          },
-          {
-            id: 5,
-            name: "Socks",
-            category: "Clothing",
-            stock: 0,
-            price: 9.99,
-          },
-        ],
-      }
-    }
-
-    // Get all company products with this device's stock
+        // Get all company products with this device's stock
     const result = await sql`
       SELECT
         p.id,
@@ -1368,39 +910,7 @@ export async function getStockByDevice(deviceId: number) {
 export async function getCustomersByDevice(deviceId: number) {
   await requireAdmin()
   try {
-    if (isMockMode()) {
-      return {
-        success: true,
-        data: [
-          {
-            id: 1,
-            name: "John Doe",
-            email: "john@example.com",
-            phone: "123-456-7890",
-            total_purchases: 3,
-            created_at: new Date().toISOString(),
-          },
-          {
-            id: 2,
-            name: "Jane Smith",
-            email: "jane@example.com",
-            phone: "987-654-3210",
-            total_purchases: 2,
-            created_at: new Date().toISOString(),
-          },
-          {
-            id: 3,
-            name: "Bob Johnson",
-            email: null,
-            phone: "555-123-4567",
-            total_purchases: 1,
-            created_at: new Date().toISOString(),
-          },
-        ],
-      }
-    }
-
-    // Get all customers created by this device
+        // Get all customers created by this device
     const result = await sql`
       SELECT c.*, COUNT(s.id) as total_purchases
       FROM customers c
@@ -1427,32 +937,7 @@ export async function getCustomersByDevice(deviceId: number) {
 export async function getDeviceFinanceData(deviceId: number, timeframe = "all") {
   await requireAdmin()
   try {
-    if (isMockMode()) {
-      return {
-        success: true,
-        data: {
-          totalIncome: 2500.75,
-          totalExpenses: 1200.5,
-          netProfit: 1300.25,
-          incomeByCategory: [
-            { category: "Sales", amount: 1800.5 },
-            { category: "Services", amount: 700.25 },
-          ],
-          expensesByCategory: [
-            { category: "Inventory", amount: 800.0 },
-            { category: "Utilities", amount: 250.5 },
-            { category: "Rent", amount: 150.0 },
-          ],
-          recentTransactions: [
-            { id: 1, type: "INCOME", category: "Sales", amount: 120.0, description: "Product sale" },
-            { id: 2, type: "EXPENSE", category: "Inventory", amount: 75.5, description: "Stock purchase" },
-            { id: 3, type: "INCOME", category: "Services", amount: 200.0, description: "Service fee" },
-          ],
-        },
-      }
-    }
-
-    let timeframeCondition = sql``
+        let timeframeCondition = sql``
     if (timeframe === "week") {
       timeframeCondition = sql`AND transaction_date >= NOW() - INTERVAL '7 days'`
     } else if (timeframe === "month") {

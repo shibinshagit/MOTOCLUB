@@ -51,12 +51,12 @@ import PayCreditModal from "../suppliers/pay-credit-modal"
 import ViewSupplierPaymentModal from "../suppliers/View-supplier-payment-model"
 import EditSupplierPaymentModal from "../suppliers/View-suplier-payment-edit"
 import type { SupplierPaymentListRow } from "@/app/actions/supplier-payment-actions"
+import { useConfirm } from "@/hooks/use-confirm"
 
 interface SupplierTabProps {
   userId: number
   isAddModalOpen?: boolean
   onModalClose?: () => void
-  mockMode?: boolean
 }
 
 // Request deduplication utility
@@ -121,9 +121,9 @@ export default function SupplierTab({
   userId,
   isAddModalOpen = false,
   onModalClose,
-  mockMode = false,
 }: SupplierTabProps) {
   const dispatch = useAppDispatch()
+  const { confirm, ConfirmDialog } = useConfirm()
 
   // Redux selectors
   const suppliers = useAppSelector(selectFilteredSuppliers)
@@ -197,7 +197,7 @@ export default function SupplierTab({
     forceRefresh?: boolean
     silent?: boolean
   } = {}) => {
-    if (mockMode || !componentMountedRef.current) return
+    if (!componentMountedRef.current) return
 
     const { searchTerm, forceRefresh = false, silent = false } = options
     const requestKey = `suppliers_${userId}_${searchTerm || 'all'}`
@@ -225,11 +225,11 @@ export default function SupplierTab({
       }
       throw error
     }
-  }, [dispatch, userId, mockMode])
+  }, [dispatch, userId])
 
   // Initial data loading - runs only once
   useEffect(() => {
-    if (mockMode || isInitializedRef.current) return
+    if (isInitializedRef.current) return
 
     isInitializedRef.current = true
 
@@ -266,7 +266,7 @@ export default function SupplierTab({
     }
 
     initializeData()
-  }, [dispatch, userId, mockMode, currency, allSuppliers.length, shouldRefresh, fetchSuppliersData])
+  }, [dispatch, userId, currency, allSuppliers.length, shouldRefresh, fetchSuppliersData])
 
   // Debounced search handler with better logic
   const handleSearchChange = useCallback((value: string) => {
@@ -332,7 +332,7 @@ export default function SupplierTab({
   }, [dispatch, userId, fetchSuppliersData])
 
   const handleDelete = useCallback(async (supplierId: number, supplierName: string) => {
-    if (!window.confirm(`Delete supplier "${supplierName}"?`)) return
+    if (!(await confirm(`Delete supplier "${supplierName}"?`))) return
 
     try {
       await RequestManager.executeRequest(
@@ -384,7 +384,7 @@ export default function SupplierTab({
   }, [])
 
   useEffect(() => {
-    if (!paymentHistorySupplier || !deviceId || mockMode) {
+    if (!paymentHistorySupplier || !deviceId) {
       setSupplierPayments([])
       setLoadingSupplierPayments(false)
       return
@@ -404,7 +404,7 @@ export default function SupplierTab({
     return () => {
       cancelled = true
     }
-  }, [paymentHistorySupplier, deviceId, userId, mockMode])
+  }, [paymentHistorySupplier, deviceId, userId])
 
   const handleModalClose = useCallback(() => {
     setShowAddModal(false)
@@ -429,7 +429,7 @@ export default function SupplierTab({
       console.error("Error refreshing after modal success:", error)
     }
 
-    if (paymentHistorySupplier && deviceId && !mockMode) {
+    if (paymentHistorySupplier && deviceId) {
       try {
         const { listSupplierPaymentsForSupplier } = await import("@/app/actions/supplier-payment-actions")
         const result = await listSupplierPaymentsForSupplier(paymentHistorySupplier.id, deviceId, userId)
@@ -440,7 +440,7 @@ export default function SupplierTab({
     }
     
     handleModalClose()
-  }, [userId, fetchSuppliersData, handleModalClose, paymentHistorySupplier, deviceId, mockMode])
+  }, [userId, fetchSuppliersData, handleModalClose, paymentHistorySupplier, deviceId])
 
   // Handle external add modal
   useEffect(() => {
@@ -462,19 +462,19 @@ export default function SupplierTab({
     return suppliers.map((supplier) => (
       <Card
         key={supplier.id}
-        className="bg-white dark:bg-gray-800 hover:shadow-md transition-shadow dark:border-gray-700"
+        className="bg-white hover:shadow-md transition-shadow"
       >
         <CardContent className="p-3 sm:p-4">
           <div className="flex flex-col space-y-3">
             {/* Header Section */}
             <div className="flex items-start justify-between">
               <div className="flex-1 min-w-0">
-                <h3 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2 truncate">
+                <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-2 truncate">
                   {supplier.name}
                 </h3>
                 
                 {/* Contact Info */}
-                <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-4 space-y-1 sm:space-y-0 text-xs sm:text-sm text-gray-600 dark:text-gray-300">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-4 space-y-1 sm:space-y-0 text-xs sm:text-sm text-gray-600">
                   <div className="flex items-center">
                     <Phone className="h-3 w-3 mr-1 text-green-600 flex-shrink-0" />
                     <span className="truncate">{supplier.phone}</span>
@@ -518,7 +518,7 @@ export default function SupplierTab({
                     <Button
                       variant="outline"
                       size="sm"
-                      className="h-7 px-2 text-xs whitespace-nowrap border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200 hover:bg-amber-50 dark:hover:bg-amber-950/40"
+                      className="h-7 px-2 text-xs whitespace-nowrap border-amber-200 text-amber-800 hover:bg-amber-50"
                       onClick={() => handleOpenPaymentHistory({ id: supplier.id, name: supplier.name })}
                     >
                       <History className="h-3 w-3 mr-1 flex-shrink-0" />
@@ -532,7 +532,7 @@ export default function SupplierTab({
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="h-7 w-7 p-0 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                    className="h-7 w-7 p-0 text-blue-600 hover:bg-blue-50"
                     onClick={() => handleView(supplier.id)}
                   >
                     <Eye className="h-3 w-3" />
@@ -540,7 +540,7 @@ export default function SupplierTab({
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="h-7 w-7 p-0 text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20"
+                    className="h-7 w-7 p-0 text-amber-600 hover:bg-amber-50"
                     onClick={() => handleEdit(supplier.id)}
                   >
                     <Edit className="h-3 w-3" />
@@ -548,7 +548,7 @@ export default function SupplierTab({
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="h-7 w-7 p-0 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
+                    className="h-7 w-7 p-0 text-red-600 hover:bg-red-50"
                     onClick={() => handleDelete(supplier.id, supplier.name)}
                   >
                     <Trash2 className="h-3 w-3" />
@@ -558,23 +558,23 @@ export default function SupplierTab({
             </div>
 
             {/* Financial Stats */}
-            <div className="pt-2 border-t border-gray-100 dark:border-gray-700">
+            <div className="pt-2 border-t border-gray-100">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-3 sm:space-y-0 text-xs sm:text-sm">
                 {/* Purchase Stats */}
                 <div className="flex items-center justify-between sm:justify-start sm:space-x-6">
                   <div className="flex items-center">
                     <TrendingUp className="h-3 w-3 text-blue-600 mr-1 flex-shrink-0" />
-                    <span className="font-medium text-gray-900 dark:text-gray-100">
+                    <span className="font-medium text-gray-900">
                       {supplier.total_purchases || 0}
                     </span>
-                    <span className="text-gray-500 dark:text-gray-400 ml-1">purchases</span>
+                    <span className="text-gray-500 ml-1">purchases</span>
                   </div>
                   <div className="flex items-center">
                     <DollarSign className="h-3 w-3 text-green-600 mr-1 flex-shrink-0" />
-                    <span className="font-medium text-gray-900 dark:text-gray-100">
+                    <span className="font-medium text-gray-900">
                       {formatCurrency(supplier.total_amount || 0)}
                     </span>
-                    <span className="text-gray-500 dark:text-gray-400 ml-1 hidden sm:inline">total</span>
+                    <span className="text-gray-500 ml-1 hidden sm:inline">total</span>
                   </div>
                 </div>
 
@@ -604,17 +604,17 @@ export default function SupplierTab({
   }, [suppliers, formatCurrency, handleView, handleEdit, handleDelete, handlePayCredit, handleOpenPaymentHistory])
 
   return (
-    <div className="h-full flex flex-col bg-gray-50 dark:bg-gray-900">
+    <div className="h-full flex flex-col bg-gray-50">
       {/* Header */}
-      <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 sm:px-6 py-4">
+      <div className="bg-white border-b border-gray-200 px-4 sm:px-6 py-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center space-x-4">
             <div>
               <div className="flex items-center space-x-2">
-                <h1 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-gray-100">Suppliers</h1>
+                <h1 className="text-lg sm:text-xl font-bold text-gray-900">Suppliers</h1>
                 {(isRefreshing || isLoading) && <RefreshCw className="h-4 w-4 animate-spin text-blue-600 flex-shrink-0" />}
               </div>
-              <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">
+              <p className="text-xs sm:text-sm text-gray-500">
                 {stats.total > 0
                   ? `${stats.total} suppliers • ${formatCurrency(stats.totalAmount)} total • ${formatCurrency(stats.totalBalance)} balance`
                   : "No suppliers found"}
@@ -663,25 +663,25 @@ export default function SupplierTab({
         {isLoading && allSuppliers.length === 0 ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="h-6 w-6 animate-spin mr-2 text-blue-600" />
-            <span className="text-gray-600 dark:text-gray-300">Loading suppliers...</span>
+            <span className="text-gray-600">Loading suppliers...</span>
           </div>
         ) : error && allSuppliers.length === 0 ? (
-          <Card className="bg-white dark:bg-gray-800 dark:border-gray-700">
+          <Card className="bg-white">
             <CardContent className="text-center py-12">
-              <div className="text-red-600 dark:text-red-400 mb-4">{error}</div>
+              <div className="text-red-600 mb-4">{error}</div>
               <Button onClick={handleRefresh} variant="outline">
                 Try Again
               </Button>
             </CardContent>
           </Card>
         ) : suppliers.length === 0 ? (
-          <Card className="bg-white dark:bg-gray-800 dark:border-gray-700">
+          <Card className="bg-white">
             <CardContent className="text-center py-12">
               <Users className="h-16 w-16 text-gray-300 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">
+              <h3 className="text-lg font-medium text-gray-900 mb-2">
                 {localSearchTerm ? "No suppliers match your search" : "No suppliers found"}
               </h3>
-              <p className="text-gray-500 dark:text-gray-400 mb-6">
+              <p className="text-gray-500 mb-6">
                 {localSearchTerm ? "Try adjusting your search terms" : "Get started by adding your first supplier"}
               </p>
               {!localSearchTerm && (
@@ -745,19 +745,19 @@ export default function SupplierTab({
           }
         }}
       >
-        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto dark:bg-gray-900 dark:border-gray-700">
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="dark:text-gray-100">
+            <DialogTitle className="">
               Credit payments{paymentHistorySupplier ? ` — ${paymentHistorySupplier.name}` : ""}
             </DialogTitle>
           </DialogHeader>
           {loadingSupplierPayments ? (
-            <div className="flex items-center justify-center py-10 text-gray-600 dark:text-gray-400">
+            <div className="flex items-center justify-center py-10 text-gray-600">
               <Loader2 className="h-5 w-5 animate-spin mr-2" />
               Loading…
             </div>
           ) : supplierPayments.length === 0 ? (
-            <p className="text-sm text-gray-500 dark:text-gray-400 py-6 text-center">
+            <p className="text-sm text-gray-500 py-6 text-center">
               No recorded credit payments for this supplier yet.
             </p>
           ) : (
@@ -765,13 +765,13 @@ export default function SupplierTab({
               {supplierPayments.map((p) => (
                 <li
                   key={p.id}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/80 px-3 py-2 text-sm"
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm"
                 >
                   <div className="min-w-0">
-                    <div className="font-medium text-gray-900 dark:text-gray-100">
+                    <div className="font-medium text-gray-900">
                       {formatCurrency(p.amount)}
                     </div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400">
+                    <div className="text-xs text-gray-500">
                       {p.payment_method} · {new Date(p.transaction_date).toLocaleDateString()}
                     </div>
                   </div>
@@ -822,7 +822,7 @@ export default function SupplierTab({
           } catch (e) {
             console.error(e)
           }
-          if (paymentHistorySupplier && deviceId && !mockMode) {
+          if (paymentHistorySupplier && deviceId) {
             const { listSupplierPaymentsForSupplier } = await import("@/app/actions/supplier-payment-actions")
             const result = await listSupplierPaymentsForSupplier(paymentHistorySupplier.id, deviceId, userId)
             if (result.success) setSupplierPayments(result.data)
@@ -848,13 +848,14 @@ export default function SupplierTab({
           } catch (e) {
             console.error(e)
           }
-          if (paymentHistorySupplier && deviceId && !mockMode) {
+          if (paymentHistorySupplier && deviceId) {
             const { listSupplierPaymentsForSupplier } = await import("@/app/actions/supplier-payment-actions")
             const result = await listSupplierPaymentsForSupplier(paymentHistorySupplier.id, deviceId, userId)
             if (result.success) setSupplierPayments(result.data)
           }
         }}
       />
+      {ConfirmDialog}
     </div>
   )
 }

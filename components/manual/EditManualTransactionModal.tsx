@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Loader2, Save } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
+import { notifyError, notifySuccess, notifyWarning } from "@/lib/notifications"
 import { SimpleDateInput } from "@/components/ui/date-picker"
 import { getManualTransactionById, updateManualTransaction } from "@/app/actions/manual-transaction-actions"
 
@@ -75,20 +76,12 @@ export default function EditManualTransactionModal({
           setPaymentMethod(txn.payment_method || "Cash")
           setTransactionDate(new Date(txn.transaction_date))
         } else {
-          toast({
-            title: "Error",
-            description: response.message || "Failed to load transaction",
-            variant: "destructive",
-          })
+          notifyError(toast, response.message || "Failed to load transaction")
           onClose()
         }
       } catch (error) {
         console.error("Error fetching transaction:", error)
-        toast({
-          title: "Error",
-          description: "An unexpected error occurred",
-          variant: "destructive",
-        })
+        notifyError(toast, "An unexpected error occurred")
         onClose()
       } finally {
         setIsLoading(false)
@@ -101,29 +94,17 @@ export default function EditManualTransactionModal({
   const handleSubmit = async () => {
     // Validation
     if (!amount || parseFloat(amount) <= 0) {
-      toast({
-        title: "Validation Error",
-        description: "Please enter a valid amount",
-        variant: "destructive",
-      })
+      notifyError(toast, "Please enter a valid amount", "Validation Error")
       return
     }
 
     if (!category) {
-      toast({
-        title: "Validation Error",
-        description: "Please enter a category",
-        variant: "destructive",
-      })
+      notifyError(toast, "Please enter a category", "Validation Error")
       return
     }
 
     if (!transactionId) {
-      toast({
-        title: "Error",
-        description: "Transaction ID not found",
-        variant: "destructive",
-      })
+      notifyError(toast, "Transaction ID not found")
       return
     }
 
@@ -140,10 +121,7 @@ export default function EditManualTransactionModal({
       })
 
       if (response.success) {
-        toast({
-          title: "Success",
-          description: "Manual transaction updated successfully",
-        })
+        notifySuccess(toast, "Manual transaction updated successfully")
         
         if (onTransactionUpdated) {
           onTransactionUpdated()
@@ -151,19 +129,11 @@ export default function EditManualTransactionModal({
         
         onClose()
       } else {
-        toast({
-          title: "Error",
-          description: response.message || "Failed to update transaction",
-          variant: "destructive",
-        })
+        notifyError(toast, response.message || "Failed to update transaction")
       }
     } catch (error) {
       console.error("Error updating transaction:", error)
-      toast({
-        title: "Error",
-        description: "An unexpected error occurred",
-        variant: "destructive",
-      })
+      notifyError(toast, "An unexpected error occurred")
     } finally {
       setIsSaving(false)
     }
@@ -181,8 +151,8 @@ export default function EditManualTransactionModal({
         {isLoading ? (
           <div className="flex justify-center items-center py-12">
             <div className="text-center">
-              <Loader2 className="h-8 w-8 animate-spin text-purple-600 dark:text-purple-400 mx-auto mb-4" />
-              <p className="text-gray-600 dark:text-gray-400">Loading transaction...</p>
+              <Loader2 className="h-8 w-8 animate-spin text-purple-600 mx-auto mb-4" />
+              <p className="text-gray-600">Loading transaction...</p>
             </div>
           </div>
         ) : (

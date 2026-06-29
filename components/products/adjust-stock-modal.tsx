@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { useToast } from "@/components/ui/use-toast"
+import { notifyError, notifySuccess } from "@/lib/notifications"
 import { adjustProductStock } from "@/app/actions/product-actions"
 import { getDeviceCurrency } from "@/app/actions/dashboard-actions"
 import { FormAlert } from "@/components/ui/form-alert"
@@ -34,36 +35,15 @@ export default function AdjustStockModal({
 }: AdjustStockModalProps) {
   const { isValueHidden } = useStaffRestrictions()
   const hideStockCount = isValueHidden("stock_count")
-  const [stockHistory, setStockHistory] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [adjustType, setAdjustType] = useState<"increase" | "decrease">("increase")
   const [quantity, setQuantity] = useState<string>("1")
   const [notes, setNotes] = useState<string>("")
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [currency, setCurrency] = useState(currencyProp || "AED") // Use prop or default
+  const [currency, setCurrency] = useState(currencyProp || "AED")
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
-  const [successMessage, setSuccessMessage] = useState<string | null>(null)
 
   const { toast } = useToast()
-
-  // Auto-dismiss error and success messages after 5 seconds
-  useEffect(() => {
-    if (errorMessage) {
-      const timer = setTimeout(() => {
-        setErrorMessage(null)
-      }, 5000)
-      return () => clearTimeout(timer)
-    }
-  }, [errorMessage])
-
-  useEffect(() => {
-    if (successMessage) {
-      const timer = setTimeout(() => {
-        setSuccessMessage(null)
-      }, 5000)
-      return () => clearTimeout(timer)
-    }
-  }, [successMessage])
 
   const handleSubmit = async () => {
     const quantityNum = Number.parseInt(quantity)
@@ -73,7 +53,6 @@ export default function AdjustStockModal({
       return
     }
 
-    // For decrease, check if we have enough stock
     if (adjustType === "decrease" && quantityNum > product.stock) {
       setErrorMessage("Cannot decrease more than current stock")
       return
@@ -81,7 +60,6 @@ export default function AdjustStockModal({
 
     setIsSubmitting(true)
     setErrorMessage(null)
-    setSuccessMessage(null)
 
     try {
       const formData = new FormData()
@@ -94,19 +72,14 @@ export default function AdjustStockModal({
       const result = await adjustProductStock(formData)
 
       if (result.success) {
-        setSuccessMessage(result.message || "Stock adjusted successfully")
+        notifySuccess(toast, result.message || "Stock adjusted successfully")
 
-        // Call onSuccess callback if provided
         if (onSuccess && result.data) {
           onSuccess(result.data)
         }
 
         resetForm()
-
-        // Close modal after a short delay to show success message
-        setTimeout(() => {
-          onClose()
-        }, 1500)
+        onClose()
       } else {
         setErrorMessage(result.message || "Failed to adjust stock")
       }
@@ -131,7 +104,6 @@ export default function AdjustStockModal({
       try {
         setIsLoading(true)
 
-        // If currency is not provided as a prop, fetch it
         if (!currencyProp) {
           try {
             const deviceCurrency = await getDeviceCurrency(userId)
@@ -158,30 +130,18 @@ export default function AdjustStockModal({
             <DialogTitle className="text-center">Adjust Stock for {product?.name}</DialogTitle>
           </DialogHeader>
 
-          {/* Error and Success Messages */}
           {errorMessage && (
             <FormAlert
-              variant="destructive"
-              title="Error"
+              type="error"
               message={errorMessage}
               className="mt-4"
               onDismiss={() => setErrorMessage(null)}
             />
           )}
 
-          {successMessage && (
-            <FormAlert
-              variant="success"
-              title="Success"
-              message={successMessage}
-              className="mt-4"
-              onDismiss={() => setSuccessMessage(null)}
-            />
-          )}
-
           {hideStockCount ? (
             <FormAlert
-              variant="destructive"
+              type="warning"
               title="Access restricted"
               message="Stock adjustments are not available for your staff role."
               className="mt-4"

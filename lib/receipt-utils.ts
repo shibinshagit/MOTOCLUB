@@ -1,19 +1,18 @@
 "use client"
 
-import { BRAND_NAME } from "@/lib/brand"
-import { getDefaultCompanyLogoUrl } from "@/lib/platform-branding"
+import { getCachedPlatformName, getDefaultDeviceLogoUrl } from "@/lib/platform-branding"
 
 // Function to get company info from the DOM
 const getCompanyInfoFromDOM = (): { name: string; address: string; phone: string } => {
   if (typeof document === "undefined") {
     return {
-      name: BRAND_NAME,
+      name: getCachedPlatformName(),
       address: "",
       phone: "",
     }
   }
   return {
-    name: BRAND_NAME,
+    name: getCachedPlatformName(),
     address: "",
     phone: "",
   }
@@ -37,17 +36,18 @@ export function printSalesReceipt(sale: any, items: any[], currency = "AED", bus
 
   // Use the company info from the DOM or fallback to provided info
   const business = {
-    name: BRAND_NAME,
+    name: getCachedPlatformName(),
     address: "",
     phone: "",
-    logo: getDefaultCompanyLogoUrl() || "",
+    logo: getDefaultDeviceLogoUrl() || "",
     ...businessInfo,
   }
 
   const logoUrl =
+    business.device_logo ||
     business.logo ||
     business.logo_url ||
-    getDefaultCompanyLogoUrl() ||
+    getDefaultDeviceLogoUrl() ||
     ""
 
   // Create a new window for printing
@@ -107,6 +107,14 @@ export function printSalesReceipt(sale: any, items: any[], currency = "AED", bus
 
   const remainingAmount = Math.max(0, finalTotal - receivedAmount)
   const totalQty = items.reduce((sum, item) => sum + Number(item.quantity), 0)
+  const isShipSale = sale.fulfillment_type === "ship"
+  const shipAddress = sale.shipping_address || sale.customer_address || ""
+  const packageDimensions =
+    sale.weight_kg && sale.length_cm
+      ? `${sale.weight_kg} kg · ${sale.length_cm}×${sale.width_cm}×${sale.height_cm} cm`
+      : sale.weight_kg
+        ? `${sale.weight_kg} kg`
+        : ""
 
   // Safe format currency function - fixes the toFixed error
   const formatCurrency = (amount: number | string | null | undefined) => {
@@ -516,6 +524,23 @@ export function printSalesReceipt(sale: any, items: any[], currency = "AED", bus
                 ${sale.customer_address ? `${sale.customer_address}` : ""}
               </div>
             </div>
+            ${
+              isShipSale
+                ? `
+            <div class="invoice-to">
+              <div class="detail-title">Ship To:</div>
+              <div class="detail-content">
+                ${shipAddress ? `<strong>${shipAddress.replace(/\n/g, "<br>")}</strong><br>` : ""}
+                ${sale.delivery_status ? `Status: ${sale.delivery_status}<br>` : ""}
+                ${sale.courier_service_name ? `Courier: ${sale.courier_service_name}<br>` : ""}
+                ${sale.packaging_type_name ? `Packaging: ${sale.packaging_type_name}<br>` : ""}
+                ${sale.tracking_id ? `Tracking: ${sale.tracking_id}<br>` : ""}
+                ${packageDimensions ? `Package: ${packageDimensions}` : ""}
+              </div>
+            </div>
+            `
+                : ""
+            }
             
             <div class="invoice-info">
               <div class="detail-title">Invoice Info:</div>
@@ -691,17 +716,18 @@ export function printPurchaseReceipt(purchase: any, items: any[], currency = "AE
   }
 
   const business = {
-    name: BRAND_NAME,
+    name: getCachedPlatformName(),
     address: "",
     phone: "",
-    logo: getDefaultCompanyLogoUrl() || "",
+    logo: getDefaultDeviceLogoUrl() || "",
     ...businessInfo,
   }
 
   const logoUrl =
+    business.device_logo ||
     business.logo ||
     business.logo_url ||
-    getDefaultCompanyLogoUrl() ||
+    getDefaultDeviceLogoUrl() ||
     ""
 
   // Create a new window for printing

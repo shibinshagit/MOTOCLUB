@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useToast } from "@/components/ui/use-toast"
+import { notifyError, notifySuccess, notifyWarning } from "@/lib/notifications"
 import { addService } from "@/app/actions/service-actions"
 import { Loader2, Settings } from "lucide-react"
 import { useAppSelector } from "@/store/hooks"
@@ -35,30 +36,18 @@ export default function NewServiceModal({ isOpen, onClose, onSuccess, userId }: 
     e.preventDefault()
 
     if (!formData.name.trim()) {
-      toast({
-        title: "Error",
-        description: "Service name is required",
-        variant: "destructive",
-      })
+      notifyError(toast, "Service name is required")
       return
     }
 
     if (!formData.price || Number.parseFloat(formData.price) < 0) {
-      toast({
-        title: "Error",
-        description: "Valid price is required",
-        variant: "destructive",
-      })
+      notifyError(toast, "Valid price is required")
       return
     }
 
     // Validate deviceId is available
     if (!deviceId) {
-      toast({
-        title: "Error",
-        description: "Device ID is not available. Please refresh the page and try again.",
-        variant: "destructive",
-      })
+      notifyError(toast, "Device ID is not available. Please refresh the page and try again.")
       return
     }
 
@@ -73,10 +62,7 @@ export default function NewServiceModal({ isOpen, onClose, onSuccess, userId }: 
       })
 
       if (result.success) {
-        toast({
-          title: "Success",
-          description: "Service added successfully",
-        })
+        notifySuccess(toast, "Service added successfully")
 
         onSuccess(result.data.id, result.data.name, result.data.price)
 
@@ -88,19 +74,11 @@ export default function NewServiceModal({ isOpen, onClose, onSuccess, userId }: 
 
         onClose()
       } else {
-        toast({
-          title: "Error",
-          description: result.message || "Failed to add service",
-          variant: "destructive",
-        })
+        notifyError(toast, result.message || "Failed to add service")
       }
     } catch (error) {
       console.error("Error adding service:", error)
-      toast({
-        title: "Error",
-        description: "An unexpected error occurred",
-        variant: "destructive",
-      })
+      notifyError(toast, "An unexpected error occurred")
     } finally {
       setIsSubmitting(false)
     }

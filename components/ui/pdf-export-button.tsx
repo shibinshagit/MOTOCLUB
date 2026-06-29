@@ -4,6 +4,7 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Download, Loader2 } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
+import { notifyError, notifySuccess, notifyWarning } from "@/lib/notifications"
 import { format } from "date-fns"
 
 interface PdfExportButtonProps {
@@ -26,11 +27,7 @@ export function PdfExportButton({
 
   const handleExport = async () => {
     if (isExporting || !data || data.length === 0) {
-      toast({
-        title: "No data to export",
-        description: "There are no records to export to PDF.",
-        variant: "destructive",
-      })
+      notifyError(toast, "There are no records to export to PDF.", "No data to export")
       return
     }
 
@@ -85,17 +82,10 @@ export function PdfExportButton({
 
       printWindow.document.close()
 
-      toast({
-        title: "Success",
-        description: `${type.charAt(0).toUpperCase() + type.slice(1)} report has been generated. Please use the print dialog to save as PDF.`,
-      })
+      notifySuccess(toast, `${type.charAt(0).toUpperCase() + type.slice(1)} report has been generated. Please use the print dialog to save as PDF.`,)
     } catch (error) {
       console.error(`Error exporting ${type} to PDF:`, error)
-      toast({
-        title: "Error",
-        description: `Failed to export ${type} to PDF: ${error instanceof Error ? error.message : "Unknown error"}`,
-        variant: "destructive",
-      })
+      notifyError(toast, `Failed to export ${type} to PDF: ${error instanceof Error ? error.message : "Unknown error"}`)
     } finally {
       setIsExporting(false)
     }

@@ -23,6 +23,9 @@ import {
 } from "lucide-react"
 import { format } from "date-fns"
 import { getSupplierPaymentById, deleteSupplierPayment } from "@/app/actions/supplier-payment-actions"
+import { useToast } from "@/components/ui/use-toast"
+import { notifyError, notifySuccess } from "@/lib/notifications"
+import { useConfirm } from "@/hooks/use-confirm"
 
 interface ViewSupplierPaymentModalProps {
   isOpen: boolean
@@ -64,6 +67,8 @@ export default function ViewSupplierPaymentModal({
   const [payment, setPayment] = useState<SupplierPayment | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isDeleting, setIsDeleting] = useState(false)
+  const { toast } = useToast()
+  const { confirm, ConfirmDialog } = useConfirm()
 
   // Format currency
   const formatCurrency = (amount: number | string) => {
@@ -93,16 +98,6 @@ export default function ViewSupplierPaymentModal({
     }
   }
 
-  const showToast = (title: string, description: string, variant: "default" | "destructive" = "default") => {
-    console.log(`[${variant}] ${title}: ${description}`)
-    // You can replace this with your actual toast implementation
-    if (typeof window !== 'undefined' && (window as any).toast) {
-      (window as any).toast[variant === "destructive" ? "error" : "success"](description)
-    } else {
-      alert(`${title}\n${description}`)
-    }
-  }
-
   // Fetch payment data using server action
   useEffect(() => {
     const fetchPayment = async () => {
@@ -122,10 +117,9 @@ export default function ViewSupplierPaymentModal({
         }
       } catch (error) {
         console.error("Error fetching supplier payment:", error)
-        showToast(
-          "Error",
+        notifyError(
+          toast,
           error instanceof Error ? error.message : "An unexpected error occurred. Please try again later.",
-          "destructive"
         )
         setPayment(null)
       } finally {
@@ -141,11 +135,11 @@ export default function ViewSupplierPaymentModal({
   // Handle delete payment using server action
   const handleDelete = async () => {
     if (!paymentId || !deviceId) {
-      showToast("Error", "Payment ID or Device ID missing", "destructive")
+      notifyError(toast, "Payment ID or Device ID missing")
       return
     }
 
-    if (!confirm("Are you sure you want to delete this supplier payment? This action cannot be undone and will affect supplier balances.")) {
+    if (!(await confirm("Are you sure you want to delete this supplier payment? This action cannot be undone and will affect supplier balances."))) {
       return
     }
 
@@ -156,7 +150,7 @@ export default function ViewSupplierPaymentModal({
       const result = await deleteSupplierPayment(paymentId, deviceId)
       
       if (result.success) {
-        showToast("Success", result.message || "Supplier payment deleted successfully")
+        notifySuccess(toast, result.message || "Supplier payment deleted successfully")
         onPaymentDeleted?.()
         onClose()
       } else {
@@ -164,10 +158,9 @@ export default function ViewSupplierPaymentModal({
       }
     } catch (error) {
       console.error("Error deleting payment:", error)
-      showToast(
-        "Error",
+      notifyError(
+        toast,
         error instanceof Error ? error.message : "An unexpected error occurred while deleting the payment.",
-        "destructive"
       )
     } finally {
       setIsDeleting(false)
@@ -180,7 +173,7 @@ export default function ViewSupplierPaymentModal({
     try {
       const printWindow = window.open("", "_blank", "width=800,height=600")
       if (!printWindow) {
-        showToast("Print Blocked", "Please allow pop-ups to print receipts", "destructive")
+        notifyError(toast, "Please allow pop-ups to print receipts", "Print Blocked")
         return
       }
 
@@ -458,19 +451,20 @@ export default function ViewSupplierPaymentModal({
       printWindow.document.close()
     } catch (error) {
       console.error("Print error:", error)
-      showToast("Print Error", "Failed to generate print receipt.", "destructive")
+      notifyError(toast, "Failed to generate print receipt.", "Print Error")
     }
   }
 
   if (!isOpen) return null
 
   return (
+    <>
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-3xl max-h-[95vh] overflow-y-auto bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700">
-        <DialogHeader className="bg-white dark:bg-gray-900 p-6 rounded-t-lg border-b border-gray-200 dark:border-gray-700">
+      <DialogContent className="max-w-3xl max-h-[95vh] overflow-y-auto bg-white border-gray-200">
+        <DialogHeader className="bg-white p-6 rounded-t-lg border-b border-gray-200">
           <div className="flex items-center justify-between">
-            <DialogTitle className="text-2xl font-bold text-gray-900 dark:text-white flex items-center">
-              <Receipt className="h-6 w-6 mr-2 text-orange-600 dark:text-orange-400" />
+            <DialogTitle className="text-2xl font-bold text-gray-900 flex items-center">
+              <Receipt className="h-6 w-6 mr-2 text-orange-600" />
               Supplier Payment Details
             </DialogTitle>
 
@@ -480,7 +474,7 @@ export default function ViewSupplierPaymentModal({
                 variant="outline"
                 size="sm"
                 onClick={handlePrint}
-                className="flex items-center gap-2 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                className="flex items-center gap-2 text-blue-600 border-blue-200 hover:bg-blue-50"
               >
                 <Printer className="h-4 w-4" />
                 Print
@@ -495,7 +489,7 @@ export default function ViewSupplierPaymentModal({
                       onClose()
                     }
                   }}
-                  className="flex items-center gap-2 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20"
+                  className="flex items-center gap-2 text-amber-600 border-amber-200 hover:bg-amber-50"
                 >
                   <Edit className="h-4 w-4" />
                   Edit
@@ -506,7 +500,7 @@ export default function ViewSupplierPaymentModal({
                 size="sm"
                 onClick={handleDelete}
                 disabled={isDeleting}
-                className="flex items-center gap-2 text-red-600 dark:text-red-400 border-red-200 dark:border-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
+                className="flex items-center gap-2 text-red-600 border-red-200 hover:bg-red-50"
               >
                 {isDeleting ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -520,54 +514,54 @@ export default function ViewSupplierPaymentModal({
         </DialogHeader>
 
         {isLoading ? (
-          <div className="flex justify-center items-center py-12 bg-white dark:bg-gray-900 rounded-lg mx-6">
+          <div className="flex justify-center items-center py-12 bg-white rounded-lg mx-6">
             <div className="text-center">
-              <Loader2 className="h-8 w-8 animate-spin text-orange-600 dark:text-orange-400 mx-auto mb-4" />
-              <p className="text-gray-600 dark:text-gray-400">Loading payment details...</p>
+              <Loader2 className="h-8 w-8 animate-spin text-orange-600 mx-auto mb-4" />
+              <p className="text-gray-600">Loading payment details...</p>
             </div>
           </div>
         ) : !payment ? (
-          <div className="text-center py-12 bg-white dark:bg-gray-900 rounded-lg mx-6">
-            <div className="text-red-500 dark:text-red-400 text-lg font-medium">Payment not found</div>
-            <p className="text-gray-500 dark:text-gray-400 mt-2">The requested payment could not be loaded.</p>
+          <div className="text-center py-12 bg-white rounded-lg mx-6">
+            <div className="text-red-500 text-lg font-medium">Payment not found</div>
+            <p className="text-gray-500 mt-2">The requested payment could not be loaded.</p>
           </div>
         ) : (
           <div className="space-y-6 p-6">
             {/* Payment Information Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* Payment Information */}
-              <Card className="shadow-sm border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+              <Card className="shadow-sm border-gray-200 bg-white">
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-lg font-semibold text-gray-800 dark:text-gray-200 flex items-center">
-                    <FileText className="h-5 w-5 mr-2 text-orange-600 dark:text-orange-400" />
+                  <CardTitle className="text-lg font-semibold text-gray-800 flex items-center">
+                    <FileText className="h-5 w-5 mr-2 text-orange-600" />
                     Payment Information
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <div className="flex justify-between items-center">
-                    <span className="text-gray-600 dark:text-gray-400 font-medium">Payment ID:</span>
-                    <span className="font-semibold text-gray-900 dark:text-gray-100">#{payment.id}</span>
+                    <span className="text-gray-600 font-medium">Payment ID:</span>
+                    <span className="font-semibold text-gray-900">#{payment.id}</span>
                   </div>
                   <div className="flex justify-between items-center">
-                    <span className="text-gray-600 dark:text-gray-400 font-medium">Reference:</span>
-                    <span className="font-semibold text-gray-900 dark:text-gray-100">
+                    <span className="text-gray-600 font-medium">Reference:</span>
+                    <span className="font-semibold text-gray-900">
                       {payment.reference_number || `SP-${payment.id}`}
                     </span>
                   </div>
                   <div className="flex justify-between items-center">
-                    <span className="text-gray-600 dark:text-gray-400 font-medium flex items-center">
+                    <span className="text-gray-600 font-medium flex items-center">
                       <Calendar className="h-4 w-4 mr-1" />
                       Date:
                     </span>
-                    <span className="font-semibold text-gray-900 dark:text-gray-100">
+                    <span className="font-semibold text-gray-900">
                       {formatDate(payment.payment_date)}
                     </span>
                   </div>
                   <div className="flex justify-between items-center">
-                    <span className="text-gray-600 dark:text-gray-400 font-medium">Type:</span>
+                    <span className="text-gray-600 font-medium">Type:</span>
                     <Badge
                       variant="outline"
-                      className="bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-300 border-orange-300 dark:border-orange-600"
+                      className="bg-orange-100 text-orange-800 border-orange-300"
                     >
                       <span className="flex items-center gap-1">
                         <TrendingDown className="h-3 w-3" />
@@ -576,10 +570,10 @@ export default function ViewSupplierPaymentModal({
                     </Badge>
                   </div>
                   <div className="flex justify-between items-center">
-                    <span className="text-gray-600 dark:text-gray-400 font-medium">Status:</span>
+                    <span className="text-gray-600 font-medium">Status:</span>
                     <Badge
                       variant="outline"
-                      className="bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 border-green-300 dark:border-green-600"
+                      className="bg-green-100 text-green-800 border-green-300"
                     >
                       {payment.status || "Completed"}
                     </Badge>
@@ -588,31 +582,31 @@ export default function ViewSupplierPaymentModal({
               </Card>
 
               {/* Supplier Details */}
-              <Card className="shadow-sm border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+              <Card className="shadow-sm border-gray-200 bg-white">
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-lg font-semibold text-gray-800 dark:text-gray-200 flex items-center">
-                    <Building className="h-5 w-5 mr-2 text-blue-600 dark:text-blue-400" />
+                  <CardTitle className="text-lg font-semibold text-gray-800 flex items-center">
+                    <Building className="h-5 w-5 mr-2 text-blue-600" />
                     Supplier Details
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <div className="flex justify-between items-center">
-                    <span className="text-gray-600 dark:text-gray-400 font-medium">Supplier Name:</span>
-                    <span className="font-semibold text-gray-900 dark:text-gray-100">{payment.supplier_name}</span>
+                    <span className="text-gray-600 font-medium">Supplier Name:</span>
+                    <span className="font-semibold text-gray-900">{payment.supplier_name}</span>
                   </div>
                   <div className="flex justify-between items-center">
-                    <span className="text-gray-600 dark:text-gray-400 font-medium flex items-center">
+                    <span className="text-gray-600 font-medium flex items-center">
                       <CreditCard className="h-4 w-4 mr-1" />
                       Payment Method:
                     </span>
-                    <span className="font-semibold text-gray-900 dark:text-gray-100">{payment.payment_method}</span>
+                    <span className="font-semibold text-gray-900">{payment.payment_method}</span>
                   </div>
                   <div className="flex justify-between items-center">
-                    <span className="text-gray-600 dark:text-gray-400 font-medium flex items-center">
+                    <span className="text-gray-600 font-medium flex items-center">
                       <Package className="h-4 w-4 mr-1" />
                       Purchases Affected:
                     </span>
-                    <span className="font-semibold text-gray-900 dark:text-gray-100">
+                    <span className="font-semibold text-gray-900">
                       {payment.affected_purchases || 0}
                     </span>
                   </div>
@@ -622,42 +616,42 @@ export default function ViewSupplierPaymentModal({
 
             {/* Amount Section */}
             <Card
-              className="shadow-sm border-2 border-red-200 dark:border-red-700 bg-gradient-to-r from-red-50 to-rose-50 dark:from-red-900/30 dark:to-rose-900/30 dark:bg-gray-800"
+              className="shadow-sm border-2 border-red-200 bg-gradient-to-r from-red-50 to-rose-50"
             >
               <CardHeader className="pb-3">
-                <CardTitle className="text-lg font-semibold text-gray-800 dark:text-gray-200 flex items-center">
-                  <DollarSign className="h-5 w-5 mr-2 text-yellow-600 dark:text-yellow-400" />
+                <CardTitle className="text-lg font-semibold text-gray-800 flex items-center">
+                  <DollarSign className="h-5 w-5 mr-2 text-yellow-600" />
                   Payment Amount
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="text-center py-4">
-                  <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">Amount Paid</div>
-                  <div className="text-4xl font-bold text-red-600 dark:text-red-400">
+                  <div className="text-sm text-gray-600 mb-2">Amount Paid</div>
+                  <div className="text-4xl font-bold text-red-600">
                     - {formatCurrency(payment.amount)}
                   </div>
                   <div className="mt-4 grid grid-cols-4 gap-4 text-sm">
                     <div className="text-center">
-                      <div className="text-xs text-gray-500 dark:text-gray-400">Spend</div>
-                      <div className="font-semibold text-red-600 dark:text-red-400">
+                      <div className="text-xs text-gray-500">Spend</div>
+                      <div className="font-semibold text-red-600">
                         {formatCurrency(payment.amount)}
                       </div>
                     </div>
                     <div className="text-center">
-                      <div className="text-xs text-gray-500 dark:text-gray-400">Cost</div>
-                      <div className="font-semibold text-gray-900 dark:text-gray-100">
+                      <div className="text-xs text-gray-500">Cost</div>
+                      <div className="font-semibold text-gray-900">
                         {currency} 0.00
                       </div>
                     </div>
                     <div className="text-center">
-                      <div className="text-xs text-gray-500 dark:text-gray-400">Credit/Debit</div>
-                      <div className="font-semibold text-blue-600 dark:text-blue-400">
+                      <div className="text-xs text-gray-500">Credit/Debit</div>
+                      <div className="font-semibold text-blue-600">
                         {currency} 0.00 / {formatCurrency(payment.amount)}
                       </div>
                     </div>
                     <div className="text-center">
-                      <div className="text-xs text-gray-500 dark:text-gray-400">Net Impact</div>
-                      <div className="font-semibold text-red-600 dark:text-red-400">
+                      <div className="text-xs text-gray-500">Net Impact</div>
+                      <div className="font-semibold text-red-600">
                         - {formatCurrency(payment.amount)}
                       </div>
                     </div>
@@ -668,12 +662,12 @@ export default function ViewSupplierPaymentModal({
 
             {/* Notes/Description */}
             {(payment.notes || payment.description) && (
-              <Card className="shadow-sm border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+              <Card className="shadow-sm border-gray-200 bg-white">
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-lg font-semibold text-gray-800 dark:text-gray-200">Notes</CardTitle>
+                  <CardTitle className="text-lg font-semibold text-gray-800">Notes</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-700 p-4 rounded-lg">
+                  <p className="text-gray-700 bg-gray-50 p-4 rounded-lg">
                     {payment.notes || payment.description}
                   </p>
                 </CardContent>
@@ -681,29 +675,29 @@ export default function ViewSupplierPaymentModal({
             )}
 
             {/* Record Information */}
-            <Card className="shadow-sm border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+            <Card className="shadow-sm border-gray-200 bg-white">
               <CardHeader className="pb-3">
-                <CardTitle className="text-lg font-semibold text-gray-800 dark:text-gray-200 flex items-center">
-                  <Clock className="h-5 w-5 mr-2 text-blue-600 dark:text-blue-400" />
+                <CardTitle className="text-lg font-semibold text-gray-800 flex items-center">
+                  <Clock className="h-5 w-5 mr-2 text-blue-600" />
                   Record Information
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
                 <div className="flex justify-between items-start">
-                  <span className="text-gray-600 dark:text-gray-400 font-medium flex items-center">
+                  <span className="text-gray-600 font-medium flex items-center">
                     <User className="h-4 w-4 mr-1" />
                     Created:
                   </span>
-                  <span className="font-semibold text-gray-900 dark:text-gray-100 text-right text-sm">
+                  <span className="font-semibold text-gray-900 text-right text-sm">
                     {formatDateTime(payment.created_at)}
                   </span>
                 </div>
                 <div className="flex justify-between items-start">
-                  <span className="text-gray-600 dark:text-gray-400 font-medium flex items-center">
+                  <span className="text-gray-600 font-medium flex items-center">
                     <Edit className="h-4 w-4 mr-1" />
                     Updated:
                   </span>
-                  <span className="font-semibold text-gray-900 dark:text-gray-100 text-right text-sm">
+                  <span className="font-semibold text-gray-900 text-right text-sm">
                     {formatDateTime(payment.updated_at)}
                   </span>
                 </div>
@@ -713,16 +707,18 @@ export default function ViewSupplierPaymentModal({
         )}
 
         {/* Footer with Close Button */}
-        <div className="flex justify-end p-6 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700">
+        <div className="flex justify-end p-6 bg-white border-t border-gray-200">
           <Button
             variant="outline"
             onClick={onClose}
-            className="px-6 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 bg-transparent"
+            className="px-6 border-gray-300 text-gray-700 hover:bg-gray-50 bg-transparent"
           >
             Close
           </Button>
         </div>
       </DialogContent>
     </Dialog>
+    {ConfirmDialog}
+    </>
   )
 }

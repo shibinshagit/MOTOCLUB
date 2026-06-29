@@ -1,5 +1,6 @@
 "use server"
 
+import { addDays, parseISO, format } from "date-fns"
 import { sql, getLastError, resetConnectionState } from "@/lib/db"
 import { revalidatePath } from "next/cache"
 import { recordPurchaseTransaction, recordPurchaseAdjustment, deletePurchaseTransaction } from "./simplified-accounting"
@@ -45,42 +46,143 @@ export async function getPurchases() {
   }
 }
 
-export async function getUserPurchases(deviceId: number, limit = 500, searchTerm?: string) {
+interface GetUserPurchasesOptions {
+  limit?: number
+  searchTerm?: string
+  dateFrom?: string
+  dateTo?: string
+}
+
+function getExclusiveEndDate(dateTo: string): string {
+  return format(addDays(parseISO(dateTo), 1), "yyyy-MM-dd")
+}
+
+async function queryDevicePurchases(deviceId: number, options: GetUserPurchasesOptions = {}) {
+  const { limit, searchTerm, dateFrom, dateTo } = options
+  const searchPattern = searchTerm?.trim() ? `%${searchTerm.trim().toLowerCase()}%` : null
+  const endExclusive = dateTo ? getExclusiveEndDate(dateTo) : null
+
+  if (dateFrom && endExclusive && !searchPattern && !limit) {
+    return sql`
+      SELECT *
+      FROM purchases
+      WHERE device_id = ${deviceId}
+        AND purchase_date >= ${dateFrom}
+        AND purchase_date < ${endExclusive}
+      ORDER BY purchase_date DESC, id DESC
+    `
+  }
+
+  if (dateFrom && endExclusive && searchPattern && limit) {
+    return sql`
+      SELECT *
+      FROM purchases
+      WHERE device_id = ${deviceId}
+        AND purchase_date >= ${dateFrom}
+        AND purchase_date < ${endExclusive}
+        AND (
+          LOWER(supplier) LIKE ${searchPattern}
+          OR CAST(id AS TEXT) LIKE ${searchPattern}
+          OR LOWER(status) LIKE ${searchPattern}
+        )
+      ORDER BY purchase_date DESC, id DESC
+      LIMIT ${limit}
+    `
+  }
+
+  if (dateFrom && endExclusive && searchPattern) {
+    return sql`
+      SELECT *
+      FROM purchases
+      WHERE device_id = ${deviceId}
+        AND purchase_date >= ${dateFrom}
+        AND purchase_date < ${endExclusive}
+        AND (
+          LOWER(supplier) LIKE ${searchPattern}
+          OR CAST(id AS TEXT) LIKE ${searchPattern}
+          OR LOWER(status) LIKE ${searchPattern}
+        )
+      ORDER BY purchase_date DESC, id DESC
+    `
+  }
+
+  if (dateFrom && endExclusive && limit) {
+    return sql`
+      SELECT *
+      FROM purchases
+      WHERE device_id = ${deviceId}
+        AND purchase_date >= ${dateFrom}
+        AND purchase_date < ${endExclusive}
+      ORDER BY purchase_date DESC, id DESC
+      LIMIT ${limit}
+    `
+  }
+
+  if (searchPattern && limit) {
+    return sql`
+      SELECT *
+      FROM purchases
+      WHERE device_id = ${deviceId}
+        AND (
+          LOWER(supplier) LIKE ${searchPattern}
+          OR CAST(id AS TEXT) LIKE ${searchPattern}
+          OR LOWER(status) LIKE ${searchPattern}
+        )
+      ORDER BY purchase_date DESC, id DESC
+      LIMIT ${limit}
+    `
+  }
+
+  if (searchPattern) {
+    return sql`
+      SELECT *
+      FROM purchases
+      WHERE device_id = ${deviceId}
+        AND (
+          LOWER(supplier) LIKE ${searchPattern}
+          OR CAST(id AS TEXT) LIKE ${searchPattern}
+          OR LOWER(status) LIKE ${searchPattern}
+        )
+      ORDER BY purchase_date DESC, id DESC
+    `
+  }
+
+  if (limit) {
+    return sql`
+      SELECT *
+      FROM purchases
+      WHERE device_id = ${deviceId}
+      ORDER BY purchase_date DESC, id DESC
+      LIMIT ${limit}
+    `
+  }
+
+  return sql`
+    SELECT *
+    FROM purchases
+    WHERE device_id = ${deviceId}
+    ORDER BY purchase_date DESC, id DESC
+  `
+}
+
+export async function getUserPurchases(
+  deviceId: number,
+  limitOrOptions: number | GetUserPurchasesOptions = 500,
+  searchTerm?: string,
+) {
   if (!deviceId) {
     return { success: false, message: "Device ID is required", data: [] }
   }
 
-  // Reset connection state to allow a fresh attempt
+  const options: GetUserPurchasesOptions =
+    typeof limitOrOptions === "object"
+      ? limitOrOptions
+      : { limit: limitOrOptions, searchTerm }
+
   resetConnectionState()
 
   try {
-    let purchases
-
-    if (searchTerm && searchTerm.trim() !== "") {
-      // Search query
-      const searchPattern = `%${searchTerm.toLowerCase()}%`
-
-      purchases = await sql`
-        SELECT *
-        FROM purchases
-        WHERE device_id = ${deviceId}
-          AND (LOWER(supplier) LIKE ${searchPattern}
-               OR CAST(id AS TEXT) LIKE ${searchPattern}
-               OR LOWER(status) LIKE ${searchPattern})
-        ORDER BY purchase_date DESC
-        LIMIT ${limit}
-      `
-    } else {
-      // Regular query
-      purchases = await sql`
-        SELECT *
-        FROM purchases
-        WHERE device_id = ${deviceId}
-        ORDER BY purchase_date DESC
-        LIMIT ${limit}
-      `
-    }
-
+    const purchases = await queryDevicePurchases(deviceId, options)
     return { success: true, data: purchases }
   } catch (error) {
     console.error("Get device purchases error:", error)

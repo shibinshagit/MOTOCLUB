@@ -466,6 +466,19 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
 }
 
 
+export async function getTrendingProducts(userId?: number) {
+  const result = await getProducts(userId)
+  if (!result.success) {
+    return result
+  }
+
+  return {
+    ...result,
+    data: (result.data || []).filter((product: { trending?: boolean }) => Boolean(product.trending)),
+  }
+}
+
+
 export async function getProductById(id: number, userId?: number) {
   if (!id) {
     return { success: false, message: "Product ID is required", data: null }
@@ -714,6 +727,7 @@ export async function createProduct(formData: FormData) {
   const flipkartStatus = normalizePlatformStatus(formData.get("flipkart_status"))
   const meeshoStatus = normalizePlatformStatus(formData.get("meesho_status"))
   const ownEcomStatus = normalizePlatformStatus(formData.get("own_ecom_status"))
+  const trending = String(formData.get("trending") || "false") === "true"
 
   if (!name || isNaN(price)) {
     return { success: false, error: "Name and valid price are required" }
@@ -820,7 +834,8 @@ export async function createProduct(formData: FormData) {
             amazon_status,
             flipkart_status,
             meesho_status,
-            own_ecom_status
+            own_ecom_status,
+            trending
           )
           VALUES (
             ${name}, 
@@ -845,7 +860,8 @@ export async function createProduct(formData: FormData) {
             ${amazonStatus},
             ${flipkartStatus},
             ${meeshoStatus},
-            ${ownEcomStatus}
+            ${ownEcomStatus},
+            ${trending}
           )
           RETURNING *
         `
@@ -1030,6 +1046,9 @@ export async function updateProduct(formData: FormData) {
     const ownEcomStatus = formData.has("own_ecom_status")
       ? normalizePlatformStatus(ownEcomStatusRaw)
       : normalizePlatformStatus(currentProduct[0].own_ecom_status)
+    const trending = formData.has("trending")
+      ? String(formData.get("trending") || "false") === "true"
+      : Boolean(currentProduct[0].trending)
 
     let parsedExistingImageUrls: string[] = []
     try {
@@ -1115,9 +1134,6 @@ export async function updateProduct(formData: FormData) {
       }
     }
 
-    // Start a transaction
-    await sql`BEGIN`
-
     const stockDeviceId = userId || currentProduct[0].created_by
     const existingDeviceStock = await sql`
       SELECT stock
@@ -1156,7 +1172,8 @@ export async function updateProduct(formData: FormData) {
           amazon_status = ${amazonStatus},
           flipkart_status = ${flipkartStatus},
           meesho_status = ${meeshoStatus},
-          own_ecom_status = ${ownEcomStatus}
+          own_ecom_status = ${ownEcomStatus},
+          trending = ${trending}
         WHERE id = ${id}
         AND created_by IN (
           SELECT d2.id
@@ -1191,7 +1208,8 @@ export async function updateProduct(formData: FormData) {
           amazon_status = ${amazonStatus},
           flipkart_status = ${flipkartStatus},
           meesho_status = ${meeshoStatus},
-          own_ecom_status = ${ownEcomStatus}
+          own_ecom_status = ${ownEcomStatus},
+          trending = ${trending}
         WHERE id = ${id}
         RETURNING *
       `
@@ -1228,9 +1246,6 @@ export async function updateProduct(formData: FormData) {
         }
       }
 
-      // Commit the transaction
-      await sql`COMMIT`
-
       const updatedProduct = result[0]
       updatedProduct.stock = stock
       updatedProduct.category = categoryName
@@ -1247,10 +1262,8 @@ export async function updateProduct(formData: FormData) {
       return { success: true, message: "Product updated successfully", data: updatedProduct }
     }
 
-    await sql`ROLLBACK`
     return { success: false, message: "Failed to update product" }
   } catch (error) {
-    await sql`ROLLBACK`
     console.error("Update product error:", error)
     return {
       success: false,
@@ -1292,9 +1305,6 @@ export async function deleteProduct(id: number) {
       // Continue execution even if this fails
     }
 
-    // Start a transaction
-    await sql`BEGIN`
-
     // Delete stock history first (if any)
     if (stockHistory.length > 0) {
       try {
@@ -1309,16 +1319,11 @@ export async function deleteProduct(id: number) {
     const result = await sql`DELETE FROM products WHERE id = ${id} RETURNING id`
 
     if (result.length > 0) {
-      // Commit the transaction
-      await sql`COMMIT`
-
       return { success: true, message: "Product deleted successfully" }
     }
 
-    await sql`ROLLBACK`
     return { success: false, message: "Failed to delete product" }
   } catch (error) {
-    await sql`ROLLBACK`
     console.error("Delete product error:", error)
     return {
       success: false,
@@ -1538,14 +1543,10 @@ export async function adjustProductStock(formData: FormData) {
   resetConnectionState()
 
   try {
-    // Start a transaction
-    await sql`BEGIN`
-
     // Get current product
     const product = await sql`SELECT * FROM products WHERE id = ${productId}`
 
     if (product.length === 0) {
-      await sql`ROLLBACK`
       return { success: false, message: "Product not found" }
     }
 
@@ -1567,7 +1568,6 @@ export async function adjustProductStock(formData: FormData) {
 
       // Check if we have enough stock
       if (newStock < 0) {
-        await sql`ROLLBACK`
         return { success: false, message: "Insufficient stock for adjustment" }
       }
     }
@@ -1593,16 +1593,12 @@ export async function adjustProductStock(formData: FormData) {
       // Continue execution even if this fails
     }
 
-    // Commit the transaction
-    await sql`COMMIT`
-
     return {
       success: true,
       message: `Stock ${type === "increase" ? "increased" : "decreased"} successfully`,
       data: updatedProduct,
     }
   } catch (error) {
-    await sql`ROLLBACK`
     console.error("Adjust product stock error:", error)
     return {
       success: false,

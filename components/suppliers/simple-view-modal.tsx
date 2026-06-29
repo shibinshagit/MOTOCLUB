@@ -71,19 +71,19 @@ function SimpleViewModal({ isOpen, onClose, supplierId, userId }: SimpleViewModa
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto dark:bg-gray-900">
+      <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="dark:text-gray-100">Supplier Details</DialogTitle>
+          <DialogTitle className="">Supplier Details</DialogTitle>
         </DialogHeader>
 
         {isLoading ? (
           <div className="flex items-center justify-center py-8">
             <Loader2 className="h-6 w-6 animate-spin mr-2" />
-            <span className="dark:text-gray-300">Loading supplier details...</span>
+            <span className="">Loading supplier details...</span>
           </div>
         ) : error ? (
           <div className="text-center py-8">
-            <div className="text-red-600 dark:text-red-400 mb-4">{error}</div>
+            <div className="text-red-600 mb-4">{error}</div>
             <Button onClick={loadSupplierData} variant="outline">
               Try Again
             </Button>
@@ -91,21 +91,21 @@ function SimpleViewModal({ isOpen, onClose, supplierId, userId }: SimpleViewModa
         ) : supplierData ? (
           <div className="space-y-6">
             {/* Supplier Info */}
-            <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4">
-              <h2 className="text-xl font-bold mb-3 dark:text-gray-100">{supplierData.supplier.name}</h2>
+            <div className="bg-gray-50 rounded-lg p-4">
+              <h2 className="text-xl font-bold mb-3">{supplierData.supplier.name}</h2>
               <div className="space-y-2">
-                <div className="flex items-center text-gray-600 dark:text-gray-300">
+                <div className="flex items-center text-gray-600">
                   <Phone className="h-4 w-4 mr-2 text-green-600" />
                   {supplierData.supplier.phone}
                 </div>
                 {supplierData.supplier.email && (
-                  <div className="flex items-center text-gray-600 dark:text-gray-300">
+                  <div className="flex items-center text-gray-600">
                     <Mail className="h-4 w-4 mr-2 text-blue-600" />
                     {supplierData.supplier.email}
                   </div>
                 )}
                 {supplierData.supplier.address && (
-                  <div className="flex items-center text-gray-600 dark:text-gray-300">
+                  <div className="flex items-center text-gray-600">
                     <MapPin className="h-4 w-4 mr-2 text-red-600" />
                     {supplierData.supplier.address}
                   </div>
@@ -115,48 +115,48 @@ function SimpleViewModal({ isOpen, onClose, supplierId, userId }: SimpleViewModa
 
             {/* Financial Summary */}
             <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-              <div className="text-center p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+              <div className="text-center p-3 bg-blue-50 rounded-lg">
                 <ShoppingCart className="h-6 w-6 mx-auto mb-2 text-blue-600" />
-                <div className="text-lg font-bold dark:text-gray-100">{supplierData.supplier.total_purchases || 0}</div>
-                <div className="text-sm text-gray-600 dark:text-gray-400">Purchases</div>
+                <div className="text-lg font-bold">{supplierData.supplier.total_purchases || 0}</div>
+                <div className="text-sm text-gray-600">Purchases</div>
               </div>
-              <div className="text-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+              <div className="text-center p-3 bg-gray-50 rounded-lg">
                 <DollarSign className="h-6 w-6 mx-auto mb-2 text-gray-600" />
-                <div className="text-lg font-bold dark:text-gray-100">
+                <div className="text-lg font-bold">
                   {formatCurrency(supplierData.supplier.total_amount)}
                 </div>
-                <div className="text-sm text-gray-600 dark:text-gray-400">Total Amount</div>
+                <div className="text-sm text-gray-600">Total Amount</div>
               </div>
-              <div className="text-center p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
+              <div className="text-center p-3 bg-green-50 rounded-lg">
                 <CreditCard className="h-6 w-6 mx-auto mb-2 text-green-600" />
-                <div className="text-lg font-bold text-green-600 dark:text-gray-100">
+                <div className="text-lg font-bold text-green-600">
                   {formatCurrency(supplierData.supplier.paid_amount)}
                 </div>
-                <div className="text-sm text-gray-600 dark:text-gray-400">Total Paid</div>
+                <div className="text-sm text-gray-600">Total Paid</div>
               </div>
-              <div className="text-center p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+              <div className="text-center p-3 bg-blue-50 rounded-lg">
                 <DollarSign className="h-6 w-6 mx-auto mb-2 text-blue-600" />
-                <div className="text-lg font-bold text-blue-600 dark:text-gray-100">
+                <div className="text-lg font-bold text-blue-600">
                   {formatCurrency(supplierData.supplier.total_credit || 0)}
                 </div>
-                <div className="text-sm text-gray-600 dark:text-gray-400">Total Credit</div>
+                <div className="text-sm text-gray-600">Total Credit</div>
               </div>
-              <div className="text-center p-3 bg-orange-50 dark:bg-orange-900/20 rounded-lg">
+              <div className="text-center p-3 bg-orange-50 rounded-lg">
                 <AlertCircle className="h-6 w-6 mx-auto mb-2 text-orange-600" />
-                <div className="text-lg font-bold text-orange-600 dark:text-gray-100">
+                <div className="text-lg font-bold text-orange-600">
                   {formatCurrency(supplierData.supplier.outstanding_balance || 0)}
                 </div>
-                <div className="text-sm text-gray-600 dark:text-gray-400">Outstanding</div>
+                <div className="text-sm text-gray-600">Outstanding</div>
               </div>
             </div>
 
             {/* Recent Purchases */}
             <div>
-              <h3 className="text-lg font-semibold mb-3 dark:text-gray-100">
+              <h3 className="text-lg font-semibold mb-3">
                 Recent Purchases ({supplierData.purchases.length})
               </h3>
               {supplierData.purchases.length === 0 ? (
-                <div className="text-center py-4 text-gray-500 dark:text-gray-400">No purchases found</div>
+                <div className="text-center py-4 text-gray-500">No purchases found</div>
               ) : (
                 <div className="space-y-2 max-h-60 overflow-y-auto">
                   {supplierData.purchases.slice(0, 10).map((purchase: any) => {
@@ -168,21 +168,21 @@ function SimpleViewModal({ isOpen, onClose, supplierId, userId }: SimpleViewModa
                     return (
                       <div
                         key={purchase.id}
-                        className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded"
+                        className="flex items-center justify-between p-3 bg-gray-50 rounded"
                       >
                         <div className="flex-1">
-                          <div className="font-medium dark:text-gray-100">Purchase #{purchase.id}</div>
-                          <div className="text-sm text-gray-600 dark:text-gray-400">
+                          <div className="font-medium">Purchase #{purchase.id}</div>
+                          <div className="text-sm text-gray-600">
                             {new Date(purchase.purchase_date).toLocaleDateString()}
                           </div>
                           {purchase.status === "Credit" && (
-                            <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                            <div className="text-xs text-gray-500 mt-1">
                               Paid: {formatCurrency(receivedAmount)} | Balance: {formatCurrency(balanceAmount)}
                             </div>
                           )}
                         </div>
                         <div className="text-right">
-                          <div className="font-medium dark:text-gray-100">{formatCurrency(totalAmount)}</div>
+                          <div className="font-medium">{formatCurrency(totalAmount)}</div>
                           <div className="flex gap-1 mt-1">
                             <Badge variant={purchase.status === "Paid" ? "default" : "secondary"}>
                               {purchase.status}

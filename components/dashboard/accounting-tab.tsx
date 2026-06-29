@@ -46,7 +46,9 @@ import {
   selectBalances,
   setBalances,
 } from "@/store/slices/accountingSlice"
-import { toast } from "sonner"
+import { useToast } from "@/components/ui/use-toast"
+import { notifyError, notifySuccess } from "@/lib/notifications"
+import { useConfirm } from "@/hooks/use-confirm"
 import {
   getFinancialSummary,
   recordManualTransaction,
@@ -86,7 +88,7 @@ const SummaryCardSkeleton = () => (
 )
 
 const TransactionSkeleton = () => (
-  <div className="border rounded-lg p-4 border-l-4 border-l-gray-200 dark:border-l-gray-600">
+  <div className="rounded-lg border border-l-4 border-l-border p-4">
     <div className="flex items-center justify-between">
       <div className="flex items-center gap-3">
         <Skeleton className="h-4 w-4" />
@@ -132,15 +134,15 @@ const TransactionSkeleton = () => (
 )
 
 const TableSkeleton = () => (
-  <div className="border rounded-lg overflow-hidden dark:border-gray-700">
-    <div className="bg-gray-50 dark:bg-gray-700 px-6 py-3">
+  <div className="border rounded-lg overflow-hidden">
+    <div className="bg-muted/50 px-6 py-3">
       <div className="grid grid-cols-7 gap-4">
         {Array.from({ length: 7 }).map((_, i) => (
           <Skeleton key={i} className="h-4 w-16" />
         ))}
       </div>
     </div>
-    <div className="divide-y divide-gray-200 dark:divide-gray-700">
+    <div className="divide-y divide-border">
       {Array.from({ length: 5 }).map((_, i) => (
         <div key={i} className="px-6 py-4">
           <div className="grid grid-cols-7 gap-4">
@@ -165,6 +167,8 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
   const balances = useAppSelector(selectBalances)
   const { isValueHidden } = useStaffRestrictions()
   const hideCogs = isValueHidden("cogs")
+  const { toast } = useToast()
+  const { confirm, ConfirmDialog } = useConfirm()
 
   // Local state
   const [searchTerm, setSearchTerm] = useState("")
@@ -298,7 +302,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
 
       if (!deviceId) {
         console.error("No device ID provided to accounting tab")
-        toast.error("Device ID not found")
+        notifyError(toast,"Device ID not found")
         return
       }
 
@@ -312,7 +316,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
     } catch (error) {
       console.error("Error loading financial data:", error)
       if (!background || error.message?.includes("critical")) {
-        toast.error("Failed to load financial data: " + (error.message || "Unknown error"))
+        notifyError(toast,"Failed to load financial data: " + (error.message || "Unknown error"))
       }
     } finally {
       if (background) {
@@ -338,7 +342,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
       dispatch(setBalances(balanceData))
     } catch (error) {
       console.error("Error loading accounting balances:", error)
-      toast.error("Failed to load account balances")
+      notifyError(toast,"Failed to load account balances")
     }
   }
 
@@ -355,10 +359,10 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
       await loadFinancialData(false)
       await loadAccountingBalances(dateFrom, dateTo)
       
-      toast.success("Data refreshed successfully")
+      notifySuccess(toast,"Data refreshed successfully")
     } catch (error) {
       console.error("Error force refreshing data:", error)
-      toast.error("Failed to refresh data")
+      notifyError(toast,"Failed to refresh data")
     } finally {
       dispatch(setLoading(false))
     }
@@ -445,37 +449,37 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
     const statusLower = status.toLowerCase()
     if (statusLower === "completed") {
       return (
-        <Badge className="bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 border-green-200 dark:border-green-700 text-xs">
+        <Badge className="border-emerald-200 bg-emerald-100 text-xs text-emerald-800">
           Completed
         </Badge>
       )
     } else if (statusLower === "credit") {
       return (
-        <Badge className="bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300 border-yellow-200 dark:border-yellow-700 text-xs">
+        <Badge className="border-amber-200 bg-amber-100 text-xs text-amber-800">
           Credit
         </Badge>
       )
     } else if (statusLower === "cancelled") {
       return (
-        <Badge className="bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300 border-red-200 dark:border-red-700 text-xs">
+        <Badge className="border-rose-200 bg-rose-100 text-xs text-rose-800">
           Cancelled
         </Badge>
       )
     } else if (statusLower === "adjustment") {
       return (
-        <Badge className="bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 border-blue-200 dark:border-blue-700 text-xs">
+        <Badge className="border-violet-200 bg-violet-100 text-xs text-violet-800">
           Adjustment
         </Badge>
       )
     } else if (statusLower === "manual entry") {
       return (
-        <Badge className="bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300 border-purple-200 dark:border-purple-700 text-xs">
+        <Badge className="border-violet-200 bg-violet-100 text-xs text-violet-800">
           Manual
         </Badge>
       )
     } else {
       return (
-        <Badge variant="outline" className="text-xs dark:border-gray-600 dark:text-gray-300">
+        <Badge variant="outline" className="text-xs">
           {status}
         </Badge>
       )
@@ -484,7 +488,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
 
   const handleAddManualTransaction = async () => {
     if (!manualAmount || !manualCategory) {
-      toast.error("Please fill in all required fields")
+      notifyError(toast,"Please fill in all required fields")
       return
     }
 
@@ -503,7 +507,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
       })
 
       if (result.success) {
-        toast.success("Manual transaction added successfully")
+        notifySuccess(toast,"Manual transaction added successfully")
         setIsManualDialogOpen(false)
         setManualAmount("")
         setManualDescription("")
@@ -512,11 +516,11 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
         setManualDate(new Date())
         await forceRefreshData()
       } else {
-        toast.error("Failed to add manual transaction")
+        notifyError(toast,"Failed to add manual transaction")
       }
     } catch (error) {
       console.error("Error adding manual transaction:", error)
-      toast.error("An error occurred while adding the transaction")
+      notifyError(toast,"An error occurred while adding the transaction")
     } finally {
       setIsAddingManual(false)
     }
@@ -529,7 +533,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
   }
 
   const handleDeleteSale = async (saleId: number) => {
-    if (!confirm("Are you sure you want to delete this sale? This action cannot be undone and will affect your financial records.")) {
+    if (!(await confirm("Are you sure you want to delete this sale? This action cannot be undone and will affect your financial records."))) {
       return
     }
 
@@ -539,7 +543,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
       const response = await deleteSale(saleId, deviceId)
       
       if (response.success) {
-        toast.success(response.message || "Sale deleted successfully")
+        notifySuccess(toast,response.message || "Sale deleted successfully")
         await forceRefreshData()
         setViewSaleId(null)
       } else {
@@ -547,7 +551,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
       }
     } catch (error) {
       console.error("Error deleting sale:", error)
-      toast.error(error instanceof Error ? error.message : "An unexpected error occurred. Please try again later.")
+      notifyError(toast,error instanceof Error ? error.message : "An unexpected error occurred. Please try again later.")
     } finally {
       setDeletingSaleId(null)
     }
@@ -560,7 +564,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
   }
 
   const handleDeletePurchase = async (purchaseId: number) => {
-    if (!confirm("Are you sure you want to delete this purchase? This action cannot be undone and will affect your financial records.")) {
+    if (!(await confirm("Are you sure you want to delete this purchase? This action cannot be undone and will affect your financial records."))) {
       return
     }
 
@@ -570,7 +574,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
       const response = await deletePurchase(purchaseId, deviceId)
       
       if (response.success) {
-        toast.success(response.message || "Purchase deleted successfully")
+        notifySuccess(toast,response.message || "Purchase deleted successfully")
         await forceRefreshData()
         setViewPurchaseId(null)
       } else {
@@ -578,7 +582,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
       }
     } catch (error) {
       console.error("Error deleting purchase:", error)
-      toast.error(error instanceof Error ? error.message : "An unexpected error occurred. Please try again later.")
+      notifyError(toast,error instanceof Error ? error.message : "An unexpected error occurred. Please try again later.")
     } finally {
       setDeletingPurchaseId(null)
     }
@@ -594,24 +598,24 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
   const handleSaleUpdated = async () => {
     setEditSaleId(null)
     await forceRefreshData()
-    toast.success("Sale updated successfully")
+    notifySuccess(toast,"Sale updated successfully")
   }
 
   const handlePurchaseUpdated = async () => {
     setEditPurchaseId(null)
     await forceRefreshData()
-    toast.success("Purchase updated successfully")
+    notifySuccess(toast,"Purchase updated successfully")
   }
 
   const handleSupplierPaymentUpdated = async () => {
     setEditSupplierPaymentId(null)
     await forceRefreshData()
-    toast.success("Supplier payment updated successfully")
+    notifySuccess(toast,"Supplier payment updated successfully")
   }
 
   const handlePrintReport = () => {
     if (!financialData) {
-      toast.error("No data available to print")
+      notifyError(toast,"No data available to print")
       return
     }
 
@@ -750,10 +754,10 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
       printWindow.document.write(htmlContent)
       printWindow.document.close()
 
-      toast.success("Print preview opened. Use your browser's print function to save as PDF.")
+      notifySuccess(toast,"Print preview opened. Use your browser's print function to save as PDF.")
     } catch (error) {
       console.error("Error opening print preview:", error)
-      toast.error("Failed to open print preview")
+      notifyError(toast,"Failed to open print preview")
     }
   }
 
@@ -860,9 +864,10 @@ const getProfit = (transaction: any) => {
   const credit = n(transaction.credit)
   const debit = n(transaction.debit)
   
-  // For sales - profit = money received - cost
+  // For sales - profit = product revenue received - cost (excludes courier charge on separate lines)
   if (type === 'sale') {
-    return received - cost
+    const saleReceived = credit > 0 ? credit : received
+    return saleReceived - cost
   }
   
   // For sale adjustments (additional payments, discounts, refunds)
@@ -951,9 +956,10 @@ const getCashImpact = (transaction: any) => {
   const debit = n(transaction.debit)
   const cost = n(transaction.cost)
   
-  // For sales - cash impact = profit only (received - cost)
+  // For sales - cash impact = profit only (product credit - cost)
   if (type === 'sale') {
-    return received - cost
+    const saleReceived = credit > 0 ? credit : received
+    return saleReceived - cost
   }
   
   // For sale adjustments - cash impact from payments, discounts, or refunds
@@ -1081,9 +1087,13 @@ const getMoneyFlowAmount = (transaction: any) => {
   const credit = n(transaction.credit)
   const debit = n(transaction.debit)
   
-  // For sales - money in is the actual received amount
+  // For sales - money in is product revenue (courier charge is on sale_shipping lines)
   if (type === 'sale') {
-    return received
+    return credit > 0 ? credit : received
+  }
+
+  if (type === 'sale_shipping') {
+    return credit > 0 ? credit : -debit
   }
   
   // For sale adjustments - net money movement from ledger
@@ -1121,7 +1131,7 @@ const getMoneyFlowInfo = (transaction: any) => {
     return {
       type: 'none',
       text: 'No Cash Flow',
-      color: 'text-gray-600 dark:text-gray-400',
+      color: 'text-muted-foreground',
       amount: 0
     }
   }
@@ -1138,7 +1148,7 @@ const getMoneyFlowInfo = (transaction: any) => {
       return {
         type: 'none',
         text: 'Credit Sale',
-        color: 'text-blue-600 dark:text-blue-400',
+        color: 'text-brand-blue',
         amount: 0
       }
     }
@@ -1146,14 +1156,14 @@ const getMoneyFlowInfo = (transaction: any) => {
       return {
         type: 'in',
         text: 'Partial Payment',
-        color: 'text-green-600 dark:text-green-400',
+        color: 'text-emerald-600',
         amount: amount
       }
     }
     return {
       type: 'in',
       text: 'Full Payment',
-      color: 'text-green-600 dark:text-green-400',
+      color: 'text-emerald-600',
       amount: amount
     }
   }
@@ -1166,7 +1176,7 @@ const getMoneyFlowInfo = (transaction: any) => {
       return {
         type: "out",
         text: description.includes("Discount change") ? "Discount Applied" : "Refund",
-        color: "text-red-600 dark:text-red-400",
+        color: "text-rose-600",
         amount: Math.abs(flowAmount),
       }
     }
@@ -1175,7 +1185,7 @@ const getMoneyFlowInfo = (transaction: any) => {
       return {
         type: "in",
         text: "Additional Payment",
-        color: "text-green-600 dark:text-green-400",
+        color: "text-emerald-600",
         amount: flowAmount,
       }
     }
@@ -1183,7 +1193,7 @@ const getMoneyFlowInfo = (transaction: any) => {
     return {
       type: "none",
       text: "Bill Updated",
-      color: "text-gray-600 dark:text-gray-400",
+      color: "text-muted-foreground",
       amount: 0,
     }
   }
@@ -1194,7 +1204,7 @@ const getMoneyFlowInfo = (transaction: any) => {
       return {
         type: 'none',
         text: 'Credit Purchase',
-        color: 'text-blue-600 dark:text-blue-400',
+        color: 'text-brand-blue',
         amount: 0
       }
     }
@@ -1202,14 +1212,14 @@ const getMoneyFlowInfo = (transaction: any) => {
       return {
         type: 'out',
         text: 'Partial Payment',
-        color: 'text-red-600 dark:text-red-400',
+        color: 'text-rose-600',
         amount: amount
       }
     }
     return {
       type: 'out',
       text: 'Full Payment',
-      color: 'text-red-600 dark:text-red-400',
+      color: 'text-rose-600',
       amount: amount
     }
   }
@@ -1219,7 +1229,7 @@ const getMoneyFlowInfo = (transaction: any) => {
     return {
       type: 'out',
       text: 'Additional Payment',
-      color: 'text-red-600 dark:text-red-400',
+      color: 'text-rose-600',
       amount: amount
     }
   }
@@ -1229,7 +1239,7 @@ const getMoneyFlowInfo = (transaction: any) => {
     return {
       type: 'out',
       text: 'Supplier Payment',
-      color: 'text-red-600 dark:text-red-400',
+      color: 'text-rose-600',
       amount: amount
     }
   }
@@ -1243,14 +1253,14 @@ const getMoneyFlowInfo = (transaction: any) => {
       return {
         type: 'in',
         text: 'Money In',
-        color: 'text-green-600 dark:text-green-400',
+        color: 'text-emerald-600',
         amount: amount
       }
     } else if (debit > 0) {
       return {
         type: 'out',
         text: 'Money Out',
-        color: 'text-red-600 dark:text-red-400',
+        color: 'text-rose-600',
         amount: amount
       }
     }
@@ -1262,14 +1272,14 @@ const getMoneyFlowInfo = (transaction: any) => {
     return {
       type: 'in',
       text: 'Money In',
-      color: 'text-green-600 dark:text-green-400',
+      color: 'text-emerald-600',
       amount: Math.abs(cashImpact)
     }
   } else if (cashImpact < 0) {
     return {
       type: 'out',
       text: 'Money Out',
-      color: 'text-red-600 dark:text-red-400',
+      color: 'text-rose-600',
       amount: Math.abs(cashImpact)
     }
   }
@@ -1277,7 +1287,7 @@ const getMoneyFlowInfo = (transaction: any) => {
   return {
     type: 'none',
     text: 'No Cash Flow',
-    color: 'text-gray-600 dark:text-gray-400',
+    color: 'text-muted-foreground',
     amount: 0
   }
 }
@@ -1779,13 +1789,13 @@ const getEnhancedDescription = (transaction: any) => {
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="bg-blue-600 dark:bg-blue-700 p-4 rounded-lg">
+      <div className="rounded-xl bg-gradient-to-r from-violet-600 to-violet-700 p-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <BarChart3 className="h-5 w-5 text-white" />
             <div>
               <h1 className="text-xl font-bold text-white">Financial Dashboard</h1>
-              <div className="text-blue-100 text-sm">
+              <div className="text-sm text-violet-100">
                 {format(dateFrom, "yyyy-MM-dd") === format(dateTo, "yyyy-MM-dd")
                   ? `${formatDate(dateFrom)} Transactions`
                   : `${formatDate(dateFrom)} - ${formatDate(dateTo)} Transactions`}
@@ -1799,7 +1809,7 @@ const getEnhancedDescription = (transaction: any) => {
           {/* Opening and Closing Balance in Header */}
           <div className="flex items-center gap-6">
             <div className="text-center">
-              <div className="text-xs text-blue-200">Opening Balance</div>
+              <div className="text-xs text-violet-200">Opening Balance</div>
               <div className="text-lg font-bold text-white">
                 {isDataLoading ? (
                   <Skeleton className="h-6 w-24 bg-white/20" />
@@ -1809,7 +1819,7 @@ const getEnhancedDescription = (transaction: any) => {
               </div>
             </div>
             <div className="text-center">
-              <div className="text-xs text-blue-200">Closing Balance</div>
+              <div className="text-xs text-violet-200">Closing Balance</div>
               <div className="text-lg font-bold text-white">
                 {isDataLoading ? (
                   <Skeleton className="h-6 w-24 bg-white/20" />
@@ -1874,13 +1884,13 @@ const getEnhancedDescription = (transaction: any) => {
               <SelectItem value="all">All Types</SelectItem>
               <SelectItem value="income">
                 <div className="flex items-center gap-2">
-                  <ArrowUpCircle className="h-4 w-4 text-green-600" />
+                  <ArrowUpCircle className="h-4 w-4 text-emerald-600" />
                   Income
                 </div>
               </SelectItem>
               <SelectItem value="expense">
                 <div className="flex items-center gap-2">
-                  <ArrowDownCircle className="h-4 w-4 text-red-600" />
+                  <ArrowDownCircle className="h-4 w-4 text-rose-600" />
                   Expense
                 </div>
               </SelectItem>
@@ -1932,7 +1942,7 @@ const getEnhancedDescription = (transaction: any) => {
       <div className="space-y-2">
         {/* Filter indicator */}
         {(filterType !== "all" || searchTerm) && (
-          <div className="text-sm text-blue-100 bg-blue-700/50 dark:bg-blue-800/50 px-3 py-1 rounded">
+          <div className="rounded-lg bg-violet-500/30 px-3 py-1 text-sm text-violet-50">
             📊 Showing {filteredTransactions.length} filtered transactions
             {filterType !== "all" && ` • Filter: ${filterType}`}
             {searchTerm && ` • Search: "${searchTerm}"`}
@@ -1945,14 +1955,14 @@ const getEnhancedDescription = (transaction: any) => {
           ) : (
             <>
               {/* Total Sales */}
-              <Card className="bg-[#22c55e] text-white">
+              <Card className="border border-emerald-100 bg-emerald-50">
                 <CardContent className="p-3">
-                  <div className="flex items-center gap-1 mb-1">
+                  <div className="mb-1 flex items-center gap-1 text-emerald-700">
                     <ShoppingCart className="h-4 w-4" />
-                    <span className="text-xs">Sales</span>
+                    <span className="text-xs font-medium">Sales</span>
                   </div>
-                  <div className="text-lg font-bold">{`${currency} ${getSalesTotal().toFixed(2)}`}</div>
-                  <div className="text-[10px] mt-1">
+                  <div className="text-lg font-bold text-emerald-700">{`${currency} ${getSalesTotal().toFixed(2)}`}</div>
+                  <div className="mt-1 text-[10px] text-emerald-600">
                     {
                       filteredTransactions.filter(
                         (t) => t.type === "sale" || t.description?.toLowerCase().startsWith("sale"),
@@ -1964,14 +1974,14 @@ const getEnhancedDescription = (transaction: any) => {
               </Card>
 
               {/* Total Purchases */}
-              <Card className="bg-[#f97316] text-white">
+              <Card className="border border-amber-100 bg-amber-50">
                 <CardContent className="p-3">
-                  <div className="flex items-center gap-1 mb-1">
+                  <div className="mb-1 flex items-center gap-1 text-amber-700">
                     <Package className="h-4 w-4" />
-                    <span className="text-xs">Purchases</span>
+                    <span className="text-xs font-medium">Purchases</span>
                   </div>
-                  <div className="text-lg font-bold">{`${currency} ${getPurchasesTotal().toFixed(2)}`}</div>
-                  <div className="text-[10px] mt-1">
+                  <div className="text-lg font-bold text-amber-700">{`${currency} ${getPurchasesTotal().toFixed(2)}`}</div>
+                  <div className="mt-1 text-[10px] text-amber-600">
                     {
                       filteredTransactions.filter(
                         (t) => t.type === "purchase" || t.description?.toLowerCase().startsWith("purchase"),
@@ -1983,15 +1993,15 @@ const getEnhancedDescription = (transaction: any) => {
               </Card>
 
               {/* Profit */}
-              <Card className="bg-[#3b82f6] text-white">
+              <Card className="border border-blue-100 bg-blue-50">
                 <CardContent className="p-3">
-                  <div className="flex items-center gap-1 mb-1">
+                  <div className="mb-1 flex items-center gap-1 text-blue-700">
                     <TrendingUp className="h-4 w-4" />
-                    <span className="text-xs">Profit</span>
+                    <span className="text-xs font-medium">Profit</span>
                   </div>
-                  <div className="text-lg font-bold">{`${currency} ${getTotalProfit().toFixed(2)}`}</div>
+                  <div className="text-lg font-bold text-blue-700">{`${currency} ${getTotalProfit().toFixed(2)}`}</div>
                   {!hideCogs && (
-                    <div className="text-[10px] mt-1">
+                    <div className="mt-1 text-[10px] text-brand-blue">
                       COGS: {currency} {getFilteredCogs().toFixed(2)}
                     </div>
                   )}
@@ -1999,58 +2009,58 @@ const getEnhancedDescription = (transaction: any) => {
               </Card>
 
               {/* Money In */}
-              <Card className="bg-[#10b981] text-white">
+              <Card className="border border-emerald-100 bg-emerald-50">
                 <CardContent className="p-3">
-                  <div className="flex items-center gap-1 mb-1">
+                  <div className="mb-1 flex items-center gap-1 text-emerald-700">
                     <ArrowDownCircle className="h-4 w-4" />
-                    <span className="text-xs">Money In</span>
+                    <span className="text-xs font-medium">Money In</span>
                   </div>
-                  <div className="text-lg font-bold">{`${currency} ${getAmountReceived().toFixed(2)}`}</div>
-                  <div className="text-[10px] mt-1">
+                  <div className="text-lg font-bold text-emerald-700">{`${currency} ${getAmountReceived().toFixed(2)}`}</div>
+                  <div className="mt-1 text-[10px] text-emerald-600">
                     Inflows: {filteredTransactions.filter((t) => getCashImpact(t) > 0).length}
                   </div>
                 </CardContent>
               </Card>
 
               {/* Money Out */}
-              <Card className="bg-[#ef4444] text-white">
+              <Card className="border border-rose-100 bg-rose-50">
                 <CardContent className="p-3">
-                  <div className="flex items-center gap-1 mb-1">
+                  <div className="mb-1 flex items-center gap-1 text-rose-700">
                     <CreditCard className="h-4 w-4" />
-                    <span className="text-xs">Money Out</span>
+                    <span className="text-xs font-medium">Money Out</span>
                   </div>
-                  <div className="text-lg font-bold">{`${currency} ${getSpends().toFixed(2)}`}</div>
-                  <div className="text-[10px] mt-1">
+                  <div className="text-lg font-bold text-rose-700">{`${currency} ${getSpends().toFixed(2)}`}</div>
+                  <div className="mt-1 text-[10px] text-rose-600">
                     Outflows: {filteredTransactions.filter((t) => getCashImpact(t) < 0).length}
                   </div>
                 </CardContent>
               </Card>
 
               {/* Receivables */}
-              <Card className="bg-[#a855f7] text-white">
+              <Card className="border border-violet-100 bg-violet-50">
                 <CardContent className="p-3">
-                  <div className="flex items-center gap-1 mb-1">
+                  <div className="mb-1 flex items-center gap-1 text-violet-700">
                     <Users className="h-4 w-4" />
-                    <span className="text-xs">Receivables</span>
+                    <span className="text-xs font-medium">Receivables</span>
                   </div>
-                  <div className="text-lg font-bold">
+                  <div className="text-lg font-bold text-violet-700">
                     {`${currency} ${(financialData?.accountsReceivable || 0).toFixed(2)}`}
                   </div>
-                  <div className="text-[10px] mt-1">{(financialData?.receivables || []).length} pending</div>
+                  <div className="mt-1 text-[10px] text-violet-600">{(financialData?.receivables || []).length} pending</div>
                 </CardContent>
               </Card>
 
               {/* Payables */}
-              <Card className="bg-[#eab308] text-white">
+              <Card className="border border-amber-100 bg-amber-50">
                 <CardContent className="p-3">
-                  <div className="flex items-center gap-1 mb-1">
+                  <div className="mb-1 flex items-center gap-1 text-amber-700">
                     <Building className="h-4 w-4" />
-                    <span className="text-xs">Payables</span>
+                    <span className="text-xs font-medium">Payables</span>
                   </div>
-                  <div className="text-lg font-bold">
+                  <div className="text-lg font-bold text-amber-700">
                     {`${currency} ${(financialData?.accountsPayable || 0).toFixed(2)}`}
                   </div>
-                  <div className="text-[10px] mt-1">{(financialData?.payables || []).length} pending</div>
+                  <div className="mt-1 text-[10px] text-amber-600">{(financialData?.payables || []).length} pending</div>
                 </CardContent>
               </Card>
             </>
@@ -2059,10 +2069,10 @@ const getEnhancedDescription = (transaction: any) => {
       </div>
 
       {/* Tabs and Content */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg border dark:border-gray-700">
+      <div className="rounded-xl border border-border bg-card">
         <Tabs defaultValue="transactions" value={activeTab} onValueChange={setActiveTab} className="w-full">
           <div className="px-4 pt-4">
-            <TabsList className="grid w-full grid-cols-4 bg-gray-100 dark:bg-gray-700 rounded-md p-1">
+            <TabsList className="grid w-full grid-cols-4 rounded-lg bg-muted p-1">
               <TabsTrigger value="transactions" className="rounded-md">
                 Transactions
               </TabsTrigger>
@@ -2086,13 +2096,13 @@ const getEnhancedDescription = (transaction: any) => {
                 ))}
               </div>
             ) : filteredTransactions.length === 0 ? (
-              <div className="text-center py-12 text-gray-500 dark:text-gray-400">
+              <div className="text-center py-12 text-muted-foreground">
                 No transactions found for the selected period
               </div>
             ) : (
               <div className="space-y-2">
                 {/* Transaction Headers */}
-                <div className="grid grid-cols-12 gap-4 px-4 py-2 bg-gray-50 dark:bg-gray-700 rounded-lg text-xs font-medium text-gray-600 dark:text-gray-300">
+                <div className="grid grid-cols-12 gap-4 rounded-lg bg-muted/50 px-4 py-2 text-xs font-medium text-muted-foreground">
                   <div className="col-span-3">Description</div>
                   <div className="col-span-1 text-center">Type</div>
                   <div className="col-span-1 text-center">Status</div>
@@ -2146,7 +2156,7 @@ const getEnhancedDescription = (transaction: any) => {
                   return (
                     <div
                       key={transaction.id}
-                      className="grid grid-cols-12 gap-4 px-4 py-3 border dark:border-gray-700 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors cursor-pointer items-center"
+                      className="grid grid-cols-12 gap-4 cursor-pointer items-center rounded-lg border px-4 py-3 transition-colors hover:bg-violet-50"
                       onClick={handleClick}
                       tabIndex={0}
                       role="button"
@@ -2159,12 +2169,12 @@ const getEnhancedDescription = (transaction: any) => {
                     >
                       {/* Description */}
                       <div className="col-span-3 flex items-center gap-2">
-                        <div className="text-gray-500 dark:text-gray-400">
+                        <div className="text-muted-foreground">
                           {getTransactionTypeIcon(transaction.type)}
                         </div>
                         <div className="min-w-0 flex-1">
                           <div
-                            className="font-medium text-gray-900 dark:text-gray-100 text-sm break-words leading-snug"
+                            className="break-words text-sm font-medium leading-snug text-foreground"
                             title={transaction.description || enhancedDescription}
                           >
                             {enhancedDescription}
@@ -2174,7 +2184,7 @@ const getEnhancedDescription = (transaction: any) => {
 
                       {/* Type */}
                       <div className="col-span-1 text-center">
-                        <Badge variant="outline" className="text-xs dark:border-gray-600 dark:text-gray-300 capitalize">
+                        <Badge variant="outline" className="text-xs capitalize">
                           {transaction.type || "unknown"}
                         </Badge>
                       </div>
@@ -2186,7 +2196,7 @@ const getEnhancedDescription = (transaction: any) => {
 
                       {/* Total Bill Amount */}
                       <div className="col-span-1 text-right">
-                        <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                        <div className="text-sm font-medium text-foreground">
                           {currency} {n(transaction.amount).toFixed(2)}
                         </div>
                       </div>
@@ -2199,7 +2209,7 @@ const getEnhancedDescription = (transaction: any) => {
                             <div className="text-xs">{moneyFlowInfo.text}</div>
                           </div>
                         ) : (
-                          <div className="text-sm text-gray-500 dark:text-gray-400">
+                          <div className="text-sm text-muted-foreground">
                             {moneyFlowInfo.text}
                           </div>
                         )}
@@ -2209,8 +2219,8 @@ const getEnhancedDescription = (transaction: any) => {
                       <div className="col-span-1 text-right">
                         <div className={`text-sm font-medium ${
                           remainingAmount > 0 
-                            ? "text-yellow-600 dark:text-yellow-400" 
-                            : "text-gray-400 dark:text-gray-500"
+                            ? "text-amber-600" 
+                            : "text-muted-foreground/60"
                         }`}>
                           {remainingAmount > 0 ? `${currency} ${remainingAmount.toFixed(2)}` : 'Paid'}
                         </div>
@@ -2219,7 +2229,7 @@ const getEnhancedDescription = (transaction: any) => {
                       {/* Product Cost */}
                       {!hideCogs && (
                       <div className="col-span-1 text-right">
-                        <div className="text-sm font-medium text-orange-600 dark:text-orange-400">
+                        <div className="text-sm font-medium text-amber-600">
                           {currency} {n(transaction.cost).toFixed(2)}
                         </div>
                       </div>
@@ -2229,10 +2239,10 @@ const getEnhancedDescription = (transaction: any) => {
                       <div className="col-span-1 text-right">
                         <div className={`text-sm font-bold ${
                           isPositive 
-                            ? "text-green-600 dark:text-green-400" 
+                            ? "text-emerald-600" 
                             : isNegative 
-                              ? "text-red-600 dark:text-red-400" 
-                              : "text-gray-600 dark:text-gray-400"
+                              ? "text-rose-600" 
+                              : "text-muted-foreground"
                         }`}>
                           {isPositive ? "+" : isNegative ? "-" : ""}
                           {currency} {Math.abs(cashImpact).toFixed(2)}
@@ -2241,7 +2251,7 @@ const getEnhancedDescription = (transaction: any) => {
 
                       {/* Date & Time */}
                       <div className="col-span-2 text-right">
-                        <div className="text-xs text-gray-500 dark:text-gray-400">
+                        <div className="text-xs text-muted-foreground">
                           <div>{dateTime.date}</div>
                           <div>{dateTime.time}</div>
                         </div>
@@ -2257,54 +2267,54 @@ const getEnhancedDescription = (transaction: any) => {
             {isDataLoading ? (
               <TableSkeleton />
             ) : (financialData?.receivables || []).length === 0 ? (
-              <div className="text-center py-12 text-gray-500 dark:text-gray-400">No outstanding receivables</div>
+              <div className="text-center py-12 text-muted-foreground">No outstanding receivables</div>
             ) : (
-              <div className="border dark:border-gray-700 rounded-lg overflow-hidden">
-                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                  <thead className="bg-gray-50 dark:bg-gray-700">
+              <div className="border rounded-lg overflow-hidden">
+                <table className="min-w-full divide-y divide-border">
+                  <thead className="bg-muted/50">
                     <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                         Sale ID
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                         Customer
                       </th>
-                      <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      <th className="px-6 py-3 text-right text-xs font-medium text-muted-foreground uppercase tracking-wider">
                         Total Amount
                       </th>
-                      <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      <th className="px-6 py-3 text-right text-xs font-medium text-muted-foreground uppercase tracking-wider">
                         Received
                       </th>
-                      <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      <th className="px-6 py-3 text-right text-xs font-medium text-muted-foreground uppercase tracking-wider">
                         Outstanding
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                         Sale Date
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                         Status
                       </th>
                     </tr>
                   </thead>
-                  <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                  <tbody className="bg-card divide-y divide-border">
                     {financialData?.receivables.map((receivable) => (
                       <tr key={receivable.id}>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-gray-100">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-foreground">
                           #{receivable.id}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">
                           {receivable.customer_name}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100 text-right">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground text-right">
                           {currency} {receivable.total_amount.toFixed(2)}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-green-600 dark:text-green-400 text-right">
+                        <td className="whitespace-nowrap px-6 py-4 text-right text-sm text-emerald-600">
                           {currency} {receivable.received_amount.toFixed(2)}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-red-600 dark:text-red-400 font-medium text-right">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-rose-600 font-medium text-right">
                           {currency} {receivable.amount.toFixed(2)}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">
                           {formatDateOnly(receivable.due_date)}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
@@ -2324,54 +2334,54 @@ const getEnhancedDescription = (transaction: any) => {
             {isDataLoading ? (
               <TableSkeleton />
             ) : (financialData?.payables || []).length === 0 ? (
-              <div className="text-center py-12 text-gray-500 dark:text-gray-400">No outstanding payables</div>
+              <div className="text-center py-12 text-muted-foreground">No outstanding payables</div>
             ) : (
-              <div className="border dark:border-gray-700 rounded-lg overflow-hidden">
-                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                  <thead className="bg-gray-50 dark:bg-gray-700">
+              <div className="border rounded-lg overflow-hidden">
+                <table className="min-w-full divide-y divide-border">
+                  <thead className="bg-muted/50">
                     <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                         Purchase ID
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                         Supplier
                       </th>
-                      <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      <th className="px-6 py-3 text-right text-xs font-medium text-muted-foreground uppercase tracking-wider">
                         Total Amount
                       </th>
-                      <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      <th className="px-6 py-3 text-right text-xs font-medium text-muted-foreground uppercase tracking-wider">
                         Paid
                       </th>
-                      <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      <th className="px-6 py-3 text-right text-xs font-medium text-muted-foreground uppercase tracking-wider">
                         Outstanding
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                         Purchase Date
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                         Status
                       </th>
                     </tr>
                   </thead>
-                  <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                  <tbody className="bg-card divide-y divide-border">
                     {financialData?.payables.map((payable) => (
                       <tr key={payable.id}>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-gray-100">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-foreground">
                           #{payable.id}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">
                           {payable.supplier_name}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100 text-right">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground text-right">
                           {currency} {payable.total_amount.toFixed(2)}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-green-600 dark:text-green-400 text-right">
+                        <td className="whitespace-nowrap px-6 py-4 text-right text-sm text-emerald-600">
                           {currency} {payable.received_amount.toFixed(2)}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-red-600 dark:text-red-400 font-medium text-right">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-rose-600 font-medium text-right">
                           {currency} {payable.amount.toFixed(2)}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">
                           {formatDateOnly(payable.due_date)}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
@@ -2391,7 +2401,7 @@ const getEnhancedDescription = (transaction: any) => {
             {isDataLoading ? (
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {Array.from({ length: 3 }).map((_, i) => (
-                  <div key={i} className="border dark:border-gray-700 rounded-lg p-4">
+                  <div key={i} className="border rounded-lg p-4">
                     <Skeleton className="h-6 w-48 mb-4" />
                     <div className="space-y-3">
                       {Array.from({ length: 4 }).map((_, j) => (
@@ -2408,9 +2418,9 @@ const getEnhancedDescription = (transaction: any) => {
               <React.Fragment>
                 {/* Filter Summary */}
                 {(filterType !== "all" || searchTerm) && (
-                  <div className="mb-6 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-                    <h4 className="font-medium text-blue-900 dark:text-blue-300 mb-2">📊 Filtered Data Summary</h4>
-                    <div className="text-sm text-blue-700 dark:text-blue-400 grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="mb-6 rounded-lg border border-violet-200 bg-violet-50 p-4">
+                    <h4 className="mb-2 font-medium text-violet-900">Filtered Data Summary</h4>
+                    <div className="grid grid-cols-2 gap-4 text-sm text-violet-700 md:grid-cols-4">
                       <div>
                         <span className="font-medium">Total Transactions:</span> {filteredTransactions.length}
                       </div>
@@ -2437,34 +2447,34 @@ const getEnhancedDescription = (transaction: any) => {
             {/* Key Metrics Row - Updated to use filtered data */}
             {!isDataLoading && (
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
-                <div className="border dark:border-gray-700 rounded-lg p-4 text-center">
-                  <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                <div className="rounded-lg border border-border p-4 text-center">
+                  <div className="text-2xl font-bold text-brand-blue">
                     {filteredTransactions.length}
                   </div>
-                  <div className="text-sm text-gray-600 dark:text-gray-400">Filtered Transactions</div>
+                  <div className="text-sm text-muted-foreground">Filtered Transactions</div>
                 </div>
-                <div className="border dark:border-gray-700 rounded-lg p-4 text-center">
-                  <div className="text-2xl font-bold text-green-600 dark:text-green-400">
+                <div className="rounded-lg border border-border p-4 text-center">
+                  <div className="text-2xl font-bold text-emerald-600">
                     {
                       filteredTransactions.filter(
                         (t) => t.type === "sale" || t.description?.toLowerCase().startsWith("sale"),
                       ).length
                     }
                   </div>
-                  <div className="text-sm text-gray-600 dark:text-gray-400">Sales Transactions</div>
+                  <div className="text-sm text-muted-foreground">Sales Transactions</div>
                 </div>
-                <div className="border dark:border-gray-700 rounded-lg p-4 text-center">
-                  <div className="text-2xl font-bold text-orange-600 dark:text-orange-400">
+                <div className="rounded-lg border border-border p-4 text-center">
+                  <div className="text-2xl font-bold text-amber-600">
                     {
                       filteredTransactions.filter(
                         (t) => t.type === "purchase" || t.description?.toLowerCase().startsWith("purchase"),
                       ).length
                     }
                   </div>
-                  <div className="text-sm text-gray-600 dark:text-gray-400">Purchase Transactions</div>
+                  <div className="text-sm text-muted-foreground">Purchase Transactions</div>
                 </div>
-                <div className="border dark:border-gray-700 rounded-lg p-4 text-center">
-                  <div className="text-2xl font-bold text-purple-600 dark:text-purple-400">
+                <div className="rounded-lg border border-border p-4 text-center">
+                  <div className="text-2xl font-bold text-violet-600">
                     {getSalesTotal() > 0
                       ? (
                           getSalesTotal() /
@@ -2477,7 +2487,7 @@ const getEnhancedDescription = (transaction: any) => {
                         ).toFixed(2)
                       : "0.00"}
                   </div>
-                  <div className="text-sm text-gray-600 dark:text-gray-400">Avg Sale Value</div>
+                  <div className="text-sm text-muted-foreground">Avg Sale Value</div>
                 </div>
               </div>
             )}
@@ -2515,7 +2525,7 @@ const getEnhancedDescription = (transaction: any) => {
             <Button variant="outline" onClick={() => setIsDateModalOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={applyDateRange} className="bg-blue-600 hover:bg-blue-700">
+            <Button onClick={applyDateRange}>
               Apply
             </Button>
           </DialogFooter>
@@ -2609,7 +2619,6 @@ const getEnhancedDescription = (transaction: any) => {
             <Button
               onClick={handleAddManualTransaction}
               disabled={isAddingManual || !manualCategory || !manualAmount}
-              className="bg-blue-600 hover:bg-blue-700"
             >
               {isAddingManual ? (
                 <>
@@ -2681,7 +2690,7 @@ const getEnhancedDescription = (transaction: any) => {
         }}
         onTransactionDeleted={() => {
           forceRefreshData()
-          toast.success("Manual transaction deleted successfully")
+          notifySuccess(toast,"Manual transaction deleted successfully")
         }}
       />
 
@@ -2707,7 +2716,7 @@ const getEnhancedDescription = (transaction: any) => {
         onEdit={handleEditSupplierPayment}
         onPaymentDeleted={() => {
           forceRefreshData()
-          toast.success("Supplier payment deleted successfully")
+          notifySuccess(toast,"Supplier payment deleted successfully")
         }}
       />
 
@@ -2720,6 +2729,7 @@ const getEnhancedDescription = (transaction: any) => {
         currency={currency}
         onPaymentUpdated={handleSupplierPaymentUpdated}
       />
+      {ConfirmDialog}
     </div>
   )
 }

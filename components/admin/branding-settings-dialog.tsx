@@ -1,100 +1,33 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
-import Image from "next/image"
-import { ImageIcon, Loader2, Trash2 } from "lucide-react"
+import { useCallback, useEffect, useState } from "react"
+import { Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { useToast } from "@/components/ui/use-toast"
+import { notifyError, notifySuccess, notifyWarning } from "@/lib/notifications"
 import { updatePlatformBranding } from "@/app/actions/brand-actions"
 import { useBranding } from "@/components/branding-provider"
+import { DEFAULT_PLATFORM_NAME } from "@/lib/brand"
+import ImageUploadField from "@/components/admin/image-upload-field"
 import {
   compressBrandingIconForUpload,
   compressBrandingLogoForUpload,
   formatBytes,
 } from "@/lib/media-upload-utils"
-import {
-  ADMIN_DIALOG_LABEL_CLASS,
-  ADMIN_DIALOG_SCROLL_CLASS,
-} from "@/lib/staff-restrictions"
+import { ADMIN_DIALOG_SCROLL_CLASS } from "@/lib/staff-restrictions"
 
 interface BrandingSettingsDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
 }
 
-function BrandingUploadField({
-  label,
-  description,
-  currentUrl,
-  previewUrl,
-  onFileChange,
-  onRemove,
-}: {
-  label: string
-  description: string
-  currentUrl: string | null
-  previewUrl: string | null
-  onFileChange: (file: File | null) => void
-  onRemove: () => void
-}) {
-  const inputRef = useRef<HTMLInputElement>(null)
-  const displayUrl = previewUrl || currentUrl
-
-  return (
-    <div className="space-y-3 rounded-lg border border-gray-200 bg-gray-50 p-4">
-      <div>
-        <Label className={ADMIN_DIALOG_LABEL_CLASS}>{label}</Label>
-        <p className="mt-1 text-xs text-gray-500">{description}</p>
-      </div>
-
-      <div className="flex min-h-[96px] items-center justify-center rounded-md border border-dashed border-gray-300 bg-white p-4">
-        {displayUrl ? (
-          <Image
-            src={displayUrl}
-            alt={label}
-            width={220}
-            height={80}
-            className="max-h-20 w-auto object-contain"
-            unoptimized={displayUrl.includes("blob.vercel-storage.com")}
-          />
-        ) : (
-          <div className="flex flex-col items-center gap-2 text-gray-400">
-            <ImageIcon className="h-8 w-8" />
-            <span className="text-xs">No image uploaded</span>
-          </div>
-        )}
-      </div>
-
-      <div className="flex flex-wrap gap-2">
-        <input
-          ref={inputRef}
-          type="file"
-          accept="image/png,image/jpeg,image/webp,image/svg+xml"
-          className="hidden"
-          onChange={(event) => {
-            const file = event.target.files?.[0] || null
-            onFileChange(file)
-          }}
-        />
-        <Button type="button" variant="outline" className="border-gray-200 bg-white" onClick={() => inputRef.current?.click()}>
-          {displayUrl ? "Replace image" : "Upload image"}
-        </Button>
-        {displayUrl ? (
-          <Button type="button" variant="outline" className="border-red-200 text-red-600 hover:bg-red-50" onClick={onRemove}>
-            <Trash2 className="mr-1 h-4 w-4" />
-            Remove
-          </Button>
-        ) : null}
-      </div>
-    </div>
-  )
-}
-
 export default function BrandingSettingsDialog({ open, onOpenChange }: BrandingSettingsDialogProps) {
   const { toast } = useToast()
   const { branding, refreshBranding } = useBranding()
+  const [platformNameDraft, setPlatformNameDraft] = useState("")
   const [isSaving, setIsSaving] = useState(false)
   const [logoFile, setLogoFile] = useState<File | null>(null)
   const [iconFile, setIconFile] = useState<File | null>(null)
@@ -117,8 +50,10 @@ export default function BrandingSettingsDialog({ open, onOpenChange }: BrandingS
   useEffect(() => {
     if (!open) {
       resetDraft()
+    } else {
+      setPlatformNameDraft(branding.name || "")
     }
-  }, [open, resetDraft])
+  }, [open, resetDraft, branding.name])
 
   useEffect(() => {
     return () => {
@@ -143,10 +78,7 @@ export default function BrandingSettingsDialog({ open, onOpenChange }: BrandingS
       setLogoFile(compressed)
       setLogoPreview(URL.createObjectURL(compressed))
       if (compressed.size < file.size) {
-        toast({
-          title: "Logo optimized",
-          description: `Reduced from ${formatBytes(file.size)} to ${formatBytes(compressed.size)}.`,
-        })
+        notifySuccess(toast, `Reduced from ${formatBytes(file.size)} to ${formatBytes(compressed.size)}.`, "Logo optimized")
       }
     } catch {
       setLogoFile(file)
@@ -172,10 +104,7 @@ export default function BrandingSettingsDialog({ open, onOpenChange }: BrandingS
       setIconFile(compressed)
       setIconPreview(URL.createObjectURL(compressed))
       if (compressed.size < file.size) {
-        toast({
-          title: "Icon optimized",
-          description: `Reduced from ${formatBytes(file.size)} to ${formatBytes(compressed.size)}.`,
-        })
+        notifySuccess(toast, `Reduced from ${formatBytes(file.size)} to ${formatBytes(compressed.size)}.`, "Icon optimized")
       }
     } catch {
       setIconFile(file)
@@ -189,6 +118,7 @@ export default function BrandingSettingsDialog({ open, onOpenChange }: BrandingS
     setIsSaving(true)
     try {
       const formData = new FormData()
+      formData.append("platformName", platformNameDraft)
       if (logoFile) formData.append("brandLogo", logoFile)
       if (iconFile) formData.append("brandIcon", iconFile)
       if (removeLogo) formData.append("removeLogo", "true")
@@ -200,17 +130,10 @@ export default function BrandingSettingsDialog({ open, onOpenChange }: BrandingS
       }
 
       await refreshBranding()
-      toast({
-        title: "Branding updated",
-        description: "Software logos were saved successfully.",
-      })
+      notifySuccess(toast, "Software logos were saved successfully.", "Branding updated")
       onOpenChange(false)
     } catch (error) {
-      toast({
-        title: "Error",
-        description: error instanceof Error ? error.message : "Failed to update branding",
-        variant: "destructive",
-      })
+      notifyError(toast, error instanceof Error ? error.message : "Failed to update branding")
     } finally {
       setIsSaving(false)
     }
@@ -225,11 +148,27 @@ export default function BrandingSettingsDialog({ open, onOpenChange }: BrandingS
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-4">
           <p className="text-sm text-gray-500">
-            Upload the logos shown on the device login screen, admin portal, invoices, and receipts. Images are
-            automatically resized and compressed before upload for faster loading. SVG files are uploaded as-is.
+            Set the software name and logos shown on login, admin, invoices, and receipts. Leave the name empty to use
+            &ldquo;{DEFAULT_PLATFORM_NAME}&rdquo;.
           </p>
 
-          <BrandingUploadField
+          <div className="space-y-2">
+            <Label htmlFor="platformName" className="text-sm font-medium text-gray-700">
+              Software name
+            </Label>
+            <Input
+              id="platformName"
+              value={platformNameDraft}
+              onChange={(e) => setPlatformNameDraft(e.target.value)}
+              placeholder={DEFAULT_PLATFORM_NAME}
+              className="border-gray-200 bg-white"
+            />
+            <p className="text-xs text-gray-500">
+              Preview: <span className="font-medium text-gray-700">{platformNameDraft.trim() || DEFAULT_PLATFORM_NAME}</span>
+            </p>
+          </div>
+
+          <ImageUploadField
             label="Full logo"
             description="Wide logo used on login screens and headers."
             currentUrl={removeLogo ? null : branding.logoUrl}
@@ -241,7 +180,7 @@ export default function BrandingSettingsDialog({ open, onOpenChange }: BrandingS
             }}
           />
 
-          <BrandingUploadField
+          <ImageUploadField
             label="Icon logo"
             description="Square icon used in compact places like the admin header and device dashboard."
             currentUrl={removeIcon ? null : branding.iconUrl}

@@ -1,18 +1,14 @@
 import type React from "react"
 import type { Metadata } from "next"
 import "./globals.css"
-import { Inter } from "next/font/google"
+import { inter } from "@/lib/fonts"
 import { Toaster } from "@/components/ui/toaster"
-import { NotificationProvider } from "@/components/ui/global-notification"
 import { ClientProvider } from "@/components/client-provider"
 import { BrandingProvider } from "@/components/branding-provider"
-import { CustomThemeProvider } from "@/hooks/use-custom-theme"
-import { BRAND_NAME, BRAND_TAGLINE } from "@/lib/brand"
-
-const inter = Inter({ subsets: ["latin"] })
+import { DEFAULT_PLATFORM_NAME, BRAND_TAGLINE } from "@/lib/brand"
 
 export const metadata: Metadata = {
-  title: BRAND_NAME,
+  title: DEFAULT_PLATFORM_NAME,
   description: BRAND_TAGLINE,
 }
 
@@ -22,16 +18,12 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body className={inter.className}>
+    <html lang="en" className={inter.variable}>
+      <body className="font-sans antialiased">
         <ClientProvider>
           <BrandingProvider>
-            <CustomThemeProvider>
-              <NotificationProvider>
-                {children}
-                <Toaster />
-              </NotificationProvider>
-            </CustomThemeProvider>
+            {children}
+            <Toaster />
           </BrandingProvider>
         </ClientProvider>
       </body>

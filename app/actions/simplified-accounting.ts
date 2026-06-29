@@ -71,6 +71,8 @@ export async function recordSaleTransaction(saleData: {
   userId: number
   customerId?: number
   saleDate: Date
+  /** Product revenue only (excludes courier charge collected). Used for Completed sale credits. */
+  productCreditAmount?: number
 }) {
   try {
     console.log("Recording sale transaction with data:", {
@@ -99,7 +101,18 @@ export async function recordSaleTransaction(saleData: {
     let creditAmount = 0
     let costAmount = 0
     let description = ""
-    let receivedAmountForRecord = Number(saleData.receivedAmount) || 0
+    const totalAmount = Number(saleData.totalAmount) || 0
+    const receivedAmount = Number(saleData.receivedAmount) || 0
+    const productCredit =
+      saleData.productCreditAmount != null ? Number(saleData.productCreditAmount) || 0 : null
+    const hasShippingSplit =
+      productCredit != null && totalAmount > 0 && productCredit < totalAmount
+    const productBillAmount = hasShippingSplit ? productCredit : totalAmount
+    const productReceived =
+      hasShippingSplit && totalAmount > 0
+        ? (receivedAmount / totalAmount) * productCredit
+        : receivedAmount
+    let receivedAmountForRecord = productReceived
 
     if (saleData.status === "Cancelled") {
       // Cancelled sales: debit = received amount (refund), credit = 0, NO COGS
@@ -109,16 +122,12 @@ export async function recordSaleTransaction(saleData: {
       receivedAmountForRecord = 0
       description = `Sale #${saleData.saleId} - Cancelled - ${saleData.paymentMethod || "Cash"} - Customer: ${saleData.customerId ? `ID ${saleData.customerId}` : "Walk-in"}`
     } else if (saleData.status === "Credit") {
-      // FIXED: Credit sales - cash impact = received amount - proportional COGS
-      creditAmount = Number(saleData.receivedAmount) || 0 // Count received amount as credit
+      // FIXED: Credit sales - cash impact = product portion received - proportional COGS
+      creditAmount = productReceived
       debitAmount = 0
-      
-      // Calculate proportional COGS based on payment received
-      const totalAmount = Number(saleData.totalAmount) || 0
-      const receivedAmount = Number(saleData.receivedAmount) || 0
-      
-      if (receivedAmount > 0 && totalAmount > 0) {
-        const paymentRatio = receivedAmount / totalAmount
+
+      if (productReceived > 0 && productBillAmount > 0) {
+        const paymentRatio = productReceived / productBillAmount
         costAmount = (Number(saleData.cogsAmount) || 0) * paymentRatio
       } else {
         costAmount = 0 // No COGS impact if no payment received
@@ -128,11 +137,10 @@ export async function recordSaleTransaction(saleData: {
       
       console.log(`Credit sale recorded: Partial payment ${receivedAmountForRecord}, COGS: ${costAmount}`)
     } else {
-      // Completed sales: credit = received amount, debit = 0
-      creditAmount = Number(saleData.receivedAmount) || 0
+      // Completed sales: credit = product revenue (courier charge posted separately)
+      creditAmount = hasShippingSplit ? productCredit : receivedAmount
       debitAmount = 0
       costAmount = Number(saleData.cogsAmount) || 0
-      receivedAmountForRecord = Number(saleData.receivedAmount) || 0
       description = `Sale #${saleData.saleId} - Completed - ${saleData.paymentMethod || "Cash"} - Customer: ${saleData.customerId ? `ID ${saleData.customerId}` : "Walk-in"}`
     }
 
@@ -144,7 +152,7 @@ export async function recordSaleTransaction(saleData: {
         status, payment_method, description, device_id, company_id, created_by, transaction_date
       ) VALUES (
         'sale', 'sale', ${saleData.saleId},
-        ${saleData.totalAmount}, ${receivedAmountForRecord}, ${costAmount}, ${debitAmount}, ${creditAmount},
+        ${productBillAmount}, ${receivedAmountForRecord}, ${costAmount}, ${debitAmount}, ${creditAmount},
         ${saleData.status}, ${saleData.paymentMethod || "Cash"}, ${description}, 
         ${saleData.deviceId}, 1, ${saleData.userId}, ${saleData.saleDate}
       ) RETURNING id
@@ -676,6 +684,137 @@ export async function recordManualTransaction(transactionData: {
   }
 }
 
+export async function syncSaleShippingTransactions(shippingData: {
+  saleId: number
+  deviceId: number
+  userId: number
+  saleDate: Date
+  paymentMethod: string
+  status: string
+  fulfillmentType: string
+  courierPaidExtra: number
+  expenseCourier: number
+  expensePacking: number
+  receivedAmount?: number
+  totalAmount?: number
+  /** Product revenue only; when set, main sale row is aligned to exclude courier charge. */
+  productCreditAmount?: number
+}) {
+  try {
+    await sql`
+      DELETE FROM financial_transactions
+      WHERE reference_type = 'sale'
+        AND reference_id = ${shippingData.saleId}
+        AND device_id = ${shippingData.deviceId}
+        AND transaction_type = 'sale_shipping'
+    `
+
+    if (shippingData.fulfillmentType !== "ship" || shippingData.status === "Cancelled") {
+      return { success: true as const, transactionIds: [] as number[] }
+    }
+
+    const courierPaidExtra = Number(shippingData.courierPaidExtra) || 0
+    const expenseCourier = Number(shippingData.expenseCourier) || 0
+    const expensePacking = Number(shippingData.expensePacking) || 0
+    const totalAmount = Number(shippingData.totalAmount) || 0
+    const receivedAmount = Number(shippingData.receivedAmount) || 0
+    const productCredit =
+      shippingData.productCreditAmount != null
+        ? Number(shippingData.productCreditAmount) || 0
+        : null
+    const hasShippingSplit =
+      productCredit != null && totalAmount > 0 && productCredit < totalAmount
+
+    if (hasShippingSplit) {
+      const productReceived =
+        totalAmount > 0 ? (receivedAmount / totalAmount) * productCredit : 0
+      const mainCredit =
+        shippingData.status === "Completed" ? productCredit : productReceived
+
+      await sql`
+        UPDATE financial_transactions
+        SET
+          amount = ${productCredit},
+          received_amount = ${productReceived},
+          credit_amount = ${mainCredit}
+        WHERE reference_type = 'sale'
+          AND reference_id = ${shippingData.saleId}
+          AND device_id = ${shippingData.deviceId}
+          AND transaction_type = 'sale'
+      `
+    }
+
+    let courierCredit = 0
+    if (shippingData.status === "Completed") {
+      courierCredit = courierPaidExtra
+    } else if (shippingData.status === "Credit" && courierPaidExtra > 0 && totalAmount > 0 && receivedAmount > 0) {
+      courierCredit = (receivedAmount / totalAmount) * courierPaidExtra
+    }
+
+    const transactionIds: number[] = []
+    const baseDate = shippingData.saleDate
+
+    if (courierCredit > 0) {
+      const result = await sql`
+        INSERT INTO financial_transactions (
+          transaction_type, reference_type, reference_id,
+          amount, received_amount, cost_amount, debit_amount, credit_amount,
+          status, payment_method, description, device_id, company_id, created_by, transaction_date
+        ) VALUES (
+          'sale_shipping', 'sale', ${shippingData.saleId},
+          ${courierCredit}, 0, 0, 0, ${courierCredit},
+          ${shippingData.status}, ${shippingData.paymentMethod || "Cash"},
+          ${`Sale #${shippingData.saleId} - Courier charge collected`},
+          ${shippingData.deviceId}, 1, ${shippingData.userId}, ${baseDate}
+        ) RETURNING id
+      `
+      transactionIds.push(Number(result[0]?.id))
+    }
+
+    if (expenseCourier > 0) {
+      const result = await sql`
+        INSERT INTO financial_transactions (
+          transaction_type, reference_type, reference_id,
+          amount, received_amount, cost_amount, debit_amount, credit_amount,
+          status, payment_method, description, device_id, company_id, created_by, transaction_date
+        ) VALUES (
+          'sale_shipping', 'sale', ${shippingData.saleId},
+          ${expenseCourier}, 0, 0, ${expenseCourier}, 0,
+          ${shippingData.status}, ${shippingData.paymentMethod || "Cash"},
+          ${`Sale #${shippingData.saleId} - Courier expense`},
+          ${shippingData.deviceId}, 1, ${shippingData.userId}, ${baseDate}
+        ) RETURNING id
+      `
+      transactionIds.push(Number(result[0]?.id))
+    }
+
+    if (expensePacking > 0) {
+      const result = await sql`
+        INSERT INTO financial_transactions (
+          transaction_type, reference_type, reference_id,
+          amount, received_amount, cost_amount, debit_amount, credit_amount,
+          status, payment_method, description, device_id, company_id, created_by, transaction_date
+        ) VALUES (
+          'sale_shipping', 'sale', ${shippingData.saleId},
+          ${expensePacking}, 0, 0, ${expensePacking}, 0,
+          ${shippingData.status}, ${shippingData.paymentMethod || "Cash"},
+          ${`Sale #${shippingData.saleId} - Packing expense`},
+          ${shippingData.deviceId}, 1, ${shippingData.userId}, ${baseDate}
+        ) RETURNING id
+      `
+      transactionIds.push(Number(result[0]?.id))
+    }
+
+    return { success: true as const, transactionIds }
+  } catch (error) {
+    console.error("Error syncing sale shipping transactions:", error)
+    return {
+      success: false as const,
+      error: error instanceof Error ? error.message : "Unknown error",
+    }
+  }
+}
+
 // Delete transaction when sale/purchase is deleted
 export async function deleteSaleTransaction(saleId: number, deviceId: number) {
   try {
@@ -1010,6 +1149,8 @@ function getAccountType(transactionType: string): string {
   switch (transactionType) {
     case "sale":
       return "Sales"
+    case "sale_shipping":
+      return "Shipping"
     case "purchase":
       return "Purchases"
     case "manual":

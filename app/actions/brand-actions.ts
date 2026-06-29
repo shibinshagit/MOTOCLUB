@@ -6,8 +6,11 @@ import { sql } from "@/lib/db"
 import { EMPTY_PLATFORM_BRANDING, type PlatformBranding } from "@/lib/platform-branding"
 import { requireAdmin } from "@/app/actions/admin-auth-actions"
 
-function mapBrandingRow(row: { brand_logo_url?: string | null; brand_icon_url?: string | null } | undefined): PlatformBranding {
+function mapBrandingRow(
+  row: { platform_name?: string | null; brand_logo_url?: string | null; brand_icon_url?: string | null } | undefined,
+): PlatformBranding {
   return {
+    name: row?.platform_name?.trim() || null,
     logoUrl: row?.brand_logo_url || null,
     iconUrl: row?.brand_icon_url || null,
   }
@@ -47,22 +50,29 @@ async function deleteBlobIfManaged(url: string | null | undefined) {
 export async function getPlatformBranding(): Promise<PlatformBranding> {
   try {
     const rows = await sql`
-      SELECT brand_logo_url, brand_icon_url
+      SELECT platform_name, brand_logo_url, brand_icon_url
       FROM platform_settings
       WHERE id = 1
       LIMIT 1
     `
 
-    return mapBrandingRow(rows[0] as { brand_logo_url?: string | null; brand_icon_url?: string | null })
+    return mapBrandingRow(
+      rows[0] as { platform_name?: string | null; brand_logo_url?: string | null; brand_icon_url?: string | null },
+    )
   } catch (error) {
     console.error("Error loading platform branding:", error)
     return { ...EMPTY_PLATFORM_BRANDING }
   }
 }
 
-export async function getDefaultCompanyLogo(): Promise<string | null> {
+export async function getDefaultDeviceLogo(): Promise<string | null> {
   const branding = await getPlatformBranding()
   return branding.iconUrl || branding.logoUrl || null
+}
+
+/** @deprecated Use getDefaultDeviceLogo() */
+export async function getDefaultCompanyLogo(): Promise<string | null> {
+  return getDefaultDeviceLogo()
 }
 
 export async function updatePlatformBranding(formData: FormData) {
@@ -70,14 +80,22 @@ export async function updatePlatformBranding(formData: FormData) {
     await requireAdmin()
 
     const existingRows = await sql`
-      SELECT brand_logo_url, brand_icon_url
+      SELECT platform_name, brand_logo_url, brand_icon_url
       FROM platform_settings
       WHERE id = 1
       LIMIT 1
     `
     const existing = mapBrandingRow(
-      existingRows[0] as { brand_logo_url?: string | null; brand_icon_url?: string | null },
+      existingRows[0] as {
+        platform_name?: string | null
+        brand_logo_url?: string | null
+        brand_icon_url?: string | null
+      },
     )
+
+    const platformNameRaw = formData.get("platformName")
+    const platformName =
+      typeof platformNameRaw === "string" ? platformNameRaw.trim() || null : existing.name
 
     const logoFile = formData.get("brandLogo")
     const iconFile = formData.get("brandIcon")
@@ -118,6 +136,7 @@ export async function updatePlatformBranding(formData: FormData) {
     await sql`
       UPDATE platform_settings
       SET
+        platform_name = ${platformName},
         brand_logo_url = ${brandLogoUrl},
         brand_icon_url = ${brandIconUrl},
         updated_at = NOW()
@@ -125,13 +144,14 @@ export async function updatePlatformBranding(formData: FormData) {
     `
 
     revalidatePath("/")
-    revalidatePath("/admin")
+    revalidatePath("/admin", "layout")
     revalidatePath("/dashboard")
 
     return {
       success: true,
       message: "Software branding updated",
       data: {
+        name: platformName,
         logoUrl: brandLogoUrl,
         iconUrl: brandIconUrl,
       } satisfies PlatformBranding,

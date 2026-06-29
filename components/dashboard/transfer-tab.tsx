@@ -9,6 +9,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Badge } from "@/components/ui/badge"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { useToast } from "@/components/ui/use-toast"
+import { notifyError, notifySuccess, notifyWarning } from "@/lib/notifications"
+import { useConfirm } from "@/hooks/use-confirm"
 import {
   acceptWarehouseTransfer,
   cancelWarehouseTransfer,
@@ -59,6 +61,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
     return ""
   }
   const { toast } = useToast()
+  const { confirm, ConfirmDialog } = useConfirm()
   const [transfers, setTransfers] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
@@ -134,19 +137,11 @@ export default function TransferTab({ userId }: TransferTabProps) {
       if (result.success) {
         setTransfers((result.data || []) as any[])
       } else {
-        toast({
-          title: "Error",
-          description: result.message || "Failed to load transfers",
-          variant: "destructive",
-        })
+        notifyError(toast, result.message || "Failed to load transfers")
       }
     } catch (error) {
       console.error("Load transfers error:", error)
-      toast({
-        title: "Error",
-        description: "Failed to load transfers",
-        variant: "destructive",
-      })
+      notifyError(toast, "Failed to load transfers")
     } finally {
       setIsLoading(false)
     }
@@ -159,11 +154,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
         setDevices(result.data.devices || [])
         setProducts(result.data.products || [])
       } else {
-        toast({
-          title: "Error",
-          description: result.message || "Failed to load transfer form data",
-          variant: "destructive",
-        })
+        notifyError(toast, result.message || "Failed to load transfer form data")
       }
     },
     [userId, toast],
@@ -217,11 +208,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
       setIsLoading(true)
       const detail = await getWarehouseTransferById(transferId, userId)
       if (!detail.success || !detail.data) {
-        toast({
-          title: "Error",
-          description: detail.message || "Failed to load transfer details",
-          variant: "destructive",
-        })
+        notifyError(toast, detail.message || "Failed to load transfer details")
         return
       }
 
@@ -276,11 +263,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
       setViewTransferDetail(null)
       const detail = await getWarehouseTransferById(transferId, userId)
       if (!detail.success || !detail.data) {
-        toast({
-          title: "Error",
-          description: detail.message || "Failed to load transfer details",
-          variant: "destructive",
-        })
+        notifyError(toast, detail.message || "Failed to load transfer details")
         return
       }
       setViewTransferDetail(detail.data)
@@ -291,30 +274,26 @@ export default function TransferTab({ userId }: TransferTabProps) {
   }
 
   const handleCancelTransfer = async (transferId: number) => {
-    if (!confirm("Cancel this transfer? Stocks will be moved back automatically.")) return
+    if (!(await confirm("Cancel this transfer? Stocks will be moved back automatically."))) return
     const result = await cancelWarehouseTransfer(transferId, userId)
     if (!result.success) {
-      toast({
-        title: "Error",
-        description: result.message || "Failed to cancel transfer",
-        variant: "destructive",
-      })
+      notifyError(toast, result.message || "Failed to cancel transfer")
       return
     }
-    toast({ title: "Success", description: result.message || "Transfer cancelled" })
+    notifySuccess(toast, result.message || "Transfer cancelled" )
     await loadTransfers()
   }
 
   const handleAcceptTransfer = async (transferId: number) => {
-    if (!confirm("Accept this transfer request? Stock will be moved now.")) return
+    if (!(await confirm("Accept this transfer request? Stock will be moved now."))) return
     try {
       setActioningId(transferId)
       const result = await acceptWarehouseTransfer(transferId, userId)
       if (!result.success) {
-        toast({ title: "Error", description: result.message || "Failed to accept request", variant: "destructive" })
+        notifyError(toast, result.message || "Failed to accept request")
         return
       }
-      toast({ title: "Accepted", description: result.message || "Transfer request accepted" })
+      notifySuccess(toast, result.message || "Transfer request accepted" , "Accepted")
       await loadTransfers()
     } finally {
       setActioningId(null)
@@ -329,17 +308,17 @@ export default function TransferTab({ userId }: TransferTabProps) {
   const handleConfirmReject = async () => {
     if (rejectTransferId == null) return
     if (!rejectReason.trim()) {
-      toast({ title: "Validation", description: "Please provide a reason for rejection", variant: "destructive" })
+      notifyWarning(toast, "Please provide a reason for rejection", "Validation")
       return
     }
     try {
       setIsRejecting(true)
       const result = await rejectWarehouseTransfer(rejectTransferId, userId, rejectReason.trim())
       if (!result.success) {
-        toast({ title: "Error", description: result.message || "Failed to reject request", variant: "destructive" })
+        notifyError(toast, result.message || "Failed to reject request")
         return
       }
-      toast({ title: "Rejected", description: result.message || "Transfer request rejected" })
+      notifySuccess(toast, result.message || "Transfer request rejected" , "Rejected")
       setRejectTransferId(null)
       setRejectReason("")
       await loadTransfers()
@@ -428,23 +407,23 @@ export default function TransferTab({ userId }: TransferTabProps) {
   const handleSave = async () => {
     const validItems = formData.items.filter((i) => i.product_id > 0 && i.quantity > 0)
     if (!formData.fromDeviceId || !formData.toDeviceId) {
-      toast({ title: "Validation", description: "Please select source and destination warehouses", variant: "destructive" })
+      notifyWarning(toast, "Please select source and destination warehouses", "Validation")
       return
     }
     if (formData.fromDeviceId === formData.toDeviceId) {
-      toast({ title: "Validation", description: "Source and destination must be different", variant: "destructive" })
+      notifyWarning(toast, "Source and destination must be different", "Validation")
       return
     }
     if (validItems.length === 0) {
-      toast({ title: "Validation", description: "Add at least one valid product row", variant: "destructive" })
+      notifyWarning(toast, "Add at least one valid product row", "Validation")
       return
     }
     if (!Number.isFinite(formData.paidAmount) || Number(formData.paidAmount) < 0) {
-      toast({ title: "Validation", description: "Paid amount must be a non-negative number", variant: "destructive" })
+      notifyWarning(toast, "Paid amount must be a non-negative number", "Validation")
       return
     }
     if (Number(formData.paidAmount) > transferTotalAmount) {
-      toast({ title: "Validation", description: "Paid amount cannot exceed transfer amount", variant: "destructive" })
+      notifyWarning(toast, "Paid amount cannot exceed transfer amount", "Validation")
       return
     }
 
@@ -456,11 +435,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
       const available = Number(effectiveSourceStockMap.get(productId) || 0)
       if (totalRequested > available) {
         const productName = products.find((p) => p.id === productId)?.name || `Product #${productId}`
-        toast({
-          title: "Validation",
-          description: `${productName}: requested ${totalRequested}, available ${available}`,
-          variant: "destructive",
-        })
+        notifyWarning(toast, `${productName}: requested ${totalRequested}, available ${available}`, "Validation")
         return
       }
     }
@@ -482,15 +457,11 @@ export default function TransferTab({ userId }: TransferTabProps) {
       setIsSaving(true)
       const result = editingTransferId ? await updateWarehouseTransfer(payload) : await createWarehouseTransfer(payload)
       if (!result.success) {
-        toast({
-          title: "Error",
-          description: result.message || "Failed to save transfer",
-          variant: "destructive",
-        })
+        notifyError(toast, result.message || "Failed to save transfer")
         return
       }
 
-      toast({ title: "Success", description: result.message || "Transfer saved" })
+      notifySuccess(toast, result.message || "Transfer saved" )
       setIsModalOpen(false)
       resetForm()
       await loadTransfers()
@@ -502,15 +473,15 @@ export default function TransferTab({ userId }: TransferTabProps) {
   const getStatusBadge = (status: string) => {
     const value = String(status).toLowerCase()
     if (value === "cancelled") {
-      return <Badge className="bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300">CANCELLED</Badge>
+      return <Badge className="bg-red-100 text-red-700">CANCELLED</Badge>
     }
     if (value === "rejected") {
-      return <Badge className="bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300">REJECTED</Badge>
+      return <Badge className="bg-rose-100 text-rose-700">REJECTED</Badge>
     }
     if (value === "pending") {
-      return <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">PENDING</Badge>
+      return <Badge className="bg-amber-100 text-amber-700">PENDING</Badge>
     }
-    return <Badge className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">DONE</Badge>
+    return <Badge className="bg-emerald-100 text-emerald-700">DONE</Badge>
   }
 
   return (
@@ -534,7 +505,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
         </div>
       </div>
 
-      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 shadow-sm">
+      <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div className="relative md:col-span-2">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -550,7 +521,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
             onChange={(e) =>
               setStatusFilter(e.target.value as "all" | "pending" | "completed" | "rejected" | "cancelled")
             }
-            className="h-10 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 text-sm"
+            className="h-10 rounded-md border border-gray-300 bg-white px-3 text-sm"
           >
             <option value="all">All Status</option>
             <option value="pending">Pending</option>
@@ -561,7 +532,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
         </div>
       </div>
 
-      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden shadow-sm">
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
         {isLoading ? (
           <div className="p-10 text-center text-gray-500">
             <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
@@ -572,7 +543,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[860px]">
-              <thead className="bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
+              <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
                   <th className="text-left p-3 text-xs font-medium text-gray-500 uppercase">ID</th>
                   <th className="text-left p-3 text-xs font-medium text-gray-500 uppercase">Date</th>
@@ -586,21 +557,21 @@ export default function TransferTab({ userId }: TransferTabProps) {
                   <th className="text-left p-3 text-xs font-medium text-gray-500 uppercase">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+              <tbody className="divide-y divide-gray-200">
                 {transfers.map((transfer) => (
-                  <tr key={transfer.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
-                    <td className="p-3 text-sm font-medium text-blue-600 dark:text-blue-300">#{transfer.id}</td>
-                    <td className="p-3 text-sm text-gray-700 dark:text-gray-300">
+                  <tr key={transfer.id} className="hover:bg-gray-50">
+                    <td className="p-3 text-sm font-medium text-blue-600">#{transfer.id}</td>
+                    <td className="p-3 text-sm text-gray-700">
                       {new Date(transfer.transfer_date || transfer.created_at).toLocaleDateString()}
                     </td>
-                    <td className="p-3 text-sm text-gray-700 dark:text-gray-300">{transfer.from_device_name}</td>
-                    <td className="p-3 text-sm text-gray-700 dark:text-gray-300">{transfer.to_device_name}</td>
-                    <td className="p-3 text-sm text-gray-700 dark:text-gray-300">{transfer.item_count}</td>
-                    <td className="p-3 text-sm text-gray-700 dark:text-gray-300">{transfer.total_quantity}</td>
-                    <td className="p-3 text-sm text-gray-700 dark:text-gray-300">
+                    <td className="p-3 text-sm text-gray-700">{transfer.from_device_name}</td>
+                    <td className="p-3 text-sm text-gray-700">{transfer.to_device_name}</td>
+                    <td className="p-3 text-sm text-gray-700">{transfer.item_count}</td>
+                    <td className="p-3 text-sm text-gray-700">{transfer.total_quantity}</td>
+                    <td className="p-3 text-sm text-gray-700">
                       {Number(transfer.total_amount || 0).toFixed(2)}
                     </td>
-                    <td className="p-3 text-sm text-gray-700 dark:text-gray-300">
+                    <td className="p-3 text-sm text-gray-700">
                       <div className="flex flex-col">
                         <span className="capitalize">{String(transfer.payment_status || "unpaid")}</span>
                         <span className="text-xs text-gray-500">
@@ -612,7 +583,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
                     <td className="p-3">
                       {getStatusBadge(transfer.status)}
                       {String(transfer.status).toLowerCase() === "rejected" && transfer.rejection_reason ? (
-                        <div className="text-xs text-rose-600 dark:text-rose-300 mt-1 max-w-[180px]">
+                        <div className="text-xs text-rose-600 mt-1 max-w-[180px]">
                           Reason: {transfer.rejection_reason}
                         </div>
                       ) : null}
@@ -715,7 +686,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
                 <select
                   value={formData.fromDeviceId || ""}
                   onChange={(e) => handleSourceChange(Number(e.target.value))}
-                  className="w-full h-10 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 text-sm"
+                  className="w-full h-10 rounded-md border border-gray-300 bg-white px-3 text-sm"
                 >
                   <option value="">Select source</option>
                   {devices.map((d) => (
@@ -731,7 +702,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
                 <select
                   value={formData.toDeviceId || ""}
                   onChange={(e) => setFormData((prev) => ({ ...prev, toDeviceId: Number(e.target.value) }))}
-                  className="w-full h-10 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 text-sm"
+                  className="w-full h-10 rounded-md border border-gray-300 bg-white px-3 text-sm"
                 >
                   <option value="">Select destination</option>
                   {devices
@@ -746,7 +717,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
             </div>
 
             {!editingTransferId && formData.fromDeviceId && formData.fromDeviceId !== userId ? (
-              <div className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-700 dark:bg-amber-900/30 px-3 py-2 text-xs text-amber-700 dark:text-amber-200">
+              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
                 You are requesting stock from another warehouse. This will be sent as a <strong>pending request</strong>,
                 and the source warehouse must accept it before any stock or payment is recorded.
               </div>
@@ -759,7 +730,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
                 onChange={(e) =>
                   setFormData((prev) => ({ ...prev, paymentStatus: e.target.value as "unpaid" | "partial" | "paid" }))
                 }
-                className="w-full h-10 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 text-sm"
+                className="w-full h-10 rounded-md border border-gray-300 bg-white px-3 text-sm"
               >
                 <option value="unpaid">Unpaid</option>
                 <option value="partial">Partial</option>
@@ -773,7 +744,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
                 <select
                   value={formData.paymentMethod || ""}
                   onChange={(e) => setFormData((prev) => ({ ...prev, paymentMethod: e.target.value }))}
-                  className="w-full h-10 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 text-sm"
+                  className="w-full h-10 rounded-md border border-gray-300 bg-white px-3 text-sm"
                 >
                   <option value="">Select method</option>
                   <option value="cash">Cash</option>
@@ -817,7 +788,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
 
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <h4 className="text-sm font-medium text-gray-800 dark:text-gray-200">Products</h4>
+                <h4 className="text-sm font-medium text-gray-800">Products</h4>
                 <Button type="button" size="sm" variant="outline" onClick={addItemRow}>
                   <Plus className="h-3.5 w-3.5 mr-1" />
                   Add Row
@@ -825,7 +796,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
               </div>
 
               <div className="space-y-2">
-                <div className="grid grid-cols-12 gap-2 px-1 text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                <div className="grid grid-cols-12 gap-2 px-1 text-[11px] uppercase tracking-wide text-gray-500">
                   <div className="col-span-5">Product</div>
                   <div className="col-span-3">Qty</div>
                   <div className="col-span-2">Unit Cost</div>
@@ -840,7 +811,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
                           <Button
                             type="button"
                             variant="outline"
-                            className="w-full justify-between h-10 border-indigo-300 dark:border-indigo-600"
+                            className="w-full justify-between h-10 border-indigo-300"
                           >
                             <span className="truncate text-left">
                               {item.product_id
@@ -858,7 +829,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
                           align="start"
                           onWheel={(e) => e.stopPropagation()}
                         >
-                          <div className="border-b border-gray-200 dark:border-gray-700 p-2">
+                          <div className="border-b border-gray-200 p-2">
                             <div className="relative">
                               <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                               <Input
@@ -895,14 +866,14 @@ export default function TransferTab({ userId }: TransferTabProps) {
                                     })
                                     setProductOpen(idx, false)
                                   }}
-                                  className="w-full text-left px-2 py-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-between gap-3"
+                                  className="w-full text-left px-2 py-2 rounded-md hover:bg-gray-100 flex items-center justify-between gap-3"
                                 >
                                   <div className="min-w-0">
-                                    <p className="truncate text-sm font-medium text-gray-900 dark:text-gray-100">{p.name}</p>
+                                    <p className="truncate text-sm font-medium text-gray-900">{p.name}</p>
                                     <p className="truncate text-xs text-gray-500">{p.barcode || "No barcode"}</p>
                                   </div>
                                   <div className="flex items-center gap-2 shrink-0">
-                                    <span className="text-xs rounded-full bg-blue-100 text-blue-700 px-2 py-0.5 dark:bg-blue-900/30 dark:text-blue-300">
+                                    <span className="text-xs rounded-full bg-blue-100 text-blue-700 px-2 py-0.5">
                                       Avl {Number(effectiveSourceStockMap.get(p.id) ?? p.source_stock ?? 0)}
                                     </span>
                                     {item.product_id === p.id ? <Check className="h-4 w-4 text-blue-600" /> : null}
@@ -920,7 +891,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
                         </PopoverContent>
                       </Popover>
                       {item.product_id ? (
-                        <p className="text-[11px] text-red-600 dark:text-red-400 mt-1">
+                        <p className="text-[11px] text-red-600 mt-1">
                         available stock: {effectiveSourceStockMap.get(item.product_id) ?? 0}
                         </p>
                       ) : null}
@@ -950,7 +921,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
                         }}
                       />
                       {rowWarnings[idx] ? (
-                        <p className="text-[11px] text-red-600 dark:text-red-400 mt-1">{rowWarnings[idx]}</p>
+                        <p className="text-[11px] text-red-600 mt-1">{rowWarnings[idx]}</p>
                       ) : null}
                     </div>
                     <div className="col-span-2">
@@ -966,7 +937,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
                         placeholder="Unit cost"
                       />
                     </div>
-                    <div className="col-span-1 h-10 flex items-center text-sm font-medium text-gray-700 dark:text-gray-300">
+                    <div className="col-span-1 h-10 flex items-center text-sm font-medium text-gray-700">
                       {(Number(item.quantity || 0) * Number(item.unit_cost || 0)).toFixed(2)}
                     </div>
                     <div className="col-span-1">
@@ -986,7 +957,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
             </div>
 
             <div className="flex justify-end gap-2 pt-2">
-              <div className="mr-auto text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center">
+              <div className="mr-auto text-sm font-medium text-gray-700 flex items-center">
                 Transfer Amount: {transferTotalAmount.toFixed(2)}
               </div>
               <Button variant="outline" onClick={() => setIsModalOpen(false)} disabled={isSaving}>
@@ -1020,15 +991,15 @@ export default function TransferTab({ userId }: TransferTabProps) {
           ) : (
             <div className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-                <div className="rounded-md border border-gray-200 dark:border-gray-700 p-3">
+                <div className="rounded-md border border-gray-200 p-3">
                   <p className="text-xs text-gray-500 mb-1">From</p>
                   <p className="font-medium">{viewTransferDetail.transfer.from_device_name}</p>
                 </div>
-                <div className="rounded-md border border-gray-200 dark:border-gray-700 p-3">
+                <div className="rounded-md border border-gray-200 p-3">
                   <p className="text-xs text-gray-500 mb-1">To</p>
                   <p className="font-medium">{viewTransferDetail.transfer.to_device_name}</p>
                 </div>
-                <div className="rounded-md border border-gray-200 dark:border-gray-700 p-3">
+                <div className="rounded-md border border-gray-200 p-3">
                   <p className="text-xs text-gray-500 mb-1">Transfer Date</p>
                   <p className="font-medium">
                     {new Date(
@@ -1036,11 +1007,11 @@ export default function TransferTab({ userId }: TransferTabProps) {
                     ).toLocaleDateString()}
                   </p>
                 </div>
-                <div className="rounded-md border border-gray-200 dark:border-gray-700 p-3">
+                <div className="rounded-md border border-gray-200 p-3">
                   <p className="text-xs text-gray-500 mb-1">Status</p>
                   <p className="font-medium capitalize">{String(viewTransferDetail.transfer.status || "completed")}</p>
                 </div>
-                <div className="rounded-md border border-gray-200 dark:border-gray-700 p-3">
+                <div className="rounded-md border border-gray-200 p-3">
                   <p className="text-xs text-gray-500 mb-1">Payment</p>
                   <p className="font-medium capitalize">
                     {String(viewTransferDetail.transfer.payment_status || "unpaid")}
@@ -1049,7 +1020,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
                       : ""}
                   </p>
                 </div>
-                <div className="rounded-md border border-gray-200 dark:border-gray-700 p-3">
+                <div className="rounded-md border border-gray-200 p-3">
                   <p className="text-xs text-gray-500 mb-1">Amount</p>
                   <p className="font-medium">
                     {Number(viewTransferDetail.transfer.total_amount || 0).toFixed(2)}
@@ -1061,14 +1032,14 @@ export default function TransferTab({ userId }: TransferTabProps) {
 
               {String(viewTransferDetail.transfer.status || "").toLowerCase() === "rejected" &&
               viewTransferDetail.transfer.rejection_reason ? (
-                <div className="rounded-md border border-rose-200 bg-rose-50 dark:border-rose-700 dark:bg-rose-900/30 p-3 text-sm">
+                <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-sm">
                   <p className="text-xs text-rose-500 mb-1">Rejection Reason</p>
-                  <p className="text-rose-700 dark:text-rose-200">{viewTransferDetail.transfer.rejection_reason}</p>
+                  <p className="text-rose-700">{viewTransferDetail.transfer.rejection_reason}</p>
                 </div>
               ) : null}
 
               {(viewTransferDetail.transfer.notes || viewTransferDetail.transfer.payment_notes) && (
-                <div className="rounded-md border border-gray-200 dark:border-gray-700 p-3 text-sm space-y-2">
+                <div className="rounded-md border border-gray-200 p-3 text-sm space-y-2">
                   {viewTransferDetail.transfer.notes ? (
                     <div>
                       <p className="text-xs text-gray-500 mb-1">Notes</p>
@@ -1084,9 +1055,9 @@ export default function TransferTab({ userId }: TransferTabProps) {
                 </div>
               )}
 
-              <div className="rounded-md border border-gray-200 dark:border-gray-700 overflow-hidden">
+              <div className="rounded-md border border-gray-200 overflow-hidden">
                 <table className="w-full text-sm">
-                  <thead className="bg-gray-50 dark:bg-gray-900">
+                  <thead className="bg-gray-50">
                     <tr>
                       <th className="text-left p-2">Product</th>
                       <th className="text-left p-2">Qty</th>
@@ -1096,7 +1067,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
                   </thead>
                   <tbody>
                     {(viewTransferDetail.items || []).map((item: any) => (
-                      <tr key={item.id} className="border-t border-gray-200 dark:border-gray-700">
+                      <tr key={item.id} className="border-t border-gray-200">
                         <td className="p-2">{item.product_name || `Product #${item.product_id}`}</td>
                         <td className="p-2">{Number(item.quantity || 0)}</td>
                         <td className="p-2">{Number(item.unit_cost || 0).toFixed(2)}</td>
@@ -1125,7 +1096,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
             <DialogTitle>Reject Transfer Request #{rejectTransferId}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
-            <p className="text-sm text-gray-600 dark:text-gray-300">
+            <p className="text-sm text-gray-600">
               Let the requester know why this transfer is being rejected. No stock or payment will be recorded.
             </p>
             <div>
@@ -1160,6 +1131,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
           </div>
         </DialogContent>
       </Dialog>
+      {ConfirmDialog}
     </div>
   )
 }

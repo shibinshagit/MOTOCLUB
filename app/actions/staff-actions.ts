@@ -178,7 +178,7 @@ export async function updateStaff(
 
     console.log("✅ Staff member updated successfully:", result[0])
     revalidatePath("/dashboard")
-    revalidatePath("/admin")
+    revalidatePath("/admin", "layout")
 
     return {
       success: true,

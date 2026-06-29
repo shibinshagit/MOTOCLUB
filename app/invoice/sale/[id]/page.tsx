@@ -1,29 +1,33 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { getSaleDetails } from "@/app/actions/sale-actions"
 import { Loader2, Printer } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { printSalesReceipt } from "@/lib/receipt-utils"
 import { BrandLogo } from "@/components/brand-logo"
-import { BRAND_NAME } from "@/lib/brand"
+import { useBranding } from "@/components/branding-provider"
 
 export default function SaleInvoicePage() {
   const params = useParams()
   const router = useRouter()
+  const { platformName } = useBranding()
   const saleId = Number(params.id)
 
   const [sale, setSale] = useState<any>(null)
   const [items, setItems] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [currency] = useState<string>("AED") // Default to AED
-  const [companyInfo] = useState<any>({
-    name: BRAND_NAME,
-    address: "",
-    phone: "",
-  })
+  const [currency] = useState<string>("AED")
+  const companyInfo = useMemo(
+    () => ({
+      name: platformName,
+      address: "",
+      phone: "",
+    }),
+    [platformName],
+  )
 
   const [receivedAmount, setReceivedAmount] = useState(0)
   const [staffName, setStaffName] = useState("")

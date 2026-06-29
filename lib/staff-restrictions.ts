@@ -1,5 +1,5 @@
 export type StaffPageId =
-  | "home"
+  | "trending"
   | "sale"
   | "sales"
   | "purchase"
@@ -8,12 +8,13 @@ export type StaffPageId =
   | "supplier"
   | "transfer"
   | "platform"
+  | "master"
   | "accounting"
 
 export type StaffValueRestriction = "cogs" | "stock_count"
 
 export const STAFF_PAGE_OPTIONS: { id: StaffPageId; label: string }[] = [
-  { id: "home", label: "Home" },
+  { id: "trending", label: "Trending" },
   { id: "sale", label: "New Sale" },
   { id: "sales", label: "Sales" },
   { id: "purchase", label: "Purchase" },
@@ -22,6 +23,7 @@ export const STAFF_PAGE_OPTIONS: { id: StaffPageId; label: string }[] = [
   { id: "supplier", label: "Suppliers" },
   { id: "transfer", label: "Transfers" },
   { id: "platform", label: "Platforms" },
+  { id: "master", label: "Master Data" },
   { id: "accounting", label: "Accounting" },
 ]
 
@@ -58,7 +60,9 @@ export function isStaffAdmin(staff: StaffRestrictionSource | null | undefined): 
 }
 
 export function getRestrictedPages(staff: StaffRestrictionSource | null | undefined): StaffPageId[] {
-  return parseStringArray<StaffPageId>(staff?.restricted_pages)
+  return parseStringArray<StaffPageId>(staff?.restricted_pages).map((page) =>
+    (page as string) === "home" ? "trending" : page,
+  )
 }
 
 export function getRestrictedValues(staff: StaffRestrictionSource | null | undefined): StaffValueRestriction[] {

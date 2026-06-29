@@ -7,14 +7,10 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
-import { Skeleton } from "@/components/ui/skeleton"
-import { format } from "date-fns"
+import { format, subMonths, addMonths, startOfMonth, endOfMonth, isSameMonth, isAfter } from "date-fns"
 import {
-  Search,
   Loader2,
   Plus,
-  Filter,
-  RefreshCw,
   Calendar,
   User,
   XCircle,
@@ -30,50 +26,27 @@ import {
   Settings,
   Eye,
   EyeOff,
-  CalendarDays,
   Edit,
   X,
 } from "lucide-react"
 import { getUserSales, deleteSale, addSale, getSaleDetails, updateSale } from "@/app/actions/sale-actions"
 import { useToast } from "@/components/ui/use-toast"
+import { notifyError, notifySuccess, notifyWarning } from "@/lib/notifications"
 import ViewSaleModal from "@/components/sales/view-sale-modal"
+import SalesExcelTable from "@/components/sales/sales-excel-table"
+import { SalesViewFlip, type SalesViewMode } from "@/components/sales/sales-view-flip"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useSelector, useDispatch } from "react-redux"
 import { selectDeviceId, selectDeviceCurrency } from "@/store/slices/deviceSlice"
 import {
   selectSales,
-  selectFilteredSales,
   selectSalesLoading,
-  selectSalesRefreshing,
-  selectSalesSilentRefreshing,
-  selectSalesLastUpdated,
-  selectSalesFetchedTime,
-  selectSalesNeedsRefresh,
   selectSalesError,
-  selectSalesSearchTerm,
-  selectSalesStatusFilter,
-  selectSalesPaymentMethodFilter,
-  selectSalesDateFromFilter,
-  selectSalesDateToFilter,
-  selectSalesMinAmountFilter,
-  selectSalesMaxAmountFilter,
-  selectSalesShowFilters,
   selectSalesCurrency,
   setSales,
-  updateSalesData,
-  setFilteredSales,
   setLoading,
-  setSilentRefreshing,
-  setNeedsRefresh,
-  forceClearSales,
   setError,
-  setSearchTerm,
-  setDateFromFilter,
-  setDateToFilter,
-  setStatusFilter,
-  setPaymentMethodFilter,
   setCurrency,
-  clearFilters,
   removeSale,
   resetSalesState,
 } from "@/store/slices/salesSlice"
@@ -88,8 +61,12 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { FormAlert } from "@/components/ui/form-alert"
 import { selectActiveStaff } from "@/store/slices/staffSlice"
 import { useStaffRestrictions } from "@/hooks/use-staff-restrictions"
+import { useConfirm } from "@/hooks/use-confirm"
 import { printSalesReceipt } from "@/lib/receipt-utils"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import SaleShippingSection from "@/components/sales/sale-shipping-section"
+import { getCustomerById } from "@/app/actions/customer-actions"
+import { mapSaleShippingFromRecord, type SaleShippingInput } from "@/lib/sale-shipping"
 
 interface SaleTabProps {
   userId: number
@@ -135,13 +112,39 @@ interface SaleDraftSnapshot {
   receivedAmount: number
   discountAmount: number
   notes: string
+  shipping: SaleShippingInput
   products: ProductRow[]
   isEditMode: boolean
   editingSaleId: number | null
   originalSaleStatus: string
 }
 
-const STALE_TIME = 5 * 60 * 1000 // 5 minutes in milliseconds
+function getMonthRange(month: Date) {
+  const normalized = startOfMonth(month)
+  return {
+    from: format(startOfMonth(normalized), "yyyy-MM-dd"),
+    to: format(endOfMonth(normalized), "yyyy-MM-dd"),
+    label: format(normalized, "MMMM yyyy"),
+  }
+}
+
+function serializeSaleRecord(sale: any) {
+  return {
+    ...sale,
+    sale_date:
+      sale.sale_date && typeof sale.sale_date === "object" && sale.sale_date !== null
+        ? sale.sale_date.toISOString()
+        : sale.sale_date || "",
+    created_at:
+      sale.created_at && typeof sale.created_at === "object" && sale.created_at !== null
+        ? sale.created_at.toISOString()
+        : sale.created_at || "",
+    updated_at:
+      sale.updated_at && typeof sale.updated_at === "object" && sale.updated_at !== null
+        ? sale.updated_at.toISOString()
+        : sale.updated_at || "",
+  }
+}
 
 export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, mode = "entry" }: SaleTabProps) {
   // Redux state
@@ -155,30 +158,13 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
 
   // Sales data from Redux
   const sales = useSelector(selectSales)
-  const filteredSales = useSelector(selectFilteredSales)
   const isLoading = useSelector(selectSalesLoading)
-  const isRefreshing = useSelector(selectSalesRefreshing)
-  const isSilentRefreshing = useSelector(selectSalesSilentRefreshing)
-  const lastUpdated = useSelector(selectSalesLastUpdated)
-  const fetchedTime = useSelector(selectSalesFetchedTime)
-  const needsRefresh = useSelector(selectSalesNeedsRefresh)
   const error = useSelector(selectSalesError)
-
-  // Filter states from Redux
-  const searchTerm = useSelector(selectSalesSearchTerm)
-  const statusFilter = useSelector(selectSalesStatusFilter)
-  const paymentMethodFilter = useSelector(selectSalesPaymentMethodFilter)
-  const dateFromFilter = useSelector(selectSalesDateFromFilter)
-  const dateToFilter = useSelector(selectSalesDateToFilter)
-  const minAmountFilter = useSelector(selectSalesMinAmountFilter)
-  const maxAmountFilter = useSelector(selectSalesMaxAmountFilter)
-  const showFilters = useSelector(selectSalesShowFilters)
   const currency = useSelector(selectSalesCurrency)
 
-  // Date range picker modal state
-  const [isDateRangeModalOpen, setIsDateRangeModalOpen] = useState(false)
-  const [tempDateFrom, setTempDateFrom] = useState<Date | null>(null)
-  const [tempDateTo, setTempDateTo] = useState<Date | null>(null)
+  const [salesViewMonth, setSalesViewMonth] = useState(() => startOfMonth(new Date()))
+  const [salesListLoaded, setSalesListLoaded] = useState(false)
+  const [activeView, setActiveView] = useState<SalesViewMode>(mode === "info" ? "info" : "entry")
 
   // Edit mode state
   const [isEditMode, setIsEditMode] = useState(false)
@@ -218,6 +204,8 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
   const [isBarcodeProcessing, setIsBarcodeProcessing] = useState<boolean>(false)
   const [lastBarcodeProcessed, setLastBarcodeProcessed] = useState<string>("")
   const [notes, setNotes] = useState<string>("")
+  const [shipping, setShipping] = useState<SaleShippingInput>({ fulfillmentType: "pickup" })
+  const [customerAddress, setCustomerAddress] = useState("")
   const [formAlert, setFormAlert] = useState<{ type: "success" | "error" | "warning"; message: string } | null>(null)
   const [barcodeAlert, setBarcodeAlert] = useState<{ type: "success" | "error" | "warning"; message: string } | null>(
     null,
@@ -235,20 +223,31 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
   // Local state
   const [isDeleting, setIsDeleting] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
-  const [expandedCards, setExpandedCards] = useState<Set<number>>(new Set())
-
-  // Use refs to track fetch state and prevent duplicate calls
-  const initializationRef = useRef({
-    hasInitialized: false,
-    currentDeviceId: null as number | null,
-    lastFetchTime: 0,
-    isCurrentlyFetching: false,
-  })
+  // Use refs to track device changes and in-flight list requests
+  const activeDeviceIdRef = useRef<number | null>(null)
+  const salesFetchRequestRef = useRef(0)
 
   const { toast } = useToast()
+  const { confirm, ConfirmDialog } = useConfirm()
   const router = useRouter()
   const searchParams = useSearchParams()
   const pathname = usePathname()
+
+  useEffect(() => {
+    setActiveView(mode === "info" ? "info" : "entry")
+  }, [mode])
+
+  const switchView = useCallback(
+    (view: SalesViewMode) => {
+      setActiveView(view)
+      const params = new URLSearchParams(searchParams.toString())
+      params.set("tab", "sale")
+      params.set("salesView", view === "info" ? "list" : "entry")
+      const nextQuery = params.toString()
+      router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname)
+    },
+    [pathname, router, searchParams],
+  )
 
   const clearEditSaleParamFromUrl = useCallback(() => {
     try {
@@ -261,12 +260,6 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     }
   }, [])
 
-  // Add pagination state
-  const [currentPage, setCurrentPage] = useState(1)
-  const salesPerPage = 7
-  const totalPages = Math.ceil(filteredSales.length / salesPerPage)
-  const paginatedSales = filteredSales.slice((currentPage - 1) * salesPerPage, currentPage * salesPerPage)
-
   const [autoPrint, setAutoPrint] = useState(() => {
     const saved = localStorage.getItem("autoPrintReceipt")
     return saved === "true"
@@ -274,8 +267,6 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
   const [showPrintConfirm, setShowPrintConfirm] = useState(false)
   const [lastSaleResult, setLastSaleResult] = useState<any>(null)
   const [rememberChoice, setRememberChoice] = useState(false)
-  const privacyMode = false
-  const setPrivacyMode = () => {}
   const [saleDrafts, setSaleDrafts] = useState<SaleDraftSnapshot[]>([])
   const [activeDraftId, setActiveDraftId] = useState<string>("")
   const [draftsHydrated, setDraftsHydrated] = useState(false)
@@ -315,6 +306,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
       receivedAmount: 0,
       discountAmount: 0,
       notes: "",
+      shipping: { fulfillmentType: "pickup" },
       products: [createEmptyProductRow()],
       isEditMode: false,
       editingSaleId: null,
@@ -338,7 +330,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
   }, [])
 
   useEffect(() => {
-    if (mode !== "entry") return
+    if (activeView !== "entry") return
     try {
       const rawDrafts = localStorage.getItem(saleDraftStorageKey)
       const rawActiveId = localStorage.getItem(`${saleDraftStorageKey}_active`)
@@ -360,10 +352,10 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     setSaleDrafts([initialDraft])
     setActiveDraftId(initialDraft.id)
     setDraftsHydrated(true)
-  }, [mode, saleDraftStorageKey, createEmptyDraft])
+  }, [activeView, saleDraftStorageKey, createEmptyDraft])
 
   useEffect(() => {
-    if (mode !== "entry" || !draftsHydrated) return
+    if (activeView !== "entry" || !draftsHydrated) return
     const activeDraft = saleDrafts.find((d) => d.id === activeDraftId)
     if (!activeDraft) return
 
@@ -378,6 +370,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     setReceivedAmount(Number(activeDraft.receivedAmount) || 0)
     setDiscountAmount(Number(activeDraft.discountAmount) || 0)
     setNotes(activeDraft.notes || "")
+    setShipping(activeDraft.shipping || { fulfillmentType: "pickup" })
     setProducts(
       Array.isArray(activeDraft.products) && activeDraft.products.length > 0 ? activeDraft.products : [createEmptyProductRow()],
     )
@@ -390,10 +383,10 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     setTimeout(() => {
       draftSwitchingRef.current = false
     }, 0)
-  }, [mode, draftsHydrated, activeDraftId, saleDrafts, createEmptyProductRow])
+  }, [activeView, draftsHydrated, activeDraftId, saleDrafts, createEmptyProductRow])
 
   useEffect(() => {
-    if (mode !== "entry" || !draftsHydrated || !activeDraftId) return
+    if (activeView !== "entry" || !draftsHydrated || !activeDraftId) return
     if (draftSwitchingRef.current) return
 
     const computedName = isEditMode
@@ -419,6 +412,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
               receivedAmount,
               discountAmount,
               notes,
+              shipping,
               products,
               isEditMode,
               editingSaleId,
@@ -428,7 +422,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
       ),
     )
   }, [
-    mode,
+    activeView,
     draftsHydrated,
     activeDraftId,
     date,
@@ -441,6 +435,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     receivedAmount,
     discountAmount,
     notes,
+    shipping,
     products,
     isEditMode,
     editingSaleId,
@@ -448,21 +443,17 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
   ])
 
   useEffect(() => {
-    if (mode !== "entry" || !draftsHydrated) return
+    if (activeView !== "entry" || !draftsHydrated) return
     localStorage.setItem(saleDraftStorageKey, JSON.stringify(saleDrafts))
     localStorage.setItem(`${saleDraftStorageKey}_active`, activeDraftId)
-  }, [mode, draftsHydrated, saleDrafts, activeDraftId, saleDraftStorageKey])
+  }, [activeView, draftsHydrated, saleDrafts, activeDraftId, saleDraftStorageKey])
 
   // Device change handling
   useEffect(() => {
-    if (deviceId && deviceId !== initializationRef.current.currentDeviceId) {
+    if (deviceId && deviceId !== activeDeviceIdRef.current) {
+      activeDeviceIdRef.current = deviceId
       dispatch(resetSalesState())
-      initializationRef.current = {
-        hasInitialized: false,
-        currentDeviceId: deviceId,
-        lastFetchTime: 0,
-        isCurrentlyFetching: false,
-      }
+      setSalesListLoaded(false)
     }
   }, [deviceId, dispatch])
 
@@ -482,6 +473,19 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     }
   }, [activeStaff, isEditMode])
 
+  useEffect(() => {
+    if (!customerId) {
+      setCustomerAddress("")
+      return
+    }
+
+    getCustomerById(customerId).then((result) => {
+      if (result.success) {
+        setCustomerAddress(result.data?.address || "")
+      }
+    })
+  }, [customerId])
+
   // Calculate totals whenever products or discount changes
   // Calculate totals whenever products or discount changes
   useEffect(() => {
@@ -491,7 +495,9 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     }, 0)
     setSubtotal(newSubtotal)
     const discount = typeof discountAmount === "number" ? discountAmount : 0
-    const finalTotal = Math.max(0, newSubtotal - discount)
+    const courierExtra =
+      shipping.fulfillmentType === "ship" ? Number(shipping.courierPaidExtra) || 0 : 0
+    const finalTotal = Math.max(0, newSubtotal - discount + courierExtra)
     setTotalAmount(finalTotal)
     
     // FIXED: Handle received amount based on status
@@ -511,23 +517,9 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     } else if (status === "Pending") {
       setReceivedAmount(0) // No payment for pending
     }
-  }, [products, discountAmount, status])
+  }, [products, discountAmount, status, shipping.fulfillmentType, shipping.courierPaidExtra])
 
 
-  // Check if data is stale
-  const isDataStale = useMemo(() => {
-    if (!fetchedTime) return true
-    return Date.now() - fetchedTime > STALE_TIME
-  }, [fetchedTime])
-
-  // Update needsRefresh when data becomes stale
-  useEffect(() => {
-    if (fetchedTime && isDataStale && !needsRefresh) {
-      dispatch(setNeedsRefresh(true))
-    }
-  }, [fetchedTime, isDataStale, needsRefresh, dispatch])
-
-  // Format currency with the device's currency
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat("en-US", {
       style: "currency",
@@ -536,210 +528,55 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     }).format(amount)
   }
 
-  // Set today's date filter on initial load - but don't fetch, just set the filter
-  useEffect(() => {
-    const today = new Date()
-    const formattedDate = format(today, "yyyy-MM-dd")
-    if (!dateFromFilter && !dateToFilter) {
-      dispatch(setDateFromFilter(formattedDate))
-      dispatch(setDateToFilter(formattedDate))
-    }
-  }, [dateFromFilter, dateToFilter, dispatch])
+  const applySalesMonth = useCallback((month: Date) => {
+    setSalesViewMonth(startOfMonth(month))
+  }, [])
 
-  // Centralized fetch function with proper duplicate prevention
-  const fetchSalesFromAPI = useCallback(
-    async (silent = false) => {
+  const fetchSalesForMonth = useCallback(
+    async (month: Date) => {
       if (!deviceId) {
         dispatch(setError("Device ID not found"))
         return
       }
-      if (initializationRef.current.isCurrentlyFetching) {
-        return
-      }
-      const now = Date.now()
-      if (now - initializationRef.current.lastFetchTime < 1000) {
-        return
-      }
+
+      const requestId = ++salesFetchRequestRef.current
+      const { from, to } = getMonthRange(month)
+
+      dispatch(setLoading(true))
+      dispatch(setError(null))
+
       try {
-        initializationRef.current.isCurrentlyFetching = true
-        initializationRef.current.lastFetchTime = now
-        if (!silent) {
-          dispatch(setLoading(true))
-        } else {
-          dispatch(setSilentRefreshing(true))
-        }
-        dispatch(setError(null))
-        const result = await getUserSales(deviceId)
+        const result = await getUserSales(deviceId, { dateFrom: from, dateTo: to })
+        if (requestId !== salesFetchRequestRef.current) return
+
         if (result.success) {
-          const serializedData = result.data.map((sale: any) => ({
-            ...sale,
-            sale_date:
-              sale.sale_date && typeof sale.sale_date === "object" && sale.sale_date !== null
-                ? sale.sale_date.toISOString()
-                : sale.sale_date || "",
-            created_at:
-              sale.created_at && typeof sale.created_at === "object" && sale.created_at !== null
-                ? sale.created_at.toISOString()
-                : sale.created_at || "",
-            updated_at:
-              sale.updated_at && typeof sale.updated_at === "object" && sale.updated_at !== null
-                ? sale.updated_at.toISOString()
-                : sale.updated_at || "",
-          }))
-          if (silent) {
-            dispatch(updateSalesData(serializedData))
-          } else {
-            dispatch(setSales(serializedData))
-          }
-          initializationRef.current.hasInitialized = true
+          dispatch(setSales(result.data.map(serializeSaleRecord)))
         } else {
+          dispatch(setSales([]))
           dispatch(setError(result.message || "Failed to load sales"))
         }
-      } catch (error) {
-        console.error("Fetch sales error:", error)
+      } catch (fetchError) {
+        console.error("Fetch sales error:", fetchError)
+        if (requestId !== salesFetchRequestRef.current) return
+        dispatch(setSales([]))
         dispatch(setError("An error occurred while loading sales"))
       } finally {
-        dispatch(setLoading(false))
-        dispatch(setSilentRefreshing(false))
-        initializationRef.current.isCurrentlyFetching = false
+        if (requestId === salesFetchRequestRef.current) {
+          dispatch(setLoading(false))
+          setSalesListLoaded(true)
+        }
       }
     },
     [deviceId, dispatch],
   )
 
-  // Single initialization effect (optimized)
   useEffect(() => {
-    if (
-      deviceId &&
-      !initializationRef.current.hasInitialized &&
-      initializationRef.current.currentDeviceId === deviceId
-    ) {
-      initializationRef.current.hasInitialized = true // Set before fetch to prevent double fetch
-      fetchSalesFromAPI(false)
-    }
-  }, [deviceId, fetchSalesFromAPI])
+    if (activeView !== "info" || !deviceId) return
+    setSalesListLoaded(false)
+    fetchSalesForMonth(salesViewMonth)
+  }, [activeView, deviceId, salesViewMonth, fetchSalesForMonth])
 
-  // Silent refresh effect (unchanged)
-  useEffect(() => {
-    if (
-      deviceId &&
-      initializationRef.current.hasInitialized &&
-      isDataStale &&
-      !isSilentRefreshing &&
-      !isLoading &&
-      !initializationRef.current.isCurrentlyFetching
-    ) {
-      const now = Date.now()
-      if (now - initializationRef.current.lastFetchTime > 120000) {
-        fetchSalesFromAPI(true)
-      }
-    }
-  }, [deviceId, isDataStale, isSilentRefreshing, isLoading, fetchSalesFromAPI])
-
-  // Client-side filtering function
-  const applyClientSideFilters = useCallback(() => {
-    if (!sales || sales.length === 0) {
-      dispatch(setFilteredSales([]))
-      return
-    }
-
-    let filtered = [...sales]
-
-    // Date filtering
-    if (dateFromFilter || dateToFilter) {
-      filtered = filtered.filter((sale) => {
-        const saleDate = new Date(sale.sale_date)
-        saleDate.setHours(0, 0, 0, 0)
-
-        if (dateFromFilter) {
-          const fromDate = new Date(dateFromFilter)
-          fromDate.setHours(0, 0, 0, 0)
-          if (saleDate < fromDate) return false
-        }
-
-        if (dateToFilter) {
-          const toDate = new Date(dateToFilter)
-          toDate.setHours(23, 59, 59, 999)
-          if (saleDate > toDate) return false
-        }
-
-        return true
-      })
-    }
-
-    // Search filter
-    if (searchTerm && searchTerm.trim() !== "") {
-      const searchLower = searchTerm.toLowerCase()
-      filtered = filtered.filter(
-        (sale) =>
-          (sale.customer_name?.toLowerCase() || "").includes(searchLower) ||
-          sale.id.toString().includes(searchLower) ||
-          (sale.status?.toLowerCase() || "").includes(searchLower) ||
-          sale.total_amount.toString().includes(searchLower),
-      )
-    }
-
-    // Status filter
-    if (statusFilter && statusFilter !== "all") {
-      filtered = filtered.filter((sale) => (sale.status?.toLowerCase() || "") === statusFilter.toLowerCase())
-    }
-
-    // Payment method filter
-    if (paymentMethodFilter && paymentMethodFilter !== "all") {
-      filtered = filtered.filter((sale) => {
-        const paymentMethod = sale.payment_method || "cash"
-        return paymentMethod.toLowerCase() === paymentMethodFilter.toLowerCase()
-      })
-    }
-
-    // Amount range filter
-    if (minAmountFilter) {
-      const minAmount = Number(minAmountFilter)
-      if (!isNaN(minAmount)) {
-        filtered = filtered.filter((sale) => Number(sale.total_amount) >= minAmount)
-      }
-    }
-
-    if (maxAmountFilter) {
-      const maxAmount = Number(maxAmountFilter)
-      if (!isNaN(maxAmount)) {
-        filtered = filtered.filter((sale) => Number(sale.total_amount) <= maxAmount)
-      }
-    }
-
-    dispatch(setFilteredSales(filtered))
-  }, [
-    sales,
-    searchTerm,
-    statusFilter,
-    paymentMethodFilter,
-    dateFromFilter,
-    dateToFilter,
-    minAmountFilter,
-    maxAmountFilter,
-    dispatch,
-  ])
-
-  useEffect(() => {
-    applyClientSideFilters()
-  }, [applyClientSideFilters])
-
-  // Handle modal state from parent
-  useEffect(() => {
-    // setIsNewSaleModalOpen(isAddModalOpen)
-  }, [isAddModalOpen])
-
-  // Handle new sale modal close
-  const handleNewSaleModalClose = () => {
-    // setIsNewSaleModalOpen(false)
-    if (onModalClose) {
-      onModalClose()
-    }
-    // Force refresh after adding new sale
-    handleForcedRefresh()
-  }
-
-  // Add Sale Form Functions
+    // Add Sale Form Functions
   const addProductRow = () => {
     setProducts([
       ...products,
@@ -1062,6 +899,8 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     setDiscountAmount(0)
     setReceivedAmount(0)
     setNotes("")
+    setShipping({ fulfillmentType: "pickup" })
+    setCustomerAddress("")
     setFormAlert(null)
     setBarcodeAlert(null)
     setIsEditMode(false)
@@ -1071,7 +910,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     setPendingEditDraftId("")
     clearEditSaleParamFromUrl()
 
-    if (mode === "entry" && activeDraftId) {
+    if (activeView === "entry" && activeDraftId) {
       setSaleDrafts((prev) =>
         prev.map((draft) =>
           draft.id === activeDraftId
@@ -1089,6 +928,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                 receivedAmount: 0,
                 discountAmount: 0,
                 notes: "",
+                shipping: { fulfillmentType: "pickup" },
                 products: resetProducts,
                 isEditMode: false,
                 editingSaleId: null,
@@ -1179,6 +1019,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
         )
 
         setReceivedAmount(Number(sale.received_amount) || (sale.status === "Credit" ? 0 : Number(sale.total_amount)))
+        setShipping(mapSaleShippingFromRecord(sale))
 
         setIsEditMode(true)
         setEditingSaleId(saleId)
@@ -1270,6 +1111,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
           discount: discountAmount,
           receivedAmount: receivedAmount,
           staffId: staffId,
+          ...shipping,
         }
 
         const result = await updateSale(saleData)
@@ -1281,11 +1123,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
           })
 
           setTimeout(() => {
-            resetAddSaleForm()
-            setFormAlert(null)
-            // Reset fetch state to force refresh
-            initializationRef.current.hasInitialized = false
-            fetchSalesFromAPI(false)
+            finalizeDraftAfterSave()
           }, 1500)
         } else {
           setFormAlert({
@@ -1307,6 +1145,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
           notes: notes,
           discount: discountAmount,
           receivedAmount: receivedAmount,
+          ...shipping,
         }
 
         const result = await addSale(saleData)
@@ -1322,20 +1161,14 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
             if (autoPrint) {
               setTimeout(() => {
                 printSalesReceipt(result.data.sale, result.data.items)
-                resetAddSaleForm()
-                setFormAlert(null)
-                initializationRef.current.hasInitialized = false
-                fetchSalesFromAPI(false)
+                finalizeDraftAfterSave()
               }, 500)
             } else {
               setShowPrintConfirm(true)
             }
           } else {
             setTimeout(() => {
-              resetAddSaleForm()
-              setFormAlert(null)
-              initializationRef.current.hasInitialized = false
-              fetchSalesFromAPI(false)
+              finalizeDraftAfterSave()
             }, 1500)
           }
         } else {
@@ -1366,8 +1199,9 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
   const handleEditSale = (sale: any) => {
     // User explicitly requested edit again; clear last closed guard.
     lastClosedEditSaleIdRef.current = null
-    if (mode === "info") {
-      router.push(`/dashboard?tab=sale&editSaleId=${sale.id}`)
+    if (activeView === "info") {
+      switchView("entry")
+      loadSaleForEdit(sale.id)
       return
     }
     loadSaleForEdit(sale.id)
@@ -1379,7 +1213,13 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
   }
 
   useEffect(() => {
-    if (mode !== "entry") return
+    if (!searchParams.get("editSaleId")) return
+    if (activeView === "entry") return
+    switchView("entry")
+  }, [searchParams, activeView, switchView])
+
+  useEffect(() => {
+    if (activeView !== "entry") return
     const editSaleIdRaw = searchParams.get("editSaleId")
     if (!editSaleIdRaw) return
     const editSaleId = Number(editSaleIdRaw)
@@ -1418,7 +1258,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname)
     clearEditSaleParamFromUrl()
   }, [
-    mode,
+    activeView,
     searchParams,
     router,
     pathname,
@@ -1442,11 +1282,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
   // Handle delete sale from view modal
   const handleDeleteSaleFromView = async (saleId: number) => {
     if (!deviceId) {
-      toast({
-        title: "Error",
-        description: "Device ID not found",
-        variant: "destructive",
-      })
+      notifyError(toast, "Device ID not found")
       return
     }
 
@@ -1456,27 +1292,19 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
 
       if (result.success) {
         dispatch(removeSale(saleId))
-        toast({
-          title: "Success",
-          description: "Sale deleted successfully",
-        })
-        // Force refresh after deletion
-        initializationRef.current.hasInitialized = false
-        fetchSalesFromAPI(false)
+        setIsViewSaleModalOpen(false)
+        setSelectedSaleId(null)
+        notifySuccess(toast, "Sale deleted successfully")
+        if (activeView === "info") {
+          fetchSalesForMonth(salesViewMonth)
+        }
       } else {
-        toast({
-          title: "Error",
-          description: result.message || "Failed to delete sale",
-          variant: "destructive",
-        })
+        notifyError(toast, result.message || "Failed to delete sale")
+        throw new Error(result.message || "Failed to delete sale")
       }
     } catch (error) {
       console.error("Delete sale error:", error)
-      toast({
-        title: "Error",
-        description: "An unexpected error occurred",
-        variant: "destructive",
-      })
+      notifyError(toast, "An unexpected error occurred")
     } finally {
       setIsDeleting(false)
     }
@@ -1500,289 +1328,8 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     return 0
   }
 
-  // Check if any filters are active
-  const hasActiveFilters =
-    searchTerm ||
-    statusFilter !== "all" ||
-    paymentMethodFilter !== "all" ||
-    dateFromFilter ||
-    dateToFilter ||
-    minAmountFilter ||
-    maxAmountFilter
-
-  // Check if today filter is active
-  const isTodayFilterActive = () => {
-    const today = format(new Date(), "yyyy-MM-dd")
-    return dateFromFilter === today && dateToFilter === today
-  }
-
-  // Check if custom date range is active
-  const isCustomDateRangeActive = () => {
-    return dateFromFilter && dateToFilter && !isTodayFilterActive()
-  }
-
-  // Get custom date range display text
-  const getCustomDateRangeText = () => {
-    if (dateFromFilter && dateToFilter) {
-      const fromDate = new Date(dateFromFilter)
-      const toDate = new Date(dateToFilter)
-
-      if (dateFromFilter === dateToFilter) {
-        return format(fromDate, "MMM d")
-      } else {
-        return `${format(fromDate, "MMM d")} - ${format(toDate, "MMM d")}`
-      }
-    }
-    return "Custom"
-  }
-
-  // FIXED: Handle forced refresh - properly reset state
-  const handleForcedRefresh = () => {
-    // Clear all data and filters
-    dispatch(forceClearSales())
-    dispatch(clearFilters())
-
-    // Reset local state
-    setExpandedCards(new Set())
-
-    // Reset initialization state
-    initializationRef.current.hasInitialized = false
-    initializationRef.current.isCurrentlyFetching = false
-    initializationRef.current.lastFetchTime = 0
-
-    // Force fetch new data
-    fetchSalesFromAPI(false)
-
-    toast({
-      title: "Refreshed",
-      description: "Sales data has been refreshed and filters cleared",
-    })
-  }
-
-  // Handle clear all filters
-  const handleClearAllFilters = () => {
-    dispatch(clearFilters())
-    toast({
-      title: "Filters Cleared",
-      description: "All filters have been removed",
-    })
-  }
-
-  // Handle Today filter - just set the date filter, no API call
-  const handleTodayFilter = () => {
-    const today = new Date()
-    const formattedDate = format(today, "yyyy-MM-dd")
-
-    // Clear other filters but keep the sales data
-    dispatch(setSearchTerm(""))
-    dispatch(setStatusFilter("all"))
-    dispatch(setPaymentMethodFilter("all"))
-
-    // Set today's date
-    dispatch(setDateFromFilter(formattedDate))
-    dispatch(setDateToFilter(formattedDate))
-
-    toast({
-      title: "Today's Sales",
-      description: `Showing sales for ${format(today, "MMMM d, yyyy")}`,
-    })
-  }
-
-  const handleLastWeekFilter = () => {
-    const today = new Date()
-    const fromDate = new Date(today)
-    fromDate.setDate(today.getDate() - 6)
-
-    dispatch(setSearchTerm(""))
-    dispatch(setStatusFilter("all"))
-    dispatch(setPaymentMethodFilter("all"))
-    dispatch(setDateFromFilter(format(fromDate, "yyyy-MM-dd")))
-    dispatch(setDateToFilter(format(today, "yyyy-MM-dd")))
-
-    toast({
-      title: "Last Week Sales",
-      description: `Showing sales from ${format(fromDate, "MMM d")} to ${format(today, "MMM d")}`,
-    })
-  }
-
-  // Handle custom date range
-  const handleCustomDateRange = () => {
-    setTempDateFrom(dateFromFilter ? new Date(dateFromFilter) : new Date())
-    setTempDateTo(dateToFilter ? new Date(dateToFilter) : new Date())
-    setIsDateRangeModalOpen(true)
-  }
-
-  // Apply custom date range - just set the filters, no API call
-  const applyCustomDateRange = () => {
-    if (tempDateFrom && tempDateTo) {
-      const fromDateStr = format(tempDateFrom, "yyyy-MM-dd")
-      const toDateStr = format(tempDateTo, "yyyy-MM-dd")
-
-      dispatch(setDateFromFilter(fromDateStr))
-      dispatch(setDateToFilter(toDateStr))
-
-      toast({
-        title: "Date Range Applied",
-        description: `Showing sales from ${format(tempDateFrom, "MMM d")} to ${format(tempDateTo, "MMM d")}`,
-      })
-    }
-    setIsDateRangeModalOpen(false)
-  }
-
-  // Handle status filter
-  const handleStatusFilter = () => {
-    const statuses = ["all", "completed", "credit", "pending", "cancelled"]
-    const currentIndex = statuses.indexOf(statusFilter || "all")
-    const nextIndex = (currentIndex + 1) % statuses.length
-    const nextStatus = statuses[nextIndex]
-
-    dispatch(setStatusFilter(nextStatus))
-
-    toast({
-      title: "Status Filter",
-      description: `Showing ${nextStatus === "all" ? "all" : nextStatus} sales`,
-    })
-  }
-
-  // Handle payment method filter
-  const handlePaymentMethodFilter = () => {
-    const methods = ["all", "cash", "card", "online"]
-    const currentIndex = methods.indexOf(paymentMethodFilter || "all")
-    const nextIndex = (currentIndex + 1) % methods.length
-    const nextMethod = methods[nextIndex]
-
-    dispatch(setPaymentMethodFilter(nextMethod))
-
-    toast({
-      title: "Payment Filter",
-      description: `Showing ${nextMethod === "all" ? "all" : nextMethod} payments`,
-    })
-  }
-
-  // Skeleton loading component
-  const SalesTableSkeleton = () => (
-    <div className="space-y-2">
-      {[...Array(3)].map((_, i) => (
-        <div key={i} className="flex items-center space-x-2 p-2">
-          <Skeleton className="h-3 w-8 bg-gray-300 dark:bg-gray-600" />
-          <Skeleton className="h-3 w-16 bg-gray-300 dark:bg-gray-600" />
-          <Skeleton className="h-3 w-12 bg-gray-300 dark:bg-gray-600" />
-        </div>
-      ))}
-    </div>
-  )
-
-  const getPrivacyValue = () => null
-
-  // Mobile Card Component
-  const SaleCard = ({ sale, index }: { sale: any; index: number }) => {
-    const isExpanded = expandedCards.has(sale.id)
-    const remainingAmount = getRemainingAmount(sale)
-
-    return (
-      <Card className="mb-2 overflow-hidden border border-gray-200 dark:border-gray-600 hover:shadow-md transition-all duration-200 bg-white dark:bg-gray-800">
-        <CardContent className="p-0">
-          {/* Main card content */}
-          <div className="p-3">
-            {/* Header row */}
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-medium text-gray-400">#{sale.id}</span>
-                <Badge
-                  variant="outline"
-                  className={
-                    sale.sale_type === "service"
-                      ? "bg-green-50 dark:bg-green-900 text-green-600 dark:text-green-300 border-green-200 dark:border-green-600 text-xs"
-                      : "bg-blue-50 dark:bg-blue-900 text-blue-600 dark:text-blue-300 border-blue-200 dark:border-blue-600 text-xs"
-                  }
-                >
-                  {sale.sale_type === "service" ? "Service" : "Product"}
-                </Badge>
-              </div>
-              <div className="flex items-center gap-2">
-                <Badge
-                  variant="outline"
-                  className={`text-xs ${
-                    sale.status === "Completed"
-                      ? "bg-green-50 dark:bg-green-900 text-green-600 dark:text-green-300 border-green-200 dark:border-green-600"
-                      : sale.status === "Credit"
-                        ? "bg-orange-50 dark:bg-orange-900 text-orange-600 dark:text-orange-300 border-orange-200 dark:border-orange-600"
-                        : sale.status === "Cancelled"
-                          ? "bg-red-50 dark:bg-red-900 text-red-600 dark:text-red-300 border-red-200 dark:border-red-600"
-                          : "bg-yellow-50 dark:bg-yellow-900 text-yellow-600 dark:text-yellow-300 border-yellow-200 dark:border-yellow-600"
-                  }`}
-                >
-                  {sale.status}
-                </Badge>
-              </div>
-            </div>
-
-            {/* Customer and amount */}
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-1">
-                <User className="h-3 w-3 text-gray-400" />
-                <span className="text-xs font-medium text-gray-600 dark:text-gray-200 truncate max-w-[100px]">
-                  {sale.customer_name || "Walk-in"}
-                </span>
-              </div>
-              <div className="text-xs font-bold text-gray-900 dark:text-gray-100">{formatCurrency(Number(sale.total_amount))}</div>
-            </div>
-
-            {/* Date and payment */}
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-1 text-xs text-gray-400">
-                <Calendar className="h-3 w-3" />
-                {format(new Date(sale.sale_date), "MMM d")}
-              </div>
-              <Badge
-                variant="outline"
-                className="bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 text-xs"
-              >
-                {getPaymentMethodDisplay(sale)}
-              </Badge>
-            </div>
-
-            {/* Action buttons */}
-            <div className="flex items-center justify-between pt-2 border-t border-gray-100 dark:border-gray-700">
-              <Button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  handleViewSale(sale)
-                }}
-                variant="ghost"
-                size="sm"
-                className="text-xs h-6 px-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20"
-              >
-                <Eye className="h-3 w-3 mr-1" />
-                View
-              </Button>
-              <Button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  handleEditSale(sale)
-                }}
-                variant="ghost"
-                size="sm"
-                className="text-xs h-6 px-2 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20"
-              >
-                <Edit className="h-3 w-3 mr-1" />
-                Edit
-              </Button>
-            </div>
-
-            {sale.status === "Credit" && remainingAmount > 0 && (
-              <div className="text-xs text-red-500 dark:text-red-400 mt-1">
-                Remaining: {formatCurrency(remainingAmount)}
-              </div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-    )
-  }
-
   const handleCreateDraftTab = () => {
-    if (mode !== "entry") return
+    if (activeView !== "entry") return
     const draftIndex = saleDrafts.length + 1
     const newDraft = createEmptyDraft(`Draft ${draftIndex}`)
     draftSwitchingRef.current = true
@@ -1791,15 +1338,15 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
   }
 
   const handleSwitchDraftTab = (draftId: string) => {
-    if (mode !== "entry" || draftId === activeDraftId) return
+    if (activeView !== "entry" || draftId === activeDraftId) return
     draftSwitchingRef.current = true
     setActiveDraftId(draftId)
   }
 
-  const handleRemoveDraftTab = (draftId: string, askConfirmation = true) => {
-    if (mode !== "entry") return
+  const handleRemoveDraftTab = async (draftId: string, askConfirmation = true) => {
+    if (activeView !== "entry") return
     if (askConfirmation) {
-      const shouldClose = window.confirm("Are you sure to close this sale tab?")
+      const shouldClose = await confirm("Are you sure to close this sale tab?")
       if (!shouldClose) return
     }
     const removingDraft = saleDrafts.find((draft) => draft.id === draftId)
@@ -1842,6 +1389,17 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     })
   }
 
+  const finalizeDraftAfterSave = () => {
+    setFormAlert(null)
+    setShowPrintConfirm(false)
+    setLastSaleResult(null)
+    if (activeView === "entry" && activeDraftId) {
+      void handleRemoveDraftTab(activeDraftId, false)
+      return
+    }
+    resetAddSaleForm()
+  }
+
   const handleCancelEditCurrent = () => {
     if (isEditMode && activeDraftId) {
       handleRemoveDraftTab(activeDraftId, false)
@@ -1850,232 +1408,46 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     resetAddSaleForm()
   }
 
-  if (mode === "info") {
-    const totalSalesAmount = filteredSales.reduce((sum, sale) => sum + Number(sale.total_amount || 0), 0)
-    const receivedAmountTotal = filteredSales.reduce((sum, sale) => {
-      if (sale.status === "Credit") return sum + Number(sale.received_amount || 0)
-      if (sale.status === "Completed") return sum + Number(sale.total_amount || 0)
-      return sum
-    }, 0)
-    const remainingAmountTotal = filteredSales.reduce((sum, sale) => sum + getRemainingAmount(sale), 0)
-    const cogsTotal = filteredSales.reduce((sum, sale) => sum + Number(sale.total_cost || 0), 0)
-    const profitTotal = filteredSales.reduce((sum, sale) => sum + (Number(sale.total_amount || 0) - Number(sale.total_cost || 0)), 0)
+  const periodLabel = getMonthRange(salesViewMonth).label
+  const isCurrentMonth = isSameMonth(salesViewMonth, new Date())
+  const canGoNextMonth = !isCurrentMonth
 
-    return (
-      <div className="min-h-[calc(100vh-100px)] bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 p-2 sm:p-3">
-        <div className="space-y-3">
-          <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 shadow-sm">
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-              <Card className="border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40">
-                <CardContent className="p-3">
-                  <p className="text-xs text-gray-500 dark:text-gray-400">Total Sales</p>
-                  <p className="text-base font-bold text-gray-900 dark:text-gray-100">{formatCurrency(totalSalesAmount)}</p>
-                </CardContent>
-              </Card>
-              <Card className="border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40">
-                <CardContent className="p-3">
-                  <p className="text-xs text-gray-500 dark:text-gray-400">Received</p>
-                  <p className="text-base font-bold text-green-600 dark:text-green-400">{formatCurrency(receivedAmountTotal)}</p>
-                </CardContent>
-              </Card>
-              <Card className="border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40">
-                <CardContent className="p-3">
-                  <p className="text-xs text-gray-500 dark:text-gray-400">Remaining</p>
-                  <p className="text-base font-bold text-orange-600 dark:text-orange-400">{formatCurrency(remainingAmountTotal)}</p>
-                </CardContent>
-              </Card>
-              <Card className="border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40">
-                <CardContent className="p-3">
-                  <p className="text-xs text-gray-500 dark:text-gray-400">Profit</p>
-                  <p className="text-base font-bold text-blue-600 dark:text-blue-400">{formatCurrency(profitTotal)}</p>
-                </CardContent>
-              </Card>
-              {!hideCogs && (
-              <Card className="border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40">
-                <CardContent className="p-3">
-                  <p className="text-xs text-gray-500 dark:text-gray-400">COGS</p>
-                  <p className="text-base font-bold text-gray-700 dark:text-gray-300">{formatCurrency(cogsTotal)}</p>
-                </CardContent>
-              </Card>
-              )}
-            </div>
-          </div>
-
-          <Card className="border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm">
-            <CardContent className="p-3">
-              <div className="flex items-center gap-2 overflow-x-auto">
-                <div className="relative min-w-[220px] sm:min-w-[260px]">
-                  <Search className="absolute left-2.5 top-2.5 h-3 w-3 text-gray-400" />
-                  <Input
-                    aria-label="Search sales"
-                    type="search"
-                    placeholder="Search by id/customer/status..."
-                    className="pl-7 h-8 text-xs bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400"
-                    value={searchTerm}
-                    onChange={(e) => dispatch(setSearchTerm(e.target.value))}
-                  />
-                </div>
-                <Button
-                  onClick={handleStatusFilter}
-                  variant="outline"
-                  size="sm"
-                  className="h-8 shrink-0 text-xs border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100"
-                >
-                  {statusFilter === "all" ? "All Status" : statusFilter}
-                </Button>
-                <Button
-                  onClick={handlePaymentMethodFilter}
-                  variant="outline"
-                  size="sm"
-                  className="h-8 shrink-0 text-xs border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100"
-                >
-                  {paymentMethodFilter === "all" ? "All Payment" : paymentMethodFilter}
-                </Button>
-                <Button
-                  onClick={handleTodayFilter}
-                  variant="outline"
-                  size="sm"
-                  className="h-8 shrink-0 text-xs border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100"
-                >
-                  Today
-                </Button>
-                <Button
-                  onClick={handleLastWeekFilter}
-                  variant="outline"
-                  size="sm"
-                  className="h-8 shrink-0 text-xs border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100"
-                >
-                  Last Week
-                </Button>
-                <Button
-                  onClick={handleCustomDateRange}
-                  variant="outline"
-                  size="sm"
-                  className="h-8 shrink-0 text-xs border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100"
-                >
-                  Custom
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm min-h-[420px]">
-            <CardContent className="p-0">
-              <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 text-xs text-gray-600 dark:text-gray-400 flex items-center justify-between">
-                <span>{filteredSales.length} {filteredSales.length === 1 ? "Sale" : "Sales"}</span>
-                {lastUpdated ? <span>Updated: {format(new Date(lastUpdated), "HH:mm")}</span> : null}
-              </div>
-              <div className="p-2">
-                {isLoading && sales.length === 0 ? (
-                  <SalesTableSkeleton />
-                ) : error ? (
-                  <div className="text-center py-6 text-red-500 dark:text-red-400 text-sm">{error}</div>
-                ) : filteredSales.length === 0 ? (
-                  <div className="text-center py-6 text-gray-500 dark:text-gray-400 text-sm">
-                    {hasActiveFilters ? "No sales found matching your filters" : "No sales found"}
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {paginatedSales.map((sale, index) => (
-                      <SaleCard key={sale.id} sale={sale} index={index} />
-                    ))}
-                    {totalPages > 1 ? (
-                      <div className="flex justify-center mt-3 gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-8 w-8"
-                          disabled={currentPage === 1}
-                          onClick={() => setCurrentPage(currentPage - 1)}
-                        >
-                          {"<"}
-                        </Button>
-                        <span className="text-xs self-center text-gray-600 dark:text-gray-300">
-                          {currentPage} / {totalPages}
-                        </span>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-8 w-8"
-                          disabled={currentPage === totalPages}
-                          onClick={() => setCurrentPage(currentPage + 1)}
-                        >
-                          {">"}
-                        </Button>
-                      </div>
-                    ) : null}
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Date Range Modal (info mode) */}
-        <Dialog open={isDateRangeModalOpen} onOpenChange={setIsDateRangeModalOpen}>
-          <DialogContent className="max-w-md bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700">
-            <DialogHeader>
-              <DialogTitle className="text-gray-900 dark:text-gray-100">Select Date Range</DialogTitle>
-            </DialogHeader>
-            <div className="py-4 space-y-4">
-              <div className="space-y-2">
-                <Label className="text-sm font-medium text-gray-900 dark:text-gray-200">From Date</Label>
-                <div className="[&_button]:text-gray-900 [&_button]:dark:text-gray-100 [&_button]:bg-white [&_button]:dark:bg-gray-700 [&_button]:border-gray-300 [&_button]:dark:border-gray-600">
-                  <DatePickerField date={tempDateFrom} onDateChange={setTempDateFrom} />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label className="text-sm font-medium text-gray-900 dark:text-gray-200">To Date</Label>
-                <div className="[&_button]:text-gray-900 [&_button]:dark:text-gray-100 [&_button]:bg-white [&_button]:dark:bg-gray-700 [&_button]:border-gray-300 [&_button]:dark:border-gray-600">
-                  <DatePickerField date={tempDateTo} onDateChange={setTempDateTo} />
-                </div>
-              </div>
-              <div className="flex justify-end gap-2 mt-6">
-                <Button
-                  variant="outline"
-                  onClick={() => setIsDateRangeModalOpen(false)}
-                  className="border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  onClick={applyCustomDateRange}
-                  className="bg-blue-600 hover:bg-blue-700 text-white"
-                  disabled={!tempDateFrom || !tempDateTo}
-                >
-                  Apply Range
-                </Button>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
-
-        {/* View Sale Modal (info mode) */}
-        <ViewSaleModal
-          isOpen={isViewSaleModalOpen}
-          onClose={() => {
-            setIsViewSaleModalOpen(false)
-            setSelectedSaleId(null)
-          }}
-          saleId={selectedSaleId}
-          currency={currency || "AED"}
-          onEdit={(saleData) => {
-            setIsViewSaleModalOpen(false)
-            handleEditSale({ id: saleData.id })
-          }}
-          onDelete={handleDeleteSaleFromView}
-          onPrintInvoice={handlePrintInvoiceFromView}
-        />
-      </div>
-    )
+  const goToPreviousMonth = () => applySalesMonth(subMonths(salesViewMonth, 1))
+  const goToNextMonth = () => {
+    const nextMonth = startOfMonth(addMonths(salesViewMonth, 1))
+    if (isAfter(nextMonth, startOfMonth(new Date()))) return
+    applySalesMonth(nextMonth)
   }
+  const goToCurrentMonth = () => applySalesMonth(startOfMonth(new Date()))
 
-  return (
-    <div className="min-h-[calc(100vh-100px)] bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 p-2 sm:p-3">
+  const salesListView = (
+    <SalesExcelTable
+      key={periodLabel}
+      sales={sales}
+      periodLabel={periodLabel}
+      isCurrentMonth={isCurrentMonth}
+      canGoNextMonth={canGoNextMonth}
+      onPreviousMonth={goToPreviousMonth}
+      onNextMonth={goToNextMonth}
+      onCurrentMonth={goToCurrentMonth}
+      isLoading={isLoading}
+      error={error}
+      hasLoadedSales={salesListLoaded}
+      hideCogs={hideCogs}
+      formatCurrency={formatCurrency}
+      getPaymentMethodDisplay={getPaymentMethodDisplay}
+      getRemainingAmount={getRemainingAmount}
+      onViewSale={handleViewSale}
+      onEditSale={handleEditSale}
+    />
+  )
+
+  const salesEntryView = (
+    <div className="min-h-[calc(100vh-100px)] bg-gray-50 text-gray-900 p-2 sm:p-3">
       <div className="mb-4">
         <div className="mt-4">
-            {mode === "entry" && (
-              <div className="mb-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-2">
+            {activeView === "entry" && (
+              <div className="mb-2 rounded-lg border border-gray-200 bg-white p-2">
                 <div className="flex items-center gap-2 overflow-x-auto">
                   {saleDrafts.map((draft, index) => (
                     <div
@@ -2083,10 +1455,10 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                       className={`h-8 shrink-0 inline-flex items-center rounded-md border ${
                         draft.id === activeDraftId
                           ? draft.isEditMode
-                            ? "bg-orange-500 text-white border-orange-500 dark:bg-orange-600 dark:border-orange-500"
+                            ? "bg-orange-500 text-white border-orange-500"
                             : "bg-primary text-primary-foreground border-primary"
                           : draft.isEditMode
-                            ? "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-900/30 dark:text-orange-200 dark:border-orange-700"
+                            ? "bg-orange-50 text-orange-700 border-orange-200"
                             : "bg-background text-foreground border-input"
                       }`}
                     >
@@ -2109,8 +1481,8 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                               ? "hover:bg-white/20"
                               : "hover:bg-primary-foreground/20"
                             : draft.isEditMode
-                              ? "hover:bg-orange-100 dark:hover:bg-orange-800/40"
-                              : "hover:bg-black/10 dark:hover:bg-white/20"
+                              ? "hover:bg-orange-100"
+                              : "hover:bg-black/10"
                         }`}
                         aria-label={`Remove ${(draft.name?.trim() ? draft.name : `Draft ${index + 1}`)}`}
                       >
@@ -2134,19 +1506,18 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
             {/* Sales Tab Content - FIXED SCROLL LAYOUT */}
             <div className="flex flex-col xl:flex-row gap-3 h-full">
               {/* Main Sale Form Section - FIXED SCROLL */}
-              {mode !== "info" && (
               <div className="flex-1 xl:w-3/4 flex flex-col min-h-0">
-                <Card className="flex-1 overflow-hidden bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 shadow-sm flex flex-col">
+                <Card className="flex-1 overflow-hidden bg-white border-gray-200 shadow-sm flex flex-col">
                   <CardContent className="p-0 h-full flex flex-col">
                     
                     {/* Fixed Header Section */}
                     <div className="flex-shrink-0">
                       {/* Edit mode indicator */}
                       {isEditMode && (
-                        <div className="p-2 bg-orange-50 dark:bg-orange-900/30 border-b border-orange-200 dark:border-orange-600">
+                        <div className="p-2 bg-orange-50 border-b border-orange-200">
                           <div className="flex items-center gap-2">
-                            <Edit className="h-4 w-4 text-orange-600 dark:text-orange-400" />
-                            <span className="text-sm font-medium text-orange-800 dark:text-orange-200">
+                            <Edit className="h-4 w-4 text-orange-600" />
+                            <span className="text-sm font-medium text-orange-800">
                               Editing Sale #{editingSaleId}
                             </span>
                           </div>
@@ -2156,7 +1527,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                       {/* Alerts */}
                       {(formAlert || barcodeAlert) && (
                         <div
-                          className="p-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800"
+                          className="p-2 border-b border-gray-200 bg-gray-50"
                           role="status"
                           aria-live="polite"
                         >
@@ -2170,9 +1541,9 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                     <div className="flex-1 overflow-hidden flex flex-col">
                       <div className="flex flex-col lg:flex-row h-full">
                         {/* Products section */}
-                        <div className="flex-1 lg:w-[70%] flex flex-col border-b lg:border-b-0 lg:border-r border-gray-200 dark:border-gray-700">
+                        <div className="flex-1 lg:w-[70%] flex flex-col border-b lg:border-b-0 lg:border-r border-gray-200">
                           {/* Barcode scanner */}
-                          <div className="p-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+                          <div className="p-2 bg-gray-50 border-b border-gray-200 flex-shrink-0">
                             <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                               <div className="relative flex-1">
                                 <Barcode className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-400" />
@@ -2181,14 +1552,14 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                   autoComplete="off"
                                   spellCheck={false}
                                   placeholder="Scan barcode or search product..."
-                                  className={`pl-8 h-9 bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 transition-all duration-200 ${
+                                  className={`pl-8 h-9 bg-white border-gray-300 text-gray-900 placeholder-gray-500 transition-all duration-200 ${
                                     scanStatus === "processing"
-                                      ? "border-yellow-500 bg-yellow-50 dark:bg-yellow-900/20"
+                                      ? "border-yellow-500 bg-yellow-50"
                                       : scanStatus === "success"
-                                        ? "border-green-500 bg-green-50 dark:bg-green-900/20"
+                                        ? "border-green-500 bg-green-50"
                                         : scanStatus === "error"
-                                          ? "border-red-500 bg-red-50 dark:bg-red-900/20"
-                                          : "border-gray-300 dark:border-gray-600 focus:border-blue-500 dark:focus:border-blue-400"
+                                          ? "border-red-500 bg-red-50"
+                                          : "border-gray-300 focus:border-blue-500"
                                   }`}
                                   value={barcodeInput}
                                   onChange={(e) => {
@@ -2235,15 +1606,15 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                           </div>
 
                           {/* Products table header */}
-                          <div className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
-                            <h3 className="font-medium text-sm text-gray-800 dark:text-gray-200">Products & Services</h3>
+                          <div className="flex items-center justify-between p-2 bg-gray-50 border-b border-gray-200 flex-shrink-0">
+                            <h3 className="font-medium text-sm text-gray-800">Products & Services</h3>
                             <div className="flex flex-wrap gap-1">
                               <Button
                                 type="button"
                                 variant="outline"
                                 size="sm"
                                 onClick={() => setIsNewCustomerModalOpen(true)}
-                                className="flex items-center gap-1 text-purple-600 dark:text-purple-400 border-purple-300 dark:border-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/20 h-7 text-xs"
+                                className="flex items-center gap-1 text-purple-600 border-purple-300 hover:bg-purple-50 h-7 text-xs"
                               >
                                 <User className="h-3 w-3" />
                                 <span className="hidden sm:inline">Customer</span>
@@ -2253,7 +1624,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                 variant="outline"
                                 size="sm"
                                 onClick={() => setIsNewServiceModalOpen(true)}
-                                className="flex items-center gap-1 text-green-600 dark:text-green-400 border-green-300 dark:border-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 h-7 text-xs"
+                                className="flex items-center gap-1 text-green-600 border-green-300 hover:bg-green-50 h-7 text-xs"
                               >
                                 <Wrench className="h-3 w-3" />
                                 <span className="hidden sm:inline">Service</span>
@@ -2264,7 +1635,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                 variant="outline"
                                 size="sm"
                                 onClick={() => setIsNewProductModalOpen(true)}
-                                className="flex items-center gap-1 text-blue-600 dark:text-blue-400 border-blue-300 dark:border-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 h-7 text-xs"
+                                className="flex items-center gap-1 text-blue-600 border-blue-300 hover:bg-blue-50 h-7 text-xs"
                               >
                                 <Plus className="h-3 w-3" />
                                 <span className="hidden sm:inline">Product</span>
@@ -2274,7 +1645,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                 variant="outline"
                                 size="sm"
                                 onClick={addProductRow}
-                                className="flex items-center gap-1 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 h-7 text-xs bg-transparent"
+                                className="flex items-center gap-1 border-gray-300 text-gray-900 hover:bg-gray-50 h-7 text-xs bg-transparent"
                               >
                                 <Plus className="h-3 w-3" />
                                 <span className="hidden sm:inline">Row</span>
@@ -2286,7 +1657,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                           <div className="flex-1 overflow-x-auto overflow-y-auto min-h-0">
                             {/* Desktop table header */}
                             <div className="hidden lg:block sticky top-0 z-10 min-w-[800px]">
-                              <div className="grid grid-cols-12 gap-1 p-2 bg-gray-100 dark:bg-gray-700 font-medium text-xs text-gray-700 dark:text-gray-200 border-b border-gray-200 dark:border-gray-600">
+                              <div className="grid grid-cols-12 gap-1 p-2 bg-gray-100 font-medium text-xs text-gray-700 border-b border-gray-200">
                                 <div className="col-span-3">Product/Service</div>
                                 <div className="col-span-2">Notes</div>
                                 <div className="col-span-1 text-center">Qty</div>
@@ -2295,7 +1666,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                   <button
                                     type="button"
                                     onClick={() => setShowCost((prev) => !prev)}
-                                    className="inline-flex items-center justify-center gap-1 hover:text-gray-900 dark:hover:text-white transition-colors"
+                                    className="inline-flex items-center justify-center gap-1 hover:text-gray-900 transition-colors"
                                     title={showCost ? "Hide reference price" : "Show reference price"}
                                   >
                                     Ref
@@ -2311,24 +1682,24 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                               {products.map((product, index) => (
                                 <div
                                   key={product.id}
-                                  className={`grid grid-cols-12 gap-1 p-2 items-center border-b border-gray-200 dark:border-gray-700 ${
-                                    index % 2 === 0 ? "bg-white dark:bg-gray-800" : "bg-gray-50 dark:bg-gray-700"
-                                  } hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors duration-150`}
+                                  className={`grid grid-cols-12 gap-1 p-2 items-center border-b border-gray-200 ${
+                                    index % 2 === 0 ? "bg-white" : "bg-gray-50"
+                                  } hover:bg-gray-100 transition-colors duration-150`}
                                 >
                                   <div className="col-span-3">
                                     {product.productId && product.productName ? (
                                       <div className="flex items-center justify-between">
                                         <div className="flex items-center gap-2 flex-1">
                                           {product.isService ? (
-                                            <Wrench className="h-4 w-4 text-green-600 dark:text-green-400 flex-shrink-0" />
+                                            <Wrench className="h-4 w-4 text-green-600 flex-shrink-0" />
                                           ) : (
                                             <div className="h-4 w-4 flex-shrink-0" />
                                           )}
-                                          <span className="truncate flex-1 font-medium text-xs text-gray-900 dark:text-gray-200">
+                                          <span className="truncate flex-1 font-medium text-xs text-gray-900">
                                             {product.productName}
                                           </span>
                                           {isProductOutOfStock(product) && (
-                                            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300">
+                                            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700">
                                               OOS
                                             </span>
                                           )}
@@ -2336,7 +1707,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                         <Button
                                           variant="ghost"
                                           size="sm"
-                                          className="h-6 w-6 p-0 text-gray-400 hover:text-blue-500 dark:hover:text-blue-400"
+                                          className="h-6 w-6 p-0 text-gray-400 hover:text-blue-500"
                                           onClick={() => {
                                             updateProductRow(product.id, {
                                               productId: null,
@@ -2372,7 +1743,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                       placeholder="Notes..."
                                       value={product.notes || ""}
                                       onChange={(e) => updateProductRow(product.id, { notes: e.target.value })}
-                                      className="text-xs h-7 bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100"
+                                      className="text-xs h-7 bg-white border-gray-300 text-gray-900"
                                     />
                                   </div>
                                   <div className="col-span-1">
@@ -2381,10 +1752,10 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                       min={isProductOutOfStock(product) ? "0" : "1"}
                                       value={product.quantity}
                                       onChange={(e) => handleQuantityInputChange(product, e.target.value)}
-                                      className={`text-center h-7 text-xs bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 ${
+                                      className={`text-center h-7 text-xs bg-white text-gray-900 ${
                                         isProductOutOfStock(product)
-                                          ? "border-red-400 dark:border-red-600"
-                                          : "border-gray-300 dark:border-gray-600"
+                                          ? "border-red-400"
+                                          : "border-gray-300"
                                       }`}
                                     />
                                   </div>
@@ -2399,29 +1770,43 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                           price: Number.parseFloat(e.target.value) || 0,
                                         })
                                       }
-                                      className="text-center h-7 text-xs bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100"
+                                      className="text-center h-7 text-xs bg-white border-gray-300 text-gray-900"
                                     />
                                   </div>
-                                  <div
-                                    className={`col-span-2 transition-all duration-150 ${
-                                      showCost ? "" : "blur-sm hover:blur-none focus-within:blur-none"
-                                    }`}
-                                    title={showCost ? undefined : "Hidden — hover to view"}
-                                  >
-                                    <Input
-                                      type="number"
-                                      min="0"
-                                      step="0.01"
-                                      value={product.cost || 0}
-                                      onChange={(e) =>
-                                        updateProductRow(product.id, {
-                                          cost: Number.parseFloat(e.target.value) || 0,
-                                        })
-                                      }
-                                      className="text-center h-7 text-xs bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100"
-                                    />
+                                  <div className="col-span-2">
+                                    {showCost ? (
+                                      <Input
+                                        type="number"
+                                        min="0"
+                                        step="0.01"
+                                        value={product.cost || 0}
+                                        onChange={(e) =>
+                                          updateProductRow(product.id, {
+                                            cost: Number.parseFloat(e.target.value) || 0,
+                                          })
+                                        }
+                                        className="text-center h-7 text-xs bg-white border-gray-300 text-gray-900"
+                                      />
+                                    ) : (
+                                      <div
+                                        className="relative group"
+                                        title={`${product.cost || 0}`}
+                                      >
+                                        <Input
+                                          type="number"
+                                          min="0"
+                                          step="0.01"
+                                          readOnly
+                                          value={product.cost || 0}
+                                          className="text-center h-7 text-xs bg-white border-gray-300 text-transparent group-hover:text-gray-900 group-focus-within:text-gray-900 transition-colors"
+                                        />
+                                        <span className="absolute inset-0 flex items-center justify-center text-gray-500 tracking-widest pointer-events-none group-hover:opacity-0 group-focus-within:opacity-0 transition-opacity">
+                                          ****
+                                        </span>
+                                      </div>
+                                    )}
                                   </div>
-                                  <div className="col-span-1 flex items-center justify-center font-medium text-xs text-gray-900 dark:text-gray-200">
+                                  <div className="col-span-1 flex items-center justify-center font-medium text-xs text-gray-900">
                                     {deviceCurrencyState} {product.total.toFixed(2)}
                                   </div>
                                   <div className="col-span-1 flex justify-center">
@@ -2431,7 +1816,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                       size="icon"
                                       onClick={() => removeProductRow(product.id)}
                                       disabled={products.length === 1}
-                                      className="h-6 w-6 p-0 text-gray-400 hover:text-red-500 dark:hover:text-red-400"
+                                      className="h-6 w-6 p-0 text-gray-400 hover:text-red-500"
                                     >
                                       <Trash2 className="h-3 w-3" />
                                     </Button>
@@ -2445,26 +1830,26 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                               {products.map((product, index) => (
                                 <div
                                   key={product.id}
-                                  className={`p-3 border-b border-gray-200 dark:border-gray-700 ${
-                                    index % 2 === 0 ? "bg-white dark:bg-gray-800" : "bg-gray-50 dark:bg-gray-700"
+                                  className={`p-3 border-b border-gray-200 ${
+                                    index % 2 === 0 ? "bg-white" : "bg-gray-50"
                                   }`}
                                 >
                                   {/* Product Selection */}
                                   <div className="mb-3">
-                                    <Label className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1 block">
+                                    <Label className="text-xs font-medium text-gray-700 mb-1 block">
                                       Product/Service
                                     </Label>
                                     {product.productId && product.productName ? (
-                                      <div className="flex items-center justify-between p-2 bg-gray-100 dark:bg-gray-600 rounded">
+                                      <div className="flex items-center justify-between p-2 bg-gray-100 rounded">
                                         <div className="flex items-center gap-2">
                                           {product.isService && (
-                                            <Wrench className="h-4 w-4 text-green-600 dark:text-green-400" />
+                                            <Wrench className="h-4 w-4 text-green-600" />
                                           )}
-                                          <span className="text-sm font-medium text-gray-900 dark:text-gray-200">
+                                          <span className="text-sm font-medium text-gray-900">
                                             {product.productName}
                                           </span>
                                           {isProductOutOfStock(product) && (
-                                            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300">
+                                            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700">
                                               OOS
                                             </span>
                                           )}
@@ -2506,7 +1891,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
 
                                   {/* Notes */}
                                   <div className="mb-3">
-                                    <Label className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1 block">
+                                    <Label className="text-xs font-medium text-gray-700 mb-1 block">
                                       Notes
                                     </Label>
                                     <Input
@@ -2520,7 +1905,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                   {/* Quantity, Price, Cost row */}
                                   <div className="grid grid-cols-3 gap-2 mb-3">
                                     <div>
-                                      <Label className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1 block">
+                                      <Label className="text-xs font-medium text-gray-700 mb-1 block">
                                         Qty
                                       </Label>
                                       <Input
@@ -2530,16 +1915,16 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                         onChange={(e) => handleQuantityInputChange(product, e.target.value)}
                                         className={`text-center h-8 text-sm ${
                                           isProductOutOfStock(product)
-                                            ? "border-red-400 dark:border-red-600"
+                                            ? "border-red-400"
                                             : ""
                                         }`}
                                       />
                                       {isProductOutOfStock(product) && (
-                                        <p className="mt-1 text-[10px] text-red-600 dark:text-red-400">Out of stock</p>
+                                        <p className="mt-1 text-[10px] text-red-600">Out of stock</p>
                                       )}
                                     </div>
                                     <div>
-                                      <Label className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1 block">
+                                      <Label className="text-xs font-medium text-gray-700 mb-1 block">
                                         Price
                                       </Label>
                                       <Input
@@ -2556,7 +1941,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                       />
                                     </div>
                                     <div>
-                                      <Label className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1 flex items-center justify-center gap-1">
+                                      <Label className="text-xs font-medium text-gray-700 mb-1 flex items-center justify-center gap-1">
                                         <button
                                           type="button"
                                           onClick={() => setShowCost((prev) => !prev)}
@@ -2567,11 +1952,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                           {showCost ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
                                         </button>
                                       </Label>
-                                      <div
-                                        className={`transition-all duration-150 ${
-                                          showCost ? "" : "blur-sm focus-within:blur-none active:blur-none"
-                                        }`}
-                                      >
+                                      {showCost ? (
                                         <Input
                                           type="number"
                                           min="0"
@@ -2584,13 +1965,30 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                           }
                                           className="text-center h-8 text-sm"
                                         />
-                                      </div>
+                                      ) : (
+                                        <div
+                                          className="relative group"
+                                          title={`${product.cost || 0}`}
+                                        >
+                                          <Input
+                                            type="number"
+                                            min="0"
+                                            step="0.01"
+                                            readOnly
+                                            value={product.cost || 0}
+                                            className="text-center h-8 text-sm text-transparent group-hover:text-gray-900 group-focus-within:text-gray-900 group-active:text-gray-900 transition-colors"
+                                          />
+                                          <span className="absolute inset-0 flex items-center justify-center text-gray-500 tracking-widest pointer-events-none group-hover:opacity-0 group-focus-within:opacity-0 group-active:opacity-0 transition-opacity">
+                                            ****
+                                          </span>
+                                        </div>
+                                      )}
                                     </div>
                                   </div>
 
                                   {/* Total and Delete */}
                                   <div className="flex items-center justify-between">
-                                    <div className="text-sm font-medium text-gray-900 dark:text-gray-200">
+                                    <div className="text-sm font-medium text-gray-900">
                                       Total: {deviceCurrencyState} {product.total.toFixed(2)}
                                     </div>
                                     <Button
@@ -2599,7 +1997,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                       size="sm"
                                       onClick={() => removeProductRow(product.id)}
                                       disabled={products.length === 1}
-                                      className="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                                      className="text-red-500 hover:text-red-700"
                                     >
                                       <Trash2 className="h-4 w-4 mr-1" />
                                       Remove
@@ -2615,13 +2013,13 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                         
 
                         {/* Sale details section */}
-                        <div className="w-full lg:w-[30%] flex flex-col bg-white dark:bg-gray-800 min-h-0">
-                          <div className="p-3 border-b border-gray-200 dark:border-gray-700 overflow-y-auto flex-1">
+                        <div className="w-full lg:w-[30%] flex flex-col bg-white min-h-0">
+                          <div className="p-3 border-b border-gray-200 overflow-y-auto flex-1">
                             <div className="space-y-3">
                               {/* Customer */}
                               <div className="space-y-1">
-                                <Label className="text-xs font-medium flex items-center text-gray-900 dark:text-gray-200">
-                                  <User className="h-3 w-3 mr-1 text-blue-500 dark:text-blue-400" />
+                                <Label className="text-xs font-medium flex items-center text-gray-900">
+                                  <User className="h-3 w-3 mr-1 text-blue-500" />
                                   Customer
                                 </Label>
                                 <CustomerSelectSimple
@@ -2638,12 +2036,12 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
 
                               {/* Status */}
                               <div className="space-y-1">
-                                <Label htmlFor="status" className="text-xs font-medium text-gray-900 dark:text-gray-200">
+                                <Label htmlFor="status" className="text-xs font-medium text-gray-900">
                                   Status
                                 </Label>
                                 <select
                                   id="status"
-                                  className="flex h-8 w-full items-center justify-between rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1 text-xs text-gray-900 dark:text-gray-100"
+                                  className="flex h-8 w-full items-center justify-between rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-900"
                                   value={status}
                                   onChange={(e) => setStatus(e.target.value)}
                                 >
@@ -2657,22 +2055,22 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                               {/* Staff and Date - responsive layout */}
                               <div className="flex flex-col sm:flex-row gap-2">
                                 <div className="flex flex-col space-y-1 flex-1">
-                                  <Label className="text-xs font-medium flex items-center text-gray-900 dark:text-gray-200">
-                                    <Users className="h-3 w-3 mr-1 text-green-500 dark:text-green-400" />
+                                  <Label className="text-xs font-medium flex items-center text-gray-900">
+                                    <Users className="h-3 w-3 mr-1 text-green-500" />
                                     Staff *
                                   </Label>
-                                  <div className="h-8 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 text-xs flex items-center text-gray-700 dark:text-gray-200">
+                                  <div className="h-8 rounded-md border border-gray-300 bg-white px-2 text-xs flex items-center text-gray-700">
                                     {activeStaff?.name || "Authenticate staff from dashboard header"}
                                   </div>
                                 </div>
 
                                 <div className="flex flex-col space-y-1 flex-1">
-                                  <Label className="text-xs font-medium flex items-center text-gray-900 dark:text-gray-200">
-                                    <Calendar className="h-3 w-3 mr-1 text-blue-500 dark:text-blue-400" />
+                                  <Label className="text-xs font-medium flex items-center text-gray-900">
+                                    <Calendar className="h-3 w-3 mr-1 text-blue-500" />
                                     Date
                                   </Label>
-                                  <div className="[&_button]:text-gray-900 [&_button]:dark:text-gray-100 [&_button]:bg-white [&_button]:dark:bg-gray-700 [&_button]:border-gray-300 [&_button]:dark:border-gray-600">
-                                    <div className="dark:text-white">
+                                  <div className="[&_button]:text-gray-900 [&_button]:[&_button]:bg-white [&_button]:[&_button]:border-gray-300 [&_button]:">
+                                    <div className="">
                                       <DatePickerField date={date} onDateChange={setDate} />
                                     </div>
                                   </div>
@@ -2684,7 +2082,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                 <div className="space-y-1">
                                   <Label
                                     htmlFor="received_amount"
-                                    className="text-xs font-medium text-gray-900 dark:text-gray-200"
+                                    className="text-xs font-medium text-gray-900"
                                   >
                                     Received Amount
                                   </Label>
@@ -2696,10 +2094,10 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                     step="0.01"
                                     value={receivedAmount}
                                     onChange={(e) => setReceivedAmount(Number.parseFloat(e.target.value) || 0)}
-                                    className="h-8 text-xs bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100"
+                                    className="h-8 text-xs bg-white border-gray-300 text-gray-900"
                                     placeholder="0.00"
                                   />
-                                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                                  <p className="text-xs text-gray-500">
                                     Remaining: {deviceCurrencyState} {(totalAmount - receivedAmount).toFixed(2)}
                                   </p>
                                 </div>
@@ -2708,8 +2106,8 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                               {/* Payment Method for Completed - responsive grid */}
                               {status === "Completed" && (
                                 <div className="space-y-1">
-                                  <Label className="text-xs font-medium flex items-center text-gray-900 dark:text-gray-200">
-                                    <CreditCard className="h-3 w-3 mr-1 text-blue-500 dark:text-blue-400" />
+                                  <Label className="text-xs font-medium flex items-center text-gray-900">
+                                    <CreditCard className="h-3 w-3 mr-1 text-blue-500" />
                                     Payment Method
                                   </Label>
                                   <RadioGroup
@@ -2717,23 +2115,23 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                     onValueChange={setPaymentMethod}
                                     className="grid grid-cols-1 sm:grid-cols-3 gap-1"
                                   >
-                                    <div className="flex items-center space-x-1 bg-gray-50 dark:bg-gray-700 p-1 rounded-md border border-gray-200 dark:border-gray-600">
+                                    <div className="flex items-center space-x-1 bg-gray-50 p-1 rounded-md border border-gray-200">
                                       <RadioGroupItem value="Cash" id="cash" className="h-3 w-3" />
-                                      <Label htmlFor="cash" className="cursor-pointer text-xs text-gray-900 dark:text-gray-200">
+                                      <Label htmlFor="cash" className="cursor-pointer text-xs text-gray-900">
                                         Cash
                                       </Label>
                                     </div>
-                                    <div className="flex items-center space-x-1 bg-gray-50 dark:bg-gray-700 p-1 rounded-md border border-gray-200 dark:border-gray-600">
+                                    <div className="flex items-center space-x-1 bg-gray-50 p-1 rounded-md border border-gray-200">
                                       <RadioGroupItem value="Card" id="card" className="h-3 w-3" />
-                                      <Label htmlFor="card" className="cursor-pointer text-xs text-gray-900 dark:text-gray-200">
+                                      <Label htmlFor="card" className="cursor-pointer text-xs text-gray-900">
                                         Card
                                       </Label>
                                     </div>
-                                    <div className="flex items-center space-x-1 bg-gray-50 dark:bg-gray-700 p-1 rounded-md border border-gray-200 dark:border-gray-600">
+                                    <div className="flex items-center space-x-1 bg-gray-50 p-1 rounded-md border border-gray-200">
                                       <RadioGroupItem value="Online" id="online" className="h-3 w-3" />
                                       <Label
                                         htmlFor="online"
-                                        className="cursor-pointer text-xs text-gray-900 dark:text-gray-200"
+                                        className="cursor-pointer text-xs text-gray-900"
                                       >
                                         Online
                                       </Label>
@@ -2741,22 +2139,31 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                   </RadioGroup>
                                 </div>
                               )}
+
+                              <SaleShippingSection
+                                deviceId={deviceId}
+                                value={shipping}
+                                onChange={setShipping}
+                                customerAddress={customerAddress}
+                                currency={deviceCurrencyState}
+                                className="mt-2"
+                              />
                             </div>
                           </div>
 
                           {/* Sale summary */}
-                          <div className="p-3 flex flex-col border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
-                            <div className="bg-white dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600 shadow-sm flex flex-col">
+                          <div className="p-3 flex flex-col border-t border-gray-200 bg-gray-50">
+                            <div className="bg-white rounded-lg border border-gray-200 shadow-sm flex flex-col">
                               <div className="p-3 space-y-2">
                                 <div className="flex justify-between items-center py-1">
-                                  <span className="font-medium text-xs text-gray-900 dark:text-gray-200">Subtotal:</span>
-                                  <span className="text-sm text-gray-900 dark:text-gray-100">
+                                  <span className="font-medium text-xs text-gray-900">Subtotal:</span>
+                                  <span className="text-sm text-gray-900">
                                     {deviceCurrencyState} {(typeof subtotal === "number" ? subtotal : 0).toFixed(2)}
                                   </span>
                                 </div>
 
-                                <div className="flex justify-between items-center py-1 border-t border-gray-200 dark:border-gray-600">
-                                  <span className="font-medium text-xs text-gray-900 dark:text-gray-200">Discount:</span>
+                                <div className="flex justify-between items-center py-1 border-t border-gray-200">
+                                  <span className="font-medium text-xs text-gray-900">Discount:</span>
                                   <div className="w-20">
                                     <Input
                                       type="number"
@@ -2764,14 +2171,37 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                       step="0.01"
                                       value={discountAmount}
                                       onChange={(e) => setDiscountAmount(Number.parseFloat(e.target.value) || 0)}
-                                      className="text-right h-7 text-xs bg-white dark:bg-gray-600 border-gray-300 dark:border-gray-500 text-gray-900 dark:text-gray-100"
+                                      className="text-right h-7 text-xs bg-white border-gray-300 text-gray-900"
                                     />
                                   </div>
                                 </div>
 
-                                <div className="flex justify-between items-center py-2 border-t border-gray-200 dark:border-gray-600 bg-blue-50 dark:bg-blue-900/30 p-2 rounded-md">
-                                  <span className="font-bold text-blue-700 dark:text-blue-300 text-sm">Total:</span>
-                                  <div className="font-bold text-blue-700 dark:text-blue-300 text-lg">
+                                {shipping.fulfillmentType === "ship" &&
+                                Number(shipping.courierPaidExtra) > 0 ? (
+                                  <div className="flex justify-between items-center py-1 border-t border-gray-200">
+                                    <span className="font-medium text-xs text-gray-900">Courier charge:</span>
+                                    <span className="text-sm text-emerald-700">
+                                      + {deviceCurrencyState}{" "}
+                                      {Number(shipping.courierPaidExtra || 0).toFixed(2)}
+                                    </span>
+                                  </div>
+                                ) : null}
+
+                                {shipping.fulfillmentType === "ship" &&
+                                (Number(shipping.expenseCourier) > 0 ||
+                                  Number(shipping.expensePacking) > 0) ? (
+                                  <div className="rounded-md border border-amber-100 bg-amber-50/60 px-2 py-1.5 text-[11px] text-amber-800">
+                                    Shipping costs (expense): courier{" "}
+                                    {deviceCurrencyState} {Number(shipping.expenseCourier || 0).toFixed(2)}
+                                    {" · "}
+                                    packing {deviceCurrencyState}{" "}
+                                    {Number(shipping.expensePacking || 0).toFixed(2)}
+                                  </div>
+                                ) : null}
+
+                                <div className="flex justify-between items-center py-2 border-t border-gray-200 bg-blue-50 p-2 rounded-md">
+                                  <span className="font-bold text-blue-700 text-sm">Total:</span>
+                                  <div className="font-bold text-blue-700 text-lg">
                                     {deviceCurrencyState} {(typeof totalAmount === "number" ? totalAmount : 0).toFixed(2)}
                                   </div>
                                 </div>
@@ -2796,8 +2226,8 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                 )}
                               </Button>
 
-                              <div className="mt-2 flex items-center justify-between rounded-md border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 px-2 py-1">
-                                <label htmlFor="auto-print" className="text-xs text-gray-700 dark:text-gray-300">
+                              <div className="mt-2 flex items-center justify-between rounded-md border border-gray-200 bg-gray-50 px-2 py-1">
+                                <label htmlFor="auto-print" className="text-xs text-gray-700">
                                   Auto‑print receipt
                                 </label>
                                 <input
@@ -2820,364 +2250,15 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                   </CardContent>
                 </Card>
               </div>
-              )}
-
-              {/* Right side - Summary and Sales List */}
-              {mode !== "entry" && (
-              <div className={mode === "info" ? "w-full flex flex-col space-y-3 min-h-0" : "w-full xl:w-1/4 flex flex-col space-y-3 min-h-0"}>
-                {/* Summary Cards - responsive grid */}
-                <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-3 gap-2">
-                  <Card className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 shadow-sm">
-                    <CardContent className="p-2">
-                      <div className="text-center">
-                        <div className="text-sm font-bold text-gray-900 dark:text-gray-100">
-                          {privacyMode
-                            ? getPrivacyValue()
-                            : formatCurrency(filteredSales.reduce((sum, sale) => sum + Number(sale.total_amount), 0))}
-                        </div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400">Total Sales</div>
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  <Card className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 shadow-sm">
-                    <CardContent className="p-2">
-                      <div className="text-center">
-                        <div className="text-sm font-bold text-green-600 dark:text-green-400">
-                          {privacyMode
-                            ? getPrivacyValue()
-                            : formatCurrency(
-                                filteredSales.reduce((sum, sale) => {
-                                  if (sale.status === "Credit") {
-                                    return sum + Number(sale.received_amount || 0)
-                                  } else if (sale.status === "Completed") {
-                                    return sum + Number(sale.total_amount)
-                                  }
-                                  return sum
-                                }, 0),
-                              )}
-                        </div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400">Received</div>
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  <Card className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 shadow-sm">
-                    <CardContent className="p-2">
-                      <div className="text-center">
-                        <div className="text-sm font-bold text-orange-600 dark:text-orange-400">
-                          {privacyMode
-                            ? getPrivacyValue()
-                            : formatCurrency(
-                                filteredSales.reduce((sum, sale) => {
-                                  if (sale.status === "Credit") {
-                                    return sum + getRemainingAmount(sale)
-                                  }
-                                  return sum
-                                }, 0),
-                              )}
-                        </div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400">Remaining</div>
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  <Card className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 shadow-sm">
-                    <CardContent className="p-2">
-                      <div className="text-center">
-                        <div className="text-sm font-bold text-blue-600 dark:text-blue-400">
-                          {privacyMode
-                            ? getPrivacyValue()
-                            : formatCurrency(
-                                filteredSales.reduce((sum, sale) => {
-                                  // Calculate profit as total - cost (assuming cost is available in sale data)
-                                  const saleProfit = Number(sale.total_amount) - (Number(sale.total_cost) || 0)
-                                  return sum + saleProfit
-                                }, 0),
-                              )}
-                        </div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400">Profit</div>
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  {!hideCogs && (
-                  <Card className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 shadow-sm">
-                    <CardContent className="p-2">
-                      <div className="text-center">
-                        <div className="text-sm font-bold text-gray-700 dark:text-gray-300">
-                          {privacyMode
-                            ? getPrivacyValue()
-                            : formatCurrency(
-                                filteredSales.reduce((sum, sale) => {
-                                  // Calculate COGS (Cost of Goods Sold)
-                                  return sum + (Number(sale.total_cost) || 0)
-                                }, 0),
-                              )}
-                        </div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center justify-center gap-1">
-                          <Settings className="h-3 w-3" />
-                          COGS
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                  )}
-
-                  <Card className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 shadow-sm">
-                    <CardContent className="p-2">
-                      <div className="text-center">
-                        <Button
-                          onClick={() => setPrivacyMode(!privacyMode)}
-                          variant="ghost"
-                          size="sm"
-                          className="w-full h-full flex flex-col items-center justify-center gap-1 hover:bg-gray-50 dark:hover:bg-gray-700"
-                        >
-                          {privacyMode ? (
-                            <EyeOff className="h-4 w-4 text-gray-600 dark:text-gray-400" />
-                          ) : (
-                            <Eye className="h-4 w-4 text-gray-600 dark:text-gray-400" />
-                          )}
-                          <div className="text-xs text-gray-500 dark:text-gray-400">Privacy</div>
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </div>
-
-                {/* Search and Controls */}
-                <Card className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 shadow-sm">
-                  <CardContent className="p-2">
-                    <div className="space-y-2">
-                      <div className="relative">
-                        <Search className="absolute left-2.5 top-2.5 h-3 w-3 text-gray-400" />
-                        <Input
-                          aria-label="Search sales"
-                          type="search"
-                          placeholder="Search sales..."
-                          className="pl-7 h-7 text-xs bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400"
-                          value={searchTerm}
-                          onChange={(e) => dispatch(setSearchTerm(e.target.value))}
-                        />
-                      </div>
-
-                      {/* Control buttons - responsive layout */}
-                      <div className="flex flex-col sm:flex-row xl:flex-col gap-1">
-                        <div className="flex gap-1">
-                          <Button
-                            onClick={handleForcedRefresh}
-                            variant="outline"
-                            size="sm"
-                            className="flex-1 text-xs bg-transparent border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 h-7"
-                            disabled={isRefreshing || isLoading}
-                          >
-                            <RefreshCw className={`h-3 w-3 mr-1 ${isRefreshing || isLoading ? "animate-spin" : ""}`} />
-                            <span className="hidden sm:inline xl:inline">Refresh</span>
-                          </Button>
-
-                          <Button
-                            onClick={handleStatusFilter}
-                            variant="outline"
-                            size="sm"
-                            className={`flex-1 text-xs h-7 hover:bg-gray-50 dark:hover:bg-gray-700 bg-transparent ${
-                              statusFilter !== "all"
-                                ? "border-blue-500 dark:border-blue-400 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400"
-                                : "border-gray-300 dark:border-gray-600"
-                            }`}
-                          >
-                            <Filter className="h-3 w-3 mr-1" />
-                            <span className="hidden sm:inline xl:inline">
-                              {statusFilter === "all"
-                                ? "All"
-                                : statusFilter?.charAt(0).toUpperCase() + statusFilter?.slice(1)}
-                            </span>
-                          </Button>
-                        </div>
-
-                        {/* Quick date filters - responsive layout */}
-                        <div className="flex gap-1">
-                          <Button
-                            onClick={handleTodayFilter}
-                            variant="outline"
-                            size="sm"
-                            className={`flex-1 text-xs h-6 hover:bg-gray-50 dark:hover:bg-gray-700 bg-transparent ${
-                              isTodayFilterActive()
-                                ? "border-green-500 dark:border-green-400 bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400"
-                                : "border-gray-300 dark:border-gray-600"
-                            }`}
-                          >
-                            Today
-                          </Button>
-                          <Button
-                            onClick={handleCustomDateRange}
-                            variant="outline"
-                            size="sm"
-                            className={`flex-1 text-xs h-6 hover:bg-gray-50 dark:hover:bg-gray-700 bg-transparent ${
-                              isCustomDateRangeActive()
-                                ? "border-blue-500 dark:border-blue-400 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300"
-                                : "border-gray-300 dark:border-gray-600"
-                            }`}
-                          >
-                            <CalendarDays className="h-3 w-3 mr-1" />
-                            <span className="hidden sm:inline xl:inline">
-                              {isCustomDateRangeActive() ? getCustomDateRangeText() : "Custom"}
-                            </span>
-                          </Button>
-                          <Button
-                            onClick={handlePaymentMethodFilter}
-                            variant="outline"
-                            size="sm"
-                            className={`flex-1 text-xs h-6 hover:bg-gray-50 dark:hover:bg-gray-700 bg-transparent ${
-                              paymentMethodFilter !== "all"
-                                ? "border-orange-500 dark:border-orange-400 bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400"
-                                : "border-gray-300 dark:border-gray-600"
-                            }`}
-                          >
-                            <span className="hidden sm:inline xl:inline">
-                              {paymentMethodFilter === "all"
-                                ? "All Pay"
-                                : paymentMethodFilter?.charAt(0).toUpperCase() + paymentMethodFilter?.slice(1)}
-                            </span>
-                            <span className="sm:hidden xl:hidden">Pay</span>
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                
-
-                {/* Sales List - responsive height */}
-                <Card className="flex-1 overflow-hidden bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 shadow-sm min-h-[300px] xl:min-h-0">
-                  <CardContent className="p-0 h-full flex flex-col">
-                    {/* Fixed Header */}
-                    <div className="p-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex-shrink-0">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-medium text-gray-900 dark:text-gray-200">
-                          {filteredSales.length} {filteredSales.length === 1 ? "Sale" : "Sales"}
-                        </span>
-                        {lastUpdated && (
-                          <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-                            <span className="hidden sm:inline">Updated: {format(new Date(lastUpdated), "HH:mm")}</span>
-                            {(isRefreshing || isSilentRefreshing) && <Loader2 className="h-3 w-3 animate-spin" />}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Scrollable Content */}
-                    <div className="flex-1 overflow-y-auto">
-                      {isLoading && sales.length === 0 ? (
-                        <div className="p-3">
-                          <SalesTableSkeleton />
-                        </div>
-                      ) : error ? (
-                        <div className="text-center py-4 text-red-500 dark:text-red-400 text-xs p-3">
-                          <div className="flex items-center justify-center gap-1">
-                            <AlertCircle className="h-4 w-4" />
-                            <span>{error}</span>
-                          </div>
-                        </div>
-                      ) : filteredSales.length === 0 ? (
-                        <div className="text-center py-4 text-gray-500 dark:text-gray-400 text-xs p-3">
-                          {hasActiveFilters ? "No sales found matching your filters" : "No sales found"}
-                        </div>
-                      ) : (
-                        <div className="p-2">
-                          {paginatedSales.map((sale, index) => (
-                            <SaleCard key={sale.id} sale={sale} index={index} />
-                          ))}
-                          {/* Pagination controls */}
-                          {totalPages > 1 && (
-                            <nav aria-label="Sales pagination" className="flex justify-center mt-4 gap-2">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                aria-label="Previous page"
-                                className="h-8 w-8 bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700"
-                                disabled={currentPage === 1}
-                                onClick={() => setCurrentPage(currentPage - 1)}
-                              >
-                                {"<"}
-                              </Button>
-                              {Array.from({ length: totalPages }).map((_, i) => (
-                                <Button
-                                  key={i}
-                                  variant={currentPage === i + 1 ? "default" : "outline"}
-                                  size="sm"
-                                  aria-label={`Go to page ${i + 1}`}
-                                  className={`h-8 w-8 ${
-                                    currentPage === i + 1
-                                      ? "bg-blue-600 hover:bg-blue-700 text-white border-blue-600"
-                                      : "bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700"
-                                  }`}
-                                  onClick={() => setCurrentPage(i + 1)}
-                                >
-                                  {i + 1}
-                                </Button>
-                              ))}
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                aria-label="Next page"
-                                className="h-8 w-8 bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700"
-                                disabled={currentPage === totalPages}
-                                onClick={() => setCurrentPage(currentPage + 1)}
-                              >
-                                {">"}
-                              </Button>
-                            </nav>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
-              )}
             </div>
         </div>
       </div>
+    </div>
+  )
 
-      {/* Date Range Modal */}
-      <Dialog open={isDateRangeModalOpen} onOpenChange={setIsDateRangeModalOpen}>
-        <DialogContent className="max-w-md bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700">
-          <DialogHeader>
-            <DialogTitle className="text-gray-900 dark:text-gray-100">Select Date Range</DialogTitle>
-          </DialogHeader>
-          <div className="py-4 space-y-4">
-            <div className="space-y-2">
-              <Label className="text-sm font-medium text-gray-900 dark:text-gray-200">From Date</Label>
-              <div className="[&_button]:text-gray-900 [&_button]:dark:text-gray-100 [&_button]:bg-white [&_button]:dark:bg-gray-700 [&_button]:border-gray-300 [&_button]:dark:border-gray-600">
-                <DatePickerField date={tempDateFrom} onDateChange={setTempDateFrom} />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label className="text-sm font-medium text-gray-900 dark:text-gray-200">To Date</Label>
-              <div className="[&_button]:text-gray-900 [&_button]:dark:text-gray-100 [&_button]:bg-white [&_button]:dark:bg-gray-700 [&_button]:border-gray-300 [&_button]:dark:border-gray-600">
-                <DatePickerField date={tempDateTo} onDateChange={setTempDateTo} />
-              </div>
-            </div>
-            <div className="flex justify-end gap-2 mt-6">
-              <Button
-                variant="outline"
-                onClick={() => setIsDateRangeModalOpen(false)}
-                className="border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300"
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={applyCustomDateRange}
-                className="bg-blue-600 hover:bg-blue-700 text-white"
-                disabled={!tempDateFrom || !tempDateTo}
-              >
-                Apply Range
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+  return (
+    <div className="min-h-[calc(100vh-100px)] bg-background p-2 sm:p-3">
+      <SalesViewFlip activeView={activeView} listView={salesListView} entryView={salesEntryView} />
 
       {/* Modals */}
       <NewCustomerModal
@@ -3224,20 +2305,16 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
           onOpenChange={(open) => {
             setShowPrintConfirm(open)
             if (!open) {
-              // Reset form and refresh sales when dialog closes (by X or outside click)
-              resetAddSaleForm()
-              setFormAlert(null)
-              initializationRef.current.hasInitialized = false
-              fetchSalesFromAPI(false)
+              finalizeDraftAfterSave()
             }
           }}
         >
-          <DialogContent className="max-w-sm bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700">
+          <DialogContent className="max-w-sm bg-white border-gray-200">
             <DialogHeader>
-              <DialogTitle className="text-gray-900 dark:text-gray-100">Print Receipt?</DialogTitle>
+              <DialogTitle className="text-gray-900">Print Receipt?</DialogTitle>
             </DialogHeader>
             <div className="py-4 space-y-4">
-              <div className="text-sm text-gray-700 dark:text-gray-300">
+              <div className="text-sm text-gray-700">
                 Sale completed successfully. Would you like to print the receipt?
               </div>
               <div className="flex justify-end gap-2">
@@ -3245,12 +2322,9 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                   variant="outline"
                   onClick={() => {
                     setShowPrintConfirm(false)
-                    resetAddSaleForm()
-                    setFormAlert(null)
-                    initializationRef.current.hasInitialized = false
-                    fetchSalesFromAPI(false)
+                    finalizeDraftAfterSave()
                   }}
-                  className="border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300"
+                  className="border-gray-300 text-gray-700"
                 >
                   Skip Print
                 </Button>
@@ -3258,10 +2332,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                   onClick={() => {
                     printSalesReceipt(lastSaleResult.sale, lastSaleResult.items)
                     setShowPrintConfirm(false)
-                    resetAddSaleForm()
-                    setFormAlert(null)
-                    initializationRef.current.hasInitialized = false
-                    fetchSalesFromAPI(false)
+                    finalizeDraftAfterSave()
                     if (rememberChoice) {
                       setAutoPrint(true)
                       localStorage.setItem("autoPrintReceipt", "true")
@@ -3280,7 +2351,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                   onChange={(e) => setRememberChoice(e.target.checked)}
                   className="mr-2"
                 />
-                <Label htmlFor="remember-choice" className="text-xs text-gray-700 dark:text-gray-300">
+                <Label htmlFor="remember-choice" className="text-xs text-gray-700">
                   Remember my choice (enable auto-print)
                 </Label>
               </div>
@@ -3288,6 +2359,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
           </DialogContent>
         </Dialog>
       )}
+      {ConfirmDialog}
     </div>
   )
 }

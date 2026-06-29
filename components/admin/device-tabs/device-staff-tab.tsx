@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
 import { useToast } from "@/components/ui/use-toast"
+import { notifyError, notifySuccess, notifyWarning } from "@/lib/notifications"
 import { addStaff, deleteStaff, getDeviceStaff, updateStaff, updateStaffStatus } from "@/app/actions/staff-actions"
 import {
   ADMIN_DIALOG_SCROLL_CLASS,
@@ -132,11 +133,7 @@ export default function DeviceStaffTab({ deviceId }: DeviceStaffTabProps) {
       }
       setStaff(result.data as StaffMember[])
     } catch (error) {
-      toast({
-        title: "Error",
-        description: error instanceof Error ? error.message : "Failed to load staff",
-        variant: "destructive",
-      })
+      notifyError(toast, error instanceof Error ? error.message : "Failed to load staff")
     } finally {
       setIsLoading(false)
     }
@@ -202,16 +199,13 @@ export default function DeviceStaffTab({ deviceId }: DeviceStaffTabProps) {
         throw new Error(result.message || "Failed to update staff status")
       }
       setStaff(result.allStaff as StaffMember[])
-      toast({
-        title: member.is_active ? "Staff deactivated" : "Staff activated",
-        description: result.message,
-      })
+      notifySuccess(
+        toast,
+        result.message || (member.is_active ? "Staff member deactivated" : "Staff member activated"),
+        member.is_active ? "Staff deactivated" : "Staff activated",
+      )
     } catch (error) {
-      toast({
-        title: "Error",
-        description: error instanceof Error ? error.message : "Failed to update staff status",
-        variant: "destructive",
-      })
+      notifyError(toast, error instanceof Error ? error.message : "Failed to update staff status")
     }
   }
 
@@ -221,33 +215,21 @@ export default function DeviceStaffTab({ deviceId }: DeviceStaffTabProps) {
       if (!result.success) {
         throw new Error(result.message || "Failed to delete staff")
       }
-      toast({ title: "Deleted", description: result.message || "Staff member deleted" })
+      notifySuccess(toast, result.message || "Staff member deleted" , "Deleted")
       await loadStaff()
     } catch (error) {
-      toast({
-        title: "Error",
-        description: error instanceof Error ? error.message : "Failed to delete staff",
-        variant: "destructive",
-      })
+      notifyError(toast, error instanceof Error ? error.message : "Failed to delete staff")
     }
   }
 
   const handleSave = async () => {
     if (!form.name.trim() || !form.phone.trim() || !form.position.trim() || !form.salary || !form.salaryDate || !form.joinedOn) {
-      toast({
-        title: "Missing fields",
-        description: "Name, phone, position, salary, salary date, and joined date are required.",
-        variant: "destructive",
-      })
+      notifyError(toast, "Name, phone, position, salary, salary date, and joined date are required.", "Missing fields")
       return
     }
 
     if (!editingStaff && !form.password.trim()) {
-      toast({
-        title: "Password required",
-        description: "Set a password for this staff member.",
-        variant: "destructive",
-      })
+      notifyError(toast, "Set a password for this staff member.", "Password required")
       return
     }
 
@@ -301,18 +283,13 @@ export default function DeviceStaffTab({ deviceId }: DeviceStaffTabProps) {
       setEditingStaff(null)
       setForm(emptyForm)
       await loadStaff()
-      toast({
-        title: wasEditing ? "Staff updated" : "Staff created",
-        description: wasEditing
-          ? "Staff details were updated successfully."
-          : "Staff member created with login password.",
-      })
+      notifySuccess(
+        toast,
+        wasEditing ? "Staff details were updated successfully." : "Staff member created with login password.",
+        wasEditing ? "Staff updated" : "Staff created",
+      )
     } catch (error) {
-      toast({
-        title: "Error",
-        description: error instanceof Error ? error.message : "Failed to save staff member",
-        variant: "destructive",
-      })
+      notifyError(toast, error instanceof Error ? error.message : "Failed to save staff member")
     } finally {
       setIsSaving(false)
     }

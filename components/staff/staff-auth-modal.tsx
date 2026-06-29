@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/components/ui/use-toast"
+import { notifyError, notifySuccess, notifyWarning } from "@/lib/notifications"
 import { useAppDispatch } from "@/store/hooks"
 import { activateStaff, setStaff } from "@/store/slices/staffSlice"
 import { authenticateStaff, getStaffForAuthentication } from "@/app/actions/staff-actions"
@@ -60,11 +61,7 @@ export default function StaffAuthModal({ deviceId, isOpen, onAuthenticated, onLo
         const firstActive = loadedStaff.find((member) => member.is_active)
         setSelectedStaffId(firstActive?.id || loadedStaff[0]?.id || null)
       } catch (error) {
-        toast({
-          title: "Unable to load staff",
-          description: error instanceof Error ? error.message : "Failed to load staff list",
-          variant: "destructive",
-        })
+        notifyError(toast, error instanceof Error ? error.message : "Failed to load staff list", "Unable to load staff")
       } finally {
         setIsLoading(false)
       }
@@ -98,7 +95,7 @@ export default function StaffAuthModal({ deviceId, isOpen, onAuthenticated, onLo
 
       setPassword("")
       setAuthError(null)
-      toast({ title: "Staff unlocked", description: `${selectedStaff?.name || "Staff"} session is active.` })
+      notifySuccess(toast, `${selectedStaff?.name || "Staff"} session is active.`, "Staff unlocked")
       onAuthenticated(selectedStaffId)
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : "Invalid staff credentials")
@@ -174,7 +171,7 @@ export default function StaffAuthModal({ deviceId, isOpen, onAuthenticated, onLo
                   }
                 }}
               />
-              {authError ? <p className="text-sm text-red-600 dark:text-red-400">{authError}</p> : null}
+              {authError ? <p className="text-sm text-red-600">{authError}</p> : null}
             </div>
 
             <div className="grid grid-cols-2 gap-2">
@@ -188,7 +185,7 @@ export default function StaffAuthModal({ deviceId, isOpen, onAuthenticated, onLo
               </Button>
               <Button
                 variant="outline"
-                className="w-full border-red-300 text-red-700 hover:bg-red-50 dark:border-red-700 dark:text-red-300 dark:hover:bg-red-900/20"
+                className="w-full border-red-300 text-red-700 hover:bg-red-50"
                 onClick={onLogout}
               >
                 Logout

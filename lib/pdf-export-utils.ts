@@ -2,7 +2,7 @@
 
 import { format } from "date-fns"
 import { formatCurrency as formatCurrencyOriginal } from "./utils"
-import { BRAND_NAME } from "@/lib/brand"
+import { DEFAULT_PLATFORM_NAME } from "@/lib/brand"
 import { jsPDF } from "jspdf"
 import "jspdf-autotable"
 
@@ -59,7 +59,7 @@ export async function generateDetailedSalePDF(saleData: any) {
   // Add company header
   doc.setFontSize(18)
   doc.setFont("helvetica", "bold")
-  doc.text(BRAND_NAME, 105, 15, { align: "center" })
+  doc.text(DEFAULT_PLATFORM_NAME, 105, 15, { align: "center" })
 
   // Add title
   doc.setFillColor(245, 245, 245)

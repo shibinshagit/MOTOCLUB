@@ -1,7 +1,6 @@
 "use client"
 
 import Image from "next/image"
-import { BRAND_NAME } from "@/lib/brand"
 import { useBranding } from "@/components/branding-provider"
 
 type BrandLogoProps = {
@@ -18,20 +17,22 @@ function BrandTextFallback({
   variant,
   className,
   centered,
+  platformName,
 }: {
   variant: "full" | "icon"
   className?: string
   centered?: boolean
+  platformName: string
 }) {
   const content =
     variant === "icon" ? (
       <div
-        className={`flex h-10 w-10 items-center justify-center rounded-md bg-blue-600 text-sm font-bold text-white ${className || ""}`.trim()}
+        className={`flex h-10 w-10 items-center justify-center rounded-lg bg-violet-600 text-sm font-bold text-white ${className || ""}`.trim()}
       >
-        {BRAND_NAME.charAt(0)}
+        {platformName.charAt(0)}
       </div>
     ) : (
-      <span className={`text-xl font-semibold text-gray-900 ${className || ""}`.trim()}>{BRAND_NAME}</span>
+      <span className={`text-xl font-semibold text-gray-900 ${className || ""}`.trim()}>{platformName}</span>
     )
 
   if (centered) {
@@ -50,7 +51,7 @@ export function BrandLogo({
   priority = false,
   centered = false,
 }: BrandLogoProps) {
-  const { branding, isLoading } = useBranding()
+  const { branding, isLoading, platformName } = useBranding()
   const src = variant === "icon" ? branding.iconUrl || branding.logoUrl : branding.logoUrl || branding.iconUrl
   const w = width ?? (variant === "icon" ? 40 : 220)
   const h = height ?? (variant === "icon" ? 40 : 56)
@@ -65,13 +66,13 @@ export function BrandLogo({
         />
       )
     }
-    return <BrandTextFallback variant={variant} className={className} centered={centered} />
+    return <BrandTextFallback variant={variant} className={className} centered={centered} platformName={platformName} />
   }
 
   const image = (
     <Image
       src={src}
-      alt={`${BRAND_NAME} logo`}
+      alt={`${platformName} logo`}
       width={w}
       height={h}
       className={`${imageClassName} ${centered ? "mx-auto block" : ""} ${className}`.trim()}
