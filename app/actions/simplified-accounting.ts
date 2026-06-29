@@ -169,9 +169,9 @@ export async function recordSaleTransaction(saleData: {
   } catch (error) {
     console.error("Error recording sale transaction:", error)
     console.error("Error details:", {
-      message: error.message,
-      code: error.code,
-      detail: error.detail,
+      message: error instanceof Error ? error.message : String(error),
+      code: (error as { code?: string }).code,
+      detail: (error as { detail?: string }).detail,
       saleData: {
         saleId: saleData.saleId,
         deviceId: saleData.deviceId,
@@ -988,11 +988,11 @@ export async function getFinancialSummary(
     }
 
     const accountsReceivable =
-      receivablesQuery.reduce((sum, r) => sum + Number(r.outstanding_amount), 0) +
-      transferReceivablesQuery.reduce((sum, r) => sum + Number(r.outstanding_amount), 0)
+      receivablesQuery.reduce((sum: number, r: any) => sum + Number(r.outstanding_amount), 0) +
+      transferReceivablesQuery.reduce((sum: number, r: any) => sum + Number(r.outstanding_amount), 0)
     const accountsPayable =
-      payablesQuery.reduce((sum, p) => sum + Number(p.outstanding_amount), 0) +
-      transferPayablesQuery.reduce((sum, p) => sum + Number(p.outstanding_amount), 0)
+      payablesQuery.reduce((sum: number, p: any) => sum + Number(p.outstanding_amount), 0) +
+      transferPayablesQuery.reduce((sum: number, p: any) => sum + Number(p.outstanding_amount), 0)
     const netProfit = totalIncome - totalExpenses
 
     console.log("Financial summary calculated:", {
@@ -1121,11 +1121,11 @@ export async function getFinancialSummary(
   } catch (error) {
     console.error("Error getting financial summary:", error)
     console.error("Error details:", {
-      message: error.message,
-      code: error.code,
+      message: error instanceof Error ? error.message : String(error),
+      code: (error as { code?: string }).code,
       deviceId,
-      dateFrom,
-      dateTo,
+      dateFrom: fromDateStr,
+      dateTo: toDateStr,
     })
     return {
       totalIncome: 0,
@@ -1227,6 +1227,8 @@ export async function getAccountingBalances(deviceId: number, fromDateStr: strin
       openingDebits,
       closingCredits,
       closingDebits,
+      openingReceived: 0,
+      closingReceived: 0,
     }
   } catch (error) {
     console.error("Error getting accounting balances:", error)
@@ -1237,6 +1239,8 @@ export async function getAccountingBalances(deviceId: number, fromDateStr: strin
       openingDebits: 0,
       closingCredits: 0,
       closingDebits: 0,
+      openingReceived: 0,
+      closingReceived: 0,
     }
   }
 }

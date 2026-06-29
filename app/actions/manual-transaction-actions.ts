@@ -52,7 +52,10 @@ export async function getManualTransactionById(transactionId: number) {
         console.log('Found in financial_transactions table:', transaction)
       }
     } catch (error) {
-      console.log('Error fetching from financial_transactions:', error.message)
+      console.log(
+        "Error fetching from financial_transactions:",
+        error instanceof Error ? error.message : error,
+      )
     }
 
     if (!transaction) {
@@ -339,7 +342,10 @@ export async function getManualTransactions(
         `
       }
     } catch (error) {
-      console.log('Error fetching manual transactions:', error.message)
+      console.log(
+        "Error fetching manual transactions:",
+        error instanceof Error ? error.message : error,
+      )
     }
 
     console.log(`Fetched ${transactions.length} manual transactions`)

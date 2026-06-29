@@ -231,7 +231,7 @@ export default function EditManualTransactionModal({
               <SimpleDateInput
                 id="transaction-date"
                 value={transactionDate}
-                onDateChange={setTransactionDate}
+                onDateChange={(date) => date && setTransactionDate(date)}
                 placeholder="Select date"
               />
             </div>

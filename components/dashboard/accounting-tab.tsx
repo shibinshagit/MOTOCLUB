@@ -45,6 +45,8 @@ import {
   setBackgroundLoading,
   selectBalances,
   setBalances,
+  getMoneyFlowDisplay,
+  clearFinancialData,
 } from "@/store/slices/accountingSlice"
 import { useToast } from "@/components/ui/use-toast"
 import { notifyError, notifySuccess } from "@/lib/notifications"
@@ -315,8 +317,9 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
       dispatch(setFinancialData(data))
     } catch (error) {
       console.error("Error loading financial data:", error)
-      if (!background || error.message?.includes("critical")) {
-        notifyError(toast,"Failed to load financial data: " + (error.message || "Unknown error"))
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      if (!background || errorMessage.includes("critical")) {
+        notifyError(toast,"Failed to load financial data: " + (errorMessage || "Unknown error"))
       }
     } finally {
       if (background) {
@@ -350,8 +353,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
   const forceRefreshData = async () => {
     try {
       dispatch(setLoading(true))
-      dispatch(setFinancialData(null))
-      dispatch(setBalances(null))
+      dispatch(clearFinancialData())
       
       await new Promise(resolve => setTimeout(resolve, 100))
       
@@ -804,12 +806,10 @@ const filteredTransactions =
 
     let transactionDate: Date
 
-    if (transaction.date instanceof Date) {
-      transactionDate = transaction.date
-    } else if (typeof transaction.date === "string") {
+    if (typeof transaction.date === "string") {
       transactionDate = parseISO(transaction.date)
     } else {
-      return false
+      transactionDate = new Date(transaction.date as string | number)
     }
 
     if (!isValid(transactionDate)) {
@@ -2507,7 +2507,7 @@ const getEnhancedDescription = (transaction: any) => {
               <SimpleDateInput
                 id="temp-date-from"
                 value={tempDateFrom}
-                onDateChange={setTempDateFrom}
+                onDateChange={(date) => date && setTempDateFrom(date)}
                 placeholder="Start date"
               />
             </div>
@@ -2516,7 +2516,7 @@ const getEnhancedDescription = (transaction: any) => {
               <SimpleDateInput
                 id="temp-date-to"
                 value={tempDateTo}
-                onDateChange={setTempDateTo}
+                onDateChange={(date) => date && setTempDateTo(date)}
                 placeholder="End date"
               />
             </div>
@@ -2607,7 +2607,7 @@ const getEnhancedDescription = (transaction: any) => {
               <SimpleDateInput
                 id="manual-date"
                 value={manualDate}
-                onDateChange={setManualDate}
+                onDateChange={(date) => date && setManualDate(date)}
                 placeholder="Select date"
               />
             </div>
@@ -2652,25 +2652,22 @@ const getEnhancedDescription = (transaction: any) => {
         currency={currency}
         onEdit={handleEditPurchase}
         onDelete={handleDeletePurchase}
-        isDeleting={deletingPurchaseId === viewPurchaseId}
       />
 
       {/* Edit Sale Modal */}
       <EditSaleModal
         isOpen={!!editSaleId}
         onClose={() => setEditSaleId(null)}
-        saleId={editSaleId}
+        saleId={editSaleId!}
         userId={userId}
-        deviceId={deviceId}
         currency={currency}
-        onSaleUpdated={handleSaleUpdated}
       />
 
       {/* Edit Purchase Modal */}
       <EditPurchaseModal
         isOpen={!!editPurchaseId}
         onClose={() => setEditPurchaseId(null)}
-        purchaseId={editPurchaseId}
+        purchaseId={editPurchaseId!}
         userId={userId}
         deviceId={deviceId}
         currency={currency}

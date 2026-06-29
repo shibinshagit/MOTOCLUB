@@ -359,7 +359,7 @@ export async function getSupplierNames(userId: number) {
       ORDER BY name ASC
     `
 
-    const supplierNames = suppliers.map((supplier) => supplier.name)
+    const supplierNames = suppliers.map((supplier: any) => supplier.name)
     return { success: true, data: supplierNames }
   } catch (error) {
     console.error("Get supplier names error:", error)

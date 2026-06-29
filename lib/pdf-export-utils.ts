@@ -177,7 +177,7 @@ export async function generateDetailedSalePDF(saleData: any) {
   doc.autoTable({
     startY: y + 5,
     head: [tableColumns.map((col) => col.header)],
-    body: tableData.map((row) => tableColumns.map((col) => row[col.dataKey])),
+    body: tableData.map((row: Record<string, unknown>) => tableColumns.map((col) => row[col.dataKey])),
     theme: "grid",
     headStyles: { fillColor: [245, 245, 245], textColor: [0, 0, 0], fontStyle: "bold" },
     styles: { fontSize: 9 },
@@ -309,7 +309,7 @@ export async function generateAllSalesPDF(salesData: any[]) {
     })
 
     // For each sale, add a detailed page
-    const currentPage = doc.internal.getNumberOfPages()
+    const currentPage = (doc.internal as { getNumberOfPages?: () => number }).getNumberOfPages?.() ?? doc.internal.pages.length
 
     salesData.forEach((sale, saleIndex) => {
       // Add a new page for each sale

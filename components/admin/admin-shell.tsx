@@ -110,7 +110,7 @@ export default function AdminShell({ children }: AdminShellProps) {
           router.push(`/admin/companies/${result.data.id}`)
         }
       } else {
-        setFormError(result.message)
+        setFormError(result.message ?? "An unexpected error occurred")
       }
     } catch {
       setFormError("An unexpected error occurred")

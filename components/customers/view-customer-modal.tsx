@@ -41,14 +41,14 @@ export default function ViewCustomerModal({ isOpen, onClose, customer }: ViewCus
         setSales(result.data)
 
         // Calculate totals
-        const totalSpentAmount = result.data.reduce((sum, sale) => sum + Number(sale.received_amount || 0), 0)
-        const totalAmountCalculated = result.data.reduce((sum, sale) => sum + Number(sale.total_amount || 0), 0)
-        const totalCreditAmount = result.data.reduce((sum, sale) => {
+        const totalSpentAmount = result.data.reduce((sum: number, sale: any) => sum + Number(sale.received_amount || 0), 0)
+        const totalAmountCalculated = result.data.reduce((sum: number, sale: any) => sum + Number(sale.total_amount || 0), 0)
+        const totalCreditAmount = result.data.reduce((sum: number, sale: any) => {
           const total = Number(sale.total_amount || 0)
           const received = Number(sale.received_amount || 0)
           return sum + Math.max(0, total - received)
         }, 0)
-        const totalBalanceAmount = result.data.reduce((sum, sale) => {
+        const totalBalanceAmount = result.data.reduce((sum: number, sale: any) => {
           const total = Number(sale.total_amount || 0)
           const received = Number(sale.received_amount || 0)
           return sum + (total - received)

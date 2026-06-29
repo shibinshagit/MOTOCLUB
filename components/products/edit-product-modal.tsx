@@ -905,9 +905,9 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
         onClose()
       } else {
         if (result?.field) {
-          setFieldErrors({ [result.field]: result.error || result.message })
+          setFieldErrors({ [result.field]: result.message || "Invalid value" })
         } else {
-          const message = result?.error || result?.message || "Failed to update product. Please try again."
+          const message = result?.message || "Failed to update product. Please try again."
           setError(message)
           notifyError(toast, message)
         }

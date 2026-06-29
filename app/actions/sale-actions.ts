@@ -168,7 +168,7 @@ async function updateProductStock(
     return { success: true, message: "Stock updated successfully" }
   } catch (error) {
     console.error(`Error updating stock for product ${productId}:`, error)
-    return { success: false, message: error.message }
+    return { success: false, message: error instanceof Error ? error.message : String(error) }
   }
 }
 
@@ -214,7 +214,7 @@ async function createStockHistoryEntry(
     return { success: true, message: "Stock history created successfully" }
   } catch (error) {
     console.error(`Error creating stock history for product ${productId}:`, error)
-    return { success: false, message: error.message }
+    return { success: false, message: error instanceof Error ? error.message : String(error) }
   }
 }
 
@@ -240,7 +240,7 @@ async function calculateCOGS(items: any[], saleId?: number) {
         WHERE si.sale_id = ${saleId}
       `
 
-      totalCogs = saleItems.reduce((sum, item) => {
+      totalCogs = saleItems.reduce((sum: number, item: any) => {
         return sum + Number(item.quantity) * Number(item.cost_price)
       }, 0)
     } catch (error) {
@@ -526,7 +526,7 @@ export async function getSaleDetails(saleId: number) {
     })
 
     // Calculate subtotal from items
-    const subtotal = itemsResult.reduce((sum, item) => sum + Number(item.quantity) * Number(item.price), 0)
+    const subtotal = itemsResult.reduce((sum: number, item: any) => sum + Number(item.quantity) * Number(item.price), 0)
 
     const discountValue =
       saleResult[0].discount !== null && saleResult[0].discount !== undefined

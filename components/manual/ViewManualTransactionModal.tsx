@@ -60,7 +60,6 @@ export default function ViewManualTransactionModal({
   currency = "AED",
   deviceId,
   onEdit,
-  onDelete,
   onTransactionDeleted,
 }: ViewManualTransactionModalProps) {
   const [transaction, setTransaction] = useState<ManualTransaction | null>(null)

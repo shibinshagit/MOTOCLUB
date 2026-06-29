@@ -28,7 +28,6 @@ export async function POST(request: Request): Promise<Response> {
     const clientToken = await generateClientTokenFromReadWriteToken({
       token,
       pathname,
-      access: "public",
       addRandomSuffix: true,
       maximumSizeInBytes: type === "video" ? MAX_VIDEO_SIZE_BYTES : MAX_IMAGE_SIZE_BYTES,
       allowedContentTypes: type === "video" ? ["video/*"] : ["image/*"],

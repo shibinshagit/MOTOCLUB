@@ -163,7 +163,7 @@ export default function AdjustStockModal({
 
             <div className="space-y-2">
               <Label htmlFor="type">Adjustment Type</Label>
-              <RadioGroup value={adjustType} onValueChange={setAdjustType} className="flex space-x-4">
+              <RadioGroup value={adjustType} onValueChange={(value) => setAdjustType(value as "increase" | "decrease")} className="flex space-x-4">
                 <div className="flex items-center space-x-2">
                   <RadioGroupItem value="increase" id="increase" />
                   <Label htmlFor="increase" className="cursor-pointer">

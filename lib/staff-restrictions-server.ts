@@ -59,7 +59,7 @@ export function filterProductForStaff<T extends Record<string, unknown>>(
 ): T {
   if (!staff) return product
 
-  const filtered = { ...product }
+  const filtered: Record<string, unknown> = { ...product }
   if (isStaffValueHidden(staff, "cogs")) {
     filtered.wholesale_price = null
     if ("cost" in filtered) filtered.cost = null
@@ -68,7 +68,7 @@ export function filterProductForStaff<T extends Record<string, unknown>>(
     filtered.stock = null
     if ("other_devices_stock" in filtered) filtered.other_devices_stock = null
   }
-  return filtered
+  return filtered as T
 }
 
 export async function filterProductsForStaff<T extends Record<string, unknown>>(
@@ -104,12 +104,12 @@ export function filterFinanceResponseForStaff<T extends Record<string, unknown>>
   staff: StaffSessionContext | null,
 ): T {
   if (!staff || !isStaffValueHidden(staff, "cogs")) return payload
-  const filtered = { ...payload, cogs: 0 }
+  const filtered: Record<string, unknown> = { ...payload, cogs: 0 }
   if (Array.isArray(filtered.data)) {
     filtered.data = (filtered.data as Record<string, unknown>[]).map((row) => ({
       ...row,
       cost: null,
     }))
   }
-  return filtered
+  return filtered as T
 }

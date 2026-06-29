@@ -139,11 +139,11 @@ export default function ProductSelectSimple({
         const broadResult = await getProducts(userId, searchBufferSize * 2, "")
 
         if (broadResult.success && broadResult.data.length > 0) {
-          const filteredProducts = broadResult.data.filter((product) => {
+          const filteredProducts = broadResult.data.filter((product: any) => {
             return (
-              normalize(product.name).includes(searchNorm) ||
-              normalize(product.company_name).includes(searchNorm) ||
-              (product.barcode && normalize(product.barcode).includes(searchNorm))
+              normalize(String(product.name)).includes(searchNorm) ||
+              normalize(String(product.company_name)).includes(searchNorm) ||
+              (product.barcode && normalize(String(product.barcode)).includes(searchNorm))
             )
           })
 
@@ -177,7 +177,7 @@ export default function ProductSelectSimple({
         
         // Also update the parent with the correct product details
         const finalPrice = usePriceType === "wholesale" && product.wholesale_price ? product.wholesale_price : product.price
-        onChange(product.id, product.name, finalPrice, product.wholesale_price, product.stock)
+        onChange(Number(product.id), String(product.name), Number(finalPrice), product.wholesale_price != null ? Number(product.wholesale_price) : undefined, product.stock != null ? Number(product.stock) : undefined)
       }
     } catch (error) {
       console.error("Error fetching selected product:", error)

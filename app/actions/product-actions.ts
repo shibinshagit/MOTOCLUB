@@ -238,7 +238,7 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
       
       // If exact match found, return immediately
       if (products.length > 0) {
-        const mappedProducts = products.map((product) => ({
+        const mappedProducts = products.map((product: any) => ({
           ...product,
           category: product.category_name || product.category || "",
         }))
@@ -420,7 +420,7 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
         FROM product_device_stock
         WHERE device_id = ${userId}
       `
-      stockMap = new Map(deviceStocks.map((row) => [Number(row.product_id), Number(row.stock)]))
+      stockMap = new Map<number, number>(deviceStocks.map((row: any) => [Number(row.product_id), Number(row.stock)]))
 
       const companyDeviceStocks = await sql`
         SELECT pds.product_id, COALESCE(SUM(pds.stock), 0) AS total_stock
@@ -432,12 +432,12 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
         GROUP BY pds.product_id
       `
       companyTotalStockMap = new Map(
-        companyDeviceStocks.map((row) => [Number(row.product_id), Number(row.total_stock)]),
+        companyDeviceStocks.map((row: any) => [Number(row.product_id), Number(row.total_stock)]),
       )
     }
 
     // Map results with device-specific stock
-    const mappedProducts = products.map((product) => {
+    const mappedProducts = products.map((product: any) => {
       const currentDeviceStock = userId ? resolveDeviceStock(product, stockMap) : 0
       const companyTotalStock = userId
         ? Number(companyTotalStockMap.get(product.id) ?? currentDeviceStock)
@@ -1288,7 +1288,7 @@ export async function deleteProduct(id: number) {
     const purchaseItems = await sql`SELECT id FROM purchase_items WHERE product_id = ${id}`
 
     // Check specifically for active sales (not cancelled)
-    const activeSales = saleItems.filter((item) => item.status !== "cancelled")
+    const activeSales = saleItems.filter((item: any) => item.status !== "cancelled")
 
     if (activeSales.length > 0) {
       return {
@@ -1495,7 +1495,7 @@ export async function getProductStockByDevice(productId: number, userId: number)
       ORDER BY d.name ASC
     `
 
-    const data = devices.map((row) => ({
+    const data = devices.map((row: any) => ({
       device_id: Number(row.device_id),
       device_name: row.device_name,
       stock: Number(row.stock || 0),
@@ -1705,10 +1705,10 @@ export async function getUserProducts(userId: number) {
       FROM product_device_stock
       WHERE device_id = ${userId}
     `
-    const stockMap = new Map(deviceStocks.map((row) => [Number(row.product_id), Number(row.stock)]))
+    const stockMap = new Map<number, number>(deviceStocks.map((row: any) => [Number(row.product_id), Number(row.stock)]))
 
     // Map the results to include category and device-specific stock
-    const mappedProducts = products.map((product) => ({
+    const mappedProducts = products.map((product: any) => ({
       ...product,
       stock: resolveDeviceStock(product, stockMap),
       category: product.category_name || product.category || "",

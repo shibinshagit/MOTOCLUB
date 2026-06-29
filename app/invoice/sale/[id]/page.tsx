@@ -40,7 +40,7 @@ export default function SaleInvoicePage() {
         setIsLoading(true)
         const result = await getSaleDetails(Number(params.id))
 
-        if (result.success) {
+        if (result.success && result.data) {
           setSale(result.data.sale)
           setItems(result.data.items)
           setReceivedAmount(Number(result.data.sale.received_amount) || 0)

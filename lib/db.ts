@@ -3,9 +3,9 @@ import "server-only"
 import { neon, neonConfig } from "@neondatabase/serverless"
 
 neonConfig.fetchConnectionCache = true
-neonConfig.fetchTimeout = 30000
+;(neonConfig as unknown as Record<string, unknown>).fetchTimeout = 30000
 neonConfig.webSocketConstructor = undefined
-neonConfig.pipelineFetch = false
+;(neonConfig as unknown as Record<string, unknown>).pipelineFetch = false
 
 function isLocalDatabaseUrl(url: string): boolean {
   try {
@@ -70,7 +70,7 @@ const createSqlClient = () => {
   const sqlFn = useLocalDriver
     ? (() => {
         // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const postgres = require("postgres") as typeof import("postgres").default
+        const postgres = require("postgres") as (url: string, options?: Record<string, unknown>) => any
         return postgres(dbUrl, {
           max: 10,
           idle_timeout: 20,

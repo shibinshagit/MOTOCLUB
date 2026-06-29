@@ -950,7 +950,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
       const result = await getSaleDetails(saleId)
       if (requestId !== editLoadRequestRef.current) return
 
-      if (result.success) {
+      if (result.success && result.data) {
         const { sale, items } = result.data
 
         // Set sale data
@@ -1566,7 +1566,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                     setBarcodeInput(e.target.value)
                                     if (e.target.value.trim() && !isBarcodeProcessing) {
                                       setTimeout(() => {
-                                        handleBarcodeInput(e.target.value)
+                                        handleBarcodeInput((e.target as HTMLInputElement).value)
                                       }, 300)
                                     }
                                   }}
@@ -1574,7 +1574,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                     if (e.key === "Enter") {
                                       e.preventDefault()
                                       if (barcodeInput.trim()) {
-                                        handleBarcodeInput(e.target.value)
+                                        handleBarcodeInput((e.target as HTMLInputElement).value)
                                       }
                                     }
                                   }}
@@ -2071,7 +2071,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                   </Label>
                                   <div className="[&_button]:text-gray-900 [&_button]:[&_button]:bg-white [&_button]:[&_button]:border-gray-300 [&_button]:">
                                     <div className="">
-                                      <DatePickerField date={date} onDateChange={setDate} />
+                                      <DatePickerField date={date} onDateChange={(d) => d && setDate(d)} />
                                     </div>
                                   </div>
                                 </div>
@@ -2271,7 +2271,9 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
       <NewProductModal
         isOpen={isNewProductModalOpen}
         onClose={() => setIsNewProductModalOpen(false)}
-        onSuccess={handleNewProduct}
+        onSuccess={(product) =>
+          handleNewProduct(product.id, product.name, product.price, product.wholesale_price, product.stock)
+        }
         userId={userId}
       />
 

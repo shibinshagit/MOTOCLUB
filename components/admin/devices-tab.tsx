@@ -153,7 +153,7 @@ export default function DevicesTab({ companyId }: DevicesTabProps) {
         resetLogoDraft()
         fetchDevices()
       } else {
-        setFormError(result.message)
+        setFormError(result.message ?? "An unexpected error occurred")
       }
     } catch (error) {
       setFormError("An unexpected error occurred")
@@ -182,7 +182,7 @@ export default function DevicesTab({ companyId }: DevicesTabProps) {
         resetLogoDraft()
         fetchDevices()
       } else {
-        setFormError(result.message)
+        setFormError(result.message ?? "An unexpected error occurred")
       }
     } catch (error) {
       setFormError("An unexpected error occurred")

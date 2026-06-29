@@ -42,10 +42,10 @@ export default function SaleShippingSection({
     Promise.all([getMasterDataItems(deviceId, "courier"), getMasterDataItems(deviceId, "packaging")]).then(
       ([courierResult, packagingResult]) => {
         if (courierResult.success) {
-          setCouriers((courierResult.data || []).filter((item) => item.is_active !== false))
+          setCouriers((courierResult.data || []).filter((item: any) => item.is_active !== false))
         }
         if (packagingResult.success) {
-          setPackagingTypes((packagingResult.data || []).filter((item) => item.is_active !== false))
+          setPackagingTypes((packagingResult.data || []).filter((item: any) => item.is_active !== false))
         }
       },
     )

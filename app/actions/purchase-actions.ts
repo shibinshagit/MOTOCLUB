@@ -477,12 +477,12 @@ export async function updatePurchase(formData: FormData) {
 
       // Create maps for easier lookup
       const currentItemsMap = new Map()
-      currentItems.forEach((item) => {
+      currentItems.forEach((item: any) => {
         currentItemsMap.set(item.product_id, item.quantity)
       })
 
       const newItemsMap = new Map()
-      items.forEach((item) => {
+      items.forEach((item: any) => {
         newItemsMap.set(item.product_id, item.quantity)
       })
 
@@ -705,7 +705,7 @@ export async function getSuppliers() {
     `
 
     // Extract just the supplier names as an array of strings
-    const suppliers = result.map((row) => row.supplier)
+    const suppliers = result.map((row: any) => row.supplier)
 
     return { success: true, data: suppliers }
   } catch (error) {

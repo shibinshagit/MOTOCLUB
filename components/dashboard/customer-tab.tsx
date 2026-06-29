@@ -301,7 +301,7 @@ return (
         </Button>
         
         <Button
-          onClick={exportCustomersToPDF}
+          onClick={() => exportCustomersToPDF(customers)}
           className="flex items-center gap-2 rounded-xl bg-purple-600 hover:bg-purple-700 px-3 sm:px-4 py-2 font-medium text-white transition-all text-xs sm:text-sm flex-1 sm:flex-initial justify-center"
           disabled={reduxIsLoading || customers.length === 0}
         >
@@ -428,8 +428,8 @@ return (
                       {customer.order_count || 0}
                     </div>
                     {/* Check if customer is new (created within last 7 days) */}
-                    {customer.created_at &&
-                      new Date(customer.created_at) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) && (
+                    {(customer as Customer).created_at &&
+                      new Date((customer as Customer).created_at!) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) && (
                         <span className="bg-yellow-100 text-yellow-800 text-xs font-semibold px-2 py-1 rounded-full">
                           New
                         </span>
@@ -509,7 +509,12 @@ return (
         <DialogHeader>
           <DialogTitle className="text-base sm:text-lg">Add New Customer</DialogTitle>
         </DialogHeader>
-        <form action={handleAddCustomer}>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault()
+            void handleAddCustomer(new FormData(e.currentTarget))
+          }}
+        >
           <input type="hidden" name="user_id" value={userId} />
           <div className="grid gap-3 sm:gap-4 py-4">
             <div className="grid gap-2">

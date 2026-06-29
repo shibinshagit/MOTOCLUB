@@ -159,7 +159,7 @@ export default function EditPurchaseModal({
         throw new Error(result.message || "Failed to load purchase details")
       }
 
-      const { purchase, items } = result.data
+      const { purchase, items } = result.data!
 
       // Set purchase data
       setDate(new Date(purchase.purchase_date))
@@ -514,7 +514,7 @@ export default function EditPurchaseModal({
                     <div className="grid grid-cols-1 gap-3">
                       <div>
                         <Label className="text-sm font-medium text-gray-700">Date</Label>
-                        <DatePickerField date={date} onDateChange={setDate} />
+                        <DatePickerField date={date} onDateChange={(d) => d && setDate(d)} />
                       </div>
                       <div>
                         <Label className="text-sm font-medium text-gray-700">Payment Status</Label>

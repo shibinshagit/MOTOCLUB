@@ -76,7 +76,7 @@ export async function paySupplierCredit(
       return { success: false, message: "No outstanding credit purchases found for this supplier" }
     }
 
-    const totalOutstanding = creditPurchases.reduce((sum, purchase) => {
+    const totalOutstanding = creditPurchases.reduce((sum: number, purchase: any) => {
       return sum + (Number(purchase.total_amount) - Number(purchase.received_amount || 0))
     }, 0)
 

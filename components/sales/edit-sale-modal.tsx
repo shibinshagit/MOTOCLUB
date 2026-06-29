@@ -163,7 +163,7 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
 
         const result = await getSaleDetails(saleId)
 
-        if (result.success) {
+        if (result.success && result.data) {
           const { sale, items } = result.data
 
           // Set sale data
@@ -1292,7 +1292,9 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
       <NewProductModal
         isOpen={isNewProductModalOpen}
         onClose={() => setIsNewProductModalOpen(false)}
-        onSuccess={handleNewProduct}
+        onSuccess={(product) =>
+          handleNewProduct(product.id, product.name, product.price, product.wholesale_price, product.stock)
+        }
         userId={userId}
         initialBarcode={newProductBarcode}
       />

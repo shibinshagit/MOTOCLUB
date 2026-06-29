@@ -65,7 +65,7 @@ export async function getMasterDataItems(deviceId: number, category?: MasterData
 
     return {
       success: true as const,
-      data: rows.map((row) => mapMasterDataRow(row as Record<string, unknown>)),
+      data: rows.map((row: Record<string, unknown>) => mapMasterDataRow(row)),
     }
   } catch (error) {
     console.error("getMasterDataItems error:", error)
@@ -109,7 +109,7 @@ export async function createMasterDataItem(deviceId: number, userId: number, inp
         ${input.website?.trim() || null},
         ${input.trackingUrlTemplate?.trim() || null},
         ${input.notes?.trim() || null},
-        ${metadata ? sql.json(metadata) : null},
+        ${metadata ? `${JSON.stringify(metadata)}::jsonb` : null},
         ${input.isActive !== false},
         ${input.sortOrder || 0},
         ${userId}
@@ -166,7 +166,7 @@ export async function updateMasterDataItem(
         website = ${input.website?.trim() || null},
         tracking_url_template = ${input.trackingUrlTemplate?.trim() || null},
         notes = ${input.notes?.trim() || null},
-        metadata = ${metadata ? sql.json(metadata) : null},
+        metadata = ${metadata ? `${JSON.stringify(metadata)}::jsonb` : null},
         is_active = ${input.isActive !== false},
         sort_order = ${input.sortOrder || 0},
         updated_at = NOW()

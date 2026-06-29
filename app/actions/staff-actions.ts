@@ -187,7 +187,7 @@ export async function updateStaff(
     }
   } catch (error) {
     console.error("❌ Error updating staff:", error)
-    return { success: false, message: `Failed to update staff member: ${error.message}` }
+    return { success: false, message: `Failed to update staff member: ${error instanceof Error ? error.message : String(error)}` }
   }
 }
 
@@ -301,7 +301,7 @@ export async function addStaff(staffData: {
     return { success: true, data: result[0], message }
   } catch (error) {
     console.error("❌ Error adding staff:", error)
-    return { success: false, message: `Failed to add staff member: ${error.message}` }
+    return { success: false, message: `Failed to add staff member: ${error instanceof Error ? error.message : String(error)}` }
   }
 }
 

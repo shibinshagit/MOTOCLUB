@@ -50,7 +50,7 @@ function isLocalDatabaseUrl(url: string): boolean {
 function createSqlClient(url: string) {
   if (isLocalDatabaseUrl(url)) {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const postgres = require("postgres") as typeof import("postgres").default
+    const postgres = require("postgres") as (url: string, options?: Record<string, unknown>) => any
     return postgres(url, { max: 1, onnotice: () => {} })
   }
   return neon(url)
