@@ -42,6 +42,7 @@ import { FormAlert } from "@/components/ui/form-alert"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useSelector } from "react-redux"
 import { selectDeviceId, selectDeviceCurrency } from "@/store/slices/deviceSlice"
+import { getSuppliers as getRegisteredSuppliers } from "@/app/actions/supplier-actions"
 import { useConfirm } from "@/hooks/use-confirm"
 
 interface PurchaseTabProps {
@@ -618,7 +619,21 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
     }
 
     if (!supplier.trim()) {
-      setFormAlert({ type: "error", message: "Please enter a supplier name" })
+      setFormAlert({ type: "error", message: "Please select a supplier" })
+      return
+    }
+
+    const supplierResult = await getRegisteredSuppliers(userId)
+    const registeredNames =
+      supplierResult.success && Array.isArray(supplierResult.data)
+        ? supplierResult.data.map((item: any) => String(item.name).trim())
+        : []
+
+    if (!registeredNames.includes(supplier.trim())) {
+      setFormAlert({
+        type: "error",
+        message: "Please select a registered supplier or add one from the Suppliers tab",
+      })
       return
     }
 
@@ -1197,11 +1212,12 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
                     <div className="space-y-3">
                       <div className="space-y-1">
                         <Label className="text-xs font-medium text-gray-900">Supplier *</Label>
+                        <p className="text-[11px] text-gray-500">Choose from your registered suppliers</p>
                         <SupplierAutocomplete
                           value={supplier}
                           onChange={setSupplier}
-        userId={userId}
-                          placeholder="Supplier name"
+                          userId={userId}
+                          placeholder="Select supplier"
                           className="h-8 text-xs"
                         />
                       </div>

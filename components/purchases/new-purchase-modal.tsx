@@ -272,7 +272,7 @@ export default function NewPurchaseModal({
     if (!supplier) {
       setFormAlert({
         type: "error",
-        message: "Please enter a supplier name",
+        message: "Please select a supplier",
       })
       return
     }
@@ -391,11 +391,12 @@ export default function NewPurchaseModal({
                 {/* Supplier */}
                 <div>
                   <Label className="text-sm font-medium text-gray-700">Supplier</Label>
+                  <p className="mt-0.5 text-xs text-gray-500">Registered suppliers only</p>
                   <SupplierAutocomplete
                     value={supplier}
                     onChange={setSupplier}
                     userId={userId}
-                    placeholder="Supplier name"
+                    placeholder="Select supplier"
                     className="h-9 mt-1"
                   />
                 </div>

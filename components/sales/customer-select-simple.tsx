@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Check, ChevronsUpDown, Loader2, Search, User, X, Plus } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { getCustomers } from "@/app/actions/customer-actions"
+import { getCustomers, addCustomer } from "@/app/actions/customer-actions"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 
@@ -228,19 +228,14 @@ export default function CustomerSelectSimple({
       body.append("user_id", String(userId))
       body.append("name", name)
       body.append("phone", phone)
-      // leave email/address empty in this quick path
-      const response = await fetch("/api/customers", {
-        method: "POST",
-        body,
-      })
-      const result = await response.json()
+
+      const result = await addCustomer(body)
       if (result.success && result.data) {
-        // keep global redux in sync
         dispatch(addCustomerAction(result.data))
       }
       return result
     } catch (error) {
-      console.error("Error creating customer via API:", error)
+      console.error("Error creating customer:", error)
       return { success: false, message: "Network error" }
     }
   }

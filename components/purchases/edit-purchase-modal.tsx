@@ -347,7 +347,7 @@ export default function EditPurchaseModal({
   // Form validation
   const validateForm = useCallback(() => {
     if (!supplier) {
-      return "Please enter a supplier name"
+      return "Please select a supplier"
     }
 
     if (!products.every(p => p.productId && p.quantity > 0)) {
@@ -501,11 +501,12 @@ export default function EditPurchaseModal({
                     {/* Supplier */}
                     <div>
                       <Label className="text-sm font-medium text-gray-700">Supplier</Label>
+                      <p className="mt-0.5 text-xs text-gray-500">Registered suppliers only</p>
                       <SupplierAutocomplete
                         value={supplier}
                         onChange={setSupplier}
                         userId={userId}
-                        placeholder="Supplier name"
+                        placeholder="Select supplier"
                         className="h-9 mt-1"
                       />
                     </div>

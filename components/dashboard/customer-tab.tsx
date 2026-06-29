@@ -10,7 +10,7 @@ import ViewCustomerModal from "../customers/view-customer-modal"
 import { useToast } from "@/components/ui/use-toast"
 import { notifyError, notifySuccess } from "@/lib/notifications"
 import { exportCustomersToPDF } from "@/lib/pdf-export-utils"
-import { getCustomers } from "@/app/actions/customer-actions"
+import { getCustomers, addCustomer as addCustomerAction, updateCustomer as updateCustomerAction, deleteCustomer as deleteCustomerAction } from "@/app/actions/customer-actions"
 import { useAppDispatch, useAppSelector } from "@/store/hooks"
 import {
   setCustomers,
@@ -119,23 +119,17 @@ export function CustomerTab({ userId }: { userId: number }) {
 
   const handleAddCustomer = async (formData: FormData) => {
     try {
-      const response = await fetch("/api/customers", {
-        method: "POST",
-        body: formData,
-      })
+      const result = await addCustomerAction(formData)
 
-      const result = await response.json()
-
-      if (result.success) {
-        // Add the new customer to Redux
+      if (result.success && result.data) {
         dispatch(addCustomer(result.data))
         setIsAddModalOpen(false)
         notifySuccess(toast, "Customer added successfully")
         return { success: true }
-      } else {
-        notifyError(toast, result.message || "Failed to add customer")
-        return { success: false, message: result.message }
       }
+
+      notifyError(toast, result.message || "Failed to add customer")
+      return { success: false, message: result.message }
     } catch (error) {
       console.error("Error adding customer:", error)
       notifyError(toast, "An unexpected error occurred")
@@ -145,23 +139,17 @@ export function CustomerTab({ userId }: { userId: number }) {
 
   const handleEditCustomer = async (formData: FormData) => {
     try {
-      const response = await fetch(`/api/customers/${formData.get("id")}`, {
-        method: "PUT",
-        body: formData,
-      })
+      const result = await updateCustomerAction(formData)
 
-      const result = await response.json()
-
-      if (result.success) {
-        // Update the customer in Redux
+      if (result.success && result.data) {
         dispatch(updateCustomer(result.data))
         setIsEditModalOpen(false)
         notifySuccess(toast, "Customer updated successfully")
         return { success: true }
-      } else {
-        notifyError(toast, result.message || "Failed to update customer")
-        return { success: false, message: result.message }
       }
+
+      notifyError(toast, result.message || "Failed to update customer")
+      return { success: false, message: result.message }
     } catch (error) {
       console.error("Error updating customer:", error)
       notifyError(toast, "An unexpected error occurred")
@@ -173,16 +161,12 @@ export function CustomerTab({ userId }: { userId: number }) {
     if (!selectedCustomer) return
 
     try {
-      const response = await fetch(`/api/customers/${selectedCustomer.id}`, {
-        method: "DELETE",
-      })
-
-      const result = await response.json()
+      const result = await deleteCustomerAction(selectedCustomer.id)
 
       if (result.success) {
-        // Remove the customer from Redux
         dispatch(deleteCustomer(selectedCustomer.id))
         setIsDeleteModalOpen(false)
+        setSelectedCustomer(null)
         notifySuccess(toast, "Customer deleted successfully")
       } else {
         notifyError(toast, result.message || "Failed to delete customer")
