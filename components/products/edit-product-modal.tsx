@@ -25,6 +25,11 @@ import {
   MAX_VIDEO_SIZE_BYTES,
 } from "@/lib/media-upload-utils"
 import { uploadProductFileFromClient } from "@/lib/blob-client-upload"
+import {
+  NESTED_DIALOG_CONTENT_ATTR,
+  preventDismissWhenNestedOpen,
+  shouldIgnoreParentDialogClose,
+} from "@/lib/nested-dialog"
 import { useStaffRestrictions } from "@/hooks/use-staff-restrictions"
 import { cn } from "@/lib/utils"
 import type { ReactNode } from "react"
@@ -144,7 +149,11 @@ function CategoryListRow({
       <button
         type="button"
         disabled={disabled}
-        onClick={() => onSelect(category)}
+        onClick={(event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          onSelect(category)
+        }}
         className={cn(
           "flex min-w-0 flex-1 items-center justify-between px-3 text-left text-slate-900 disabled:opacity-50",
           rowPad,
@@ -289,6 +298,7 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
   const editCategoryInputRef = useRef<HTMLInputElement>(null)
   const categorySearchInputRef = useRef<HTMLInputElement>(null)
   const newCategoryInputRef = useRef<HTMLInputElement>(null)
+  const closingCategoryDialogRef = useRef(false)
 
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
 
@@ -683,6 +693,19 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
     setNewCategoryParentId(null)
   }
 
+  const closeCategoryDialog = () => {
+    closingCategoryDialogRef.current = true
+    setIsCategoryDialogOpen(false)
+    resetCategoryDialogModes()
+    window.setTimeout(() => {
+      closingCategoryDialogRef.current = false
+    }, 300)
+  }
+
+  const guardProductDialogDismiss = (event: Event) => {
+    preventDismissWhenNestedOpen(event, isCategoryDialogOpen, closingCategoryDialogRef.current)
+  }
+
   const handleStartEditCategory = (category: Category) => {
     setIsAddingNewCategory(false)
     setIsEditingCategory(true)
@@ -807,7 +830,7 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
         setNewCategoryName("")
         setNewCategoryParentId(null)
         setIsAddingNewCategory(false)
-        setIsCategoryDialogOpen(false)
+        closeCategoryDialog()
       } else {
         notifyError(toast, result.message || "Failed to add category")
       }
@@ -826,7 +849,7 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
       category: getCategoryDisplayName(category),
       categoryId: category.id,
     }))
-    setIsCategoryDialogOpen(false)
+    closeCategoryDialog()
     notifySuccess(toast, `"${getCategoryDisplayName(category)}" has been selected`, "Category Selected")
   }
 
@@ -938,10 +961,18 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
       <Dialog
         open={isOpen}
         onOpenChange={(open) => {
+          if (!open && shouldIgnoreParentDialogClose(isCategoryDialogOpen, closingCategoryDialogRef.current)) {
+            return
+          }
           if (!open) void handleAttemptClose()
         }}
       >
-        <DialogContent className="max-w-4xl gap-0 overflow-hidden border-slate-200 p-0 sm:max-w-4xl [&>button]:top-3 [&>button]:right-3">
+        <DialogContent
+          className="max-w-4xl gap-0 overflow-hidden border-slate-200 p-0 sm:max-w-4xl [&>button]:top-3 [&>button]:right-3"
+          onInteractOutside={guardProductDialogDismiss}
+          onPointerDownOutside={guardProductDialogDismiss}
+          onFocusOutside={guardProductDialogDismiss}
+        >
           <DialogHeader className="space-y-0 border-b border-slate-200 bg-[#F1F4F9] px-4 py-3 text-left">
             <DialogTitle className="sr-only">Edit product</DialogTitle>
             <div className="flex flex-wrap items-center gap-2 pr-10">
@@ -1471,11 +1502,21 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
       <Dialog
         open={isCategoryDialogOpen}
         onOpenChange={(open) => {
+          if (!open) {
+            closingCategoryDialogRef.current = true
+            window.setTimeout(() => {
+              closingCategoryDialogRef.current = false
+            }, 300)
+          }
           setIsCategoryDialogOpen(open)
           if (!open) resetCategoryDialogModes()
         }}
       >
-        <DialogContent className="max-w-md gap-0 overflow-hidden border-slate-200 p-0 sm:max-w-md [&>button]:top-3 [&>button]:right-3">
+        <DialogContent
+          {...{ [NESTED_DIALOG_CONTENT_ATTR]: "true" }}
+          overlayClassName="z-[60]"
+          className="z-[60] max-w-md gap-0 overflow-hidden border-slate-200 p-0 sm:max-w-md [&>button]:top-3 [&>button]:right-3"
+        >
           <DialogHeader className="border-b border-slate-200 bg-[#F1F4F9] px-4 py-3 text-left">
             <DialogTitle className="text-sm font-semibold text-slate-900">Select category</DialogTitle>
           </DialogHeader>
