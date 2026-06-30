@@ -32,6 +32,7 @@ import {
 import { getUserSales, deleteSale, addSale, getSaleDetails, updateSale } from "@/app/actions/sale-actions"
 import { useToast } from "@/components/ui/use-toast"
 import { notifyError, notifySuccess, notifyWarning } from "@/lib/notifications"
+import { markInventoryStale } from "@/lib/inventory-sync"
 import ViewSaleModal from "@/components/sales/view-sale-modal"
 import SalesExcelTable from "@/components/sales/sales-excel-table"
 import { SalesViewFlip, type SalesViewMode } from "@/components/sales/sales-view-flip"
@@ -1117,6 +1118,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
         const result = await updateSale(saleData)
 
         if (result.success) {
+          markInventoryStale(dispatch)
           setFormAlert({
             type: "success",
             message: "Sale updated successfully",
@@ -1151,6 +1153,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
         const result = await addSale(saleData)
 
         if (result.success) {
+          markInventoryStale(dispatch)
           setFormAlert({
             type: "success",
             message: "Sale completed successfully",
@@ -1291,6 +1294,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
       const result = await deleteSale(saleId, deviceId)
 
       if (result.success) {
+        markInventoryStale(dispatch)
         dispatch(removeSale(saleId))
         setIsViewSaleModalOpen(false)
         setSelectedSaleId(null)

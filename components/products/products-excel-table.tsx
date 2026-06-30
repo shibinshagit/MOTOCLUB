@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState, memo } from "react"
+import { useMemo, useState, memo } from "react"
 import {
   ExcelColumnFilterHeader,
   createEmptyColumnFilter,
@@ -53,8 +53,22 @@ function buildInitialFilters(products: any[], getters: Record<ColumnKey, (p: any
   return filters
 }
 
+function productMatchesSearch(product: any, searchTerm: string): boolean {
+  if (!searchTerm.trim()) return true
+  const query = searchTerm.toLowerCase()
+  return (
+    product.name?.toLowerCase().includes(query) ||
+    product.category?.toLowerCase().includes(query) ||
+    product.company_name?.toLowerCase().includes(query) ||
+    product.barcode?.toLowerCase().includes(query) ||
+    product.shelf?.toLowerCase().includes(query) ||
+    String(product.id).includes(query)
+  )
+}
+
 interface ProductsExcelTableProps {
   products: any[]
+  searchTerm?: string
   isLoading: boolean
   hasLoaded: boolean
   hideCogs: boolean
@@ -80,6 +94,7 @@ function TableSkeleton({ cols }: { cols: number }) {
 
 function ProductsExcelTable({
   products,
+  searchTerm = "",
   isLoading,
   hasLoaded,
   hideCogs,
@@ -125,19 +140,19 @@ function ProductsExcelTable({
   )
   const [columnFilterOpen, setColumnFilterOpen] = useState(false)
 
-  useEffect(() => {
-    if (!hasLoaded) return
-    setColumnFilters(buildInitialFilters(products, valueGetters))
-  }, [hasLoaded, products, valueGetters])
+  const searchFilteredProducts = useMemo(() => {
+    if (!hasLoaded) return products
+    return products.filter((p) => productMatchesSearch(p, searchTerm))
+  }, [products, searchTerm, hasLoaded])
 
   const displayProducts = useMemo(() => {
     if (!hasLoaded) return products
-    return products.filter((p) =>
+    return searchFilteredProducts.filter((p) =>
       (Object.keys(valueGetters) as ColumnKey[]).every((key) =>
         passesColumnFilter(valueGetters[key](p), columnFilters[key], uniqueValues[key]),
       ),
     )
-  }, [products, columnFilters, uniqueValues, valueGetters, hasLoaded])
+  }, [products, searchFilteredProducts, columnFilters, uniqueValues, valueGetters, hasLoaded])
 
   const activeFilterCount = hasLoaded
     ? (Object.keys(columnFilters) as ColumnKey[]).filter((key) =>
@@ -186,7 +201,7 @@ function ProductsExcelTable({
     <div className="flex h-full flex-col overflow-hidden rounded-xl border border-slate-200 bg-card">
       <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-[#F1F4F9] px-4 py-2">
         <span className="text-xs font-medium text-slate-600">
-          {displayProducts.length} of {products.length} products
+          {displayProducts.length} of {searchFilteredProducts.length} products
         </span>
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
@@ -251,19 +266,21 @@ function ProductsExcelTable({
                       index % 2 === 0 ? "bg-white" : "bg-slate-50/60",
                     )}
                   >
-                    <td className="whitespace-nowrap px-4 py-2.5 text-xs text-muted-foreground">{index + 1}</td>
-                    <td className="max-w-[200px] truncate px-4 py-2.5 font-medium text-slate-800">{product.name}</td>
-                    <td className="max-w-[140px] truncate px-4 py-2.5 text-slate-700">
+                    <td className="whitespace-nowrap px-4 py-2.5 align-top text-xs text-muted-foreground">{index + 1}</td>
+                    <td className="min-w-[200px] max-w-sm whitespace-normal break-words px-4 py-2.5 align-top font-medium leading-snug text-slate-800">
+                      {product.name}
+                    </td>
+                    <td className="max-w-[140px] truncate px-4 py-2.5 align-top text-slate-700">
                       {product.company_name || "No Company"}
                     </td>
-                    <td className="max-w-[120px] truncate px-4 py-2.5 text-slate-600">
+                    <td className="max-w-[120px] truncate px-4 py-2.5 align-top text-slate-600">
                       {product.category || "Uncategorized"}
                     </td>
-                    <td className="whitespace-nowrap px-4 py-2.5 text-right font-medium text-slate-800">
+                    <td className="whitespace-nowrap px-4 py-2.5 align-top text-right font-medium text-slate-800">
                       {formatMoney(product.price)}
                     </td>
                     {!hideCogs && (
-                      <td className="whitespace-nowrap px-4 py-2.5 text-right text-slate-600">
+                      <td className="whitespace-nowrap px-4 py-2.5 align-top text-right text-slate-600">
                         <span className="group/cost relative inline-block">
                           <span className="group-hover/cost:hidden">****</span>
                           <span className="hidden group-hover/cost:inline">{formatMoney(product.wholesale_price || 0)}</span>
@@ -272,16 +289,16 @@ function ProductsExcelTable({
                     )}
                     {!hideStockCount && (
                       <>
-                        <td className="whitespace-nowrap px-4 py-2.5 text-right text-slate-800">{stock}</td>
-                        <td className="whitespace-nowrap px-4 py-2.5 text-right text-violet-700">
+                        <td className="whitespace-nowrap px-4 py-2.5 align-top text-right text-slate-800">{stock}</td>
+                        <td className="whitespace-nowrap px-4 py-2.5 align-top text-right text-violet-700">
                           {Number(product.other_devices_stock || 0)}
                         </td>
-                        <td className="whitespace-nowrap px-4 py-2.5">
+                        <td className="whitespace-nowrap px-4 py-2.5 align-top">
                           <StatusBadge stock={stock} />
                         </td>
                       </>
                     )}
-                    <td className={stickyActionCellClass(index % 2 === 0 ? "bg-white" : "bg-slate-50/60")}>
+                    <td className={cn(stickyActionCellClass(index % 2 === 0 ? "bg-white" : "bg-slate-50/60"), "align-top")}>
                       <button
                         type="button"
                         onClick={(e) => {

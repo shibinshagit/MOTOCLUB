@@ -40,8 +40,10 @@ import { DatePickerField } from "@/components/ui/date-picker-field"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { FormAlert } from "@/components/ui/form-alert"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
-import { useSelector } from "react-redux"
+import { useSelector, useDispatch } from "react-redux"
+import type { AppDispatch } from "@/store/store"
 import { selectDeviceId, selectDeviceCurrency } from "@/store/slices/deviceSlice"
+import { markInventoryStale } from "@/lib/inventory-sync"
 import { getSuppliers as getRegisteredSuppliers } from "@/app/actions/supplier-actions"
 import { useConfirm } from "@/hooks/use-confirm"
 
@@ -110,6 +112,7 @@ function normalizePaymentStatus(status: string) {
 }
 
 export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps) {
+  const dispatch = useDispatch<AppDispatch>()
   const deviceId = useSelector(selectDeviceId)
   const deviceCurrency = useSelector(selectDeviceCurrency)
 
@@ -692,6 +695,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
         isEditMode && editingPurchaseId ? await updatePurchase(formData) : await createPurchase(formData)
 
       if (result.success) {
+        markInventoryStale(dispatch)
         notifySuccess(toast, isEditMode ? "Purchase updated successfully" : "Purchase added successfully")
         setFormAlert({
           type: "success",
@@ -764,6 +768,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
       const result = await deletePurchase(purchaseId, deviceId)
 
       if (result.success) {
+        markInventoryStale(dispatch)
         setPurchases((prev) => prev.filter((p) => p.id !== purchaseId))
         notifySuccess(toast, "Purchase deleted successfully")
         if (activeView === "info") {

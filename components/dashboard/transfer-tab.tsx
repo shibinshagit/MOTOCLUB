@@ -10,7 +10,10 @@ import { Badge } from "@/components/ui/badge"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { useToast } from "@/components/ui/use-toast"
 import { notifyError, notifySuccess, notifyWarning } from "@/lib/notifications"
+import { markInventoryStale } from "@/lib/inventory-sync"
 import { useConfirm } from "@/hooks/use-confirm"
+import { useDispatch } from "react-redux"
+import type { AppDispatch } from "@/store/store"
 import {
   acceptWarehouseTransfer,
   cancelWarehouseTransfer,
@@ -45,6 +48,7 @@ type TransferFormData = {
 }
 
 export default function TransferTab({ userId }: TransferTabProps) {
+  const dispatch = useDispatch<AppDispatch>()
   const getTodayDate = () => new Date().toISOString().slice(0, 10)
   const toDateInputValue = (value: unknown): string => {
     if (!value) return ""
@@ -280,6 +284,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
       notifyError(toast, result.message || "Failed to cancel transfer")
       return
     }
+    markInventoryStale(dispatch)
     notifySuccess(toast, result.message || "Transfer cancelled" )
     await loadTransfers()
   }
@@ -293,6 +298,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
         notifyError(toast, result.message || "Failed to accept request")
         return
       }
+      markInventoryStale(dispatch)
       notifySuccess(toast, result.message || "Transfer request accepted" , "Accepted")
       await loadTransfers()
     } finally {
@@ -318,6 +324,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
         notifyError(toast, result.message || "Failed to reject request")
         return
       }
+      markInventoryStale(dispatch)
       notifySuccess(toast, result.message || "Transfer request rejected" , "Rejected")
       setRejectTransferId(null)
       setRejectReason("")
@@ -461,6 +468,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
         return
       }
 
+      markInventoryStale(dispatch)
       notifySuccess(toast, result.message || "Transfer saved" )
       setIsModalOpen(false)
       resetForm()

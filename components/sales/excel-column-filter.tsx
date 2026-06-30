@@ -13,13 +13,14 @@ export type ExcelColumnFilterValue = {
 
 export const EXCEL_COLUMN_FILTER_POPOVER_ATTR = "data-excel-column-filter-popover"
 
-export function createEmptyColumnFilter(allValues: string[]): ExcelColumnFilterValue {
-  return { contains: "", selected: new Set(allValues) }
+export function createEmptyColumnFilter(_allValues?: string[]): ExcelColumnFilterValue {
+  return { contains: "", selected: new Set() }
 }
 
 export function isColumnFilterActive(filter: ExcelColumnFilterValue, allValues: string[]): boolean {
   if (filter.contains.trim()) return true
-  return filter.selected.size < allValues.length
+  if (allValues.length === 0) return false
+  return filter.selected.size > 0 && filter.selected.size < allValues.length
 }
 
 export function passesColumnFilter(cellValue: string, filter: ExcelColumnFilterValue, allValues: string[]): boolean {
@@ -27,10 +28,10 @@ export function passesColumnFilter(cellValue: string, filter: ExcelColumnFilterV
   if (filter.contains.trim() && !value.toLowerCase().includes(filter.contains.trim().toLowerCase())) {
     return false
   }
-  if (filter.selected.size < allValues.length && !filter.selected.has(value)) {
-    return false
+  if (filter.selected.size === 0 || filter.selected.size >= allValues.length) {
+    return true
   }
-  return true
+  return filter.selected.has(value)
 }
 
 interface ExcelColumnFilterProps {

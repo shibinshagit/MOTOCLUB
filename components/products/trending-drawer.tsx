@@ -57,21 +57,25 @@ export default function TrendingDrawer({ open, onOpenChange, userId }: TrendingD
   const [, startTableTransition] = useTransition()
 
   useEffect(() => {
-    if (open) {
-      setContentReady(false)
-      const openTimer = window.setTimeout(() => {
-        startTableTransition(() => setContentReady(true))
+    if (!open) {
+      const closeTimer = window.setTimeout(() => {
+        setDetailProduct(null)
+        setSearchTerm("")
       }, SHEET_ANIMATION_MS)
-      return () => window.clearTimeout(openTimer)
+      return () => window.clearTimeout(closeTimer)
     }
 
-    const closeTimer = window.setTimeout(() => {
-      setContentReady(false)
-      setDetailProduct(null)
-      setSearchTerm("")
+    if (hasLoaded && products.length > 0) {
+      setContentReady(true)
+      return
+    }
+
+    setContentReady(false)
+    const openTimer = window.setTimeout(() => {
+      startTableTransition(() => setContentReady(true))
     }, SHEET_ANIMATION_MS)
-    return () => window.clearTimeout(closeTimer)
-  }, [open])
+    return () => window.clearTimeout(openTimer)
+  }, [open, hasLoaded, products.length])
 
   const fetchTrendingProducts = useCallback(async () => {
     if (!userId) return
@@ -182,8 +186,9 @@ export default function TrendingDrawer({ open, onOpenChange, userId }: TrendingD
     <>
       <Sheet open={open} onOpenChange={onOpenChange}>
         <SheetContent
+          forceMount
           side="right"
-          className="flex h-full w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-xl md:max-w-3xl lg:max-w-[min(96vw,1200px)]"
+          className="flex h-full w-full flex-col gap-0 overflow-hidden p-0 data-[state=closed]:pointer-events-none sm:max-w-xl md:max-w-3xl lg:max-w-[min(96vw,1200px)]"
           onInteractOutside={sheetOutsideGuard}
           onPointerDownOutside={sheetOutsideGuard}
           onFocusOutside={sheetOutsideGuard}
@@ -263,7 +268,8 @@ export default function TrendingDrawer({ open, onOpenChange, userId }: TrendingD
               {contentReady ? (
                 searchedProducts.length > 0 || loading ? (
                   <ProductsExcelTable
-                    products={searchedProducts}
+                    products={products}
+                    searchTerm={searchTerm}
                     isLoading={loading}
                     hasLoaded={hasLoaded}
                     hideCogs={hideCogs}

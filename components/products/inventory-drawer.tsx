@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState, useTransition } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react"
 import { Download, Package, Plus, RefreshCw, Search, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -37,7 +37,7 @@ import {
   removeProduct,
   setSearchTerm,
   setError,
-  clearProducts,
+  setSilentRefreshing,
 } from "@/store/slices/productSlice"
 import { selectDeviceCurrency } from "@/store/slices/deviceSlice"
 
@@ -59,14 +59,17 @@ export default function InventoryDrawer({
   onModalClose,
 }: InventoryDrawerProps) {
   const dispatch = useDispatch<AppDispatch>()
-  const { products, searchTerm, loading, error } = useSelector((state: RootState) => state.product)
+  const { products, searchTerm, loading, error, fetchedTime, needsRefresh, silentRefreshing } = useSelector(
+    (state: RootState) => state.product,
+  )
   const currency = useSelector(selectDeviceCurrency)
   const { isValueHidden } = useStaffRestrictions()
   const hideCogs = isValueHidden("cogs")
   const hideStockCount = isValueHidden("stock_count")
   const { toast } = useToast()
 
-  const [hasLoaded, setHasLoaded] = useState(false)
+  const hasLoaded = Boolean(fetchedTime) || products.length > 0
+  const hasCachedProducts = products.length > 0
   const [isProductModalOpen, setIsProductModalOpen] = useState(isAddModalOpen)
   const [detailProduct, setDetailProduct] = useState<any>(null)
   const [selectedProduct, setSelectedProduct] = useState<any>(null)
@@ -76,26 +79,31 @@ export default function InventoryDrawer({
   const [isDeleting, setIsDeleting] = useState(false)
   const [contentReady, setContentReady] = useState(false)
   const [, startTableTransition] = useTransition()
+  const fetchInFlightRef = useRef(false)
 
   useEffect(() => {
     if (isAddModalOpen) setIsProductModalOpen(true)
   }, [isAddModalOpen])
 
   useEffect(() => {
-    if (open) {
-      setContentReady(false)
-      const openTimer = window.setTimeout(() => {
-        startTableTransition(() => setContentReady(true))
+    if (!open) {
+      const closeTimer = window.setTimeout(() => {
+        setDetailProduct(null)
       }, SHEET_ANIMATION_MS)
-      return () => window.clearTimeout(openTimer)
+      return () => window.clearTimeout(closeTimer)
     }
 
-    const closeTimer = window.setTimeout(() => {
-      setContentReady(false)
-      setDetailProduct(null)
+    if (hasCachedProducts || hasLoaded) {
+      setContentReady(true)
+      return
+    }
+
+    setContentReady(false)
+    const openTimer = window.setTimeout(() => {
+      startTableTransition(() => setContentReady(true))
     }, SHEET_ANIMATION_MS)
-    return () => window.clearTimeout(closeTimer)
-  }, [open])
+    return () => window.clearTimeout(openTimer)
+  }, [open, hasCachedProducts, hasLoaded])
 
   const searchedProducts = useMemo(() => {
     if (!searchTerm.trim()) return products
@@ -111,49 +119,56 @@ export default function InventoryDrawer({
     )
   }, [products, searchTerm])
 
-  const fetchProducts = useCallback(async () => {
-    if (!userId) return
+  const fetchProducts = useCallback(
+    async ({ silent = false, force = false }: { silent?: boolean; force?: boolean } = {}) => {
+      if (!userId) return
+      if (fetchInFlightRef.current && !force) return
 
-    try {
-      dispatch(setLoading(true))
-      const result = await getProducts(userId)
-      if (result.success) {
-        dispatch(setProducts(result.data as Product[]))
-        dispatch(setError(null))
-        setHasLoaded(true)
-      } else {
-        dispatch(setProducts([]))
-        dispatch(setError(result.message || "Failed to load products"))
-        notifyError(toast, result.message || "Failed to load products")
-        setHasLoaded(true)
+      fetchInFlightRef.current = true
+      try {
+        if (silent) {
+          dispatch(setSilentRefreshing(true))
+        } else {
+          dispatch(setLoading(true))
+        }
+
+        const result = await getProducts(userId)
+        if (result.success) {
+          dispatch(setProducts(result.data as Product[]))
+          dispatch(setError(null))
+        } else if (!silent) {
+          dispatch(setProducts([]))
+          dispatch(setError(result.message || "Failed to load products"))
+          notifyError(toast, result.message || "Failed to load products")
+        }
+      } catch (err) {
+        console.error("Error fetching products:", err)
+        if (!silent) {
+          dispatch(setProducts([]))
+          dispatch(setError("Failed to load products. Please try again later."))
+          notifyError(toast, "Failed to load products. Please try again later.")
+        }
+      } finally {
+        dispatch(setLoading(false))
+        dispatch(setSilentRefreshing(false))
+        fetchInFlightRef.current = false
       }
-    } catch (err) {
-      console.error("Error fetching products:", err)
-      dispatch(setProducts([]))
-      dispatch(setError("Failed to load products. Please try again later."))
-      notifyError(toast, "Failed to load products. Please try again later.")
-      setHasLoaded(true)
-    } finally {
-      dispatch(setLoading(false))
-    }
-  }, [userId, dispatch, toast])
+    },
+    [userId, dispatch, toast],
+  )
 
   useEffect(() => {
-    if (open && !hasLoaded && products.length === 0) {
-      fetchProducts()
-    }
-  }, [open, hasLoaded, products.length, fetchProducts])
+    if (!open || !userId || hasLoaded) return
+    fetchProducts()
+  }, [open, userId, hasLoaded, fetchProducts])
 
   useEffect(() => {
-    if (open && products.length > 0) {
-      setHasLoaded(true)
-    }
-  }, [open, products.length])
+    if (!open || !userId || !needsRefresh) return
+    fetchProducts({ silent: true })
+  }, [open, userId, needsRefresh, fetchProducts])
 
   const handleRefresh = () => {
-    dispatch(clearProducts())
-    setHasLoaded(false)
-    fetchProducts()
+    fetchProducts({ force: true })
   }
 
   const handleModalClose = () => {
@@ -227,8 +242,9 @@ export default function InventoryDrawer({
     <>
       <Sheet open={open} onOpenChange={onOpenChange}>
         <SheetContent
+          forceMount
           side="right"
-          className="flex h-full w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-xl md:max-w-3xl lg:max-w-[min(96vw,1200px)]"
+          className="flex h-full w-full flex-col gap-0 overflow-hidden p-0 data-[state=closed]:pointer-events-none sm:max-w-xl md:max-w-3xl lg:max-w-[min(96vw,1200px)]"
           onInteractOutside={(event) => {
             const target = event.target as HTMLElement | null
             if (target?.closest(`[${EXCEL_COLUMN_FILTER_POPOVER_ATTR}]`)) {
@@ -258,6 +274,7 @@ export default function InventoryDrawer({
                 <h2 className="truncate text-base font-semibold text-slate-900">Inventory</h2>
                 <p className="text-xs text-slate-500">
                   {products.length} product{products.length === 1 ? "" : "s"}
+                  {silentRefreshing ? " · Syncing…" : ""}
                   {error ? ` · ${error}` : ""}
                 </p>
               </div>
@@ -305,9 +322,9 @@ export default function InventoryDrawer({
                 size="sm"
                 className="h-8 border-slate-200 bg-white px-2.5 text-xs"
                 onClick={handleRefresh}
-                disabled={loading}
+                disabled={loading || silentRefreshing}
               >
-                <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+                <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${loading || silentRefreshing ? "animate-spin" : ""}`} />
                 Refresh
               </Button>
 
@@ -342,7 +359,8 @@ export default function InventoryDrawer({
           <div className="relative z-0 min-h-0 flex-1 p-4">
             {contentReady ? (
               <ProductsExcelTable
-                products={searchedProducts}
+                products={products}
+                searchTerm={searchTerm}
                 isLoading={loading}
                 hasLoaded={hasLoaded}
                 hideCogs={hideCogs}
