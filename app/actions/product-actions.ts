@@ -9,6 +9,7 @@ import {
   filterProductsForStaff,
   resolveStaffSessionContext,
 } from "@/lib/staff-restrictions-server"
+import { parseProductLinksFromFormData, serializeProductLinks } from "@/lib/product-links"
 
 
 // Generate a unique barcode for a product
@@ -722,7 +723,7 @@ export async function createProduct(formData: FormData) {
   const suitableFor = (formData.get("suitable_for") as string) || ""
   const attributesRaw = formData.get("attributes") as string
   const attributes = attributesRaw ? JSON.parse(attributesRaw) : []
-  const link = (formData.get("link") as string) || ""
+  const link = serializeProductLinks(parseProductLinksFromFormData(formData))
   const amazonStatus = normalizePlatformStatus(formData.get("amazon_status"))
   const flipkartStatus = normalizePlatformStatus(formData.get("flipkart_status"))
   const meeshoStatus = normalizePlatformStatus(formData.get("meesho_status"))
@@ -966,7 +967,7 @@ export async function updateProduct(formData: FormData) {
   const suitableFor = (formData.get("suitable_for") as string) || ""
   const attributesRaw = formData.get("attributes") as string
   const attributes = attributesRaw ? JSON.parse(attributesRaw) : []
-  const link = (formData.get("link") as string) || ""
+  const link = serializeProductLinks(parseProductLinksFromFormData(formData))
   const amazonStatusRaw = formData.get("amazon_status")
   const flipkartStatusRaw = formData.get("flipkart_status")
   const meeshoStatusRaw = formData.get("meesho_status")

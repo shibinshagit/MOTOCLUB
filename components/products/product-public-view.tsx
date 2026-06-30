@@ -1,8 +1,8 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Image from "next/image"
-import { ChevronLeft, ChevronRight, Maximize2, Play, X } from "lucide-react"
+import { ChevronLeft, ChevronRight, Maximize2, Play } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { PublicSharedProduct } from "@/lib/product-share"
 import { BrandLogo } from "@/components/brand-logo"
@@ -10,6 +10,8 @@ import { BrandLogo } from "@/components/brand-logo"
 interface ProductPublicViewProps {
   product: PublicSharedProduct
 }
+
+const SWIPE_THRESHOLD_PX = 48
 
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
@@ -34,6 +36,7 @@ export function ProductPublicView({ product }: ProductPublicViewProps) {
 
   const [activeIndex, setActiveIndex] = useState(0)
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const touchStartXRef = useRef<number | null>(null)
 
   const activeMedia = mediaItems[activeIndex] || null
 
@@ -46,6 +49,27 @@ export function ProductPublicView({ product }: ProductPublicViewProps) {
     if (mediaItems.length <= 1) return
     setActiveIndex((current) => (current - 1 + mediaItems.length) % mediaItems.length)
   }, [mediaItems.length])
+
+  const handleTouchStart = useCallback((event: React.TouchEvent) => {
+    touchStartXRef.current = event.touches[0]?.clientX ?? null
+  }, [])
+
+  const handleTouchEnd = useCallback(
+    (event: React.TouchEvent) => {
+      if (mediaItems.length <= 1 || touchStartXRef.current == null) return
+
+      const endX = event.changedTouches[0]?.clientX
+      if (endX == null) return
+
+      const deltaX = touchStartXRef.current - endX
+      touchStartXRef.current = null
+
+      if (Math.abs(deltaX) < SWIPE_THRESHOLD_PX) return
+      if (deltaX > 0) goNext()
+      else goPrevious()
+    },
+    [goNext, goPrevious, mediaItems.length],
+  )
 
   useEffect(() => {
     if (!isFullscreen) return
@@ -100,57 +124,65 @@ export function ProductPublicView({ product }: ProductPublicViewProps) {
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           {mediaItems.length > 0 ? (
             <div className="border-b border-slate-200 bg-slate-950">
-              <div className="relative aspect-[4/3] w-full sm:aspect-[16/10]">
-                {activeMedia?.type === "video" ? (
-                  <video
-                    key={activeMedia.url}
-                    src={activeMedia.url}
-                    controls
-                    playsInline
-                    className="h-full w-full bg-black object-contain"
-                  />
-                ) : activeMedia ? (
-                  <Image
-                    src={activeMedia.url}
-                    alt={product.name}
-                    fill
-                    unoptimized
-                    className="object-contain"
-                    sizes="(max-width: 768px) 100vw, 960px"
-                  />
-                ) : null}
+              <div
+                className="relative aspect-[4/3] w-full touch-pan-y sm:aspect-[16/10]"
+                onTouchStart={handleTouchStart}
+                onTouchEnd={handleTouchEnd}
+              >
+                <div className="absolute inset-0 z-0">
+                  {activeMedia?.type === "video" ? (
+                    <video
+                      key={activeMedia.url}
+                      src={activeMedia.url}
+                      controls
+                      playsInline
+                      className="h-full w-full bg-black object-contain"
+                    />
+                  ) : activeMedia ? (
+                    <Image
+                      src={activeMedia.url}
+                      alt={product.name}
+                      fill
+                      unoptimized
+                      className="object-contain"
+                      sizes="(max-width: 768px) 100vw, 960px"
+                    />
+                  ) : null}
+                </div>
 
-                {mediaItems.length > 1 ? (
-                  <>
+                <div className="pointer-events-none absolute inset-0 z-10">
+                  {mediaItems.length > 1 ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={goPrevious}
+                        className="pointer-events-auto absolute left-3 top-1/2 z-10 -translate-y-1/2 rounded-full bg-black/60 p-2.5 text-white shadow-md hover:bg-black/80"
+                        aria-label="Previous media"
+                      >
+                        <ChevronLeft className="h-5 w-5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={goNext}
+                        className="pointer-events-auto absolute right-3 top-1/2 z-10 -translate-y-1/2 rounded-full bg-black/60 p-2.5 text-white shadow-md hover:bg-black/80"
+                        aria-label="Next media"
+                      >
+                        <ChevronRight className="h-5 w-5" />
+                      </button>
+                    </>
+                  ) : null}
+
+                  {activeMedia?.type === "image" ? (
                     <button
                       type="button"
-                      onClick={goPrevious}
-                      className="absolute left-3 top-1/2 -translate-y-1/2 rounded-full bg-black/50 p-2 text-white hover:bg-black/70"
-                      aria-label="Previous media"
+                      onClick={() => setIsFullscreen(true)}
+                      className="pointer-events-auto absolute right-3 top-3 z-10 rounded-full bg-black/60 p-2 text-white shadow-md hover:bg-black/80"
+                      aria-label="View full screen"
                     >
-                      <ChevronLeft className="h-5 w-5" />
+                      <Maximize2 className="h-4 w-4" />
                     </button>
-                    <button
-                      type="button"
-                      onClick={goNext}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-black/50 p-2 text-white hover:bg-black/70"
-                      aria-label="Next media"
-                    >
-                      <ChevronRight className="h-5 w-5" />
-                    </button>
-                  </>
-                ) : null}
-
-                {activeMedia?.type === "image" ? (
-                  <button
-                    type="button"
-                    onClick={() => setIsFullscreen(true)}
-                    className="absolute right-3 top-3 rounded-full bg-black/50 p-2 text-white hover:bg-black/70"
-                    aria-label="View full screen"
-                  >
-                    <Maximize2 className="h-4 w-4" />
-                  </button>
-                ) : null}
+                  ) : null}
+                </div>
               </div>
 
               {mediaItems.length > 1 ? (
@@ -209,6 +241,27 @@ export function ProductPublicView({ product }: ProductPublicViewProps) {
               </div>
             ) : null}
 
+            {product.links.length > 0 ? (
+              <div>
+                <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Links</h2>
+                <div className="rounded-xl border border-slate-100 bg-slate-50/60 px-4">
+                  {product.links.map((entry, index) => (
+                    <div key={`${entry.name}-${entry.url}-${index}`} className="border-b border-slate-100 py-3 last:border-b-0">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{entry.name}</p>
+                      <a
+                        href={entry.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-1 block break-all text-sm text-brand-blue hover:underline"
+                      >
+                        {entry.url}
+                      </a>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
             {product.attributes.length > 0 ? (
               <div>
                 <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Specifications</h2>
@@ -230,48 +283,61 @@ export function ProductPublicView({ product }: ProductPublicViewProps) {
       </div>
 
       {isFullscreen && activeMedia?.type === "image" ? (
-        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/95 p-4">
-          <button
-            type="button"
-            onClick={() => setIsFullscreen(false)}
-            className="absolute right-4 top-4 rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
-            aria-label="Close full screen"
-          >
-            <X className="h-6 w-6" />
-          </button>
+        <div
+          className="fixed inset-0 z-[300] flex items-center justify-center bg-black/95 p-4 pb-24"
+          onTouchStart={handleTouchStart}
+          onTouchEnd={handleTouchEnd}
+        >
+          <div className="pointer-events-none absolute inset-0 z-20">
+            {mediaItems.length > 1 ? (
+              <>
+                <button
+                  type="button"
+                  onClick={goPrevious}
+                  className="pointer-events-auto absolute left-3 top-1/2 -translate-y-1/2 rounded-full bg-black/70 p-3 text-white shadow-md hover:bg-black/90 sm:left-4"
+                  aria-label="Previous image"
+                >
+                  <ChevronLeft className="h-6 w-6" />
+                </button>
+                <button
+                  type="button"
+                  onClick={goNext}
+                  className="pointer-events-auto absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-black/70 p-3 text-white shadow-md hover:bg-black/90 sm:right-4"
+                  aria-label="Next image"
+                >
+                  <ChevronRight className="h-6 w-6" />
+                </button>
+              </>
+            ) : null}
+          </div>
 
-          {mediaItems.length > 1 ? (
-            <>
-              <button
-                type="button"
-                onClick={goPrevious}
-                className="absolute left-4 top-1/2 -translate-y-1/2 rounded-full bg-white/10 p-3 text-white hover:bg-white/20"
-                aria-label="Previous image"
-              >
-                <ChevronLeft className="h-6 w-6" />
-              </button>
-              <button
-                type="button"
-                onClick={goNext}
-                className="absolute right-4 top-1/2 -translate-y-1/2 rounded-full bg-white/10 p-3 text-white hover:bg-white/20"
-                aria-label="Next image"
-              >
-                <ChevronRight className="h-6 w-6" />
-              </button>
-            </>
-          ) : null}
-
-          <div className="relative h-full w-full max-h-[90vh] max-w-6xl">
+          <div className="relative z-0 h-full w-full max-h-[calc(100vh-7rem)] max-w-6xl">
             <Image
               src={activeMedia.url}
               alt={product.name}
               fill
               unoptimized
-              className="object-contain"
+              className="object-contain select-none"
               sizes="100vw"
               priority
+              draggable={false}
             />
           </div>
+
+          {mediaItems.length > 1 ? (
+            <p className="absolute bottom-20 left-1/2 z-20 -translate-x-1/2 text-xs text-white/70 sm:hidden">
+              Swipe left or right for next image
+            </p>
+          ) : null}
+
+          <button
+            type="button"
+            onClick={() => setIsFullscreen(false)}
+            className="absolute bottom-6 left-1/2 z-20 -translate-x-1/2 rounded-full bg-red-500 px-8 py-2.5 text-sm font-semibold lowercase text-black shadow-lg"
+            aria-label="Close full screen"
+          >
+            close
+          </button>
         </div>
       ) : null}
     </>

@@ -23,6 +23,7 @@ import {
   MAX_VIDEO_SIZE_BYTES,
 } from "@/lib/media-upload-utils"
 import { uploadProductFileFromClient } from "@/lib/blob-client-upload"
+import type { ProductLinkEntry } from "@/lib/product-links"
 import {
   NESTED_DIALOG_CONTENT_ATTR,
   preventDismissWhenNestedOpen,
@@ -249,9 +250,9 @@ export default function NewProductModal({
     color: "",
     size: "",
     suitableFor: "",
-    link: "",
   })
   const [attributes, setAttributes] = useState<AttributeEntry[]>([])
+  const [productLinks, setProductLinks] = useState<ProductLinkEntry[]>([])
   const [platformStatus, setPlatformStatus] = useState<Record<PlatformKey, PlatformStatus>>({
     amazon: "not_listed",
     flipkart: "not_listed",
@@ -489,9 +490,10 @@ export default function NewProductModal({
         name: "", companyName: "", category: "", categoryId: null,
         description: "", price: "", wholesalePrice: "", msp: "",
         stock: "", shelf: "", barcode: initialBarcode, color: "", size: "",
-        suitableFor: "", link: "",
+        suitableFor: "", 
       })
       setAttributes([])
+      setProductLinks([])
       setPlatformStatus({
         amazon: "not_listed",
         flipkart: "not_listed",
@@ -618,6 +620,18 @@ export default function NewProductModal({
 
   const handleAttributeChange = (index: number, field: "key" | "value", val: string) => {
     setAttributes((prev) => prev.map((attr, i) => i === index ? { ...attr, [field]: val } : attr))
+  }
+
+  const handleAddProductLink = () => {
+    setProductLinks((prev) => [...prev, { name: "", url: "" }])
+  }
+
+  const handleRemoveProductLink = (index: number) => {
+    setProductLinks((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  const handleProductLinkChange = (index: number, field: "name" | "url", val: string) => {
+    setProductLinks((prev) => prev.map((entry, i) => (i === index ? { ...entry, [field]: val } : entry)))
   }
 
   // Build hierarchy: parent categories and their children
@@ -816,7 +830,7 @@ export default function NewProductModal({
       submitFormData.append("color", formData.color)
       submitFormData.append("size", formData.size)
       submitFormData.append("suitable_for", formData.suitableFor)
-      submitFormData.append("link", formData.link)
+      submitFormData.append("links", JSON.stringify(productLinks))
       const validAttributes = attributes.filter((a) => a.key.trim() && a.value.trim())
       submitFormData.append("attributes", JSON.stringify(validAttributes))
       if (userId) submitFormData.append("user_id", userId.toString())
@@ -1006,20 +1020,46 @@ export default function NewProductModal({
                   />
                 </div>
 
-                <div className="space-y-1.5 sm:col-span-2">
-                  <FieldLabel htmlFor="link">
+                <div className="space-y-2 sm:col-span-2">
+                  <FieldLabel>
                     <span className="inline-flex items-center gap-1">
-                      <Link2 className="h-3 w-3" /> Product link
+                      <Link2 className="h-3 w-3" /> Product links
                     </span>
                   </FieldLabel>
-                  <Input
-                    id="link"
-                    name="link"
-                    value={formData.link}
-                    onChange={handleChange}
-                    placeholder="https://..."
-                    className={inputClass()}
-                  />
+                  {productLinks.map((entry, index) => (
+                    <div key={index} className="flex items-center gap-2">
+                      <Input
+                        value={entry.name}
+                        onChange={(e) => handleProductLinkChange(index, "name", e.target.value)}
+                        placeholder="Name (optional, defaults to Link)"
+                        className="h-8 flex-1 border-slate-300 bg-white text-sm"
+                      />
+                      <Input
+                        value={entry.url}
+                        onChange={(e) => handleProductLinkChange(index, "url", e.target.value)}
+                        placeholder="https://..."
+                        className="h-8 flex-[1.5] border-slate-300 bg-white text-sm"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleRemoveProductLink(index)}
+                        className="h-8 w-8 p-0 text-rose-500 hover:bg-rose-50 hover:text-rose-700"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleAddProductLink}
+                    className="w-full border-dashed border-slate-300 bg-transparent text-slate-600 hover:bg-slate-50"
+                  >
+                    <Plus className="mr-1 h-4 w-4" /> Add link
+                  </Button>
                 </div>
 
                 <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2.5 sm:col-span-2">

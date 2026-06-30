@@ -14,6 +14,7 @@ import { useStaffRestrictions } from "@/hooks/use-staff-restrictions"
 import { useToast } from "@/components/ui/use-toast"
 import { notifyError, notifySuccess } from "@/lib/notifications"
 import { cn } from "@/lib/utils"
+import { parseProductLinks } from "@/lib/product-links"
 
 interface ProductDetailBaseProps {
   onClose: () => void
@@ -164,6 +165,7 @@ export function ProductDetailPanel({
     }
     return urls.slice(0, 4)
   }, [product.image_urls, product.image_url])
+  const productLinks = useMemo(() => parseProductLinks(product.link), [product.link])
   const mediaVideoUrl = typeof product.video_url === "string" && product.video_url.trim() ? product.video_url : null
   const platformStatuses = [
     { key: "amazon", label: "Amazon", status: product.amazon_status || "not_listed" },
@@ -516,22 +518,25 @@ export function ProductDetailPanel({
                 label="Updated"
                 value={product.updated_at ? format(new Date(product.updated_at), "yyyy-MM-dd") : "—"}
               />
-              {product.link ? (
-                <InfoCell
-                  label="Link"
-                  value={
-                    <a
-                      href={product.link}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="break-all text-brand-blue hover:underline"
-                    >
-                      {product.link}
-                    </a>
-                  }
-                  className="sm:col-span-2 lg:col-span-4"
-                />
-              ) : null}
+              {productLinks.length > 0
+                ? productLinks.map((entry, index) => (
+                    <InfoCell
+                      key={`${entry.name}-${entry.url}-${index}`}
+                      label={entry.name}
+                      value={
+                        <a
+                          href={entry.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="break-all text-brand-blue hover:underline"
+                        >
+                          {entry.url}
+                        </a>
+                      }
+                      className="sm:col-span-2 lg:col-span-4"
+                    />
+                  ))
+                : null}
               {product.description ? (
                 <InfoCell label="Description" value={product.description} className="sm:col-span-2 lg:col-span-4" />
               ) : null}

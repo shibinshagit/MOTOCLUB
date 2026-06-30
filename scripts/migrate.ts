@@ -12,6 +12,7 @@
 
 import { neon } from "@neondatabase/serverless"
 import * as dotenv from "dotenv"
+import { migrateStoredProductLink } from "../lib/product-links"
 
 dotenv.config({ path: ".env.local" })
 dotenv.config()
@@ -629,6 +630,25 @@ async function upgradeLegacyColumns() {
   await runSafe("companies.logo_url drop", () => sql`ALTER TABLE companies DROP COLUMN IF EXISTS logo_url`)
 
   await runSafe("products.stock drop", () => sql`ALTER TABLE products DROP COLUMN IF EXISTS stock`)
+
+  await runSafe("products.link legacy plain URLs", async () => {
+    const rows = await sql`
+      SELECT id, link
+      FROM products
+      WHERE link IS NOT NULL AND TRIM(link) <> ''
+    `
+
+    for (const row of rows as Array<{ id: number; link: string }>) {
+      const migrated = migrateStoredProductLink(row.link)
+      if (migrated && migrated !== row.link) {
+        await sql`
+          UPDATE products
+          SET link = ${migrated}
+          WHERE id = ${row.id}
+        `
+      }
+    }
+  })
 }
 
 async function dropLegacyTables() {

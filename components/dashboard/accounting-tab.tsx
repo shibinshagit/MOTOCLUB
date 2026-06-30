@@ -29,6 +29,7 @@ import {
   TrendingUp,
   ArrowUpCircle,
   Loader2,
+  Wallet,
 } from "lucide-react"
 import { useAppSelector, useAppDispatch } from "@/store/hooks"
 import { useStaffRestrictions } from "@/hooks/use-staff-restrictions"
@@ -511,6 +512,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
       if (result.success) {
         notifySuccess(toast,"Manual transaction added successfully")
         setIsManualDialogOpen(false)
+        setActiveTab("petty-cash")
         setManualAmount("")
         setManualDescription("")
         setManualCategory("")
@@ -771,62 +773,80 @@ const extractIdFromDescription = (desc: string) => {
 
 const n = (v: any) => Number(v) || 0
 
-// Define filteredTransactions first with proper null checks
+const matchesSearchAndDateRange = (transaction: any) => {
+  if (!transaction) return false
+
+  const description = transaction.description || ""
+  const account = transaction.account || ""
+
+  const matchesSearch =
+    description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    account.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (transaction.status && transaction.status.toLowerCase().includes(searchTerm.toLowerCase()))
+
+  let transactionDate: Date
+
+  if (typeof transaction.date === "string") {
+    transactionDate = parseISO(transaction.date)
+  } else {
+    transactionDate = new Date(transaction.date as string | number)
+  }
+
+  if (!isValid(transactionDate)) {
+    return false
+  }
+
+  const transactionDateOnly = new Date(
+    transactionDate.getFullYear(),
+    transactionDate.getMonth(),
+    transactionDate.getDate(),
+  )
+  const fromDateOnly = new Date(dateFrom.getFullYear(), dateFrom.getMonth(), dateFrom.getDate())
+  const toDateOnly = new Date(dateTo.getFullYear(), dateTo.getMonth(), dateTo.getDate())
+
+  const isWithinDateRange = transactionDateOnly >= fromDateOnly && transactionDateOnly <= toDateOnly
+
+  return matchesSearch && isWithinDateRange
+}
+
+// Define filteredTransactions first with proper null checks (excludes manual/petty cash entries)
 const filteredTransactions =
   financialData?.transactions?.filter((transaction) => {
     if (!transaction) return false
-    
-    const description = transaction.description || ""
-    const account = transaction.account || ""
 
-    const matchesSearch =
-      description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      account.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (transaction.status && transaction.status.toLowerCase().includes(searchTerm.toLowerCase()))
+    const type = transaction.type?.toLowerCase()
+    if (type === "manual") return false
+
+    if (!matchesSearchAndDateRange(transaction)) return false
+
+    const description = transaction.description || ""
+    const received = n(transaction.received)
 
     let matchesType = true
-    const type = transaction.type?.toLowerCase()
-    const received = n(transaction.received)
-    
     if (filterType === "income") {
       matchesType = (type === 'sale' && received > 0) || (type === 'adjustment' && received > 0)
     } else if (filterType === "expense") {
-      matchesType = (type === 'purchase' && received > 0) || 
+      matchesType = (type === 'purchase' && received > 0) ||
                    (type === 'supplier_payment') ||
                    (type === 'adjustment' && description.includes('Purchase') && received > 0)
     } else if (filterType === "sale") {
       matchesType = type === "sale" || description.toLowerCase().startsWith("sale")
     } else if (filterType === "purchase") {
-      matchesType = type === "purchase" || 
+      matchesType = type === "purchase" ||
                    description.toLowerCase().startsWith("purchase") ||
                    (type === 'adjustment' && description.includes('Purchase'))
     } else if (filterType !== "all") {
       matchesType = transaction.type === filterType
     }
 
-    let transactionDate: Date
+    return matchesType
+  }) || []
 
-    if (typeof transaction.date === "string") {
-      transactionDate = parseISO(transaction.date)
-    } else {
-      transactionDate = new Date(transaction.date as string | number)
-    }
-
-    if (!isValid(transactionDate)) {
-      return false
-    }
-
-    const transactionDateOnly = new Date(
-      transactionDate.getFullYear(),
-      transactionDate.getMonth(),
-      transactionDate.getDate(),
-    )
-    const fromDateOnly = new Date(dateFrom.getFullYear(), dateFrom.getMonth(), dateFrom.getDate())
-    const toDateOnly = new Date(dateTo.getFullYear(), dateTo.getMonth(), dateTo.getDate())
-
-    const isWithinDateRange = transactionDateOnly >= fromDateOnly && transactionDateOnly <= toDateOnly
-
-    return matchesSearch && matchesType && isWithinDateRange
+const pettyCashTransactions =
+  financialData?.transactions?.filter((transaction) => {
+    if (!transaction) return false
+    if (transaction.type?.toLowerCase() !== "manual") return false
+    return matchesSearchAndDateRange(transaction)
   }) || []
 
 
@@ -1061,6 +1081,21 @@ const getCashImpact = (transaction: any) => {
   // For manual/other transactions - cash impact = actual net money movement
   return credit - debit
 }
+
+const getPettyCashMoneyIn = () =>
+  pettyCashTransactions.reduce((sum, t) => {
+    const impact = getCashImpact(t)
+    return impact > 0 ? sum + impact : sum
+  }, 0)
+
+const getPettyCashMoneyOut = () =>
+  pettyCashTransactions.reduce((sum, t) => {
+    const impact = getCashImpact(t)
+    return impact < 0 ? sum + Math.abs(impact) : sum
+  }, 0)
+
+const getPettyCashNet = () =>
+  pettyCashTransactions.reduce((sum, t) => sum + getCashImpact(t), 0)
 
 // FIXED: Total Cash Impact
 const getTotalCashImpact = () => {
@@ -1786,6 +1821,181 @@ const getEnhancedDescription = (transaction: any) => {
   return description || "Transaction"
 }
 
+const renderTransactionList = (
+  transactions: typeof filteredTransactions,
+  emptyMessage: string,
+) => {
+  if (isDataLoading) {
+    return (
+      <div className="space-y-2">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <TransactionSkeleton key={i} />
+        ))}
+      </div>
+    )
+  }
+
+  if (transactions.length === 0) {
+    return (
+      <div className="text-center py-12 text-muted-foreground">
+        {emptyMessage}
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="grid grid-cols-12 gap-4 rounded-lg bg-muted/50 px-4 py-2 text-xs font-medium text-muted-foreground">
+        <div className="col-span-3">Description</div>
+        <div className="col-span-1 text-center">Type</div>
+        <div className="col-span-1 text-center">Status</div>
+        <div className="col-span-1 text-right">Total Bill</div>
+        <div className="col-span-1 text-right">Money In/Out</div>
+        <div className="col-span-1 text-right">Remaining</div>
+        {!hideCogs && <div className="col-span-1 text-right">Product Cost</div>}
+        <div className="col-span-1 text-right">Cash Impact</div>
+        <div className="col-span-2 text-right">Date & Time</div>
+      </div>
+
+      {transactions.map((transaction) => {
+        const dateTime = formatDateTime(transaction.date)
+        const cashImpact = getCashImpact(transaction)
+        const isPositive = cashImpact > 0
+        const isNegative = cashImpact < 0
+        const remainingAmount = getRemainingAmount(transaction)
+        const moneyFlowInfo = getMoneyFlowInfo(transaction)
+        const enhancedDescription = getEnhancedDescription(transaction)
+
+        const isSale = transaction.type === "sale" || transaction.description?.toLowerCase().startsWith("sale")
+        const isPurchase = transaction.type === "purchase" || transaction.description?.toLowerCase().startsWith("purchase")
+        const isManual = transaction.type === "manual" || transaction.description?.toLowerCase().includes("manual")
+        const isSupplierPayment = transaction.type === 'supplier_payment' ||
+                                 transaction.description?.toLowerCase().includes('supplier payment')
+
+        const handleClick = () => {
+          if (isSale) {
+            const saleId = transaction.sale_id ||
+                          transaction.reference_id ||
+                          extractIdFromDescription(transaction.description) ||
+                          transaction.id
+            setViewSaleId(saleId)
+          } else if (isPurchase) {
+            const purchaseId = transaction.purchase_id ||
+                              transaction.reference_id ||
+                              extractIdFromDescription(transaction.description) ||
+                              transaction.id
+            setViewPurchaseId(purchaseId)
+          } else if (isManual) {
+            setViewManualTransactionId(transaction.id)
+          } else if (isSupplierPayment) {
+            const paymentId = transaction.supplier_payment_id ||
+                             transaction.reference_id ||
+                             transaction.id
+            setViewSupplierPaymentId(paymentId)
+          }
+        }
+
+        return (
+          <div
+            key={transaction.id}
+            className="grid grid-cols-12 gap-4 cursor-pointer items-center rounded-lg border px-4 py-3 transition-colors hover:bg-violet-50"
+            onClick={handleClick}
+            tabIndex={0}
+            role="button"
+            aria-label={
+              isSale ? "View Sale" :
+              isPurchase ? "View Purchase" :
+              isSupplierPayment ? "View Supplier Payment" :
+              "View Transaction"
+            }
+          >
+            <div className="col-span-3 flex items-center gap-2">
+              <div className="text-muted-foreground">
+                {getTransactionTypeIcon(transaction.type)}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div
+                  className="break-words text-sm font-medium leading-snug text-foreground"
+                  title={transaction.description || enhancedDescription}
+                >
+                  {enhancedDescription}
+                </div>
+              </div>
+            </div>
+
+            <div className="col-span-1 text-center">
+              <Badge variant="outline" className="text-xs capitalize">
+                {transaction.type || "unknown"}
+              </Badge>
+            </div>
+
+            <div className="col-span-1 text-center">
+              {getStatusBadge(transaction.status)}
+            </div>
+
+            <div className="col-span-1 text-right">
+              <div className="text-sm font-medium text-foreground">
+                {currency} {n(transaction.amount).toFixed(2)}
+              </div>
+            </div>
+
+            <div className="col-span-1 text-right">
+              {moneyFlowInfo.type !== 'none' ? (
+                <div className={`text-sm font-medium ${moneyFlowInfo.color}`}>
+                  {moneyFlowInfo.type === 'in' ? '+' : '-'}{currency} {moneyFlowInfo.amount.toFixed(2)}
+                  <div className="text-xs">{moneyFlowInfo.text}</div>
+                </div>
+              ) : (
+                <div className="text-sm text-muted-foreground">
+                  {moneyFlowInfo.text}
+                </div>
+              )}
+            </div>
+
+            <div className="col-span-1 text-right">
+              <div className={`text-sm font-medium ${
+                remainingAmount > 0
+                  ? "text-amber-600"
+                  : "text-muted-foreground/60"
+              }`}>
+                {remainingAmount > 0 ? `${currency} ${remainingAmount.toFixed(2)}` : 'Paid'}
+              </div>
+            </div>
+
+            {!hideCogs && (
+            <div className="col-span-1 text-right">
+              <div className="text-sm font-medium text-amber-600">
+                {currency} {n(transaction.cost).toFixed(2)}
+              </div>
+            </div>
+            )}
+
+            <div className="col-span-1 text-right">
+              <div className={`text-sm font-bold ${
+                isPositive
+                  ? "text-emerald-600"
+                  : isNegative
+                    ? "text-rose-600"
+                    : "text-muted-foreground"
+              }`}>
+                {isPositive ? "+" : isNegative ? "-" : ""}
+                {currency} {Math.abs(cashImpact).toFixed(2)}
+              </div>
+            </div>
+
+            <div className="col-span-2 text-right">
+              <div className="text-xs text-muted-foreground">
+                <div>{dateTime.date}</div>
+                <div>{dateTime.time}</div>
+              </div>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -1897,7 +2107,6 @@ const getEnhancedDescription = (transaction: any) => {
               <SelectItem value="sale">Sales</SelectItem>
               <SelectItem value="purchase">Purchases</SelectItem>
               <SelectItem value="adjustment">Adjustments</SelectItem>
-              <SelectItem value="manual">Manual</SelectItem>
             </SelectContent>
           </Select>
 
@@ -2072,9 +2281,12 @@ const getEnhancedDescription = (transaction: any) => {
       <div className="rounded-xl border border-border bg-card">
         <Tabs defaultValue="transactions" value={activeTab} onValueChange={setActiveTab} className="w-full">
           <div className="px-4 pt-4">
-            <TabsList className="grid w-full grid-cols-4 rounded-lg bg-muted p-1">
+            <TabsList className="grid w-full grid-cols-2 md:grid-cols-5 rounded-lg bg-muted p-1">
               <TabsTrigger value="transactions" className="rounded-md">
                 Transactions
+              </TabsTrigger>
+              <TabsTrigger value="petty-cash" className="rounded-md">
+                Petty cash
               </TabsTrigger>
               <TabsTrigger value="receivables" className="rounded-md">
                 Receivables
@@ -2089,177 +2301,93 @@ const getEnhancedDescription = (transaction: any) => {
           </div>
 
           <TabsContent value="transactions" className="p-4">
-            {isDataLoading ? (
-              <div className="space-y-2">
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <TransactionSkeleton key={i} />
-                ))}
-              </div>
-            ) : filteredTransactions.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground">
-                No transactions found for the selected period
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {/* Transaction Headers */}
-                <div className="grid grid-cols-12 gap-4 rounded-lg bg-muted/50 px-4 py-2 text-xs font-medium text-muted-foreground">
-                  <div className="col-span-3">Description</div>
-                  <div className="col-span-1 text-center">Type</div>
-                  <div className="col-span-1 text-center">Status</div>
-                  <div className="col-span-1 text-right">Total Bill</div>
-                  <div className="col-span-1 text-right">Money In/Out</div>
-                  <div className="col-span-1 text-right">Remaining</div>
-                  {!hideCogs && <div className="col-span-1 text-right">Product Cost</div>}
-                  <div className="col-span-1 text-right">Cash Impact</div>
-                  <div className="col-span-2 text-right">Date & Time</div>
-                </div>
+            {renderTransactionList(
+              filteredTransactions,
+              "No transactions found for the selected period",
+            )}
+          </TabsContent>
 
-                {filteredTransactions.map((transaction) => {
-                  const dateTime = formatDateTime(transaction.date)
-                  const cashImpact = getCashImpact(transaction)
-                  const isPositive = cashImpact > 0
-                  const isNegative = cashImpact < 0
-                  const remainingAmount = getRemainingAmount(transaction)
-                  const moneyFlowInfo = getMoneyFlowInfo(transaction)
-                  const enhancedDescription = getEnhancedDescription(transaction)
+          <TabsContent value="petty-cash" className="p-4">
+            <div className="mb-4 flex flex-wrap items-center justify-end gap-3">
+              <Button size="sm" onClick={() => setIsManualDialogOpen(true)}>
+                <Plus className="h-4 w-4 mr-2" />
+                Add Entry
+              </Button>
+            </div>
 
-                  // Determine transaction type and extract the correct ID
-                  const isSale = transaction.type === "sale" || transaction.description?.toLowerCase().startsWith("sale")
-                  const isPurchase = transaction.type === "purchase" || transaction.description?.toLowerCase().startsWith("purchase")
-                  const isManual = transaction.type === "manual" || transaction.description?.toLowerCase().includes("manual")
-                  const isSupplierPayment = transaction.type === 'supplier_payment' || 
-                                           transaction.description?.toLowerCase().includes('supplier payment')
-                  
-                  const handleClick = () => {
-                    if (isSale) {
-                      const saleId = transaction.sale_id || 
-                                    transaction.reference_id || 
-                                    extractIdFromDescription(transaction.description) ||
-                                    transaction.id
-                      setViewSaleId(saleId)
-                    } else if (isPurchase) {
-                      const purchaseId = transaction.purchase_id || 
-                                        transaction.reference_id || 
-                                        extractIdFromDescription(transaction.description) ||
-                                        transaction.id
-                      setViewPurchaseId(purchaseId)
-                    } else if (isManual) {
-                      setViewManualTransactionId(transaction.id)
-                    } else if (isSupplierPayment) {
-                      const paymentId = transaction.supplier_payment_id || 
-                                       transaction.reference_id || 
-                                       transaction.id
-                      setViewSupplierPaymentId(paymentId)
-                    }
-                  }
-
-                  return (
-                    <div
-                      key={transaction.id}
-                      className="grid grid-cols-12 gap-4 cursor-pointer items-center rounded-lg border px-4 py-3 transition-colors hover:bg-violet-50"
-                      onClick={handleClick}
-                      tabIndex={0}
-                      role="button"
-                      aria-label={
-                        isSale ? "View Sale" : 
-                        isPurchase ? "View Purchase" : 
-                        isSupplierPayment ? "View Supplier Payment" : 
-                        "View Transaction"
-                      }
-                    >
-                      {/* Description */}
-                      <div className="col-span-3 flex items-center gap-2">
-                        <div className="text-muted-foreground">
-                          {getTransactionTypeIcon(transaction.type)}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div
-                            className="break-words text-sm font-medium leading-snug text-foreground"
-                            title={transaction.description || enhancedDescription}
-                          >
-                            {enhancedDescription}
-                          </div>
-                        </div>
+            <div className="mb-4 grid grid-cols-2 md:grid-cols-4 gap-2">
+              {isDataLoading ? (
+                Array.from({ length: 4 }).map((_, i) => <SummaryCardSkeleton key={i} />)
+              ) : (
+                <>
+                  <Card className="border border-violet-100 bg-violet-50">
+                    <CardContent className="p-3">
+                      <div className="mb-1 flex items-center gap-1 text-violet-700">
+                        <Wallet className="h-4 w-4" />
+                        <span className="text-xs font-medium">Entries</span>
                       </div>
-
-                      {/* Type */}
-                      <div className="col-span-1 text-center">
-                        <Badge variant="outline" className="text-xs capitalize">
-                          {transaction.type || "unknown"}
-                        </Badge>
+                      <div className="text-lg font-bold text-violet-700">
+                        {pettyCashTransactions.length}
                       </div>
-
-                      {/* Status */}
-                      <div className="col-span-1 text-center">
-                        {getStatusBadge(transaction.status)}
+                      <div className="mt-1 text-[10px] text-violet-600">
+                        {searchTerm ? `matching "${searchTerm}"` : "manual entries"}
                       </div>
+                    </CardContent>
+                  </Card>
 
-                      {/* Total Bill Amount */}
-                      <div className="col-span-1 text-right">
-                        <div className="text-sm font-medium text-foreground">
-                          {currency} {n(transaction.amount).toFixed(2)}
-                        </div>
+                  <Card className="border border-emerald-100 bg-emerald-50">
+                    <CardContent className="p-3">
+                      <div className="mb-1 flex items-center gap-1 text-emerald-700">
+                        <ArrowUpCircle className="h-4 w-4" />
+                        <span className="text-xs font-medium">Money In</span>
                       </div>
+                      <div className="text-lg font-bold text-emerald-700">
+                        {`${currency} ${getPettyCashMoneyIn().toFixed(2)}`}
+                      </div>
+                      <div className="mt-1 text-[10px] text-emerald-600">
+                        Inflows: {pettyCashTransactions.filter((t) => getCashImpact(t) > 0).length}
+                      </div>
+                    </CardContent>
+                  </Card>
 
-                      {/* Money In/Out */}
-                      <div className="col-span-1 text-right">
-                        {moneyFlowInfo.type !== 'none' ? (
-                          <div className={`text-sm font-medium ${moneyFlowInfo.color}`}>
-                            {moneyFlowInfo.type === 'in' ? '+' : '-'}{currency} {moneyFlowInfo.amount.toFixed(2)}
-                            <div className="text-xs">{moneyFlowInfo.text}</div>
-                          </div>
-                        ) : (
-                          <div className="text-sm text-muted-foreground">
-                            {moneyFlowInfo.text}
-                          </div>
-                        )}
+                  <Card className="border border-rose-100 bg-rose-50">
+                    <CardContent className="p-3">
+                      <div className="mb-1 flex items-center gap-1 text-rose-700">
+                        <ArrowDownCircle className="h-4 w-4" />
+                        <span className="text-xs font-medium">Money Out</span>
                       </div>
+                      <div className="text-lg font-bold text-rose-700">
+                        {`${currency} ${getPettyCashMoneyOut().toFixed(2)}`}
+                      </div>
+                      <div className="mt-1 text-[10px] text-rose-600">
+                        Outflows: {pettyCashTransactions.filter((t) => getCashImpact(t) < 0).length}
+                      </div>
+                    </CardContent>
+                  </Card>
 
-                      {/* Remaining */}
-                      <div className="col-span-1 text-right">
-                        <div className={`text-sm font-medium ${
-                          remainingAmount > 0 
-                            ? "text-amber-600" 
-                            : "text-muted-foreground/60"
-                        }`}>
-                          {remainingAmount > 0 ? `${currency} ${remainingAmount.toFixed(2)}` : 'Paid'}
-                        </div>
+                  <Card className="border border-blue-100 bg-blue-50">
+                    <CardContent className="p-3">
+                      <div className="mb-1 flex items-center gap-1 text-blue-700">
+                        <TrendingUp className="h-4 w-4" />
+                        <span className="text-xs font-medium">Net</span>
                       </div>
+                      <div className={`text-lg font-bold ${
+                        getPettyCashNet() >= 0 ? "text-emerald-700" : "text-rose-700"
+                      }`}>
+                        {`${currency} ${getPettyCashNet().toFixed(2)}`}
+                      </div>
+                      <div className="mt-1 text-[10px] text-brand-blue">
+                        in − out for period
+                      </div>
+                    </CardContent>
+                  </Card>
+                </>
+              )}
+            </div>
 
-                      {/* Product Cost */}
-                      {!hideCogs && (
-                      <div className="col-span-1 text-right">
-                        <div className="text-sm font-medium text-amber-600">
-                          {currency} {n(transaction.cost).toFixed(2)}
-                        </div>
-                      </div>
-                      )}
-
-                      {/* Cash Impact */}
-                      <div className="col-span-1 text-right">
-                        <div className={`text-sm font-bold ${
-                          isPositive 
-                            ? "text-emerald-600" 
-                            : isNegative 
-                              ? "text-rose-600" 
-                              : "text-muted-foreground"
-                        }`}>
-                          {isPositive ? "+" : isNegative ? "-" : ""}
-                          {currency} {Math.abs(cashImpact).toFixed(2)}
-                        </div>
-                      </div>
-
-                      {/* Date & Time */}
-                      <div className="col-span-2 text-right">
-                        <div className="text-xs text-muted-foreground">
-                          <div>{dateTime.date}</div>
-                          <div>{dateTime.time}</div>
-                        </div>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
+            {renderTransactionList(
+              pettyCashTransactions,
+              "No petty cash entries found for the selected period",
             )}
           </TabsContent>
 

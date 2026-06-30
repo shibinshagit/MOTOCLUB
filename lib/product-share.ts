@@ -1,4 +1,5 @@
 import { randomBytes } from "crypto"
+import { parseProductLinks, type ProductLinkEntry } from "@/lib/product-links"
 
 export type PublicSharedProduct = {
   name: string
@@ -9,6 +10,7 @@ export type PublicSharedProduct = {
   size: string | null
   suitableFor: string | null
   attributes: Array<{ key: string; value: string }>
+  links: ProductLinkEntry[]
   imageUrls: string[]
   videoUrl: string | null
   storeName: string | null
@@ -80,6 +82,7 @@ export function mapRowToPublicSharedProduct(row: Record<string, unknown>): Publi
     size: row.size ? String(row.size) : null,
     suitableFor: row.suitable_for ? String(row.suitable_for) : null,
     attributes: parseProductAttributes(row.attributes),
+    links: parseProductLinks(row.link),
     imageUrls: parseProductImageUrls({
       image_urls: row.image_urls,
       image_url: row.image_url as string | null,

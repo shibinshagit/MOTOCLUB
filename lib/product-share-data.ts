@@ -27,6 +27,7 @@ export async function fetchSharedProductByToken(
         p.size,
         p.suitable_for,
         p.attributes,
+        p.link,
         p.image_urls,
         p.image_url,
         p.video_url,
