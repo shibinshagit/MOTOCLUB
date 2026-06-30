@@ -9,6 +9,11 @@ export const MASTER_DATA_CATEGORIES = [
     label: "Packaging Types",
     description: "Common packaging options for shipped orders.",
   },
+  {
+    id: "manual_category",
+    label: "Manual Entry Categories",
+    description: "Standard categories for petty cash and manual accounting entries.",
+  },
 ] as const
 
 export type MasterDataCategory = (typeof MASTER_DATA_CATEGORIES)[number]["id"]

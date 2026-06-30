@@ -13,6 +13,14 @@
 import { neon } from "@neondatabase/serverless"
 import * as dotenv from "dotenv"
 import { migrateStoredProductLink } from "../lib/product-links"
+import {
+  DEFAULT_MANUAL_ENTRY_CATEGORIES,
+  MANUAL_ENTRY_MASTER_CATEGORY,
+  buildManualEntryDescription,
+  normalizeManualEntryCategory,
+  parseManualEntryCategoryFromDescription,
+  parseManualEntryDetailFromDescription,
+} from "../lib/manual-entry-categories"
 
 dotenv.config({ path: ".env.local" })
 dotenv.config()
@@ -651,6 +659,102 @@ async function upgradeLegacyColumns() {
   })
 }
 
+async function migrateManualEntryCategories() {
+  console.log("\n── Migrating manual entry categories ──\n")
+
+  const devices = (await sql`SELECT id FROM devices ORDER BY id ASC`) as Array<{
+    id: number
+  }>
+
+  for (const device of devices) {
+    const deviceId = Number(device.id)
+    const userRows = (await sql`
+      SELECT created_by
+      FROM financial_transactions
+      WHERE device_id = ${deviceId}
+        AND created_by IS NOT NULL
+      ORDER BY id ASC
+      LIMIT 1
+    `) as Array<{ created_by: number | null }>
+    const userId = Number(userRows[0]?.created_by) || 1
+
+    for (const category of DEFAULT_MANUAL_ENTRY_CATEGORIES) {
+      await runSafe(`seed manual category ${category.name} for device ${deviceId}`, async () => {
+        const existing = await sql`
+          SELECT id
+          FROM master_data
+          WHERE device_id = ${deviceId}
+            AND category = ${MANUAL_ENTRY_MASTER_CATEGORY}
+            AND LOWER(name) = LOWER(${category.name})
+          LIMIT 1
+        `
+
+        if (existing.length === 0) {
+          await sql`
+            INSERT INTO master_data (
+              device_id,
+              category,
+              name,
+              code,
+              is_active,
+              sort_order,
+              created_by
+            )
+            VALUES (
+              ${deviceId},
+              ${MANUAL_ENTRY_MASTER_CATEGORY},
+              ${category.name},
+              ${category.code},
+              true,
+              ${category.sortOrder},
+              ${userId}
+            )
+          `
+        }
+      })
+    }
+
+    const categoryRows = (await sql`
+      SELECT id, name
+      FROM master_data
+      WHERE device_id = ${deviceId}
+        AND category = ${MANUAL_ENTRY_MASTER_CATEGORY}
+    `) as Array<{ id: number; name: string }>
+
+    const categoryIdByName = new Map(
+      categoryRows.map((row) => [row.name.toLowerCase(), Number(row.id)]),
+    )
+
+    const manualRows = (await sql`
+      SELECT id, description, category_name
+      FROM financial_transactions
+      WHERE device_id = ${deviceId}
+        AND (transaction_type = 'manual' OR reference_type = 'manual')
+    `) as Array<{ id: number; description: string | null; category_name: string | null }>
+
+    for (const row of manualRows) {
+      const rawCategory =
+        row.category_name?.trim() ||
+        parseManualEntryCategoryFromDescription(row.description) ||
+        "Other"
+      const canonical = normalizeManualEntryCategory(rawCategory)
+      const detail = parseManualEntryDetailFromDescription(row.description)
+      const categoryId = categoryIdByName.get(canonical.toLowerCase()) || 0
+      const description = buildManualEntryDescription(canonical, detail)
+
+      await sql`
+        UPDATE financial_transactions
+        SET
+          category_name = ${canonical},
+          reference_id = ${categoryId},
+          description = ${description},
+          updated_at = NOW()
+        WHERE id = ${row.id}
+      `
+    }
+  }
+}
+
 async function dropLegacyTables() {
   console.log("\n── Dropping unused legacy tables ──\n")
 
@@ -737,6 +841,7 @@ async function migrate() {
   try {
     await createTables()
     await upgradeLegacyColumns()
+    await migrateManualEntryCategories()
     await dropLegacyTables()
     await createIndexes()
     await seedAdmin()

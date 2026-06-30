@@ -282,6 +282,63 @@ export async function getCustomerSales(customerId: number) {
   }
 }
 
+export type CustomerSettlementSummary = {
+  customer_id: number
+  customer_name: string
+  total_billed: number
+  already_received: number
+  still_to_collect: number
+  open_sale_count: number
+}
+
+export async function getCustomerSettlementSummaries(deviceId: number, userId: number) {
+  if (!deviceId || !userId) {
+    return { success: false, message: "Device ID and user ID are required", data: [] as CustomerSettlementSummary[] }
+  }
+
+  resetConnectionState()
+
+  try {
+    const rows = (await sql`
+      SELECT
+        c.id AS customer_id,
+        c.name AS customer_name,
+        SUM(COALESCE(s.total_amount, 0))::numeric AS total_billed,
+        SUM(COALESCE(s.received_amount, 0))::numeric AS already_received,
+        SUM(GREATEST(COALESCE(s.total_amount, 0) - COALESCE(s.received_amount, 0), 0))::numeric AS still_to_collect,
+        COUNT(*) FILTER (
+          WHERE COALESCE(s.total_amount, 0) - COALESCE(s.received_amount, 0) > 0.01
+        )::int AS open_sale_count
+      FROM customers c
+      JOIN sales s ON s.customer_id = c.id
+      WHERE c.created_by = ${userId}
+        AND s.device_id = ${deviceId}
+        AND LOWER(COALESCE(s.status, '')) != 'cancelled'
+      GROUP BY c.id, c.name
+      HAVING SUM(GREATEST(COALESCE(s.total_amount, 0) - COALESCE(s.received_amount, 0), 0)) > 0.01
+      ORDER BY still_to_collect DESC, c.name ASC
+    `) as any[]
+
+    const data: CustomerSettlementSummary[] = rows.map((row) => ({
+      customer_id: Number(row.customer_id),
+      customer_name: String(row.customer_name || `Customer #${row.customer_id}`),
+      total_billed: Number(row.total_billed || 0),
+      already_received: Number(row.already_received || 0),
+      still_to_collect: Number(row.still_to_collect || 0),
+      open_sale_count: Number(row.open_sale_count || 0),
+    }))
+
+    return { success: true, data }
+  } catch (error) {
+    console.error("getCustomerSettlementSummaries error:", error)
+    return {
+      success: false,
+      message: getLastError()?.message || "Failed to load customer balances",
+      data: [] as CustomerSettlementSummary[],
+    }
+  }
+}
+
 export async function deleteCustomer(id: number) {
   if (!id) {
     return { success: false, message: "Customer ID is required" }

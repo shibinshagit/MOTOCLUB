@@ -12,12 +12,17 @@ import { useToast } from "@/components/ui/use-toast"
 import { notifyError, notifySuccess, notifyWarning } from "@/lib/notifications"
 import { SimpleDateInput } from "@/components/ui/date-picker"
 import { getManualTransactionById, updateManualTransaction } from "@/app/actions/manual-transaction-actions"
+import { ensureManualEntryCategories } from "@/app/actions/master-data-actions"
+import type { MasterDataItem } from "@/lib/master-data"
+import ManualCategorySelect from "./manual-category-select"
 
 interface EditManualTransactionModalProps {
   isOpen: boolean
   onClose: () => void
   transactionId: number | null
   currency?: string
+  deviceId: number
+  userId: number
   onTransactionUpdated?: () => void
 }
 
@@ -27,6 +32,7 @@ interface ManualTransaction {
   type: "debit" | "credit"
   description: string
   category: string
+  category_id?: number | null
   payment_method: string
   transaction_date: string
   device_id: number
@@ -38,6 +44,8 @@ export default function EditManualTransactionModal({
   onClose,
   transactionId,
   currency = "AED",
+  deviceId,
+  userId,
   onTransactionUpdated,
 }: EditManualTransactionModalProps) {
   const [transaction, setTransaction] = useState<ManualTransaction | null>(null)
@@ -49,7 +57,8 @@ export default function EditManualTransactionModal({
   const [amount, setAmount] = useState("")
   const [type, setType] = useState<"debit" | "credit">("debit")
   const [description, setDescription] = useState("")
-  const [category, setCategory] = useState("")
+  const [categoryId, setCategoryId] = useState("")
+  const [categoryName, setCategoryName] = useState("")
   const [paymentMethod, setPaymentMethod] = useState("Cash")
   const [transactionDate, setTransactionDate] = useState<Date>(new Date())
 
@@ -72,7 +81,8 @@ export default function EditManualTransactionModal({
           setAmount(txn.amount.toString())
           setType(txn.type)
           setDescription(txn.description || "")
-          setCategory(txn.category || "")
+          setCategoryId(txn.category_id ? String(txn.category_id) : "")
+          setCategoryName(txn.category || "")
           setPaymentMethod(txn.payment_method || "Cash")
           setTransactionDate(new Date(txn.transaction_date))
         } else {
@@ -91,6 +101,24 @@ export default function EditManualTransactionModal({
     fetchTransaction()
   }, [isOpen, transactionId, toast, onClose])
 
+  useEffect(() => {
+    const resolveCategoryId = async () => {
+      if (!isOpen || !deviceId || !userId || !categoryName || categoryId) return
+
+      const result = await ensureManualEntryCategories(deviceId, userId)
+      if (!result.success) return
+
+      const match = result.data.find(
+        (item: MasterDataItem) => item.name.toLowerCase() === categoryName.toLowerCase(),
+      )
+      if (match) {
+        setCategoryId(String(match.id))
+      }
+    }
+
+    void resolveCategoryId()
+  }, [isOpen, deviceId, userId, categoryName, categoryId])
+
   const handleSubmit = async () => {
     // Validation
     if (!amount || parseFloat(amount) <= 0) {
@@ -98,8 +126,8 @@ export default function EditManualTransactionModal({
       return
     }
 
-    if (!category) {
-      notifyError(toast, "Please enter a category", "Validation Error")
+    if (!categoryId || !categoryName) {
+      notifyError(toast, "Please select a category", "Validation Error")
       return
     }
 
@@ -115,9 +143,12 @@ export default function EditManualTransactionModal({
         amount: parseFloat(amount),
         type,
         description: description || "No Description",
-        category,
+        category: categoryName,
+        categoryId: Number(categoryId) || undefined,
         payment_method: paymentMethod,
         transaction_date: transactionDate,
+        deviceId,
+        userId,
       })
 
       if (response.success) {
@@ -188,11 +219,14 @@ export default function EditManualTransactionModal({
             {/* Category */}
             <div className="space-y-2">
               <Label htmlFor="category">Category *</Label>
-              <Input
-                id="category"
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-                placeholder="e.g., Office Supplies, Petty Cash"
+              <ManualCategorySelect
+                deviceId={deviceId}
+                userId={userId}
+                value={categoryId}
+                onValueChange={(id, selectedCategory) => {
+                  setCategoryId(id)
+                  setCategoryName(selectedCategory?.name || "")
+                }}
               />
             </div>
 

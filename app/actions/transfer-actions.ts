@@ -1025,3 +1025,158 @@ export async function rejectWarehouseTransfer(transferId: number, userId: number
     }
   }
 }
+
+function derivePaymentStatus(totalAmount: number, paidAmount: number): string {
+  if (paidAmount <= 0) return "unpaid"
+  if (paidAmount >= totalAmount - 0.01) return "paid"
+  return "partial"
+}
+
+export async function refreshTransferPaymentLedger(transferId: number, userId: number) {
+  const companyId = await getCompanyIdForDevice(userId)
+  if (!companyId) throw new Error("Device/company not found")
+
+  const rows = (await sql`
+    SELECT
+      id, from_device_id, to_device_id,
+      COALESCE(total_amount, 0)::numeric AS total_amount,
+      COALESCE(paid_amount, 0)::numeric AS paid_amount,
+      COALESCE(payment_status, 'unpaid') AS payment_status,
+      COALESCE(payment_method, '') AS payment_method,
+      COALESCE(payment_notes, '') AS payment_notes,
+      TO_CHAR(COALESCE(transfer_date, created_at), 'YYYY-MM-DD') AS transfer_date_str
+    FROM stock_transfers
+    WHERE id = ${transferId} AND company_id = ${companyId} AND LOWER(status) = 'completed'
+    LIMIT 1
+  `) as any[]
+
+  if (rows.length === 0) return
+
+  const transfer = rows[0]
+  await deleteTransferLedger(transferId)
+  await recordTransferLedger({
+    transferId: Number(transfer.id),
+    companyId,
+    fromDeviceId: Number(transfer.from_device_id),
+    toDeviceId: Number(transfer.to_device_id),
+    totalAmount: Number(transfer.total_amount || 0),
+    paidAmount: Number(transfer.paid_amount || 0),
+    paymentStatus: String(transfer.payment_status || "unpaid"),
+    paymentMethod: String(transfer.payment_method || ""),
+    paymentNotes: String(transfer.payment_notes || ""),
+    userId,
+    transferDate: transfer.transfer_date_str || null,
+  })
+}
+
+export type WarehouseSettlementSummary = {
+  warehouse_id: number
+  warehouse_name: string
+  total_received: number
+  paid_to_them: number
+  we_owe: number
+  payable_transfer_count: number
+  total_sent: number
+  collected_from_them: number
+  they_owe_us: number
+  receivable_transfer_count: number
+}
+
+export async function getWarehouseSettlementSummaries(deviceId: number) {
+  if (!deviceId) {
+    return { success: false, message: "Device ID is required", data: [] as WarehouseSettlementSummary[] }
+  }
+
+  resetConnectionState()
+  try {
+    const companyId = await getCompanyIdForDevice(deviceId)
+    if (!companyId) {
+      return { success: false, message: "Device/company not found", data: [] as WarehouseSettlementSummary[] }
+    }
+
+    const rows = (await sql`
+      WITH partners AS (
+        SELECT DISTINCT
+          CASE
+            WHEN from_device_id = ${deviceId} THEN to_device_id
+            ELSE from_device_id
+          END AS partner_id
+        FROM stock_transfers
+        WHERE company_id = ${companyId}
+          AND LOWER(status) = 'completed'
+          AND (from_device_id = ${deviceId} OR to_device_id = ${deviceId})
+      ),
+      payable AS (
+        SELECT
+          from_device_id AS partner_id,
+          SUM(COALESCE(total_amount, 0))::numeric AS total_received,
+          SUM(COALESCE(paid_amount, 0))::numeric AS paid_to_them,
+          SUM(GREATEST(COALESCE(total_amount, 0) - COALESCE(paid_amount, 0), 0))::numeric AS we_owe,
+          COUNT(*) FILTER (
+            WHERE COALESCE(total_amount, 0) - COALESCE(paid_amount, 0) > 0.01
+          )::int AS payable_transfer_count
+        FROM stock_transfers
+        WHERE company_id = ${companyId}
+          AND LOWER(status) = 'completed'
+          AND to_device_id = ${deviceId}
+        GROUP BY from_device_id
+      ),
+      receivable AS (
+        SELECT
+          to_device_id AS partner_id,
+          SUM(COALESCE(total_amount, 0))::numeric AS total_sent,
+          SUM(COALESCE(paid_amount, 0))::numeric AS collected_from_them,
+          SUM(GREATEST(COALESCE(total_amount, 0) - COALESCE(paid_amount, 0), 0))::numeric AS they_owe_us,
+          COUNT(*) FILTER (
+            WHERE COALESCE(total_amount, 0) - COALESCE(paid_amount, 0) > 0.01
+          )::int AS receivable_transfer_count
+        FROM stock_transfers
+        WHERE company_id = ${companyId}
+          AND LOWER(status) = 'completed'
+          AND from_device_id = ${deviceId}
+        GROUP BY to_device_id
+      )
+      SELECT
+        p.partner_id AS warehouse_id,
+        d.name AS warehouse_name,
+        COALESCE(pb.total_received, 0)::numeric AS total_received,
+        COALESCE(pb.paid_to_them, 0)::numeric AS paid_to_them,
+        COALESCE(pb.we_owe, 0)::numeric AS we_owe,
+        COALESCE(pb.payable_transfer_count, 0)::int AS payable_transfer_count,
+        COALESCE(rb.total_sent, 0)::numeric AS total_sent,
+        COALESCE(rb.collected_from_them, 0)::numeric AS collected_from_them,
+        COALESCE(rb.they_owe_us, 0)::numeric AS they_owe_us,
+        COALESCE(rb.receivable_transfer_count, 0)::int AS receivable_transfer_count
+      FROM partners p
+      JOIN devices d ON d.id = p.partner_id
+      LEFT JOIN payable pb ON pb.partner_id = p.partner_id
+      LEFT JOIN receivable rb ON rb.partner_id = p.partner_id
+      WHERE p.partner_id != ${deviceId}
+      ORDER BY COALESCE(pb.we_owe, 0) DESC, COALESCE(rb.they_owe_us, 0) DESC, d.name ASC
+    `) as any[]
+
+    const data: WarehouseSettlementSummary[] = rows.map((row) => ({
+      warehouse_id: Number(row.warehouse_id),
+      warehouse_name: row.warehouse_name || `Warehouse #${row.warehouse_id}`,
+      total_received: Number(row.total_received || 0),
+      paid_to_them: Number(row.paid_to_them || 0),
+      we_owe: Number(row.we_owe || 0),
+      payable_transfer_count: Number(row.payable_transfer_count || 0),
+      total_sent: Number(row.total_sent || 0),
+      collected_from_them: Number(row.collected_from_them || 0),
+      they_owe_us: Number(row.they_owe_us || 0),
+      receivable_transfer_count: Number(row.receivable_transfer_count || 0),
+    }))
+
+    return { success: true, data }
+  } catch (error) {
+    console.error("Get warehouse settlement summaries error:", error)
+    return {
+      success: false,
+      message: `Database error: ${getLastError()?.message || "Unknown error"}.`,
+      data: [] as WarehouseSettlementSummary[],
+    }
+  }
+}
+
+export { derivePaymentStatus }

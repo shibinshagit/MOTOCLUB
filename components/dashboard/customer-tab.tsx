@@ -1,17 +1,49 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { User, Plus, Search, X, Loader2, RefreshCw, Phone, Mail, MapPin } from "lucide-react"
+import {
+  User,
+  Plus,
+  Search,
+  X,
+  Loader2,
+  RefreshCw,
+  Phone,
+  Mail,
+  MapPin,
+  Wallet,
+  CreditCard,
+  History,
+  FilePenLine,
+  Undo2,
+} from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import EditCustomerModal from "../customers/edit-customer-modal"
 import ViewCustomerModal from "../customers/view-customer-modal"
+import PayCustomerCreditModal from "../customers/pay-customer-credit-modal"
+import EditCustomerPaymentModal from "../customers/edit-customer-payment-modal"
 import { useToast } from "@/components/ui/use-toast"
 import { notifyError, notifySuccess } from "@/lib/notifications"
 import { exportCustomersToPDF } from "@/lib/pdf-export-utils"
-import { getCustomers, addCustomer as addCustomerAction, updateCustomer as updateCustomerAction, deleteCustomer as deleteCustomerAction } from "@/app/actions/customer-actions"
+import {
+  getCustomers,
+  addCustomer as addCustomerAction,
+  updateCustomer as updateCustomerAction,
+  deleteCustomer as deleteCustomerAction,
+  getCustomerSettlementSummaries,
+  type CustomerSettlementSummary,
+} from "@/app/actions/customer-actions"
+import {
+  deleteCustomerPayment,
+  listCustomerPaymentsForCustomer,
+  type CustomerPaymentListRow,
+} from "@/app/actions/customer-payment-actions"
 import { useAppDispatch, useAppSelector } from "@/store/hooks"
+import { useConfirm } from "@/hooks/use-confirm"
+import { useSelector } from "react-redux"
+import type { RootState } from "@/store/store"
 import {
   setCustomers,
   setSearchTerm as setReduxSearchTerm,
@@ -55,8 +87,27 @@ export function CustomerTab({ userId }: { userId: number }) {
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [isSearching, setIsSearching] = useState(false)
   const [isBackgroundRefreshing, setIsBackgroundRefreshing] = useState(false)
+  const [settlements, setSettlements] = useState<CustomerSettlementSummary[]>([])
+  const [isLoadingSettlements, setIsLoadingSettlements] = useState(false)
+  const [showCollectModal, setShowCollectModal] = useState(false)
+  const [selectedCustomerForPayment, setSelectedCustomerForPayment] = useState<{
+    customer_id: number
+    customer_name: string
+    still_to_collect: number
+  } | null>(null)
+  const [paymentHistoryCustomer, setPaymentHistoryCustomer] = useState<{
+    customer_id: number
+    customer_name: string
+  } | null>(null)
+  const [customerPayments, setCustomerPayments] = useState<CustomerPaymentListRow[]>([])
+  const [loadingCustomerPayments, setLoadingCustomerPayments] = useState(false)
+  const [editCustomerPaymentId, setEditCustomerPaymentId] = useState<number | null>(null)
+  const [undoingPaymentId, setUndoingPaymentId] = useState<number | null>(null)
 
   const { toast } = useToast()
+  const { confirm, ConfirmDialog } = useConfirm()
+  const currency = useSelector((state: RootState) => state.device.currency) || "AED"
+  const formatCurrency = (amount: number) => `${currency} ${Number(amount || 0).toFixed(2)}`
 
   // Initial load and background refresh
   useEffect(() => {
@@ -74,6 +125,116 @@ export function CustomerTab({ userId }: { userId: number }) {
       })
     }
   }, [userId])
+
+  const loadSettlements = useCallback(async () => {
+    if (!userId) return
+    try {
+      setIsLoadingSettlements(true)
+      const result = await getCustomerSettlementSummaries(userId, userId)
+      if (result.success) {
+        setSettlements(result.data || [])
+      } else {
+        notifyError(toast, result.message || "Failed to load customer balances")
+      }
+    } catch (error) {
+      console.error("Load customer settlements error:", error)
+      notifyError(toast, "Failed to load customer balances")
+    } finally {
+      setIsLoadingSettlements(false)
+    }
+  }, [userId, toast])
+
+  useEffect(() => {
+    loadSettlements()
+  }, [loadSettlements])
+
+  const settlementByCustomerId = useMemo(() => {
+    return new Map(settlements.map((row) => [row.customer_id, row]))
+  }, [settlements])
+
+  const settlementTotals = useMemo(() => {
+    return settlements.reduce(
+      (acc, row) => ({
+        totalBilled: acc.totalBilled + Number(row.total_billed || 0),
+        alreadyReceived: acc.alreadyReceived + Number(row.already_received || 0),
+        stillToCollect: acc.stillToCollect + Number(row.still_to_collect || 0),
+      }),
+      { totalBilled: 0, alreadyReceived: 0, stillToCollect: 0 },
+    )
+  }, [settlements])
+
+  const loadCustomerPayments = useCallback(
+    async (customerId: number) => {
+      if (!userId || !customerId) return
+      setLoadingCustomerPayments(true)
+      try {
+        const result = await listCustomerPaymentsForCustomer(customerId, userId, userId)
+        if (result.success) {
+          setCustomerPayments(result.data)
+        } else {
+          notifyError(toast, result.message || "Failed to load payments")
+        }
+      } catch (error) {
+        console.error(error)
+        notifyError(toast, "Failed to load payments")
+      } finally {
+        setLoadingCustomerPayments(false)
+      }
+    },
+    [userId, toast],
+  )
+
+  const handleCollectCustomer = (customer: CustomerSettlementSummary) => {
+    setSelectedCustomerForPayment({
+      customer_id: customer.customer_id,
+      customer_name: customer.customer_name,
+      still_to_collect: customer.still_to_collect,
+    })
+    setShowCollectModal(true)
+  }
+
+  const handlePaymentSuccess = () => {
+    setShowCollectModal(false)
+    setSelectedCustomerForPayment(null)
+    loadSettlements()
+    if (paymentHistoryCustomer) {
+      loadCustomerPayments(paymentHistoryCustomer.customer_id)
+    }
+  }
+
+  const handleOpenPaymentHistory = (customer: CustomerSettlementSummary) => {
+    setPaymentHistoryCustomer({
+      customer_id: customer.customer_id,
+      customer_name: customer.customer_name,
+    })
+    loadCustomerPayments(customer.customer_id)
+  }
+
+  const handleUndoPayment = async (paymentId: number) => {
+    const ok = await confirm(
+      "Undo this payment? The money goes back to the sale balance and the payment record is removed.",
+    )
+    if (!ok) return
+
+    setUndoingPaymentId(paymentId)
+    try {
+      const result = await deleteCustomerPayment(paymentId, userId, userId)
+      if (result.success) {
+        notifySuccess(toast, result.message || "Payment undone")
+        loadSettlements()
+        if (paymentHistoryCustomer) {
+          await loadCustomerPayments(paymentHistoryCustomer.customer_id)
+        }
+      } else {
+        notifyError(toast, result.message || "Failed to undo payment")
+      }
+    } catch (error) {
+      console.error(error)
+      notifyError(toast, "Failed to undo payment")
+    } finally {
+      setUndoingPaymentId(null)
+    }
+  }
 
   // Handle search with debouncing
   useEffect(() => {
@@ -113,7 +274,7 @@ export function CustomerTab({ userId }: { userId: number }) {
 
   const handleRefresh = async () => {
     setIsRefreshing(true)
-    await fetchCustomers(reduxSearchTerm, !reduxShowingLimited)
+    await Promise.all([fetchCustomers(reduxSearchTerm, !reduxShowingLimited), loadSettlements()])
     setIsRefreshing(false)
   }
 
@@ -367,6 +528,83 @@ return (
       </CardContent>
     </Card>
 
+    <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm space-y-4">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+        <div>
+          <h2 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+            <Wallet className="h-4 w-4 text-blue-600" />
+            Customer payments
+          </h2>
+          <p className="text-xs text-gray-500 mt-1">Money still pending on credit sales</p>
+        </div>
+        <div className="flex flex-wrap gap-2 text-xs">
+          <span className="rounded-full bg-blue-50 text-blue-700 px-3 py-1 border border-blue-100">
+            Total billed: {formatCurrency(settlementTotals.totalBilled)}
+          </span>
+          <span className="rounded-full bg-gray-50 text-gray-700 px-3 py-1 border border-gray-100">
+            Already received: {formatCurrency(settlementTotals.alreadyReceived)}
+          </span>
+          <span className="rounded-full bg-emerald-50 text-emerald-700 px-3 py-1 border border-emerald-100">
+            Still to collect: {formatCurrency(settlementTotals.stillToCollect)}
+          </span>
+        </div>
+      </div>
+
+      {isLoadingSettlements ? (
+        <div className="py-8 text-center text-gray-500">
+          <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2" />
+          Loading...
+        </div>
+      ) : settlements.length === 0 ? (
+        <div className="py-6 text-center text-sm text-gray-500">No outstanding customer balances yet</div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3">
+          {settlements.map((customer) => (
+            <Card key={customer.customer_id} className="border border-gray-200 shadow-sm">
+              <CardContent className="p-4 space-y-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <div className="font-semibold text-gray-900">{customer.customer_name}</div>
+                    <div className="text-xs text-gray-500">
+                      {customer.open_sale_count} open sale{customer.open_sale_count === 1 ? "" : "s"}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-1 justify-end">
+                    <Button size="sm" variant="outline" onClick={() => handleOpenPaymentHistory(customer)}>
+                      <History className="h-3.5 w-3.5 mr-1" />
+                      Payments
+                    </Button>
+                    {customer.still_to_collect > 0.01 && (
+                      <Button size="sm" onClick={() => handleCollectCustomer(customer)}>
+                        <CreditCard className="h-3.5 w-3.5 mr-1" />
+                        Collect now
+                      </Button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="rounded-md border border-emerald-100 bg-emerald-50/50 p-3 space-y-1.5">
+                  <div className="text-xs font-semibold text-emerald-800">Credit sales</div>
+                  <div className="flex justify-between text-xs text-gray-600">
+                    <span>Total amount</span>
+                    <span className="font-medium">{formatCurrency(customer.total_billed)}</span>
+                  </div>
+                  <div className="flex justify-between text-xs text-gray-600">
+                    <span>Already received</span>
+                    <span className="font-medium">{formatCurrency(customer.already_received)}</span>
+                  </div>
+                  <div className="flex justify-between text-sm pt-1 border-t border-emerald-100">
+                    <span className="font-medium text-emerald-800">Still to collect</span>
+                    <span className="font-bold text-emerald-700">{formatCurrency(customer.still_to_collect)}</span>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+
     {/* Customer List */}
     {reduxIsLoading && customers.length === 0 ? (
       renderSkeletonLoading()
@@ -418,6 +656,11 @@ return (
                           New
                         </span>
                       )}
+                    {settlementByCustomerId.get(customer.id)?.still_to_collect ? (
+                      <span className="bg-emerald-100 text-emerald-800 text-xs font-semibold px-2 py-1 rounded-full">
+                        Due {formatCurrency(settlementByCustomerId.get(customer.id)!.still_to_collect)}
+                      </span>
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -597,6 +840,112 @@ return (
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    {selectedCustomerForPayment && (
+      <PayCustomerCreditModal
+        isOpen={showCollectModal}
+        onClose={() => {
+          setShowCollectModal(false)
+          setSelectedCustomerForPayment(null)
+        }}
+        onSuccess={handlePaymentSuccess}
+        customer={selectedCustomerForPayment}
+        userId={userId}
+        deviceId={userId}
+      />
+    )}
+
+    <Dialog
+      open={!!paymentHistoryCustomer}
+      onOpenChange={(open) => {
+        if (!open) {
+          setPaymentHistoryCustomer(null)
+          setCustomerPayments([])
+        }
+      }}
+    >
+      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>
+            Payments{paymentHistoryCustomer ? ` — ${paymentHistoryCustomer.customer_name}` : ""}
+          </DialogTitle>
+        </DialogHeader>
+        {loadingCustomerPayments ? (
+          <div className="flex items-center justify-center py-10 text-gray-600">
+            <Loader2 className="h-5 w-5 animate-spin mr-2" />
+            Loading...
+          </div>
+        ) : customerPayments.length === 0 ? (
+          <p className="text-sm text-gray-500 py-6 text-center">
+            No bulk payments recorded for this customer yet.
+          </p>
+        ) : (
+          <ul className="space-y-2">
+            {customerPayments.map((payment) => (
+              <li
+                key={payment.id}
+                className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="font-medium text-gray-900">{formatCurrency(payment.amount)}</div>
+                    <div className="text-xs text-gray-500">
+                      {payment.payment_method} · {new Date(payment.transaction_date).toLocaleDateString()}
+                    </div>
+                    {payment.user_notes ? (
+                      <div className="text-xs text-gray-500 mt-1">{payment.user_notes}</div>
+                    ) : null}
+                  </div>
+                  <div className="flex gap-1 flex-shrink-0">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 px-2 text-amber-600"
+                      onClick={() => setEditCustomerPaymentId(payment.id)}
+                    >
+                      <FilePenLine className="h-4 w-4 mr-1" />
+                      Edit
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 px-2 text-rose-600"
+                      onClick={() => handleUndoPayment(payment.id)}
+                      disabled={undoingPaymentId === payment.id}
+                    >
+                      {undoingPaymentId === payment.id ? (
+                        <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                      ) : (
+                        <Undo2 className="h-4 w-4 mr-1" />
+                      )}
+                      Undo
+                    </Button>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </DialogContent>
+    </Dialog>
+
+    <EditCustomerPaymentModal
+      isOpen={editCustomerPaymentId != null}
+      onClose={() => setEditCustomerPaymentId(null)}
+      onSuccess={() => {
+        setEditCustomerPaymentId(null)
+        loadSettlements()
+        if (paymentHistoryCustomer) {
+          loadCustomerPayments(paymentHistoryCustomer.customer_id)
+        }
+      }}
+      paymentId={editCustomerPaymentId}
+      userId={userId}
+      deviceId={userId}
+    />
+    {ConfirmDialog}
   </div>
 )
 }

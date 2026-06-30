@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { ArrowRightLeft, Check, ChevronDown, Eye, Loader2, Pencil, Plus, RefreshCw, Search, Trash2, X } from "lucide-react"
+import { ArrowRightLeft, Check, ChevronDown, CreditCard, Eye, FilePenLine, History, Loader2, Pencil, Plus, RefreshCw, Search, Trash2, Undo2, Wallet, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -12,17 +12,27 @@ import { useToast } from "@/components/ui/use-toast"
 import { notifyError, notifySuccess, notifyWarning } from "@/lib/notifications"
 import { markInventoryStale } from "@/lib/inventory-sync"
 import { useConfirm } from "@/hooks/use-confirm"
-import { useDispatch } from "react-redux"
-import type { AppDispatch } from "@/store/store"
+import { Card, CardContent } from "@/components/ui/card"
+import { useDispatch, useSelector } from "react-redux"
+import type { AppDispatch, RootState } from "@/store/store"
+import PayWarehouseCreditModal from "@/components/transfers/pay-warehouse-credit-modal"
+import EditWarehousePaymentModal from "@/components/transfers/edit-warehouse-payment-modal"
+import {
+  deleteWarehousePayment,
+  listWarehousePaymentsForWarehouse,
+  type WarehousePaymentListRow,
+} from "@/app/actions/warehouse-payment-actions"
 import {
   acceptWarehouseTransfer,
   cancelWarehouseTransfer,
   createWarehouseTransfer,
   getTransferFormData,
+  getWarehouseSettlementSummaries,
   getWarehouseTransferById,
   getWarehouseTransfers,
   rejectWarehouseTransfer,
   updateWarehouseTransfer,
+  type WarehouseSettlementSummary,
 } from "@/app/actions/transfer-actions"
 
 interface TransferTabProps {
@@ -49,6 +59,8 @@ type TransferFormData = {
 
 export default function TransferTab({ userId }: TransferTabProps) {
   const dispatch = useDispatch<AppDispatch>()
+  const currency = useSelector((state: RootState) => state.device.currency) || "AED"
+  const formatCurrency = (amount: number) => `${currency} ${Number(amount || 0).toFixed(2)}`
   const getTodayDate = () => new Date().toISOString().slice(0, 10)
   const toDateInputValue = (value: unknown): string => {
     if (!value) return ""
@@ -105,6 +117,22 @@ export default function TransferTab({ userId }: TransferTabProps) {
   const [rowProductSearch, setRowProductSearch] = useState<string[]>([""])
   const [rowProductOpen, setRowProductOpen] = useState<boolean[]>([false])
   const [rowWarnings, setRowWarnings] = useState<Record<number, string>>({})
+  const [settlements, setSettlements] = useState<WarehouseSettlementSummary[]>([])
+  const [isLoadingSettlements, setIsLoadingSettlements] = useState(false)
+  const [showPayWarehouseModal, setShowPayWarehouseModal] = useState(false)
+  const [selectedWarehouseForPayment, setSelectedWarehouseForPayment] = useState<{
+    warehouse_id: number
+    warehouse_name: string
+    we_owe: number
+  } | null>(null)
+  const [paymentHistoryWarehouse, setPaymentHistoryWarehouse] = useState<{
+    warehouse_id: number
+    warehouse_name: string
+  } | null>(null)
+  const [warehousePayments, setWarehousePayments] = useState<WarehousePaymentListRow[]>([])
+  const [loadingWarehousePayments, setLoadingWarehousePayments] = useState(false)
+  const [editWarehousePaymentId, setEditWarehousePaymentId] = useState<number | null>(null)
+  const [undoingPaymentId, setUndoingPaymentId] = useState<number | null>(null)
 
   const selectedSourceStockMap = useMemo(() => {
     return new Map(products.map((p) => [p.id, p.source_stock]))
@@ -132,6 +160,24 @@ export default function TransferTab({ userId }: TransferTabProps) {
         .toFixed(2),
     )
   }, [formData.items])
+
+  const loadSettlements = useCallback(async () => {
+    if (!userId) return
+    try {
+      setIsLoadingSettlements(true)
+      const result = await getWarehouseSettlementSummaries(userId)
+      if (result.success) {
+        setSettlements(result.data || [])
+      } else {
+        notifyError(toast, result.message || "Failed to load warehouse balances")
+      }
+    } catch (error) {
+      console.error("Load warehouse settlements error:", error)
+      notifyError(toast, "Failed to load warehouse balances")
+    } finally {
+      setIsLoadingSettlements(false)
+    }
+  }, [userId, toast])
 
   const loadTransfers = useCallback(async () => {
     if (!userId) return
@@ -166,7 +212,8 @@ export default function TransferTab({ userId }: TransferTabProps) {
 
   useEffect(() => {
     loadTransfers()
-  }, [loadTransfers])
+    loadSettlements()
+  }, [loadTransfers, loadSettlements])
 
   useEffect(() => {
     const timeout = setTimeout(() => {
@@ -287,6 +334,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
     markInventoryStale(dispatch)
     notifySuccess(toast, result.message || "Transfer cancelled" )
     await loadTransfers()
+    await loadSettlements()
   }
 
   const handleAcceptTransfer = async (transferId: number) => {
@@ -301,6 +349,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
       markInventoryStale(dispatch)
       notifySuccess(toast, result.message || "Transfer request accepted" , "Accepted")
       await loadTransfers()
+    await loadSettlements()
     } finally {
       setActioningId(null)
     }
@@ -329,6 +378,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
       setRejectTransferId(null)
       setRejectReason("")
       await loadTransfers()
+    await loadSettlements()
     } finally {
       setIsRejecting(false)
     }
@@ -473,9 +523,102 @@ export default function TransferTab({ userId }: TransferTabProps) {
       setIsModalOpen(false)
       resetForm()
       await loadTransfers()
+    await loadSettlements()
     } finally {
       setIsSaving(false)
     }
+  }
+
+  const settlementTotals = useMemo(() => {
+    return settlements.reduce(
+      (acc, row) => ({
+        weOwe: acc.weOwe + Number(row.we_owe || 0),
+        theyOweUs: acc.theyOweUs + Number(row.they_owe_us || 0),
+        paidOut: acc.paidOut + Number(row.paid_to_them || 0),
+        collectedIn: acc.collectedIn + Number(row.collected_from_them || 0),
+      }),
+      { weOwe: 0, theyOweUs: 0, paidOut: 0, collectedIn: 0 },
+    )
+  }, [settlements])
+
+  const handlePayWarehouse = (warehouse: WarehouseSettlementSummary) => {
+    setSelectedWarehouseForPayment({
+      warehouse_id: warehouse.warehouse_id,
+      warehouse_name: warehouse.warehouse_name,
+      we_owe: warehouse.we_owe,
+    })
+    setShowPayWarehouseModal(true)
+  }
+
+  const handlePaymentSuccess = () => {
+    setShowPayWarehouseModal(false)
+    setSelectedWarehouseForPayment(null)
+    loadTransfers()
+    loadSettlements()
+    if (paymentHistoryWarehouse) {
+      loadWarehousePayments(paymentHistoryWarehouse.warehouse_id)
+    }
+  }
+
+  const loadWarehousePayments = useCallback(
+    async (warehouseId: number) => {
+      if (!userId || !warehouseId) return
+      setLoadingWarehousePayments(true)
+      try {
+        const result = await listWarehousePaymentsForWarehouse(warehouseId, userId, userId)
+        if (result.success) {
+          setWarehousePayments(result.data)
+        } else {
+          notifyError(toast, result.message || "Failed to load payments")
+        }
+      } catch (error) {
+        console.error(error)
+        notifyError(toast, "Failed to load payments")
+      } finally {
+        setLoadingWarehousePayments(false)
+      }
+    },
+    [userId, toast],
+  )
+
+  const handleOpenPaymentHistory = (warehouse: WarehouseSettlementSummary) => {
+    setPaymentHistoryWarehouse({
+      warehouse_id: warehouse.warehouse_id,
+      warehouse_name: warehouse.warehouse_name,
+    })
+    loadWarehousePayments(warehouse.warehouse_id)
+  }
+
+  const handleUndoPayment = async (paymentId: number) => {
+    const ok = await confirm(
+      "Undo this payment? The money goes back to the transfer balance and the payment record is removed.",
+    )
+    if (!ok) return
+
+    setUndoingPaymentId(paymentId)
+    try {
+      const result = await deleteWarehousePayment(paymentId, userId, userId)
+      if (result.success) {
+        notifySuccess(toast, result.message || "Payment undone")
+        loadTransfers()
+        loadSettlements()
+        if (paymentHistoryWarehouse) {
+          await loadWarehousePayments(paymentHistoryWarehouse.warehouse_id)
+        }
+      } else {
+        notifyError(toast, result.message || "Failed to undo payment")
+      }
+    } catch (error) {
+      console.error(error)
+      notifyError(toast, "Failed to undo payment")
+    } finally {
+      setUndoingPaymentId(null)
+    }
+  }
+
+  const refreshAll = () => {
+    loadTransfers()
+    loadSettlements()
   }
 
   const getStatusBadge = (status: string) => {
@@ -501,7 +644,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
             <h1 className="text-lg font-semibold">Warehouse Transfers</h1>
           </div>
           <div className="flex gap-2">
-            <Button variant="secondary" size="sm" onClick={loadTransfers} disabled={isLoading}>
+            <Button variant="secondary" size="sm" onClick={refreshAll} disabled={isLoading || isLoadingSettlements}>
               <RefreshCw className={`h-4 w-4 mr-1 ${isLoading ? "animate-spin" : ""}`} />
               Refresh
             </Button>
@@ -511,6 +654,101 @@ export default function TransferTab({ userId }: TransferTabProps) {
             </Button>
           </div>
         </div>
+      </div>
+
+      <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+              <Wallet className="h-4 w-4 text-indigo-600" />
+              Transfer payments
+            </h2>
+            <p className="text-xs text-gray-500 mt-1">
+              Money still pending on completed transfers
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2 text-xs">
+            <span className="rounded-full bg-rose-50 text-rose-700 px-3 py-1 border border-rose-100">
+              To pay: {formatCurrency(settlementTotals.weOwe)}
+            </span>
+            <span className="rounded-full bg-emerald-50 text-emerald-700 px-3 py-1 border border-emerald-100">
+              To collect: {formatCurrency(settlementTotals.theyOweUs)}
+            </span>
+          </div>
+        </div>
+
+        {isLoadingSettlements ? (
+          <div className="py-8 text-center text-gray-500">
+            <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2" />
+            Loading...
+          </div>
+        ) : settlements.length === 0 ? (
+          <div className="py-6 text-center text-sm text-gray-500">
+            No payment balances with other warehouses yet
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3">
+            {settlements.map((warehouse) => (
+              <Card key={warehouse.warehouse_id} className="border border-gray-200 shadow-sm">
+                <CardContent className="p-4 space-y-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="font-semibold text-gray-900">{warehouse.warehouse_name}</div>
+                    </div>
+                    <div className="flex flex-wrap gap-1 justify-end">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleOpenPaymentHistory(warehouse)}
+                      >
+                        <History className="h-3.5 w-3.5 mr-1" />
+                        Payments
+                      </Button>
+                      {warehouse.we_owe > 0.01 && (
+                        <Button size="sm" onClick={() => handlePayWarehouse(warehouse)}>
+                          <CreditCard className="h-3.5 w-3.5 mr-1" />
+                          Pay now
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="rounded-md border border-rose-100 bg-rose-50/50 p-3 space-y-1.5">
+                    <div className="text-xs font-semibold text-rose-800">They sent stock to you</div>
+                    <div className="flex justify-between text-xs text-gray-600">
+                      <span>Total amount</span>
+                      <span className="font-medium">{formatCurrency(warehouse.total_received)}</span>
+                    </div>
+                    <div className="flex justify-between text-xs text-gray-600">
+                      <span>Already paid</span>
+                      <span className="font-medium">{formatCurrency(warehouse.paid_to_them)}</span>
+                    </div>
+                    <div className="flex justify-between text-sm pt-1 border-t border-rose-100">
+                      <span className="font-medium text-rose-800">Still to pay</span>
+                      <span className="font-bold text-rose-700">{formatCurrency(warehouse.we_owe)}</span>
+                    </div>
+                  </div>
+
+                  <div className="rounded-md border border-emerald-100 bg-emerald-50/50 p-3 space-y-1.5">
+                    <div className="text-xs font-semibold text-emerald-800">You sent stock to them</div>
+                    <div className="flex justify-between text-xs text-gray-600">
+                      <span>Total amount</span>
+                      <span className="font-medium">{formatCurrency(warehouse.total_sent)}</span>
+                    </div>
+                    <div className="flex justify-between text-xs text-gray-600">
+                      <span>Already received</span>
+                      <span className="font-medium">{formatCurrency(warehouse.collected_from_them)}</span>
+                    </div>
+                    <div className="flex justify-between text-sm pt-1 border-t border-emerald-100">
+                      <span className="font-medium text-emerald-800">Still to collect</span>
+                      <span className="font-bold text-emerald-700">{formatCurrency(warehouse.they_owe_us)}</span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
@@ -731,69 +969,6 @@ export default function TransferTab({ userId }: TransferTabProps) {
               </div>
             ) : null}
 
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Payment Status</label>
-              <select
-                value={formData.paymentStatus}
-                onChange={(e) =>
-                  setFormData((prev) => ({ ...prev, paymentStatus: e.target.value as "unpaid" | "partial" | "paid" }))
-                }
-                className="w-full h-10 rounded-md border border-gray-300 bg-white px-3 text-sm"
-              >
-                <option value="unpaid">Unpaid</option>
-                <option value="partial">Partial</option>
-                <option value="paid">Paid</option>
-              </select>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Payment Method</label>
-                <select
-                  value={formData.paymentMethod || ""}
-                  onChange={(e) => setFormData((prev) => ({ ...prev, paymentMethod: e.target.value }))}
-                  className="w-full h-10 rounded-md border border-gray-300 bg-white px-3 text-sm"
-                >
-                  <option value="">Select method</option>
-                  <option value="cash">Cash</option>
-                  <option value="card">Card</option>
-                  <option value="bank">Bank Transfer</option>
-                  <option value="upi">UPI</option>
-                  <option value="credit">Credit</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Paid Amount</label>
-                <Input
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  value={formData.paidAmount}
-                  onChange={(e) => setFormData((prev) => ({ ...prev, paidAmount: Number(e.target.value || 0) }))}
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Payment Notes</label>
-              <Textarea
-                value={formData.paymentNotes}
-                onChange={(e) => setFormData((prev) => ({ ...prev, paymentNotes: e.target.value }))}
-                rows={2}
-                placeholder="Optional payment note"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Notes</label>
-              <Textarea
-                value={formData.notes}
-                onChange={(e) => setFormData((prev) => ({ ...prev, notes: e.target.value }))}
-                rows={2}
-                placeholder="Optional transfer note"
-              />
-            </div>
-
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <h4 className="text-sm font-medium text-gray-800">Products</h4>
@@ -813,7 +988,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
                 </div>
                 {formData.items.map((item, idx) => (
                   <div key={idx} className="grid grid-cols-12 gap-2 items-start">
-                    <div className="col-span-5">
+                    <div className="col-span-5 relative">
                       <Popover open={Boolean(rowProductOpen[idx])} onOpenChange={(open) => setProductOpen(idx, open)}>
                         <PopoverTrigger asChild>
                           <Button
@@ -833,11 +1008,15 @@ export default function TransferTab({ userId }: TransferTabProps) {
                           </Button>
                         </PopoverTrigger>
                         <PopoverContent
-                          className="w-[460px] p-0 z-[80]"
+                          className="w-[min(460px,calc(100vw-2rem))] p-0 bg-white"
                           align="start"
+                          side="bottom"
+                          sideOffset={4}
+                          collisionPadding={16}
+                          onOpenAutoFocus={(event) => event.preventDefault()}
                           onWheel={(e) => e.stopPropagation()}
                         >
-                          <div className="border-b border-gray-200 p-2">
+                          <div className="border-b border-gray-200 bg-white p-2">
                             <div className="relative">
                               <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                               <Input
@@ -850,7 +1029,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
                           </div>
 
                           <div
-                            className="max-h-[260px] overflow-y-auto overscroll-contain p-1"
+                            className="max-h-[260px] overflow-y-auto overscroll-contain bg-white p-1"
                             onWheel={(e) => e.stopPropagation()}
                           >
                             {products
@@ -866,15 +1045,17 @@ export default function TransferTab({ userId }: TransferTabProps) {
                                   onClick={() => {
                                     const available = Number(effectiveSourceStockMap.get(p.id) || 0)
                                     const currentQty = Number(item.quantity || 1)
-                              const defaultUnitCost = Number(products.find((x) => x.id === p.id)?.default_unit_cost || 0)
+                                    const defaultUnitCost = Number(
+                                      products.find((x) => x.id === p.id)?.default_unit_cost || 0,
+                                    )
                                     setItem(idx, {
                                       product_id: p.id,
                                       quantity: available > 0 ? Math.min(currentQty, available) : 1,
-                                unit_cost: Number(item.unit_cost || defaultUnitCost || 0),
+                                      unit_cost: Number(item.unit_cost || defaultUnitCost || 0),
                                     })
                                     setProductOpen(idx, false)
                                   }}
-                                  className="w-full text-left px-2 py-2 rounded-md hover:bg-gray-100 flex items-center justify-between gap-3"
+                                  className="w-full text-left px-2 py-2 rounded-md hover:bg-gray-100 flex items-center justify-between gap-3 bg-white"
                                 >
                                   <div className="min-w-0">
                                     <p className="truncate text-sm font-medium text-gray-900">{p.name}</p>
@@ -893,14 +1074,14 @@ export default function TransferTab({ userId }: TransferTabProps) {
                               if (!q) return true
                               return p.name.toLowerCase().includes(q) || p.barcode.toLowerCase().includes(q)
                             }).length === 0 ? (
-                              <p className="py-6 text-center text-sm text-gray-500">No product found.</p>
+                              <p className="py-6 text-center text-sm text-gray-500 bg-white">No product found.</p>
                             ) : null}
                           </div>
                         </PopoverContent>
                       </Popover>
                       {item.product_id ? (
                         <p className="text-[11px] text-red-600 mt-1">
-                        available stock: {effectiveSourceStockMap.get(item.product_id) ?? 0}
+                          available stock: {effectiveSourceStockMap.get(item.product_id) ?? 0}
                         </p>
                       ) : null}
                     </div>
@@ -962,6 +1143,69 @@ export default function TransferTab({ userId }: TransferTabProps) {
                   </div>
                 ))}
               </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Payment Status</label>
+              <select
+                value={formData.paymentStatus}
+                onChange={(e) =>
+                  setFormData((prev) => ({ ...prev, paymentStatus: e.target.value as "unpaid" | "partial" | "paid" }))
+                }
+                className="w-full h-10 rounded-md border border-gray-300 bg-white px-3 text-sm"
+              >
+                <option value="unpaid">Unpaid</option>
+                <option value="partial">Partial</option>
+                <option value="paid">Paid</option>
+              </select>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Payment Method</label>
+                <select
+                  value={formData.paymentMethod || ""}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, paymentMethod: e.target.value }))}
+                  className="w-full h-10 rounded-md border border-gray-300 bg-white px-3 text-sm"
+                >
+                  <option value="">Select method</option>
+                  <option value="cash">Cash</option>
+                  <option value="card">Card</option>
+                  <option value="bank">Bank Transfer</option>
+                  <option value="upi">UPI</option>
+                  <option value="credit">Credit</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Paid Amount</label>
+                <Input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={formData.paidAmount}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, paidAmount: Number(e.target.value || 0) }))}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Payment Notes</label>
+              <Textarea
+                value={formData.paymentNotes}
+                onChange={(e) => setFormData((prev) => ({ ...prev, paymentNotes: e.target.value }))}
+                rows={2}
+                placeholder="Optional payment note"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Notes</label>
+              <Textarea
+                value={formData.notes}
+                onChange={(e) => setFormData((prev) => ({ ...prev, notes: e.target.value }))}
+                rows={2}
+                placeholder="Optional transfer note"
+              />
             </div>
 
             <div className="flex justify-end gap-2 pt-2">
@@ -1139,6 +1383,111 @@ export default function TransferTab({ userId }: TransferTabProps) {
           </div>
         </DialogContent>
       </Dialog>
+      {selectedWarehouseForPayment && (
+        <PayWarehouseCreditModal
+          isOpen={showPayWarehouseModal}
+          onClose={() => {
+            setShowPayWarehouseModal(false)
+            setSelectedWarehouseForPayment(null)
+          }}
+          onSuccess={handlePaymentSuccess}
+          warehouse={selectedWarehouseForPayment}
+          userId={userId}
+          deviceId={userId}
+        />
+      )}
+
+      <Dialog
+        open={!!paymentHistoryWarehouse}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPaymentHistoryWarehouse(null)
+            setWarehousePayments([])
+          }
+        }}
+      >
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              Payments{paymentHistoryWarehouse ? ` — ${paymentHistoryWarehouse.warehouse_name}` : ""}
+            </DialogTitle>
+          </DialogHeader>
+          {loadingWarehousePayments ? (
+            <div className="flex items-center justify-center py-10 text-gray-600">
+              <Loader2 className="h-5 w-5 animate-spin mr-2" />
+              Loading...
+            </div>
+          ) : warehousePayments.length === 0 ? (
+            <p className="text-sm text-gray-500 py-6 text-center">
+              No bulk payments recorded for this warehouse yet.
+            </p>
+          ) : (
+            <ul className="space-y-2">
+              {warehousePayments.map((payment) => (
+                <li
+                  key={payment.id}
+                  className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="font-medium text-gray-900">{formatCurrency(payment.amount)}</div>
+                      <div className="text-xs text-gray-500">
+                        {payment.payment_method} · {new Date(payment.transaction_date).toLocaleDateString()}
+                      </div>
+                      {payment.user_notes ? (
+                        <div className="text-xs text-gray-500 mt-1">{payment.user_notes}</div>
+                      ) : null}
+                    </div>
+                    <div className="flex gap-1 flex-shrink-0">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 px-2 text-amber-600"
+                        onClick={() => setEditWarehousePaymentId(payment.id)}
+                      >
+                        <FilePenLine className="h-4 w-4 mr-1" />
+                        Edit
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 px-2 text-rose-600"
+                        onClick={() => handleUndoPayment(payment.id)}
+                        disabled={undoingPaymentId === payment.id}
+                      >
+                        {undoingPaymentId === payment.id ? (
+                          <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                        ) : (
+                          <Undo2 className="h-4 w-4 mr-1" />
+                        )}
+                        Undo
+                      </Button>
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <EditWarehousePaymentModal
+        isOpen={editWarehousePaymentId != null}
+        onClose={() => setEditWarehousePaymentId(null)}
+        onSuccess={() => {
+          setEditWarehousePaymentId(null)
+          loadTransfers()
+          loadSettlements()
+          if (paymentHistoryWarehouse) {
+            loadWarehousePayments(paymentHistoryWarehouse.warehouse_id)
+          }
+        }}
+        paymentId={editWarehousePaymentId}
+        userId={userId}
+        deviceId={userId}
+      />
       {ConfirmDialog}
     </div>
   )

@@ -68,6 +68,7 @@ import EditPurchaseModal from "../purchases/edit-purchase-modal"
 import EditSaleModal from "../sales/edit-sale-modal"
 import ViewManualTransactionModal from "../manual/ViewManualTransactionModal"
 import EditManualTransactionModal from "../manual/EditManualTransactionModal"
+import ManualCategorySelect from "../manual/manual-category-select"
 import ViewSupplierPaymentModal from "../suppliers/View-supplier-payment-model"
 import EditSupplierPaymentModal from "../suppliers/View-suplier-payment-edit"
 
@@ -229,7 +230,8 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
   const [manualAmount, setManualAmount] = useState("")
   const [manualType, setManualType] = useState<"debit" | "credit">("debit")
   const [manualDescription, setManualDescription] = useState("")
-  const [manualCategory, setManualCategory] = useState("")
+  const [manualCategoryId, setManualCategoryId] = useState("")
+  const [manualCategoryName, setManualCategoryName] = useState("")
   const [manualPaymentMethod, setManualPaymentMethod] = useState("Cash")
   const [manualDate, setManualDate] = useState<Date>(new Date())
   const [isAddingManual, setIsAddingManual] = useState(false)
@@ -490,7 +492,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
   }
 
   const handleAddManualTransaction = async () => {
-    if (!manualAmount || !manualCategory) {
+    if (!manualAmount || !manualCategoryId || !manualCategoryName) {
       notifyError(toast,"Please fill in all required fields")
       return
     }
@@ -501,8 +503,9 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
       const result = await recordManualTransaction({
         amount: Number(manualAmount),
         type: manualType,
-        description: manualDescription || `${manualType === 'credit' ? 'Income' : 'Expense'}: ${manualCategory}`,
-        category: manualCategory,
+        description: manualDescription || `${manualType === 'credit' ? 'Income' : 'Expense'}: ${manualCategoryName}`,
+        category: manualCategoryName,
+        categoryId: Number(manualCategoryId),
         paymentMethod: manualPaymentMethod,
         deviceId,
         userId,
@@ -515,7 +518,8 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
         setActiveTab("petty-cash")
         setManualAmount("")
         setManualDescription("")
-        setManualCategory("")
+        setManualCategoryId("")
+        setManualCategoryName("")
         setManualPaymentMethod("Cash")
         setManualDate(new Date())
         await forceRefreshData()
@@ -809,13 +813,12 @@ const matchesSearchAndDateRange = (transaction: any) => {
   return matchesSearch && isWithinDateRange
 }
 
-// Define filteredTransactions first with proper null checks (excludes manual/petty cash entries)
+// Define filteredTransactions first with proper null checks
 const filteredTransactions =
   financialData?.transactions?.filter((transaction) => {
     if (!transaction) return false
 
     const type = transaction.type?.toLowerCase()
-    if (type === "manual") return false
 
     if (!matchesSearchAndDateRange(transaction)) return false
 
@@ -2107,6 +2110,7 @@ const renderTransactionList = (
               <SelectItem value="sale">Sales</SelectItem>
               <SelectItem value="purchase">Purchases</SelectItem>
               <SelectItem value="adjustment">Adjustments</SelectItem>
+              <SelectItem value="manual">Petty cash</SelectItem>
             </SelectContent>
           </Select>
 
@@ -2695,12 +2699,14 @@ const renderTransactionList = (
 
             <div className="grid gap-2">
               <Label htmlFor="manual-category">Category *</Label>
-              <Input
-                id="manual-category"
-                value={manualCategory}
-                onChange={(e) => setManualCategory(e.target.value)}
-                placeholder="e.g., Office Supplies, Petty Cash, Utilities"
-                required
+              <ManualCategorySelect
+                deviceId={deviceId}
+                userId={userId}
+                value={manualCategoryId}
+                onValueChange={(id, category) => {
+                  setManualCategoryId(id)
+                  setManualCategoryName(category?.name || "")
+                }}
               />
             </div>
 
@@ -2746,7 +2752,7 @@ const renderTransactionList = (
             </Button>
             <Button
               onClick={handleAddManualTransaction}
-              disabled={isAddingManual || !manualCategory || !manualAmount}
+              disabled={isAddingManual || !manualCategoryId || !manualAmount}
             >
               {isAddingManual ? (
                 <>
@@ -2825,6 +2831,8 @@ const renderTransactionList = (
         onClose={() => setEditManualTransactionId(null)}
         transactionId={editManualTransactionId}
         currency={currency}
+        deviceId={deviceId}
+        userId={userId}
         onTransactionUpdated={() => {
           setEditManualTransactionId(null)
           forceRefreshData()

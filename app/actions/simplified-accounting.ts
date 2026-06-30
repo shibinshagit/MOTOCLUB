@@ -58,6 +58,118 @@ export async function recordSupplierPayment(paymentData: {
   }
 }
 
+export async function recordCustomerPayment(paymentData: {
+  customerId: number
+  customerName: string
+  paymentAmount: number
+  costAmount: number
+  paymentMethod: string
+  allocations: Array<{ saleId: number; allocatedAmount: number }>
+  deviceId: number
+  userId: number
+  paymentDate: Date
+  notes?: string
+}) {
+  try {
+    const paymentAmount = Number(paymentData.paymentAmount) || 0
+    const costAmount = Number(paymentData.costAmount) || 0
+    const debitAmount = 0
+    const creditAmount = paymentAmount
+
+    let description = `Customer Payment - ${paymentData.customerName} - ${paymentData.paymentMethod} - ${paymentData.allocations.length} sale(s) affected`
+    if (paymentData.notes?.trim()) {
+      description += ` - Notes: ${paymentData.notes.trim()}`
+    }
+
+    const companyRows = await sql`
+      SELECT company_id FROM devices WHERE id = ${paymentData.deviceId} LIMIT 1
+    `
+    const companyId = companyRows.length > 0 ? Number(companyRows[0].company_id) : 1
+
+    const storedNotes = JSON.stringify({
+      v: 1,
+      userNotes: paymentData.notes?.trim() || "",
+      allocations: paymentData.allocations.map((a) => ({
+        saleId: a.saleId,
+        allocatedAmount: a.allocatedAmount,
+      })),
+    })
+
+    const result = await sql`
+      INSERT INTO financial_transactions (
+        transaction_type, reference_type, reference_id,
+        amount, received_amount, cost_amount, debit_amount, credit_amount,
+        status, payment_method, description, notes, device_id, company_id, created_by, transaction_date
+      ) VALUES (
+        'customer_payment', 'customer', ${paymentData.customerId},
+        ${paymentAmount}, ${paymentAmount}, ${costAmount}, ${debitAmount}, ${creditAmount},
+        'Completed', ${paymentData.paymentMethod}, ${description}, ${storedNotes},
+        ${paymentData.deviceId}, ${companyId}, ${paymentData.userId}, ${paymentData.paymentDate.toISOString()}
+      ) RETURNING id
+    `
+
+    return { success: true, transactionId: result[0]?.id }
+  } catch (error) {
+    console.error("Error recording customer payment transaction:", error)
+    return { success: false, error: error instanceof Error ? error.message : "Unknown error" }
+  }
+}
+
+export async function recordWarehousePayment(paymentData: {
+  warehouseId: number
+  warehouseName: string
+  paymentAmount: number
+  paymentMethod: string
+  allocations: Array<{ transferId: number; allocatedAmount: number }>
+  deviceId: number
+  userId: number
+  paymentDate: Date
+  notes?: string
+}) {
+  try {
+    const paymentAmount = Number(paymentData.paymentAmount) || 0
+    const debitAmount = paymentAmount
+    const creditAmount = 0
+
+    let description = `Warehouse Payment - ${paymentData.warehouseName} - ${paymentData.paymentMethod} - ${paymentData.allocations.length} transfer(s) affected`
+    if (paymentData.notes?.trim()) {
+      description += ` - Notes: ${paymentData.notes.trim()}`
+    }
+
+    const companyRows = await sql`
+      SELECT company_id FROM devices WHERE id = ${paymentData.deviceId} LIMIT 1
+    `
+    const companyId = companyRows.length > 0 ? Number(companyRows[0].company_id) : 1
+
+    const storedNotes = JSON.stringify({
+      v: 1,
+      userNotes: paymentData.notes?.trim() || "",
+      allocations: paymentData.allocations.map((a) => ({
+        transferId: a.transferId,
+        allocatedAmount: a.allocatedAmount,
+      })),
+    })
+
+    const result = await sql`
+      INSERT INTO financial_transactions (
+        transaction_type, reference_type, reference_id,
+        amount, received_amount, cost_amount, debit_amount, credit_amount,
+        status, payment_method, description, notes, device_id, company_id, created_by, transaction_date
+      ) VALUES (
+        'warehouse_payment', 'warehouse', ${paymentData.warehouseId},
+        ${paymentAmount}, ${paymentAmount}, 0, ${debitAmount}, ${creditAmount},
+        'Completed', ${paymentData.paymentMethod}, ${description}, ${storedNotes},
+        ${paymentData.deviceId}, ${companyId}, ${paymentData.userId}, ${paymentData.paymentDate.toISOString()}
+      ) RETURNING id
+    `
+
+    return { success: true, transactionId: result[0]?.id }
+  } catch (error) {
+    console.error("Error recording warehouse payment transaction:", error)
+    return { success: false, error: error instanceof Error ? error.message : "Unknown error" }
+  }
+}
+
 // FIXED: Create a comprehensive transaction entry for sales - PROPER partial credit sale handling
 export async function recordSaleTransaction(saleData: {
   saleId: number
@@ -649,29 +761,28 @@ export async function recordManualTransaction(transactionData: {
   type: "debit" | "credit"
   description: string
   category: string
+  categoryId?: number
   paymentMethod: string
   deviceId: number
   userId: number
   transactionDate: Date
 }) {
   try {
-    // Ensure table exists
     const amount = Number(transactionData.amount) || 0
     const debitAmount = transactionData.type === "debit" ? amount : 0
     const creditAmount = transactionData.type === "credit" ? amount : 0
+    const category = transactionData.category.trim() || "Other"
+    const description = `Manual Entry - ${category} - ${transactionData.description}`
 
-    const description = `Manual Entry - ${transactionData.category} - ${transactionData.description}`
-
-    // Insert the manual transaction
     const result = await sql`
       INSERT INTO financial_transactions (
         transaction_type, reference_type, reference_id,
         amount, received_amount, cost_amount, debit_amount, credit_amount,
-        status, payment_method, description, device_id, company_id, created_by, transaction_date
+        status, payment_method, description, category_name, device_id, company_id, created_by, transaction_date
       ) VALUES (
-        'manual', 'manual', 0,
+        'manual', 'manual', ${transactionData.categoryId || 0},
         ${amount}, ${amount}, 0, ${debitAmount}, ${creditAmount},
-        'Manual Entry', ${transactionData.paymentMethod}, ${description}, 
+        'Manual Entry', ${transactionData.paymentMethod}, ${description}, ${category},
         ${transactionData.deviceId}, 1, ${transactionData.userId}, ${transactionData.transactionDate}
       ) RETURNING id
     `
@@ -1051,6 +1162,7 @@ export async function getFinancialSummary(
           credit: creditAmount,
           paymentMethod: tx.payment_method || "",
           notes: tx.notes || "",
+          category_name: tx.category_name || "",
           account: getAccountType(tx.transaction_type),
           reference: `${tx.reference_type} #${tx.reference_id}`,
           remaining: Math.max(0, remaining),
@@ -1157,6 +1269,10 @@ function getAccountType(transactionType: string): string {
       return "Manual"
     case "supplier_payment":
       return "Supplier Payment"
+    case "customer_payment":
+      return "Customer Payment"
+    case "warehouse_payment":
+      return "Warehouse Payment"
     case "transfer":
       return "Transfer"
     case "adjustment":

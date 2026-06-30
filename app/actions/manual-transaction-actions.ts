@@ -1,6 +1,12 @@
 "use server"
 
 import { sql } from "@/lib/db"
+import {
+  buildManualEntryDescription,
+  parseManualEntryDetailFromDescription,
+  resolveManualEntryCategory,
+} from "@/lib/manual-entry-categories"
+import { getManualEntryCategoryByName } from "./master-data-actions"
 
 /**
  * Get manual transaction by ID
@@ -28,6 +34,7 @@ export async function getManualTransactionById(transactionId: number) {
           amount,
           transaction_type as type,
           description,
+          category_name,
           payment_method,
           transaction_date,
           created_at,
@@ -35,7 +42,7 @@ export async function getManualTransactionById(transactionId: number) {
           device_id,
           created_by as user_id,
           status,
-          reference_id as reference_number,
+          reference_id,
           reference_type,
           received_amount,
           cost_amount,
@@ -72,8 +79,9 @@ export async function getManualTransactionById(transactionId: number) {
       id: transaction.id,
       amount: Number(transaction.amount) || 0,
       type: getTransactionType(transaction),
-      description: transaction.description || 'Transaction',
-      category: getCategoryFromTransaction(transaction),
+      description: parseManualEntryDetailFromDescription(transaction.description),
+      category: resolveManualEntryCategory(transaction.category_name, transaction.description),
+      category_id: Number(transaction.reference_id) || null,
       payment_method: transaction.payment_method || 'Cash',
       transaction_date: transaction.transaction_date || transaction.created_at,
       created_at: transaction.created_at,
@@ -81,7 +89,7 @@ export async function getManualTransactionById(transactionId: number) {
       device_id: transaction.device_id,
       user_id: transaction.user_id || transaction.created_by,
       status: transaction.status || 'Completed',
-      reference_number: transaction.reference_number || `TRX-${transaction.id}`,
+      reference_number: transaction.reference_id ? `TRX-${transaction.reference_id}` : `TRX-${transaction.id}`,
     }
 
     console.log(`Transaction mapped successfully:`, mappedTransaction)
@@ -115,13 +123,7 @@ function getTransactionType(transaction: any): "debit" | "credit" {
 
 // Helper function to determine category
 function getCategoryFromTransaction(transaction: any): string {
-  if (transaction.type === 'sale') return 'Sales'
-  if (transaction.type === 'purchase') return 'Purchases'
-  if (transaction.type === 'manual') return 'Manual Entry'
-  if (transaction.reference_type === 'manual') return 'Manual Entry'
-  if (transaction.description?.toLowerCase().includes('manual')) return 'Manual Entry'
-  
-  return transaction.type || 'General'
+  return resolveManualEntryCategory(transaction.category_name, transaction.description)
 }
 
 /**
@@ -137,8 +139,11 @@ export async function updateManualTransaction(
     type: "debit" | "credit"
     description: string
     category: string
+    categoryId?: number
     payment_method: string
     transaction_date: Date
+    deviceId?: number
+    userId?: number
   }
 ) {
   try {
@@ -151,7 +156,6 @@ export async function updateManualTransaction(
       }
     }
 
-    // Validate required fields
     if (!data.amount || !data.type || !data.category) {
       return {
         success: false,
@@ -159,15 +163,24 @@ export async function updateManualTransaction(
       }
     }
 
-    // Calculate debit/credit amounts
     const debitAmount = data.type === "debit" ? data.amount : 0
     const creditAmount = data.type === "credit" ? data.amount : 0
+    const category = resolveManualEntryCategory(data.category, null)
+    const description = buildManualEntryDescription(category, data.description)
+
+    let categoryId = data.categoryId || 0
+    if (!categoryId && data.deviceId) {
+      const masterCategory = await getManualEntryCategoryByName(data.deviceId, category)
+      categoryId = masterCategory?.id || 0
+    }
 
     const result = await sql`
       UPDATE financial_transactions
       SET 
         amount = ${data.amount},
-        description = ${data.description},
+        description = ${description},
+        category_name = ${category},
+        reference_id = ${categoryId},
         transaction_type = ${data.type},
         payment_method = ${data.payment_method},
         transaction_date = ${data.transaction_date},

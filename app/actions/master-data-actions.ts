@@ -4,6 +4,11 @@ import { sql } from "@/lib/db"
 import { revalidatePath } from "next/cache"
 import type { MasterDataCategory, MasterDataInput, MasterDataItem } from "@/lib/master-data"
 import { getPackagingDefaultCost } from "@/lib/master-data"
+import {
+  DEFAULT_MANUAL_ENTRY_CATEGORIES,
+  MANUAL_ENTRY_MASTER_CATEGORY,
+  normalizeManualEntryCategory,
+} from "@/lib/manual-entry-categories"
 
 function buildMetadata(input: MasterDataInput, existing?: Record<string, unknown> | null) {
   if (input.category === "packaging") {
@@ -210,4 +215,78 @@ export async function deleteMasterDataItem(id: number, deviceId: number) {
     console.error("deleteMasterDataItem error:", error)
     return { success: false as const, message: "Failed to delete master data item" }
   }
+}
+
+export async function ensureManualEntryCategories(deviceId: number, userId: number) {
+  if (!deviceId || !userId) {
+    return { success: false as const, message: "Device and user are required", data: [] as MasterDataItem[] }
+  }
+
+  try {
+    for (const category of DEFAULT_MANUAL_ENTRY_CATEGORIES) {
+      const existing = await sql`
+        SELECT id
+        FROM master_data
+        WHERE device_id = ${deviceId}
+          AND category = ${MANUAL_ENTRY_MASTER_CATEGORY}
+          AND LOWER(name) = LOWER(${category.name})
+        LIMIT 1
+      `
+
+      if (existing.length === 0) {
+        await sql`
+          INSERT INTO master_data (
+            device_id,
+            category,
+            name,
+            code,
+            is_active,
+            sort_order,
+            created_by
+          )
+          VALUES (
+            ${deviceId},
+            ${MANUAL_ENTRY_MASTER_CATEGORY},
+            ${category.name},
+            ${category.code},
+            true,
+            ${category.sortOrder},
+            ${userId}
+          )
+        `
+      }
+    }
+
+    const rows = await sql`
+      SELECT *
+      FROM master_data
+      WHERE device_id = ${deviceId}
+        AND category = ${MANUAL_ENTRY_MASTER_CATEGORY}
+        AND is_active = true
+      ORDER BY sort_order ASC, name ASC
+    `
+
+    return {
+      success: true as const,
+      data: rows.map((row: Record<string, unknown>) => mapMasterDataRow(row)),
+    }
+  } catch (error) {
+    console.error("ensureManualEntryCategories error:", error)
+    return { success: false as const, message: "Failed to load manual entry categories", data: [] as MasterDataItem[] }
+  }
+}
+
+export async function getManualEntryCategoryByName(deviceId: number, categoryName: string) {
+  const canonical = normalizeManualEntryCategory(categoryName)
+  const rows = await sql`
+    SELECT *
+    FROM master_data
+    WHERE device_id = ${deviceId}
+      AND category = ${MANUAL_ENTRY_MASTER_CATEGORY}
+      AND LOWER(name) = LOWER(${canonical})
+    LIMIT 1
+  `
+
+  if (rows.length === 0) return null
+  return mapMasterDataRow(rows[0] as Record<string, unknown>)
 }
