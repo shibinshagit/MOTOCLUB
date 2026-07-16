@@ -405,7 +405,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
 
       if (p) {
         if (p.has_variants) {
-          if (p.is_batch_managed) {
+          if (!p.is_service) {
             const selectedBatch = p.batches?.find((b: any) => b.id === item.batch_id)
             let baseStock = Number(selectedBatch?.stock || 0)
             if (editOriginal && editOriginal.fromDeviceId === prev.fromDeviceId) {
@@ -535,7 +535,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
       let label = p.name
 
       if (p.has_variants) {
-        if (p.is_batch_managed) {
+        if (!p.is_service) {
           const selectedBatch = p.batches?.find((b: any) => b.id === item.batch_id)
           let baseStock = Number(selectedBatch?.stock || 0)
           if (editOriginal && editOriginal.fromDeviceId === formData.fromDeviceId) {
@@ -1115,14 +1115,14 @@ export default function TransferTab({ userId }: TransferTabProps) {
                                     const variantId = defaultVariant?.id || null
                                     const variantName = defaultVariant?.variant_name || null
 
-                                    const variantBatches = p.is_batch_managed ? p.batches?.filter((b: any) => (b.product_variant_id || null) == (variantId || null)) || [] : []
+                                    const variantBatches = !p.is_service ? p.batches?.filter((b: any) => (b.product_variant_id || null) == (variantId || null)) || [] : []
                                     const defaultBatch = variantBatches?.[0]
                                     const batchId = defaultBatch?.id || null
                                     const batchNumber = defaultBatch?.batch_number || null
 
                                     let resolvedStock = Number(effectiveSourceStockMap.get(p.id) || 0)
                                     if (p.has_variants) {
-                                      if (p.is_batch_managed) {
+                                      if (!p.is_service) {
                                         resolvedStock = Number(defaultBatch?.stock || 0)
                                       } else {
                                         resolvedStock = Number(defaultVariant?.stock || 0)
@@ -1193,7 +1193,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
                                         resolvedStock += Number(originalQty)
                                       }
 
-                                      if (p.is_batch_managed && p.batches && p.batches.length > 0) {
+                                      if (!p.is_service && p.batches && p.batches.length > 0) {
                                         const variantBatches = p.batches.filter((b: any) => (b.product_variant_id || null) == (variantId || null))
                                         const firstBatch = variantBatches?.[0]
                                         resolvedBatchId = firstBatch?.id || null
@@ -1226,7 +1226,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
                               </div>
                             )}
 
-                            {p.is_batch_managed && p.batches && (
+                            {!p.is_service && p.batches && (
                               <div className="mt-1 flex items-center gap-1">
                                 <span className="text-[10px] text-gray-500 font-semibold uppercase shrink-0">Batch:</span>
                                 <select
@@ -1277,7 +1277,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
                           available stock: {(() => {
                             const p = products.find((x) => x.id === item.product_id)
                             if (p?.has_variants) {
-                              if (p.is_batch_managed) {
+                              if (!p.is_service) {
                                 const b = p.batches?.find((x: any) => x.id === item.batch_id)
                                 let s = Number(b ? b.stock : 0)
                                 if (b && editOriginal && editOriginal.fromDeviceId === formData.fromDeviceId) {
@@ -1306,7 +1306,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
                         max={(() => {
                           const p = products.find((x) => x.id === item.product_id)
                           if (p?.has_variants) {
-                            if (p.is_batch_managed) {
+                            if (!p.is_service) {
                               const b = p.batches?.find((x: any) => x.id === item.batch_id)
                               let s = Number(b ? b.stock : 1)
                               if (b && editOriginal && editOriginal.fromDeviceId === formData.fromDeviceId) {
@@ -1330,7 +1330,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
                           const p = products.find((x) => x.id === item.product_id)
                           let maxAllowed = Number(effectiveSourceStockMap.get(item.product_id) || 1)
                           if (p?.has_variants) {
-                            if (p.is_batch_managed) {
+                            if (!p.is_service) {
                               const b = p.batches?.find((x: any) => x.id === item.batch_id)
                               maxAllowed = b ? Number(b.stock) : 1
                               if (b && editOriginal && editOriginal.fromDeviceId === formData.fromDeviceId) {

@@ -29,17 +29,15 @@ export async function getSuppliers(userId: number, limit?: number, searchTerm?: 
           COALESCE(p.paid_amount, 0) as paid_amount,
           COALESCE(p.balance_amount, 0) as balance_amount
         FROM suppliers s
-        LEFT JOIN (
+        LEFT JOIN LATERAL (
           SELECT 
-            TRIM(supplier) as supplier,
             COUNT(*) as total_purchases,
             SUM(total_amount) as total_amount,
             SUM(COALESCE(received_amount, 0)) as paid_amount,
             SUM(CASE WHEN status != 'Cancelled' THEN (total_amount - COALESCE(received_amount, 0)) ELSE 0 END) as balance_amount
           FROM purchases
-          WHERE created_by = ${userId}
-          GROUP BY TRIM(supplier)
-        ) p ON TRIM(s.name) = p.supplier
+          WHERE created_by = ${userId} AND TRIM(supplier) = TRIM(s.name)
+        ) p ON true
         WHERE s.created_by = ${userId}
         AND (
           LOWER(s.name) LIKE ${searchPattern} OR 
@@ -58,17 +56,15 @@ export async function getSuppliers(userId: number, limit?: number, searchTerm?: 
           COALESCE(p.paid_amount, 0) as paid_amount,
           COALESCE(p.balance_amount, 0) as balance_amount
         FROM suppliers s
-        LEFT JOIN (
+        LEFT JOIN LATERAL (
           SELECT 
-            TRIM(supplier) as supplier,
             COUNT(*) as total_purchases,
             SUM(total_amount) as total_amount,
             SUM(COALESCE(received_amount, 0)) as paid_amount,
             SUM(CASE WHEN status != 'Cancelled' THEN (total_amount - COALESCE(received_amount, 0)) ELSE 0 END) as balance_amount
           FROM purchases
-          WHERE created_by = ${userId}
-          GROUP BY TRIM(supplier)
-        ) p ON TRIM(s.name) = p.supplier
+          WHERE created_by = ${userId} AND TRIM(supplier) = TRIM(s.name)
+        ) p ON true
         WHERE s.created_by = ${userId}
         ORDER BY s.name ASC
       `

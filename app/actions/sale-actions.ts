@@ -166,6 +166,15 @@ async function updateProductStock(
         DO UPDATE SET stock = ${nextBatchStock}, updated_at = NOW()
       `
 
+      // Also update remaining_quantity in product_batches
+      if (operation === "subtract") {
+        await sql`
+          UPDATE product_batches 
+          SET remaining_quantity = GREATEST(0, remaining_quantity - ${quantityChange})
+          WHERE id = ${batchId}
+        `
+      }
+
       // 2. Aggregate variant stock from batches
       const totalStockRows = await sql`
         SELECT COALESCE(SUM(stock), 0) as total_stock
@@ -177,25 +186,56 @@ async function updateProductStock(
       
       // 3. Update variant stock in product_device_stock
       /* Legacy product_device_stock insert removed */
-    } else {
-      // No batch specified, update variant stock directly
-      const variantStockRows = await sql`
-        SELECT stock FROM product_device_stock
-        WHERE product_variant_id = ${resolvedVariantId} AND device_id = ${deviceId}
-        LIMIT 1
+    } else if (operation === "subtract") {
+      let remaining = quantityChange
+      const availableBatches = await sql`
+        SELECT pbds.batch_id, pbds.stock
+        FROM product_batch_device_stock pbds
+        JOIN product_batches pb ON pb.id = pbds.batch_id
+        WHERE pb.product_variant_id = ${resolvedVariantId} 
+          AND pbds.device_id = ${deviceId}
+          AND pbds.stock > 0
+        ORDER BY pb.created_at ASC
       `
-      const currentStock = variantStockRows.length > 0 ? Number(variantStockRows[0].stock || 0) : 0
-      let nextStock = operation === "subtract" ? currentStock - quantityChange : currentStock + quantityChange
-      nextStock = Math.max(0, nextStock)
+      for (const batch of availableBatches) {
+        if (remaining <= 0) break
+        const take = Math.min(remaining, Number(batch.stock))
+        const nextStock = Number(batch.stock) - take
+        remaining -= take
 
-      /* Legacy product_device_stock insert removed */
+        await sql`
+          UPDATE product_batch_device_stock
+          SET stock = ${nextStock}, updated_at = NOW()
+          WHERE batch_id = ${batch.batch_id} AND device_id = ${deviceId}
+        `
+        await sql`
+          UPDATE product_batches 
+          SET remaining_quantity = GREATEST(0, remaining_quantity - ${take})
+          WHERE id = ${batch.batch_id}
+        `
+      }
+    } else if (operation === "add") {
+      // For returns without a specific batch, create an adjustment batch
+      const adjBatchNo = `RET-${productId}-${Date.now().toString().slice(-6)}`
+      const adjBatch = await sql`
+        INSERT INTO product_batches (
+          product_id, product_variant_id, batch_no, cost_price, selling_price, quantity_purchased, remaining_quantity, status
+        ) VALUES (
+          ${productId}, ${resolvedVariantId}, ${adjBatchNo}, 0, 0, ${quantityChange}, ${quantityChange}, 'active'
+        ) RETURNING id
+      `
+      const adjBatchId = adjBatch[0].id
+      await sql`
+        INSERT INTO product_batch_device_stock (batch_id, device_id, stock, updated_at)
+        VALUES (${adjBatchId}, ${deviceId}, ${quantityChange}, NOW())
+      `
     }
 
     // Log stock history
     try {
       await sql`
         INSERT INTO product_stock_history (
-          product_id, product_variant_id, batch_id, quantity, type, reference_type, notes, created_by, device_id
+          product_id, product_product_variant_id, batch_id, quantity, type, reference_type, notes, created_by, device_id
         ) VALUES (
           ${productId}, ${resolvedVariantId}, ${batchId || null}, ${quantityChange}, ${operation === "subtract" ? "adjustment" : "adjustment"}, 'sale', 'POS Checkout', ${deviceId}, ${deviceId}
         )
@@ -246,7 +286,7 @@ async function createStockHistoryEntry(
 
     await sql`
       INSERT INTO product_stock_history (
-        product_id, product_variant_id, batch_id, quantity, type, reference_id, reference_type, notes, created_by, device_id
+        product_id, product_product_variant_id, batch_id, quantity, type, reference_id, reference_type, notes, created_by, device_id
       ) VALUES (
         ${productId},
         ${resolvedVariantId || null},
@@ -783,76 +823,81 @@ export async function addSale(saleData: any) {
         }
       }
 
-      let allocations: {batchId: number | null, quantity: number}[] = []
+      let allocations: {batchId: number | null, quantity: number, costPrice?: number, sellingPrice?: number}[] = Array.isArray(item.allocations) && item.allocations.length > 0 ? item.allocations : []
       let remainingQty = Number(item.quantity)
 
-      if (isService || !isBatchManaged) {
-         allocations.push({ batchId: requestedBatchId, quantity: remainingQty })
-      } else {
-         if (requestedBatchId) {
-            // User explicitly selected a batch - strictly deduct from this batch only,
-            // bypassing FIFO completely even if it goes into negative stock.
-            allocations.push({ batchId: requestedBatchId, quantity: remainingQty })
-            remainingQty = 0
-         } else {
-            // Auto-allocate (FIFO)
-            const availableBatches = await sql`
-              SELECT pb.id, pbds.stock
-              FROM product_batch_device_stock pbds
-              JOIN product_batches pb ON pb.id = pbds.batch_id
-              WHERE pb.product_variant_id = ${variantId} 
-                AND pbds.device_id = ${saleData.deviceId}
-                AND pbds.stock > 0
-              ORDER BY pb.manufacture_date ASC NULLS LAST, pb.created_at ASC
-            `
-            
-            for (const batch of availableBatches) {
-               if (remainingQty <= 0) break
-               const stockAvailable = Number(batch.stock)
-               const qtyFromBatch = Math.min(remainingQty, stockAvailable)
-               allocations.push({ batchId: batch.id, quantity: qtyFromBatch })
-               remainingQty -= qtyFromBatch
-            }
-            
-            // If still remaining quantity after FIFO (insufficient stock), assign to null batch
-            if (remainingQty > 0) {
-               allocations.push({ batchId: null, quantity: remainingQty })
-            }
-         }
+      if (allocations.length === 0) {
+        if (isService || !isBatchManaged) {
+           allocations.push({ batchId: requestedBatchId, quantity: remainingQty })
+        } else {
+           if (requestedBatchId) {
+              allocations.push({ batchId: requestedBatchId, quantity: remainingQty })
+              remainingQty = 0
+           } else {
+              const availableBatches = await sql`
+                SELECT pb.id, pbds.stock, pb.cost_price, pb.selling_price
+                FROM product_batch_device_stock pbds
+                JOIN product_batches pb ON pb.id = pbds.batch_id
+                WHERE pb.product_variant_id = ${variantId} 
+                  AND pbds.device_id = ${saleData.deviceId}
+                  AND pbds.stock > 0
+                ORDER BY pb.manufacture_date ASC NULLS LAST, pb.created_at ASC
+              `
+              
+              for (const batch of availableBatches) {
+                 if (remainingQty <= 0) break
+                 const stockAvailable = Number(batch.stock)
+                 const qtyFromBatch = Math.min(remainingQty, stockAvailable)
+                 allocations.push({ batchId: batch.id, quantity: qtyFromBatch, costPrice: Number(batch.cost_price) || 0, sellingPrice: Number(batch.selling_price) || 0 })
+                 remainingQty -= qtyFromBatch
+              }
+              
+              if (remainingQty > 0) {
+                 allocations.push({ batchId: null, quantity: remainingQty })
+              }
+           }
+        }
       }
 
-      // Check if cost and notes columns exist in sale_items table
       const hasCostColumn = true
       const hasNotesColumn = true
 
       try {
+        let itemResult
+        if (hasCostColumn && hasNotesColumn) {
+          itemResult = await sql`
+            INSERT INTO sale_items (sale_id, product_id, product_variant_id, batch_id, quantity, price, cost, notes)
+            VALUES (${saleId}, ${item.productId}, ${variantId || null}, ${requestedBatchId || null}, ${item.quantity}, ${item.price}, ${item.cost || 0}, ${item.notes || ""})
+            RETURNING *
+          `
+        } else if (hasCostColumn) {
+          itemResult = await sql`
+            INSERT INTO sale_items (sale_id, product_id, product_variant_id, batch_id, quantity, price, cost)
+            VALUES (${saleId}, ${item.productId}, ${variantId || null}, ${requestedBatchId || null}, ${item.quantity}, ${item.price}, ${item.cost || 0})
+            RETURNING *
+          `
+        } else {
+          itemResult = await sql`
+            INSERT INTO sale_items (sale_id, product_id, product_variant_id, batch_id, quantity, price)
+            VALUES (${saleId}, ${item.productId}, ${variantId || null}, ${requestedBatchId || null}, ${item.quantity}, ${item.price})
+            RETURNING *
+          `
+        }
+
+        const insertedItemId = itemResult[0].id
+        itemResult[0].product_name = itemName
+        itemResult[0].item_type = isService ? "service" : "product"
+        saleItems.push(itemResult[0])
+
         for (const alloc of allocations) {
           if (alloc.quantity <= 0) continue;
           
-          let itemResult
-          if (hasCostColumn && hasNotesColumn) {
-            itemResult = await sql`
-              INSERT INTO sale_items (sale_id, product_id, product_variant_id, batch_id, quantity, price, cost, notes)
-              VALUES (${saleId}, ${item.productId}, ${variantId || null}, ${alloc.batchId || null}, ${alloc.quantity}, ${item.price}, ${item.cost || 0}, ${item.notes || ""})
-              RETURNING *
-            `
-          } else if (hasCostColumn) {
-            itemResult = await sql`
-              INSERT INTO sale_items (sale_id, product_id, product_variant_id, batch_id, quantity, price, cost)
-              VALUES (${saleId}, ${item.productId}, ${variantId || null}, ${alloc.batchId || null}, ${alloc.quantity}, ${item.price}, ${item.cost || 0})
-              RETURNING *
-            `
-          } else {
-            itemResult = await sql`
-              INSERT INTO sale_items (sale_id, product_id, product_variant_id, batch_id, quantity, price)
-              VALUES (${saleId}, ${item.productId}, ${variantId || null}, ${alloc.batchId || null}, ${alloc.quantity}, ${item.price})
-              RETURNING *
+          if (!isService && isBatchManaged) {
+            await sql`
+              INSERT INTO sale_batch_allocations (sale_item_id, batch_id, quantity, cost_price, selling_price)
+              VALUES (${insertedItemId}, ${alloc.batchId}, ${alloc.quantity}, ${alloc.costPrice || item.cost || 0}, ${alloc.sellingPrice || item.price})
             `
           }
-
-          itemResult[0].product_name = itemName
-          itemResult[0].item_type = isService ? "service" : "product"
-          saleItems.push(itemResult[0])
 
           if (!isCancelled && !isService) {
             const stockResult = await updateProductStock(item.productId, variantId, alloc.batchId, alloc.quantity, "subtract", saleData.deviceId)
@@ -1311,27 +1356,9 @@ export async function updateSale(saleData: any) {
 
       await updateSaleRecord(Boolean(saleData.deviceId))
 
-    // 7. Handle sale items updates with improved stock management and stock history
-    console.log("Updating sale items with stock tracking...")
+    // 7. Handle sale items updates with MULTI-BATCH logic
+    console.log("Updating sale items with multi-batch stock tracking...")
 
-      // Get existing sale items with more details
-      const existingItems = await sql`
-        SELECT id, product_id, product_variant_id, batch_id, quantity FROM sale_items WHERE sale_id = ${saleData.id}
-      `
-
-      const existingItemMap = new Map()
-      for (const item of existingItems) {
-        existingItemMap.set(item.id, {
-          productId: item.product_id,
-          productVariantId: item.product_variant_id,
-          batchId: item.batch_id,
-          quantity: item.quantity,
-        })
-      }
-
-      const processedItemIds = new Set()
-
-      // Handle status change for stock adjustments with stock history
       const wasCompleted = changes.originalStatus.toLowerCase() === "completed"
       const wasCancelled = changes.originalStatus.toLowerCase() === "cancelled"
       const isNowCompleted = changes.newStatus.toLowerCase() === "completed"
@@ -1343,66 +1370,60 @@ export async function updateSale(saleData: any) {
         isNowCompleted,
         isNowCancelled,
         statusChanged: changes.statusChanged,
-        isReturn: wasCompleted && isNowCancelled, // This is a return
       })
 
-      // Handle status-based stock changes first
-      if (changes.statusChanged) {
-        if (wasCompleted && !wasCancelled && isNowCancelled) {
-          // This is a RETURN - Changing from completed to cancelled - restore all stock for products only
-          console.log("Processing SALE RETURN - restoring stock for all items")
-          for (const item of existingItems) {
-            const stockResult = await updateProductStock(item.product_id, item.product_variant_id, item.batch_id, item.quantity, "add", saleData.deviceId)
-            if (stockResult.success) {
-              // Create stock history entry for return
-              await createStockHistoryEntry(
-                item.product_id,
-                item.product_variant_id,
-                item.batch_id,
-                "sale_returned",
-                item.quantity,
-                saleData.id,
-                "sale",
-                saleData.deviceId,
-                `Sale #${saleData.id} returned - stock restored`,
-              )
-              console.log(`Stock restored for returned product ${item.product_id}: +${item.quantity}`)
-            }
-          }
-        } else if (wasCancelled && isNowCompleted) {
-          // Changing from cancelled to completed - reduce stock for products only
-          console.log("Sale completed from cancelled - reducing stock for all items")
-          for (const item of existingItems) {
-            const stockResult = await updateProductStock(item.product_id, item.product_variant_id, item.batch_id, item.quantity, "subtract", saleData.deviceId)
-            if (stockResult.success) {
-              // Create stock history entry for completion
-              await createStockHistoryEntry(
-                item.product_id,
-                item.product_variant_id,
-                item.batch_id,
-                "sale_completed",
-                -item.quantity,
-                saleData.id,
-                "sale",
-                saleData.deviceId,
-                `Sale #${saleData.id} completed - stock reduced`,
-              )
-              console.log(`Stock reduced for product ${item.product_id}: -${item.quantity}`)
-            }
+      // Fetch all existing sale items and their allocations
+      const existingItems = await sql`
+        SELECT id, product_id, product_variant_id FROM sale_items WHERE sale_id = ${saleData.id}
+      `
+      
+      const existingAllocations = await sql`
+        SELECT sba.*, si.product_id, si.product_variant_id 
+        FROM sale_batch_allocations sba 
+        JOIN sale_items si ON sba.sale_item_id = si.id 
+        WHERE si.sale_id = ${saleData.id}
+      `
+
+      // RESTORE STOCK: If the sale WAS completed, we restore all allocated stock back to inventory
+      if (wasCompleted && !wasCancelled) {
+        console.log("Restoring stock from previous allocations...")
+        for (const alloc of existingAllocations) {
+          const stockResult = await updateProductStock(
+            alloc.product_id, 
+            alloc.product_variant_id, 
+            alloc.batch_id, 
+            alloc.quantity, 
+            "add", 
+            saleData.deviceId
+          )
+          if (stockResult.success) {
+            await createStockHistoryEntry(
+              alloc.product_id,
+              alloc.product_variant_id,
+              alloc.batch_id,
+              "sale_edited_restored",
+              alloc.quantity,
+              saleData.id,
+              "sale",
+              saleData.deviceId,
+              `Sale #${saleData.id} edited - stock temporarily restored`
+            )
           }
         }
       }
 
-      // Track individual item changes for stock adjustments
-      const itemStockChanges = []
+      // DELETE old allocations (we will recreate them)
+      if (existingItems.length > 0) {
+        await sql`DELETE FROM sale_batch_allocations WHERE sale_item_id IN (SELECT id FROM sale_items WHERE sale_id = ${saleData.id})`
+      }
 
-      // Update or insert each sale item and track changes
+      const processedItemIds = new Set()
+
+      // Process items (UPDATE existing, INSERT new)
       for (const item of saleData.items) {
         const variantId = item.variantId || item.productVariantId || item.product_variant_id || null
-        const batchId = item.batchId || item.batch_id || null
-
         let resolvedVariantId = variantId
-        // Find default variant if not provided
+        
         if (!resolvedVariantId) {
           const defaultVariant = await sql`
             SELECT id FROM product_variants WHERE product_id = ${item.productId} ORDER BY id ASC LIMIT 1
@@ -1412,55 +1433,15 @@ export async function updateSale(saleData: any) {
           }
         }
 
+        let insertedItemId = item.id;
+        
         if (item.id) {
-          // Update existing item - check for quantity changes
-          const existingItem = existingItemMap.get(item.id)
-          if (existingItem) {
-            const isSameVariant = existingItem.productVariantId === resolvedVariantId && existingItem.batchId === batchId
-            if (isSameVariant) {
-              const quantityDiff = item.quantity - existingItem.quantity
-
-              if (quantityDiff !== 0 && isNowCompleted && !isNowCancelled) {
-                // Only adjust stock if sale is currently completed
-                itemStockChanges.push({
-                  productId: item.productId,
-                  variantId: resolvedVariantId,
-                  batchId: batchId,
-                  quantityChange: quantityDiff,
-                  changeType: quantityDiff > 0 ? "sale_item_increased" : "sale_item_decreased",
-                  notes: `Sale #${saleData.id} item quantity changed from ${existingItem.quantity} to ${item.quantity}`,
-                })
-              }
-            } else {
-              // Variant/batch changed!
-              if (isNowCompleted && !isNowCancelled) {
-                // Restore old variant
-                itemStockChanges.push({
-                  productId: existingItem.productId,
-                  variantId: existingItem.productVariantId,
-                  batchId: existingItem.batchId,
-                  quantityChange: -existingItem.quantity,
-                  changeType: "sale_item_removed",
-                  notes: `Sale #${saleData.id} item variant/batch changed (removed old)`,
-                })
-                // Subtract new variant
-                itemStockChanges.push({
-                  productId: item.productId,
-                  variantId: resolvedVariantId,
-                  batchId: batchId,
-                  quantityChange: item.quantity,
-                  changeType: "sale_item_added",
-                  notes: `Sale #${saleData.id} item variant/batch changed (added new)`,
-                })
-              }
-            }
-          }
-
+          // Update existing item
           await sql`
             UPDATE sale_items SET
               product_id = ${item.productId},
               product_variant_id = ${resolvedVariantId || null},
-              batch_id = ${batchId || null},
+              batch_id = null,
               quantity = ${item.quantity},
               price = ${item.price},
               cost = ${item.cost || 0},
@@ -1470,101 +1451,64 @@ export async function updateSale(saleData: any) {
           processedItemIds.add(item.id)
         } else {
           // Insert new item
-          if (isNowCompleted && !isNowCancelled) {
-            itemStockChanges.push({
-              productId: item.productId,
-              variantId: resolvedVariantId,
-              batchId: batchId,
-              quantityChange: item.quantity,
-              changeType: "sale_item_added",
-              notes: `New item added to Sale #${saleData.id}`,
-            })
-          }
-
-          await sql`
+          const itemResult = await sql`
             INSERT INTO sale_items (
-              sale_id, 
-              product_id, 
-              product_variant_id,
-              batch_id,
-              quantity, 
-              price,
-              cost,
-              notes
+              sale_id, product_id, product_variant_id, batch_id, quantity, price, cost, notes
             ) VALUES (
-              ${saleData.id}, 
-              ${item.productId}, 
-              ${resolvedVariantId || null},
-              ${batchId || null},
-              ${item.quantity}, 
-              ${item.price},
-              ${item.cost || 0},
-              ${item.notes || ""}
-            )
+              ${saleData.id}, ${item.productId}, ${resolvedVariantId || null}, null, ${item.quantity}, ${item.price}, ${item.cost || 0}, ${item.notes || ""}
+            ) RETURNING id
           `
+          insertedItemId = itemResult[0].id;
+        }
+
+        // RE-ALLOCATE: Create new allocations and deduct stock if the sale is currently COMPLETED
+        if (isNowCompleted && !isNowCancelled) {
+          const allocations = item.allocations || [];
+          
+          for (const alloc of allocations) {
+            if (alloc.quantity <= 0) continue;
+            
+            // Insert allocation
+            await sql`
+              INSERT INTO sale_batch_allocations (sale_item_id, batch_id, quantity, cost_price, selling_price)
+              VALUES (${insertedItemId}, ${alloc.batchId}, ${alloc.quantity}, ${alloc.costPrice || item.cost || 0}, ${alloc.sellingPrice || item.price})
+            `
+            
+            // Deduct stock
+            const stockResult = await updateProductStock(
+              item.productId, 
+              resolvedVariantId, 
+              alloc.batchId, 
+              alloc.quantity, 
+              "subtract", 
+              saleData.deviceId
+            )
+            
+            if (stockResult.success) {
+              await createStockHistoryEntry(
+                item.productId,
+                resolvedVariantId,
+                alloc.batchId,
+                "sale_edited_deducted",
+                -alloc.quantity,
+                saleData.id,
+                "sale",
+                saleData.deviceId,
+                `Sale #${saleData.id} edited - stock deducted for allocation`
+              )
+            }
+          }
         }
       }
 
       // Handle deleted items
-      for (const [itemId, itemData] of existingItemMap.entries()) {
-        if (!processedItemIds.has(itemId)) {
-          // Item was removed
-          if (isNowCompleted && !isNowCancelled) {
-            itemStockChanges.push({
-              productId: itemData.productId,
-              variantId: itemData.productVariantId,
-              batchId: itemData.batchId,
-              quantityChange: -itemData.quantity,
-              changeType: "sale_item_removed",
-              notes: `Item removed from Sale #${saleData.id} - stock restored`,
-            })
-          }
-
-          await sql`DELETE FROM sale_items WHERE id = ${itemId}`
+      for (const item of existingItems) {
+        if (!processedItemIds.has(item.id)) {
+          await sql`DELETE FROM sale_items WHERE id = ${item.id}`
         }
       }
 
-      // Apply stock changes and create history entries
-      console.log("Applying item-level stock changes:", itemStockChanges.length)
-      for (const change of itemStockChanges) {
-        if (change.quantityChange > 0) {
-          // More items sold - reduce stock
-          const stockResult = await updateProductStock(change.productId, change.variantId, change.batchId, change.quantityChange, "subtract", saleData.deviceId)
-          if (stockResult.success) {
-            await createStockHistoryEntry(
-              change.productId,
-              change.variantId,
-              change.batchId,
-              change.changeType,
-              -change.quantityChange, // Negative for stock reduction
-              saleData.id,
-              "sale",
-              saleData.deviceId,
-              change.notes,
-            )
-            console.log(`Stock reduced for product ${change.productId}: -${change.quantityChange}`)
-          }
-        } else if (change.quantityChange < 0) {
-          // Fewer items sold - restore stock
-          const stockResult = await updateProductStock(change.productId, change.variantId, change.batchId, Math.abs(change.quantityChange), "add", saleData.deviceId)
-          if (stockResult.success) {
-            await createStockHistoryEntry(
-              change.productId,
-              change.variantId,
-              change.batchId,
-              change.changeType,
-              Math.abs(change.quantityChange), // Positive for stock restoration
-              saleData.id,
-              "sale",
-              saleData.deviceId,
-              change.notes,
-            )
-            console.log(`Stock restored for product ${change.productId}: +${Math.abs(change.quantityChange)}`)
-          }
-        }
-      }
-
-      console.log("Sale items updated successfully with stock history")
+      console.log("Sale items and batch allocations updated successfully")
 
       // 7.5. Update sale type based on current items
       try {

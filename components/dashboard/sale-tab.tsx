@@ -54,6 +54,7 @@ import {
 import CustomerSelectSimple from "@/components/sales/customer-select-simple"
 import ProductSelectSimple from "@/components/sales/product-select-simple"
 import { DatePickerField } from "@/components/ui/date-picker-field"
+import { BatchAllocator } from "@/components/dashboard/batch-allocator"
 import NewCustomerModal from "@/components/sales/new-customer-modal"
 import NewProductModal from "@/components/sales/new-product-modal"
 import NewServiceModal from "@/components/services/new-service-modal"
@@ -97,6 +98,8 @@ interface ProductRow {
   isBatchManaged?: boolean
   variants?: any[]
   batches?: any[]
+  allocations?: any[]
+  autoAllocate?: boolean
 }
 
 interface ScanResult {
@@ -178,6 +181,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
   // Edit mode state
   const [isEditMode, setIsEditMode] = useState(false)
   const [editingSaleId, setEditingSaleId] = useState<number | null>(null)
+  const [allocatorRowId, setAllocatorRowId] = useState<string | null>(null)
   const [originalSaleStatus, setOriginalSaleStatus] = useState<string>("")
 
   // Add Sale Form State
@@ -706,19 +710,41 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
       hasVariants = true
       resolvedVariantId = productObj.variants[0].id
       variantName = productObj.variants[0].name
+      if (batches.length === 0 && productObj.variants[0].batches) {
+        batches = productObj.variants[0].batches
+      }
     }
 
-    let batchId = null
-    let batchNumber = null
+    let allocations: any[] = []
+    let autoAllocate = true
+    let updatedPrice = price
+    let updatedCost = wholesalePrice || 0
 
-    // For sales, we leave batchId null by default (FIFO) UNLESS there's exactly one valid batch
-    // Actually, to match the original, we just leave it null (Auto-allocate)
-    
+    if (isBatchManaged && batches.length > 0) {
+      // Auto Allocate initially
+      let remaining = updatedPrice > 0 ? (products.find((p) => p.id === id)?.quantity || 1) : 1
+      const sortedBatches = [...batches].sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+      for (const b of sortedBatches) {
+        if (remaining <= 0) break
+        const stockCount = b.stocks?.find((s: any) => Number(s.device_id) === Number(deviceId))?.stock || b.device_stock || b.stock || 0
+        if (stockCount > 0) {
+          const allocQty = Math.min(stockCount, remaining)
+          allocations.push({ batchId: b.id || b.batch_id, quantity: allocQty, costPrice: b.cost_price ? Number(b.cost_price) : updatedCost, sellingPrice: b.selling_price ? Number(b.selling_price) : updatedPrice })
+          remaining -= allocQty
+        }
+      }
+      
+      if (allocations.length > 0) {
+        updatedCost = allocations[0].costPrice || updatedCost
+        updatedPrice = allocations[0].sellingPrice || updatedPrice
+      }
+    }
+
     updateProductRow(id, {
       productId,
       productName,
-      price,
-      total: price * (products.find((p) => p.id === id)?.quantity || 1),
+      price: updatedPrice,
+      total: updatedPrice * (products.find((p) => p.id === id)?.quantity || 1),
       stock,
       isService,
       serviceId: isService ? productId : undefined,
@@ -728,9 +754,11 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
       variantName,
       batches,
       variants,
-      batchId,
-      batchNumber,
-      cost: wholesalePrice || 0,
+      batchId: null,
+      batchNumber: null,
+      allocations,
+      autoAllocate,
+      cost: updatedCost,
     })
 
     const hasEmptyRow = products.some((p) => p.productId === null)
@@ -1093,7 +1121,8 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
       return
     }
 
-    if (!staffId) {
+    const finalStaffId = staffId || activeStaff?.id
+    if (!finalStaffId) {
       setFormAlert({
         type: "error",
         message: "Please select a staff member",
@@ -1114,6 +1143,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
         serviceId: p.serviceId,
         variantId: p.productVariantId,
         batchId: p.batchId,
+        allocations: p.allocations,
       }))
 
     if (validItems.length === 0) {
@@ -1149,7 +1179,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
           originalStatus: originalSaleStatus,
           discount: discountAmount,
           receivedAmount: receivedAmount,
-          staffId: staffId,
+          staffId: finalStaffId,
           ...shipping,
         }
 
@@ -1175,7 +1205,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
         // Add new sale
         const saleData = {
           customerId: customerId || null,
-          staffId: staffId || null,
+          staffId: finalStaffId || null,
           userId: userId,
           deviceId: deviceId,
           items: validItems,
@@ -1702,6 +1732,8 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                                 isService: false,
                                                 serviceId: undefined,
                                                 isBatchManaged: false,
+    allocations: [],
+    autoAllocate: true,
                                                 batchId: null,
                                                 batchNumber: null,
                                                 variantName: null,
@@ -1728,7 +1760,10 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                                       variantName: v.name,
                                                       batchId: null,
                                                       batchNumber: null,
-                                                      price: product.price
+                                                      price: product.price,
+                                                      batches: v.batches || [],
+                                                      allocations: [],
+                                                      autoAllocate: true
                                                     })
                                                   }
                                                 }}
@@ -1738,48 +1773,19 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                                 ))}
                                               </select>
                                             )}
-                                            <select
-                                              className="text-[10px] h-6 px-1 rounded border border-blue-200 bg-blue-50/30 text-blue-800 w-full focus:outline-none focus:ring-1 focus:ring-blue-400"
-                                              value={product.batchId || ""}
-                                              onChange={(e) => {
-                                                const val = e.target.value
-                                                const validBatches = product.batches?.filter((b: any) => (b.product_variant_id || null) == (product.productVariantId || null) || b.product_variant_id == null) || []
-                                                
-                                                if (!val) {
-                                                  // Find oldest available batch for Auto-allocate price
-                                                  const oldestAvailable = validBatches.find((b: any) => {
-                                                    const stockCount = b.stocks?.find((s: any) => Number(s.device_id) === Number(deviceId))?.stock || b.device_stock || b.stock || 0
-                                                    return stockCount > 0
-                                                  })
-                                                  const fallbackPrice = oldestAvailable?.selling_price ? Number(oldestAvailable.selling_price) : product.price
-                                                  const fallbackCost = oldestAvailable?.cost_price ? Number(oldestAvailable.cost_price) : product.cost
-                                                  updateProductRow(product.id, { batchId: null, batchNumber: null, price: fallbackPrice, cost: fallbackCost })
-                                                  return
-                                                }
-                                                const bId = parseInt(val)
-                                                const b = validBatches.find((b: any) => b.id === bId)
-                                                if (b) {
-                                                  updateProductRow(product.id, { 
-                                                    batchId: bId, 
-                                                    batchNumber: b.batch_no,
-                                                    price: b.selling_price ? Number(b.selling_price) : product.price,
-                                                    cost: b.cost_price ? Number(b.cost_price) : product.cost
-                                                  })
-                                                }
-                                              }}
-                                            >
-                                              <option value="">Auto-allocate (FIFO)</option>
-                                              {(product.batches || [])
-                                                .filter((b: any) => (b.product_variant_id || null) == (product.productVariantId || null) || b.product_variant_id == null)
-                                                .map((b: any) => {
-                                                  const stockCount = b.stocks?.find((s: any) => Number(s.device_id) === Number(deviceId))?.stock || b.device_stock || b.stock || 0
-                                                  return (
-                                                    <option key={b.id} value={b.id} disabled={stockCount <= 0}>
-                                                      {b.batch_no} | Stock: {stockCount} {b.selling_price ? `| Selling Price: QAR ${b.selling_price}` : ''}
-                                                    </option>
-                                                  )
-                                                })}
-                                            </select>
+                                            <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-7 text-[10px] sm:text-xs px-2 flex justify-between items-center bg-blue-50/30 border-blue-200 text-blue-800 hover:bg-blue-100/50 w-full max-w-[120px]"
+                                  onClick={() => setAllocatorRowId(product.id)}
+                                >
+                                  <span className="truncate">
+                                    {product.allocations?.length ? `Allocated (${product.allocations.reduce((sum, a) => sum + a.quantity, 0)})` : 'Allocate Batches'}
+                                  </span>
+                                  <span className="ml-1 opacity-70">
+                                    {product.autoAllocate ? '(Auto)' : '(Manual)'}
+                                  </span>
+                                </Button>
                                           </div>
                                         )}
                                       </div>
@@ -2381,7 +2387,45 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                         </div>
                       </div>
                     </div>
-                  </CardContent>
+                  
+      {allocatorRowId && (() => {
+        const row = products.find(p => p.id === allocatorRowId)
+        if (!row) return null
+        return (
+          <BatchAllocator
+            isOpen={true}
+            onClose={() => setAllocatorRowId(null)}
+            productName={row.productName}
+            requiredQty={row.quantity}
+            batches={row.batches || []}
+            initialAllocations={row.allocations || []}
+            deviceId={deviceId}
+            onSave={(allocations, autoAllocate) => {
+              const totalAllocatedQty = allocations.reduce((sum: any, a: any) => sum + a.quantity, 0)
+              let newCost = row.cost
+              let newPrice = row.price
+              
+              if (allocations.length > 0 && totalAllocatedQty > 0) {
+                const totalCost = allocations.reduce((sum: any, a: any) => sum + (a.costPrice || row.cost) * a.quantity, 0)
+                newCost = totalCost / totalAllocatedQty
+                
+                const totalPrice = allocations.reduce((sum: any, a: any) => sum + (a.sellingPrice || row.price) * a.quantity, 0)
+                newPrice = totalPrice / totalAllocatedQty
+              }
+
+              updateProductRow(row.id, { 
+                allocations, 
+                autoAllocate,
+                cost: newCost,
+                price: newPrice,
+                total: newPrice * row.quantity
+              })
+            }}
+          />
+        )
+      })()}
+    
+          </CardContent>
                 </Card>
               </div>
             </div>

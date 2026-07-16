@@ -70,6 +70,12 @@ interface ProductRow {
   hasVariants?: boolean
   isBatchManaged?: boolean
   variants?: any[]
+  msp?: number | null
+  mrp?: number | null
+  shelf?: string | null
+  barcode?: string | null
+  sku?: string | null
+  stock?: number | null
 }
 
 interface PurchaseDraftSnapshot {
@@ -462,31 +468,76 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
     stock?: number,
     productObj?: any,
   ) => {
-    let resolvedVariantId: number | null = null
-    let priceToUse = wholesalePrice || price
-    const hasVariants = productObj?.has_variants || false
-    const isBatchManaged = productObj?.is_batch_managed || false
+    // Every product now has at least one default variant (guaranteed by createProduct).
+    // Always read pricing from the first (default) variant. Never rely on has_variants flag.
+    const variants: any[] = productObj?.variants || []
+    const defaultVariant = variants[0] || null
+    const isService = stock === 999
+    const isBatchManaged = !isService
 
-    if (hasVariants && productObj?.variants && productObj.variants.length > 0) {
-      const defaultVariant = productObj.variants[0]
+    // Priority: variant cost_price → wholesale_price → price → product fallback
+    let priceToUse: number = Number(wholesalePrice || price) || 0
+    let resolvedVariantId: number | null = productObj?.variant_id ?? null
+    let resolvedMsp: number = 0
+    let resolvedMrp: number = 0
+    let resolvedShelf: string | null = null
+    let resolvedBarcode: string | null = null
+    let resolvedSku: string | null = null
+    let resolvedStock: number = Number(stock) || 0
+
+    if (defaultVariant) {
       resolvedVariantId = defaultVariant.id
-      if (defaultVariant.wholesale_price !== null && defaultVariant.wholesale_price !== undefined) {
-        priceToUse = Number(defaultVariant.wholesale_price)
-      } else if (defaultVariant.price !== null && defaultVariant.price !== undefined) {
-        priceToUse = Number(defaultVariant.price)
-      }
+      priceToUse = Number(
+        defaultVariant.cost_price ?? defaultVariant.wholesale_price ?? defaultVariant.price ?? wholesalePrice ?? price
+      ) || 0
+      resolvedMsp = Number(defaultVariant.msp ?? defaultVariant.price ?? 0)
+      resolvedMrp = Number(defaultVariant.mrp ?? defaultVariant.msp ?? defaultVariant.price ?? 0)
+      resolvedShelf = defaultVariant.shelf || null
+      resolvedBarcode = defaultVariant.barcode || null
+      resolvedSku = defaultVariant.sku || null
+      resolvedStock = Number(defaultVariant.stock ?? stock ?? 0)
+    } else if (productObj) {
+      // Fallback: use top-level product fields surfaced by getProducts
+      resolvedVariantId = productObj.variant_id ?? null
+      priceToUse = Number(productObj.cost_price ?? productObj.wholesale_price ?? productObj.price ?? 0)
+      resolvedMsp = Number(productObj.msp ?? productObj.price ?? 0)
+      resolvedMrp = Number(productObj.mrp ?? productObj.msp ?? productObj.price ?? 0)
+      resolvedShelf = productObj.shelf ?? null
+      resolvedBarcode = productObj.barcode ?? null
+      resolvedSku = productObj.sku ?? null
+      resolvedStock = Number(productObj.stock ?? 0)
     }
+
+    priceToUse = priceToUse || 0
+    const currentQty = Number(products.find((p) => p.id === id)?.quantity) || 1
+
+    console.log("[Purchase] Product selected:", {
+      productId,
+      productName,
+      resolvedVariantId,
+      priceToUse,
+      resolvedMsp,
+      resolvedMrp,
+      resolvedStock,
+      variantsCount: variants.length,
+    })
 
     updateProductRow(id, {
       productId,
       productName,
       price: priceToUse,
       wholesalePrice: priceToUse,
-      total: (products.find((p) => p.id === id)?.quantity || 1) * priceToUse,
+      total: currentQty * priceToUse,
       variant_id: resolvedVariantId,
-      hasVariants,
+      hasVariants: variants.length > 1,
       isBatchManaged,
-      variants: productObj?.variants || [],
+      variants,
+      msp: resolvedMsp,
+      mrp: resolvedMrp,
+      shelf: resolvedShelf,
+      barcode: resolvedBarcode,
+      sku: resolvedSku,
+      stock: resolvedStock,
     })
 
     const hasEmptyRow = products.some((p) => p.productId === null)
@@ -495,7 +546,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
     }
   }
 
-  const handleAddNewFromRow = (rowId: string) => {
+    const handleAddNewFromRow = (rowId: string) => {
     setActiveProductRowId(rowId)
     setIsNewProductModalOpen(true)
   }
@@ -982,49 +1033,6 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
                 <ChevronsUpDown className="h-3 w-3" />
               </Button>
             </div>
-
-            {product.isBatchManaged && (
-              <div className="mt-1.5 space-y-1 bg-blue-50/50 p-1.5 rounded border border-blue-100">
-                <div className="flex gap-1 items-center">
-                  <span className="text-[9px] text-blue-600 font-bold uppercase shrink-0 w-12">Batch #:</span>
-                  <Input
-                    placeholder="BATCH-123"
-                    value={product.batch_number || ""}
-                    onChange={(e) => updateProductRow(product.id, { batch_number: e.target.value })}
-                    className="text-[10px] h-5 px-1 bg-white border-blue-200 text-gray-900 placeholder:text-gray-400"
-                  />
-                </div>
-                <div className="flex gap-1 items-center">
-                  <span className="text-[9px] text-blue-600 font-bold uppercase shrink-0 w-12">Mfg. Date:</span>
-                  <input
-                    type="date"
-                    value={product.mfg_date || ""}
-                    onChange={(e) => updateProductRow(product.id, { mfg_date: e.target.value })}
-                    className="text-[10px] h-5 px-1 rounded border border-blue-200 bg-white text-gray-900 focus:outline-none w-full"
-                  />
-                </div>
-                <div className="flex gap-1 items-center">
-                  <span className="text-[9px] text-blue-600 font-bold uppercase shrink-0 w-12">Exp. Date:</span>
-                  <input
-                    type="date"
-                    value={product.expiry_date || ""}
-                    onChange={(e) => updateProductRow(product.id, { expiry_date: e.target.value })}
-                    className="text-[10px] h-5 px-1 rounded border border-blue-200 bg-white text-gray-900 focus:outline-none w-full"
-                  />
-                </div>
-                <div className="flex gap-1 items-center">
-                  <span className="text-[9px] text-blue-600 font-bold uppercase shrink-0 w-12">Sell Price:</span>
-                  <Input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={product.selling_price || ""}
-                    onChange={(e) => updateProductRow(product.id, { selling_price: parseFloat(e.target.value) || 0 })}
-                    className="text-[10px] h-5 px-1 bg-white border-blue-200 text-gray-900 placeholder:text-gray-400"
-                  />
-                </div>
-              </div>
-            )}
           </div>
         ) : (
           <ProductSelectSimple
@@ -1039,7 +1047,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
             allowServices={false}
           />
         )}
-              </div>
+      </div>
       <div className="col-span-2">
         <Input
           type="number"
@@ -1052,7 +1060,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
         />
       </div>
       <div className="col-span-2">
-                    <Input
+        <Input
           type="number"
           min="0"
           step="0.01"
@@ -1061,14 +1069,14 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
             updateProductRow(product.id, { price: Number.parseFloat(e.target.value) || 0 })
           }
           className="text-center h-7 text-xs bg-white border-gray-300 text-gray-900"
-                    />
-                  </div>
+        />
+      </div>
       <div className="col-span-2 flex items-center justify-center font-medium text-xs text-gray-900">
-        {currency} {product.total.toFixed(2)}
-                </div>
+        {currency} {(Number(product.total) || 0).toFixed(2)}
+      </div>
       <div className="col-span-1 flex justify-center">
-                <Button
-                  type="button"
+        <Button
+          type="button"
           variant="ghost"
           size="icon"
           onClick={() => removeProductRow(product.id)}
@@ -1076,7 +1084,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
           className="h-6 w-6 p-0 text-gray-400 hover:text-red-500"
         >
           <Trash2 className="h-3 w-3" />
-                </Button>
+        </Button>
       </div>
     </div>
   )
@@ -1089,69 +1097,24 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
       <div className="mb-3">
         <Label className="text-xs font-medium text-gray-700 mb-1 block">Product</Label>
         {product.productId && product.productName ? (
-          <div className="flex flex-col">
-            <div className="flex items-center justify-between p-2 bg-gray-100 rounded">
-              <span className="text-sm font-medium text-gray-900">{product.productName}</span>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-6 w-6 p-0"
-                onClick={() =>
-                  updateProductRow(product.id, {
-                    productId: null,
-                    productName: "",
-                    price: 0,
-                    total: 0,
-                    wholesalePrice: 0,
-                  })
-                }
-              >
-                <ChevronsUpDown className="h-3 w-3" />
-              </Button>
-            </div>
-
-            {product.isBatchManaged && (
-              <div className="mt-2 space-y-1.5 bg-blue-50/50 p-2 rounded border border-blue-100">
-                <div className="flex gap-2 items-center">
-                  <span className="text-xs text-blue-600 font-bold uppercase shrink-0 w-16">Batch #:</span>
-                  <Input
-                    placeholder="BATCH-123"
-                    value={product.batch_number || ""}
-                    onChange={(e) => updateProductRow(product.id, { batch_number: e.target.value })}
-                    className="text-xs h-7 px-2 bg-white border-blue-200 text-gray-900 placeholder:text-gray-400"
-                  />
-                </div>
-                <div className="flex gap-2 items-center">
-                  <span className="text-xs text-blue-600 font-bold uppercase shrink-0 w-16">Mfg. Date:</span>
-                  <input
-                    type="date"
-                    value={product.mfg_date || ""}
-                    onChange={(e) => updateProductRow(product.id, { mfg_date: e.target.value })}
-                    className="text-xs h-7 px-2 rounded border border-blue-200 bg-white text-gray-900 focus:outline-none w-full"
-                  />
-                </div>
-                <div className="flex gap-2 items-center">
-                  <span className="text-xs text-blue-600 font-bold uppercase shrink-0 w-16">Exp. Date:</span>
-                  <input
-                    type="date"
-                    value={product.expiry_date || ""}
-                    onChange={(e) => updateProductRow(product.id, { expiry_date: e.target.value })}
-                    className="text-xs h-7 px-2 rounded border border-blue-200 bg-white text-gray-900 focus:outline-none w-full"
-                  />
-                </div>
-                <div className="flex gap-2 items-center">
-                  <span className="text-xs text-blue-600 font-bold uppercase shrink-0 w-16">Sell Price:</span>
-                  <Input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={product.selling_price || ""}
-                    onChange={(e) => updateProductRow(product.id, { selling_price: parseFloat(e.target.value) || 0 })}
-                    className="text-xs h-7 px-2 bg-white border-blue-200 text-gray-900 placeholder:text-gray-400"
-                  />
-                </div>
-              </div>
-            )}
+          <div className="flex items-center justify-between p-2 bg-gray-100 rounded">
+            <span className="text-sm font-medium text-gray-900">{product.productName}</span>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 w-6 p-0"
+              onClick={() =>
+                updateProductRow(product.id, {
+                  productId: null,
+                  productName: "",
+                  price: 0,
+                  total: 0,
+                  wholesalePrice: 0,
+                })
+              }
+            >
+              <ChevronsUpDown className="h-3 w-3" />
+            </Button>
           </div>
         ) : (
           <ProductSelectSimple
@@ -1166,7 +1129,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
             allowServices={false}
           />
         )}
-              </div>
+      </div>
       <div className="grid grid-cols-2 gap-2 mb-3">
         <div>
           <Label className="text-xs font-medium text-gray-700 mb-1 block">Qty</Label>
@@ -1179,7 +1142,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
             }
             className="text-center h-8 text-sm"
           />
-                </div>
+        </div>
         <div>
           <Label className="text-xs font-medium text-gray-700 mb-1 block">Price</Label>
           <Input
@@ -1192,24 +1155,24 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
             }
             className="text-center h-8 text-sm"
           />
-              </div>
-            </div>
+        </div>
+      </div>
       <div className="flex items-center justify-between">
         <div className="text-sm font-medium text-gray-900">
-          Total: {currency} {product.total.toFixed(2)}
+          Total: {currency} {(Number(product.total) || 0).toFixed(2)}
         </div>
-                  <Button
-                    type="button"
+        <Button
+          type="button"
           variant="ghost"
-                    size="sm"
+          size="sm"
           onClick={() => removeProductRow(product.id)}
           disabled={products.length === 1}
           className="text-red-500 hover:text-red-700"
         >
           <Trash2 className="h-4 w-4 mr-1" />
           Remove
-                  </Button>
-              </div>
+        </Button>
+      </div>
     </div>
   )
 

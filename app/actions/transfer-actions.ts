@@ -18,6 +18,44 @@ type StockMoveItemInput = {
   quantity: number
 }
 
+
+async function resolveTransferAllocations(productId: number, variantId: number | null, batchId: number | null, deviceId: number, quantity: number) {
+  let resolvedVariantId = variantId
+  if (!resolvedVariantId) {
+    const defaultVariant = await sql`SELECT id FROM product_variants WHERE product_id = ${productId} ORDER BY id ASC LIMIT 1`
+    if (defaultVariant.length > 0) resolvedVariantId = defaultVariant[0].id
+  }
+
+  let allocations: {batchId: number | null, qty: number}[] = []
+  
+  if (batchId) {
+    allocations.push({ batchId, qty: quantity })
+  } else {
+    // FIFO auto-allocate
+    const availableBatches = await sql`
+      SELECT pb.id, pbds.stock
+      FROM product_batch_device_stock pbds
+      JOIN product_batches pb ON pb.id = pbds.batch_id
+      WHERE pb.product_variant_id = ${resolvedVariantId} 
+        AND pbds.device_id = ${deviceId}
+        AND pbds.stock > 0
+      ORDER BY pb.manufacture_date ASC NULLS LAST, pb.created_at ASC
+    `
+    let remaining = quantity
+    for (const batch of availableBatches) {
+      if (remaining <= 0) break
+      const available = Number(batch.stock)
+      const take = Math.min(remaining, available)
+      allocations.push({ batchId: batch.id, qty: take })
+      remaining -= take
+    }
+    if (remaining > 0) {
+      allocations.push({ batchId: null, qty: remaining })
+    }
+  }
+  return { resolvedVariantId, allocations }
+}
+
 function normalizeTransferItems(items: any[]): TransferItemInput[] {
   const itemMap = new Map<string, { product_id: number; product_variant_id: number | null; batch_id: number | null; quantity: number; unit_cost: number }>()
 
@@ -73,23 +111,11 @@ async function getCompanyIdForDevice(deviceId: number): Promise<number | null> {
 }
 
 async function getDeviceStockForUpdate(productId: number, variantId: number | null, deviceId: number): Promise<number> {
-  let resolvedVariantId = variantId
-  if (!resolvedVariantId) {
-    const defaultVariant = await sql`
-      SELECT id FROM product_variants WHERE product_id = ${productId} ORDER BY id ASC LIMIT 1
-    `
-    if (defaultVariant.length > 0) {
-      resolvedVariantId = defaultVariant[0].id
-    } else {
-      return 0
-    }
-  }
-
   const rows = (await sql`
-    SELECT stock
-    FROM product_device_stock
-    WHERE product_variant_id = ${resolvedVariantId} AND device_id = ${deviceId}
-    FOR UPDATE
+    SELECT COALESCE(SUM(pbds.stock), 0) as stock
+    FROM product_batch_device_stock pbds
+    JOIN product_batches pb ON pb.id = pbds.batch_id
+    WHERE pb.product_id = ${productId} AND pbds.device_id = ${deviceId}
   `) as any[]
   return rows.length > 0 ? Number(rows[0].stock || 0) : 0
 }
@@ -127,7 +153,7 @@ async function adjustDeviceProductStock(
       return
     }
   }
-
+  
   if (batchId) {
     const batchStockRows = await sql`
       SELECT stock FROM product_batch_device_stock
@@ -143,27 +169,8 @@ async function adjustDeviceProductStock(
       ON CONFLICT (batch_id, device_id)
       DO UPDATE SET stock = ${nextBatchStock}, updated_at = NOW()
     `
-
-    const totalStockRows = await sql`
-      SELECT COALESCE(SUM(stock), 0) as total_stock
-      FROM product_batch_device_stock pbds
-      JOIN product_batches pb ON pbds.batch_id = pb.id
-      WHERE pb.product_variant_id = ${resolvedVariantId} AND pbds.device_id = ${deviceId}
-    `
-    const nextVariantStock = Number(totalStockRows[0]?.total_stock || 0)
-
-    /* Legacy product_device_stock insert removed */
   } else {
-    const deviceStock = await sql`
-      SELECT stock
-      FROM product_device_stock
-      WHERE product_variant_id = ${resolvedVariantId} AND device_id = ${deviceId}
-      LIMIT 1
-    `
-    const currentStock = deviceStock.length > 0 ? Number(deviceStock[0].stock || 0) : 0
-    const nextStock = Math.max(0, currentStock + delta)
-
-    /* Legacy product_device_stock insert removed */
+    // If no batch ID is specified (legacy data), do nothing since we only track by batch now
   }
 }
 

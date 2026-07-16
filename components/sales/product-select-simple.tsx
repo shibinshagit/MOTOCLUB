@@ -404,9 +404,9 @@ export default function ProductSelectSimple({
                         handleItemSelect(
                           item.id,
                           item.name,
-                          item.price,
-                          isServiceMode ? 0 : item.wholesale_price,
-                          isServiceMode ? 999 : item.stock
+                          item.price ?? item.msp ?? 0,
+                          isServiceMode ? 0 : (item.wholesale_price ?? item.cost_price ?? 0),
+                          isServiceMode ? 999 : (item.stock ?? 0)
                         )
                       }
                     >
@@ -423,10 +423,10 @@ export default function ProductSelectSimple({
                           </span>
                           <span className="text-xs text-gray-500 truncate">
                             {!isServiceMode && item.company_name && `Company: ${item.company_name} • `}
-                            Price: {item.price}
-                            {!isServiceMode && item.wholesale_price > 0 && ` • Wholesale: ${item.wholesale_price}`}
+                            Price: {item.price ?? item.msp ?? 0}
+                            {!isServiceMode && (item.wholesale_price || item.cost_price) && ` • Wholesale/Cost: ${item.wholesale_price ?? item.cost_price ?? 0}`}
                             {!isServiceMode && item.barcode && ` • Barcode: ${item.barcode}`}
-                            {!isServiceMode && ` • Stock: ${item.stock || 0}`}
+                            {!isServiceMode && ` • Stock: ${item.stock ?? 0}`}
                             {isServiceMode && item.category && ` • Category: ${item.category}`}
                           </span>
                         </div>

@@ -19,7 +19,7 @@ async function adjustDeviceProductStock(
   // Adjust batch stock
   const batchStock = await sql`
     SELECT id, stock FROM product_batch_device_stock
-    WHERE product_batch_id = ${batchId} AND device_id = ${deviceId}
+    WHERE batch_id = ${batchId} AND device_id = ${deviceId}
     LIMIT 1
   `
 
@@ -31,7 +31,7 @@ async function adjustDeviceProductStock(
     `
   } else {
     await sql`
-      INSERT INTO product_batch_device_stock (product_batch_id, device_id, stock)
+      INSERT INTO product_batch_device_stock (batch_id, device_id, stock)
       VALUES (${batchId}, ${deviceId}, ${quantityChange})
     `
   }
@@ -254,6 +254,8 @@ export async function createPurchase(formData: FormData) {
   // Normalise items so every numeric field is a real number
   items = items.map((it: any) => ({
     product_id: Number(it.product_id) || 0,
+    variant_id: it.variant_id ? Number(it.variant_id) : null,
+    batch_id: it.batch_id ? Number(it.batch_id) : null,
     quantity: Number(it.quantity) || 0,
     price: Number(it.price) || 0,
   }))
@@ -308,15 +310,53 @@ export async function createPurchase(formData: FormData) {
       const isCancelled = status.toLowerCase() === "cancelled"
 
       // Add purchase items and handle stock...
-      for (const item of items) {
+      for (let item of items) {
+        // Resolve variant: use provided variant_id, or fetch the default variant.
+        // If no variant exists (legacy product), auto-create one so purchase never fails.
+        let variantId = item.variant_id;
+        if (!variantId) {
+          const defaultVariant = await sql`
+            SELECT id FROM product_variants WHERE product_id = ${item.product_id} ORDER BY id ASC LIMIT 1
+          `;
+          if (defaultVariant.length > 0) {
+            variantId = defaultVariant[0].id;
+          } else {
+            console.log(`[Purchase] Auto-creating default variant for product ${item.product_id}`);
+            const autoVariant = await sql`
+              INSERT INTO product_variants (
+                product_id, name, cost_price, wholesale_price, price, msp, mrp, minimum_stock, status
+              ) VALUES (
+                ${item.product_id}, 'Default', ${item.price}, ${item.price}, ${item.price},
+                ${item.price}, ${item.price}, 0, 'active'
+              ) RETURNING id
+            `;
+            variantId = autoVariant[0].id;
+          }
+        }
+
+        // Every purchase MUST create a NEW BATCH — never reuse or merge.
+        const batchNo = `PUR-${purchaseId || 0}-${item.product_id}-${Date.now().toString().slice(-4)}`;
+        const newBatch = await sql`
+          INSERT INTO product_batches (
+            product_id, product_variant_id, batch_no, cost_price, selling_price,
+            quantity_purchased, remaining_quantity, status, purchase_id
+          ) VALUES (
+            ${item.product_id}, ${variantId}, ${batchNo}, ${item.price}, ${item.price},
+            ${item.quantity}, ${item.quantity}, 'active', ${purchaseId}
+          ) RETURNING id
+        `;
+        let batchId = newBatch[0].id;
+        item.variant_id = variantId;
+        item.batch_id = batchId;
+
         await sql`
-          INSERT INTO purchase_items (purchase_id, product_id, quantity, price)
-          VALUES (${purchaseId}, ${item.product_id}, ${item.quantity}, ${item.price})
+          INSERT INTO purchase_items (purchase_id, product_id, product_variant_id, batch_id, quantity, price)
+          VALUES (${purchaseId}, ${item.product_id}, ${item.variant_id || null}, ${item.batch_id || null}, ${item.quantity}, ${item.price})
         `
 
         // Only update stock when purchase status is Delivered AND not Cancelled
         if (isDelivered && !isCancelled) {
-          await adjustDeviceProductStock(item.product_id, deviceId, Number(item.quantity))
+          await adjustDeviceProductStock(item.product_id, (item as any).variant_id || null, (item as any).batch_id || null, deviceId, Number(item.quantity))
 
           // Add stock history entry for purchase
           try {
@@ -324,9 +364,9 @@ export async function createPurchase(formData: FormData) {
 
             await sql`
               INSERT INTO product_stock_history (
-                product_id, quantity, type, reference_id, reference_type, notes, created_by, device_id
+                product_id, product_variant_id, batch_id, quantity, type, reference_id, reference_type, notes, created_by, device_id
               ) VALUES (
-                ${item.product_id}, ${item.quantity}, 'purchase', ${purchaseId}, 'purchase', 
+                ${item.product_id}, ${item.variant_id}, ${item.batch_id}, ${item.quantity}, 'purchase', ${purchaseId}, 'purchase', 
                 ${historyNote}, ${userId}, ${deviceId}
               )
             `
@@ -394,6 +434,8 @@ export async function updatePurchase(formData: FormData) {
   // Normalise items so every numeric field is a real number
   items = items.map((it: any) => ({
     product_id: Number(it.product_id) || 0,
+    variant_id: it.variant_id ? Number(it.variant_id) : null,
+    batch_id: it.batch_id ? Number(it.batch_id) : null,
     quantity: Number(it.quantity) || 0,
     price: Number(it.price) || 0,
   }))
@@ -511,7 +553,7 @@ export async function updatePurchase(formData: FormData) {
           })
 
           // Update the product stock for this device
-          await adjustDeviceProductStock(productId, deviceId, Number(netChange))
+          await adjustDeviceProductStock(productId, null, null, deviceId, Number(netChange))
 
           // Create a single stock history entry for the net change
           try {
@@ -546,10 +588,48 @@ export async function updatePurchase(formData: FormData) {
       // Delete existing items and add new ones
       await sql`DELETE FROM purchase_items WHERE purchase_id = ${purchaseId}`
 
-      for (const item of items) {
+      for (let item of items) {
+        // Resolve variant: use provided variant_id, or fetch the default variant.
+        // If no variant exists (legacy product), auto-create one so purchase never fails.
+        let variantId = item.variant_id;
+        if (!variantId) {
+          const defaultVariant = await sql`
+            SELECT id FROM product_variants WHERE product_id = ${item.product_id} ORDER BY id ASC LIMIT 1
+          `;
+          if (defaultVariant.length > 0) {
+            variantId = defaultVariant[0].id;
+          } else {
+            console.log(`[Purchase] Auto-creating default variant for product ${item.product_id}`);
+            const autoVariant = await sql`
+              INSERT INTO product_variants (
+                product_id, name, cost_price, wholesale_price, price, msp, mrp, minimum_stock, status
+              ) VALUES (
+                ${item.product_id}, 'Default', ${item.price}, ${item.price}, ${item.price},
+                ${item.price}, ${item.price}, 0, 'active'
+              ) RETURNING id
+            `;
+            variantId = autoVariant[0].id;
+          }
+        }
+
+        // Every purchase MUST create a NEW BATCH — never reuse or merge.
+        const batchNo = `PUR-${purchaseId || 0}-${item.product_id}-${Date.now().toString().slice(-4)}`;
+        const newBatch = await sql`
+          INSERT INTO product_batches (
+            product_id, product_variant_id, batch_no, cost_price, selling_price,
+            quantity_purchased, remaining_quantity, status, purchase_id
+          ) VALUES (
+            ${item.product_id}, ${variantId}, ${batchNo}, ${item.price}, ${item.price},
+            ${item.quantity}, ${item.quantity}, 'active', ${purchaseId}
+          ) RETURNING id
+        `;
+        let batchId = newBatch[0].id;
+        item.variant_id = variantId;
+        item.batch_id = batchId;
+
         await sql`
-          INSERT INTO purchase_items (purchase_id, product_id, quantity, price)
-          VALUES (${purchaseId}, ${item.product_id}, ${item.quantity}, ${item.price})
+          INSERT INTO purchase_items (purchase_id, product_id, product_variant_id, batch_id, quantity, price)
+          VALUES (${purchaseId}, ${item.product_id}, ${item.variant_id || null}, ${item.batch_id || null}, ${item.quantity}, ${item.price})
         `
       }
 
@@ -631,8 +711,46 @@ export async function deletePurchase(purchaseId: number, deviceId: number) {
       // If stock was previously added, remove it
       if (wasStockAdded) {
         console.log("Removing stock for deleted purchase items:", items)
-        for (const item of items) {
-          await adjustDeviceProductStock(item.product_id, deviceId, -Number(item.quantity))
+        for (let item of items) {
+        // Resolve variant: use provided variant_id, or fetch the default variant.
+        // If no variant exists (legacy product), auto-create one so purchase never fails.
+        let variantId = item.variant_id;
+        if (!variantId) {
+          const defaultVariant = await sql`
+            SELECT id FROM product_variants WHERE product_id = ${item.product_id} ORDER BY id ASC LIMIT 1
+          `;
+          if (defaultVariant.length > 0) {
+            variantId = defaultVariant[0].id;
+          } else {
+            console.log(`[Purchase] Auto-creating default variant for product ${item.product_id}`);
+            const autoVariant = await sql`
+              INSERT INTO product_variants (
+                product_id, name, cost_price, wholesale_price, price, msp, mrp, minimum_stock, status
+              ) VALUES (
+                ${item.product_id}, 'Default', ${item.price}, ${item.price}, ${item.price},
+                ${item.price}, ${item.price}, 0, 'active'
+              ) RETURNING id
+            `;
+            variantId = autoVariant[0].id;
+          }
+        }
+
+        // Every purchase MUST create a NEW BATCH — never reuse or merge.
+        const batchNo = `PUR-${purchaseId || 0}-${item.product_id}-${Date.now().toString().slice(-4)}`;
+        const newBatch = await sql`
+          INSERT INTO product_batches (
+            product_id, product_variant_id, batch_no, cost_price, selling_price,
+            quantity_purchased, remaining_quantity, status, purchase_id
+          ) VALUES (
+            ${item.product_id}, ${variantId}, ${batchNo}, ${item.price}, ${item.price},
+            ${item.quantity}, ${item.quantity}, 'active', ${purchaseId}
+          ) RETURNING id
+        `;
+        let batchId = newBatch[0].id;
+        item.variant_id = variantId;
+        item.batch_id = batchId;
+
+          await adjustDeviceProductStock(item.product_id, (item as any).variant_id || null, (item as any).batch_id || null, deviceId, -Number(item.quantity))
 
           // Record negative adjustment
           try {
