@@ -5,20 +5,26 @@ import { revalidatePath } from "next/cache"
 
 type TransferItemInput = {
   product_id: number
+  product_variant_id: number | null
+  batch_id: number | null
   quantity: number
   unit_cost: number
 }
 
 type StockMoveItemInput = {
   product_id: number
+  product_variant_id: number | null
+  batch_id: number | null
   quantity: number
 }
 
 function normalizeTransferItems(items: any[]): TransferItemInput[] {
-  const itemMap = new Map<number, { quantity: number; unit_cost: number }>()
+  const itemMap = new Map<string, { product_id: number; product_variant_id: number | null; batch_id: number | null; quantity: number; unit_cost: number }>()
 
   for (const item of items || []) {
     const productId = Number(item?.product_id)
+    const variantId = Number(item?.product_variant_id || item?.variant_id || item?.variantId) || null
+    const batchId = Number(item?.batch_id || item?.batchId) || null
     const quantity = Number(item?.quantity)
     const unitCost = Number(item?.unit_cost ?? 0)
     if (!Number.isFinite(productId) || productId <= 0) continue
@@ -26,21 +32,24 @@ function normalizeTransferItems(items: any[]): TransferItemInput[] {
 
     const nextQuantity = Math.floor(quantity)
     const safeUnitCost = Number.isFinite(unitCost) && unitCost >= 0 ? unitCost : 0
-    const existing = itemMap.get(productId)
+    const key = `${productId}_${variantId || ''}_${batchId || ''}`
+    const existing = itemMap.get(key)
     if (!existing) {
-      itemMap.set(productId, { quantity: nextQuantity, unit_cost: safeUnitCost })
+      itemMap.set(key, { product_id: productId, product_variant_id: variantId, batch_id: batchId, quantity: nextQuantity, unit_cost: safeUnitCost })
     } else {
       const totalQty = existing.quantity + nextQuantity
       const weightedCost =
         totalQty > 0
           ? (existing.unit_cost * existing.quantity + safeUnitCost * nextQuantity) / totalQty
           : safeUnitCost
-      itemMap.set(productId, { quantity: totalQty, unit_cost: weightedCost })
+      itemMap.set(key, { product_id: productId, product_variant_id: variantId, batch_id: batchId, quantity: totalQty, unit_cost: weightedCost })
     }
   }
 
-  return Array.from(itemMap.entries()).map(([product_id, value]) => ({
-    product_id,
+  return Array.from(itemMap.values()).map(value => ({
+    product_id: value.product_id,
+    product_variant_id: value.product_variant_id,
+    batch_id: value.batch_id,
     quantity: value.quantity,
     unit_cost: Number(value.unit_cost.toFixed(2)),
   }))
@@ -63,28 +72,106 @@ async function getCompanyIdForDevice(deviceId: number): Promise<number | null> {
   return result.length > 0 ? Number(result[0].company_id) : null
 }
 
-async function getDeviceStockForUpdate(productId: number, deviceId: number): Promise<number> {
+async function getDeviceStockForUpdate(productId: number, variantId: number | null, deviceId: number): Promise<number> {
+  let resolvedVariantId = variantId
+  if (!resolvedVariantId) {
+    const defaultVariant = await sql`
+      SELECT id FROM product_variants WHERE product_id = ${productId} ORDER BY id ASC LIMIT 1
+    `
+    if (defaultVariant.length > 0) {
+      resolvedVariantId = defaultVariant[0].id
+    } else {
+      return 0
+    }
+  }
+
   const rows = (await sql`
     SELECT stock
     FROM product_device_stock
-    WHERE product_id = ${productId} AND device_id = ${deviceId}
+    WHERE product_variant_id = ${resolvedVariantId} AND device_id = ${deviceId}
     FOR UPDATE
   `) as any[]
   return rows.length > 0 ? Number(rows[0].stock || 0) : 0
 }
 
-async function upsertDeviceStock(productId: number, deviceId: number, stock: number) {
-  await sql`
-    INSERT INTO product_device_stock (product_id, device_id, stock, updated_at)
-    VALUES (${productId}, ${deviceId}, ${Math.max(0, stock)}, NOW())
-    ON CONFLICT (product_id, device_id)
-    DO UPDATE SET stock = ${Math.max(0, stock)}, updated_at = NOW()
+async function getDeviceBatchStockForUpdate(batchId: number, deviceId: number): Promise<number> {
+  const rows = (await sql`
+    SELECT stock
+    FROM product_batch_device_stock
+    WHERE batch_id = ${batchId} AND device_id = ${deviceId}
+    FOR UPDATE
+  `) as any[]
+  return rows.length > 0 ? Number(rows[0].stock || 0) : 0
+}
+
+async function adjustDeviceProductStock(
+  productId: number,
+  variantId: number | null,
+  batchId: number | null,
+  deviceId: number,
+  delta: number
+) {
+  const productCheck = await sql`
+    SELECT id FROM products WHERE id = ${productId}
   `
+  if (productCheck.length === 0) return
+
+  let resolvedVariantId = variantId
+  if (!resolvedVariantId) {
+    const defaultVariant = await sql`
+      SELECT id FROM product_variants WHERE product_id = ${productId} ORDER BY id ASC LIMIT 1
+    `
+    if (defaultVariant.length > 0) {
+      resolvedVariantId = defaultVariant[0].id
+    } else {
+      return
+    }
+  }
+
+  if (batchId) {
+    const batchStockRows = await sql`
+      SELECT stock FROM product_batch_device_stock
+      WHERE batch_id = ${batchId} AND device_id = ${deviceId}
+      LIMIT 1
+    `
+    const currentBatchStock = batchStockRows.length > 0 ? Number(batchStockRows[0].stock || 0) : 0
+    const nextBatchStock = Math.max(0, currentBatchStock + delta)
+
+    await sql`
+      INSERT INTO product_batch_device_stock (batch_id, device_id, stock, updated_at)
+      VALUES (${batchId}, ${deviceId}, ${nextBatchStock}, NOW())
+      ON CONFLICT (batch_id, device_id)
+      DO UPDATE SET stock = ${nextBatchStock}, updated_at = NOW()
+    `
+
+    const totalStockRows = await sql`
+      SELECT COALESCE(SUM(stock), 0) as total_stock
+      FROM product_batch_device_stock pbds
+      JOIN product_batches pb ON pbds.batch_id = pb.id
+      WHERE pb.product_variant_id = ${resolvedVariantId} AND pbds.device_id = ${deviceId}
+    `
+    const nextVariantStock = Number(totalStockRows[0]?.total_stock || 0)
+
+    /* Legacy product_device_stock insert removed */
+  } else {
+    const deviceStock = await sql`
+      SELECT stock
+      FROM product_device_stock
+      WHERE product_variant_id = ${resolvedVariantId} AND device_id = ${deviceId}
+      LIMIT 1
+    `
+    const currentStock = deviceStock.length > 0 ? Number(deviceStock[0].stock || 0) : 0
+    const nextStock = Math.max(0, currentStock + delta)
+
+    /* Legacy product_device_stock insert removed */
+  }
 }
 
 async function createTransferHistoryRows(
   transferId: number,
   productId: number,
+  variantId: number | null,
+  batchId: number | null,
   quantity: number,
   fromDeviceId: number,
   toDeviceId: number,
@@ -95,18 +182,18 @@ async function createTransferHistoryRows(
 
   await sql`
     INSERT INTO product_stock_history (
-      product_id, quantity, type, reference_id, reference_type, notes, created_by, device_id
+      product_id, product_variant_id, batch_id, quantity, type, reference_id, reference_type, notes, created_by, device_id
     ) VALUES (
-      ${productId}, ${-Math.abs(quantity)}, 'transfer_out', ${transferId}, 'transfer',
+      ${productId}, ${variantId || null}, ${batchId || null}, ${-Math.abs(quantity)}, 'transfer_out', ${transferId}, 'transfer',
       ${noteText}, ${actorDeviceId}, ${fromDeviceId}
     )
   `
 
   await sql`
     INSERT INTO product_stock_history (
-      product_id, quantity, type, reference_id, reference_type, notes, created_by, device_id
+      product_id, product_variant_id, batch_id, quantity, type, reference_id, reference_type, notes, created_by, device_id
     ) VALUES (
-      ${productId}, ${Math.abs(quantity)}, 'transfer_in', ${transferId}, 'transfer',
+      ${productId}, ${variantId || null}, ${batchId || null}, ${Math.abs(quantity)}, 'transfer_in', ${transferId}, 'transfer',
       ${noteText}, ${actorDeviceId}, ${toDeviceId}
     )
   `
@@ -114,6 +201,8 @@ async function createTransferHistoryRows(
 
 async function moveStockBetweenDevices(
   productId: number,
+  variantId: number | null,
+  batchId: number | null,
   quantity: number,
   fromDeviceId: number,
   toDeviceId: number,
@@ -122,22 +211,39 @@ async function moveStockBetweenDevices(
   historyNotes?: string,
 ) {
   const lockOrder = [fromDeviceId, toDeviceId].sort((a, b) => a - b)
-  await getDeviceStockForUpdate(productId, lockOrder[0])
+  await getDeviceStockForUpdate(productId, variantId, lockOrder[0])
   if (lockOrder[1] !== lockOrder[0]) {
-    await getDeviceStockForUpdate(productId, lockOrder[1])
+    await getDeviceStockForUpdate(productId, variantId, lockOrder[1])
   }
 
-  const fromStock = await getDeviceStockForUpdate(productId, fromDeviceId)
-  if (fromStock < quantity) {
-    throw new Error(`Insufficient stock for product ID ${productId}. Available: ${fromStock}, required: ${quantity}.`)
+  let resolvedVariantId = variantId
+  if (!resolvedVariantId) {
+    const defaultVariant = await sql`
+      SELECT id FROM product_variants WHERE product_id = ${productId} ORDER BY id ASC LIMIT 1
+    `
+    if (defaultVariant.length > 0) {
+      resolvedVariantId = defaultVariant[0].id
+    } else {
+      throw new Error(`No product variant found for product ID ${productId}`)
+    }
   }
 
-  const toStock = await getDeviceStockForUpdate(productId, toDeviceId)
+  if (batchId) {
+    const fromBatchStock = await getDeviceBatchStockForUpdate(batchId, fromDeviceId)
+    if (fromBatchStock < quantity) {
+      throw new Error(`Insufficient batch stock for product ID ${productId}. Available: ${fromBatchStock}, required: ${quantity}.`)
+    }
+  } else {
+    const fromStock = await getDeviceStockForUpdate(productId, resolvedVariantId, fromDeviceId)
+    if (fromStock < quantity) {
+      throw new Error(`Insufficient stock for product ID ${productId}. Available: ${fromStock}, required: ${quantity}.`)
+    }
+  }
 
-  await upsertDeviceStock(productId, fromDeviceId, fromStock - quantity)
-  await upsertDeviceStock(productId, toDeviceId, toStock + quantity)
+  await adjustDeviceProductStock(productId, resolvedVariantId, batchId, fromDeviceId, -quantity)
+  await adjustDeviceProductStock(productId, resolvedVariantId, batchId, toDeviceId, quantity)
 
-  await createTransferHistoryRows(transferId, productId, quantity, fromDeviceId, toDeviceId, actorDeviceId, historyNotes)
+  await createTransferHistoryRows(transferId, productId, resolvedVariantId, batchId, quantity, fromDeviceId, toDeviceId, actorDeviceId, historyNotes)
 }
 
 async function getDeviceNames(fromDeviceId: number, toDeviceId: number): Promise<{ from: string; to: string }> {
@@ -227,6 +333,8 @@ async function reverseTransferItems(
   for (const item of items) {
     await moveStockBetweenDevices(
       item.product_id,
+      item.product_variant_id,
+      item.batch_id,
       item.quantity,
       originalToDeviceId,
       originalFromDeviceId,
@@ -263,6 +371,8 @@ export async function getTransferFormData(userId: number, fromDeviceId?: number)
         p.id,
         p.name,
         p.barcode,
+        p.has_variants,
+        p.is_batch_managed,
         COALESCE(p.wholesale_price, 0) AS default_unit_cost,
         COALESCE(pds.stock, 0) AS source_stock
       FROM products p
@@ -272,6 +382,68 @@ export async function getTransferFormData(userId: number, fromDeviceId?: number)
       WHERE d.company_id = ${companyId}
       ORDER BY p.name ASC
     `) as any[]
+
+    if (products.length > 0) {
+      const productIds = products.map((p) => p.id)
+      
+      const variants = await sql`
+        SELECT pv.*, COALESCE(pds.stock, 0) as stock
+        FROM product_variants pv
+        LEFT JOIN product_device_stock pds ON pv.id = pds.product_variant_id AND pds.device_id = ${sourceDeviceId}
+        WHERE pv.product_id = ANY(${productIds})
+        ORDER BY pv.id ASC
+      `
+      
+      const variantsByProductId = new Map<number, any[]>()
+      for (const variant of variants) {
+        const pid = Number(variant.product_id)
+        if (!variantsByProductId.has(pid)) {
+          variantsByProductId.set(pid, [])
+        }
+        variantsByProductId.get(pid)!.push({
+          id: Number(variant.id),
+          variant_name: variant.variant_name,
+          sku: variant.sku,
+          barcode: variant.barcode,
+          price: variant.price !== null ? Number(variant.price) : null,
+          wholesale_price: variant.wholesale_price !== null ? Number(variant.wholesale_price) : null,
+          stock: Number(variant.stock || 0),
+        })
+      }
+
+      const batches = await sql`
+        SELECT pb.*, pv.name as variant_name, COALESCE(pbds.stock, 0) as stock
+        FROM product_batches pb
+        LEFT JOIN product_variants pv ON pb.product_variant_id = pv.id
+        LEFT JOIN product_batch_device_stock pbds ON pb.id = pbds.batch_id AND pbds.device_id = ${sourceDeviceId}
+        WHERE pb.product_id = ANY(${productIds})
+        ORDER BY pb.id ASC
+      `
+
+      const batchesByProductId = new Map<number, any[]>()
+      for (const batch of batches) {
+        const pid = Number(batch.product_id)
+        if (!batchesByProductId.has(pid)) {
+          batchesByProductId.set(pid, [])
+        }
+        batchesByProductId.get(pid)!.push({
+          id: Number(batch.id),
+          batch_number: batch.batch_number,
+          product_variant_id: batch.product_variant_id ? Number(batch.product_variant_id) : null,
+          variant_name: batch.variant_name || null,
+          mfg_date: batch.mfg_date,
+          expiry_date: batch.expiry_date,
+          purchase_price: batch.purchase_price !== null ? Number(batch.purchase_price) : 0,
+          selling_price: batch.selling_price !== null ? Number(batch.selling_price) : 0,
+          stock: Number(batch.stock || 0),
+        })
+      }
+
+      for (const p of products) {
+        p.variants = variantsByProductId.get(p.id) || []
+        p.batches = batchesByProductId.get(p.id) || []
+      }
+    }
 
     return {
       success: true,
@@ -283,6 +455,10 @@ export async function getTransferFormData(userId: number, fromDeviceId?: number)
           barcode: p.barcode || "",
           default_unit_cost: Number(p.default_unit_cost || 0),
           source_stock: Number(p.source_stock || 0),
+          has_variants: Boolean(p.has_variants),
+          is_batch_managed: Boolean(p.is_batch_managed),
+          variants: p.variants || [],
+          batches: p.batches || [],
         })),
       },
     }
@@ -389,6 +565,8 @@ export async function getWarehouseTransferById(transferId: number, userId: numbe
       SELECT
         ti.id,
         ti.product_id,
+        ti.product_variant_id,
+        ti.batch_id,
         ti.quantity,
         COALESCE(ti.unit_cost, 0)::numeric AS unit_cost,
         COALESCE(ti.total_cost, 0)::numeric AS total_cost,
@@ -505,11 +683,11 @@ export async function createWarehouseTransfer(formData: FormData) {
     for (const item of items) {
       // Pending requests don't move stock yet — that happens on acceptance.
       if (!isRequest) {
-        await moveStockBetweenDevices(item.product_id, item.quantity, fromDeviceId, toDeviceId, transferId, userId)
+        await moveStockBetweenDevices(item.product_id, item.product_variant_id, item.batch_id, item.quantity, fromDeviceId, toDeviceId, transferId, userId)
       }
       await sql`
-        INSERT INTO stock_transfer_items (transfer_id, product_id, quantity, unit_cost, total_cost, created_at)
-        VALUES (${transferId}, ${item.product_id}, ${item.quantity}, ${item.unit_cost}, ${Number((item.quantity * item.unit_cost).toFixed(2))}, NOW())
+        INSERT INTO stock_transfer_items (transfer_id, product_id, product_variant_id, batch_id, quantity, unit_cost, total_cost, created_at)
+        VALUES (${transferId}, ${item.product_id}, ${item.product_variant_id || null}, ${item.batch_id || null}, ${item.quantity}, ${item.unit_cost}, ${Number((item.quantity * item.unit_cost).toFixed(2))}, NOW())
       `
     }
 
@@ -635,13 +813,15 @@ export async function updateWarehouseTransfer(formData: FormData) {
     const isPending = currentStatus === "pending"
 
     const existingItemsRows = (await sql`
-      SELECT product_id, quantity
+      SELECT product_id, product_variant_id, batch_id, quantity
       FROM stock_transfer_items
       WHERE transfer_id = ${transferId}
       ORDER BY id ASC
     `) as any[]
     const existingItems = existingItemsRows.map((row) => ({
       product_id: Number(row.product_id),
+      product_variant_id: row.product_variant_id ? Number(row.product_variant_id) : null,
+      batch_id: row.batch_id ? Number(row.batch_id) : null,
       quantity: Number(row.quantity),
     }))
 
@@ -652,26 +832,35 @@ export async function updateWarehouseTransfer(formData: FormData) {
     if (isPending) {
       // No stock has moved for a pending request — nothing to reconcile here.
     } else if (isSameRoute) {
-      const oldQtyMap = new Map<number, number>()
+      const oldQtyMap = new Map<string, number>()
       for (const item of existingItems) {
-        oldQtyMap.set(item.product_id, (oldQtyMap.get(item.product_id) || 0) + item.quantity)
+        const key = `${item.product_id}_${item.product_variant_id || ''}_${item.batch_id || ''}`
+        oldQtyMap.set(key, (oldQtyMap.get(key) || 0) + item.quantity)
       }
 
-      const newQtyMap = new Map<number, number>()
+      const newQtyMap = new Map<string, number>()
       for (const item of items) {
-        newQtyMap.set(item.product_id, (newQtyMap.get(item.product_id) || 0) + item.quantity)
+        const key = `${item.product_id}_${item.product_variant_id || ''}_${item.batch_id || ''}`
+        newQtyMap.set(key, (newQtyMap.get(key) || 0) + item.quantity)
       }
 
-      const allProductIds = new Set([...oldQtyMap.keys(), ...newQtyMap.keys()])
-      for (const productId of allProductIds) {
-        const oldQty = oldQtyMap.get(productId) || 0
-        const newQty = newQtyMap.get(productId) || 0
+      const allKeys = new Set([...oldQtyMap.keys(), ...newQtyMap.keys()])
+      for (const key of allKeys) {
+        const parts = key.split("_")
+        const productId = Number(parts[0])
+        const variantId = parts[1] ? Number(parts[1]) : null
+        const batchId = parts[2] ? Number(parts[2]) : null
+
+        const oldQty = oldQtyMap.get(key) || 0
+        const newQty = newQtyMap.get(key) || 0
         const delta = newQty - oldQty
         if (delta === 0) continue
 
         if (delta > 0) {
           await moveStockBetweenDevices(
             productId,
+            variantId,
+            batchId,
             delta,
             fromDeviceId,
             toDeviceId,
@@ -682,6 +871,8 @@ export async function updateWarehouseTransfer(formData: FormData) {
         } else {
           await moveStockBetweenDevices(
             productId,
+            variantId,
+            batchId,
             Math.abs(delta),
             toDeviceId,
             fromDeviceId,
@@ -704,6 +895,8 @@ export async function updateWarehouseTransfer(formData: FormData) {
       for (const item of items) {
         await moveStockBetweenDevices(
           item.product_id,
+          item.product_variant_id,
+          item.batch_id,
           item.quantity,
           fromDeviceId,
           toDeviceId,
@@ -733,8 +926,8 @@ export async function updateWarehouseTransfer(formData: FormData) {
 
     for (const item of items) {
       await sql`
-        INSERT INTO stock_transfer_items (transfer_id, product_id, quantity, unit_cost, total_cost, created_at)
-        VALUES (${transferId}, ${item.product_id}, ${item.quantity}, ${item.unit_cost}, ${Number((item.quantity * item.unit_cost).toFixed(2))}, NOW())
+        INSERT INTO stock_transfer_items (transfer_id, product_id, product_variant_id, batch_id, quantity, unit_cost, total_cost, created_at)
+        VALUES (${transferId}, ${item.product_id}, ${item.product_variant_id || null}, ${item.batch_id || null}, ${item.quantity}, ${item.unit_cost}, ${Number((item.quantity * item.unit_cost).toFixed(2))}, NOW())
       `
     }
 
@@ -808,7 +1001,7 @@ export async function cancelWarehouseTransfer(transferId: number, userId: number
     // to be reversed. Pending requests have done neither.
     if (cancelStatus !== "pending") {
       const itemsRows = (await sql`
-        SELECT product_id, quantity
+        SELECT product_id, product_variant_id, batch_id, quantity
         FROM stock_transfer_items
         WHERE transfer_id = ${transferId}
         ORDER BY id ASC
@@ -816,6 +1009,8 @@ export async function cancelWarehouseTransfer(transferId: number, userId: number
 
       const items = itemsRows.map((row) => ({
         product_id: Number(row.product_id),
+        product_variant_id: row.product_variant_id ? Number(row.product_variant_id) : null,
+        batch_id: row.batch_id ? Number(row.batch_id) : null,
         quantity: Number(row.quantity),
       }))
 
@@ -898,13 +1093,15 @@ export async function acceptWarehouseTransfer(transferId: number, userId: number
     }
 
     const itemsRows = (await sql`
-      SELECT product_id, quantity
+      SELECT product_id, product_variant_id, batch_id, quantity
       FROM stock_transfer_items
       WHERE transfer_id = ${transferId}
       ORDER BY id ASC
     `) as any[]
     const items = itemsRows.map((row) => ({
       product_id: Number(row.product_id),
+      product_variant_id: row.product_variant_id ? Number(row.product_variant_id) : null,
+      batch_id: row.batch_id ? Number(row.batch_id) : null,
       quantity: Number(row.quantity),
     }))
 
@@ -917,6 +1114,8 @@ export async function acceptWarehouseTransfer(transferId: number, userId: number
     for (const item of items) {
       await moveStockBetweenDevices(
         item.product_id,
+        item.product_variant_id,
+        item.batch_id,
         item.quantity,
         fromDeviceId,
         toDeviceId,

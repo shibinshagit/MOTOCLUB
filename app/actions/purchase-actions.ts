@@ -5,31 +5,36 @@ import { sql, getLastError, resetConnectionState } from "@/lib/db"
 import { revalidatePath } from "next/cache"
 import { recordPurchaseTransaction, recordPurchaseAdjustment, deletePurchaseTransaction } from "./simplified-accounting"
 
-async function adjustDeviceProductStock(productId: number, deviceId: number, delta: number) {
-  const productCheck = await sql`
-    SELECT id FROM products WHERE id = ${productId}
-  `
+async function adjustDeviceProductStock(
+  productId: number,
+  variantId: number | null,
+  batchId: number | null,
+  deviceId: number,
+  quantityChange: number,
+) {
+  if (!batchId) {
+    throw new Error("Batch ID is required for stock adjustment");
+  }
 
-  if (productCheck.length === 0) return
-
-  const deviceStock = await sql`
-    SELECT stock
-    FROM product_device_stock
-    WHERE product_id = ${productId} AND device_id = ${deviceId}
+  // Adjust batch stock
+  const batchStock = await sql`
+    SELECT id, stock FROM product_batch_device_stock
+    WHERE product_batch_id = ${batchId} AND device_id = ${deviceId}
     LIMIT 1
   `
 
-  const currentStock = deviceStock.length > 0 ? Number(deviceStock[0].stock || 0) : 0
-
-  const nextStock = Math.max(0, currentStock + delta)
-
-  await sql`
-    INSERT INTO product_device_stock (product_id, device_id, stock, updated_at)
-    VALUES (${productId}, ${deviceId}, ${nextStock}, NOW())
-    ON CONFLICT (product_id, device_id)
-    DO UPDATE SET stock = ${nextStock}, updated_at = NOW()
-  `
-
+  if (batchStock.length > 0) {
+    await sql`
+      UPDATE product_batch_device_stock
+      SET stock = stock + ${quantityChange}, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ${batchStock[0].id}
+    `
+  } else {
+    await sql`
+      INSERT INTO product_batch_device_stock (product_batch_id, device_id, stock)
+      VALUES (${batchId}, ${deviceId}, ${quantityChange})
+    `
+  }
 }
 
 export async function getPurchases() {

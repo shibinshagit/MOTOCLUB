@@ -1,0 +1,1 @@
+﻿const { sql } = require('./lib/db.ts'); async function dump() { const rows = await sql\SELECT * FROM product_batches ORDER BY id DESC LIMIT 5\; console.log(JSON.stringify(rows, null, 2)); process.exit(0); } dump();

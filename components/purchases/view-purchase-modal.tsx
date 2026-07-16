@@ -379,6 +379,7 @@ export default function ViewPurchaseModal({
                         <tr className="border-b border-slate-200 bg-[#F1F4F9] text-xs font-semibold uppercase tracking-wide text-slate-600">
                           <th className="whitespace-nowrap px-4 py-2.5 text-left">#</th>
                           <th className="whitespace-nowrap px-4 py-2.5 text-left">Product</th>
+                          <th className="whitespace-nowrap px-4 py-2.5 text-left">Variant/Batch</th>
                           <th className="whitespace-nowrap px-4 py-2.5 text-center">Qty</th>
                           <th className="whitespace-nowrap px-4 py-2.5 text-right">Unit price</th>
                           <th className="whitespace-nowrap px-4 py-2.5 text-right">Total</th>
@@ -412,6 +413,17 @@ export default function ViewPurchaseModal({
                                     ) : null}
                                   </div>
                                 </div>
+                              </td>
+                              <td className="whitespace-nowrap px-4 py-2.5 text-left">
+                                <div className="text-xs font-medium text-slate-700">
+                                  {item.variant_name || "—"}
+                                </div>
+                                {item.batch_number && (
+                                  <div className="text-[11px] text-slate-600 mt-0.5 flex items-center">
+                                    <span className="font-semibold text-blue-600 mr-1 uppercase text-[9px]">Batch:</span>
+                                    {item.batch_number}
+                                  </div>
+                                )}
                               </td>
                               <td className="whitespace-nowrap px-4 py-2.5 text-center text-slate-800">
                                 {getDisplayValue(item.quantity, "0")}

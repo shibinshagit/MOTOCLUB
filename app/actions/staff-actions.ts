@@ -355,7 +355,32 @@ export async function authenticateStaff(
       return { success: false, message: activateResult.message || "Failed to activate staff session" }
     }
 
-    await setStaffSessionCookie(deviceId, staffId)
+    const deviceResult = await sql`SELECT company_id FROM devices WHERE id = ${deviceId} LIMIT 1`
+    const companyId = deviceResult.length > 0 ? deviceResult[0].company_id : null
+
+    let restricted_pages: string[] = []
+    let restricted_values: string[] = []
+    try {
+      restricted_pages = typeof staff.restricted_pages === 'string' 
+        ? JSON.parse(staff.restricted_pages) : (staff.restricted_pages || [])
+      restricted_values = typeof staff.restricted_values === 'string' 
+        ? JSON.parse(staff.restricted_values) : (staff.restricted_values || [])
+    } catch (e) {
+      console.warn("Failed to parse staff restrictions during login", e)
+    }
+
+    await setStaffSessionCookie({
+      staffId: staff.id,
+      companyId: companyId,
+      deviceId: deviceId,
+      branchId: deviceId,
+      phoneNumber: staff.phone || "",
+      role: staff.role || "staff",
+      permissions: {
+        restricted_pages,
+        restricted_values,
+      },
+    })
 
     return {
       success: true,
@@ -548,7 +573,34 @@ export async function restoreStaffSession(staffId: number, deviceId: number) {
       return { success: false, message: "Staff member is inactive" }
     }
 
-    await setStaffSessionCookie(deviceId, staffId)
+    const staffRow = staff[0]
+
+    const deviceResult = await sql`SELECT company_id FROM devices WHERE id = ${deviceId} LIMIT 1`
+    const companyId = deviceResult.length > 0 ? deviceResult[0].company_id : null
+
+    let restricted_pages: string[] = []
+    let restricted_values: string[] = []
+    try {
+      restricted_pages = typeof staffRow.restricted_pages === 'string' 
+        ? JSON.parse(staffRow.restricted_pages) : (staffRow.restricted_pages || [])
+      restricted_values = typeof staffRow.restricted_values === 'string' 
+        ? JSON.parse(staffRow.restricted_values) : (staffRow.restricted_values || [])
+    } catch (e) {
+      console.warn("Failed to parse staff restrictions during restore", e)
+    }
+
+    await setStaffSessionCookie({
+      staffId: staffRow.id,
+      companyId: companyId,
+      deviceId: deviceId,
+      branchId: deviceId,
+      phoneNumber: staffRow.phone || "",
+      role: staffRow.role || "staff",
+      permissions: {
+        restricted_pages,
+        restricted_values,
+      },
+    })
 
     const allStaff = await sql`
       SELECT id, name, position, role, is_active, restricted_pages, restricted_values
@@ -570,7 +622,7 @@ export async function restoreStaffSession(staffId: number, deviceId: number) {
 
 export async function clearStaffSession(deviceId: number) {
   try {
-    await clearStaffSessionCookie(deviceId)
+    await clearStaffSessionCookie()
     return { success: true }
   } catch (error) {
     console.error("Error clearing staff session:", error)

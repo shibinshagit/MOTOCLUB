@@ -20,6 +20,7 @@ import {
   Store,
   Flame,
   Database,
+  CalendarDays,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/components/ui/use-toast"
@@ -45,6 +46,7 @@ import AccountingTab from "./accounting-tab"
 import SupplierTab from "./supplier-tab"
 import PlatformTab from "./platform-tab"
 import MasterDataTab from "./master-data-tab"
+import AttendanceTab from "./attendance-tab"
 import StaffAuthModal from "../staff/staff-auth-modal"
 import { BrandLogo } from "@/components/brand-logo"
 
@@ -61,7 +63,7 @@ import { getDeviceProfile } from "@/app/actions/auth-actions"
 import { activateStaff, clearStaff, selectActiveStaff, setStaff } from "@/store/slices/staffSlice"
 import { getStaffForAuthentication } from "@/app/actions/staff-actions"
 
-type TabType = "sale" | "sales" | "purchase" | "product" | "trending" | "customer" | "transfer" | "accounting" | "supplier" | "platform" | "master"
+type TabType = "sale" | "sales" | "purchase" | "product" | "trending" | "customer" | "transfer" | "accounting" | "supplier" | "platform" | "master" | "attendance"
 
 const DEFAULT_CONTENT_TAB: TabType = "sale"
 
@@ -70,14 +72,15 @@ interface DashboardProps {
 }
 
 // Fallback component for when a tab fails to load
-function ErrorTab({ name }: { name: string }) {
+function ErrorTab({ name, error }: { name: string; error?: any }) {
   return (
-    <FormAlert
-      type="error"
-      title={`Error Loading ${name} Tab`}
-      message="There was an error loading this tab. Please try again later."
-      className="mb-6"
-    />
+    <div className="flex h-full flex-col items-center justify-center p-8 text-center">
+      <AlertTriangle className="mb-4 h-12 w-12 text-red-500" />
+      <h3 className="mb-2 text-lg font-medium text-gray-900">Error Loading {name} Tab</h3>
+      <p className="text-sm text-gray-500">
+        {error ? (error instanceof Error ? error.message : String(error)) : "There was an error loading this tab. Please try again later."}
+      </p>
+    </div>
   )
 }
 
@@ -99,7 +102,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
     if (param === "home") return "trending"
     if (
       param &&
-      ["sale", "purchase", "product", "trending", "customer", "transfer", "accounting", "supplier", "platform", "master"].includes(
+      ["sale", "purchase", "product", "trending", "customer", "transfer", "accounting", "supplier", "platform", "master", "attendance"].includes(
         param,
       )
     ) {
@@ -430,6 +433,8 @@ export function Dashboard({ onLogout }: DashboardProps) {
           return (
             <CustomerTab userId={user?.id ?? 0} />
           )
+        case "attendance":
+          return <AttendanceTab />
         case "supplier":
           return (
             <SupplierTab
@@ -451,16 +456,17 @@ export function Dashboard({ onLogout }: DashboardProps) {
       }
     } catch (error) {
       console.error(`Error rendering ${activeTab} tab:`, error)
-      return <ErrorTab name={activeTab} />
+      return <ErrorTab name={activeTab} error={error} />
     }
   }
 
   // Navigation items configuration
- const navItems = [
+  const navItems = [
     { id: "trending", icon: <Flame className="h-4 w-4" />, label: "Trending" },
     { id: "purchase", icon: <Receipt className="h-4 w-4" />, label: "Purchase" },
     { id: "sale", icon: <Plus className="h-5 w-5" />, label: "Sales" },
     { id: "customer", icon: <User className="h-4 w-4" />, label: "Customers" },
+    { id: "attendance", icon: <CalendarDays className="h-4 w-4" />, label: "Attendance" },
     { id: "supplier", icon: <Truck className="h-4 w-4" />, label: "Suppliers" },
     { id: "transfer", icon: <ArrowRightLeft className="h-4 w-4" />, label: "Transfers" },
     { id: "platform", icon: <Store className="h-4 w-4" />, label: "Platforms" },
@@ -469,7 +475,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
 
   // Primary tabs for bottom navigation (most used)
   const primaryTabs = ["trending", "sale", "purchase"]
-  const secondaryTabs = ["customer", "supplier", "transfer", "platform", "master"]
+  const secondaryTabs = ["customer", "attendance", "supplier", "transfer", "platform", "master"]
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background">

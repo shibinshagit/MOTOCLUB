@@ -250,6 +250,9 @@ export default function NewProductModal({
     color: "",
     size: "",
     suitableFor: "",
+    initialBatchNumber: "AUTO_GENERATE",
+    initialMfgDate: "",
+    initialExpDate: "",
   })
   const [attributes, setAttributes] = useState<AttributeEntry[]>([])
   const [productLinks, setProductLinks] = useState<ProductLinkEntry[]>([])
@@ -260,6 +263,9 @@ export default function NewProductModal({
     own_ecom: "not_listed",
   })
   const [trending, setTrending] = useState(false)
+  
+  const [isBatchManaged, setIsBatchManaged] = useState(false)
+  const [variants, setVariants] = useState<any[]>([{ variant_name: "", color: "", size: "", length: "", height: "", sku: "", barcode: "", price: null, wholesale_price: null, stock: 0, batch_number: "AUTO_GENERATE", manufacture_date: "", expiry_date: "" }])
 
   const [categories, setCategories] = useState<Category[]>([])
   const [filteredCategories, setFilteredCategories] = useState<Category[]>([])
@@ -490,7 +496,10 @@ export default function NewProductModal({
         name: "", companyName: "", category: "", categoryId: null,
         description: "", price: "", wholesalePrice: "", msp: "",
         stock: "", shelf: "", barcode: initialBarcode, color: "", size: "",
-        suitableFor: "", 
+        suitableFor: "",
+        initialBatchNumber: "AUTO_GENERATE",
+        initialMfgDate: "",
+        initialExpDate: "",
       })
       setAttributes([])
       setProductLinks([])
@@ -801,7 +810,19 @@ export default function NewProductModal({
       if (!formData.name) errors.name = "Product name is required"
       if (!formData.price) errors.price = "MRP is required"
       if (!hideCogs && !formData.wholesalePrice) errors.wholesalePrice = "Cost price is required"
-      if (!hideStockCount && !formData.stock) errors.stock = "Stock is required"
+      
+
+      if (true) {
+        if (variants.length === 0) {
+          errors.variants = "At least one variant is required when variants are enabled"
+        } else {
+          variants.forEach((v, idx) => {
+            if (!v.variant_name || !v.variant_name.trim()) {
+              errors[`variant_${idx}_name`] = `Variant #${idx + 1} Name is required`
+            }
+          })
+        }
+      }
 
       if (Object.keys(errors).length > 0) {
         setFieldErrors(errors)
@@ -821,24 +842,30 @@ export default function NewProductModal({
       submitFormData.append("category", formData.category)
       if (formData.categoryId) submitFormData.append("category_id", formData.categoryId.toString())
       submitFormData.append("description", formData.description)
-      submitFormData.append("price", formData.price)
-      submitFormData.append("wholesale_price", formData.wholesalePrice || "0")
-      submitFormData.append("msp", formData.msp || "0")
-      submitFormData.append("stock", formData.stock || "0")
-      submitFormData.append("shelf", formData.shelf)
-      submitFormData.append("barcode", formData.barcode)
-      submitFormData.append("color", formData.color)
-      submitFormData.append("size", formData.size)
+      
+      
+      
+      
+      
+      
+      
+      
       submitFormData.append("suitable_for", formData.suitableFor)
       submitFormData.append("links", JSON.stringify(productLinks))
       const validAttributes = attributes.filter((a) => a.key.trim() && a.value.trim())
       submitFormData.append("attributes", JSON.stringify(validAttributes))
+      
+      
+      
       if (userId) submitFormData.append("user_id", userId.toString())
       submitFormData.append("amazon_status", platformStatus.amazon)
       submitFormData.append("flipkart_status", platformStatus.flipkart)
       submitFormData.append("meesho_status", platformStatus.meesho)
       submitFormData.append("own_ecom_status", platformStatus.own_ecom)
       submitFormData.append("trending", trending ? "true" : "false")
+      submitFormData.append("has_variants", "true")
+      submitFormData.append("is_batch_managed", isBatchManaged ? "true" : "false")
+      submitFormData.append("variants", JSON.stringify(variants))
 
       if (uploadedImageUrls.length > 0) {
         submitFormData.append("uploaded_image_urls", JSON.stringify(uploadedImageUrls))
@@ -1076,122 +1103,311 @@ export default function NewProductModal({
               </div>
             </PanelSection>
 
-            <PanelSection title="Pricing">
-              <div className="grid gap-4 sm:grid-cols-3">
-                {!hideCogs && (
-                  <div className="space-y-1.5">
-                    <FieldLabel htmlFor="wholesalePrice" required>
-                      Cost ({currency})
-                    </FieldLabel>
-                    <Input
-                      id="wholesalePrice"
-                      name="wholesalePrice"
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={formData.wholesalePrice}
-                      onChange={handleChange}
-                      placeholder="0.00"
-                      className={inputClass("wholesalePrice")}
-                    />
-                  </div>
-                )}
+            
 
-                <div className="space-y-1.5">
-                  <FieldLabel htmlFor="msp">MSP ({currency})</FieldLabel>
-                  <Input
-                    id="msp"
-                    name="msp"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={formData.msp}
-                    onChange={handleChange}
-                    placeholder="0.00"
-                    className={inputClass()}
-                  />
+            
+
+            
+
+            
+
+            {true && (
+              <PanelSection title="Product Variants" subtitle="Each row is a distinct combination — e.g. Red / M / L:30cm">
+                <div className="space-y-3">
+                  {variants.map((v, idx) => (
+                    <div key={idx} className="flex flex-col gap-3 rounded-md border border-slate-200 bg-white p-3 shadow-sm relative">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="absolute right-2 top-2 h-7 w-7 text-rose-500 hover:bg-rose-50 hover:text-rose-700"
+                        onClick={() => {
+                          setVariants(variants.filter((_, i) => i !== idx))
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                      
+                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 pr-8">
+                        <div className="space-y-1">
+                          <FieldLabel>Color</FieldLabel>
+                          <Input
+                            value={v.color || ""}
+                            onChange={(e) => {
+                              const newVariants = [...variants]
+                              newVariants[idx].color = e.target.value
+                              newVariants[idx].variant_name = `${e.target.value || ""} ${v.size || ""} ${v.length ? `L:${v.length}` : ""} ${v.height ? `H:${v.height}` : ""}`.trim()
+                              setVariants(newVariants)
+                            }}
+                            placeholder="Red"
+                            className="h-8 text-xs border-slate-300"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <FieldLabel>Size</FieldLabel>
+                          <Input
+                            value={v.size || ""}
+                            onChange={(e) => {
+                              const newVariants = [...variants]
+                              newVariants[idx].size = e.target.value
+                              newVariants[idx].variant_name = `${v.color || ""} ${e.target.value || ""} ${v.length ? `L:${v.length}` : ""} ${v.height ? `H:${v.height}` : ""}`.trim()
+                              setVariants(newVariants)
+                            }}
+                            placeholder="M, L, XL"
+                            className="h-8 text-xs border-slate-300"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <FieldLabel>Length</FieldLabel>
+                          <Input
+                            value={v.length || ""}
+                            onChange={(e) => {
+                              const newVariants = [...variants]
+                              newVariants[idx].length = e.target.value
+                              newVariants[idx].variant_name = `${v.color || ""} ${v.size || ""} ${e.target.value ? `L:${e.target.value}` : ""} ${v.height ? `H:${v.height}` : ""}`.trim()
+                              setVariants(newVariants)
+                            }}
+                            placeholder="e.g. 30cm"
+                            className="h-8 text-xs border-slate-300"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <FieldLabel>Height</FieldLabel>
+                          <Input
+                            value={v.height || ""}
+                            onChange={(e) => {
+                              const newVariants = [...variants]
+                              newVariants[idx].height = e.target.value
+                              newVariants[idx].variant_name = `${v.color || ""} ${v.size || ""} ${v.length ? `L:${v.length}` : ""} ${e.target.value ? `H:${e.target.value}` : ""}`.trim()
+                              setVariants(newVariants)
+                            }}
+                            placeholder="e.g. 20cm"
+                            className="h-8 text-xs border-slate-300"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+                        <div className="space-y-1">
+                          <FieldLabel>SKU</FieldLabel>
+                          <Input
+                            value={v.sku || ""}
+                            onChange={(e) => {
+                              const newVariants = [...variants]
+                              newVariants[idx].sku = e.target.value
+                              setVariants(newVariants)
+                            }}
+                            placeholder="SKU-001"
+                            className="h-8 text-xs border-slate-300"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <FieldLabel>Barcode</FieldLabel>
+                          <Input
+                            value={v.barcode || ""}
+                            onChange={(e) => {
+                              const newVariants = [...variants]
+                              newVariants[idx].barcode = e.target.value
+                              setVariants(newVariants)
+                            }}
+                            placeholder="Barcode"
+                            className="h-8 text-xs border-slate-300"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <FieldLabel required>Stock</FieldLabel>
+                          <Input
+                            type="number"
+                            min="0"
+                            value={v.stock !== undefined ? v.stock : 0}
+                            onChange={(e) => {
+                              const newVariants = [...variants]
+                              newVariants[idx].stock = e.target.value === "" ? 0 : Number(e.target.value)
+                              setVariants(newVariants)
+                            }}
+                            onFocus={(e) => e.target.select()}
+                            placeholder="0"
+                            className="h-8 text-xs border-slate-300"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <FieldLabel>Price</FieldLabel>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            value={v.price !== undefined && v.price !== null ? v.price : ""}
+                            onChange={(e) => {
+                              const newVariants = [...variants]
+                              newVariants[idx].price = e.target.value === "" ? null : Number(e.target.value)
+                              setVariants(newVariants)
+                            }}
+                            placeholder="MRP"
+                            className="h-8 text-xs border-slate-300"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <FieldLabel>Cost</FieldLabel>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            value={v.wholesale_price !== undefined && v.wholesale_price !== null ? v.wholesale_price : ""}
+                            onChange={(e) => {
+                              const newVariants = [...variants]
+                              newVariants[idx].wholesale_price = e.target.value === "" ? null : Number(e.target.value)
+                              setVariants(newVariants)
+                            }}
+                            placeholder="Cost"
+                            className="h-8 text-xs border-slate-300"
+                          />
+                        </div>
+                      </div>
+
+                      {isBatchManaged && (
+                        <div className="mt-2 rounded bg-violet-50/50 p-2 border border-violet-100">
+                          <p className="mb-2 text-[10px] font-bold uppercase text-violet-700">Initial Batch</p>
+                          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                            <div className="space-y-1">
+                              <FieldLabel>Batch Number</FieldLabel>
+                              <Input
+                                value={v.batch_number || ""}
+                                onChange={(e) => {
+                                  const newVariants = [...variants]
+                                  newVariants[idx].batch_number = e.target.value
+                                  setVariants(newVariants)
+                                }}
+                                placeholder="AUTO_GENERATE"
+                                className="h-8 text-xs border-violet-200 bg-white"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <FieldLabel>Mfg Date (Opt)</FieldLabel>
+                              <Input
+                                type="date"
+                                value={v.manufacture_date || ""}
+                                onChange={(e) => {
+                                  const newVariants = [...variants]
+                                  newVariants[idx].manufacture_date = e.target.value
+                                  setVariants(newVariants)
+                                }}
+                                className="h-8 text-xs border-violet-200 bg-white"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <FieldLabel>Exp Date (Opt)</FieldLabel>
+                              <Input
+                                type="date"
+                                value={v.expiry_date || ""}
+                                onChange={(e) => {
+                                  const newVariants = [...variants]
+                                  newVariants[idx].expiry_date = e.target.value
+                                  setVariants(newVariants)
+                                }}
+                                className="h-8 text-xs border-violet-200 bg-white"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="mt-2 text-xs h-8 border-dashed border-slate-300 text-slate-600 w-full"
+                    onClick={() => {
+                      setVariants([
+                        ...variants,
+                        { variant_name: "", color: "", size: "", length: "", height: "", sku: "", barcode: "", price: null, wholesale_price: null, stock: 0, batch_number: "AUTO_GENERATE", manufacture_date: "", expiry_date: "" }
+                      ])
+                    }}
+                  >
+                    <Plus className="mr-1 h-3.5 w-3.5" /> Add Variant
+                  </Button>
+                </div>
+              </PanelSection>
+            )}
+
+            {/* Attributes & details — available in Edit Product modal. Kept minimal here. */}
+            {/*
+            <PanelSection title="Attributes & details">
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <FieldLabel>Custom attributes</FieldLabel>
+                  {attributes.map((attr, index) => (
+                    <div key={index} className="flex items-center gap-2">
+                      <Input
+                        value={attr.key}
+                        onChange={(e) => handleAttributeChange(index, "key", e.target.value)}
+                        placeholder="e.g. Model"
+                        className="h-8 flex-1 border-slate-300 bg-white text-sm"
+                      />
+                      <Input
+                        value={attr.value}
+                        onChange={(e) => handleAttributeChange(index, "value", e.target.value)}
+                        placeholder="e.g. CBR600"
+                        className="h-8 flex-1 border-slate-300 bg-white text-sm"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleRemoveAttribute(index)}
+                        className="h-8 w-8 p-0 text-rose-500 hover:bg-rose-50 hover:text-rose-700"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleAddAttribute}
+                    className="w-full border-dashed border-slate-300 bg-transparent text-slate-600 hover:bg-slate-50"
+                  >
+                    <Plus className="mr-1 h-4 w-4" /> Add attribute
+                  </Button>
                 </div>
 
-                <div className="space-y-1.5">
-                  <FieldLabel htmlFor="price" required>
-                    MRP ({currency})
-                  </FieldLabel>
-                  <Input
-                    id="price"
-                    name="price"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={formData.price}
-                    onChange={handleChange}
-                    placeholder="0.00"
-                    required
-                    className={inputClass("price")}
-                  />
-                </div>
-              </div>
-            </PanelSection>
-
-            <PanelSection title="Inventory & barcode">
-              <div className="grid gap-4 sm:grid-cols-3">
-                {!hideStockCount && (
-                  <>
-                    <div className="space-y-1.5">
-                      <FieldLabel htmlFor="stock" required>
-                        Stock
-                      </FieldLabel>
-                      <Input
-                        id="stock"
-                        name="stock"
-                        type="number"
-                        min="0"
-                        value={formData.stock}
-                        onChange={handleChange}
-                        onFocus={(e) => e.target.select()}
-                        placeholder="0"
-                        className={inputClass("stock")}
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <FieldLabel htmlFor="shelf">Shelf</FieldLabel>
-                      <Input
-                        id="shelf"
-                        name="shelf"
-                        value={formData.shelf}
-                        onChange={handleChange}
-                        placeholder="e.g. A1, B3"
-                        className={inputClass()}
-                      />
-                    </div>
-                  </>
-                )}
-                {hideStockCount && (
-                  <div className="space-y-1.5">
-                    <FieldLabel htmlFor="shelf">Shelf</FieldLabel>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <div className="space-y-1.5 sm:col-span-3">
+                    <FieldLabel htmlFor="suitableFor">Suitable for</FieldLabel>
                     <Input
-                      id="shelf"
-                      name="shelf"
-                      value={formData.shelf}
+                      id="suitableFor"
+                      name="suitableFor"
+                      value={formData.suitableFor}
                       onChange={handleChange}
-                      placeholder="e.g. A1, B3"
+                      placeholder="e.g. Honda CBR, Yamaha R15"
                       className={inputClass()}
                     />
                   </div>
-                )}
-                <div className={cn("space-y-1.5", hideStockCount ? "sm:col-span-2" : "")}>
-                  <FieldLabel htmlFor="barcode">Barcode + code</FieldLabel>
-                  <Input
-                    id="barcode"
-                    name="barcode"
-                    value={formData.barcode}
-                    onChange={handleChange}
-                    placeholder="Enter or scan barcode"
-                    className={inputClass("barcode")}
-                  />
-                  <p className="text-[11px] text-slate-500">Auto-generated if left blank.</p>
+                  <div className="space-y-1.5">
+                    <FieldLabel htmlFor="color">Colour</FieldLabel>
+                    <Input
+                      id="color"
+                      name="color"
+                      value={formData.color}
+                      onChange={handleChange}
+                      placeholder="e.g. Red"
+                      className={inputClass()}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <FieldLabel htmlFor="size">Size</FieldLabel>
+                    <Input
+                      id="size"
+                      name="size"
+                      value={formData.size}
+                      onChange={handleChange}
+                      placeholder="e.g. M, L"
+                      className={inputClass()}
+                    />
+                  </div>
                 </div>
               </div>
             </PanelSection>
+            */}
 
             <PanelSection
               title="Product media"

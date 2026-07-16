@@ -730,8 +730,8 @@ export async function createProduct(formData: FormData) {
   const ownEcomStatus = normalizePlatformStatus(formData.get("own_ecom_status"))
   const trending = String(formData.get("trending") || "false") === "true"
 
-  if (!name || isNaN(price)) {
-    return { success: false, error: "Name and valid price are required" }
+  if (!name) {
+    return { success: false, error: "Name is required" }
   }
 
   const normalizedImages =
@@ -818,17 +818,10 @@ export async function createProduct(formData: FormData) {
             category,
             category_id, 
             description, 
-            price,
-            wholesale_price,
-            msp,
-            shelf,
             image_url,
             image_urls,
             video_url,
             created_by,
-            barcode,
-            color,
-            size,
             suitable_for,
             attributes,
             link,
@@ -844,17 +837,10 @@ export async function createProduct(formData: FormData) {
             ${category || ""}, 
             ${categoryId}, 
             ${description}, 
-            ${price},
-            ${wholesalePrice},
-            ${msp},
-            ${shelf || ""},
             ${uploadedImageUrls[0] || null},
             ${JSON.stringify(uploadedImageUrls)},
             ${videoUrl},
             ${userId},
-            ${barcode},
-            ${color},
-            ${size},
             ${suitableFor},
             ${JSON.stringify(attributes)},
             ${link},
@@ -973,8 +959,8 @@ export async function updateProduct(formData: FormData) {
   const meeshoStatusRaw = formData.get("meesho_status")
   const ownEcomStatusRaw = formData.get("own_ecom_status")
 
-  if (!id || !name || isNaN(price)) {
-    return { success: false, message: "ID, name, and valid price are required" }
+  if (!id || !name) {
+    return { success: false, message: "ID and name are required" }
   }
 
   const normalizedNewImages =
@@ -1157,16 +1143,9 @@ export async function updateProduct(formData: FormData) {
           category = ${category || ""},
           category_id = ${categoryId},
           description = ${description}, 
-          price = ${price},
-          wholesale_price = ${wholesalePrice},
-          msp = ${msp},
-          shelf = ${shelf || ""},
           image_url = ${imageUrl},
           image_urls = ${JSON.stringify(finalImageUrls)},
           video_url = ${videoUrl},
-          barcode = ${barcode || currentProduct[0].barcode},
-          color = ${color},
-          size = ${size},
           suitable_for = ${suitableFor},
           attributes = ${JSON.stringify(attributes)},
           link = ${link},
@@ -1193,16 +1172,9 @@ export async function updateProduct(formData: FormData) {
           category = ${category || ""},
           category_id = ${categoryId},
           description = ${description}, 
-          price = ${price},
-          wholesale_price = ${wholesalePrice},
-          msp = ${msp},
-          shelf = ${shelf || ""},
           image_url = ${imageUrl},
           image_urls = ${JSON.stringify(finalImageUrls)},
           video_url = ${videoUrl},
-          barcode = ${barcode || currentProduct[0].barcode},
-          color = ${color},
-          size = ${size},
           suitable_for = ${suitableFor},
           attributes = ${JSON.stringify(attributes)},
           link = ${link},

@@ -43,6 +43,10 @@ type TransferItemForm = {
   product_id: number
   quantity: number
   unit_cost: number
+  product_variant_id?: number | null
+  batch_id?: number | null
+  variant_name?: string | null
+  batch_number?: string | null
 }
 
 type TransferFormData = {
@@ -97,6 +101,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
     fromDeviceId: number
     toDeviceId: number
     qtyByProduct: Map<number, number>
+    qtyByVariantOrBatch: Map<string, number>
   } | null>(null)
   const [formData, setFormData] = useState<TransferFormData>({
     fromDeviceId: userId || 0,
@@ -111,9 +116,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
   })
 
   const [devices, setDevices] = useState<Array<{ id: number; name: string }>>([])
-  const [products, setProducts] = useState<
-    Array<{ id: number; name: string; barcode: string; source_stock: number; default_unit_cost: number }>
-  >([])
+  const [products, setProducts] = useState<any[]>([])
   const [rowProductSearch, setRowProductSearch] = useState<string[]>([""])
   const [rowProductOpen, setRowProductOpen] = useState<boolean[]>([false])
   const [rowWarnings, setRowWarnings] = useState<Record<number, string>>({})
@@ -270,14 +273,18 @@ export default function TransferTab({ userId }: TransferTabProps) {
 
       setEditingTransferId(transferId)
       const originalQtyByProduct = new Map<number, number>()
-      for (const item of detail.data.items) {
+      const originalQtyByVariantOrBatch = new Map<string, number>()
+      for (const item of (detail.data.items as any[])) {
         const pid = Number(item.product_id)
         originalQtyByProduct.set(pid, (originalQtyByProduct.get(pid) || 0) + Number(item.quantity || 0))
+        const key = item.batch_id ? `batch-${item.batch_id}` : (item.product_variant_id ? `variant-${item.product_variant_id}` : `prod-${pid}`)
+        originalQtyByVariantOrBatch.set(key, (originalQtyByVariantOrBatch.get(key) || 0) + Number(item.quantity || 0))
       }
       setEditOriginal({
         fromDeviceId: Number(transfer.from_device_id),
         toDeviceId: Number(transfer.to_device_id),
         qtyByProduct: originalQtyByProduct,
+        qtyByVariantOrBatch: originalQtyByVariantOrBatch,
       })
       const rowCount = detail.data.items.length > 0 ? detail.data.items.length : 1
       setRowProductSearch(Array(rowCount).fill(""))
@@ -298,6 +305,10 @@ export default function TransferTab({ userId }: TransferTabProps) {
                 product_id: Number(item.product_id),
                 quantity: Number(item.quantity),
                 unit_cost: Number(item.unit_cost || 0),
+                product_variant_id: item.product_variant_id ? Number(item.product_variant_id) : null,
+                batch_id: item.batch_id ? Number(item.batch_id) : null,
+                variant_name: item.variant_name || null,
+                batch_number: item.batch_number || null,
               }))
             : [{ product_id: 0, quantity: 1, unit_cost: 0 }],
       })
@@ -388,7 +399,32 @@ export default function TransferTab({ userId }: TransferTabProps) {
     setFormData((prev) => {
       const items = [...prev.items]
       items[index] = { ...items[index], ...patch }
-      const sourceStock = Number(effectiveSourceStockMap.get(items[index].product_id) || 0)
+      const item = items[index]
+      const p = products.find((x) => x.id === item.product_id)
+      let sourceStock = Number(effectiveSourceStockMap.get(item.product_id) || 0)
+
+      if (p) {
+        if (p.has_variants) {
+          if (p.is_batch_managed) {
+            const selectedBatch = p.batches?.find((b: any) => b.id === item.batch_id)
+            let baseStock = Number(selectedBatch?.stock || 0)
+            if (editOriginal && editOriginal.fromDeviceId === prev.fromDeviceId) {
+              const originalQty = editOriginal.qtyByVariantOrBatch?.get(`batch-${item.batch_id}`) || 0
+              baseStock += Number(originalQty)
+            }
+            sourceStock = baseStock
+          } else {
+            const selectedVar = p.variants?.find((v: any) => v.id === item.product_variant_id)
+            let baseStock = Number(selectedVar?.stock || 0)
+            if (editOriginal && editOriginal.fromDeviceId === prev.fromDeviceId) {
+              const originalQty = editOriginal.qtyByVariantOrBatch?.get(`variant-${item.product_variant_id}`) || 0
+              baseStock += Number(originalQty)
+            }
+            sourceStock = baseStock
+          }
+        }
+      }
+
       if (items[index].quantity > sourceStock) {
         items[index].quantity = sourceStock > 0 ? sourceStock : 1
         setRowWarnings((prevWarnings) => ({
@@ -484,15 +520,47 @@ export default function TransferTab({ userId }: TransferTabProps) {
       return
     }
 
-    const requestedByProduct = new Map<number, number>()
+    const requestedByVariantOrBatch = new Map<string, number>()
     for (const item of validItems) {
-      requestedByProduct.set(item.product_id, (requestedByProduct.get(item.product_id) || 0) + Number(item.quantity))
+      const key = item.batch_id ? `batch-${item.batch_id}` : (item.product_variant_id ? `variant-${item.product_variant_id}` : `prod-${item.product_id}`)
+      requestedByVariantOrBatch.set(key, (requestedByVariantOrBatch.get(key) || 0) + Number(item.quantity))
     }
-    for (const [productId, totalRequested] of requestedByProduct.entries()) {
-      const available = Number(effectiveSourceStockMap.get(productId) || 0)
-      if (totalRequested > available) {
-        const productName = products.find((p) => p.id === productId)?.name || `Product #${productId}`
-        notifyWarning(toast, `${productName}: requested ${totalRequested}, available ${available}`, "Validation")
+
+    for (const item of validItems) {
+      const p = products.find((x) => x.id === item.product_id)
+      if (!p) continue
+
+      let maxAvailable = Number(effectiveSourceStockMap.get(item.product_id) || 0)
+      let key = `prod-${item.product_id}`
+      let label = p.name
+
+      if (p.has_variants) {
+        if (p.is_batch_managed) {
+          const selectedBatch = p.batches?.find((b: any) => b.id === item.batch_id)
+          let baseStock = Number(selectedBatch?.stock || 0)
+          if (editOriginal && editOriginal.fromDeviceId === formData.fromDeviceId) {
+            const originalQty = editOriginal.qtyByVariantOrBatch?.get(`batch-${item.batch_id}`) || 0
+            baseStock += Number(originalQty)
+          }
+          maxAvailable = baseStock
+          key = `batch-${item.batch_id}`
+          label = `${p.name} (Batch: ${item.batch_number || selectedBatch?.batch_number})`
+        } else {
+          const selectedVar = p.variants?.find((v: any) => v.id === item.product_variant_id)
+          let baseStock = Number(selectedVar?.stock || 0)
+          if (editOriginal && editOriginal.fromDeviceId === formData.fromDeviceId) {
+            const originalQty = editOriginal.qtyByVariantOrBatch?.get(`variant-${item.product_variant_id}`) || 0
+            baseStock += Number(originalQty)
+          }
+          maxAvailable = baseStock
+          key = `variant-${item.product_variant_id}`
+          label = `${p.name} (Variant: ${item.variant_name || selectedVar?.variant_name})`
+        }
+      }
+
+      const totalRequested = requestedByVariantOrBatch.get(key) || 0
+      if (totalRequested > maxAvailable) {
+        notifyWarning(toast, `${label}: requested ${totalRequested}, available ${maxAvailable}`, "Validation")
         return
       }
     }
@@ -1043,15 +1111,37 @@ export default function TransferTab({ userId }: TransferTabProps) {
                                   key={p.id}
                                   type="button"
                                   onClick={() => {
-                                    const available = Number(effectiveSourceStockMap.get(p.id) || 0)
+                                    const defaultVariant = p.variants?.[0]
+                                    const variantId = defaultVariant?.id || null
+                                    const variantName = defaultVariant?.variant_name || null
+
+                                    const variantBatches = p.is_batch_managed ? p.batches?.filter((b: any) => (b.product_variant_id || null) == (variantId || null)) || [] : []
+                                    const defaultBatch = variantBatches?.[0]
+                                    const batchId = defaultBatch?.id || null
+                                    const batchNumber = defaultBatch?.batch_number || null
+
+                                    let resolvedStock = Number(effectiveSourceStockMap.get(p.id) || 0)
+                                    if (p.has_variants) {
+                                      if (p.is_batch_managed) {
+                                        resolvedStock = Number(defaultBatch?.stock || 0)
+                                      } else {
+                                        resolvedStock = Number(defaultVariant?.stock || 0)
+                                      }
+                                    }
+
                                     const currentQty = Number(item.quantity || 1)
                                     const defaultUnitCost = Number(
-                                      products.find((x) => x.id === p.id)?.default_unit_cost || 0,
+                                      defaultBatch?.purchase_price ?? defaultVariant?.wholesale_price ?? p.default_unit_cost ?? 0
                                     )
+
                                     setItem(idx, {
                                       product_id: p.id,
-                                      quantity: available > 0 ? Math.min(currentQty, available) : 1,
-                                      unit_cost: Number(item.unit_cost || defaultUnitCost || 0),
+                                      quantity: resolvedStock > 0 ? Math.min(currentQty, resolvedStock) : 1,
+                                      unit_cost: defaultUnitCost,
+                                      product_variant_id: variantId,
+                                      variant_name: variantName,
+                                      batch_id: batchId,
+                                      batch_number: batchNumber,
                                     })
                                     setProductOpen(idx, false)
                                   }}
@@ -1079,9 +1169,133 @@ export default function TransferTab({ userId }: TransferTabProps) {
                           </div>
                         </PopoverContent>
                       </Popover>
+                      {(() => {
+                        const p = products.find((x) => x.id === item.product_id)
+                        if (!p) return null
+                        return (
+                          <>
+                            {p.has_variants && p.variants && p.variants.length > 0 && (
+                              <div className="mt-1 flex items-center gap-1">
+                                <span className="text-[10px] text-gray-500 font-semibold uppercase shrink-0">Var:</span>
+                                <select
+                                  value={item.product_variant_id || ""}
+                                  onChange={(e) => {
+                                    const variantId = Number(e.target.value)
+                                    const selectedVar = p.variants?.find((v: any) => v.id === variantId)
+                                    if (selectedVar) {
+                                      const defaultUnitCost = Number(selectedVar.wholesale_price ?? p.default_unit_cost ?? 0)
+                                      
+                                      let resolvedBatchId = null
+                                      let resolvedBatchNumber = null
+                                      let resolvedStock = Number(selectedVar.stock || 0)
+                                      if (editOriginal && editOriginal.fromDeviceId === formData.fromDeviceId) {
+                                        const originalQty = editOriginal.qtyByVariantOrBatch?.get(`variant-${variantId}`) || 0
+                                        resolvedStock += Number(originalQty)
+                                      }
+
+                                      if (p.is_batch_managed && p.batches && p.batches.length > 0) {
+                                        const variantBatches = p.batches.filter((b: any) => (b.product_variant_id || null) == (variantId || null))
+                                        const firstBatch = variantBatches?.[0]
+                                        resolvedBatchId = firstBatch?.id || null
+                                        resolvedBatchNumber = firstBatch?.batch_number || null
+                                        resolvedStock = firstBatch ? Number(firstBatch.stock || 0) : 0
+                                        if (firstBatch && editOriginal && editOriginal.fromDeviceId === formData.fromDeviceId) {
+                                          const originalQty = editOriginal.qtyByVariantOrBatch?.get(`batch-${firstBatch.id}`) || 0
+                                          resolvedStock += Number(originalQty)
+                                        }
+                                      }
+
+                                      setItem(idx, {
+                                        product_variant_id: variantId,
+                                        variant_name: selectedVar.variant_name,
+                                        unit_cost: defaultUnitCost,
+                                        batch_id: resolvedBatchId,
+                                        batch_number: resolvedBatchNumber,
+                                        quantity: resolvedStock > 0 ? Math.min(item.quantity || 1, resolvedStock) : 1,
+                                      })
+                                    }
+                                  }}
+                                  className="text-[10px] h-6 px-1 py-0.5 rounded border border-gray-300 bg-white text-gray-900 focus:outline-none w-full"
+                                >
+                                  {p.variants.map((v: any) => (
+                                    <option key={v.id} value={v.id}>
+                                      {v.variant_name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            )}
+
+                            {p.is_batch_managed && p.batches && (
+                              <div className="mt-1 flex items-center gap-1">
+                                <span className="text-[10px] text-gray-500 font-semibold uppercase shrink-0">Batch:</span>
+                                <select
+                                  value={item.batch_id || ""}
+                                  onChange={(e) => {
+                                    const batchId = Number(e.target.value)
+                                    const selectedBatch = p.batches?.find((b: any) => b.id === batchId)
+                                    if (selectedBatch) {
+                                      const defaultUnitCost = Number(selectedBatch.purchase_price ?? selectedBatch.selling_price ?? p.default_unit_cost ?? 0)
+                                      let resolvedStock = Number(selectedBatch.stock || 0)
+                                      if (editOriginal && editOriginal.fromDeviceId === formData.fromDeviceId) {
+                                        const originalQty = editOriginal.qtyByVariantOrBatch?.get(`batch-${batchId}`) || 0
+                                        resolvedStock += Number(originalQty)
+                                      }
+
+                                      setItem(idx, {
+                                        batch_id: batchId,
+                                        batch_number: selectedBatch.batch_number,
+                                        unit_cost: defaultUnitCost,
+                                        quantity: resolvedStock > 0 ? Math.min(item.quantity || 1, resolvedStock) : 1,
+                                      })
+                                    }
+                                  }}
+                                  className="text-[10px] h-6 px-1 py-0.5 rounded border border-gray-300 bg-white text-gray-900 focus:outline-none w-full"
+                                >
+                                  {(p.batches || [])
+                                    .filter((b: any) => (b.product_variant_id || null) == (item.product_variant_id || null))
+                                    .map((b: any) => (
+                                      <option key={b.id} value={b.id}>
+                                        {b.batch_number} (Stock: {(() => {
+                                          let s = Number(b.stock || 0)
+                                          if (editOriginal && editOriginal.fromDeviceId === formData.fromDeviceId) {
+                                            const originalQty = editOriginal.qtyByVariantOrBatch?.get(`batch-${b.id}`) || 0
+                                            s += Number(originalQty)
+                                          }
+                                          return s
+                                        })()}) {b.expiry_date ? `| Exp: ${new Date(b.expiry_date).toISOString().slice(0, 10)}` : ""}
+                                      </option>
+                                    ))}
+                                </select>
+                              </div>
+                            )}
+                          </>
+                        )
+                      })()}
                       {item.product_id ? (
                         <p className="text-[11px] text-red-600 mt-1">
-                          available stock: {effectiveSourceStockMap.get(item.product_id) ?? 0}
+                          available stock: {(() => {
+                            const p = products.find((x) => x.id === item.product_id)
+                            if (p?.has_variants) {
+                              if (p.is_batch_managed) {
+                                const b = p.batches?.find((x: any) => x.id === item.batch_id)
+                                let s = Number(b ? b.stock : 0)
+                                if (b && editOriginal && editOriginal.fromDeviceId === formData.fromDeviceId) {
+                                  const originalQty = editOriginal.qtyByVariantOrBatch?.get(`batch-${b.id}`) || 0
+                                  s += Number(originalQty)
+                                }
+                                return s
+                              }
+                              const v = p.variants?.find((x: any) => x.id === item.product_variant_id)
+                              let s = Number(v ? v.stock : 0)
+                              if (v && editOriginal && editOriginal.fromDeviceId === formData.fromDeviceId) {
+                                  const originalQty = editOriginal.qtyByVariantOrBatch?.get(`variant-${v.id}`) || 0
+                                  s += Number(originalQty)
+                              }
+                              return s
+                            }
+                            return effectiveSourceStockMap.get(item.product_id) ?? 0
+                          })()}
                         </p>
                       ) : null}
                     </div>
@@ -1089,10 +1303,49 @@ export default function TransferTab({ userId }: TransferTabProps) {
                       <Input
                         type="number"
                         min={1}
-                        max={Number(effectiveSourceStockMap.get(item.product_id) || 1)}
+                        max={(() => {
+                          const p = products.find((x) => x.id === item.product_id)
+                          if (p?.has_variants) {
+                            if (p.is_batch_managed) {
+                              const b = p.batches?.find((x: any) => x.id === item.batch_id)
+                              let s = Number(b ? b.stock : 1)
+                              if (b && editOriginal && editOriginal.fromDeviceId === formData.fromDeviceId) {
+                                const originalQty = editOriginal.qtyByVariantOrBatch?.get(`batch-${b.id}`) || 0
+                                s += Number(originalQty)
+                              }
+                              return s
+                            }
+                            const v = p.variants?.find((x: any) => x.id === item.product_variant_id)
+                            let s = Number(v ? v.stock : 1)
+                            if (v && editOriginal && editOriginal.fromDeviceId === formData.fromDeviceId) {
+                              const originalQty = editOriginal.qtyByVariantOrBatch?.get(`variant-${v.id}`) || 0
+                              s += Number(originalQty)
+                            }
+                            return s
+                          }
+                          return Number(effectiveSourceStockMap.get(item.product_id) || 1)
+                        })()}
                         value={item.quantity || 1}
                         onChange={(e) => {
-                          const maxAllowed = Number(effectiveSourceStockMap.get(item.product_id) || 1)
+                          const p = products.find((x) => x.id === item.product_id)
+                          let maxAllowed = Number(effectiveSourceStockMap.get(item.product_id) || 1)
+                          if (p?.has_variants) {
+                            if (p.is_batch_managed) {
+                              const b = p.batches?.find((x: any) => x.id === item.batch_id)
+                              maxAllowed = b ? Number(b.stock) : 1
+                              if (b && editOriginal && editOriginal.fromDeviceId === formData.fromDeviceId) {
+                                const originalQty = editOriginal.qtyByVariantOrBatch?.get(`batch-${b.id}`) || 0
+                                maxAllowed += Number(originalQty)
+                              }
+                            } else {
+                              const v = p.variants?.find((x: any) => x.id === item.product_variant_id)
+                              maxAllowed = v ? Number(v.stock) : 1
+                              if (v && editOriginal && editOriginal.fromDeviceId === formData.fromDeviceId) {
+                                const originalQty = editOriginal.qtyByVariantOrBatch?.get(`variant-${v.id}`) || 0
+                                maxAllowed += Number(originalQty)
+                              }
+                            }
+                          }
                           const nextValue = Number(e.target.value || 1)
                           if (nextValue > maxAllowed) {
                             setRowWarnings((prev) => ({

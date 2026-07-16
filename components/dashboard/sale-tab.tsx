@@ -89,6 +89,14 @@ interface ProductRow {
   originalItemId?: number
   isService?: boolean
   serviceId?: number
+  productVariantId?: number | null
+  batchId?: number | null
+  variantName?: string | null
+  batchNumber?: string | null
+  hasVariants?: boolean
+  isBatchManaged?: boolean
+  variants?: any[]
+  batches?: any[]
 }
 
 interface ScanResult {
@@ -675,6 +683,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     price: number,
     wholesalePrice?: number,
     stock?: number,
+    productObj?: any,
   ) => {
     if (!hideStockCount && stock !== undefined && stock <= 0) {
       setBarcodeAlert({
@@ -686,15 +695,42 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     // Check if this is a service (stock = 999 indicates service)
     const isService = stock === 999
 
+    let resolvedVariantId = null
+    let hasVariants = false
+    let isBatchManaged = productObj?.is_batch_managed || false
+    let variantName = null
+    let batches = productObj?.batches || []
+    let variants = productObj?.variants || []
+
+    if (productObj?.variants && productObj.variants.length > 0) {
+      hasVariants = true
+      resolvedVariantId = productObj.variants[0].id
+      variantName = productObj.variants[0].name
+    }
+
+    let batchId = null
+    let batchNumber = null
+
+    // For sales, we leave batchId null by default (FIFO) UNLESS there's exactly one valid batch
+    // Actually, to match the original, we just leave it null (Auto-allocate)
+    
     updateProductRow(id, {
       productId,
       productName,
       price,
-      cost: wholesalePrice,
+      total: price * (products.find((p) => p.id === id)?.quantity || 1),
       stock,
-      total: (products.find((p) => p.id === id)?.quantity || 1) * price,
-      isService: isService,
+      isService,
       serviceId: isService ? productId : undefined,
+      productVariantId: resolvedVariantId,
+      hasVariants,
+      isBatchManaged,
+      variantName,
+      batches,
+      variants,
+      batchId,
+      batchNumber,
+      cost: wholesalePrice || 0,
     })
 
     const hasEmptyRow = products.some((p) => p.productId === null)
@@ -1076,6 +1112,8 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
         notes: p.notes || "",
         isService: p.isService,
         serviceId: p.serviceId,
+        variantId: p.productVariantId,
+        batchId: p.batchId,
       }))
 
     if (validItems.length === 0) {
@@ -1546,68 +1584,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                       <div className="flex flex-col lg:flex-row h-full">
                         {/* Products section */}
                         <div className="flex-1 lg:w-[70%] flex flex-col border-b lg:border-b-0 lg:border-r border-gray-200">
-                          {/* Barcode scanner */}
-                          <div className="p-2 bg-gray-50 border-b border-gray-200 flex-shrink-0">
-                            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                              <div className="relative flex-1">
-                                <Barcode className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-400" />
-                                <Input
-                                  aria-label="Scan barcode or search product"
-                                  autoComplete="off"
-                                  spellCheck={false}
-                                  placeholder="Scan barcode or search product..."
-                                  className={`pl-8 h-9 bg-white border-gray-300 text-gray-900 placeholder-gray-500 transition-all duration-200 ${
-                                    scanStatus === "processing"
-                                      ? "border-yellow-500 bg-yellow-50"
-                                      : scanStatus === "success"
-                                        ? "border-green-500 bg-green-50"
-                                        : scanStatus === "error"
-                                          ? "border-red-500 bg-red-50"
-                                          : "border-gray-300 focus:border-blue-500"
-                                  }`}
-                                  value={barcodeInput}
-                                  onChange={(e) => {
-                                    setBarcodeInput(e.target.value)
-                                    if (e.target.value.trim() && !isBarcodeProcessing) {
-                                      setTimeout(() => {
-                                        handleBarcodeInput((e.target as HTMLInputElement).value)
-                                      }, 300)
-                                    }
-                                  }}
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter") {
-                                      e.preventDefault()
-                                      if (barcodeInput.trim()) {
-                                        handleBarcodeInput((e.target as HTMLInputElement).value)
-                                      }
-                                    }
-                                  }}
-                                />
-                                {scanStatus === "processing" && (
-                                  <Loader2 className="absolute right-2.5 top-2.5 h-4 w-4 animate-spin text-yellow-500" />
-                                )}
-                                {scanStatus === "success" && (
-                                  <CheckCircle2 className="absolute right-2.5 top-2.5 h-4 w-4 text-green-500" />
-                                )}
-                                {scanStatus === "error" && (
-                                  <XCircle className="absolute right-2.5 top-2.5 h-4 w-4 text-red-500" />
-                                )}
-                              </div>
-                              <Button
-                                type="button"
-                                onClick={() => {
-                                  if (barcodeInput.trim()) {
-                                    handleBarcodeInput(barcodeInput)
-                                  }
-                                }}
-                                disabled={isBarcodeProcessing || !barcodeInput}
-                                size="sm"
-                                className="bg-blue-600 hover:bg-blue-700 text-white h-9 px-4 sm:px-6"
-                              >
-                                Add
-                              </Button>
-                            </div>
-                          </div>
+                          {/* Barcode scanner removed per user request */}
 
                           {/* Products table header */}
                           <div className="flex items-center justify-between p-2 bg-gray-50 border-b border-gray-200 flex-shrink-0">
@@ -1692,56 +1669,133 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                 >
                                   <div className="col-span-3">
                                     {product.productId && product.productName ? (
-                                      <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-2 flex-1">
-                                          {product.isService ? (
-                                            <Wrench className="h-4 w-4 text-green-600 flex-shrink-0" />
-                                          ) : (
-                                            <div className="h-4 w-4 flex-shrink-0" />
-                                          )}
-                                          <span className="truncate flex-1 font-medium text-xs text-gray-900">
-                                            {product.productName}
-                                          </span>
-                                          {isProductOutOfStock(product) && (
-                                            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700">
-                                              OOS
+                                      <div className="flex flex-col">
+                                        <div className="flex items-center justify-between">
+                                          <div className="flex items-center gap-2 flex-1">
+                                            {product.isService ? (
+                                              <Wrench className="h-4 w-4 text-green-600 flex-shrink-0" />
+                                            ) : (
+                                              <div className="h-4 w-4 flex-shrink-0" />
+                                            )}
+                                            <span className="truncate flex-1 font-medium text-xs text-gray-900">
+                                              {product.productName}
                                             </span>
-                                          )}
+                                            {isProductOutOfStock(product) && (
+                                              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700">
+                                                OOS
+                                              </span>
+                                            )}
+                                          </div>
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-6 w-6 p-0 text-gray-400 hover:text-blue-500"
+                                            onClick={() => {
+                                              updateProductRow(product.id, {
+                                                productId: null,
+                                                productName: "",
+                                                price: 0,
+                                                cost: 0,
+                                                stock: 0,
+                                                total: 0,
+                                                notes: "",
+                                                isService: false,
+                                                serviceId: undefined,
+                                                isBatchManaged: false,
+                                                batchId: null,
+                                                batchNumber: null,
+                                                variantName: null,
+                                                batches: [],
+                                                variants: [],
+                                              })
+                                            }}
+                                          >
+                                            <ChevronsUpDown className="h-3 w-3" />
+                                          </Button>
                                         </div>
-                                        <Button
-                                          variant="ghost"
-                                          size="sm"
-                                          className="h-6 w-6 p-0 text-gray-400 hover:text-blue-500"
-                                          onClick={() => {
-                                            updateProductRow(product.id, {
-                                              productId: null,
-                                              productName: "",
-                                              price: 0,
-                                              cost: 0,
-                                              stock: 0,
-                                              total: 0,
-                                              notes: "",
-                                              isService: false,
-                                              serviceId: undefined,
-                                            })
-                                          }}
-                                        >
-                                          <ChevronsUpDown className="h-3 w-3" />
-                                        </Button>
+                                        {product.isBatchManaged && (
+                                          <div className="mt-1 flex flex-col gap-1">
+                                            {product.variants && product.variants.length > 0 && (
+                                              <select
+                                                className="text-[10px] h-6 px-1 rounded border border-gray-200 bg-gray-50/50 text-gray-800 w-full focus:outline-none focus:ring-1 focus:ring-gray-400"
+                                                value={product.productVariantId || ""}
+                                                onChange={(e) => {
+                                                  const vId = parseInt(e.target.value)
+                                                  const v = product.variants?.find((v: any) => v.id === vId)
+                                                  if (v) {
+                                                    updateProductRow(product.id, {
+                                                      productVariantId: v.id,
+                                                      variantName: v.name,
+                                                      batchId: null,
+                                                      batchNumber: null,
+                                                      price: product.price
+                                                    })
+                                                  }
+                                                }}
+                                              >
+                                                {product.variants.map((v: any) => (
+                                                  <option key={v.id} value={v.id}>{v.name}</option>
+                                                ))}
+                                              </select>
+                                            )}
+                                            <select
+                                              className="text-[10px] h-6 px-1 rounded border border-blue-200 bg-blue-50/30 text-blue-800 w-full focus:outline-none focus:ring-1 focus:ring-blue-400"
+                                              value={product.batchId || ""}
+                                              onChange={(e) => {
+                                                const val = e.target.value
+                                                const validBatches = product.batches?.filter((b: any) => (b.product_variant_id || null) == (product.productVariantId || null) || b.product_variant_id == null) || []
+                                                
+                                                if (!val) {
+                                                  // Find oldest available batch for Auto-allocate price
+                                                  const oldestAvailable = validBatches.find((b: any) => {
+                                                    const stockCount = b.stocks?.find((s: any) => Number(s.device_id) === Number(deviceId))?.stock || b.device_stock || b.stock || 0
+                                                    return stockCount > 0
+                                                  })
+                                                  const fallbackPrice = oldestAvailable?.selling_price ? Number(oldestAvailable.selling_price) : product.price
+                                                  const fallbackCost = oldestAvailable?.cost_price ? Number(oldestAvailable.cost_price) : product.cost
+                                                  updateProductRow(product.id, { batchId: null, batchNumber: null, price: fallbackPrice, cost: fallbackCost })
+                                                  return
+                                                }
+                                                const bId = parseInt(val)
+                                                const b = validBatches.find((b: any) => b.id === bId)
+                                                if (b) {
+                                                  updateProductRow(product.id, { 
+                                                    batchId: bId, 
+                                                    batchNumber: b.batch_no,
+                                                    price: b.selling_price ? Number(b.selling_price) : product.price,
+                                                    cost: b.cost_price ? Number(b.cost_price) : product.cost
+                                                  })
+                                                }
+                                              }}
+                                            >
+                                              <option value="">Auto-allocate (FIFO)</option>
+                                              {(product.batches || [])
+                                                .filter((b: any) => (b.product_variant_id || null) == (product.productVariantId || null) || b.product_variant_id == null)
+                                                .map((b: any) => {
+                                                  const stockCount = b.stocks?.find((s: any) => Number(s.device_id) === Number(deviceId))?.stock || b.device_stock || b.stock || 0
+                                                  return (
+                                                    <option key={b.id} value={b.id} disabled={stockCount <= 0}>
+                                                      {b.batch_no} | Stock: {stockCount} {b.selling_price ? `| Selling Price: QAR ${b.selling_price}` : ''}
+                                                    </option>
+                                                  )
+                                                })}
+                                            </select>
+                                          </div>
+                                        )}
                                       </div>
                                     ) : (
                                       <ProductSelectSimple
                                         id={`product-select-${product.id}`}
                                         value={product.productId}
-                                        onChange={(productId, productName, price, wholesalePrice, stock) =>
-                                          handleProductSelect(product.id, productId, productName, price, wholesalePrice, stock)
+                                        onChange={(productId, productName, price, wholesalePrice, stock, productObj) =>
+                                          handleProductSelect(product.id, productId, productName, price, wholesalePrice, stock, productObj)
                                         }
-                                        onAddNew={() => setIsNewProductModalOpen(true)}
-                                        onAddNewService={() => setIsNewServiceModalOpen(true)}
-                                        userId={userId}
-                                      />
-                                    )}
-                                  </div>
+                                  onAddNew={() => setIsNewProductModalOpen(true)}
+                                  onAddNewService={() => setIsNewServiceModalOpen(true)}
+                                  userId={userId}
+                                />
+                              )}
+                            </div>
                                   <div className="col-span-2">
                                     <Input
                                       placeholder="Notes..."
@@ -1844,47 +1898,123 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                       Product/Service
                                     </Label>
                                     {product.productId && product.productName ? (
-                                      <div className="flex items-center justify-between p-2 bg-gray-100 rounded">
-                                        <div className="flex items-center gap-2">
-                                          {product.isService && (
-                                            <Wrench className="h-4 w-4 text-green-600" />
-                                          )}
-                                          <span className="text-sm font-medium text-gray-900">
-                                            {product.productName}
-                                          </span>
-                                          {isProductOutOfStock(product) && (
-                                            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700">
-                                              OOS
+                                      <div className="flex flex-col">
+                                        <div className="flex items-center justify-between p-2 bg-gray-100 rounded">
+                                          <div className="flex items-center gap-2">
+                                            {product.isService && (
+                                              <Wrench className="h-4 w-4 text-green-600" />
+                                            )}
+                                            <span className="text-sm font-medium text-gray-900">
+                                              {product.productName}
                                             </span>
-                                          )}
+                                            {isProductOutOfStock(product) && (
+                                              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700">
+                                                OOS
+                                              </span>
+                                            )}
+                                          </div>
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-6 w-6 p-0"
+                                            onClick={() => {
+                                              updateProductRow(product.id, {
+                                                productId: null,
+                                                productName: "",
+                                                price: 0,
+                                                cost: 0,
+                                                stock: 0,
+                                                total: 0,
+                                                notes: "",
+                                                isService: false,
+                                                serviceId: undefined,
+                                                isBatchManaged: false,
+                                                batchId: null,
+                                                batchNumber: null,
+                                                variantName: null,
+                                                batches: [],
+                                                variants: [],
+                                              })
+                                            }}
+                                          >
+                                            <ChevronsUpDown className="h-3 w-3" />
+                                          </Button>
                                         </div>
-                                        <Button
-                                          variant="ghost"
-                                          size="sm"
-                                          className="h-6 w-6 p-0"
-                                          onClick={() => {
-                                            updateProductRow(product.id, {
-                                              productId: null,
-                                              productName: "",
-                                              price: 0,
-                                              cost: 0,
-                                              stock: 0,
-                                              total: 0,
-                                              notes: "",
-                                              isService: false,
-                                              serviceId: undefined,
-                                            })
-                                          }}
-                                        >
-                                          <ChevronsUpDown className="h-3 w-3" />
-                                        </Button>
+                                        
+                                        {product.isBatchManaged && (
+                                          <div className="mt-1 flex flex-col gap-1">
+                                            {product.variants && product.variants.length > 0 && (
+                                              <select
+                                                className="text-[10px] h-6 px-1 rounded border border-gray-200 bg-gray-50/50 text-gray-800 w-full focus:outline-none focus:ring-1 focus:ring-gray-400"
+                                                value={product.productVariantId || ""}
+                                                onChange={(e) => {
+                                                  const vId = parseInt(e.target.value)
+                                                  const v = product.variants?.find((v: any) => v.id === vId)
+                                                  if (v) {
+                                                    updateProductRow(product.id, {
+                                                      productVariantId: v.id,
+                                                      variantName: v.name,
+                                                      batchId: null,
+                                                      batchNumber: null,
+                                                      price: product.price
+                                                    })
+                                                  }
+                                                }}
+                                              >
+                                                {product.variants.map((v: any) => (
+                                                  <option key={v.id} value={v.id}>{v.name}</option>
+                                                ))}
+                                              </select>
+                                            )}
+                                            <select
+                                              className="text-[10px] h-6 px-1 rounded border border-blue-200 bg-blue-50/30 text-blue-800 w-full focus:outline-none focus:ring-1 focus:ring-blue-400"
+                                              value={product.batchId || ""}
+                                              onChange={(e) => {
+                                                const val = e.target.value
+                                                const validBatches = product.batches?.filter((b: any) => (b.product_variant_id || null) == (product.productVariantId || null) || b.product_variant_id == null) || []
+                                                
+                                                if (!val) {
+                                                  // Find oldest available batch for Auto-allocate price
+                                                  const oldestAvailable = validBatches.find((b: any) => {
+                                                    const stockCount = b.stocks?.find((s: any) => s.device_id === deviceId)?.stock || b.stock || 0
+                                                    return stockCount > 0
+                                                  })
+                                                  const fallbackPrice = oldestAvailable?.selling_price ? Number(oldestAvailable.selling_price) : product.price
+                                                  updateProductRow(product.id, { batchId: null, batchNumber: null, price: fallbackPrice })
+                                                  return
+                                                }
+                                                const bId = parseInt(val)
+                                                const b = validBatches.find((b: any) => b.id === bId)
+                                                if (b) {
+                                                  updateProductRow(product.id, { 
+                                                    batchId: bId, 
+                                                    batchNumber: b.batch_no,
+                                                    price: b.selling_price ? Number(b.selling_price) : product.price
+                                                  })
+                                                }
+                                              }}
+                                            >
+                                              <option value="">Auto-allocate (FIFO)</option>
+                                              {(product.batches || [])
+                                                .filter((b: any) => (b.product_variant_id || null) == (product.productVariantId || null) || b.product_variant_id == null)
+                                                .map((b: any) => {
+                                                  const stockCount = b.stocks?.find((s: any) => s.device_id === deviceId)?.stock || b.stock || 0
+                                                  return (
+                                                    <option key={b.id} value={b.id} disabled={stockCount <= 0}>
+                                                      {b.batch_no} | Stock: {stockCount} {b.selling_price ? `| Selling Price: QAR ${b.selling_price}` : ''}
+                                                    </option>
+                                                  )
+                                                })}
+                                            </select>
+                                          </div>
+                                        )}
                                       </div>
                                     ) : (
                                       <ProductSelectSimple
                                         id={`product-select-mobile-${product.id}`}
                                         value={product.productId}
-                                        onChange={(productId, productName, price, wholesalePrice, stock) =>
-                                          handleProductSelect(product.id, productId, productName, price, wholesalePrice, stock)
+                                        onChange={(productId, productName, price, wholesalePrice, stock, productObj) =>
+                                          handleProductSelect(product.id, productId, productName, price, wholesalePrice, stock, productObj)
                                         }
                                         onAddNew={() => setIsNewProductModalOpen(true)}
                                         onAddNewService={() => setIsNewServiceModalOpen(true)}

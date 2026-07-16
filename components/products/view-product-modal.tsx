@@ -620,6 +620,95 @@ export function ProductDetailPanel({
             </PanelSection>
           ) : null}
 
+          {product.has_variants && product.variants && product.variants.length > 0 && (
+            <PanelSection title="Product Variants">
+              <div className="overflow-x-auto">
+                <table className="min-w-full border-separate border-spacing-0 text-sm">
+                  <thead>
+                    <tr className={tableHeadClass}>
+                      <th className="whitespace-nowrap px-4 py-2.5 text-left">Variant Name</th>
+                      <th className="whitespace-nowrap px-4 py-2.5 text-left">SKU</th>
+                      <th className="whitespace-nowrap px-4 py-2.5 text-left">Barcode</th>
+                      <th className="whitespace-nowrap px-4 py-2.5 text-right">Price</th>
+                      <th className="whitespace-nowrap px-4 py-2.5 text-right">Cost</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {product.variants.map((v: any, index: number) => (
+                      <tr
+                        key={v.id}
+                        className={cn(
+                          "border-b border-slate-200",
+                          index % 2 === 0 ? "bg-white" : "bg-slate-50/60",
+                        )}
+                      >
+                        <td className="px-4 py-2.5 font-medium text-slate-800">{v.variant_name}</td>
+                        <td className="px-4 py-2.5 text-slate-600">{v.sku || "—"}</td>
+                        <td className="px-4 py-2.5 text-slate-600">{v.barcode || "—"}</td>
+                        <td className="px-4 py-2.5 text-right text-slate-800">
+                          {v.price !== null && v.price !== undefined ? `${currency} ${Number(v.price).toFixed(2)}` : `Default (${currency} ${Number(product.price || 0).toFixed(2)})`}
+                        </td>
+                        <td className="px-4 py-2.5 text-right text-slate-800">
+                          {!hideCogs && (v.wholesale_price !== null && v.wholesale_price !== undefined ? `${currency} ${Number(v.wholesale_price).toFixed(2)}` : `Default (${currency} ${Number(product.wholesale_price || 0).toFixed(2)})`)}
+                          {hideCogs && "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </PanelSection>
+          )}
+
+          {product.is_batch_managed && product.batches && product.batches.length > 0 && (
+            <PanelSection title="Active Inventory Batches">
+              <div className="overflow-x-auto">
+                <table className="min-w-full border-separate border-spacing-0 text-sm">
+                  <thead>
+                    <tr className={tableHeadClass}>
+                      <th className="whitespace-nowrap px-4 py-2.5 text-left">Batch Number</th>
+                      <th className="whitespace-nowrap px-4 py-2.5 text-left">Variant</th>
+                      <th className="whitespace-nowrap px-4 py-2.5 text-left">Mfg. Date</th>
+                      <th className="whitespace-nowrap px-4 py-2.5 text-left">Expiry Date</th>
+                      <th className="whitespace-nowrap px-4 py-2.5 text-right">Purchase Price</th>
+                      <th className="whitespace-nowrap px-4 py-2.5 text-right">Selling Price</th>
+                      <th className="whitespace-nowrap px-4 py-2.5 text-right">Stock</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {product.batches.map((b: any, index: number) => {
+                      const mfg = b.manufacture_date ? format(new Date(b.manufacture_date), "yyyy-MM-dd") : "—"
+                      const exp = b.expiry_date ? format(new Date(b.expiry_date), "yyyy-MM-dd") : "—"
+                      const totalStock = Array.isArray(b.stocks) ? b.stocks.reduce((acc: number, cur: any) => acc + Number(cur.stock || 0), 0) : 0
+                      return (
+                        <tr
+                          key={b.id}
+                          className={cn(
+                            "border-b border-slate-200",
+                            index % 2 === 0 ? "bg-white" : "bg-slate-50/60",
+                          )}
+                        >
+                          <td className="px-4 py-2.5 font-medium text-slate-800">{b.batch_no || b.batch_number}</td>
+                          <td className="px-4 py-2.5 text-slate-600">{b.variant_name || "Default"}</td>
+                          <td className="px-4 py-2.5 text-slate-600">{mfg}</td>
+                          <td className="px-4 py-2.5 text-slate-600">{exp}</td>
+                          <td className="px-4 py-2.5 text-right text-slate-800">
+                            {!hideCogs && `${currency} ${Number(b.cost_price || b.purchase_price || 0).toFixed(2)}`}
+                            {hideCogs && "—"}
+                          </td>
+                          <td className="px-4 py-2.5 text-right text-slate-800">
+                            {currency} {Number(b.selling_price || 0).toFixed(2)}
+                          </td>
+                          <td className="px-4 py-2.5 text-right font-semibold text-emerald-700">{totalStock}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </PanelSection>
+          )}
+
           {!hideStockCount && !privacyMode && deviceStocks.length > 0 ? (
             <PanelSection title="Stock by device">
               <div className="overflow-x-auto">

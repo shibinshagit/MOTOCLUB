@@ -2,6 +2,7 @@
 
 import { sql } from "@/lib/db"
 import { cookies } from "next/headers"
+import { setStaffSessionCookie } from "@/lib/staff-session"
 
 async function generatePasswordHash(password: string): Promise<string> {
   const encoder = new TextEncoder()
@@ -13,79 +14,144 @@ async function generatePasswordHash(password: string): Promise<string> {
 
 export async function login(formData: FormData) {
   try {
-    const email = formData.get("email") as string
+    const phone = formData.get("phone") as string
     const password = formData.get("password") as string
 
-    if (!email?.trim() || !password) {
+    if (!phone?.trim() || !password) {
       return {
         success: false,
-        message: "Email and password are required",
+        message: "Phone number and password are required",
       }
     }
 
     const password_hash = await generatePasswordHash(password)
 
-    const result = await sql`
+    // 1. Search the Admin (devices) table
+    const adminResult = await sql`
       SELECT d.id, d.name, d.email, d.logo_url as device_logo, c.name as company_name
       FROM devices d
       LEFT JOIN companies c ON d.company_id = c.id
-      WHERE d.email = ${email} AND d.password_hash = ${password_hash}
+      WHERE d.email = ${phone} AND d.password_hash = ${password_hash}
     `
 
-    if (result.length === 0) {
+    if (adminResult.length > 0) {
+      const user = adminResult[0]
+      const token = Math.random().toString(36).substring(2)
+
+      await sql`
+        UPDATE devices
+        SET auth_token = ${token}
+        WHERE id = ${user.id}
+      `
+
+      const deviceData = await sql`
+        SELECT 
+          d.id, 
+          d.name, 
+          d.currency,
+          d.logo_url as device_logo,
+          c.id as company_id,
+          c.name as company_name
+        FROM devices d
+        LEFT JOIN companies c ON d.company_id = c.id
+        WHERE d.id = ${user.id}
+      `
+
+      const deviceInfo = deviceData[0] || {}
+      const deviceLogo = deviceInfo.device_logo?.trim() || null
+
       return {
-        success: false,
-        message: "Invalid email or password",
+        success: true,
+        message: "Login successful",
+        redirect: "/dashboard",
+        data: {
+          user: {
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            token,
+          },
+          device: {
+            id: deviceInfo.id || user.id,
+            name: deviceInfo.name || user.name,
+            currency: deviceInfo.currency || "AED",
+            logo_url: deviceLogo,
+          },
+          company: {
+            id: deviceInfo.company_id,
+            name: deviceInfo.company_name || user.company_name,
+          },
+        },
       }
     }
 
-    const user = result[0]
-    const token = Math.random().toString(36).substring(2)
-
-    await sql`
-      UPDATE devices
-      SET auth_token = ${token}
-      WHERE id = ${user.id}
-    `
-
-    const deviceData = await sql`
+    // 2. Search the Staff table
+    const staffResult = await sql`
       SELECT 
-        d.id, 
-        d.name, 
-        d.currency,
-        d.logo_url as device_logo,
-        c.id as company_id,
-        c.name as company_name
-      FROM devices d
-      LEFT JOIN companies c ON d.company_id = c.id
-      WHERE d.id = ${user.id}
+        s.id as staff_id,
+        s.name as staff_name,
+        s.phone,
+        s.role,
+        s.is_active as staff_active,
+        s.restricted_pages,
+        s.restricted_values,
+        d.id as device_id,
+        d.company_id
+      FROM staff s
+      LEFT JOIN devices d ON s.device_id = d.id
+      WHERE s.phone = ${phone} AND s.staff_password_hash = ${password_hash}
+      LIMIT 1
     `
 
-    const deviceInfo = deviceData[0] || {}
-    const deviceLogo = deviceInfo.device_logo?.trim() || null
+    if (staffResult.length > 0) {
+      const staff = staffResult[0]
 
+      if (!staff.staff_active) {
+        return {
+          success: false,
+          message: "Your staff account has been deactivated. Please contact your admin.",
+        }
+      }
+
+      let restricted_pages: string[] = []
+      let restricted_values: string[] = []
+      
+      try {
+        restricted_pages = typeof staff.restricted_pages === 'string' 
+          ? JSON.parse(staff.restricted_pages) 
+          : (staff.restricted_pages || [])
+          
+        restricted_values = typeof staff.restricted_values === 'string' 
+          ? JSON.parse(staff.restricted_values) 
+          : (staff.restricted_values || [])
+      } catch (e) {
+        console.warn("Failed to parse staff restrictions during login", e)
+      }
+
+      await setStaffSessionCookie({
+        staffId: staff.staff_id,
+        companyId: staff.company_id,
+        deviceId: staff.device_id,
+        branchId: staff.device_id,
+        phoneNumber: staff.phone,
+        role: staff.role,
+        permissions: {
+          restricted_pages,
+          restricted_values,
+        },
+      })
+
+      return {
+        success: true,
+        message: "Login successful",
+        redirect: "/staff/dashboard",
+      }
+    }
+
+    // 3. If neither found
     return {
-      success: true,
-      message: "Login successful",
-      redirect: "/dashboard",
-      data: {
-        user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          token,
-        },
-        device: {
-          id: deviceInfo.id || user.id,
-          name: deviceInfo.name || user.name,
-          currency: deviceInfo.currency || "AED",
-          logo_url: deviceLogo,
-        },
-        company: {
-          id: deviceInfo.company_id,
-          name: deviceInfo.company_name || user.company_name,
-        },
-      },
+      success: false,
+      message: "Invalid phone number or password.",
     }
   } catch (error) {
     console.error("Login error:", error)

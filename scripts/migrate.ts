@@ -356,6 +356,31 @@ async function createTables() {
     `
   })
 
+  await run("staff_attendance", async () => {
+    await sql`
+      CREATE TABLE IF NOT EXISTS staff_attendance (
+        id SERIAL PRIMARY KEY,
+        company_id INTEGER REFERENCES companies(id) ON DELETE CASCADE,
+        device_id INTEGER REFERENCES devices(id) ON DELETE CASCADE,
+        staff_id INTEGER REFERENCES staff(id) ON DELETE CASCADE,
+        date DATE NOT NULL,
+        check_in TIMESTAMP,
+        check_out TIMESTAMP,
+        working_minutes INTEGER DEFAULT 0,
+        late_minutes INTEGER DEFAULT 0,
+        early_exit_minutes INTEGER DEFAULT 0,
+        overtime_minutes INTEGER DEFAULT 0,
+        status VARCHAR(50) DEFAULT 'Present',
+        remarks TEXT,
+        shift_id INTEGER,
+        marked_by_admin_id INTEGER,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(staff_id, date)
+      )
+    `
+  })
+
   await run("services", async () => {
     await sql`
       CREATE TABLE IF NOT EXISTS services (

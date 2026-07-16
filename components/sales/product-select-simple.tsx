@@ -15,7 +15,7 @@ import { selectDeviceId } from "@/store/slices/deviceSlice"
 interface ProductSelectSimpleProps {
   id?: string
   value: number | null
-  onChange: (value: number, name: string, price: number, wholesalePrice?: number, stock?: number) => void
+  onChange: (value: number, name: string, price: number, wholesalePrice?: number, stock?: number, productObj?: any) => void
   onAddNew: () => void
   onAddNewService?: () => void
   userId?: number
@@ -177,7 +177,7 @@ export default function ProductSelectSimple({
         
         // Also update the parent with the correct product details
         const finalPrice = usePriceType === "wholesale" && product.wholesale_price ? product.wholesale_price : product.price
-        onChange(Number(product.id), String(product.name), Number(finalPrice), product.wholesale_price != null ? Number(product.wholesale_price) : undefined, product.stock != null ? Number(product.stock) : undefined)
+        onChange(Number(product.id), String(product.name), Number(finalPrice), product.wholesale_price != null ? Number(product.wholesale_price) : undefined, product.stock != null ? Number(product.stock) : undefined, product)
       }
     } catch (error) {
       console.error("Error fetching selected product:", error)
@@ -214,9 +214,10 @@ export default function ProductSelectSimple({
     itemName: string,
     price: number,
     wholesalePrice?: number,
-    stock?: number
+    stock?: number,
+    fullItem?: any
   ) => {
-    const selectedItem = items.find(item => item.id === itemId)
+    const selectedItem = fullItem || items.find(item => item.id === itemId)
     
     // Use the actual item data from the list to ensure consistency
     if (selectedItem) {
@@ -233,10 +234,10 @@ export default function ProductSelectSimple({
     }
 
     if (isServiceMode) {
-      onChange(itemId, itemName, price, 0, 999)
+      onChange(itemId, itemName, price, 0, 999, selectedItem)
     } else {
       const finalPrice = usePriceType === "wholesale" && wholesalePrice ? wholesalePrice : price
-      onChange(itemId, itemName, finalPrice, wholesalePrice, stock)
+      onChange(itemId, itemName, finalPrice, wholesalePrice, stock, selectedItem)
     }
 
     setOpen(false)

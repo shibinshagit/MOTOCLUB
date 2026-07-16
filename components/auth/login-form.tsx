@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { EyeIcon, EyeOffIcon, MailIcon, LockIcon, Loader2 } from "lucide-react"
+import { EyeIcon, EyeOffIcon, MailIcon, LockIcon, Loader2, PhoneIcon } from "lucide-react"
 import { login } from "@/app/actions/auth-actions"
 import { useToast } from "@/components/ui/use-toast"
 import { notifySuccess } from "@/lib/notifications"
@@ -84,16 +84,16 @@ export default function LoginForm() {
       {error && <FormAlert type="error" message={error} />}
 
       <div className="space-y-2">
-        <Label htmlFor="email">Email</Label>
+        <Label htmlFor="phone">Email or Phone</Label>
         <div className="relative">
-          <MailIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+          <PhoneIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
           <Input
-            id="email"
-            name="email"
-            type="email"
-            placeholder="name@example.com"
+            id="phone"
+            name="phone"
+            type="text"
+            placeholder="Enter your email or phone number"
             required
-            autoComplete="email"
+            autoComplete="username"
             className="border-gray-200 bg-white pl-10"
           />
         </div>

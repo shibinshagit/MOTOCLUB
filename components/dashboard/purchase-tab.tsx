@@ -61,6 +61,15 @@ interface ProductRow {
   total: number
   wholesalePrice?: number
   originalItemId?: number
+  variant_id?: number | null
+  batch_id?: number | null
+  batch_number?: string | null
+  expiry_date?: string | null
+  mfg_date?: string | null
+  selling_price?: number | null
+  hasVariants?: boolean
+  isBatchManaged?: boolean
+  variants?: any[]
 }
 
 interface PurchaseDraftSnapshot {
@@ -201,6 +210,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
       price: 0,
       total: 0,
       wholesalePrice: 0,
+      selling_price: 0,
     }),
     [],
   )
@@ -449,14 +459,34 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
     productName: string,
     price: number,
     wholesalePrice?: number,
+    stock?: number,
+    productObj?: any,
   ) => {
-    const priceToUse = wholesalePrice || price
+    let resolvedVariantId: number | null = null
+    let priceToUse = wholesalePrice || price
+    const hasVariants = productObj?.has_variants || false
+    const isBatchManaged = productObj?.is_batch_managed || false
+
+    if (hasVariants && productObj?.variants && productObj.variants.length > 0) {
+      const defaultVariant = productObj.variants[0]
+      resolvedVariantId = defaultVariant.id
+      if (defaultVariant.wholesale_price !== null && defaultVariant.wholesale_price !== undefined) {
+        priceToUse = Number(defaultVariant.wholesale_price)
+      } else if (defaultVariant.price !== null && defaultVariant.price !== undefined) {
+        priceToUse = Number(defaultVariant.price)
+      }
+    }
+
     updateProductRow(id, {
       productId,
       productName,
       price: priceToUse,
-      wholesalePrice,
+      wholesalePrice: priceToUse,
       total: (products.find((p) => p.id === id)?.quantity || 1) * priceToUse,
+      variant_id: resolvedVariantId,
+      hasVariants,
+      isBatchManaged,
+      variants: productObj?.variants || [],
     })
 
     const hasEmptyRow = products.some((p) => p.productId === null)
@@ -585,6 +615,13 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
           total: item.quantity * item.price,
           originalItemId: item.id,
           wholesalePrice: item.wholesale_price || item.price,
+          variant_id: item.product_variant_id || null,
+          batch_id: item.batch_id || null,
+          batch_number: item.batch_number || null,
+          mfg_date: item.mfg_date ? format(new Date(item.mfg_date), "yyyy-MM-dd") : null,
+          expiry_date: item.expiry_date ? format(new Date(item.expiry_date), "yyyy-MM-dd") : null,
+          selling_price: item.selling_price || null,
+          isBatchManaged: Boolean(item.is_batch_managed),
         }))
 
         setProducts(productRows.length > 0 ? productRows : [createEmptyProductRow()])
@@ -688,6 +725,11 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
         product_id: p.productId,
         quantity: p.quantity,
         price: p.price,
+        variant_id: p.variant_id || null,
+        batch_id: p.batch_id || null,
+        batch_number: p.batch_number || null,
+        mfg_date: p.mfg_date || null,
+        expiry_date: p.expiry_date || null,
       }))
       formData.append("items", JSON.stringify(items))
 
@@ -920,31 +962,76 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
     >
       <div className="col-span-5">
         {product.productId && product.productName ? (
-          <div className="flex items-center justify-between">
-            <span className="truncate flex-1 font-medium text-xs text-gray-900">{product.productName}</span>
-                <Button
-              variant="ghost"
-                  size="sm"
-              className="h-6 w-6 p-0 text-gray-400 hover:text-blue-500"
-              onClick={() =>
-                updateProductRow(product.id, {
-                  productId: null,
-                  productName: "",
-                  price: 0,
-                  total: 0,
-                  wholesalePrice: 0,
-                })
-              }
-            >
-              <ChevronsUpDown className="h-3 w-3" />
-                </Button>
+          <div className="flex flex-col">
+            <div className="flex items-center justify-between">
+              <span className="truncate flex-1 font-medium text-xs text-gray-900">{product.productName}</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 w-6 p-0 text-gray-400 hover:text-blue-500"
+                onClick={() =>
+                  updateProductRow(product.id, {
+                    productId: null,
+                    productName: "",
+                    price: 0,
+                    total: 0,
+                    wholesalePrice: 0,
+                  })
+                }
+              >
+                <ChevronsUpDown className="h-3 w-3" />
+              </Button>
+            </div>
+
+            {product.isBatchManaged && (
+              <div className="mt-1.5 space-y-1 bg-blue-50/50 p-1.5 rounded border border-blue-100">
+                <div className="flex gap-1 items-center">
+                  <span className="text-[9px] text-blue-600 font-bold uppercase shrink-0 w-12">Batch #:</span>
+                  <Input
+                    placeholder="BATCH-123"
+                    value={product.batch_number || ""}
+                    onChange={(e) => updateProductRow(product.id, { batch_number: e.target.value })}
+                    className="text-[10px] h-5 px-1 bg-white border-blue-200 text-gray-900 placeholder:text-gray-400"
+                  />
+                </div>
+                <div className="flex gap-1 items-center">
+                  <span className="text-[9px] text-blue-600 font-bold uppercase shrink-0 w-12">Mfg. Date:</span>
+                  <input
+                    type="date"
+                    value={product.mfg_date || ""}
+                    onChange={(e) => updateProductRow(product.id, { mfg_date: e.target.value })}
+                    className="text-[10px] h-5 px-1 rounded border border-blue-200 bg-white text-gray-900 focus:outline-none w-full"
+                  />
+                </div>
+                <div className="flex gap-1 items-center">
+                  <span className="text-[9px] text-blue-600 font-bold uppercase shrink-0 w-12">Exp. Date:</span>
+                  <input
+                    type="date"
+                    value={product.expiry_date || ""}
+                    onChange={(e) => updateProductRow(product.id, { expiry_date: e.target.value })}
+                    className="text-[10px] h-5 px-1 rounded border border-blue-200 bg-white text-gray-900 focus:outline-none w-full"
+                  />
+                </div>
+                <div className="flex gap-1 items-center">
+                  <span className="text-[9px] text-blue-600 font-bold uppercase shrink-0 w-12">Sell Price:</span>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={product.selling_price || ""}
+                    onChange={(e) => updateProductRow(product.id, { selling_price: parseFloat(e.target.value) || 0 })}
+                    className="text-[10px] h-5 px-1 bg-white border-blue-200 text-gray-900 placeholder:text-gray-400"
+                  />
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           <ProductSelectSimple
             id={`product-select-${product.id}`}
             value={product.productId}
-            onChange={(productId, productName, price, wholesalePrice) =>
-              handleProductSelect(product.id, productId, productName, price, wholesalePrice)
+            onChange={(productId, productName, price, wholesalePrice, stock, productObj) =>
+              handleProductSelect(product.id, productId, productName, price, wholesalePrice, stock, productObj)
             }
             onAddNew={() => handleAddNewFromRow(product.id)}
             userId={userId}
@@ -1002,31 +1089,76 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
       <div className="mb-3">
         <Label className="text-xs font-medium text-gray-700 mb-1 block">Product</Label>
         {product.productId && product.productName ? (
-          <div className="flex items-center justify-between p-2 bg-gray-100 rounded">
-            <span className="text-sm font-medium text-gray-900">{product.productName}</span>
-                <Button
-              variant="ghost"
-                  size="sm"
-              className="h-6 w-6 p-0"
-              onClick={() =>
-                updateProductRow(product.id, {
-                  productId: null,
-                  productName: "",
-                  price: 0,
-                  total: 0,
-                  wholesalePrice: 0,
-                })
-              }
-            >
-              <ChevronsUpDown className="h-3 w-3" />
-                </Button>
+          <div className="flex flex-col">
+            <div className="flex items-center justify-between p-2 bg-gray-100 rounded">
+              <span className="text-sm font-medium text-gray-900">{product.productName}</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 w-6 p-0"
+                onClick={() =>
+                  updateProductRow(product.id, {
+                    productId: null,
+                    productName: "",
+                    price: 0,
+                    total: 0,
+                    wholesalePrice: 0,
+                  })
+                }
+              >
+                <ChevronsUpDown className="h-3 w-3" />
+              </Button>
+            </div>
+
+            {product.isBatchManaged && (
+              <div className="mt-2 space-y-1.5 bg-blue-50/50 p-2 rounded border border-blue-100">
+                <div className="flex gap-2 items-center">
+                  <span className="text-xs text-blue-600 font-bold uppercase shrink-0 w-16">Batch #:</span>
+                  <Input
+                    placeholder="BATCH-123"
+                    value={product.batch_number || ""}
+                    onChange={(e) => updateProductRow(product.id, { batch_number: e.target.value })}
+                    className="text-xs h-7 px-2 bg-white border-blue-200 text-gray-900 placeholder:text-gray-400"
+                  />
+                </div>
+                <div className="flex gap-2 items-center">
+                  <span className="text-xs text-blue-600 font-bold uppercase shrink-0 w-16">Mfg. Date:</span>
+                  <input
+                    type="date"
+                    value={product.mfg_date || ""}
+                    onChange={(e) => updateProductRow(product.id, { mfg_date: e.target.value })}
+                    className="text-xs h-7 px-2 rounded border border-blue-200 bg-white text-gray-900 focus:outline-none w-full"
+                  />
+                </div>
+                <div className="flex gap-2 items-center">
+                  <span className="text-xs text-blue-600 font-bold uppercase shrink-0 w-16">Exp. Date:</span>
+                  <input
+                    type="date"
+                    value={product.expiry_date || ""}
+                    onChange={(e) => updateProductRow(product.id, { expiry_date: e.target.value })}
+                    className="text-xs h-7 px-2 rounded border border-blue-200 bg-white text-gray-900 focus:outline-none w-full"
+                  />
+                </div>
+                <div className="flex gap-2 items-center">
+                  <span className="text-xs text-blue-600 font-bold uppercase shrink-0 w-16">Sell Price:</span>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={product.selling_price || ""}
+                    onChange={(e) => updateProductRow(product.id, { selling_price: parseFloat(e.target.value) || 0 })}
+                    className="text-xs h-7 px-2 bg-white border-blue-200 text-gray-900 placeholder:text-gray-400"
+                  />
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           <ProductSelectSimple
             id={`product-select-mobile-${product.id}`}
             value={product.productId}
-            onChange={(productId, productName, price, wholesalePrice) =>
-              handleProductSelect(product.id, productId, productName, price, wholesalePrice)
+            onChange={(productId, productName, price, wholesalePrice, stock, productObj) =>
+              handleProductSelect(product.id, productId, productName, price, wholesalePrice, stock, productObj)
             }
             onAddNew={() => handleAddNewFromRow(product.id)}
             userId={userId}

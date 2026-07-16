@@ -228,6 +228,10 @@ interface Product {
   meesho_status?: PlatformStatus
   own_ecom_status?: PlatformStatus
   trending?: boolean
+  has_variants?: boolean
+  is_batch_managed?: boolean
+  variants?: any[]
+  batches?: any[]
 }
 
 interface EditProductModalProps {
@@ -274,6 +278,9 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
     size: "",
     suitableFor: "",
   })
+  
+  const [isBatchManaged, setIsBatchManaged] = useState(false)
+  const [variants, setVariants] = useState<any[]>([])
   const [attributes, setAttributes] = useState<AttributeEntry[]>([])
   const [productLinks, setProductLinks] = useState<ProductLinkEntry[]>([])
   const [platformStatus, setPlatformStatus] = useState<Record<PlatformKey, PlatformStatus>>({
@@ -344,6 +351,9 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
         size: product.size || "",
         suitableFor: product.suitable_for || "",
       })
+      
+      setIsBatchManaged(product.is_batch_managed || false)
+      setVariants(product.variants || [])
       setAttributes(parseAttributes(product.attributes))
       setProductLinks(parseProductLinks(product.link))
       let initialImageUrls: string[] = []
@@ -881,7 +891,19 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
       if (!formData.name) errors.name = "Product name is required"
       if (!formData.price) errors.price = "MRP is required"
       if (!hideCogs && !formData.wholesalePrice) errors.wholesalePrice = "Cost price is required"
-      if (!hideStockCount && !formData.stock) errors.stock = "Stock is required"
+      
+
+      if (true) {
+        if (variants.length === 0) {
+          errors.variants = "At least one variant is required when variants are enabled"
+        } else {
+          variants.forEach((v, idx) => {
+            if (!v.variant_name || !v.variant_name.trim()) {
+              errors[`variant_${idx}_name`] = `Variant #${idx + 1} Name is required`
+            }
+          })
+        }
+      }
 
       if (Object.keys(errors).length > 0) {
         setFieldErrors(errors)
@@ -902,14 +924,14 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
       submitFormData.append("category", formData.category)
       if (formData.categoryId) submitFormData.append("category_id", formData.categoryId.toString())
       submitFormData.append("description", formData.description)
-      submitFormData.append("price", formData.price)
-      submitFormData.append("wholesale_price", formData.wholesalePrice || "0")
-      submitFormData.append("msp", formData.msp || "0")
-      submitFormData.append("stock", formData.stock || "0")
-      submitFormData.append("shelf", formData.shelf)
-      submitFormData.append("barcode", formData.barcode)
-      submitFormData.append("color", formData.color)
-      submitFormData.append("size", formData.size)
+      
+      
+      
+      
+      
+      
+      
+      
       submitFormData.append("suitable_for", formData.suitableFor)
       submitFormData.append("links", JSON.stringify(productLinks))
       const validAttributes = attributes.filter((a) => a.key.trim() && a.value.trim())
@@ -930,6 +952,9 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
         submitFormData.append("uploaded_video_url", uploadedVideoUrl)
       }
       if (userId) submitFormData.append("user_id", userId.toString())
+      submitFormData.append("has_variants", "true")
+      submitFormData.append("is_batch_managed", isBatchManaged ? "true" : "false")
+      submitFormData.append("variants", JSON.stringify(variants))
 
       const result = await updateProduct(submitFormData)
 
@@ -1158,121 +1183,163 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
               </div>
             </PanelSection>
 
-            <PanelSection title="Pricing">
-              <div className="grid gap-4 sm:grid-cols-3">
-                {!hideCogs && (
-                  <div className="space-y-1.5">
-                    <FieldLabel htmlFor="wholesalePrice" required>
-                      Cost ({currency})
-                    </FieldLabel>
-                    <Input
-                      id="wholesalePrice"
-                      name="wholesalePrice"
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={formData.wholesalePrice}
-                      onChange={handleChange}
-                      placeholder="0.00"
-                      className={inputClass("wholesalePrice")}
-                    />
-                  </div>
-                )}
+            
 
-                <div className="space-y-1.5">
-                  <FieldLabel htmlFor="msp">MSP ({currency})</FieldLabel>
-                  <Input
-                    id="msp"
-                    name="msp"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={formData.msp}
-                    onChange={handleChange}
-                    placeholder="0.00"
-                    className={inputClass()}
-                  />
-                </div>
+            
 
-                <div className="space-y-1.5">
-                  <FieldLabel htmlFor="price" required>
-                    MRP ({currency})
-                  </FieldLabel>
-                  <Input
-                    id="price"
-                    name="price"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={formData.price}
-                    onChange={handleChange}
-                    placeholder="0.00"
-                    required
-                    className={inputClass("price")}
-                  />
-                </div>
-              </div>
-            </PanelSection>
+            
 
-            <PanelSection title="Inventory & barcode">
-              <div className="grid gap-4 sm:grid-cols-3">
-                {!hideStockCount && (
-                  <>
-                    <div className="space-y-1.5">
-                      <FieldLabel htmlFor="stock" required>
-                        Stock
-                      </FieldLabel>
-                      <Input
-                        id="stock"
-                        name="stock"
-                        type="number"
-                        min="0"
-                        value={formData.stock}
-                        onChange={handleChange}
-                        onFocus={(e) => e.target.select()}
-                        placeholder="0"
-                        className={inputClass("stock")}
-                      />
+            {true && (
+              <PanelSection title="Product Variants">
+                <div className="space-y-3">
+                  {variants.map((v, idx) => (
+                    <div key={idx} className="grid grid-cols-12 gap-2 items-end border-b border-slate-100 pb-3 last:border-0 last:pb-0">
+                      <div className="col-span-2 space-y-1">
+                        <FieldLabel>Color</FieldLabel>
+                        <Input
+                          value={v.color || ""}
+                          onChange={(e) => {
+                            const newVariants = [...variants]
+                            newVariants[idx].color = e.target.value
+                            newVariants[idx].variant_name = `${e.target.value || ""} ${v.size || ""} ${v.length ? `L:${v.length}` : ""} ${v.height ? `H:${v.height}` : ""}`.trim()
+                            setVariants(newVariants)
+                          }}
+                          placeholder="Red"
+                          className="h-8 text-xs border-slate-300"
+                        />
+                      </div>
+                      <div className="col-span-1 space-y-1">
+                        <FieldLabel>Size</FieldLabel>
+                        <Input
+                          value={v.size || ""}
+                          onChange={(e) => {
+                            const newVariants = [...variants]
+                            newVariants[idx].size = e.target.value
+                            newVariants[idx].variant_name = `${v.color || ""} ${e.target.value || ""} ${v.length ? `L:${v.length}` : ""} ${v.height ? `H:${v.height}` : ""}`.trim()
+                            setVariants(newVariants)
+                          }}
+                          placeholder="M, L, XL"
+                          className="h-8 text-xs border-slate-300"
+                        />
+                      </div>
+                      <div className="col-span-1 space-y-1">
+                        <FieldLabel>Length</FieldLabel>
+                        <Input
+                          value={v.length || ""}
+                          onChange={(e) => {
+                            const newVariants = [...variants]
+                            newVariants[idx].length = e.target.value
+                            newVariants[idx].variant_name = `${v.color || ""} ${v.size || ""} ${e.target.value ? `L:${e.target.value}` : ""} ${v.height ? `H:${v.height}` : ""}`.trim()
+                            setVariants(newVariants)
+                          }}
+                          placeholder="Length"
+                          className="h-8 text-xs border-slate-300"
+                        />
+                      </div>
+                      <div className="col-span-1 space-y-1">
+                        <FieldLabel>Height</FieldLabel>
+                        <Input
+                          value={v.height || ""}
+                          onChange={(e) => {
+                            const newVariants = [...variants]
+                            newVariants[idx].height = e.target.value
+                            newVariants[idx].variant_name = `${v.color || ""} ${v.size || ""} ${v.length ? `L:${v.length}` : ""} ${e.target.value ? `H:${e.target.value}` : ""}`.trim()
+                            setVariants(newVariants)
+                          }}
+                          placeholder="Height"
+                          className="h-8 text-xs border-slate-300"
+                        />
+                      </div>
+                      <div className="col-span-2 space-y-1">
+                        <FieldLabel>SKU</FieldLabel>
+                        <Input
+                          value={v.sku || ""}
+                          onChange={(e) => {
+                            const newVariants = [...variants]
+                            newVariants[idx].sku = e.target.value
+                            setVariants(newVariants)
+                          }}
+                          placeholder="SKU"
+                          className="h-8 text-xs border-slate-300"
+                        />
+                      </div>
+                      <div className="col-span-2 space-y-1">
+                        <FieldLabel>Barcode</FieldLabel>
+                        <Input
+                          value={v.barcode || ""}
+                          onChange={(e) => {
+                            const newVariants = [...variants]
+                            newVariants[idx].barcode = e.target.value
+                            setVariants(newVariants)
+                          }}
+                          placeholder="Barcode"
+                          className="h-8 text-xs border-slate-300"
+                        />
+                      </div>
+                      <div className="col-span-1 space-y-1">
+                        <FieldLabel>Price</FieldLabel>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          value={v.price !== undefined && v.price !== null ? v.price : ""}
+                          onChange={(e) => {
+                            const newVariants = [...variants]
+                            newVariants[idx].price = e.target.value === "" ? null : Number(e.target.value)
+                            setVariants(newVariants)
+                          }}
+                          placeholder="Default"
+                          className="h-8 text-xs border-slate-300"
+                        />
+                      </div>
+                      <div className="col-span-1 flex items-center justify-between gap-1">
+                        <div className="space-y-1 w-full">
+                          <FieldLabel>Cost</FieldLabel>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            value={v.wholesale_price !== undefined && v.wholesale_price !== null ? v.wholesale_price : ""}
+                            onChange={(e) => {
+                              const newVariants = [...variants]
+                              newVariants[idx].wholesale_price = e.target.value === "" ? null : Number(e.target.value)
+                              setVariants(newVariants)
+                            }}
+                            placeholder="Default"
+                            className="h-8 text-xs border-slate-300"
+                          />
+                        </div>
+                      </div>
+                      <div className="col-span-1 flex justify-center pb-1">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-rose-500 hover:text-rose-700 hover:bg-rose-50 shrink-0 self-end"
+                          onClick={() => {
+                            setVariants(variants.filter((_, i) => i !== idx))
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </div>
-                    <div className="space-y-1.5">
-                      <FieldLabel htmlFor="shelf">Shelf</FieldLabel>
-                      <Input
-                        id="shelf"
-                        name="shelf"
-                        value={formData.shelf}
-                        onChange={handleChange}
-                        placeholder="e.g. A1, B3"
-                        className={inputClass()}
-                      />
-                    </div>
-                  </>
-                )}
-                {hideStockCount && (
-                  <div className="space-y-1.5">
-                    <FieldLabel htmlFor="shelf">Shelf</FieldLabel>
-                    <Input
-                      id="shelf"
-                      name="shelf"
-                      value={formData.shelf}
-                      onChange={handleChange}
-                      placeholder="e.g. A1, B3"
-                      className={inputClass()}
-                    />
-                  </div>
-                )}
-                <div className={cn("space-y-1.5", hideStockCount ? "sm:col-span-2" : "")}>
-                  <FieldLabel htmlFor="barcode">Barcode + code</FieldLabel>
-                  <Input
-                    id="barcode"
-                    name="barcode"
-                    value={formData.barcode}
-                    onChange={handleChange}
-                    placeholder="Enter or scan barcode"
-                    className={inputClass("barcode")}
-                  />
+                  ))}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="mt-2 text-xs h-8 border-dashed border-slate-300 text-slate-600 w-full"
+                    onClick={() => {
+                      setVariants([
+                        ...variants,
+                        { variant_name: "", color: "", size: "", length: "", height: "", sku: "", barcode: "", price: null, wholesale_price: null }
+                      ])
+                    }}
+                  >
+                    <Plus className="h-3 w-3 mr-1" /> Add Variant
+                  </Button>
                 </div>
-              </div>
-            </PanelSection>
+              </PanelSection>
+            )}
 
             <PanelSection
               title="Product media"
