@@ -6,14 +6,19 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Edit, Loader2, Package, Printer, Trash2 } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
-import { notifyError } from "@/lib/notifications"
+import { notifyError, notifySuccess } from "@/lib/notifications"
+import {
+  NESTED_DIALOG_CONTENT_ATTR,
+  preventDismissWhenNestedOpen,
+  shouldIgnoreParentDialogClose,
+} from "@/lib/nested-dialog"
 import { useConfirm } from "@/hooks/use-confirm"
 import { FormAlert } from "@/components/ui/form-alert"
 import { format } from "date-fns"
 import { useSelector } from "react-redux"
 import { selectDeviceCurrency, selectDeviceId } from "@/store/slices/deviceSlice"
 import { printPurchaseReceipt } from "@/lib/receipt-utils"
-import { getPurchaseDetails } from "@/app/actions/purchase-actions"
+import { getPurchaseDetails, markPurchaseDelivered } from "@/app/actions/purchase-actions"
 import { getProductById } from "@/app/actions/product-actions"
 import { ProductDetailSlider } from "@/components/products/product-detail-slider"
 
@@ -24,14 +29,14 @@ interface ViewPurchaseModalProps {
   currency?: string
   onEdit?: (purchaseData: any) => void
   onDelete?: (purchaseId: number) => void
+  onDelivered?: () => void
 }
 
 function PaymentStatusBadge({ status }: { status: string }) {
-  const normalized = status === "Partial" ? "Cancelled" : status
+  const normalized = status === "Partial" ? "Credit" : status
   const styles: Record<string, string> = {
     Paid: "bg-emerald-50 text-emerald-700 border-emerald-200",
     Credit: "bg-amber-50 text-amber-700 border-amber-200",
-    Cancelled: "bg-rose-50 text-rose-700 border-rose-200",
   }
 
   return (
@@ -104,6 +109,7 @@ export default function ViewPurchaseModal({
   currency,
   onEdit,
   onDelete,
+  onDelivered,
 }: ViewPurchaseModalProps) {
   const [purchaseData, setPurchaseData] = useState<any>(null)
   const [purchaseItems, setPurchaseItems] = useState<any[]>([])
@@ -111,6 +117,7 @@ export default function ViewPurchaseModal({
   const [error, setError] = useState<string | null>(null)
   const [detailProduct, setDetailProduct] = useState<any>(null)
   const [isItemLoading, setIsItemLoading] = useState(false)
+  const [isDelivering, setIsDelivering] = useState(false)
   const { toast } = useToast()
   const { confirm, ConfirmDialog } = useConfirm()
 
@@ -124,6 +131,12 @@ export default function ViewPurchaseModal({
     if (isNaN(numAmount)) return `${deviceCurrency} 0.00`
     return `${deviceCurrency} ${numAmount.toFixed(2)}`
   }
+
+  useEffect(() => {
+    if (!isOpen) {
+      setIsDelivering(false)
+    }
+  }, [isOpen])
 
   useEffect(() => {
     const fetchPurchaseData = async () => {
@@ -212,6 +225,61 @@ export default function ViewPurchaseModal({
     }
   }
 
+  const handleMarkDelivered = async () => {
+    if (!purchaseId || !deviceId || isDelivering) return
+    console.log("[receive purchase] clicked", { purchaseId, deviceId })
+    
+    const confirmed = window.confirm(
+      "Receive purchase?\n\nThis will create inventory batches, increase stock, update variant stock, and make these products available for sale."
+    )
+    if (!confirmed) return
+
+    await confirmMarkDelivered()
+  }
+
+  const confirmMarkDelivered = async () => {
+    if (!purchaseId || !deviceId || isDelivering) return
+    console.log("[receive purchase] dialog confirmed")
+
+    setIsDelivering(true)
+    try {
+      console.log("[receive purchase] calling API")
+      const result = await markPurchaseDelivered(purchaseId, deviceId)
+      console.log("[receive purchase] API response", result)
+      if (!result.success) {
+        notifyError(toast, result.message || "Unable to receive purchase")
+        console.log("[receive purchase] delivery failed")
+        return
+      }
+      console.log("[receive purchase] delivery successful")
+      setPurchaseData((current: any) =>
+        current ? { ...current, purchase_status: "Delivered" } : current,
+      )
+      notifySuccess(toast, result.message || "Purchase marked as delivered")
+      setIsDelivering(false)
+      onDelivered?.()
+      console.log("[receive purchase] closing purchase details dialog")
+      onClose()
+      console.log("[receive purchase] dialogs closed, refresh triggered")
+    } catch (error) {
+      console.error("[receive purchase] client request failed", error)
+      notifyError(toast, "Unable to receive purchase")
+    } finally {
+      console.log("[receive purchase] delivery request finished")
+      setIsDelivering(false)
+    }
+  }
+
+  const handlePurchaseDialogOpenChange = (open: boolean) => {
+    if (open) return
+    if (shouldIgnoreParentDialogClose(false, isDelivering)) return
+    onClose()
+  }
+
+  const guardPurchaseDialogDismiss = (event: Event) => {
+    preventDismissWhenNestedOpen(event, false, isDelivering)
+  }
+
   const handleItemRowClick = async (item: any) => {
     if (!item.product_id) {
       notifyError(toast, "Product details are not available for this line item")
@@ -254,14 +322,16 @@ export default function ViewPurchaseModal({
     </div>
   )
 
-  if (!isOpen) return null
-
-  const paymentStatus = purchaseData?.status === "Partial" ? "Cancelled" : purchaseData?.status || "Credit"
+  const paymentStatus = purchaseData?.status === "Partial" ? "Credit" : purchaseData?.status || "Credit"
 
   return (
     <>
-      <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <Dialog open={isOpen} onOpenChange={handlePurchaseDialogOpenChange}>
         <DialogContent
+          {...{ [NESTED_DIALOG_CONTENT_ATTR]: "true" }}
+          onPointerDownOutside={guardPurchaseDialogDismiss}
+          onInteractOutside={guardPurchaseDialogDismiss}
+          onEscapeKeyDown={guardPurchaseDialogDismiss}
           overlayClassName="duration-0 data-[state=open]:animate-none data-[state=closed]:animate-none"
           className="max-w-5xl gap-0 overflow-hidden border-slate-200 p-0 duration-0 data-[state=open]:animate-none data-[state=closed]:animate-none sm:max-w-5xl [&>button]:top-3 [&>button]:right-3"
         >
@@ -300,6 +370,17 @@ export default function ViewPurchaseModal({
                 <Trash2 className="mr-1.5 h-3.5 w-3.5" />
                 Delete
               </Button>
+              {purchaseData?.purchase_status === "Ordered" && (
+                <Button
+                  size="sm"
+                  onClick={handleMarkDelivered}
+                  disabled={isLoading || isDelivering || !deviceId}
+                  className="h-8 bg-emerald-600 px-3 text-xs text-white hover:bg-emerald-700"
+                >
+                  {isDelivering ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Package className="mr-1.5 h-3.5 w-3.5" />}
+                  Mark as Delivered
+                </Button>
+              )}
             </div>
           </DialogHeader>
 

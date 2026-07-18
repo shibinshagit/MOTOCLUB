@@ -305,6 +305,9 @@ async function createTables() {
         status VARCHAR(50),
         payment_method VARCHAR(50),
         purchase_status VARCHAR(50) DEFAULT 'Delivered',
+        invoice_number VARCHAR(255),
+        supplier_invoice_number VARCHAR(255),
+        notes TEXT,
         received_amount DECIMAL(12,2) DEFAULT 0,
         purchase_date TIMESTAMP DEFAULT NOW(),
         device_id INTEGER,
@@ -323,6 +326,9 @@ async function createTables() {
         product_id INTEGER,
         quantity INTEGER NOT NULL,
         price DECIMAL(10,2) NOT NULL,
+        tax_percentage DECIMAL(5,2) DEFAULT 0,
+        tax_amount DECIMAL(10,2) DEFAULT 0,
+        line_total DECIMAL(10,2) NOT NULL,
         created_at TIMESTAMP DEFAULT NOW()
       )
     `
@@ -594,6 +600,11 @@ async function upgradeLegacyColumns() {
     ["sales.courier_paid_extra", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS courier_paid_extra DECIMAL(12,2) DEFAULT 0`],
     ["sales.expense_courier", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS expense_courier DECIMAL(12,2) DEFAULT 0`],
     ["sales.expense_packing", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS expense_packing DECIMAL(12,2) DEFAULT 0`],
+    ["purchase_items.tax_percentage", () => sql`ALTER TABLE purchase_items ADD COLUMN IF NOT EXISTS tax_percentage DECIMAL(5,2) DEFAULT 0`],
+    ["purchase_items.tax_amount", () => sql`ALTER TABLE purchase_items ADD COLUMN IF NOT EXISTS tax_amount DECIMAL(10,2) DEFAULT 0`],
+    ["purchase_items.line_total", () => sql`ALTER TABLE purchase_items ADD COLUMN IF NOT EXISTS line_total DECIMAL(10,2) DEFAULT 0`],
+    ["purchase_items.product_variant_id", () => sql`ALTER TABLE purchase_items ADD COLUMN IF NOT EXISTS product_variant_id INTEGER`],
+    ["purchase_items.batch_id", () => sql`ALTER TABLE purchase_items ADD COLUMN IF NOT EXISTS batch_id INTEGER`],
     ["sales.shipped_at", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS shipped_at TIMESTAMP`],
     ["sales.delivered_at", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMP`],
     ["sales.shipping_notes", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS shipping_notes TEXT`],
@@ -604,6 +615,9 @@ async function upgradeLegacyColumns() {
     ["purchases.device_id", () => sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS device_id INTEGER`],
     ["purchases.payment_method", () => sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50)`],
     ["purchases.purchase_status", () => sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS purchase_status VARCHAR(50) DEFAULT 'Delivered'`],
+    ["purchases.invoice_number", () => sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS invoice_number VARCHAR(255)`],
+    ["purchases.supplier_invoice_number", () => sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS supplier_invoice_number VARCHAR(255)`],
+    ["purchases.notes", () => sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS notes TEXT`],
     ["purchases.received_amount", () => sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS received_amount DECIMAL(12,2) DEFAULT 0`],
     ["purchases.created_at", () => sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`],
     ["purchases.updated_at", () => sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()`],
@@ -823,6 +837,34 @@ async function createIndexes() {
   }
 }
 
+async function createInventoryLedgerTrigger() {
+  await runSafe("inventory batch ledger synchronization trigger", async () => {
+    await sql.unsafe(`
+      CREATE OR REPLACE FUNCTION sync_product_batch_remaining_quantity()
+      RETURNS TRIGGER AS $$
+      DECLARE affected_batch_id INTEGER;
+      BEGIN
+        affected_batch_id := COALESCE(NEW.batch_id, OLD.batch_id);
+        UPDATE product_batches
+        SET remaining_quantity = COALESCE((
+          SELECT SUM(stock) FROM product_batch_device_stock WHERE batch_id = affected_batch_id
+        ), 0), updated_at = NOW()
+        WHERE id = affected_batch_id;
+        RETURN COALESCE(NEW, OLD);
+      END;
+      $$ LANGUAGE plpgsql;
+      DROP TRIGGER IF EXISTS product_batch_stock_sync_remaining_quantity ON product_batch_device_stock;
+      CREATE TRIGGER product_batch_stock_sync_remaining_quantity
+      AFTER INSERT OR UPDATE OF stock OR DELETE ON product_batch_device_stock
+      FOR EACH ROW EXECUTE FUNCTION sync_product_batch_remaining_quantity();
+      UPDATE product_batches pb
+      SET remaining_quantity = COALESCE((
+        SELECT SUM(pbds.stock) FROM product_batch_device_stock pbds WHERE pbds.batch_id = pb.id
+      ), 0), updated_at = NOW();
+    `)
+  })
+}
+
 async function seedAdmin() {
   console.log("\n── Admin seed ──\n")
 
@@ -869,6 +911,7 @@ async function migrate() {
     await migrateManualEntryCategories()
     await dropLegacyTables()
     await createIndexes()
+    await createInventoryLedgerTrigger()
     await seedAdmin()
   } catch {
     console.error("\n✗ Migration failed. See errors above.")

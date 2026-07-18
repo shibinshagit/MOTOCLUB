@@ -1,6 +1,6 @@
 "use client"
 
-import type React from "react"
+import React from "react"
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -76,6 +76,37 @@ interface ProductRow {
   barcode?: string | null
   sku?: string | null
   stock?: number | null
+  variantEntries?: PurchaseVariantEntry[]
+  taxPercentage: number
+  taxAmount: number
+  lineTotal: number
+}
+
+interface PurchaseVariantEntry {
+  id: number
+  name: string
+  quantity: number
+  price: number
+  msp: number | null
+  mrp: number | null
+  sku?: string | null
+  barcode?: string | null
+  shelf?: string | null
+  stock?: number
+  taxPercentage: number
+  total: number
+  taxAmount: number
+  lineTotal: number
+}
+
+type TaxablePurchaseLine = Pick<PurchaseVariantEntry, "quantity" | "price" | "taxPercentage">
+
+/** The single source of truth for product and variant purchase-line amounts. */
+function calculatePurchaseLine({ quantity, price, taxPercentage }: TaxablePurchaseLine) {
+  const baseAmount = (Number(quantity) || 0) * (Number(price) || 0)
+  const taxAmount = baseAmount * ((Number(taxPercentage) || 0) / 100)
+
+  return { total: baseAmount, taxAmount, lineTotal: baseAmount + taxAmount }
 }
 
 interface PurchaseDraftSnapshot {
@@ -88,7 +119,6 @@ interface PurchaseDraftSnapshot {
   purchaseStatus: string
   paymentMethod: string
   receivedAmount: number
-  taxRate: number
   discountAmount: number
   products: ProductRow[]
   isEditMode: boolean
@@ -136,6 +166,8 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
   const [error, setError] = useState<string | null>(null)
   const [purchasesListLoaded, setPurchasesListLoaded] = useState(false)
   const [purchasesViewMonth, setPurchasesViewMonth] = useState(() => startOfMonth(new Date()))
+  const [purchaseSearch, setPurchaseSearch] = useState("")
+  const [debouncedPurchaseSearch, setDebouncedPurchaseSearch] = useState("")
   const [activeView, setActiveView] = useState<PurchaseViewMode>(mode === "info" ? "info" : "entry")
 
   const [isEditMode, setIsEditMode] = useState(false)
@@ -156,11 +188,12 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
       price: 0,
       total: 0,
       wholesalePrice: 0,
+      taxPercentage: 0,
+      taxAmount: 0,
+      lineTotal: 0,
     },
   ])
   const [subtotal, setSubtotal] = useState(0)
-  const [taxRate, setTaxRate] = useState(0)
-  const [taxAmount, setTaxAmount] = useState(0)
   const [discountAmount, setDiscountAmount] = useState(0)
   const [totalAmount, setTotalAmount] = useState(0)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -195,6 +228,11 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
     setActiveView(mode === "info" ? "info" : "entry")
   }, [mode])
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedPurchaseSearch(purchaseSearch), 400)
+    return () => window.clearTimeout(timer)
+  }, [purchaseSearch])
+
   const switchView = useCallback(
     (view: PurchaseViewMode) => {
       setActiveView(view)
@@ -217,6 +255,9 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
       total: 0,
       wholesalePrice: 0,
       selling_price: 0,
+      taxPercentage: 0,
+      taxAmount: 0,
+      lineTotal: 0,
     }),
     [],
   )
@@ -232,7 +273,6 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
       purchaseStatus: "Delivered",
       paymentMethod: "Cash",
       receivedAmount: 0,
-      taxRate: 0,
       discountAmount: 0,
       products: [createEmptyProductRow()],
       isEditMode: false,
@@ -290,7 +330,6 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
     setPurchaseStatus(activeDraft.purchaseStatus || "Delivered")
     setPaymentMethod(activeDraft.paymentMethod || "Cash")
     setReceivedAmount(Number(activeDraft.receivedAmount) || 0)
-    setTaxRate(Number(activeDraft.taxRate) || 0)
     setDiscountAmount(Number(activeDraft.discountAmount) || 0)
     setProducts(
       Array.isArray(activeDraft.products) && activeDraft.products.length > 0
@@ -329,7 +368,6 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
               purchaseStatus,
               paymentMethod,
               receivedAmount,
-              taxRate,
               discountAmount,
               products,
               isEditMode,
@@ -348,7 +386,6 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
     purchaseStatus,
     paymentMethod,
     receivedAmount,
-    taxRate,
     discountAmount,
     products,
     isEditMode,
@@ -364,9 +401,8 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
   useEffect(() => {
     const newSubtotal = products.reduce((sum, product) => sum + (Number(product.total) || 0), 0)
     setSubtotal(newSubtotal)
-    const newTaxAmount = newSubtotal * (taxRate / 100)
-    setTaxAmount(newTaxAmount)
-    const finalTotal = Math.max(0, Number(newSubtotal) + Number(newTaxAmount) - Number(discountAmount))
+    const lineTaxTotal = products.reduce((sum, product) => sum + (Number(product.taxAmount) || 0), 0)
+    const finalTotal = Math.max(0, Number(newSubtotal) + lineTaxTotal - Number(discountAmount))
     setTotalAmount(finalTotal)
 
     if (status === "Paid") {
@@ -374,7 +410,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
     } else if (status === "Cancelled") {
       setReceivedAmount(0)
     }
-  }, [products, taxRate, discountAmount, status])
+  }, [products, discountAmount, status])
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat("en-US", {
@@ -389,7 +425,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
   }, [])
 
   const fetchPurchasesForMonth = useCallback(
-    async (month: Date) => {
+    async (month: Date, searchTerm = "") => {
       if (!deviceId) {
         setError("Device ID not found")
       return
@@ -402,7 +438,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
       setError(null)
 
       try {
-        const result = await getUserPurchases(deviceId, { dateFrom: from, dateTo: to })
+        const result = await getUserPurchases(deviceId, { dateFrom: from, dateTo: to, searchTerm })
         if (requestId !== purchasesFetchRequestRef.current) return
 
         if (result.success) {
@@ -429,8 +465,8 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
   useEffect(() => {
     if (activeView !== "info" || !deviceId) return
     setPurchasesListLoaded(false)
-    fetchPurchasesForMonth(purchasesViewMonth)
-  }, [activeView, deviceId, purchasesViewMonth, fetchPurchasesForMonth])
+    fetchPurchasesForMonth(purchasesViewMonth, debouncedPurchaseSearch)
+  }, [activeView, deviceId, purchasesViewMonth, debouncedPurchaseSearch, fetchPurchasesForMonth])
 
   const addProductRow = () => {
     setProducts([...products, createEmptyProductRow()])
@@ -447,16 +483,38 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
       products.map((product) => {
         if (product.id === id) {
           const updatedProduct = { ...product, ...updates }
-          if (updates.quantity !== undefined || updates.price !== undefined) {
-            const quantity = Number(updatedProduct.quantity) || 0
-            const price = Number(updatedProduct.price) || 0
-            updatedProduct.total = quantity * price
+          Object.assign(updatedProduct, calculatePurchaseLine(updatedProduct))
+          if ((updatedProduct.variantEntries?.length || 0) > 1) {
+            updatedProduct.total = updatedProduct.variantEntries!.reduce((sum, entry) => sum + entry.total, 0)
+            updatedProduct.taxAmount = updatedProduct.variantEntries!.reduce((sum, entry) => sum + entry.taxAmount, 0)
+            updatedProduct.lineTotal = updatedProduct.total + updatedProduct.taxAmount
           }
           return updatedProduct
         }
         return product
       }),
     )
+  }
+
+  const updateVariantEntry = (rowId: string, variantId: number, updates: Partial<PurchaseVariantEntry>) => {
+    setProducts(current => current.map(row => {
+      if (row.id !== rowId) return row
+      const variantEntries = (row.variantEntries || []).map(entry => {
+        if (entry.id === variantId) {
+          const updatedEntry = { ...entry, ...updates }
+          Object.assign(updatedEntry, calculatePurchaseLine(updatedEntry))
+          return updatedEntry
+        }
+        return entry
+      })
+      return {
+        ...row,
+        variantEntries,
+        total: variantEntries.reduce((sum, entry) => sum + entry.total, 0),
+        taxAmount: variantEntries.reduce((sum, entry) => sum + entry.taxAmount, 0),
+        lineTotal: variantEntries.reduce((sum, entry) => sum + entry.lineTotal, 0),
+      }
+    }))
   }
 
   const handleProductSelect = (
@@ -470,7 +528,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
   ) => {
     // Every product now has at least one default variant (guaranteed by createProduct).
     // Always read pricing from the first (default) variant. Never rely on has_variants flag.
-    const variants: any[] = productObj?.variants || []
+    const variants: any[] = Array.isArray(productObj?.variants) ? productObj.variants : []
     const defaultVariant = variants[0] || null
     const isService = stock === 999
     const isBatchManaged = !isService
@@ -510,28 +568,38 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
 
     priceToUse = priceToUse || 0
     const currentQty = Number(products.find((p) => p.id === id)?.quantity) || 1
+    const taxPercentage = Number(productObj?.tax_percentage) || 0
 
-    console.log("[Purchase] Product selected:", {
-      productId,
-      productName,
-      resolvedVariantId,
-      priceToUse,
-      resolvedMsp,
-      resolvedMrp,
-      resolvedStock,
-      variantsCount: variants.length,
-    })
+    console.log("[Purchase] selectedProduct", productObj)
+    console.log("[Purchase] selectedProduct.variants.length", variants.length)
+
+    const variantEntries: PurchaseVariantEntry[] = variants.map((variant: any, index: number) => ({
+      id: Number(variant.id),
+      name: String(variant.name || (index === 0 ? "Default" : "Variant")),
+      quantity: 0,
+      price: Number(variant.cost_price ?? variant.wholesale_price ?? priceToUse ?? 0),
+      msp: variant.msp != null ? Number(variant.msp) : null,
+      mrp: variant.mrp != null ? Number(variant.mrp) : null,
+      sku: variant.sku || null,
+      barcode: variant.barcode || null,
+      shelf: variant.shelf || null,
+      stock: Number(variant.stock || 0),
+      taxPercentage,
+      ...calculatePurchaseLine({ quantity: 0, price: Number(variant.cost_price ?? variant.wholesale_price ?? priceToUse ?? 0), taxPercentage }),
+    }))
 
     updateProductRow(id, {
       productId,
       productName,
       price: priceToUse,
       wholesalePrice: priceToUse,
-      total: currentQty * priceToUse,
+      total: variantEntries.length > 1 ? 0 : currentQty * priceToUse,
+      taxPercentage,
       variant_id: resolvedVariantId,
       hasVariants: variants.length > 1,
       isBatchManaged,
       variants,
+      variantEntries,
       msp: resolvedMsp,
       mrp: resolvedMrp,
       shelf: resolvedShelf,
@@ -561,13 +629,18 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
     setActiveProductRowId(null)
 
     if (targetRowId) {
-      updateProductRow(targetRowId, {
+      // Use the same variant-aware selection path as an existing product.
+      // createProduct returns its persisted variants, so a new multi-variant
+      // product expands immediately without requiring a second search.
+      handleProductSelect(
+        targetRowId,
         productId,
-        productName: product.name,
-        price: priceToUse,
-        wholesalePrice: product.wholesale_price,
-        total: (products.find((p) => p.id === targetRowId)?.quantity || 1) * priceToUse,
-      })
+        product.name,
+        Number(product.price ?? product.msp ?? priceToUse ?? 0),
+        Number(product.wholesale_price ?? product.cost_price ?? priceToUse ?? 0),
+        Number(product.stock ?? 0),
+        product,
+      )
     }
 
     notifySuccess(toast, `Product "${product.name}" added successfully`)
@@ -587,7 +660,6 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
     setPurchaseStatus("Delivered")
     setPaymentMethod("Cash")
     setProducts(resetProducts)
-    setTaxRate(0)
     setDiscountAmount(0)
     setReceivedAmount(0)
     setFormAlert(null)
@@ -610,7 +682,6 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
                 purchaseStatus: "Delivered",
                 paymentMethod: "Cash",
                 receivedAmount: 0,
-                taxRate: 0,
                 discountAmount: 0,
                 products: resetProducts,
                 isEditMode: false,
@@ -641,21 +712,11 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
         setPaymentMethod(purchase.payment_method || "Cash")
         setReceivedAmount(Number(purchase.received_amount) || 0)
 
-        const calculatedSubtotal = items.reduce(
-          (sum: number, item: any) => sum + item.quantity * item.price,
+        const lineTotalsBeforeDiscount = items.reduce(
+          (sum: number, item: any) => sum + Number(item.line_total ?? (item.quantity * item.price)),
           0,
         )
-
-        if (calculatedSubtotal > 0) {
-          const estimatedTaxAmount = Math.round((purchase.total_amount - calculatedSubtotal) * 100) / 100
-          if (estimatedTaxAmount > 0) {
-            setTaxRate(Math.round((estimatedTaxAmount / calculatedSubtotal) * 100 * 100) / 100)
-            setDiscountAmount(0)
-          } else {
-            setTaxRate(0)
-            setDiscountAmount(Math.abs(estimatedTaxAmount))
-          }
-        }
+        setDiscountAmount(Math.max(0, lineTotalsBeforeDiscount - Number(purchase.total_amount || 0)))
 
         const productRows = items.map((item: any) => ({
           id: crypto.randomUUID(),
@@ -664,6 +725,9 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
           quantity: item.quantity,
           price: item.price,
           total: item.quantity * item.price,
+          taxPercentage: Number(item.tax_percentage) || 0,
+          taxAmount: Number(item.tax_amount) || 0,
+          lineTotal: Number(item.line_total ?? (item.quantity * item.price)) || 0,
           originalItemId: item.id,
           wholesalePrice: item.wholesale_price || item.price,
           variant_id: item.product_variant_id || null,
@@ -728,11 +792,42 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
       return
     }
 
-    const validProducts = products.filter((p) => p.productId !== null)
-    if (validProducts.length === 0 || !validProducts.every((p) => p.quantity > 0)) {
+    const items: any[] = products.flatMap((product): any[] => {
+      if (!product.productId) return []
+      if ((product.variantEntries?.length || 0) > 1) {
+        return product.variantEntries!
+          .filter(variant => variant.quantity > 0)
+          .map(variant => ({
+            product_id: product.productId!,
+            variant_id: variant.id,
+            quantity: variant.quantity,
+            price: variant.price,
+            tax_percentage: variant.taxPercentage,
+            tax_amount: variant.taxAmount,
+            line_total: variant.lineTotal,
+          }))
+      }
+      return product.quantity > 0
+        ? [{
+            ...(product.originalItemId ? { id: product.originalItemId } : {}),
+            product_id: product.productId,
+            quantity: product.quantity,
+            price: product.price,
+            variant_id: product.variantEntries?.[0]?.id || product.variant_id || null,
+            batch_id: product.batch_id || null,
+            batch_number: product.batch_number || null,
+            mfg_date: product.mfg_date || null,
+            expiry_date: product.expiry_date || null,
+            tax_percentage: product.taxPercentage,
+            tax_amount: product.taxAmount,
+            line_total: product.lineTotal,
+          }]
+        : []
+    })
+    if (items.length === 0) {
       setFormAlert({
         type: "error",
-        message: "Please select products and ensure quantities are greater than zero",
+        message: "Please select products and enter a quantity greater than zero",
       })
       return
     }
@@ -771,17 +866,6 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
       formData.append("device_id", deviceId.toString())
       formData.append("received_amount", finalReceivedAmount.toString())
 
-      const items = validProducts.map((p) => ({
-        ...(p.originalItemId ? { id: p.originalItemId } : {}),
-        product_id: p.productId,
-        quantity: p.quantity,
-        price: p.price,
-        variant_id: p.variant_id || null,
-        batch_id: p.batch_id || null,
-        batch_number: p.batch_number || null,
-        mfg_date: p.mfg_date || null,
-        expiry_date: p.expiry_date || null,
-      }))
       formData.append("items", JSON.stringify(items))
 
       const result =
@@ -989,6 +1073,8 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
       periodLabel={periodLabel}
       isCurrentMonth={isCurrentMonth}
       canGoNextMonth={canGoNextMonth}
+      searchTerm={purchaseSearch}
+      onSearchChange={setPurchaseSearch}
       onPreviousMonth={goToPreviousMonth}
       onNextMonth={goToNextMonth}
       onCurrentMonth={goToCurrentMonth}
@@ -1004,14 +1090,49 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
     />
   )
 
+  const renderVariantEntries = (product: ProductRow) => {
+    const variants = product.variantEntries || []
+    if (variants.length <= 1) return null
+
+    return (
+      <div className="mx-2 mb-3 overflow-hidden rounded-lg border border-emerald-200 bg-white shadow-sm">
+        <div className="flex items-center gap-2 border-b border-emerald-100 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-900">
+          <ChevronsUpDown className="h-4 w-4" /> Variants ({variants.length})
+        </div>
+        <div className="grid grid-cols-12 gap-2 border-b border-gray-100 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-600">
+          <div className="col-span-4">Variant</div><div className="col-span-1 text-center">Qty</div><div className="col-span-1 text-center">Cost Price</div><div className="col-span-1 text-center">Tax %</div><div className="col-span-2 text-center">Tax Amount</div><div className="col-span-2 text-center">Line Total</div>
+        </div>
+        {variants.map(variant => {
+          // Older saved drafts predate per-line tax fields. Recalculate here
+          // rather than assuming those optional persisted values exist.
+          const amounts = calculatePurchaseLine(variant)
+
+          return (
+          <div key={variant.id} className="grid grid-cols-12 gap-2 items-center border-b border-gray-100 px-3 py-2 last:border-b-0">
+            <div className="col-span-4 min-w-0">
+              <p className="truncate text-sm font-medium text-gray-900">{variant.name}</p>
+              <p className="truncate text-[11px] text-gray-500">Stock: {variant.stock || 0}{variant.sku ? ` · SKU: ${variant.sku}` : ""}{variant.barcode ? ` · ${variant.barcode}` : ""}{variant.shelf ? ` · Shelf: ${variant.shelf}` : ""}</p>
+            </div>
+            <Input type="number" min="0" className="col-span-1 h-8 text-center" value={variant.quantity || ""} placeholder="0" onChange={event => updateVariantEntry(product.id, variant.id, { quantity: Math.max(0, Number.parseInt(event.target.value, 10) || 0) })} />
+            <Input type="number" min="0" step="0.01" className="col-span-1 h-8 text-center" value={variant.price || 0} onChange={event => updateVariantEntry(product.id, variant.id, { price: Number.parseFloat(event.target.value) || 0 })} />
+            <Input type="number" min="0" max="100" step="0.01" className="col-span-1 h-8 text-center" value={variant.taxPercentage || 0} onChange={event => updateVariantEntry(product.id, variant.id, { taxPercentage: Math.max(0, Math.min(100, Number.parseFloat(event.target.value) || 0)) })} />
+            <div className="col-span-2 text-center text-xs text-gray-700">{currency} {amounts.taxAmount.toFixed(2)}</div>
+            <div className="col-span-2 text-center text-xs font-medium text-gray-900">{currency} {amounts.lineTotal.toFixed(2)}</div>
+          </div>
+          )
+        })}
+      </div>
+    )
+  }
+
   const renderProductRowDesktop = (product: ProductRow, index: number) => (
+    <React.Fragment key={product.id}>
     <div
-      key={product.id}
       className={`grid grid-cols-12 gap-1 p-2 items-center border-b border-gray-200 ${
         index % 2 === 0 ? "bg-white" : "bg-gray-50"
       } hover:bg-gray-100 transition-colors duration-150`}
     >
-      <div className="col-span-5">
+      <div className="col-span-4">
         {product.productId && product.productName ? (
           <div className="flex flex-col">
             <div className="flex items-center justify-between">
@@ -1027,6 +1148,11 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
                     price: 0,
                     total: 0,
                     wholesalePrice: 0,
+                    variants: [],
+                    variantEntries: [],
+                    taxPercentage: 0,
+                    taxAmount: 0,
+                    lineTotal: 0,
                   })
                 }
               >
@@ -1048,31 +1174,52 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
           />
         )}
       </div>
-      <div className="col-span-2">
-        <Input
-          type="number"
-          min="1"
-          value={product.quantity}
-          onChange={(e) =>
-            updateProductRow(product.id, { quantity: Number.parseInt(e.target.value, 10) || 1 })
-          }
-          className="text-center h-7 text-xs bg-white border-gray-300 text-gray-900"
-        />
+      <div className="col-span-1">
+        {(!product.variantEntries || product.variantEntries.length <= 1) && (
+          <Input
+            type="number"
+            min="1"
+            value={product.quantity}
+            onChange={(e) => updateProductRow(product.id, { quantity: Number.parseInt(e.target.value, 10) || 1 })}
+            className="text-center h-7 text-xs bg-white border-gray-300 text-gray-900"
+          />
+        )}
       </div>
-      <div className="col-span-2">
-        <Input
-          type="number"
-          min="0"
-          step="0.01"
-          value={product.price}
-          onChange={(e) =>
-            updateProductRow(product.id, { price: Number.parseFloat(e.target.value) || 0 })
-          }
-          className="text-center h-7 text-xs bg-white border-gray-300 text-gray-900"
-        />
+      <div className="col-span-1">
+        {(!product.variantEntries || product.variantEntries.length <= 1) && (
+          <Input
+            type="number"
+            min="0"
+            step="0.01"
+            value={product.price}
+            onChange={(e) => updateProductRow(product.id, { price: Number.parseFloat(e.target.value) || 0 })}
+            className="text-center h-7 text-xs bg-white border-gray-300 text-gray-900"
+          />
+        )}
+      </div>
+      <div className="col-span-1">
+        {(!product.variantEntries || product.variantEntries.length <= 1) && (
+          <Input
+            type="number"
+            min="0"
+            max="100"
+            step="0.01"
+            value={product.taxPercentage}
+            onChange={(e) => {
+              const value = Number.parseFloat(e.target.value) || 0
+              if (value >= 0 && value <= 100) {
+                updateProductRow(product.id, { taxPercentage: value })
+              }
+            }}
+            className="text-center h-7 text-xs bg-white border-gray-300 text-gray-900"
+          />
+        )}
+      </div>
+      <div className="col-span-2 flex items-center justify-center text-xs text-gray-600">
+        {currency} {(Number(product.taxAmount) || 0).toFixed(2)}
       </div>
       <div className="col-span-2 flex items-center justify-center font-medium text-xs text-gray-900">
-        {currency} {(Number(product.total) || 0).toFixed(2)}
+        {currency} {(Number(product.lineTotal) || 0).toFixed(2)}
       </div>
       <div className="col-span-1 flex justify-center">
         <Button
@@ -1087,11 +1234,13 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
         </Button>
       </div>
     </div>
+    {renderVariantEntries(product)}
+    </React.Fragment>
   )
 
   const renderProductRowMobile = (product: ProductRow, index: number) => (
+    <React.Fragment key={product.id}>
     <div
-      key={product.id}
       className={`p-3 border-b border-gray-200 ${index % 2 === 0 ? "bg-white" : "bg-gray-50"}`}
     >
       <div className="mb-3">
@@ -1110,6 +1259,8 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
                   price: 0,
                   total: 0,
                   wholesalePrice: 0,
+                  variants: [],
+                  variantEntries: [],
                 })
               }
             >
@@ -1130,7 +1281,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
           />
         )}
       </div>
-      <div className="grid grid-cols-2 gap-2 mb-3">
+      {(!product.variantEntries || product.variantEntries.length <= 1) && <div className="grid grid-cols-3 gap-2 mb-3">
         <div>
           <Label className="text-xs font-medium text-gray-700 mb-1 block">Qty</Label>
           <Input
@@ -1156,10 +1307,25 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
             className="text-center h-8 text-sm"
           />
         </div>
-      </div>
+        <div>
+          <Label className="text-xs font-medium text-gray-700 mb-1 block">Tax %</Label>
+          <Input
+            type="number"
+            min="0"
+            max="100"
+            step="0.01"
+            value={product.taxPercentage}
+            onChange={(e) => updateProductRow(product.id, { taxPercentage: Math.max(0, Math.min(100, Number.parseFloat(e.target.value) || 0)) })}
+            className="text-center h-8 text-sm"
+          />
+        </div>
+      </div>}
       <div className="flex items-center justify-between">
         <div className="text-sm font-medium text-gray-900">
-          Total: {currency} {(Number(product.total) || 0).toFixed(2)}
+          Tax Amount: {currency} {(Number(product.taxAmount) || 0).toFixed(2)}
+        </div>
+        <div className="text-sm font-medium text-gray-900">
+          Total: {currency} {(Number(product.lineTotal) || 0).toFixed(2)}
         </div>
         <Button
           type="button"
@@ -1174,6 +1340,8 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
         </Button>
       </div>
     </div>
+    {renderVariantEntries(product)}
+    </React.Fragment>
   )
 
   const purchasesEntryView = (
@@ -1267,16 +1435,6 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
                     type="button"
                     variant="outline"
                     size="sm"
-                        onClick={() => setIsNewProductModalOpen(true)}
-                        className="flex items-center gap-1 text-blue-600 border-blue-300 hover:bg-blue-50 h-7 text-xs"
-                      >
-                        <Plus className="h-3 w-3" />
-                        <span className="hidden sm:inline">Product</span>
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
                         onClick={addProductRow}
                         className="flex items-center gap-1 border-gray-300 text-gray-900 hover:bg-gray-50 h-7 text-xs bg-transparent"
                       >
@@ -1289,9 +1447,11 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
                   <div className="flex-1 overflow-x-auto overflow-y-auto min-h-0">
                     <div className="hidden lg:block sticky top-0 z-10 min-w-[640px]">
                       <div className="grid grid-cols-12 gap-1 p-2 bg-gray-100 font-medium text-xs text-gray-700 border-b border-gray-200">
-                        <div className="col-span-5">Product</div>
-                        <div className="col-span-2 text-center">Qty</div>
-                        <div className="col-span-2 text-center">Price</div>
+                        <div className="col-span-4">Product</div>
+                        <div className="col-span-1 text-center">Qty</div>
+                        <div className="col-span-1 text-center">Price</div>
+                        <div className="col-span-1 text-center">Tax %</div>
+                        <div className="col-span-2 text-center">Tax Amount</div>
                         <div className="col-span-2 text-center">Total</div>
                         <div className="col-span-1"></div>
                   </div>
@@ -1339,7 +1499,6 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
                           <SelectContent className="bg-white border-gray-200">
                             <SelectItem value="Credit">Credit</SelectItem>
                             <SelectItem value="Paid">Paid</SelectItem>
-                            <SelectItem value="Cancelled">Cancelled</SelectItem>
                           </SelectContent>
                         </Select>
               </div>
@@ -1352,7 +1511,6 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
                           </SelectTrigger>
                           <SelectContent className="bg-white border-gray-200">
                             <SelectItem value="Delivered">Delivered</SelectItem>
-                            <SelectItem value="Pending">Pending</SelectItem>
                             <SelectItem value="Ordered">Ordered</SelectItem>
                           </SelectContent>
                         </Select>
@@ -1427,24 +1585,6 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
                             {currency} {subtotal.toFixed(2)}
                           </span>
                         </div>
-                        <div className="flex justify-between items-center py-1">
-                          <span className="font-medium text-xs text-gray-900">Tax (%):</span>
-                  <Input
-                    type="number"
-                    min="0"
-                            max="100"
-                    step="0.01"
-                            value={taxRate}
-                            onChange={(e) => setTaxRate(Number.parseFloat(e.target.value) || 0)}
-                            className="w-16 h-7 text-xs text-center bg-white border-gray-300 text-gray-900"
-                  />
-                </div>
-                        <div className="flex justify-between items-center py-1">
-                          <span className="font-medium text-xs text-gray-900">Tax Amount:</span>
-                          <span className="text-sm text-gray-900">
-                            {currency} {taxAmount.toFixed(2)}
-                          </span>
-                        </div>
                         <div className="flex justify-between items-center py-1 border-t border-gray-200">
                           <span className="font-medium text-xs text-gray-900">Discount:</span>
                   <Input
@@ -1457,7 +1597,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
                           />
                         </div>
                         <div className="flex justify-between items-center py-2 border-t border-gray-200 bg-green-50 p-2 rounded-md">
-                          <span className="font-bold text-green-700 text-sm">Total:</span>
+                          <span className="font-bold text-green-700 text-sm">Grand Total:</span>
                           <div className="font-bold text-green-700 text-lg">
                             {currency} {totalAmount.toFixed(2)}
                           </div>
@@ -1514,6 +1654,10 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
           handleEditPurchase({ id: purchaseData.id })
         }}
         onDelete={handleDeletePurchaseFromView}
+        onDelivered={() => {
+          markInventoryStale(dispatch)
+          fetchPurchasesForMonth(purchasesViewMonth)
+        }}
       />
 
       <NewProductModal

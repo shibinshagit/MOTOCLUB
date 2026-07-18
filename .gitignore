@@ -14,8 +14,9 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+build-output.txt
 .pnpm-debug.log*
-
+*.backup
 # database backups
 /backups/
 

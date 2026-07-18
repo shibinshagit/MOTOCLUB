@@ -708,10 +708,13 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
 
     if (productObj?.variants && productObj.variants.length > 0) {
       hasVariants = true
-      resolvedVariantId = productObj.variants[0].id
-      variantName = productObj.variants[0].name
-      if (batches.length === 0 && productObj.variants[0].batches) {
-        batches = productObj.variants[0].batches
+      // Default-only products remain one-click. Products with choices must
+      // explicitly select a variant before their variant-scoped batches load.
+      const selectedVariant = productObj.variants.length === 1 ? productObj.variants[0] : null
+      resolvedVariantId = selectedVariant?.id || null
+      variantName = selectedVariant?.name || null
+      if (selectedVariant && batches.length === 0 && selectedVariant.batches) {
+        batches = selectedVariant.batches
       }
     }
 
@@ -720,7 +723,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     let updatedPrice = price
     let updatedCost = wholesalePrice || 0
 
-    if (isBatchManaged && batches.length > 0) {
+    if (isBatchManaged && resolvedVariantId && batches.length > 0) {
       // Auto Allocate initially
       let remaining = updatedPrice > 0 ? (products.find((p) => p.id === id)?.quantity || 1) : 1
       const sortedBatches = [...batches].sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
@@ -1465,8 +1468,19 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     setFormAlert(null)
     setShowPrintConfirm(false)
     setLastSaleResult(null)
-    if (activeView === "entry" && activeDraftId) {
-      void handleRemoveDraftTab(activeDraftId, false)
+    if (activeView === "entry") {
+      // A completed sale must not leave stale entry tabs behind. Start the
+      // cashier on one clean draft so tabs cannot accumulate after checkout.
+      const freshDraft = createEmptyDraft("Draft 1")
+      draftSwitchingRef.current = true
+      setSaleDrafts([freshDraft])
+      setActiveDraftId(freshDraft.id)
+      setIsEditMode(false)
+      setEditingSaleId(null)
+      setOriginalSaleStatus("")
+      setPendingEditSaleId(null)
+      setPendingEditDraftId("")
+      clearEditSaleParamFromUrl()
       return
     }
     resetAddSaleForm()
@@ -1645,16 +1659,6 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                 type="button"
                                 variant="outline"
                                 size="sm"
-                                onClick={() => setIsNewProductModalOpen(true)}
-                                className="flex items-center gap-1 text-blue-600 border-blue-300 hover:bg-blue-50 h-7 text-xs"
-                              >
-                                <Plus className="h-3 w-3" />
-                                <span className="hidden sm:inline">Product</span>
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
                                 onClick={addProductRow}
                                 className="flex items-center gap-1 border-gray-300 text-gray-900 hover:bg-gray-50 h-7 text-xs bg-transparent"
                               >
@@ -1778,6 +1782,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                   size="sm"
                                   className="h-7 text-[10px] sm:text-xs px-2 flex justify-between items-center bg-blue-50/30 border-blue-200 text-blue-800 hover:bg-blue-100/50 w-full max-w-[120px]"
                                   onClick={() => setAllocatorRowId(product.id)}
+                                  disabled={product.variants && product.variants.length > 1 && !product.productVariantId}
                                 >
                                   <span className="truncate">
                                     {product.allocations?.length ? `Allocated (${product.allocations.reduce((sum, a) => sum + a.quantity, 0)})` : 'Allocate Batches'}
@@ -2399,7 +2404,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
             requiredQty={row.quantity}
             batches={row.batches || []}
             initialAllocations={row.allocations || []}
-            deviceId={deviceId}
+            deviceId={deviceId || 0}
             onSave={(allocations, autoAllocate) => {
               const totalAllocatedQty = allocations.reduce((sum: any, a: any) => sum + a.quantity, 0)
               let newCost = row.cost

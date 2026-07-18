@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Plus, Trash2, Loader2, CreditCard, Banknote, Globe, X } from "lucide-react"
+import { Plus, Trash2, Loader2, CreditCard, Banknote, Globe, X, ChevronDown } from "lucide-react"
 import { createPurchase } from "@/app/actions/purchase-actions"
 import { getDeviceCurrency } from "@/app/actions/dashboard-actions"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
@@ -37,6 +37,25 @@ interface ProductRow {
   price: number
   total: number
   wholesalePrice?: number
+  taxPercentage: number
+  taxAmount: number
+  lineTotal: number
+  variants: PurchaseVariant[]
+}
+
+interface PurchaseVariant {
+  id: number
+  name: string
+  quantity: number
+  price: number
+  taxPercentage: number
+  taxAmount: number
+  lineTotal: number
+  msp?: number | null
+  mrp?: number | null
+  stock?: number
+  shelf?: string | null
+  barcode?: string | null
 }
 
 export default function NewPurchaseModal({
@@ -64,10 +83,14 @@ export default function NewPurchaseModal({
       price: 0,
       total: 0,
       wholesalePrice: 0,
+      taxPercentage: 0,
+      taxAmount: 0,
+      lineTotal: 0,
+      variants: [],
     },
   ])
   const [subtotal, setSubtotal] = useState(0)
-  const [taxRate, setTaxRate] = useState(0)
+  
   const [taxAmount, setTaxAmount] = useState(0)
   const [discountAmount, setDiscountAmount] = useState(0)
   const [totalAmount, setTotalAmount] = useState(0)
@@ -115,11 +138,15 @@ export default function NewPurchaseModal({
           price: 0,
           total: 0,
           wholesalePrice: 0,
+      taxPercentage: 0,
+      taxAmount: 0,
+      lineTotal: 0,
+      variants: [],
         },
       ])
       setSubtotal(0)
-      setTaxRate(0)
-      setTaxAmount(0)
+      
+      
       setDiscountAmount(0)
       setTotalAmount(0)
       setFormAlert(null)
@@ -127,16 +154,16 @@ export default function NewPurchaseModal({
     }
   }, [isOpen])
 
-  // Calculate totals whenever products, tax rate, or discount changes
+  // Calculate totals whenever products or discount changes
   useEffect(() => {
-    const newSubtotal = products.reduce((sum, product) => sum + product.total, 0)
+    const newSubtotal = products.reduce((sum, product) => sum + (product.quantity * product.price), 0)
     setSubtotal(newSubtotal)
 
-    const newTaxAmount = newSubtotal * (taxRate / 100)
-    setTaxAmount(newTaxAmount)
+    const newTotalTax = products.reduce((sum, product) => sum + product.taxAmount, 0)
+    setTaxAmount(newTotalTax)
 
     // Ensure we're working with numbers
-    const newTotalAmount = Number(newSubtotal) + Number(newTaxAmount) - Number(discountAmount)
+    const newTotalAmount = Number(newSubtotal) + Number(newTotalTax) - Number(discountAmount)
     setTotalAmount(newTotalAmount)
 
     // Auto-adjust received amount based on status
@@ -145,7 +172,7 @@ export default function NewPurchaseModal({
     } else if (status === "Cancelled") {
       setReceivedAmount(0)
     }
-  }, [products, taxRate, discountAmount, status])
+  }, [products, discountAmount, status])
 
   // Handle status change
   const handleStatusChange = (newStatus: string) => {
@@ -155,22 +182,6 @@ export default function NewPurchaseModal({
     } else if (newStatus === "Cancelled") {
       setReceivedAmount(0)
     }
-  }
-
-  // Add a new product row
-  const addProductRow = () => {
-    setProducts([
-      ...products,
-      {
-        id: crypto.randomUUID(),
-        productId: null,
-        productName: "",
-        quantity: 1,
-        price: 0,
-        total: 0,
-        wholesalePrice: 0,
-      },
-    ])
   }
 
   // Remove a product row
@@ -190,6 +201,11 @@ export default function NewPurchaseModal({
           if (updates.quantity !== undefined || updates.price !== undefined) {
             updatedProduct.total = updatedProduct.quantity * updatedProduct.price
           }
+          // Recalculate tax amount and line total if tax percentage, quantity, or price changed
+          if (updates.taxPercentage !== undefined || updates.quantity !== undefined || updates.price !== undefined) {
+            updatedProduct.taxAmount = updatedProduct.quantity * updatedProduct.price * (updatedProduct.taxPercentage / 100)
+            updatedProduct.lineTotal = updatedProduct.total + updatedProduct.taxAmount
+          }
           return updatedProduct
         }
         return product
@@ -204,17 +220,78 @@ export default function NewPurchaseModal({
     productName: string,
     price: number,
     wholesalePrice?: number,
+    _stock?: number,
+    productObj?: any,
   ) => {
     // Use wholesale price if available, otherwise use the provided price
     const priceToUse = wholesalePrice || price
+    const defaultTaxPercentage = productObj?.tax_percentage || 0
 
+    const sourceVariants = Array.isArray(productObj?.variants) ? productObj.variants : []
+    const variants = sourceVariants.map((variant: any, index: number) => ({
+      id: Number(variant.id),
+      name: String(variant.name || (index === 0 ? "Default" : "Variant")),
+      // A single Default variant preserves the existing one-quantity UI.
+      quantity: 0,
+      price: Number(variant.cost_price ?? variant.wholesale_price ?? priceToUse ?? 0),
+      taxPercentage: defaultTaxPercentage,
+      taxAmount: 0,
+      lineTotal: 0,
+      msp: variant.msp != null ? Number(variant.msp) : null,
+      mrp: variant.mrp != null ? Number(variant.mrp) : null,
+      stock: Number(variant.stock || 0),
+      shelf: variant.shelf || null,
+      barcode: variant.barcode || null,
+    }))
     updateProductRow(id, {
       productId,
       productName,
       price: priceToUse, // Use wholesale price for purchases
       wholesalePrice,
-      total: (products.find((p) => p.id === id)?.quantity || 1) * priceToUse,
+      taxPercentage: defaultTaxPercentage,
+      total: variants.length > 1 ? 0 : (products.find((p) => p.id === id)?.quantity || 1) * priceToUse,
+      variants,
     })
+  }
+
+  // Add a new product row
+  const addProductRow = () => {
+    setProducts([
+      ...products,
+      {
+        id: crypto.randomUUID(),
+        productId: null,
+        productName: "",
+        quantity: 1,
+        price: 0,
+        total: 0,
+        wholesalePrice: 0,
+      taxPercentage: 0,
+      taxAmount: 0,
+      lineTotal: 0,
+      variants: [],
+      },
+    ])
+  }
+
+  const updateVariant = (rowId: string, variantId: number, updates: Partial<PurchaseVariant>) => {
+    setProducts(current => current.map(row => {
+      if (row.id !== rowId) return row
+      const variants = row.variants.map(variant => {
+        if (variant.id === variantId) {
+          const updatedVariant = { ...variant, ...updates }
+          // Recalculate tax amount and line total if tax percentage, quantity, or price changed
+          if (updates.taxPercentage !== undefined || updates.quantity !== undefined || updates.price !== undefined) {
+            updatedVariant.taxAmount = updatedVariant.quantity * updatedVariant.price * (updatedVariant.taxPercentage / 100)
+            updatedVariant.lineTotal = (updatedVariant.quantity * updatedVariant.price) + updatedVariant.taxAmount
+          }
+          return updatedVariant
+        }
+        return variant
+      })
+      const total = variants.reduce((sum, variant) => sum + variant.quantity * variant.price, 0)
+      return { ...row, variants, total }
+    }))
   }
 
   // Track which row is opening the add product modal
@@ -277,10 +354,28 @@ export default function NewPurchaseModal({
       return
     }
 
-    if (!products.every((p) => p.productId && p.quantity > 0)) {
+    const purchaseItems = products.flatMap((p) => {
+      if (!p.productId) return []
+      // Multi-variant products submit one item per entered variant. Default-only
+      // products intentionally retain the old product-row quantity and cost fields.
+      if (p.variants.length > 1) {
+        return p.variants.filter(v => v.quantity > 0).map(v => {
+          const taxPercentage = v.taxPercentage || 0
+          const taxAmount = v.quantity * v.price * (taxPercentage / 100)
+          const lineTotal = (v.quantity * v.price) + taxAmount
+          return { product_id: p.productId, variant_id: v.id, quantity: v.quantity, price: v.price, tax_percentage: taxPercentage, tax_amount: taxAmount, line_total: lineTotal }
+        })
+      }
+      const taxPercentage = p.taxPercentage || 0
+      const taxAmount = p.quantity * p.price * (taxPercentage / 100)
+      const lineTotal = (p.quantity * p.price) + taxAmount
+      return p.quantity > 0 ? [{ product_id: p.productId, variant_id: p.variants[0]?.id, quantity: p.quantity, price: p.price, tax_percentage: taxPercentage, tax_amount: taxAmount, line_total: lineTotal }] : []
+    })
+
+    if (purchaseItems.length === 0) {
       setFormAlert({
         type: "error",
-        message: "Please select products and ensure quantities are greater than zero",
+        message: "Please select products and enter a quantity greater than zero",
       })
       return
     }
@@ -318,13 +413,7 @@ export default function NewPurchaseModal({
       formData.append("received_amount", receivedAmount.toString())
 
       // Prepare items
-      const items = products.map((p) => ({
-        product_id: p.productId,
-        quantity: p.quantity,
-        price: p.price,
-      }))
-
-      formData.append("items", JSON.stringify(items))
+      formData.append("items", JSON.stringify(purchaseItems))
 
       // Submit form
       const result = await createPurchase(formData)
@@ -416,7 +505,6 @@ export default function NewPurchaseModal({
                       <SelectContent className="bg-white border-gray-200">
                         <SelectItem value="Credit">Credit</SelectItem>
                         <SelectItem value="Paid">Paid</SelectItem>
-                        <SelectItem value="Cancelled">Cancelled</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -431,7 +519,6 @@ export default function NewPurchaseModal({
                     </SelectTrigger>
                     <SelectContent className="bg-white border-gray-200">
                       <SelectItem value="Delivered">Delivered</SelectItem>
-                      <SelectItem value="Pending">Pending</SelectItem>
                       <SelectItem value="Ordered">Ordered</SelectItem>
                     </SelectContent>
                   </Select>
@@ -494,24 +581,6 @@ export default function NewPurchaseModal({
                       </span>
                     </div>
                     <div className="flex justify-between items-center">
-                      <span className="text-gray-600">Tax (%):</span>
-                      <Input
-                        type="number"
-                        min="0"
-                        max="100"
-                        step="0.01"
-                        value={taxRate}
-                        onChange={(e) => setTaxRate(Number.parseFloat(e.target.value) || 0)}
-                        className="w-16 h-7 text-xs text-center bg-white border-gray-300"
-                      />
-                    </div>
-                    <div className="flex justify-between text-gray-600">
-                      <span>Tax Amount:</span>
-                      <span>
-                        {localCurrency} {taxAmount.toFixed(2)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center">
                       <span className="text-gray-600">Discount:</span>
                       <Input
                         type="number"
@@ -523,7 +592,7 @@ export default function NewPurchaseModal({
                       />
                     </div>
                     <div className="flex justify-between font-bold text-green-600 border-t border-gray-200 pt-2">
-                      <span>Total:</span>
+                      <span>Grand Total:</span>
                       <span>
                         {localCurrency} {totalAmount.toFixed(2)}
                       </span>
@@ -565,25 +634,29 @@ export default function NewPurchaseModal({
 
               <div className="flex-1 overflow-y-auto">
                 <div className="sticky top-0 z-10 grid grid-cols-12 gap-2 p-2 bg-green-50 font-medium text-sm text-green-800 border-b border-gray-200">
-                  <div className="col-span-5">Product</div>
-                  <div className="col-span-2 text-center">Quantity</div>
-                  <div className="col-span-2 text-center">Price</div>
-                  <div className="col-span-2 text-center">Total</div>
+                  <div className="col-span-4">Product</div>
+                  <div className="col-span-1 text-center">Qty</div>
+                  <div className="col-span-2 text-center">Cost</div>
+                  <div className="col-span-1 text-center">Tax %</div>
+                  <div className="col-span-2 text-center">Tax Amt</div>
+                  <div className="col-span-2 text-center">Line Total</div>
                   <div className="col-span-1"></div>
                 </div>
 
                 {products.map((product, index) => (
+                  <div key={product.id}>
+                  {product.variants.length <= 1 && (
                   <div
                     key={product.id}
                     className={`grid grid-cols-12 gap-2 p-2 items-center border-b border-gray-200 ${
                       index % 2 === 0 ? "bg-white" : "bg-gray-50"
                     } hover:bg-green-50 transition-colors`}
                   >
-                    <div className="col-span-5">
+                    <div className="col-span-4">
                       <ProductSelectSimple
                         value={product.productId}
-                        onChange={(productId, productName, price, wholesalePrice) =>
-                          handleProductSelect(product.id, productId, productName, price, wholesalePrice)
+                        onChange={(productId, productName, price, wholesalePrice, stock, productObj) =>
+                          handleProductSelect(product.id, productId, productName, price, wholesalePrice, stock, productObj)
                         }
                         onAddNew={() => handleAddNewFromRow(product.id)}
                         userId={userId}
@@ -591,7 +664,7 @@ export default function NewPurchaseModal({
                         allowServices={false}
                       />
                     </div>
-                    <div className="col-span-2">
+                    <div className="col-span-1">
                       <Input
                         type="number"
                         min="1"
@@ -614,8 +687,27 @@ export default function NewPurchaseModal({
                         className="text-center h-9 bg-white border-gray-300 text-gray-900"
                       />
                     </div>
+                    <div className="col-span-1">
+                      <Input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.01"
+                        value={product.taxPercentage}
+                        onChange={(e) => {
+                          const value = Number.parseFloat(e.target.value) || 0
+                          if (value >= 0 && value <= 100) {
+                            updateProductRow(product.id, { taxPercentage: value })
+                          }
+                        }}
+                        className="text-center h-9 bg-white border-gray-300 text-gray-900"
+                      />
+                    </div>
+                    <div className="col-span-2 flex items-center justify-center text-sm text-gray-600">
+                      {localCurrency} {product.taxAmount.toFixed(2)}
+                    </div>
                     <div className="col-span-2 flex items-center justify-center font-medium text-gray-900">
-                      {localCurrency} {product.total.toFixed(2)}
+                      {localCurrency} {product.lineTotal.toFixed(2)}
                     </div>
                     <div className="col-span-1 flex justify-center">
                       <Button
@@ -629,6 +721,36 @@ export default function NewPurchaseModal({
                         <Trash2 className="h-4 w-4 text-red-500" />
                       </Button>
                     </div>
+                  </div>
+                  )}
+                  {product.variants.length > 1 && (
+                    <div className="mx-2 mb-3 overflow-hidden rounded-lg border border-emerald-200 bg-white shadow-sm">
+                      <div className="flex items-center gap-2 border-b border-emerald-100 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-900">
+                        <ChevronDown className="h-4 w-4" />
+                        Variants <span className="font-normal text-emerald-700">({product.variants.length})</span>
+                      </div>
+                      <div className="grid grid-cols-12 gap-2 border-b border-gray-100 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-600">
+                        <div className="col-span-2">Variant</div><div className="col-span-1 text-center">Qty</div><div className="col-span-1 text-center">Cost</div><div className="col-span-1 text-center">Tax %</div><div className="col-span-2 text-center">Tax Amt</div><div className="col-span-2 text-center">Line Total</div><div className="col-span-1 text-center">MSP</div><div className="col-span-1 text-center">MRP</div>
+                      </div>
+                      {product.variants.map(variant => (
+                        <div key={variant.id} className="grid grid-cols-12 gap-2 items-center border-b border-gray-100 px-3 py-2 last:border-b-0">
+                          <div className="col-span-2 min-w-0"><p className="truncate text-sm font-medium text-gray-900">{variant.name}</p><p className="truncate text-[11px] text-gray-500">Stock: {variant.stock || 0}{variant.shelf ? ` · ${variant.shelf}` : ""}{variant.barcode ? ` · ${variant.barcode}` : ""}</p></div>
+                          <Input type="number" min="0" className="col-span-1 h-8 text-center" value={variant.quantity || ""} placeholder="0" onChange={e => updateVariant(product.id, variant.id, { quantity: Math.max(0, Number.parseInt(e.target.value) || 0) })} />
+                          <Input type="number" min="0" step="0.01" className="col-span-1 h-8 text-center" value={variant.price} onChange={e => updateVariant(product.id, variant.id, { price: Number.parseFloat(e.target.value) || 0 })} />
+                          <Input type="number" min="0" max="100" step="0.01" className="col-span-1 h-8 text-center" value={variant.taxPercentage} onChange={e => {
+                            const value = Number.parseFloat(e.target.value) || 0
+                            if (value >= 0 && value <= 100) {
+                              updateVariant(product.id, variant.id, { taxPercentage: value })
+                            }
+                          }} />
+                          <div className="col-span-2 flex items-center justify-center text-xs text-gray-600">{localCurrency} {variant.taxAmount.toFixed(2)}</div>
+                          <div className="col-span-2 flex items-center justify-center text-xs font-medium text-gray-900">{localCurrency} {variant.lineTotal.toFixed(2)}</div>
+                          <div className="col-span-1 rounded bg-gray-50 px-1 py-2 text-center text-xs text-gray-600">{variant.msp ?? "–"}</div>
+                          <div className="col-span-1 rounded bg-gray-50 px-1 py-2 text-center text-xs text-gray-600">{variant.mrp ?? "–"}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   </div>
                 ))}
               </div>

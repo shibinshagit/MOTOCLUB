@@ -842,6 +842,7 @@ export default function NewProductModal({
 
       const submitFormData = new FormData()
       submitFormData.append("name", formData.name)
+      submitFormData.append("barcode", formData.barcode || "")
       submitFormData.append("company_name", formData.companyName)
       submitFormData.append("category", formData.category)
       if (formData.categoryId) submitFormData.append("category_id", formData.categoryId.toString())
@@ -1010,6 +1011,18 @@ export default function NewProductModal({
                     value={formData.companyName}
                     onChange={handleChange}
                     placeholder="Brand name"
+                    className={inputClass()}
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <FieldLabel htmlFor="barcode">Barcode</FieldLabel>
+                  <Input
+                    id="barcode"
+                    name="barcode"
+                    value={formData.barcode || ""}
+                    onChange={handleChange}
+                    placeholder="Product barcode (optional)"
                     className={inputClass()}
                   />
                 </div>

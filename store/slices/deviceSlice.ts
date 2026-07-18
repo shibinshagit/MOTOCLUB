@@ -90,7 +90,10 @@ const saveStateToStorage = (state: DeviceState) => {
 
 const deviceSlice = createSlice({
   name: "device",
-  initialState: loadStateFromStorage(),
+  // The server and the browser must render the same initial tree. Reading
+  // localStorage here makes the browser render an authenticated redirect
+  // during hydration while the server renders the login form.
+  initialState,
   reducers: {
     setDeviceData: (
       state,

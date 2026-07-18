@@ -3,12 +3,14 @@ import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import { Check, ChevronsUpDown, Plus, Loader2, Search, X, Package, Wrench } from "lucide-react"
+import { Check, ChevronsUpDown, Plus, Loader2, Search, X, Package, Wrench, Tag } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { getProducts } from "@/app/actions/product-actions"
 import { getDeviceServices } from "@/app/actions/service-actions"
+import { getCategories } from "@/app/actions/category-actions"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useSelector } from "react-redux"
 import { selectDeviceId } from "@/store/slices/deviceSlice"
 
@@ -70,6 +72,9 @@ export default function ProductSelectSimple({
   const [isServiceMode, setIsServiceMode] = useState(false)
   const [selectedProduct, setSelectedProduct] = useState<any>(null)
   const [hasSearched, setHasSearched] = useState(false)
+  const [categories, setCategories] = useState<any[]>([])
+  const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null)
+  const [loadingCategories, setLoadingCategories] = useState(false)
 
   const debouncedSearchTerm = useDebounce(localSearchTerm, 300)
 
@@ -79,6 +84,13 @@ export default function ProductSelectSimple({
       fetchServices()
     }
   }, [allowServices])
+
+  // Fetch categories when dialog opens
+  useEffect(() => {
+    if (open && !isServiceMode) {
+      fetchCategories()
+    }
+  }, [open, isServiceMode])
 
   // Search products
   useEffect(() => {
@@ -90,6 +102,19 @@ export default function ProductSelectSimple({
       setHasSearched(false)
     }
   }, [debouncedSearchTerm, isServiceMode, open, userId])
+
+  // Reload products when category changes
+  useEffect(() => {
+    if (open && !isServiceMode) {
+      if (debouncedSearchTerm.trim() !== "") {
+        searchProducts(debouncedSearchTerm)
+      } else if (selectedCategoryId !== null) {
+        // Load products for selected category even without search term
+        searchProducts("")
+        setHasSearched(true)
+      }
+    }
+  }, [selectedCategoryId])
 
   // Refresh trigger
   useEffect(() => {
@@ -131,12 +156,12 @@ export default function ProductSelectSimple({
 
       const searchNorm = normalize(searchTerm)
 
-      // Try backend API
-      let result = await getProducts(userId, searchBufferSize, searchTerm)
+      // Try backend API with category filter
+      let result = await getProducts(userId, searchBufferSize, searchTerm, selectedCategoryId)
 
       // If no backend result → client-side filtering
       if (!result.success || result.data.length === 0) {
-        const broadResult = await getProducts(userId, searchBufferSize * 2, "")
+        const broadResult = await getProducts(userId, searchBufferSize * 2, "", selectedCategoryId)
 
         if (broadResult.success && broadResult.data.length > 0) {
           const filteredProducts = broadResult.data.filter((product: any) => {
@@ -195,6 +220,22 @@ export default function ProductSelectSimple({
       }
     } catch (error) {
       console.error("Error fetching services:", error)
+    }
+  }
+
+  const fetchCategories = async () => {
+    setLoadingCategories(true)
+    try {
+      const result = await getCategories(userId)
+      if (result.success && result.data) {
+        setCategories(result.data)
+      } else {
+        console.error("Failed to load categories:", result.message)
+      }
+    } catch (error) {
+      console.error("Error fetching categories:", error)
+    } finally {
+      setLoadingCategories(false)
     }
   }
 
@@ -257,6 +298,7 @@ export default function ProductSelectSimple({
     setLocalSearchTerm("")
     setProducts([])
     setHasSearched(false)
+    setSelectedCategoryId(null)
   }
 
   const handleAddNew = () => {
@@ -270,7 +312,16 @@ export default function ProductSelectSimple({
     setLocalSearchTerm("")
     setProducts([])
     setHasSearched(false)
+    setSelectedCategoryId(null)
     setSelectedProduct(null) // Clear selection when switching modes
+  }
+
+  const handleCategoryChange = (value: string) => {
+    if (value === "all") {
+      setSelectedCategoryId(null)
+    } else {
+      setSelectedCategoryId(Number(value))
+    }
   }
 
   return (
@@ -320,6 +371,28 @@ export default function ProductSelectSimple({
 
           <div className="p-4 border-b border-gray-200 bg-white">
             <div className="space-y-3">
+              {!isServiceMode && (
+                <div className="flex items-center gap-2">
+                  <Label className="text-sm font-medium text-gray-700 whitespace-nowrap">Category</Label>
+                  <Select
+                    value={selectedCategoryId?.toString() || "all"}
+                    onValueChange={handleCategoryChange}
+                    disabled={loadingCategories}
+                  >
+                    <SelectTrigger className="h-9 bg-white border-gray-300 text-gray-900">
+                      <SelectValue placeholder="All Categories" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-white border-gray-200">
+                      <SelectItem value="all">All Categories</SelectItem>
+                      {categories.map((category) => (
+                        <SelectItem key={category.id} value={category.id.toString()}>
+                          {category.parent_name ? `${category.parent_name} › ${category.name}` : category.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
                 <Input
@@ -374,15 +447,18 @@ export default function ProductSelectSimple({
                   Searching {isServiceMode ? "services" : "products"}...
                 </p>
               </div>
-            ) : !hasSearched && !isServiceMode && localSearchTerm.trim() === "" ? (
+            ) : !hasSearched && !isServiceMode && localSearchTerm.trim() === "" && selectedCategoryId === null ? (
               <div className="p-4 text-center">
                 <Search className="h-8 w-8 mx-auto text-gray-400 mb-2" />
                 <p className="text-sm text-gray-500">Start typing to search products...</p>
               </div>
             ) : filteredItems.length === 0 ? (
               <div className="p-4 text-center">
+                <Tag className="h-8 w-8 mx-auto text-gray-400 mb-2" />
                 <p className="py-3 text-sm text-gray-500">
-                  No {isServiceMode ? "services" : "products"} found.
+                  {!isServiceMode && selectedCategoryId
+                    ? `No products found in this category.`
+                    : `No ${isServiceMode ? "services" : "products"} found.`}
                 </p>
               </div>
             ) : (
@@ -390,6 +466,11 @@ export default function ProductSelectSimple({
                 <div className="text-xs font-medium text-gray-500 px-3 py-2">
                   {isServiceMode ? "Services" : "Products"} ({filteredItems.length}
                   {!isServiceMode && filteredItems.length === searchBufferSize ? "+" : ""})
+                  {!isServiceMode && selectedCategoryId && categories.find(c => c.id === selectedCategoryId) && (
+                    <span className="ml-2 text-gray-400">
+                      in {categories.find(c => c.id === selectedCategoryId)?.name}
+                    </span>
+                  )}
                 </div>
                 <div>
                   {filteredItems.map((item) => (

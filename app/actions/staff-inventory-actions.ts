@@ -36,32 +36,9 @@ async function attachStaffVariantsAndBatches(products: any[], deviceId: number) 
     AND pbds.device_id = ${deviceId}
     ORDER BY pb.id ASC
   `
-
-  // Get variant stocks for the device
-  const variantStocks = await sql`
-    SELECT pds.* FROM product_device_stock pds
-    WHERE pds.product_id = ANY(${productIds}) 
-    AND pds.product_variant_id IS NOT NULL
-    AND pds.device_id = ${deviceId}
-  `
   
   const variantsByProductId = new Map<number, any[]>()
   const batchesByProductId = new Map<number, any[]>()
-  
-  // Group variants
-  for (const v of variants) {
-    if (!variantsByProductId.has(v.product_id)) variantsByProductId.set(v.product_id, [])
-    
-    // Add device stock for this variant
-    const stockRecord = variantStocks.find(
-      s => s.product_id === v.product_id && s.product_variant_id === v.id
-    )
-    
-    variantsByProductId.get(v.product_id)!.push({
-      ...v,
-      device_stock: stockRecord ? Number(stockRecord.stock) : 0,
-    })
-  }
   
   // Group batches
   for (const b of batches) {
@@ -78,17 +55,38 @@ async function attachStaffVariantsAndBatches(products: any[], deviceId: number) 
     if (b.device_stock !== null) {
       existingBatch.stocks.push({
         device_id: b.device_id,
-        stock: b.device_stock
+        stock: Number(b.device_stock)
       })
     }
   }
   
+  // Group variants
+  for (const v of variants) {
+    if (!variantsByProductId.has(v.product_id)) variantsByProductId.set(v.product_id, [])
+    
+    // Calculate device stock for this variant by summing its batches' device_stock
+    const variantBatches = batches.filter(b => b.product_variant_id === v.id)
+    const device_stock = variantBatches.reduce((sum, b) => sum + (b.device_stock ? Number(b.device_stock) : 0), 0)
+    
+    variantsByProductId.get(v.product_id)!.push({
+      ...v,
+      device_stock
+    })
+  }
+  
   // Attach to products
-  return products.map(p => ({
-    ...p,
-    variants: variantsByProductId.get(p.id) || [],
-    batches: batchesByProductId.get(p.id) || []
-  }))
+  return products.map(p => {
+    const pVariants = variantsByProductId.get(p.id) || []
+    const pBatches = batchesByProductId.get(p.id) || []
+    const total_stock = pVariants.reduce((sum, v) => sum + v.device_stock, 0)
+
+    return {
+      ...p,
+      stock: total_stock,
+      variants: pVariants,
+      batches: pBatches
+    }
+  })
 }
 
 export async function getStaffInventory(searchTerm?: string) {
@@ -100,85 +98,40 @@ export async function getStaffInventory(searchTerm?: string) {
     const deviceId = session.deviceId
     const companyId = session.companyId
 
-    let query = sql`
-      SELECT 
-        p.id, p.name, p.category, p.description, p.wholesale_price, p.msp, p.barcode, 
-        p.image_url, p.has_variants, p.is_batch_managed,
-        COALESCE(SUM(pds.stock), 0) as total_stock,
-        MAX(d.name) as branch_name
-      FROM products p
-      LEFT JOIN product_device_stock pds ON p.id = pds.product_id AND pds.device_id = ${deviceId} AND pds.product_variant_id IS NULL
-      LEFT JOIN devices d ON pds.device_id = d.id
-      WHERE p.created_by IN (SELECT id FROM devices WHERE company_id = ${companyId})
-    `
-
-    if (searchTerm) {
-      const term = `%${searchTerm}%`
-      query = sql`
-        SELECT 
-          p.id, p.name, p.category, p.description, p.wholesale_price, p.msp, p.barcode, 
-          p.image_url, p.has_variants, p.is_batch_managed,
-          COALESCE(SUM(pds.stock), 0) as total_stock,
-          MAX(d.name) as branch_name
-        FROM products p
-        LEFT JOIN product_device_stock pds ON p.id = pds.product_id AND pds.device_id = ${deviceId} AND pds.product_variant_id IS NULL
-        LEFT JOIN devices d ON pds.device_id = d.id
-        WHERE p.created_by IN (SELECT id FROM devices WHERE company_id = ${companyId})
-        AND (
-          p.name ILIKE ${term} OR 
-          p.barcode ILIKE ${term} OR 
-          p.category ILIKE ${term}
-        )
-      `
-    }
-
-    // Must append GROUP BY and ORDER BY depending on whether we searched or not
-    // We can just construct the full query again to be safe with tagged templates
     let finalQuery;
     if (searchTerm) {
       const term = `%${searchTerm}%`
       finalQuery = await sql`
         SELECT 
-          p.id, p.name, p.category, p.description, p.wholesale_price as selling_price, p.msp, p.barcode, 
+          p.id, p.name, p.category, p.description, 
           p.image_url, p.has_variants, p.is_batch_managed,
-          COALESCE(SUM(pds.stock), 0) as total_stock,
-          MAX(d.name) as branch_name
+          (SELECT name FROM devices WHERE id = ${deviceId}) as branch_name
         FROM products p
-        LEFT JOIN product_device_stock pds ON p.id = pds.product_id AND pds.device_id = ${deviceId} AND pds.product_variant_id IS NULL
-        LEFT JOIN devices d ON pds.device_id = d.id
         WHERE p.created_by IN (SELECT id FROM devices WHERE company_id = ${companyId})
         AND (
           p.name ILIKE ${term} OR 
-          p.barcode ILIKE ${term} OR 
-          p.category ILIKE ${term}
+          p.category ILIKE ${term} OR
+          EXISTS (
+            SELECT 1 FROM product_variants pv 
+            WHERE pv.product_id = p.id 
+            AND (pv.barcode ILIKE ${term} OR pv.sku ILIKE ${term} OR pv.name ILIKE ${term})
+          )
         )
-        GROUP BY p.id
         ORDER BY p.name ASC
       `
     } else {
       finalQuery = await sql`
         SELECT 
-          p.id, p.name, p.category, p.description, p.wholesale_price as selling_price, p.msp, p.barcode, 
+          p.id, p.name, p.category, p.description, 
           p.image_url, p.has_variants, p.is_batch_managed,
-          COALESCE(SUM(pds.stock), 0) as total_stock,
-          MAX(d.name) as branch_name
+          (SELECT name FROM devices WHERE id = ${deviceId}) as branch_name
         FROM products p
-        LEFT JOIN product_device_stock pds ON p.id = pds.product_id AND pds.device_id = ${deviceId} AND pds.product_variant_id IS NULL
-        LEFT JOIN devices d ON pds.device_id = d.id
-        WHERE p.created_by IN (
-          SELECT id FROM devices WHERE company_id = ${companyId}
-        )
-        GROUP BY p.id
+        WHERE p.created_by IN (SELECT id FROM devices WHERE company_id = ${companyId})
         ORDER BY p.name ASC
       `
     }
 
-    const productsWithStock = finalQuery.map(p => ({
-      ...p,
-      stock: Number(p.total_stock)
-    }))
-
-    const finalProducts = await attachStaffVariantsAndBatches(productsWithStock, deviceId)
+    const finalProducts = await attachStaffVariantsAndBatches(finalQuery, deviceId)
 
     return { success: true, data: finalProducts }
   } catch (error) {

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { format } from "date-fns"
-import { ChevronLeft, ChevronRight } from "lucide-react"
+import { ChevronLeft, ChevronRight, Search, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -80,6 +80,8 @@ interface PurchaseExcelTableProps {
   periodLabel: string
   isCurrentMonth: boolean
   canGoNextMonth: boolean
+  searchTerm: string
+  onSearchChange: (value: string) => void
   onPreviousMonth: () => void
   onNextMonth: () => void
   onCurrentMonth: () => void
@@ -120,6 +122,8 @@ export default function PurchaseExcelTable({
   periodLabel,
   isCurrentMonth,
   canGoNextMonth,
+  searchTerm,
+  onSearchChange,
   onPreviousMonth,
   onNextMonth,
   onCurrentMonth,
@@ -296,6 +300,26 @@ export default function PurchaseExcelTable({
           </div>
 
           <div className="ml-auto flex min-h-[28px] items-center gap-2">
+            <div className="relative w-72">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+              <input
+                value={searchTerm}
+                onChange={(event) => onSearchChange(event.target.value)}
+                placeholder="Search purchases, supplier, product..."
+                aria-label="Global purchase search"
+                className="h-7 w-full rounded-md border border-slate-200 bg-white py-1 pl-8 pr-7 text-xs outline-none transition focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+              />
+              {searchTerm ? (
+                <button
+                  type="button"
+                  onClick={() => onSearchChange("")}
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
+                  aria-label="Clear global purchase search"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              ) : null}
+            </div>
             {activeFilterCount > 0 ? (
               <>
                 <span className="text-xs font-medium text-violet-700">

@@ -69,7 +69,7 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
   const stats = useMemo(() => {
     const total = products.length
     const available = products.filter(p => p.stock > 0).length
-    const low = products.filter(p => p.stock > 0 && p.stock < 5).length
+    const low = products.filter(p => p.stock > 0 && p.stock <= 5).length
     const out = products.filter(p => p.stock <= 0).length
     return { total, available, low, out }
   }, [products])
@@ -181,13 +181,36 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
                         </div>
                       </td>
                       <td className="px-6 py-3 text-slate-600">{product.category || "—"}</td>
-                      <td className="px-6 py-3 font-mono text-xs text-slate-500">{product.barcode || "—"}</td>
+                      <td className="px-6 py-3 font-mono text-xs text-slate-500">{product.variants?.[0]?.barcode || "—"}</td>
                       <td className="px-6 py-3 text-slate-600">{product.branch_name || "Main"}</td>
                       <td className="px-6 py-3 text-right font-medium text-slate-800">
-                        AED {Number(product.selling_price || 0).toFixed(2)}
+                        {(() => {
+                          let prices: number[] = []
+                          if (product.batches && product.batches.length > 0) {
+                            prices = product.batches.map((b: any) => Number(b.selling_price || 0)).filter((p: number) => p > 0)
+                          }
+                          if (prices.length === 0 && product.variants) {
+                            prices = product.variants.map((v: any) => Number(v.selling_price || 0)).filter((p: number) => p > 0)
+                          }
+                          
+                          if (!product.has_variants || (product.variants && product.variants.length <= 1)) {
+                             const singlePrice = prices.length > 0 ? Math.max(...prices) : Number(product.variants?.[0]?.msp || 0)
+                             return `AED ${singlePrice.toFixed(2)}`
+                          }
+
+                          if (prices.length > 0) {
+                             const minPrice = Math.min(...prices)
+                             return `From AED ${minPrice.toFixed(2)}`
+                          }
+                          
+                          return "AED 0.00"
+                        })()}
                       </td>
                       <td className="px-6 py-3 text-right font-medium text-slate-600">
-                        {Number(product.msp || 0) > 0 ? `AED ${Number(product.msp).toFixed(2)}` : "—"}
+                        {(() => {
+                          const msp = Number(product.variants?.[0]?.msp || 0)
+                          return msp > 0 ? `AED ${msp.toFixed(2)}` : "—"
+                        })()}
                       </td>
                       <td className="px-6 py-3 text-right font-bold text-slate-700">
                         {product.stock}
@@ -197,7 +220,7 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
                           <span className="inline-flex items-center px-2 py-1 rounded-full text-[10px] font-bold bg-red-50 text-red-700 border border-red-100">
                             OUT OF STOCK
                           </span>
-                        ) : product.stock < 5 ? (
+                        ) : product.stock <= 5 ? (
                           <span className="inline-flex items-center px-2 py-1 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-100">
                             LOW STOCK
                           </span>

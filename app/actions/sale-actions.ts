@@ -166,14 +166,8 @@ async function updateProductStock(
         DO UPDATE SET stock = ${nextBatchStock}, updated_at = NOW()
       `
 
-      // Also update remaining_quantity in product_batches
-      if (operation === "subtract") {
-        await sql`
-          UPDATE product_batches 
-          SET remaining_quantity = GREATEST(0, remaining_quantity - ${quantityChange})
-          WHERE id = ${batchId}
-        `
-      }
+      // remaining_quantity is a derived database value synchronized by the
+      // product_batch_device_stock trigger. Never mutate it here.
 
       // 2. Aggregate variant stock from batches
       const totalStockRows = await sql`
@@ -207,11 +201,6 @@ async function updateProductStock(
           UPDATE product_batch_device_stock
           SET stock = ${nextStock}, updated_at = NOW()
           WHERE batch_id = ${batch.batch_id} AND device_id = ${deviceId}
-        `
-        await sql`
-          UPDATE product_batches 
-          SET remaining_quantity = GREATEST(0, remaining_quantity - ${take})
-          WHERE id = ${batch.batch_id}
         `
       }
     } else if (operation === "add") {
@@ -595,11 +584,17 @@ export async function getSaleDetails(saleId: number) {
           si.*,
           p.name as product_name,
           p.category as product_category,
-          COALESCE(pds.stock, 0) as stock,
-          p.barcode,
+          COALESCE((
+            SELECT SUM(pbds.stock)
+            FROM product_batch_device_stock pbds
+            JOIN product_batches stock_batch ON stock_batch.id = pbds.batch_id
+            WHERE stock_batch.product_id = p.id
+              AND pbds.device_id = ${stockDeviceId}
+          ), 0) as stock,
+          pv.barcode,
           p.description as product_description,
-          p.wholesale_price as product_wholesale_price,
-          COALESCE(si.cost, si.wholesale_price, 0) as actual_cost,
+          pv.wholesale_price as product_wholesale_price,
+          COALESCE(si.cost, pv.wholesale_price, 0) as actual_cost,
           pv.name as variant_name,
           pb.batch_no as batch_number,
           s.name as service_name,
@@ -616,7 +611,6 @@ export async function getSaleDetails(saleId: number) {
         LEFT JOIN products p ON si.product_id = p.id AND NOT EXISTS (SELECT 1 FROM services s WHERE s.id = si.product_id)
         LEFT JOIN product_variants pv ON si.product_variant_id = pv.id
         LEFT JOIN product_batches pb ON si.batch_id = pb.id
-        LEFT JOIN product_device_stock pds ON pds.product_id = p.id AND pds.device_id = ${stockDeviceId}
         LEFT JOIN services s ON si.product_id = s.id
         WHERE si.sale_id = ${saleId}
         ORDER BY si.id
@@ -856,6 +850,23 @@ export async function addSale(saleData: any) {
                  allocations.push({ batchId: null, quantity: remainingQty })
               }
            }
+        }
+      }
+
+      // Allocation input may come from an older client or a crafted request.
+      // Enforce the Product -> Variant -> Batch boundary on the server too.
+      if (!isService && isBatchManaged) {
+        for (const allocation of allocations) {
+          if (!allocation.batchId || allocation.quantity <= 0) continue
+          const batch = await sql`
+            SELECT id FROM product_batches
+            WHERE id = ${allocation.batchId}
+              AND product_id = ${item.productId}
+              AND product_variant_id = ${variantId}
+          `
+          if (batch.length === 0) {
+            throw new Error("Selected batch does not belong to the selected product variant")
+          }
         }
       }
 
@@ -1467,6 +1478,18 @@ export async function updateSale(saleData: any) {
           
           for (const alloc of allocations) {
             if (alloc.quantity <= 0) continue;
+            if (!alloc.batchId) {
+              throw new Error("A batch-managed sale allocation requires a batch")
+            }
+            const batch = await sql`
+              SELECT id FROM product_batches
+              WHERE id = ${alloc.batchId}
+                AND product_id = ${item.productId}
+                AND product_variant_id = ${resolvedVariantId}
+            `
+            if (batch.length === 0) {
+              throw new Error("Selected batch does not belong to the selected product variant")
+            }
             
             // Insert allocation
             await sql`

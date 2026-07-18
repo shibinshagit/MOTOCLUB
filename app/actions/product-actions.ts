@@ -190,10 +190,10 @@ async function upsertDeviceStock(_productId: number, _deviceId: number, _stock: 
 // Add this improved version to your product-actions.ts file
 // Replace the existing getProducts function
 
-export async function getProducts(userId?: number, limit?: number, searchTerm?: string) {
+export async function getProducts(userId?: number, limit?: number, searchTerm?: string, categoryId?: number | null) {
   resetConnectionState()
 
-  console.log("getProducts called with:", { userId, limit, searchTerm })
+  console.log("getProducts called with:", { userId, limit, searchTerm, categoryId })
 
   try {
     let products
@@ -208,203 +208,395 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
       console.log('Exact ID search for:', productId)
       
       if (userId) {
-        products = await sql`
-          SELECT 
-            p.*,
-            c.name as category_name
-          FROM products p
-          LEFT JOIN product_categories c ON p.category_id = c.id
-          WHERE p.id = ${productId}
-          AND p.created_by IN (
-            SELECT d2.id
-            FROM devices d1
-            JOIN devices d2 ON d2.company_id = d1.company_id
-            WHERE d1.id = ${userId}
-          )
-        `
+        if (categoryId) {
+          products = await sql`
+            SELECT 
+              p.*,
+              c.name as category_name
+            FROM products p
+            LEFT JOIN product_categories c ON p.category_id = c.id
+            WHERE p.id = ${productId}
+            AND p.category_id = ${categoryId}
+            AND p.created_by IN (
+              SELECT d2.id
+              FROM devices d1
+              JOIN devices d2 ON d2.company_id = d1.company_id
+              WHERE d1.id = ${userId}
+            )
+          `
+        } else {
+          products = await sql`
+            SELECT 
+              p.*,
+              c.name as category_name
+            FROM products p
+            LEFT JOIN product_categories c ON p.category_id = c.id
+            WHERE p.id = ${productId}
+            AND p.created_by IN (
+              SELECT d2.id
+              FROM devices d1
+              JOIN devices d2 ON d2.company_id = d1.company_id
+              WHERE d1.id = ${userId}
+            )
+          `
+        }
       } else {
-        products = await sql`
-          SELECT 
-            p.*,
-            c.name as category_name
-          FROM products p
-          LEFT JOIN product_categories c ON p.category_id = c.id
-          WHERE p.id = ${productId}
-        `
+        if (categoryId) {
+          products = await sql`
+            SELECT 
+              p.*,
+              c.name as category_name
+            FROM products p
+            LEFT JOIN product_categories c ON p.category_id = c.id
+            WHERE p.id = ${productId}
+            AND p.category_id = ${categoryId}
+          `
+        } else {
+          products = await sql`
+            SELECT 
+              p.*,
+              c.name as category_name
+            FROM products p
+            LEFT JOIN product_categories c ON p.category_id = c.id
+            WHERE p.id = ${productId}
+          `
+        }
       }
       
-      // If exact match found, return immediately
-      if (products.length > 0) {
-        const mappedProducts = products.map((product: any) => ({
-          ...product,
-          category: product.category_name || product.category || "",
-        }))
-        
-        console.log(`Found exact product match for ID ${productId}:`, mappedProducts[0])
-        return { success: true, data: await filterProductsForStaff(mappedProducts, userId) }
-      }
+      // Do not return here. The shared hydration below attaches every product's
+      // variants and variant-scoped batches in batched queries. Returning early
+      // caused ProductSelectSimple's post-selection ID refresh to overwrite the
+      // selected product with a raw product object whose variants array was empty.
     }
 
-    if (searchTerm && searchTerm.trim() !== "") {
+    if (!isIdSearch && searchTerm && searchTerm.trim() !== "") {
       // Normalize search term: lowercase + remove spaces
       const searchPattern = `%${searchTerm.toLowerCase().replace(/\s+/g, "")}%`
 
       if (limit) {
         if (userId) {
-          products = await sql`
-            SELECT 
-              p.*,
-              c.name as category_name
-            FROM products p
-            LEFT JOIN product_categories c ON p.category_id = c.id
-            WHERE p.created_by IN (
-              SELECT d2.id
-              FROM devices d1
-              JOIN devices d2 ON d2.company_id = d1.company_id
-              WHERE d1.id = ${userId}
-            )
-            AND (
-              REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
-              REPLACE(LOWER(p.category), ' ', '') LIKE ${searchPattern} OR
-              REPLACE(LOWER(p.company_name), ' ', '') LIKE ${searchPattern} OR
-              REPLACE(LOWER(p.shelf), ' ', '') LIKE ${searchPattern} OR
-              REPLACE(COALESCE(p.barcode, ''), ' ', '') LIKE ${searchPattern} OR
-              REPLACE(LOWER(COALESCE(p.color, '')), ' ', '') LIKE ${searchPattern} OR
-              REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
-            )
-            ORDER BY 
-              CASE WHEN p.id::text = ${searchTerm.trim()} THEN 0 ELSE 1 END,
-              p.created_at DESC
-            LIMIT ${limit}
-          `
+          if (categoryId) {
+            products = await sql`
+              SELECT 
+                p.*,
+                c.name as category_name
+              FROM products p
+              LEFT JOIN product_categories c ON p.category_id = c.id
+              WHERE p.created_by IN (
+                SELECT d2.id
+                FROM devices d1
+                JOIN devices d2 ON d2.company_id = d1.company_id
+                WHERE d1.id = ${userId}
+              )
+              AND p.category_id = ${categoryId}
+              AND (
+                REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(p.category), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(p.company_name), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(p.shelf), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(COALESCE(p.barcode, ''), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(COALESCE(p.color, '')), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
+              )
+              ORDER BY 
+                CASE WHEN p.id::text = ${searchTerm.trim()} THEN 0 ELSE 1 END,
+                p.created_at DESC
+              LIMIT ${limit}
+            `
+          } else {
+            products = await sql`
+              SELECT 
+                p.*,
+                c.name as category_name
+              FROM products p
+              LEFT JOIN product_categories c ON p.category_id = c.id
+              WHERE p.created_by IN (
+                SELECT d2.id
+                FROM devices d1
+                JOIN devices d2 ON d2.company_id = d1.company_id
+                WHERE d1.id = ${userId}
+              )
+              AND (
+                REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(p.category), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(p.company_name), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(p.shelf), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(COALESCE(p.barcode, ''), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(COALESCE(p.color, '')), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
+              )
+              ORDER BY 
+                CASE WHEN p.id::text = ${searchTerm.trim()} THEN 0 ELSE 1 END,
+                p.created_at DESC
+              LIMIT ${limit}
+            `
+          }
         } else {
-          products = await sql`
-            SELECT 
-              p.*,
-              c.name as category_name
-            FROM products p
-            LEFT JOIN product_categories c ON p.category_id = c.id
-            WHERE (
-              REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
-              REPLACE(LOWER(p.category), ' ', '') LIKE ${searchPattern} OR
-              REPLACE(LOWER(p.company_name), ' ', '') LIKE ${searchPattern} OR
-              REPLACE(LOWER(p.shelf), ' ', '') LIKE ${searchPattern} OR
-              REPLACE(COALESCE(p.barcode, ''), ' ', '') LIKE ${searchPattern} OR
-              REPLACE(LOWER(COALESCE(p.color, '')), ' ', '') LIKE ${searchPattern} OR
-              REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
-            )
-            ORDER BY 
-              CASE WHEN p.id::text = ${searchTerm.trim()} THEN 0 ELSE 1 END,
-              p.created_at DESC
-            LIMIT ${limit}
-          `
+          if (categoryId) {
+            products = await sql`
+              SELECT 
+                p.*,
+                c.name as category_name
+              FROM products p
+              LEFT JOIN product_categories c ON p.category_id = c.id
+              WHERE p.category_id = ${categoryId}
+              AND (
+                REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(p.category), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(p.company_name), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(p.shelf), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(COALESCE(p.barcode, ''), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(COALESCE(p.color, '')), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
+              )
+              ORDER BY 
+                CASE WHEN p.id::text = ${searchTerm.trim()} THEN 0 ELSE 1 END,
+                p.created_at DESC
+              LIMIT ${limit}
+            `
+          } else {
+            products = await sql`
+              SELECT 
+                p.*,
+                c.name as category_name
+              FROM products p
+              LEFT JOIN product_categories c ON p.category_id = c.id
+              WHERE (
+                REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(p.category), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(p.company_name), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(p.shelf), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(COALESCE(p.barcode, ''), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(COALESCE(p.color, '')), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
+              )
+              ORDER BY 
+                CASE WHEN p.id::text = ${searchTerm.trim()} THEN 0 ELSE 1 END,
+                p.created_at DESC
+              LIMIT ${limit}
+            `
+          }
         }
       } else {
         // Search without limit
         if (userId) {
-          products = await sql`
-            SELECT 
-              p.*,
-              c.name as category_name
-            FROM products p
-            LEFT JOIN product_categories c ON p.category_id = c.id
-            WHERE p.created_by IN (
-              SELECT d2.id
-              FROM devices d1
-              JOIN devices d2 ON d2.company_id = d1.company_id
-              WHERE d1.id = ${userId}
-            )
-            AND (
-              REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
-              REPLACE(LOWER(p.category), ' ', '') LIKE ${searchPattern} OR
-              REPLACE(LOWER(p.company_name), ' ', '') LIKE ${searchPattern} OR
-              REPLACE(LOWER(p.shelf), ' ', '') LIKE ${searchPattern} OR
-              REPLACE(COALESCE(p.barcode, ''), ' ', '') LIKE ${searchPattern} OR
-              REPLACE(LOWER(COALESCE(p.color, '')), ' ', '') LIKE ${searchPattern} OR
-              REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
-            )
-            ORDER BY 
-              CASE WHEN p.id::text = ${searchTerm.trim()} THEN 0 ELSE 1 END,
-              p.created_at DESC
-          `
+          if (categoryId) {
+            products = await sql`
+              SELECT 
+                p.*,
+                c.name as category_name
+              FROM products p
+              LEFT JOIN product_categories c ON p.category_id = c.id
+              WHERE p.created_by IN (
+                SELECT d2.id
+                FROM devices d1
+                JOIN devices d2 ON d2.company_id = d1.company_id
+                WHERE d1.id = ${userId}
+              )
+              AND p.category_id = ${categoryId}
+              AND (
+                REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(p.category), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(p.company_name), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(p.shelf), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(COALESCE(p.barcode, ''), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(COALESCE(p.color, '')), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
+              )
+              ORDER BY 
+                CASE WHEN p.id::text = ${searchTerm.trim()} THEN 0 ELSE 1 END,
+                p.created_at DESC
+            `
+          } else {
+            products = await sql`
+              SELECT 
+                p.*,
+                c.name as category_name
+              FROM products p
+              LEFT JOIN product_categories c ON p.category_id = c.id
+              WHERE p.created_by IN (
+                SELECT d2.id
+                FROM devices d1
+                JOIN devices d2 ON d2.company_id = d1.company_id
+                WHERE d1.id = ${userId}
+              )
+              AND (
+                REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(p.category), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(p.company_name), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(p.shelf), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(COALESCE(p.barcode, ''), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(COALESCE(p.color, '')), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
+              )
+              ORDER BY 
+                CASE WHEN p.id::text = ${searchTerm.trim()} THEN 0 ELSE 1 END,
+                p.created_at DESC
+            `
+          }
         } else {
-          products = await sql`
-            SELECT 
-              p.*,
-              c.name as category_name
-            FROM products p
-            LEFT JOIN product_categories c ON p.category_id = c.id
-            WHERE (
-              REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
-              REPLACE(LOWER(p.category), ' ', '') LIKE ${searchPattern} OR
-              REPLACE(LOWER(p.company_name), ' ', '') LIKE ${searchPattern} OR
-              REPLACE(LOWER(p.shelf), ' ', '') LIKE ${searchPattern} OR
-              REPLACE(COALESCE(p.barcode, ''), ' ', '') LIKE ${searchPattern} OR
-              REPLACE(LOWER(COALESCE(p.color, '')), ' ', '') LIKE ${searchPattern} OR
-              REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
-            )
-            ORDER BY 
-              CASE WHEN p.id::text = ${searchTerm.trim()} THEN 0 ELSE 1 END,
-              p.created_at DESC
-          `
+          if (categoryId) {
+            products = await sql`
+              SELECT 
+                p.*,
+                c.name as category_name
+              FROM products p
+              LEFT JOIN product_categories c ON p.category_id = c.id
+              WHERE p.category_id = ${categoryId}
+              AND (
+                REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(p.category), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(p.company_name), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(p.shelf), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(COALESCE(p.barcode, ''), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(COALESCE(p.color, '')), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
+              )
+              ORDER BY 
+                CASE WHEN p.id::text = ${searchTerm.trim()} THEN 0 ELSE 1 END,
+                p.created_at DESC
+            `
+          } else {
+            products = await sql`
+              SELECT 
+                p.*,
+                c.name as category_name
+              FROM products p
+              LEFT JOIN product_categories c ON p.category_id = c.id
+              WHERE (
+                REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(p.category), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(p.company_name), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(p.shelf), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(COALESCE(p.barcode, ''), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(COALESCE(p.color, '')), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
+              )
+              ORDER BY 
+                CASE WHEN p.id::text = ${searchTerm.trim()} THEN 0 ELSE 1 END,
+                p.created_at DESC
+            `
+          }
         }
       }
     } else {
-      // Regular fetch with optional limit (unchanged)
+      // Regular fetch with optional limit
       if (limit) {
         if (userId) {
-          products = await sql`
-            SELECT 
-              p.*,
-              c.name as category_name
-            FROM products p
-            LEFT JOIN product_categories c ON p.category_id = c.id
-            WHERE p.created_by IN (
-              SELECT d2.id
-              FROM devices d1
-              JOIN devices d2 ON d2.company_id = d1.company_id
-              WHERE d1.id = ${userId}
-            )
-            ORDER BY p.created_at DESC
-            LIMIT ${limit}
-          `
+          if (categoryId) {
+            products = await sql`
+              SELECT 
+                p.*,
+                c.name as category_name
+              FROM products p
+              LEFT JOIN product_categories c ON p.category_id = c.id
+              WHERE p.created_by IN (
+                SELECT d2.id
+                FROM devices d1
+                JOIN devices d2 ON d2.company_id = d1.company_id
+                WHERE d1.id = ${userId}
+              )
+              AND p.category_id = ${categoryId}
+              ORDER BY p.created_at DESC
+              LIMIT ${limit}
+            `
+          } else {
+            products = await sql`
+              SELECT 
+                p.*,
+                c.name as category_name
+              FROM products p
+              LEFT JOIN product_categories c ON p.category_id = c.id
+              WHERE p.created_by IN (
+                SELECT d2.id
+                FROM devices d1
+                JOIN devices d2 ON d2.company_id = d1.company_id
+                WHERE d1.id = ${userId}
+              )
+              ORDER BY p.created_at DESC
+              LIMIT ${limit}
+            `
+          }
         } else {
-          products = await sql`
-            SELECT 
-              p.*,
-              c.name as category_name
-            FROM products p
-            LEFT JOIN product_categories c ON p.category_id = c.id
-            ORDER BY p.created_at DESC
-            LIMIT ${limit}
-          `
+          if (categoryId) {
+            products = await sql`
+              SELECT 
+                p.*,
+                c.name as category_name
+              FROM products p
+              LEFT JOIN product_categories c ON p.category_id = c.id
+              WHERE p.category_id = ${categoryId}
+              ORDER BY p.created_at DESC
+              LIMIT ${limit}
+            `
+          } else {
+            products = await sql`
+              SELECT 
+                p.*,
+                c.name as category_name
+              FROM products p
+              LEFT JOIN product_categories c ON p.category_id = c.id
+              ORDER BY p.created_at DESC
+              LIMIT ${limit}
+            `
+          }
         }
       } else {
-        // Fetch all (unchanged)
+        // Fetch all
         if (userId) {
-          products = await sql`
-            SELECT 
-              p.*,
-              c.name as category_name
-            FROM products p
-            LEFT JOIN product_categories c ON p.category_id = c.id
-            WHERE p.created_by IN (
-              SELECT d2.id
-              FROM devices d1
-              JOIN devices d2 ON d2.company_id = d1.company_id
-              WHERE d1.id = ${userId}
-            )
-            ORDER BY p.created_at DESC
-          `
+          if (categoryId) {
+            products = await sql`
+              SELECT 
+                p.*,
+                c.name as category_name
+              FROM products p
+              LEFT JOIN product_categories c ON p.category_id = c.id
+              WHERE p.created_by IN (
+                SELECT d2.id
+                FROM devices d1
+                JOIN devices d2 ON d2.company_id = d1.company_id
+                WHERE d1.id = ${userId}
+              )
+              AND p.category_id = ${categoryId}
+              ORDER BY p.created_at DESC
+            `
+          } else {
+            products = await sql`
+              SELECT 
+                p.*,
+                c.name as category_name
+              FROM products p
+              LEFT JOIN product_categories c ON p.category_id = c.id
+              WHERE p.created_by IN (
+                SELECT d2.id
+                FROM devices d1
+                JOIN devices d2 ON d2.company_id = d1.company_id
+                WHERE d1.id = ${userId}
+              )
+              ORDER BY p.created_at DESC
+            `
+          }
         } else {
-          products = await sql`
-            SELECT 
-              p.*,
-              c.name as category_name
-            FROM products p
-            LEFT JOIN product_categories c ON p.category_id = c.id
-            ORDER BY p.created_at DESC
-          `
+          if (categoryId) {
+            products = await sql`
+              SELECT 
+                p.*,
+                c.name as category_name
+              FROM products p
+              LEFT JOIN product_categories c ON p.category_id = c.id
+              WHERE p.category_id = ${categoryId}
+              ORDER BY p.created_at DESC
+            `
+          } else {
+            products = await sql`
+              SELECT 
+                p.*,
+                c.name as category_name
+              FROM products p
+              LEFT JOIN product_categories c ON p.category_id = c.id
+              ORDER BY p.created_at DESC
+            `
+          }
         }
       }
     }
@@ -821,6 +1013,45 @@ export async function createProduct(formData: FormData) {
   const meeshoStatus = normalizePlatformStatus(formData.get("meesho_status"))
   const ownEcomStatus = normalizePlatformStatus(formData.get("own_ecom_status"))
   const trending = String(formData.get("trending") || "false") === "true"
+  const variantsRaw = (formData.get("variants") as string) || "[]"
+  let submittedVariants: any[] = []
+
+  try {
+    const parsedVariants = JSON.parse(variantsRaw)
+    submittedVariants = Array.isArray(parsedVariants) ? parsedVariants : []
+  } catch {
+    return { success: false, error: "Invalid variants format" }
+  }
+
+  const productVariants = submittedVariants.length > 0
+    ? submittedVariants.map((variant, index) => {
+        const costPrice = Number(variant.wholesale_price ?? variant.cost_price) || 0
+        const mspPrice = Number(variant.price ?? variant.msp) || 0
+        return {
+          name: String(variant.variant_name || variant.name || (index === 0 ? "Default" : `Variant ${index + 1}`)).trim(),
+          sku: String(variant.sku || "").trim() || null,
+          barcode: String(variant.barcode || "").trim() || null,
+          shelf: String(variant.shelf || "").trim() || null,
+          costPrice,
+          mspPrice,
+          mrp: variant.mrp === null || variant.mrp === undefined || variant.mrp === "" ? mspPrice : Number(variant.mrp) || 0,
+          openingStock: Math.max(0, Number.parseInt(variant.stock, 10) || 0),
+          minimumStock: Math.max(0, Number.parseInt(variant.minimum_stock, 10) || 0),
+          batchNumber: String(variant.batch_number || "AUTO_GENERATE").trim(),
+        }
+      })
+    : [{
+        name: "Default",
+        sku: barcode || null,
+        barcode: barcode || null,
+        shelf: shelf || null,
+        costPrice: wholesalePrice || 0,
+        mspPrice: msp || price || 0,
+        mrp: msp || price || 0,
+        openingStock: stock,
+        minimumStock: 0,
+        batchNumber: "AUTO_GENERATE",
+      }]
 
   if (!name) {
     return { success: false, error: "Name is required" }
@@ -953,59 +1184,50 @@ export async function createProduct(formData: FormData) {
 
         const productId = result[0].id
 
-        // STEP 1: Guarantee Default Variant exists for every product.
-        // This runs unconditionally so no product can ever be orphaned.
-        const variantName = "Default"
-        const defaultVariantResult = await sql`
-          INSERT INTO product_variants (
-            product_id,
-            name,
-            sku,
-            barcode,
-            cost_price,
-            wholesale_price,
-            price,
-            msp,
-            mrp,
-            minimum_stock,
-            shelf,
-            status
-          ) VALUES (
-            ${productId},
-            ${variantName},
-            ${barcode || null},
-            ${barcode || null},
-            ${wholesalePrice || 0},
-            ${wholesalePrice || 0},
-            ${price || 0},
-            ${msp || price || 0},
-            ${msp || price || 0},
-            0,
-            ${shelf || null},
-            'active'
-          )
-          RETURNING id
-        `
-        const defaultVariantId = defaultVariantResult[0].id
+        // Persist every submitted sellable variant. A batch remains a separate
+        // inventory record and is only created for a variant with opening stock.
+        const createdVariants: any[] = []
+        for (const variant of productVariants) {
+          const insertedVariant = await sql`
+            INSERT INTO product_variants (
+              product_id, name, sku, barcode, cost_price, wholesale_price,
+              price, msp, mrp, minimum_stock, shelf, status
+            ) VALUES (
+              ${productId}, ${variant.name}, ${variant.sku}, ${variant.barcode},
+              ${variant.costPrice}, ${variant.costPrice}, ${variant.mspPrice},
+              ${variant.mspPrice}, ${variant.mrp}, ${variant.minimumStock},
+              ${variant.shelf}, 'active'
+            ) RETURNING *
+          `
+          const createdVariant = insertedVariant[0]
+          
+          if (!createdVariant.barcode) {
+            const generatedBarcode = await generateProductBarcode(createdVariant.id)
+            await sql`UPDATE product_variants SET barcode = ${generatedBarcode} WHERE id = ${createdVariant.id}`
+            createdVariant.barcode = generatedBarcode
+          }
+          
+          createdVariants.push(createdVariant)
 
-        // STEP 2: If opening stock > 0, create the initial batch
-        if (userId && stock > 0) {
+          if (!userId || variant.openingStock <= 0) continue
           try {
-            const initBatchNo = `INIT-${productId}-${Date.now().toString().slice(-4)}`
+            const initBatchNo = variant.batchNumber && variant.batchNumber !== "AUTO_GENERATE"
+              ? variant.batchNumber
+              : `INIT-${productId}-${createdVariant.id}-${Date.now().toString().slice(-4)}`
             const initBatch = await sql`
               INSERT INTO product_batches (
                 product_id, product_variant_id, batch_no, cost_price, selling_price,
                 quantity_purchased, remaining_quantity, status
               ) VALUES (
-                ${productId}, ${defaultVariantId}, ${initBatchNo}, ${wholesalePrice || 0}, ${price || 0},
-                ${stock}, ${stock}, 'active'
+                ${productId}, ${createdVariant.id}, ${initBatchNo}, ${variant.costPrice}, ${variant.mspPrice},
+                ${variant.openingStock}, ${variant.openingStock}, 'active'
               ) RETURNING id
             `
             const initBatchId = initBatch[0].id
 
             await sql`
               INSERT INTO product_batch_device_stock (batch_id, device_id, stock, updated_at)
-              VALUES (${initBatchId}, ${userId}, ${stock}, NOW())
+              VALUES (${initBatchId}, ${userId}, ${variant.openingStock}, NOW())
               ON CONFLICT (batch_id, device_id)
               DO UPDATE SET stock = ${stock}, updated_at = NOW()
             `
@@ -1014,7 +1236,7 @@ export async function createProduct(formData: FormData) {
               INSERT INTO product_stock_history (
                 product_id, product_variant_id, batch_id, quantity, type, reference_type, notes, created_by, device_id
               ) VALUES (
-                ${productId}, ${defaultVariantId}, ${initBatchId}, ${stock}, 'adjustment', 'manual', 'Initial stock', ${userId}, ${userId}
+                ${productId}, ${createdVariant.id}, ${initBatchId}, ${variant.openingStock}, 'adjustment', 'manual', 'Initial stock', ${userId}, ${userId}
               )
             `
           } catch (err) {
@@ -1034,6 +1256,7 @@ export async function createProduct(formData: FormData) {
 
         const productWithDetails = updatedProduct.length > 0 ? updatedProduct[0] : result[0]
         productWithDetails.category = productWithDetails.category_name || category
+        productWithDetails.variants = createdVariants
 
         return {
           success: true,

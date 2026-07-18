@@ -1,6 +1,7 @@
 "use server"
 
 import { addDays, parseISO, format } from "date-fns"
+import postgres from "postgres"
 import { sql, getLastError, resetConnectionState } from "@/lib/db"
 import { revalidatePath } from "next/cache"
 import { recordPurchaseTransaction, recordPurchaseAdjustment, deletePurchaseTransaction } from "./simplified-accounting"
@@ -11,26 +12,27 @@ async function adjustDeviceProductStock(
   batchId: number | null,
   deviceId: number,
   quantityChange: number,
+  query: any = sql,
 ) {
   if (!batchId) {
     throw new Error("Batch ID is required for stock adjustment");
   }
 
   // Adjust batch stock
-  const batchStock = await sql`
+  const batchStock = await query`
     SELECT id, stock FROM product_batch_device_stock
     WHERE batch_id = ${batchId} AND device_id = ${deviceId}
     LIMIT 1
   `
 
   if (batchStock.length > 0) {
-    await sql`
+    await query`
       UPDATE product_batch_device_stock
       SET stock = stock + ${quantityChange}, updated_at = CURRENT_TIMESTAMP
       WHERE id = ${batchStock[0].id}
     `
   } else {
-    await sql`
+    await query`
       INSERT INTO product_batch_device_stock (batch_id, device_id, stock)
       VALUES (${batchId}, ${deviceId}, ${quantityChange})
     `
@@ -64,109 +66,41 @@ function getExclusiveEndDate(dateTo: string): string {
 
 async function queryDevicePurchases(deviceId: number, options: GetUserPurchasesOptions = {}) {
   const { limit, searchTerm, dateFrom, dateTo } = options
-  const searchPattern = searchTerm?.trim() ? `%${searchTerm.trim().toLowerCase()}%` : null
+  const normalizedSearch = searchTerm?.trim() || null
+  const searchPattern = normalizedSearch ? `%${normalizedSearch}%` : null
+  // A leading # is how the list displays purchase numbers. Treat it as an ID search
+  // without preventing the same term from matching invoice or batch text.
+  const purchaseNumberPattern = normalizedSearch ? `%${normalizedSearch.replace(/^#/, "")}%` : null
   const endExclusive = dateTo ? getExclusiveEndDate(dateTo) : null
 
-  if (dateFrom && endExclusive && !searchPattern && !limit) {
-    return sql`
-      SELECT *
-      FROM purchases
-      WHERE device_id = ${deviceId}
-        AND purchase_date >= ${dateFrom}
-        AND purchase_date < ${endExclusive}
-      ORDER BY purchase_date DESC, id DESC
-    `
-  }
-
-  if (dateFrom && endExclusive && searchPattern && limit) {
-    return sql`
-      SELECT *
-      FROM purchases
-      WHERE device_id = ${deviceId}
-        AND purchase_date >= ${dateFrom}
-        AND purchase_date < ${endExclusive}
-        AND (
-          LOWER(supplier) LIKE ${searchPattern}
-          OR CAST(id AS TEXT) LIKE ${searchPattern}
-          OR LOWER(status) LIKE ${searchPattern}
-        )
-      ORDER BY purchase_date DESC, id DESC
-      LIMIT ${limit}
-    `
-  }
-
-  if (dateFrom && endExclusive && searchPattern) {
-    return sql`
-      SELECT *
-      FROM purchases
-      WHERE device_id = ${deviceId}
-        AND purchase_date >= ${dateFrom}
-        AND purchase_date < ${endExclusive}
-        AND (
-          LOWER(supplier) LIKE ${searchPattern}
-          OR CAST(id AS TEXT) LIKE ${searchPattern}
-          OR LOWER(status) LIKE ${searchPattern}
-        )
-      ORDER BY purchase_date DESC, id DESC
-    `
-  }
-
-  if (dateFrom && endExclusive && limit) {
-    return sql`
-      SELECT *
-      FROM purchases
-      WHERE device_id = ${deviceId}
-        AND purchase_date >= ${dateFrom}
-        AND purchase_date < ${endExclusive}
-      ORDER BY purchase_date DESC, id DESC
-      LIMIT ${limit}
-    `
-  }
-
-  if (searchPattern && limit) {
-    return sql`
-      SELECT *
-      FROM purchases
-      WHERE device_id = ${deviceId}
-        AND (
-          LOWER(supplier) LIKE ${searchPattern}
-          OR CAST(id AS TEXT) LIKE ${searchPattern}
-          OR LOWER(status) LIKE ${searchPattern}
-        )
-      ORDER BY purchase_date DESC, id DESC
-      LIMIT ${limit}
-    `
-  }
-
-  if (searchPattern) {
-    return sql`
-      SELECT *
-      FROM purchases
-      WHERE device_id = ${deviceId}
-        AND (
-          LOWER(supplier) LIKE ${searchPattern}
-          OR CAST(id AS TEXT) LIKE ${searchPattern}
-          OR LOWER(status) LIKE ${searchPattern}
-        )
-      ORDER BY purchase_date DESC, id DESC
-    `
-  }
-
-  if (limit) {
-    return sql`
-      SELECT *
-      FROM purchases
-      WHERE device_id = ${deviceId}
-      ORDER BY purchase_date DESC, id DESC
-      LIMIT ${limit}
-    `
-  }
-
   return sql`
-    SELECT *
-    FROM purchases
-    WHERE device_id = ${deviceId}
-    ORDER BY purchase_date DESC, id DESC
+    SELECT DISTINCT p.*
+    FROM purchases p
+    LEFT JOIN suppliers s
+      ON LOWER(TRIM(s.name)) = LOWER(TRIM(p.supplier))
+    LEFT JOIN purchase_items pi ON pi.purchase_id = p.id
+    LEFT JOIN products pr ON pr.id = pi.product_id
+    LEFT JOIN product_variants pv ON pv.id = pi.product_variant_id
+    LEFT JOIN product_batches b ON b.id = pi.batch_id
+    WHERE p.device_id = ${deviceId}
+      AND (${dateFrom}::date IS NULL OR p.purchase_date >= ${dateFrom}::date)
+      AND (${endExclusive}::date IS NULL OR p.purchase_date < ${endExclusive}::date)
+      AND (
+        ${searchPattern}::text IS NULL
+        OR p.supplier ILIKE ${searchPattern}
+        OR s.name ILIKE ${searchPattern}
+        OR pr.name ILIKE ${searchPattern}
+        OR pv.name ILIKE ${searchPattern}
+        OR b.batch_no ILIKE ${searchPattern}
+        OR p.invoice_number ILIKE ${searchPattern}
+        OR p.supplier_invoice_number ILIKE ${searchPattern}
+        OR p.status ILIKE ${searchPattern}
+        OR p.purchase_status ILIKE ${searchPattern}
+        OR p.notes ILIKE ${searchPattern}
+        OR CAST(p.id AS TEXT) ILIKE ${purchaseNumberPattern}
+      )
+    ORDER BY p.purchase_date DESC, p.id DESC
+    LIMIT ${limit ?? null}
   `
 }
 
@@ -252,13 +186,24 @@ export async function createPurchase(formData: FormData) {
   }
 
   // Normalise items so every numeric field is a real number
-  items = items.map((it: any) => ({
-    product_id: Number(it.product_id) || 0,
-    variant_id: it.variant_id ? Number(it.variant_id) : null,
-    batch_id: it.batch_id ? Number(it.batch_id) : null,
-    quantity: Number(it.quantity) || 0,
-    price: Number(it.price) || 0,
-  }))
+  items = items.map((it: any) => {
+    const quantity = Number(it.quantity) || 0
+    const price = Number(it.price) || 0
+    const taxPercentage = Number(it.tax_percentage) || 0
+    const taxAmount = quantity * price * (taxPercentage / 100)
+    const lineTotal = (quantity * price) + taxAmount
+
+    return {
+      product_id: Number(it.product_id) || 0,
+      variant_id: it.variant_id ? Number(it.variant_id) : null,
+      batch_id: it.batch_id ? Number(it.batch_id) : null,
+      quantity,
+      price,
+      tax_percentage: taxPercentage,
+      tax_amount: taxAmount,
+      line_total: lineTotal,
+    }
+  })
 
   if (!supplier || isNaN(totalAmount) || items.length === 0 || !userId || !deviceId) {
     return { success: false, message: "Supplier, total amount, at least one item, user ID, and device ID are required" }
@@ -335,23 +280,26 @@ export async function createPurchase(formData: FormData) {
         }
 
         // Every purchase MUST create a NEW BATCH — never reuse or merge.
-        const batchNo = `PUR-${purchaseId || 0}-${item.product_id}-${Date.now().toString().slice(-4)}`;
-        const newBatch = await sql`
-          INSERT INTO product_batches (
-            product_id, product_variant_id, batch_no, cost_price, selling_price,
-            quantity_purchased, remaining_quantity, status, purchase_id
-          ) VALUES (
-            ${item.product_id}, ${variantId}, ${batchNo}, ${item.price}, ${item.price},
-            ${item.quantity}, ${item.quantity}, 'active', ${purchaseId}
-          ) RETURNING id
-        `;
-        let batchId = newBatch[0].id;
+        let batchId: number | null = null;
+        if (isDelivered && !isCancelled) {
+          const batchNo = `PUR-${purchaseId || 0}-${item.product_id}-${Date.now().toString().slice(-4)}`;
+          const newBatch = await sql`
+            INSERT INTO product_batches (
+              product_id, product_variant_id, batch_no, cost_price, selling_price,
+              quantity_purchased, remaining_quantity, status, purchase_id
+            ) VALUES (
+              ${item.product_id}, ${variantId}, ${batchNo}, ${item.price}, ${item.price},
+              ${item.quantity}, ${item.quantity}, 'active', ${purchaseId}
+            ) RETURNING id
+          `;
+          batchId = newBatch[0].id;
+        }
         item.variant_id = variantId;
         item.batch_id = batchId;
 
         await sql`
-          INSERT INTO purchase_items (purchase_id, product_id, product_variant_id, batch_id, quantity, price)
-          VALUES (${purchaseId}, ${item.product_id}, ${item.variant_id || null}, ${item.batch_id || null}, ${item.quantity}, ${item.price})
+          INSERT INTO purchase_items (purchase_id, product_id, product_variant_id, batch_id, quantity, price, tax_percentage, tax_amount, line_total)
+          VALUES (${purchaseId}, ${item.product_id}, ${item.variant_id || null}, ${item.batch_id || null}, ${item.quantity}, ${item.price}, ${item.tax_percentage}, ${item.tax_amount}, ${item.line_total})
         `
 
         // Only update stock when purchase status is Delivered AND not Cancelled
@@ -409,6 +357,105 @@ export async function createPurchase(formData: FormData) {
   }
 }
 
+/** Receives an ordered purchase exactly once and makes its batches saleable. */
+export async function markPurchaseDelivered(purchaseId: number, deviceId: number) {
+  if (!purchaseId || !deviceId) return { success: false, message: "Purchase and device are required" }
+  const databaseUrl = process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || process.env.NEON_POSTGRES_URL || process.env.NEON_POSTGRES_URL_NON_POOLING || process.env.POSTGRES_URL
+  if (!databaseUrl) return { success: false, message: "Database connection is not configured" }
+  const client = postgres(databaseUrl, { max: 1 })
+  console.log("[receive purchase] request received", { purchaseId, deviceId })
+  try {
+    const outcome = await client.begin(async (tx) => {
+      console.log("[receive purchase] transaction started")
+      // A lock must surface as an error, never hold the UI in a pending state.
+      await tx`SET LOCAL statement_timeout = '15s'`
+      await tx`SET LOCAL lock_timeout = '15s'`
+      const purchases = await tx`
+        SELECT id, supplier, status, purchase_status, created_by
+        FROM purchases WHERE id = ${purchaseId} AND device_id = ${deviceId}
+        FOR UPDATE
+      `
+      if (!purchases.length) {
+        return { success: false, message: "Purchase not found" }
+      }
+
+      const purchase = purchases[0]
+      if (String(purchase.purchase_status).toLowerCase() === "delivered") {
+        return { success: true, alreadyDelivered: true, message: "Purchase is already delivered" }
+      }
+      if (String(purchase.purchase_status).toLowerCase() !== "ordered" || String(purchase.status).toLowerCase() === "cancelled") {
+        return { success: false, message: "Only active ordered purchases can be delivered" }
+      }
+
+      console.log("[receive purchase] loading items")
+      const items = await tx`
+        SELECT id, product_id, product_variant_id, batch_id, quantity, price
+        FROM purchase_items WHERE purchase_id = ${purchaseId}
+      `
+      for (const item of items) {
+        const quantity = Number(item.quantity) || 0
+        if (quantity <= 0) continue
+        if (!item.product_variant_id) throw new Error(`Purchase item ${item.id} has no variant`)
+
+        let batchId = item.batch_id ? Number(item.batch_id) : null
+        if (batchId) {
+          const existingBatch = await tx`
+            SELECT id FROM product_batches
+            WHERE id = ${batchId}
+              AND purchase_id = ${purchaseId}
+              AND product_id = ${item.product_id}
+              AND product_variant_id = ${item.product_variant_id}
+          `
+          if (existingBatch.length === 0) batchId = null
+        }
+        if (!batchId) {
+          const batchNo = `PUR-${purchaseId}-${item.product_id}-${item.id}`
+          console.log("[receive purchase] creating batch", { itemId: item.id })
+          const batches = await tx`
+            INSERT INTO product_batches (
+              product_id, product_variant_id, batch_no, cost_price, selling_price,
+              quantity_purchased, remaining_quantity, status, purchase_id
+            ) VALUES (
+              ${item.product_id}, ${item.product_variant_id}, ${batchNo}, ${item.price}, ${item.price},
+              ${quantity}, ${quantity}, 'active', ${purchaseId}
+            ) RETURNING id
+          `
+          batchId = Number(batches[0].id)
+          await tx`UPDATE purchase_items SET batch_id = ${batchId} WHERE id = ${item.id}`
+        }
+        await adjustDeviceProductStock(item.product_id, item.product_variant_id, batchId, deviceId, quantity, tx)
+        await tx`
+          INSERT INTO product_stock_history (
+            product_id, product_variant_id, batch_id, quantity, type, reference_id, reference_type, notes, created_by, device_id
+          ) VALUES (
+            ${item.product_id}, ${item.product_variant_id}, ${batchId}, ${quantity}, 'purchase', ${purchaseId}, 'purchase',
+            ${`Stock received from purchase #${purchaseId} - ${purchase.supplier}`}, ${purchase.created_by}, ${deviceId}
+          )
+        `
+      }
+
+      console.log("[receive purchase] updating status")
+      const result = await tx`
+        UPDATE purchases SET purchase_status = 'Delivered', updated_at = NOW()
+        WHERE id = ${purchaseId} AND device_id = ${deviceId} AND purchase_status = 'Ordered' RETURNING *
+      `
+      if (!result.length) throw new Error("Purchase status changed while receiving")
+      console.log("[receive purchase] transaction committing")
+      return { success: true, data: result[0], message: "Purchase marked as delivered" }
+    })
+    console.log("[receive purchase] response sent", outcome)
+    revalidatePath("/dashboard")
+    return outcome
+  } catch (error) {
+    // postgres rolls back begin() automatically when this callback throws.
+    console.error("[receive purchase] transaction rolled back", error)
+    return { success: false, message: "Unable to receive purchase" }
+  } finally {
+    await client.end({ timeout: 5 })
+    console.log("[receive purchase] database client released")
+  }
+}
+
 export async function updatePurchase(formData: FormData) {
   const purchaseId = Number.parseInt(formData.get("id") as string)
   const supplier = (formData.get("supplier") as string)?.trim()
@@ -432,13 +479,24 @@ export async function updatePurchase(formData: FormData) {
   }
 
   // Normalise items so every numeric field is a real number
-  items = items.map((it: any) => ({
-    product_id: Number(it.product_id) || 0,
-    variant_id: it.variant_id ? Number(it.variant_id) : null,
-    batch_id: it.batch_id ? Number(it.batch_id) : null,
-    quantity: Number(it.quantity) || 0,
-    price: Number(it.price) || 0,
-  }))
+  items = items.map((it: any) => {
+    const quantity = Number(it.quantity) || 0
+    const price = Number(it.price) || 0
+    const taxPercentage = Number(it.tax_percentage) || 0
+    const taxAmount = quantity * price * (taxPercentage / 100)
+    const lineTotal = (quantity * price) + taxAmount
+
+    return {
+      product_id: Number(it.product_id) || 0,
+      variant_id: it.variant_id ? Number(it.variant_id) : null,
+      batch_id: it.batch_id ? Number(it.batch_id) : null,
+      quantity,
+      price,
+      tax_percentage: taxPercentage,
+      tax_amount: taxAmount,
+      line_total: lineTotal,
+    }
+  })
 
   if (!purchaseId || !supplier || isNaN(totalAmount) || items.length === 0 || !userId || !deviceId) {
     return {
@@ -613,23 +671,26 @@ export async function updatePurchase(formData: FormData) {
         }
 
         // Every purchase MUST create a NEW BATCH — never reuse or merge.
-        const batchNo = `PUR-${purchaseId || 0}-${item.product_id}-${Date.now().toString().slice(-4)}`;
-        const newBatch = await sql`
-          INSERT INTO product_batches (
-            product_id, product_variant_id, batch_no, cost_price, selling_price,
-            quantity_purchased, remaining_quantity, status, purchase_id
-          ) VALUES (
-            ${item.product_id}, ${variantId}, ${batchNo}, ${item.price}, ${item.price},
-            ${item.quantity}, ${item.quantity}, 'active', ${purchaseId}
-          ) RETURNING id
-        `;
-        let batchId = newBatch[0].id;
+        let batchId: number | null = null;
+        if (shouldAddStock) {
+          const batchNo = `PUR-${purchaseId || 0}-${item.product_id}-${Date.now().toString().slice(-4)}`;
+          const newBatch = await sql`
+            INSERT INTO product_batches (
+              product_id, product_variant_id, batch_no, cost_price, selling_price,
+              quantity_purchased, remaining_quantity, status, purchase_id
+            ) VALUES (
+              ${item.product_id}, ${variantId}, ${batchNo}, ${item.price}, ${item.price},
+              ${item.quantity}, ${item.quantity}, 'active', ${purchaseId}
+            ) RETURNING id
+          `;
+          batchId = newBatch[0].id;
+        }
         item.variant_id = variantId;
         item.batch_id = batchId;
 
         await sql`
-          INSERT INTO purchase_items (purchase_id, product_id, product_variant_id, batch_id, quantity, price)
-          VALUES (${purchaseId}, ${item.product_id}, ${item.variant_id || null}, ${item.batch_id || null}, ${item.quantity}, ${item.price})
+          INSERT INTO purchase_items (purchase_id, product_id, product_variant_id, batch_id, quantity, price, tax_percentage, tax_amount, line_total)
+          VALUES (${purchaseId}, ${item.product_id}, ${item.variant_id || null}, ${item.batch_id || null}, ${item.quantity}, ${item.price}, ${item.tax_percentage}, ${item.tax_amount}, ${item.line_total})
         `
       }
 

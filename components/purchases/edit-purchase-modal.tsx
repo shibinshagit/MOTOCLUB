@@ -39,6 +39,9 @@ interface ProductRow {
   total: number
   originalItemId?: number
   wholesalePrice?: number
+  taxPercentage: number
+  taxAmount: number
+  lineTotal: number
 }
 
 export default function EditPurchaseModal({
@@ -77,9 +80,11 @@ export default function EditPurchaseModal({
       price: 0,
       total: 0,
       wholesalePrice: 0,
+      taxPercentage: 0,
+      taxAmount: 0,
+      lineTotal: 0,
     },
   ])
-  const [taxRate, setTaxRate] = useState(0)
   const [discountAmount, setDiscountAmount] = useState(0)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [formAlert, setFormAlert] = useState<{ type: "success" | "error" | "warning"; message: string } | null>(null)
@@ -89,11 +94,11 @@ export default function EditPurchaseModal({
   // Memoized calculations to prevent unnecessary recalculations
   const calculations = useMemo(() => {
     const subtotal = products.reduce((sum, product) => sum + product.total, 0)
-    const taxAmount = subtotal * (taxRate / 100)
+    const taxAmount = products.reduce((sum, product) => sum + product.taxAmount, 0)
     const totalAmount = Number(subtotal) + Number(taxAmount) - Number(discountAmount)
-    
+
     return { subtotal, taxAmount, totalAmount }
-  }, [products, taxRate, discountAmount])
+  }, [products, discountAmount])
 
   const { subtotal, taxAmount, totalAmount } = calculations
 
@@ -114,9 +119,11 @@ export default function EditPurchaseModal({
         price: 0,
         total: 0,
         wholesalePrice: 0,
+        taxPercentage: 0,
+        taxAmount: 0,
+        lineTotal: 0,
       },
     ])
-    setTaxRate(0)
     setDiscountAmount(0)
     setFormAlert(null)
     setActiveProductRowId(null)
@@ -177,21 +184,6 @@ export default function EditPurchaseModal({
       setPaymentMethod(purchase.payment_method || "Cash")
       setReceivedAmount(Number(purchase.received_amount) || 0)
 
-      // Calculate subtotal from items
-      const calculatedSubtotal = items.reduce((sum: number, item: any) => sum + item.quantity * item.price, 0)
-
-      // Estimate tax and discount
-      if (calculatedSubtotal > 0) {
-        const estimatedTaxAmount = Math.round((purchase.total_amount - calculatedSubtotal) * 100) / 100
-        if (estimatedTaxAmount > 0) {
-          setTaxRate(Math.round((estimatedTaxAmount / calculatedSubtotal) * 100 * 100) / 100)
-          setDiscountAmount(0)
-        } else {
-          setTaxRate(0)
-          setDiscountAmount(Math.abs(estimatedTaxAmount))
-        }
-      }
-
       // Set product rows with optimized mapping
       const productRows = items.map((item: any) => ({
         id: crypto.randomUUID(),
@@ -202,6 +194,9 @@ export default function EditPurchaseModal({
         total: item.quantity * item.price,
         originalItemId: item.id,
         wholesalePrice: item.wholesale_price || item.price,
+        taxPercentage: item.tax_percentage || 0,
+        taxAmount: item.tax_amount || 0,
+        lineTotal: item.line_total || (item.quantity * item.price),
       }))
 
       setProducts(
@@ -216,6 +211,9 @@ export default function EditPurchaseModal({
                 price: 0,
                 total: 0,
                 wholesalePrice: 0,
+                taxPercentage: 0,
+                taxAmount: 0,
+                lineTotal: 0,
               },
             ]
       )
@@ -276,6 +274,9 @@ export default function EditPurchaseModal({
         price: 0,
         total: 0,
         wholesalePrice: 0,
+        taxPercentage: 0,
+        taxAmount: 0,
+        lineTotal: 0,
       },
     ])
   }, [])
@@ -292,6 +293,11 @@ export default function EditPurchaseModal({
           if (updates.quantity !== undefined || updates.price !== undefined) {
             updatedProduct.total = updatedProduct.quantity * updatedProduct.price
           }
+          // Recalculate tax amount and line total if tax percentage, quantity, or price changed
+          if (updates.taxPercentage !== undefined || updates.quantity !== undefined || updates.price !== undefined) {
+            updatedProduct.taxAmount = updatedProduct.quantity * updatedProduct.price * (updatedProduct.taxPercentage / 100)
+            updatedProduct.lineTotal = updatedProduct.total + updatedProduct.taxAmount
+          }
           return updatedProduct
         }
         return product
@@ -306,15 +312,19 @@ export default function EditPurchaseModal({
     productName: string,
     price: number,
     wholesalePrice?: number,
+    _stock?: number,
+    productObj?: any,
   ) => {
     const priceToUse = wholesalePrice || price
     const currentQuantity = products.find(p => p.id === id)?.quantity || 1
+    const defaultTaxPercentage = productObj?.tax_percentage || 0
 
     updateProductRow(id, {
       productId,
       productName,
       price: priceToUse,
       wholesalePrice,
+      taxPercentage: defaultTaxPercentage,
       total: currentQuantity * priceToUse,
     })
   }, [products, updateProductRow])
@@ -401,12 +411,20 @@ export default function EditPurchaseModal({
       formData.append("device_id", deviceId.toString())
       formData.append("received_amount", finalReceivedAmount.toString())
 
-      const items = products.map(p => ({
-        id: p.originalItemId,
-        product_id: p.productId,
-        quantity: p.quantity,
-        price: p.price,
-      }))
+      const items = products.map(p => {
+        const taxPercentage = p.taxPercentage || 0
+        const taxAmount = p.quantity * p.price * (taxPercentage / 100)
+        const lineTotal = (p.quantity * p.price) + taxAmount
+        return {
+          id: p.originalItemId,
+          product_id: p.productId,
+          quantity: p.quantity,
+          price: p.price,
+          tax_percentage: taxPercentage,
+          tax_amount: taxAmount,
+          line_total: lineTotal,
+        }
+      })
 
       formData.append("items", JSON.stringify(items))
 
@@ -526,7 +544,6 @@ export default function EditPurchaseModal({
                           <SelectContent className="bg-white border-gray-200">
                             <SelectItem value="Credit">Credit</SelectItem>
                             <SelectItem value="Paid">Paid</SelectItem>
-                            <SelectItem value="Cancelled">Cancelled</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -541,7 +558,6 @@ export default function EditPurchaseModal({
                         </SelectTrigger>
                         <SelectContent className="bg-white border-gray-200">
                           <SelectItem value="Delivered">Delivered</SelectItem>
-                          <SelectItem value="Pending">Pending</SelectItem>
                           <SelectItem value="Ordered">Ordered</SelectItem>
                         </SelectContent>
                       </Select>
@@ -604,24 +620,6 @@ export default function EditPurchaseModal({
                           </span>
                         </div>
                         <div className="flex justify-between items-center">
-                          <span className="text-gray-600">Tax (%):</span>
-                          <Input
-                            type="number"
-                            min="0"
-                            max="100"
-                            step="0.01"
-                            value={taxRate}
-                            onChange={(e) => setTaxRate(Number.parseFloat(e.target.value) || 0)}
-                            className="w-16 h-7 text-xs text-center bg-white border-gray-300"
-                          />
-                        </div>
-                        <div className="flex justify-between text-gray-600">
-                          <span>Tax Amount:</span>
-                          <span>
-                            {localCurrency} {taxAmount.toFixed(2)}
-                          </span>
-                        </div>
-                        <div className="flex justify-between items-center">
                           <span className="text-gray-600">Discount:</span>
                           <Input
                             type="number"
@@ -633,7 +631,7 @@ export default function EditPurchaseModal({
                           />
                         </div>
                         <div className="flex justify-between font-bold text-blue-600 border-t border-gray-200 pt-2">
-                          <span>Total:</span>
+                          <span>Grand Total:</span>
                           <span>
                             {localCurrency} {totalAmount.toFixed(2)}
                           </span>
@@ -675,10 +673,12 @@ export default function EditPurchaseModal({
 
                   <div className="flex-1 overflow-y-auto">
                     <div className="sticky top-0 z-10 grid grid-cols-12 gap-2 p-2 bg-blue-50 font-medium text-sm text-blue-800 border-b border-gray-200">
-                      <div className="col-span-5">Product</div>
-                      <div className="col-span-2 text-center">Quantity</div>
-                      <div className="col-span-2 text-center">Price</div>
-                      <div className="col-span-2 text-center">Total</div>
+                      <div className="col-span-4">Product</div>
+                      <div className="col-span-1 text-center">Qty</div>
+                      <div className="col-span-2 text-center">Cost</div>
+                      <div className="col-span-1 text-center">Tax %</div>
+                      <div className="col-span-2 text-center">Tax Amt</div>
+                      <div className="col-span-2 text-center">Line Total</div>
                       <div className="col-span-1"></div>
                     </div>
 
@@ -689,7 +689,7 @@ export default function EditPurchaseModal({
                           index % 2 === 0 ? "bg-white" : "bg-gray-50"
                         } hover:bg-blue-50 transition-colors`}
                       >
-                        <div className="col-span-5">
+                        <div className="col-span-4">
                           <ProductSelectSimple
                             value={product.productId}
                             onChange={(productId, productName, price, wholesalePrice) =>
@@ -701,7 +701,7 @@ export default function EditPurchaseModal({
                             allowServices={false}
                           />
                         </div>
-                        <div className="col-span-2">
+                        <div className="col-span-1">
                           <Input
                             type="number"
                             min="1"
@@ -724,8 +724,27 @@ export default function EditPurchaseModal({
                             className="text-center h-9 bg-white border-gray-300 text-gray-900"
                           />
                         </div>
+                        <div className="col-span-1">
+                          <Input
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="0.01"
+                            value={product.taxPercentage}
+                            onChange={(e) => {
+                              const value = Number.parseFloat(e.target.value) || 0
+                              if (value >= 0 && value <= 100) {
+                                updateProductRow(product.id, { taxPercentage: value })
+                              }
+                            }}
+                            className="text-center h-9 bg-white border-gray-300 text-gray-900"
+                          />
+                        </div>
+                        <div className="col-span-2 flex items-center justify-center text-sm text-gray-600">
+                          {localCurrency} {product.taxAmount.toFixed(2)}
+                        </div>
                         <div className="col-span-2 flex items-center justify-center font-medium text-gray-900">
-                          {localCurrency} {product.total.toFixed(2)}
+                          {localCurrency} {product.lineTotal.toFixed(2)}
                         </div>
                         <div className="col-span-1 flex justify-center">
                           <Button
