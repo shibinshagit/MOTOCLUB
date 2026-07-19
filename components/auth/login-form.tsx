@@ -13,6 +13,7 @@ import { notifySuccess } from "@/lib/notifications"
 import { FormAlert } from "@/components/ui/form-alert"
 import { useAppDispatch, useAppSelector } from "@/store/hooks"
 import { setDeviceData, selectDevice, loadFromStorage } from "@/store/slices/deviceSlice"
+import { setStaff, activateStaff } from "@/store/slices/staffSlice"
 
 export default function LoginForm() {
   const [showPassword, setShowPassword] = useState(false)
@@ -30,9 +31,13 @@ export default function LoginForm() {
 
   useEffect(() => {
     if (device.id && device.user?.token) {
-      router.replace("/dashboard")
+      if (device.user.role === "STAFF") {
+        router.replace("/staff/dashboard")
+      } else {
+        router.replace("/dashboard")
+      }
     }
-  }, [device.id, device.user?.token, router])
+  }, [device.id, device.user?.token, device.user?.role, router])
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -47,11 +52,30 @@ export default function LoginForm() {
         if (result.data) {
           dispatch(
             setDeviceData({
-              device: result.data.device,
-              company: result.data.company,
+              device: result.data.device ?? {
+                id: 0,
+                name: "",
+                currency: "AED",
+                logo_url: null,
+              },
+              company: result.data.company ?? { id: 0, name: "" },
               user: result.data.user,
             }),
           )
+
+          if (result.data.staff) {
+            dispatch(setStaff([result.data.staff]))
+            dispatch(
+              activateStaff({
+                staffId: result.data.staff.id,
+                allStaff: [result.data.staff],
+              }),
+            )
+            if (typeof window !== "undefined" && result.data.device?.id) {
+              const sessionKey = `staff_session_device_${result.data.device.id}`
+              localStorage.setItem(sessionKey, String(result.data.staff.id))
+            }
+          }
         }
 
         notifySuccess(toast, "Welcome back! You've been logged in successfully.", "Login Successful")

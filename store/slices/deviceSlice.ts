@@ -14,6 +14,7 @@ interface DeviceState {
     name: string | null
     email: string | null
     token: string | null
+    role: string | null
   } | null
   isLoading: boolean
   error: string | null
@@ -100,7 +101,7 @@ const deviceSlice = createSlice({
       action: PayloadAction<{
         device: { id: number; name: string; currency: string; logo_url?: string | null }
         company: { id: number; name: string }
-        user: { id: number; name: string; email: string; token: string }
+        user: { id: number; name: string; email: string; token: string; role?: string | null }
       }>,
     ) => {
       state.id = action.payload.device.id
@@ -108,7 +109,13 @@ const deviceSlice = createSlice({
       state.currency = action.payload.device.currency
       state.logo_url = action.payload.device.logo_url ?? null
       state.company = action.payload.company
-      state.user = action.payload.user
+      state.user = {
+        id: action.payload.user.id,
+        name: action.payload.user.name,
+        email: action.payload.user.email,
+        token: action.payload.user.token,
+        role: action.payload.user.role ?? null,
+      }
       state.error = null
       saveStateToStorage(state)
     },

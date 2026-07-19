@@ -45,12 +45,32 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  // For protected dashboard routes, we'll let the client-side authentication handle it
-  // This prevents the middleware from causing redirect loops
+  // Guard /dashboard routes: if the user only has a staff session cookie
+  // and their role is "staff" (not "admin"), redirect them to /staff/dashboard.
+  // ADMIN-role staff and DEVICE_USER logins are allowed through.
+  if (pathname.startsWith("/dashboard")) {
+    const staffToken = request.cookies.get("ims_staff_session")?.value
+
+    if (staffToken) {
+      try {
+        const { payload } = await jwtVerify(staffToken, SECRET_KEY)
+        const role = (payload as any).role as string | undefined
+
+        // Only redirect pure "staff" role — "admin" staff are allowed in the dashboard
+        if (role === "staff") {
+          return NextResponse.redirect(new URL("/staff/dashboard", request.url))
+        }
+      } catch {
+        // Token invalid/expired — let client-side handle it
+      }
+    }
+  }
+
+  // For all other protected routes, let the client-side authentication handle it
   return NextResponse.next()
 }
 
-// Only match dashboard and staff routes
+// Match dashboard and staff routes
 export const config = {
   matcher: ["/dashboard/:path*", "/staff/:path*"],
 }

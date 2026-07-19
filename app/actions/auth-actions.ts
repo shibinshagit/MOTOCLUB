@@ -70,6 +70,7 @@ export async function login(formData: FormData) {
             name: user.name,
             email: user.email,
             token,
+            role: "DEVICE_USER",
           },
           device: {
             id: deviceInfo.id || user.id,
@@ -91,14 +92,30 @@ export async function login(formData: FormData) {
         s.id as staff_id,
         s.name as staff_name,
         s.phone,
+        s.email as staff_email,
         s.role,
+        s.position,
+        s.salary,
+        s.salary_date,
+        s.joined_on,
+        s.age,
+        s.id_card_number,
+        s.address,
         s.is_active as staff_active,
         s.restricted_pages,
         s.restricted_values,
+        s.created_by,
+        s.created_at,
+        s.updated_at,
         d.id as device_id,
-        d.company_id
+        d.name as device_name,
+        d.currency as device_currency,
+        d.logo_url as device_logo,
+        c.id as company_id,
+        c.name as company_name
       FROM staff s
       LEFT JOIN devices d ON s.device_id = d.id
+      LEFT JOIN companies c ON d.company_id = c.id
       WHERE s.phone = ${phone} AND s.staff_password_hash = ${password_hash}
       LIMIT 1
     `
@@ -141,10 +158,65 @@ export async function login(formData: FormData) {
         },
       })
 
+      const token = Math.random().toString(36).substring(2)
+
+      if (staff.device_id) {
+        await sql`
+          UPDATE devices
+          SET auth_token = ${token}
+          WHERE id = ${staff.device_id}
+        `
+      }
+
+      const role = staff.role === "admin" ? "ADMIN" : "STAFF"
+      const redirect = role === "STAFF" ? "/staff/dashboard" : "/dashboard"
+      const deviceLogo = staff.device_logo?.trim() || null
+
       return {
         success: true,
         message: "Login successful",
-        redirect: "/staff/dashboard",
+        redirect,
+        data: {
+          user: {
+            id: staff.staff_id,
+            name: staff.staff_name,
+            email: staff.phone,
+            token,
+            role,
+          },
+          device: staff.device_id ? {
+            id: staff.device_id,
+            name: staff.device_name || staff.staff_name,
+            currency: staff.device_currency || "AED",
+            logo_url: deviceLogo,
+          } : null,
+          company: staff.company_id ? {
+            id: staff.company_id,
+            name: staff.company_name || "",
+          } : null,
+          staff: {
+            id: staff.staff_id,
+            name: staff.staff_name,
+            phone: staff.phone,
+            email: staff.staff_email || null,
+            role: staff.role || "staff",
+            restricted_pages,
+            restricted_values,
+            position: staff.position || "",
+            salary: Number(staff.salary) || 0,
+            salary_date: staff.salary_date ? new Date(staff.salary_date).toISOString() : "",
+            joined_on: staff.joined_on ? new Date(staff.joined_on).toISOString() : "",
+            age: staff.age || null,
+            id_card_number: staff.id_card_number || null,
+            address: staff.address || null,
+            is_active: staff.staff_active,
+            device_id: staff.device_id,
+            company_id: staff.company_id,
+            created_by: staff.created_by,
+            created_at: staff.created_at ? new Date(staff.created_at).toISOString() : "",
+            updated_at: staff.updated_at ? new Date(staff.updated_at).toISOString() : "",
+          }
+        }
       }
     }
 

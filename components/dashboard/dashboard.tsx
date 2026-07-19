@@ -194,9 +194,14 @@ export function Dashboard({ onLogout }: DashboardProps) {
       return
     }
     if (mounted && user?.id) {
+      // STAFF role must not access the accounting/admin dashboard
+      if (user.role === "STAFF") {
+        routerRef.current.replace("/staff/dashboard")
+        return
+      }
       setIsLoading(false)
     }
-  }, [mounted, user?.id])
+  }, [mounted, user?.id, user?.role])
 
   useEffect(() => {
     const restoreStaffSession = async () => {
