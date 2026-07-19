@@ -18,7 +18,7 @@ interface ProductSelectSimpleProps {
   id?: string
   value: number | null
   onChange: (value: number, name: string, price: number, wholesalePrice?: number, stock?: number, productObj?: any) => void
-  onAddNew: () => void
+  onAddNew?: () => void
   onAddNewService?: () => void
   userId?: number
   refreshTrigger?: boolean
@@ -26,6 +26,7 @@ interface ProductSelectSimpleProps {
   usePriceType?: "retail" | "wholesale"
   allowServices?: boolean
   searchBufferSize?: number
+  error?: string
 }
 
 // Helper: truncate names
@@ -62,6 +63,7 @@ export default function ProductSelectSimple({
   usePriceType = "retail",
   allowServices = true,
   searchBufferSize = 50,
+  error,
 }: ProductSelectSimpleProps) {
   const deviceId = useSelector(selectDeviceId)
   const [open, setOpen] = useState(false)
@@ -304,7 +306,7 @@ export default function ProductSelectSimple({
   const handleAddNew = () => {
     setOpen(false)
     if (isServiceMode && onAddNewService) onAddNewService()
-    else onAddNew()
+    else if (onAddNew) onAddNew()
   }
 
   const handleModeSwitch = (checked: boolean) => {
@@ -360,6 +362,7 @@ export default function ProductSelectSimple({
         </div>
         <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
       </Button>
+      {error && <p className="text-sm font-medium text-destructive mt-1">{error}</p>}
 
       <Dialog open={open} onOpenChange={handleDialogClose}>
         <DialogContent className="sm:max-w-md p-0 gap-0 bg-white border border-gray-200">

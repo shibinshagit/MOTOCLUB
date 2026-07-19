@@ -1034,7 +1034,7 @@ export async function addSale(saleData: any) {
         totalAmount: total,
         cogsAmount,
         receivedAmount,
-        outstandingAmount,
+        outstandingAmount: balanceAmount,
         status: saleData.paymentStatus || "Completed",
         paymentMethod: saleData.paymentMethod || "Cash",
         deviceId: saleData.deviceId,
@@ -1089,7 +1089,7 @@ export async function addSale(saleData: any) {
     revalidatePath("/dashboard")
 
     console.log(`Sale ${saleId} created successfully with ${saleItems.length} items (${saleType} sale)`)
-    console.log(`Sale financial summary: Total=${total}, Received=${receivedAmount}, Outstanding=${outstandingAmount}, Status=${saleData.paymentStatus}`)
+    console.log(`Sale financial summary: Total=${total}, Received=${receivedAmount}, Outstanding=${balanceAmount}, Status=${saleData.paymentStatus}`)
 
     return {
       success: true,
@@ -1099,7 +1099,7 @@ export async function addSale(saleData: any) {
           ...sale,
           discount: discountAmount,
           received_amount: receivedAmount,
-          outstanding_amount: outstandingAmount,
+          outstanding_amount: balanceAmount,
         },
         items: saleItems,
       },
