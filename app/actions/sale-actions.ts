@@ -980,7 +980,7 @@ export async function addSale(saleData: any) {
 
           const isNowDeducted = ["shipped", "delivered"].includes(String(shipping.delivery_status || "").toLowerCase())
 
-          if (!isCancelled && !isService && isNowDeducted) {
+          if (saleData.status !== "Cancelled" && !isService && isNowDeducted) {
             const stockResult = await updateProductStock(item.productId, variantId, alloc.batchId, alloc.quantity, "subtract", saleData.deviceId)
             if (!stockResult.success) {
               console.warn(`Stock update warning for product ${itemName}:`, stockResult.message)
