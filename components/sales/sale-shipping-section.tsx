@@ -22,6 +22,9 @@ interface SaleShippingSectionProps {
   customerAddress?: string
   currency?: string
   className?: string
+  isJobCard?: boolean
+  customerName?: string
+  customerPhone?: string
 }
 
 export default function SaleShippingSection({
@@ -31,6 +34,9 @@ export default function SaleShippingSection({
   customerAddress,
   currency = "AED",
   className,
+  isJobCard = false,
+  customerName = "",
+  customerPhone = "",
 }: SaleShippingSectionProps) {
   const shipping = { ...DEFAULT_SALE_SHIPPING, ...value }
   const [couriers, setCouriers] = useState<MasterDataItem[]>([])
@@ -106,6 +112,59 @@ export default function SaleShippingSection({
       packagingTypeName: packaging?.name || "",
       expensePacking: defaultCost ?? shipping.expensePacking ?? 0,
     })
+  }
+
+  if (isJobCard) {
+    return (
+      <div className={cn("rounded-lg border border-blue-100 bg-blue-50/30 overflow-hidden", className)}>
+        <div className="bg-blue-100/50 px-3 py-2 border-b border-blue-100 flex items-center">
+          <Truck className="h-4 w-4 mr-2 text-blue-700" />
+          <h3 className="text-xs font-semibold text-blue-900">Job Card Fulfillment Details</h3>
+        </div>
+        
+        <div className="p-3 grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-3">
+            <div>
+              <Label className="text-[10px] font-semibold uppercase tracking-wide text-blue-600/80">Customer Information</Label>
+              <div className="mt-1 bg-white p-2 border border-blue-100 rounded-md">
+                <div className="text-sm font-medium text-slate-900">{customerName || "No name provided"}</div>
+                <div className="text-xs text-slate-500 mt-0.5">{customerPhone || shipping.customerPhoneOverride || "No phone provided"}</div>
+              </div>
+            </div>
+            
+            <div>
+              <Label className="text-[10px] font-semibold uppercase tracking-wide text-blue-600/80">Order Tracking</Label>
+              <div className="mt-1 bg-white p-2 border border-blue-100 rounded-md">
+                <div className="text-xs font-medium text-slate-700">Tracking ID: <span className="font-mono bg-slate-100 px-1 rounded text-slate-900">{shipping.trackingId || "N/A"}</span></div>
+              </div>
+            </div>
+          </div>
+          
+          <div>
+            <Label className="text-[10px] font-semibold uppercase tracking-wide text-blue-600/80">Shipping Address</Label>
+            <div className="mt-1 bg-white p-2 border border-blue-100 rounded-md space-y-1.5 min-h-[92px]">
+              {shipping.shippingAddressType && (
+                <div className="inline-block px-1.5 py-0.5 bg-blue-50 text-blue-700 text-[10px] font-medium rounded border border-blue-100">
+                  {shipping.shippingAddressType}
+                </div>
+              )}
+              {shipping.shippingStreet && <div className="text-xs text-slate-700"><span className="font-medium text-slate-900">Street:</span> {shipping.shippingStreet}</div>}
+              {shipping.shippingLandmark && <div className="text-xs text-slate-700"><span className="font-medium text-slate-900">Landmark:</span> {shipping.shippingLandmark}</div>}
+              {shipping.shippingCity && <div className="text-xs text-slate-700"><span className="font-medium text-slate-900">Location:</span> {shipping.shippingCity}</div>}
+              {shipping.shippingPincode && <div className="text-xs text-slate-700"><span className="font-medium text-slate-900">Pincode:</span> {shipping.shippingPincode}</div>}
+              
+              {!shipping.shippingStreet && !shipping.shippingCity && shipping.shippingAddress && (
+                <div className="text-xs text-slate-700 mt-1">{shipping.shippingAddress}</div>
+              )}
+              
+              {!shipping.shippingStreet && !shipping.shippingCity && !shipping.shippingAddress && (
+                <div className="text-xs text-slate-400 italic">No shipping address provided</div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (

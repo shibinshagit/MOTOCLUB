@@ -44,7 +44,7 @@ export async function getCustomers(userId?: number, limit?: number, searchTerm?:
             SELECT c.*, COUNT(s.id) as order_count
             FROM customers c
             LEFT JOIN sales s ON c.id = s.customer_id
-            WHERE c.created_by = ${userId}
+            WHERE (c.created_by = ${userId} OR c.created_by IN (SELECT id FROM devices WHERE company_id = ${userId}))
             AND (
               LOWER(c.name) LIKE ${searchPattern}
               OR LOWER(c.email) LIKE ${searchPattern}
@@ -60,7 +60,7 @@ export async function getCustomers(userId?: number, limit?: number, searchTerm?:
             SELECT c.*, COUNT(s.id) as order_count
             FROM customers c
             LEFT JOIN sales s ON c.id = s.customer_id
-            WHERE c.created_by = ${userId}
+            WHERE (c.created_by = ${userId} OR c.created_by IN (SELECT id FROM devices WHERE company_id = ${userId}))
             AND (
               LOWER(c.name) LIKE ${searchPattern}
               OR LOWER(c.email) LIKE ${searchPattern}
@@ -111,7 +111,7 @@ export async function getCustomers(userId?: number, limit?: number, searchTerm?:
             SELECT c.*, COUNT(s.id) as order_count
             FROM customers c
             LEFT JOIN sales s ON c.id = s.customer_id
-            WHERE c.created_by = ${userId}
+            WHERE (c.created_by = ${userId} OR c.created_by IN (SELECT id FROM devices WHERE company_id = ${userId}))
             GROUP BY c.id
             ORDER BY c.created_at DESC
             LIMIT ${limit}
@@ -121,7 +121,7 @@ export async function getCustomers(userId?: number, limit?: number, searchTerm?:
             SELECT c.*, COUNT(s.id) as order_count
             FROM customers c
             LEFT JOIN sales s ON c.id = s.customer_id
-            WHERE c.created_by = ${userId}
+            WHERE (c.created_by = ${userId} OR c.created_by IN (SELECT id FROM devices WHERE company_id = ${userId}))
             GROUP BY c.id
             ORDER BY c.created_at DESC
           `
@@ -166,8 +166,27 @@ export async function addCustomer(formData: FormData) {
   const address = formData.get("address") as string
   const userId = Number.parseInt(formData.get("user_id") as string)
 
+  const city = (formData.get("city") as string) || null
+  const street = (formData.get("street") as string) || null
+  const landmark = (formData.get("landmark") as string) || null
+  const address_type = (formData.get("address_type") as string) || null
+  const pincode = (formData.get("pincode") as string) || null
+
   if (!name) {
     return { success: false, message: "Name is required" }
+  }
+
+  let finalAddress = address
+  if (!finalAddress && (city || street || landmark || pincode)) {
+    finalAddress = [
+      street,
+      landmark,
+      city,
+      pincode ? `Pincode: ${pincode}` : null,
+      address_type ? `(${address_type})` : null,
+    ]
+      .filter(Boolean)
+      .join(", ")
   }
 
   // Reset connection state to allow a fresh attempt
@@ -175,8 +194,8 @@ export async function addCustomer(formData: FormData) {
 
   try {
     const result = await sql`
-    INSERT INTO customers (name, email, phone, address, created_by)
-    VALUES (${name}, ${email}, ${phone}, ${address}, ${userId})
+    INSERT INTO customers (name, email, phone, address, created_by, city, street, landmark, address_type, pincode)
+    VALUES (${name}, ${email}, ${phone}, ${finalAddress}, ${userId}, ${city}, ${street}, ${landmark}, ${address_type}, ${pincode})
     RETURNING *
   `
 
@@ -204,8 +223,27 @@ export async function updateCustomer(formData: FormData) {
   const address = formData.get("address") as string
   const userId = formData.get("user_id") ? Number.parseInt(formData.get("user_id") as string) : undefined
 
+  const city = (formData.get("city") as string) || null
+  const street = (formData.get("street") as string) || null
+  const landmark = (formData.get("landmark") as string) || null
+  const address_type = (formData.get("address_type") as string) || null
+  const pincode = (formData.get("pincode") as string) || null
+
   if (!id || !name) {
     return { success: false, message: "ID and name are required" }
+  }
+
+  let finalAddress = address
+  if (!finalAddress && (city || street || landmark || pincode)) {
+    finalAddress = [
+      street,
+      landmark,
+      city,
+      pincode ? `Pincode: ${pincode}` : null,
+      address_type ? `(${address_type})` : null,
+    ]
+      .filter(Boolean)
+      .join(", ")
   }
 
   // Reset connection state to allow a fresh attempt
@@ -218,14 +256,16 @@ export async function updateCustomer(formData: FormData) {
     if (userId) {
       result = await sql`
         UPDATE customers
-        SET name = ${name}, email = ${email}, phone = ${phone}, address = ${address}
+        SET name = ${name}, email = ${email}, phone = ${phone}, address = ${finalAddress},
+            city = ${city}, street = ${street}, landmark = ${landmark}, address_type = ${address_type}, pincode = ${pincode}
         WHERE id = ${id} AND created_by = ${userId}
         RETURNING *
       `
     } else {
       result = await sql`
         UPDATE customers
-        SET name = ${name}, email = ${email}, phone = ${phone}, address = ${address}
+        SET name = ${name}, email = ${email}, phone = ${phone}, address = ${finalAddress},
+            city = ${city}, street = ${street}, landmark = ${landmark}, address_type = ${address_type}, pincode = ${pincode}
         WHERE id = ${id}
         RETURNING *
       `

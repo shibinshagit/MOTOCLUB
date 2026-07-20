@@ -222,6 +222,15 @@ export default function ViewSaleModal({
   const getRemainingAmount = () => {
     if (!saleData) return 0
 
+    if (saleData.payment_status === "Paid" || saleData.payment_status === "Completed") {
+      return 0
+    }
+
+    if (saleData.balance_amount !== undefined && saleData.balance_amount !== null) {
+      const balance = Number(saleData.balance_amount)
+      if (balance > 0) return balance
+    }
+
     if (saleData.outstanding_amount !== undefined && saleData.outstanding_amount !== null) {
       return Number.parseFloat(saleData.outstanding_amount) || 0
     }
@@ -640,36 +649,6 @@ export default function ViewSaleModal({
                     <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-600">
                       Shipping & delivery
                     </h3>
-                    <div className="flex flex-wrap gap-1.5">
-                      {!["Shipped", "In transit", "Delivered"].includes(
-                        saleData.delivery_status || "Pending",
-                      ) ? (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-7 border-slate-200 bg-white px-2 text-[11px]"
-                          disabled={isUpdatingDelivery}
-                          onClick={() => handleDeliveryStatusUpdate("Shipped")}
-                        >
-                          {isUpdatingDelivery ? (
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                          ) : (
-                            "Mark shipped"
-                          )}
-                        </Button>
-                      ) : null}
-                      {saleData.delivery_status !== "Delivered" ? (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-7 border-emerald-200 bg-white px-2 text-[11px] text-emerald-700 hover:bg-emerald-50"
-                          disabled={isUpdatingDelivery}
-                          onClick={() => handleDeliveryStatusUpdate("Delivered")}
-                        >
-                          Mark delivered
-                        </Button>
-                      ) : null}
-                    </div>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
                     <InfoCell

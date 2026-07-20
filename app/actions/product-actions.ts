@@ -293,10 +293,7 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
                 REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
                 REPLACE(LOWER(p.category), ' ', '') LIKE ${searchPattern} OR
                 REPLACE(LOWER(p.company_name), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(LOWER(p.shelf), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(COALESCE(p.barcode, ''), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(LOWER(COALESCE(p.color, '')), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
+REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
               )
               ORDER BY 
                 CASE WHEN p.id::text = ${searchTerm.trim()} THEN 0 ELSE 1 END,
@@ -320,10 +317,7 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
                 REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
                 REPLACE(LOWER(p.category), ' ', '') LIKE ${searchPattern} OR
                 REPLACE(LOWER(p.company_name), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(LOWER(p.shelf), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(COALESCE(p.barcode, ''), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(LOWER(COALESCE(p.color, '')), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
+REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
               )
               ORDER BY 
                 CASE WHEN p.id::text = ${searchTerm.trim()} THEN 0 ELSE 1 END,
@@ -344,10 +338,7 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
                 REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
                 REPLACE(LOWER(p.category), ' ', '') LIKE ${searchPattern} OR
                 REPLACE(LOWER(p.company_name), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(LOWER(p.shelf), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(COALESCE(p.barcode, ''), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(LOWER(COALESCE(p.color, '')), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
+REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
               )
               ORDER BY 
                 CASE WHEN p.id::text = ${searchTerm.trim()} THEN 0 ELSE 1 END,
@@ -365,10 +356,7 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
                 REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
                 REPLACE(LOWER(p.category), ' ', '') LIKE ${searchPattern} OR
                 REPLACE(LOWER(p.company_name), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(LOWER(p.shelf), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(COALESCE(p.barcode, ''), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(LOWER(COALESCE(p.color, '')), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
+REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
               )
               ORDER BY 
                 CASE WHEN p.id::text = ${searchTerm.trim()} THEN 0 ELSE 1 END,
@@ -398,10 +386,7 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
                 REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
                 REPLACE(LOWER(p.category), ' ', '') LIKE ${searchPattern} OR
                 REPLACE(LOWER(p.company_name), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(LOWER(p.shelf), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(COALESCE(p.barcode, ''), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(LOWER(COALESCE(p.color, '')), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
+REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
               )
               ORDER BY 
                 CASE WHEN p.id::text = ${searchTerm.trim()} THEN 0 ELSE 1 END,
@@ -424,10 +409,7 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
                 REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
                 REPLACE(LOWER(p.category), ' ', '') LIKE ${searchPattern} OR
                 REPLACE(LOWER(p.company_name), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(LOWER(p.shelf), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(COALESCE(p.barcode, ''), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(LOWER(COALESCE(p.color, '')), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
+REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
               )
               ORDER BY 
                 CASE WHEN p.id::text = ${searchTerm.trim()} THEN 0 ELSE 1 END,
@@ -447,10 +429,7 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
                 REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
                 REPLACE(LOWER(p.category), ' ', '') LIKE ${searchPattern} OR
                 REPLACE(LOWER(p.company_name), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(LOWER(p.shelf), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(COALESCE(p.barcode, ''), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(LOWER(COALESCE(p.color, '')), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
+REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
               )
               ORDER BY 
                 CASE WHEN p.id::text = ${searchTerm.trim()} THEN 0 ELSE 1 END,
@@ -467,10 +446,7 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
                 REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
                 REPLACE(LOWER(p.category), ' ', '') LIKE ${searchPattern} OR
                 REPLACE(LOWER(p.company_name), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(LOWER(p.shelf), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(COALESCE(p.barcode, ''), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(LOWER(COALESCE(p.color, '')), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
+REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
               )
               ORDER BY 
                 CASE WHEN p.id::text = ${searchTerm.trim()} THEN 0 ELSE 1 END,

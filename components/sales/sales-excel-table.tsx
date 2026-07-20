@@ -136,12 +136,9 @@ export default function SalesExcelTable({
       payment: (sale: any) => getPaymentMethodDisplay(sale),
       total: (sale: any) => formatCurrency(Number(sale.total_amount)),
       received: (sale: any) => {
-        const received =
-          sale.status === "Credit"
-            ? Number(sale.received_amount || 0)
-            : sale.status === "Completed"
-              ? Number(sale.total_amount || 0)
-              : 0
+        const received = (sale.payment_status === "Paid" || sale.payment_status === "Completed")
+          ? Number(sale.total_amount || 0)
+          : Number(sale.received_amount || 0)
         return received > 0 ? formatCurrency(received) : "—"
       },
       balance: (sale: any) => {
@@ -179,9 +176,10 @@ export default function SalesExcelTable({
 
   const totalSalesAmount = displaySales.reduce((sum, sale) => sum + Number(sale.total_amount || 0), 0)
   const receivedAmountTotal = displaySales.reduce((sum, sale) => {
-    if (sale.status === "Credit") return sum + Number(sale.received_amount || 0)
-    if (sale.status === "Completed") return sum + Number(sale.total_amount || 0)
-    return sum
+    const received = (sale.payment_status === "Paid" || sale.payment_status === "Completed")
+      ? Number(sale.total_amount || 0)
+      : Number(sale.received_amount || 0)
+    return sum + received
   }, 0)
   const remainingAmountTotal = displaySales.reduce((sum, sale) => sum + getRemainingAmount(sale), 0)
   const cogsTotal = displaySales.reduce((sum, sale) => sum + Number(sale.total_cost || 0), 0)
@@ -362,12 +360,9 @@ export default function SalesExcelTable({
               ) : (
                 displaySales.map((sale, index) => {
                   const remaining = getRemainingAmount(sale)
-                  const received =
-                    sale.status === "Credit"
-                      ? Number(sale.received_amount || 0)
-                      : sale.status === "Completed"
-                        ? Number(sale.total_amount || 0)
-                        : 0
+                  const received = (sale.payment_status === "Paid" || sale.payment_status === "Completed")
+                    ? Number(sale.total_amount || 0)
+                    : Number(sale.received_amount || 0)
 
                   return (
                     <tr

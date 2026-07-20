@@ -14,7 +14,7 @@ import { addCustomer as addCustomerAction } from "@/store/slices/customerSlice"
 interface CustomerSelectSimpleProps {
   id?: string
   value: number | null
-  onChange: (value: number, name: string) => void
+  onChange: (value: number, name: string, customerObj?: any) => void
   onAddNew: () => void
   onCreateCustomer?: (name: string, phone: string) => Promise<{ success: boolean; data?: any; message?: string }>
   userId?: number
@@ -121,7 +121,7 @@ export default function CustomerSelectSimple({
   // Set selected customer when external value changes
   useEffect(() => {
     if (value) {
-      const c = customers.find((c) => c.id === value)
+      const c = customers.find((c) => Number(c.id) === Number(value))
       setSelectedCustomer(c ?? null)
     } else {
       setSelectedCustomer(null)
@@ -185,8 +185,9 @@ export default function CustomerSelectSimple({
     }
   }
 
-  const handleCustomerSelect = (customerId: number, customerName: string) => {
-    onChange(customerId, customerName)
+  const handleCustomerSelect = (customerId: number, customerName: string, explicitCustomer?: any) => {
+    const customer = explicitCustomer || customers.find((c) => c.id === customerId)
+    onChange(customerId, customerName, customer)
     setOpen(false)
     setShowForm(false)
     setFormData({ name: "", phone: "" })
@@ -194,7 +195,6 @@ export default function CustomerSelectSimple({
 
     // Save to recent customers
     try {
-      const customer = customers.find((c) => c.id === customerId)
       if (customer) {
         const stored = localStorage.getItem(`recent-customers-${userId}`) || "[]"
         const list = JSON.parse(stored)
@@ -255,8 +255,8 @@ export default function CustomerSelectSimple({
         setCustomers((prev) => [newCustomer, ...prev])
         setFilteredCustomers((prev) => [newCustomer, ...prev])
 
-        // Select the newly created customer
-        handleCustomerSelect(newCustomer.id, newCustomer.name)
+        // Select the newly created customer, passing the object explicitly to bypass async state closure
+        handleCustomerSelect(newCustomer.id, newCustomer.name, newCustomer)
 
         // Reset form
         setFormData({ name: "", phone: "" })
@@ -378,55 +378,60 @@ export default function CustomerSelectSimple({
                   </Button>
                 </div>
 
-                <form onSubmit={handleCreateCustomer} className="space-y-3">
-                  <div>
-                    <label className="text-xs font-medium text-gray-700 mb-1 block">Name</label>
+                <div className="space-y-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium">Name <span className="text-red-500">*</span></label>
                     <Input
                       ref={nameInputRef}
-                      placeholder="Enter customer name"
+                      placeholder="Customer Name"
                       value={formData.name}
                       onChange={(e) => handleFormInputChange("name", e.target.value)}
-                      className={cn(
-                        "h-9 text-sm bg-white text-gray-900",
-                        formErrors.name ? "border-red-300 focus-visible:ring-red-500" : "border-gray-300"
-                      )}
+                      className={cn("h-9", formErrors.name && "border-red-500 focus-visible:ring-red-500")}
                       disabled={formLoading}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault()
+                          handleCreateCustomer(e)
+                        }
+                      }}
                     />
-                    {formErrors.name && <p className="text-xs text-red-600 mt-1">{formErrors.name}</p>}
+                    {formErrors.name && <p className="text-[10px] text-red-500">{formErrors.name}</p>}
                   </div>
-
-                  <div>
-                    <label className="text-xs font-medium text-gray-700 mb-1 block">Phone Number</label>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium">Phone <span className="text-red-500">*</span></label>
                     <Input
                       ref={phoneInputRef}
-                      placeholder="Enter phone number"
+                      placeholder="Phone Number"
                       value={formData.phone}
                       onChange={(e) => handleFormInputChange("phone", e.target.value)}
-                      className={cn(
-                        "h-9 text-sm bg-white text-gray-900",
-                        formErrors.phone ? "border-red-300 focus-visible:ring-red-500" : "border-gray-300"
-                      )}
+                      className={cn("h-9", formErrors.phone && "border-red-500 focus-visible:ring-red-500")}
                       disabled={formLoading}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault()
+                          handleCreateCustomer(e)
+                        }
+                      }}
                     />
-                    {formErrors.phone && <p className="text-xs text-red-600 mt-1">{formErrors.phone}</p>}
+                    {formErrors.phone && <p className="text-[10px] text-red-500">{formErrors.phone}</p>}
                   </div>
-
-                  <div className="flex gap-2 pt-1">
-                    <Button type="submit" size="sm" className="flex-1 h-9 text-sm bg-blue-600 hover:bg-blue-700" disabled={formLoading}>
-                      {formLoading ? (
-                        <>
-                          <Loader2 className="h-4 w-4 animate-spin mr-1" />
-                          Creating...
-                        </>
-                      ) : (
-                        "Create Customer"
-                      )}
+                  
+                  <div className="flex gap-2 pt-2">
+                    <Button 
+                      type="button" 
+                      size="sm" 
+                      className="flex-1 h-9 text-sm bg-blue-600 hover:bg-blue-700" 
+                      disabled={formLoading}
+                      onClick={handleCreateCustomer}
+                    >
+                      {formLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                      Create Customer
                     </Button>
                     <Button type="button" variant="outline" size="sm" className="h-9 text-sm" onClick={resetSearchAndForm} disabled={formLoading}>
                       Cancel
                     </Button>
                   </div>
-                </form>
+                </div>
               </div>
             ) : (
               <>

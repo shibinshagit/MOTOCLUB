@@ -35,15 +35,7 @@ export async function getCategories(userId?: number) {
         LEFT JOIN product_categories p ON c.parent_id = p.id
         WHERE (
           c.company_id = ${companyId}
-          OR (
-            c.company_id IS NULL
-            AND c.created_by IN (
-              SELECT d2.id
-              FROM devices d1
-              JOIN devices d2 ON d2.company_id = d1.company_id
-              WHERE d1.id = ${userId}
-            )
-          )
+          OR c.company_id IS NULL
         )
         ORDER BY COALESCE(c.parent_id, c.id), c.parent_id NULLS FIRST, c.name ASC
       `

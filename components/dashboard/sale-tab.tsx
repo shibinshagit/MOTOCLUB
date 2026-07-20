@@ -117,11 +117,15 @@ interface SaleDraftSnapshot {
   date: string
   customerId: number | null
   customerName: string
+  customerPhone: string
   staffId: number | null
   staffName: string
   status: string
+  paymentStatus?: string
   paymentMethod: string
   receivedAmount: number
+  advanceAmount: number
+  balanceAmount: number
   discountAmount: number
   notes: string
   shipping: SaleShippingInput
@@ -184,15 +188,18 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
   const [allocatorRowId, setAllocatorRowId] = useState<string | null>(null)
   const [originalSaleStatus, setOriginalSaleStatus] = useState<string>("")
 
-  // Add Sale Form State
   const [receivedAmount, setReceivedAmount] = useState(0)
+  const [advanceAmount, setAdvanceAmount] = useState(0)
+  const [balanceAmount, setBalanceAmount] = useState(0)
   const [deviceCurrencyState, setDeviceCurrencyState] = useState(deviceCurrency || "QAR")
   const [date, setDate] = useState<Date>(new Date())
   const [customerId, setCustomerId] = useState<number | null>(null)
   const [customerName, setCustomerName] = useState<string>("")
+  const [customerPhone, setCustomerPhone] = useState<string>("")
   const [staffId, setStaffId] = useState<number | null>(null)
   const [staffName, setStaffName] = useState<string>("")
   const [status, setStatus] = useState<string>("Completed")
+  const [paymentStatus, setPaymentStatus] = useState<string>("Paid")
   const [paymentMethod, setPaymentMethod] = useState<string>("Cash")
   const [products, setProducts] = useState<ProductRow[]>([
     {
@@ -312,11 +319,15 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
       date: new Date().toISOString(),
       customerId: null,
       customerName: "",
+      customerPhone: "",
       staffId: activeStaff?.id || null,
       staffName: activeStaff?.name || "",
       status: "Completed",
+      paymentStatus: "Paid",
       paymentMethod: "Cash",
       receivedAmount: 0,
+      advanceAmount: 0,
+      balanceAmount: 0,
       discountAmount: 0,
       notes: "",
       shipping: { fulfillmentType: "pickup" },
@@ -376,11 +387,15 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     setDate(new Date(activeDraft.date || new Date().toISOString()))
     setCustomerId(activeDraft.customerId)
     setCustomerName(activeDraft.customerName || "")
+    setCustomerPhone(activeDraft.customerPhone || "")
     setStaffId(activeDraft.staffId)
     setStaffName(activeDraft.staffName || "")
     setStatus(activeDraft.status || "Completed")
+    setPaymentStatus(activeDraft.paymentStatus || "Paid")
     setPaymentMethod(activeDraft.paymentMethod || "Cash")
     setReceivedAmount(Number(activeDraft.receivedAmount) || 0)
+    setAdvanceAmount(Number(activeDraft.advanceAmount) || 0)
+    setBalanceAmount(Number(activeDraft.balanceAmount) || 0)
     setDiscountAmount(Number(activeDraft.discountAmount) || 0)
     setNotes(activeDraft.notes || "")
     setShipping(activeDraft.shipping || { fulfillmentType: "pickup" })
@@ -408,32 +423,40 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
         ? customerName.trim()
         : "New Sale"
 
-    setSaleDrafts((prev) =>
-      prev.map((draft) =>
-        draft.id === activeDraftId
-          ? {
-              ...draft,
-              name: computedName,
-              updatedAt: Date.now(),
-              date: date?.toISOString() || new Date().toISOString(),
-              customerId,
-              customerName,
-              staffId,
-              staffName,
-              status,
-              paymentMethod,
-              receivedAmount,
-              discountAmount,
-              notes,
-              shipping,
-              products,
-              isEditMode,
-              editingSaleId,
-              originalSaleStatus,
-            }
-          : draft,
-      ),
-    )
+    const timeoutId = setTimeout(() => {
+      setSaleDrafts((prev) =>
+        prev.map((draft) =>
+          draft.id === activeDraftId
+            ? {
+                ...draft,
+                name: computedName,
+                updatedAt: Date.now(),
+                date: date?.toISOString() || new Date().toISOString(),
+                customerId,
+                customerName,
+                customerPhone,
+                staffId,
+                staffName,
+                status,
+                paymentStatus,
+                paymentMethod,
+                receivedAmount,
+                advanceAmount,
+                balanceAmount,
+                discountAmount,
+                notes,
+                shipping,
+                products,
+                isEditMode,
+                editingSaleId,
+                originalSaleStatus,
+              }
+            : draft,
+        ),
+      )
+    }, 400) // Debounce global draft updates to fix typing lag
+
+    return () => clearTimeout(timeoutId)
   }, [
     activeView,
     draftsHydrated,
@@ -441,9 +464,11 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     date,
     customerId,
     customerName,
+    customerPhone,
     staffId,
     staffName,
     status,
+    paymentStatus,
     paymentMethod,
     receivedAmount,
     discountAmount,
@@ -457,8 +482,13 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
 
   useEffect(() => {
     if (activeView !== "entry" || !draftsHydrated) return
-    localStorage.setItem(saleDraftStorageKey, JSON.stringify(saleDrafts))
-    localStorage.setItem(`${saleDraftStorageKey}_active`, activeDraftId)
+
+    const timeoutId = setTimeout(() => {
+      localStorage.setItem(saleDraftStorageKey, JSON.stringify(saleDrafts))
+      localStorage.setItem(`${saleDraftStorageKey}_active`, activeDraftId)
+    }, 400) // Debounce blocking localStorage writes
+
+    return () => clearTimeout(timeoutId)
   }, [activeView, draftsHydrated, saleDrafts, activeDraftId, saleDraftStorageKey])
 
   // Device change handling
@@ -500,7 +530,6 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
   }, [customerId])
 
   // Calculate totals whenever products or discount changes
-  // Calculate totals whenever products or discount changes
   useEffect(() => {
     const newSubtotal = products.reduce((sum, product) => {
       const productTotal = typeof product.total === "number" ? product.total : 0
@@ -512,26 +541,18 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
       shipping.fulfillmentType === "ship" ? Number(shipping.courierPaidExtra) || 0 : 0
     const finalTotal = Math.max(0, newSubtotal - discount + courierExtra)
     setTotalAmount(finalTotal)
-    
-    // FIXED: Handle received amount based on status
-    if (status === "Completed") {
-      setReceivedAmount(finalTotal) // Full payment
-    } else if (status === "Cancelled") {
-      setReceivedAmount(0) // No payment for cancelled
-    } else if (status === "Credit") {
-      // For credit sales, keep current received amount but validate
-      // If received amount was previously set to full total, reset to 0
-      if (receivedAmount === 0 || receivedAmount === finalTotal) {
-        setReceivedAmount(0) // Default to completely credit (no payment)
-      } else if (receivedAmount > finalTotal) {
-        setReceivedAmount(0) // Invalid amount, reset to 0
-      }
-      // Otherwise keep the partial payment amount
-    } else if (status === "Pending") {
-      setReceivedAmount(0) // No payment for pending
-    }
-  }, [products, discountAmount, status, shipping.fulfillmentType, shipping.courierPaidExtra])
+  }, [products, discountAmount, shipping.fulfillmentType, shipping.courierPaidExtra])
 
+  // Auto-calculate received amount based on paymentStatus and paymentMethod
+  useEffect(() => {
+    if (paymentStatus === "Paid" || paymentStatus === "Completed") {
+      setReceivedAmount(totalAmount)
+    } else if (paymentStatus === "Cancelled") {
+      setReceivedAmount(0)
+    } else if (paymentStatus === "Pending") {
+      setReceivedAmount(0)
+    }
+  }, [paymentStatus, paymentMethod, totalAmount])
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat("en-US", {
@@ -590,9 +611,9 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
   }, [activeView, deviceId, salesViewMonth, fetchSalesForMonth])
 
     // Add Sale Form Functions
-  const addProductRow = () => {
-    setProducts([
-      ...products,
+  const addProductRow = useCallback(() => {
+    setProducts(prev => [
+      ...prev,
       {
         id: crypto.randomUUID(),
         productId: null,
@@ -605,16 +626,19 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
         notes: "",
       },
     ])
-  }
+  }, [])
 
-  const removeProductRow = (id: string) => {
-    if (products.length > 1) {
-      setProducts(products.filter((product) => product.id !== id))
-    }
-  }
+  const removeProductRow = useCallback((id: string) => {
+    setProducts(prev => {
+      if (prev.length > 1) {
+        return prev.filter((product) => product.id !== id)
+      }
+      return prev
+    })
+  }, [])
 
-  const updateProductRow = (id: string, updates: Partial<ProductRow>) => {
-    const updatedProducts = products.map((product) => {
+  const updateProductRow = useCallback((id: string, updates: Partial<ProductRow>) => {
+    setProducts(prev => prev.map((product) => {
       if (product.id === id) {
         const updatedProduct = { ...product, ...updates }
 
@@ -646,15 +670,13 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
         return updatedProduct
       }
       return product
-    })
-
-    setProducts(updatedProducts)
-  }
+    }))
+  }, [hideStockCount])
 
   const isProductOutOfStock = (product: ProductRow) =>
     Boolean(!hideStockCount && product.productId && !product.isService && (product.stock ?? 0) <= 0)
 
-  const handleQuantityInputChange = (product: ProductRow, rawValue: string) => {
+  const handleQuantityInputChange = useCallback((product: ProductRow, rawValue: string) => {
     const parsed = Number.parseInt(rawValue, 10)
     const requestedQuantity = Number.isFinite(parsed) ? parsed : 0
 
@@ -678,7 +700,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     }
 
     updateProductRow(product.id, { quantity: safeRequested })
-  }
+  }, [hideStockCount, updateProductRow])
 
   const handleProductSelect = (
     id: string,
@@ -770,9 +792,23 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     }
   }
 
-  const handleNewCustomer = (customerId: number, customerName: string) => {
+  const handleNewCustomer = (customerId: number, customerName: string, customerObj?: any) => {
     setCustomerId(customerId)
     setCustomerName(customerName)
+    setCustomerPhone(customerObj?.phone || "")
+    
+    // Automatically populate the address fields if the created customer has them
+    if (customerObj) {
+      setShipping((prev) => ({
+        ...prev,
+        shippingAddress: customerObj.address || prev.shippingAddress,
+        shippingCity: customerObj.city || prev.shippingCity,
+        shippingPincode: customerObj.pincode || prev.shippingPincode,
+        shippingLandmark: customerObj.landmark || prev.shippingLandmark,
+        shippingAddressType: customerObj.address_type || prev.shippingAddressType,
+      }))
+    }
+    
     setIsNewCustomerModalOpen(false)
   }
 
@@ -957,11 +993,13 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     setDate(new Date())
     setCustomerId(null)
     setCustomerName("")
+    setCustomerPhone("")
     if (activeStaff) {
       setStaffId(activeStaff.id)
       setStaffName(activeStaff.name)
     }
     setStatus("Completed")
+    setPaymentStatus("Paid")
     setPaymentMethod("Cash")
     setProducts(resetProducts)
     setDiscountAmount(0)
@@ -989,9 +1027,11 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                 date: resetDate.toISOString(),
                 customerId: null,
                 customerName: "",
+                customerPhone: "",
                 staffId: activeStaff?.id || null,
                 staffName: activeStaff?.name || "",
                 status: "Completed",
+                paymentStatus: "Paid",
                 paymentMethod: "Cash",
                 receivedAmount: 0,
                 discountAmount: 0,
@@ -1024,8 +1064,10 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
         // Set sale data
         setDate(new Date(sale.sale_date))
         setCustomerId(sale.customer_id)
-        setCustomerName(sale.customer_name || "")
+        setCustomerName(sale.customer_name || sale.customer_name_override || "")
+        setCustomerPhone(sale.customer_phone || sale.customer_phone_override || "")
         setStatus(sale.status || "Completed")
+        setPaymentStatus(sale.payment_status || "Paid")
         setOriginalSaleStatus(sale.status || "Completed")
 
         // Set staff information
@@ -1064,33 +1106,60 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
             notes: item.notes || "",
             isService: isService,
             serviceId: isService ? item.product_id : undefined,
+            productVariantId: item.product_variant_id,
+            variantName: item.variant_name,
+            batchId: item.batch_id,
+            batchNumber: item.batch_number,
+            isBatchManaged: item.is_batch_managed,
+            allocations: item.allocations || [],
           }
         })
 
-        setProducts(
-          productRows.length > 0
-            ? productRows
-            : [
-                {
-                  id: crypto.randomUUID(),
-                  productId: null,
-                  productName: "",
-                  quantity: 1,
-                  price: 0,
-                  cost: 0,
-                  stock: 0,
-                  total: 0,
-                  notes: "",
-                  isService: false,
-                },
-              ],
-        )
+        const parsedReceivedAmount = Number(sale.received_amount) || (sale.status === "Credit" ? 0 : Number(sale.total_amount))
+        const parsedAdvanceAmount = Number(sale.advance_amount) || 0
+        const parsedBalanceAmount = Number(sale.balance_amount) || 0
+        const mappedShipping = mapSaleShippingFromRecord(sale)
 
-        setReceivedAmount(Number(sale.received_amount) || (sale.status === "Credit" ? 0 : Number(sale.total_amount)))
-        setShipping(mapSaleShippingFromRecord(sale))
+        const finalProducts = productRows.length > 0 ? productRows : [createEmptyProductRow()]
+        setProducts(finalProducts)
+
+        setReceivedAmount(parsedReceivedAmount)
+        setAdvanceAmount(parsedAdvanceAmount)
+        setBalanceAmount(parsedBalanceAmount)
+        setShipping(mappedShipping)
 
         setIsEditMode(true)
         setEditingSaleId(saleId)
+
+        // Force update the draft to prevent hydration loop from resetting it to empty
+        setSaleDrafts((prev) =>
+          prev.map((draft) =>
+            draft.id === activeDraftId
+              ? {
+                  ...draft,
+                  date: new Date(sale.sale_date).toISOString(),
+                  customerId: sale.customer_id,
+                  customerName: sale.customer_name || sale.customer_name_override || "",
+                  customerPhone: sale.customer_phone || sale.customer_phone_override || "",
+                  status: sale.status || "Completed",
+                  paymentStatus: sale.payment_status || "Paid",
+                  originalSaleStatus: sale.status || "Completed",
+                  staffId: sale.staff_id || (activeStaff ? activeStaff.id : null),
+                  staffName: sale.staff_name || (activeStaff ? activeStaff.name : ""),
+                  paymentMethod: sale.payment_method || "Cash",
+                  discountAmount: Number(sale.discount) || 0,
+                  products: finalProducts,
+                  receivedAmount: parsedReceivedAmount,
+                  advanceAmount: parsedAdvanceAmount,
+                  balanceAmount: parsedBalanceAmount,
+                  shipping: mappedShipping,
+                  isEditMode: true,
+                  editingSaleId: saleId,
+                  name: `Edit #${saleId}`,
+                }
+              : draft
+          )
+        )
 
         setFormAlert({
           type: "success",
@@ -1176,12 +1245,14 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
           userId: userId,
           deviceId: deviceId,
           items: validItems,
-          paymentStatus: status,
+          paymentStatus: paymentStatus,
           paymentMethod: paymentMethod,
           saleDate: date?.toISOString() || new Date().toISOString(),
           originalStatus: originalSaleStatus,
           discount: discountAmount,
           receivedAmount: receivedAmount,
+          advanceAmount: advanceAmount,
+          balanceAmount: balanceAmount,
           staffId: finalStaffId,
           ...shipping,
         }
@@ -1212,12 +1283,14 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
           userId: userId,
           deviceId: deviceId,
           items: validItems,
-          paymentStatus: status,
+          paymentStatus: paymentStatus,
           paymentMethod: paymentMethod,
           saleDate: date?.toISOString() || new Date().toISOString(),
           notes: notes,
           discount: discountAmount,
           receivedAmount: receivedAmount,
+          advanceAmount: advanceAmount,
+          balanceAmount: balanceAmount,
           ...shipping,
         }
 
@@ -1393,14 +1466,22 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     return sale.payment_method || "Cash"
   }
 
-  // Calculate remaining amount for credit sales
+  // Calculate remaining amount based on total and received, for all payment methods
   const getRemainingAmount = (sale: any) => {
-    if (sale.status === "Credit") {
-      const total = Number(sale.total_amount) || 0
-      const received = Number(sale.received_amount) || 0
-      return Math.max(0, total - received)
+    if (sale.payment_status === "Paid" || sale.payment_status === "Completed") {
+      return 0
     }
-    return 0
+    
+    // Use explicit balance_amount from DB if available and > 0
+    if (sale.balance_amount !== undefined && sale.balance_amount !== null) {
+      const balance = Number(sale.balance_amount)
+      if (balance > 0) return balance
+    }
+
+    // Fallback for legacy records
+    const total = Number(sale.total_amount) || 0
+    const received = Number(sale.received_amount) || 0
+    return Math.max(0, total - received)
   }
 
   const handleCreateDraftTab = () => {
@@ -1527,6 +1608,406 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
       onEditSale={handleEditSale}
     />
   )
+
+  const memoizedProductTable = useMemo(() => (
+    <div className="flex-1 overflow-x-auto overflow-y-auto min-h-0">
+      {/* Desktop table header */}
+      <div className="hidden lg:block sticky top-0 z-10 min-w-[800px]">
+        <div className="grid grid-cols-12 gap-1 p-2 bg-gray-100 font-medium text-xs text-gray-700 border-b border-gray-200">
+          <div className="col-span-3">Product/Service</div>
+          <div className="col-span-2">Notes</div>
+          <div className="col-span-1 text-center">Qty</div>
+          <div className="col-span-2 text-center">Price</div>
+          <div className="col-span-2 text-center">
+            <button
+              type="button"
+              onClick={() => setShowCost((prev) => !prev)}
+              className="inline-flex items-center justify-center gap-1 hover:text-gray-900 transition-colors"
+              title={showCost ? "Hide reference price" : "Show reference price"}
+            >
+              Ref
+              {showCost ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+            </button>
+          </div>
+          <div className="col-span-1 text-center">Total</div>
+          <div className="col-span-1"></div>
+        </div>
+      </div>
+      {/* Desktop table rows */}
+      <div className="hidden lg:block min-w-[800px]">
+        {products.map((product, index) => (
+          <div
+            key={product.id}
+            className={`grid grid-cols-12 gap-1 p-2 items-center border-b border-gray-200 ${
+              index % 2 === 0 ? "bg-white" : "bg-gray-50"
+            } hover:bg-gray-100 transition-colors duration-150`}
+          >
+            <div className="col-span-3">
+              {product.productId && product.productName ? (
+                <div className="flex flex-col">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 flex-1">
+                      {product.isService ? (
+                        <Wrench className="h-4 w-4 text-green-600 flex-shrink-0" />
+                      ) : (
+                        <div className="h-4 w-4 flex-shrink-0" />
+                      )}
+                      <span className="truncate flex-1 font-medium text-xs text-gray-900">
+                        {product.productName}
+                      </span>
+                      {isProductOutOfStock(product) && (
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700">
+                          OOS
+                        </span>
+                      )}
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 w-6 p-0 text-gray-400 hover:text-blue-500"
+                      onClick={() => {
+                        updateProductRow(product.id, {
+                          productId: null,
+                          productName: "",
+                          price: 0,
+                          cost: 0,
+                          stock: 0,
+                          total: 0,
+                          notes: "",
+                          isService: false,
+                          serviceId: undefined,
+                          isBatchManaged: false,
+                          allocations: [],
+                          autoAllocate: true,
+                          batchId: null,
+                          batchNumber: null,
+                        })
+                        setBarcodeAlert(null)
+                      }}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  {(!product.isService || (product.variants && product.variants.length > 0)) && (
+                    <div className="mt-1.5 ml-6 flex flex-col sm:flex-row gap-2">
+                      {product.variants && product.variants.length > 0 && (
+                        <select
+                          className="h-7 text-[10px] sm:text-xs bg-white border border-gray-300 rounded-md px-1.5 w-full max-w-[120px]"
+                          value={product.productVariantId || ""}
+                          onChange={(e) => {
+                            const vId = e.target.value
+                            const v = product.variants?.find((vx: any) => vx.id === vId)
+                            if (v) {
+                              updateProductRow(product.id, {
+                                productVariantId: v.id,
+                                variantName: v.name,
+                                batchId: null,
+                                batchNumber: null,
+                                price: product.price,
+                                batches: v.batches || [],
+                                allocations: [],
+                                autoAllocate: true
+                              })
+                            }
+                          }}
+                        >
+                          {product.variants.map((v: any) => (
+                            <option key={v.id} value={v.id}>{v.name}</option>
+                          ))}
+                        </select>
+                      )}
+                      <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-[10px] sm:text-xs px-2 flex justify-between items-center bg-blue-50/30 border-blue-200 text-blue-800 hover:bg-blue-100/50 w-full max-w-[120px]"
+            onClick={() => setAllocatorRowId(product.id)}
+            disabled={product.variants && product.variants.length > 1 && !product.productVariantId}
+          >
+            <span className="truncate">
+              {product.allocations?.length ? `Allocated (${product.allocations.reduce((sum, a) => sum + a.quantity, 0)})` : 'Allocate Batches'}
+            </span>
+            <span className="ml-1 opacity-70">
+              {product.autoAllocate ? '(Auto)' : '(Manual)'}
+            </span>
+          </Button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <ProductSelectSimple
+                  id={`product-select-${product.id}`}
+                  value={product.productId}
+                  onChange={(productId, productName, price, wholesalePrice, stock, productObj) =>
+                    handleProductSelect(product.id, productId, productName, price, wholesalePrice, stock, productObj)
+                  }
+                  error={
+                    products.filter((p) => p.productId === product.productId).length > 1
+                      ? "Duplicate item"
+                      : undefined
+                  }
+                />
+              )}
+            </div>
+            <div className="col-span-2">
+              <Input
+                value={product.notes}
+                onChange={(e) => updateProductRow(product.id, { notes: e.target.value })}
+                className="h-8 text-xs bg-white border-gray-300 text-gray-900"
+                placeholder="Optional notes..."
+                disabled={!product.productId}
+              />
+            </div>
+            <div className="col-span-1">
+              <Input
+                type="number"
+                min="1"
+                step="1"
+                value={product.quantity || ""}
+                onChange={(e) => handleQuantityInputChange(product, e.target.value)}
+                className="h-8 text-xs text-center bg-white border-gray-300 text-gray-900"
+                disabled={!product.productId}
+              />
+            </div>
+            <div className="col-span-2">
+              <div className="relative">
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={product.price || ""}
+                  onChange={(e) => updateProductRow(product.id, { price: Number.parseFloat(e.target.value) || 0 })}
+                  className="h-8 text-xs text-right pr-6 bg-white border-gray-300 text-gray-900"
+                  disabled={!product.productId}
+                />
+                <span className="absolute right-2 top-2 text-[10px] text-gray-400">{deviceCurrencyState}</span>
+              </div>
+            </div>
+            <div className="col-span-2 text-center text-xs text-gray-500">
+              {showCost && product.productId && (
+                <span>
+                  {deviceCurrencyState} {formatCurrency(product.cost)}
+                </span>
+              )}
+            </div>
+            <div className="col-span-1 text-right font-medium text-xs text-gray-900">
+              {product.productId ? (
+                <>
+                  {deviceCurrencyState} {formatCurrency(product.total)}
+                </>
+              ) : null}
+            </div>
+            <div className="col-span-1 flex justify-center">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => removeProductRow(product.id)}
+                disabled={products.length === 1}
+                className="h-8 w-8 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Mobile table rows */}
+      <div className="lg:hidden">
+        {products.map((product, index) => (
+          <div
+            key={product.id}
+            className={`flex flex-col p-3 border-b border-gray-200 ${
+              index % 2 === 0 ? "bg-white" : "bg-gray-50"
+            }`}
+          >
+            <div className="mb-2">
+              <Label className="text-[10px] text-gray-500 mb-1 block">Product/Service</Label>
+              {product.productId && product.productName ? (
+                <div className="flex flex-col">
+                  <div className="flex items-center justify-between bg-gray-100 p-2 rounded-md">
+                    <div className="flex items-center gap-2 flex-1">
+                      {product.isService ? (
+                        <Wrench className="h-4 w-4 text-green-600 flex-shrink-0" />
+                      ) : (
+                        <div className="h-4 w-4 flex-shrink-0" />
+                      )}
+                      <span className="truncate flex-1 font-medium text-xs text-gray-900">
+                        {product.productName}
+                      </span>
+                      {isProductOutOfStock(product) && (
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700">
+                          OOS
+                        </span>
+                      )}
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 w-6 p-0 text-gray-400 hover:text-blue-500"
+                      onClick={() => {
+                        updateProductRow(product.id, {
+                          productId: null,
+                          productName: "",
+                          price: 0,
+                          cost: 0,
+                          stock: 0,
+                          total: 0,
+                          notes: "",
+                          isService: false,
+                          serviceId: undefined,
+                          isBatchManaged: false,
+                          allocations: [],
+                          autoAllocate: true,
+                          batchId: null,
+                          batchNumber: null,
+                        })
+                        setBarcodeAlert(null)
+                      }}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  {(!product.isService || (product.variants && product.variants.length > 0)) && (
+                    <div className="mt-2 flex flex-row gap-2">
+                      {product.variants && product.variants.length > 0 && (
+                        <select
+                          className="h-8 text-xs bg-white border border-gray-300 rounded-md px-2 flex-1"
+                          value={product.productVariantId || ""}
+                          onChange={(e) => {
+                            const vId = e.target.value
+                            const v = product.variants?.find((vx: any) => vx.id === vId)
+                            if (v) {
+                              updateProductRow(product.id, {
+                                productVariantId: v.id,
+                                variantName: v.name,
+                                batchId: null,
+                                batchNumber: null,
+                                price: product.price,
+                                batches: v.batches || [],
+                                allocations: [],
+                                autoAllocate: true
+                              })
+                            }
+                          }}
+                        >
+                          {product.variants.map((v: any) => (
+                            <option key={v.id} value={v.id}>{v.name}</option>
+                          ))}
+                        </select>
+                      )}
+                      <Button
+            variant="outline"
+            size="sm"
+            className="h-8 text-xs px-2 flex justify-between items-center bg-blue-50/30 border-blue-200 text-blue-800 hover:bg-blue-100/50 flex-1"
+            onClick={() => setAllocatorRowId(product.id)}
+            disabled={product.variants && product.variants.length > 1 && !product.productVariantId}
+          >
+            <span className="truncate">
+              {product.allocations?.length ? `Allocated (${product.allocations.reduce((sum, a) => sum + a.quantity, 0)})` : 'Allocate Batches'}
+            </span>
+          </Button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <ProductSelectSimple
+                  id={`product-select-mobile-${product.id}`}
+                  value={product.productId}
+                  onChange={(productId, productName, price, wholesalePrice, stock, productObj) =>
+                    handleProductSelect(product.id, productId, productName, price, wholesalePrice, stock, productObj)
+                  }
+                  error={
+                    products.filter((p) => p.productId === product.productId).length > 1
+                      ? "Duplicate"
+                      : undefined
+                  }
+                />
+              )}
+            </div>
+
+            <div className="mb-2">
+              <Label className="text-[10px] text-gray-500 mb-1 block">Notes</Label>
+              <Input
+                value={product.notes}
+                onChange={(e) => updateProductRow(product.id, { notes: e.target.value })}
+                className="h-8 text-xs bg-white border-gray-300 text-gray-900"
+                placeholder="Optional notes..."
+                disabled={!product.productId}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 mb-2">
+              <div>
+                <Label className="text-[10px] text-gray-500 mb-1 block">Quantity</Label>
+                <Input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={product.quantity || ""}
+                  onChange={(e) => handleQuantityInputChange(product, e.target.value)}
+                  className="h-8 text-xs bg-white border-gray-300 text-gray-900"
+                  disabled={!product.productId}
+                />
+              </div>
+              <div>
+                <Label className="text-[10px] text-gray-500 mb-1 block">Price</Label>
+                <div className="relative">
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={product.price || ""}
+                    onChange={(e) => updateProductRow(product.id, { price: Number.parseFloat(e.target.value) || 0 })}
+                    className="h-8 text-xs pr-8 bg-white border-gray-300 text-gray-900"
+                    disabled={!product.productId}
+                  />
+                  <span className="absolute right-2 top-2 text-[10px] text-gray-400">{deviceCurrencyState}</span>
+                </div>
+              </div>
+            </div>
+
+            {showCost && product.productId && (
+              <div className="mb-2">
+                <Label className="text-[10px] text-gray-500 mb-1 block">Ref Price (Cost)</Label>
+                <div className="text-xs text-gray-700 bg-gray-100 p-1.5 rounded">
+                  {deviceCurrencyState} {formatCurrency(product.cost)}
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-between items-center mt-2 pt-2 border-t border-gray-200">
+              <div>
+                <Label className="text-[10px] text-gray-500 block">Total</Label>
+                <div className="font-medium text-sm text-gray-900">
+                  {product.productId ? (
+                    <>
+                      {deviceCurrencyState} {formatCurrency(product.total)}
+                    </>
+                  ) : (
+                    "—"
+                  )}
+                </div>
+              </div>
+              <div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => removeProductRow(product.id)}
+                  disabled={products.length === 1}
+                  className="text-red-500 hover:text-red-700"
+                >
+                  <Trash2 className="h-4 w-4 mr-1" />
+                  Remove
+                </Button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  ), [products, showCost, deviceCurrencyState, hideStockCount, updateProductRow, removeProductRow, addProductRow, handleQuantityInputChange, handleProductSelect, setAllocatorRowId, setIsNewServiceModalOpen])
 
   const salesEntryView = (
     <div className="min-h-[calc(100vh-100px)] bg-gray-50 text-gray-900 p-2 sm:p-3">
@@ -1663,501 +2144,12 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                 className="flex items-center gap-1 border-gray-300 text-gray-900 hover:bg-gray-50 h-7 text-xs bg-transparent"
                               >
                                 <Plus className="h-3 w-3" />
-                                <span className="hidden sm:inline">Row</span>
+                                Add
                               </Button>
                             </div>
                           </div>
-
-                          {/* Products table - scrollable area */}
-                          <div className="flex-1 overflow-x-auto overflow-y-auto min-h-0">
-                            {/* Desktop table header */}
-                            <div className="hidden lg:block sticky top-0 z-10 min-w-[800px]">
-                              <div className="grid grid-cols-12 gap-1 p-2 bg-gray-100 font-medium text-xs text-gray-700 border-b border-gray-200">
-                                <div className="col-span-3">Product/Service</div>
-                                <div className="col-span-2">Notes</div>
-                                <div className="col-span-1 text-center">Qty</div>
-                                <div className="col-span-2 text-center">Price</div>
-                                <div className="col-span-2 text-center">
-                                  <button
-                                    type="button"
-                                    onClick={() => setShowCost((prev) => !prev)}
-                                    className="inline-flex items-center justify-center gap-1 hover:text-gray-900 transition-colors"
-                                    title={showCost ? "Hide reference price" : "Show reference price"}
-                                  >
-                                    Ref
-                                    {showCost ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
-                                  </button>
-                                </div>
-                                <div className="col-span-1 text-center">Total</div>
-                                <div className="col-span-1"></div>
-                              </div>
-                            </div>
-                            {/* Desktop table rows */}
-                            <div className="hidden lg:block min-w-[800px]">
-                              {products.map((product, index) => (
-                                <div
-                                  key={product.id}
-                                  className={`grid grid-cols-12 gap-1 p-2 items-center border-b border-gray-200 ${
-                                    index % 2 === 0 ? "bg-white" : "bg-gray-50"
-                                  } hover:bg-gray-100 transition-colors duration-150`}
-                                >
-                                  <div className="col-span-3">
-                                    {product.productId && product.productName ? (
-                                      <div className="flex flex-col">
-                                        <div className="flex items-center justify-between">
-                                          <div className="flex items-center gap-2 flex-1">
-                                            {product.isService ? (
-                                              <Wrench className="h-4 w-4 text-green-600 flex-shrink-0" />
-                                            ) : (
-                                              <div className="h-4 w-4 flex-shrink-0" />
-                                            )}
-                                            <span className="truncate flex-1 font-medium text-xs text-gray-900">
-                                              {product.productName}
-                                            </span>
-                                            {isProductOutOfStock(product) && (
-                                              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700">
-                                                OOS
-                                              </span>
-                                            )}
-                                          </div>
-                                          <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            className="h-6 w-6 p-0 text-gray-400 hover:text-blue-500"
-                                            onClick={() => {
-                                              updateProductRow(product.id, {
-                                                productId: null,
-                                                productName: "",
-                                                price: 0,
-                                                cost: 0,
-                                                stock: 0,
-                                                total: 0,
-                                                notes: "",
-                                                isService: false,
-                                                serviceId: undefined,
-                                                isBatchManaged: false,
-    allocations: [],
-    autoAllocate: true,
-                                                batchId: null,
-                                                batchNumber: null,
-                                                variantName: null,
-                                                batches: [],
-                                                variants: [],
-                                              })
-                                            }}
-                                          >
-                                            <ChevronsUpDown className="h-3 w-3" />
-                                          </Button>
-                                        </div>
-                                        {product.isBatchManaged && (
-                                          <div className="mt-1 flex flex-col gap-1">
-                                            {product.variants && product.variants.length > 0 && (
-                                              <select
-                                                className="text-[10px] h-6 px-1 rounded border border-gray-200 bg-gray-50/50 text-gray-800 w-full focus:outline-none focus:ring-1 focus:ring-gray-400"
-                                                value={product.productVariantId || ""}
-                                                onChange={(e) => {
-                                                  const vId = parseInt(e.target.value)
-                                                  const v = product.variants?.find((v: any) => v.id === vId)
-                                                  if (v) {
-                                                    updateProductRow(product.id, {
-                                                      productVariantId: v.id,
-                                                      variantName: v.name,
-                                                      batchId: null,
-                                                      batchNumber: null,
-                                                      price: product.price,
-                                                      batches: v.batches || [],
-                                                      allocations: [],
-                                                      autoAllocate: true
-                                                    })
-                                                  }
-                                                }}
-                                              >
-                                                {product.variants.map((v: any) => (
-                                                  <option key={v.id} value={v.id}>{v.name}</option>
-                                                ))}
-                                              </select>
-                                            )}
-                                            <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="h-7 text-[10px] sm:text-xs px-2 flex justify-between items-center bg-blue-50/30 border-blue-200 text-blue-800 hover:bg-blue-100/50 w-full max-w-[120px]"
-                                  onClick={() => setAllocatorRowId(product.id)}
-                                  disabled={product.variants && product.variants.length > 1 && !product.productVariantId}
-                                >
-                                  <span className="truncate">
-                                    {product.allocations?.length ? `Allocated (${product.allocations.reduce((sum, a) => sum + a.quantity, 0)})` : 'Allocate Batches'}
-                                  </span>
-                                  <span className="ml-1 opacity-70">
-                                    {product.autoAllocate ? '(Auto)' : '(Manual)'}
-                                  </span>
-                                </Button>
-                                          </div>
-                                        )}
-                                      </div>
-                                    ) : (
-                                      <ProductSelectSimple
-                                        id={`product-select-${product.id}`}
-                                        value={product.productId}
-                                        onChange={(productId, productName, price, wholesalePrice, stock, productObj) =>
-                                          handleProductSelect(product.id, productId, productName, price, wholesalePrice, stock, productObj)
-                                        }
-                                  onAddNew={() => setIsNewProductModalOpen(true)}
-                                  onAddNewService={() => setIsNewServiceModalOpen(true)}
-                                  userId={userId}
-                                />
-                              )}
-                            </div>
-                                  <div className="col-span-2">
-                                    <Input
-                                      placeholder="Notes..."
-                                      value={product.notes || ""}
-                                      onChange={(e) => updateProductRow(product.id, { notes: e.target.value })}
-                                      className="text-xs h-7 bg-white border-gray-300 text-gray-900"
-                                    />
-                                  </div>
-                                  <div className="col-span-1">
-                                    <Input
-                                      type="number"
-                                      min={isProductOutOfStock(product) ? "0" : "1"}
-                                      value={product.quantity}
-                                      onChange={(e) => handleQuantityInputChange(product, e.target.value)}
-                                      className={`text-center h-7 text-xs bg-white text-gray-900 ${
-                                        isProductOutOfStock(product)
-                                          ? "border-red-400"
-                                          : "border-gray-300"
-                                      }`}
-                                    />
-                                  </div>
-                                  <div className="col-span-2">
-                                    <Input
-                                      type="number"
-                                      min="0"
-                                      step="0.01"
-                                      value={product.price}
-                                      onChange={(e) =>
-                                        updateProductRow(product.id, {
-                                          price: Number.parseFloat(e.target.value) || 0,
-                                        })
-                                      }
-                                      className="text-center h-7 text-xs bg-white border-gray-300 text-gray-900"
-                                    />
-                                  </div>
-                                  <div className="col-span-2">
-                                    {showCost ? (
-                                      <Input
-                                        type="number"
-                                        min="0"
-                                        step="0.01"
-                                        value={product.cost || 0}
-                                        onChange={(e) =>
-                                          updateProductRow(product.id, {
-                                            cost: Number.parseFloat(e.target.value) || 0,
-                                          })
-                                        }
-                                        className="text-center h-7 text-xs bg-white border-gray-300 text-gray-900"
-                                      />
-                                    ) : (
-                                      <div
-                                        className="relative group"
-                                        title={`${product.cost || 0}`}
-                                      >
-                                        <Input
-                                          type="number"
-                                          min="0"
-                                          step="0.01"
-                                          readOnly
-                                          value={product.cost || 0}
-                                          className="text-center h-7 text-xs bg-white border-gray-300 text-transparent group-hover:text-gray-900 group-focus-within:text-gray-900 transition-colors"
-                                        />
-                                        <span className="absolute inset-0 flex items-center justify-center text-gray-500 tracking-widest pointer-events-none group-hover:opacity-0 group-focus-within:opacity-0 transition-opacity">
-                                          ****
-                                        </span>
-                                      </div>
-                                    )}
-                                  </div>
-                                  <div className="col-span-1 flex items-center justify-center font-medium text-xs text-gray-900">
-                                    {deviceCurrencyState} {product.total.toFixed(2)}
-                                  </div>
-                                  <div className="col-span-1 flex justify-center">
-                                    <Button
-                                      type="button"
-                                      variant="ghost"
-                                      size="icon"
-                                      onClick={() => removeProductRow(product.id)}
-                                      disabled={products.length === 1}
-                                      className="h-6 w-6 p-0 text-gray-400 hover:text-red-500"
-                                    >
-                                      <Trash2 className="h-3 w-3" />
-                                    </Button>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-
-                            {/* Mobile card layout */}
-                            <div className="lg:hidden">
-                              {products.map((product, index) => (
-                                <div
-                                  key={product.id}
-                                  className={`p-3 border-b border-gray-200 ${
-                                    index % 2 === 0 ? "bg-white" : "bg-gray-50"
-                                  }`}
-                                >
-                                  {/* Product Selection */}
-                                  <div className="mb-3">
-                                    <Label className="text-xs font-medium text-gray-700 mb-1 block">
-                                      Product/Service
-                                    </Label>
-                                    {product.productId && product.productName ? (
-                                      <div className="flex flex-col">
-                                        <div className="flex items-center justify-between p-2 bg-gray-100 rounded">
-                                          <div className="flex items-center gap-2">
-                                            {product.isService && (
-                                              <Wrench className="h-4 w-4 text-green-600" />
-                                            )}
-                                            <span className="text-sm font-medium text-gray-900">
-                                              {product.productName}
-                                            </span>
-                                            {isProductOutOfStock(product) && (
-                                              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700">
-                                                OOS
-                                              </span>
-                                            )}
-                                          </div>
-                                          <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            className="h-6 w-6 p-0"
-                                            onClick={() => {
-                                              updateProductRow(product.id, {
-                                                productId: null,
-                                                productName: "",
-                                                price: 0,
-                                                cost: 0,
-                                                stock: 0,
-                                                total: 0,
-                                                notes: "",
-                                                isService: false,
-                                                serviceId: undefined,
-                                                isBatchManaged: false,
-                                                batchId: null,
-                                                batchNumber: null,
-                                                variantName: null,
-                                                batches: [],
-                                                variants: [],
-                                              })
-                                            }}
-                                          >
-                                            <ChevronsUpDown className="h-3 w-3" />
-                                          </Button>
-                                        </div>
-                                        
-                                        {product.isBatchManaged && (
-                                          <div className="mt-1 flex flex-col gap-1">
-                                            {product.variants && product.variants.length > 0 && (
-                                              <select
-                                                className="text-[10px] h-6 px-1 rounded border border-gray-200 bg-gray-50/50 text-gray-800 w-full focus:outline-none focus:ring-1 focus:ring-gray-400"
-                                                value={product.productVariantId || ""}
-                                                onChange={(e) => {
-                                                  const vId = parseInt(e.target.value)
-                                                  const v = product.variants?.find((v: any) => v.id === vId)
-                                                  if (v) {
-                                                    updateProductRow(product.id, {
-                                                      productVariantId: v.id,
-                                                      variantName: v.name,
-                                                      batchId: null,
-                                                      batchNumber: null,
-                                                      price: product.price
-                                                    })
-                                                  }
-                                                }}
-                                              >
-                                                {product.variants.map((v: any) => (
-                                                  <option key={v.id} value={v.id}>{v.name}</option>
-                                                ))}
-                                              </select>
-                                            )}
-                                            <select
-                                              className="text-[10px] h-6 px-1 rounded border border-blue-200 bg-blue-50/30 text-blue-800 w-full focus:outline-none focus:ring-1 focus:ring-blue-400"
-                                              value={product.batchId || ""}
-                                              onChange={(e) => {
-                                                const val = e.target.value
-                                                const validBatches = product.batches?.filter((b: any) => (b.product_variant_id || null) == (product.productVariantId || null) || b.product_variant_id == null) || []
-                                                
-                                                if (!val) {
-                                                  // Find oldest available batch for Auto-allocate price
-                                                  const oldestAvailable = validBatches.find((b: any) => {
-                                                    const stockCount = b.stocks?.find((s: any) => s.device_id === deviceId)?.stock || b.stock || 0
-                                                    return stockCount > 0
-                                                  })
-                                                  const fallbackPrice = oldestAvailable?.selling_price ? Number(oldestAvailable.selling_price) : product.price
-                                                  updateProductRow(product.id, { batchId: null, batchNumber: null, price: fallbackPrice })
-                                                  return
-                                                }
-                                                const bId = parseInt(val)
-                                                const b = validBatches.find((b: any) => b.id === bId)
-                                                if (b) {
-                                                  updateProductRow(product.id, { 
-                                                    batchId: bId, 
-                                                    batchNumber: b.batch_no,
-                                                    price: b.selling_price ? Number(b.selling_price) : product.price
-                                                  })
-                                                }
-                                              }}
-                                            >
-                                              <option value="">Auto-allocate (FIFO)</option>
-                                              {(product.batches || [])
-                                                .filter((b: any) => (b.product_variant_id || null) == (product.productVariantId || null) || b.product_variant_id == null)
-                                                .map((b: any) => {
-                                                  const stockCount = b.stocks?.find((s: any) => s.device_id === deviceId)?.stock || b.stock || 0
-                                                  return (
-                                                    <option key={b.id} value={b.id} disabled={stockCount <= 0}>
-                                                      {b.batch_no} | Stock: {stockCount} {b.selling_price ? `| Selling Price: QAR ${b.selling_price}` : ''}
-                                                    </option>
-                                                  )
-                                                })}
-                                            </select>
-                                          </div>
-                                        )}
-                                      </div>
-                                    ) : (
-                                      <ProductSelectSimple
-                                        id={`product-select-mobile-${product.id}`}
-                                        value={product.productId}
-                                        onChange={(productId, productName, price, wholesalePrice, stock, productObj) =>
-                                          handleProductSelect(product.id, productId, productName, price, wholesalePrice, stock, productObj)
-                                        }
-                                        onAddNew={() => setIsNewProductModalOpen(true)}
-                                        onAddNewService={() => setIsNewServiceModalOpen(true)}
-                                        userId={userId}
-                                      />
-                                    )}
-                                  </div>
-
-                                  {/* Notes */}
-                                  <div className="mb-3">
-                                    <Label className="text-xs font-medium text-gray-700 mb-1 block">
-                                      Notes
-                                    </Label>
-                                    <Input
-                                      placeholder="Notes..."
-                                      value={product.notes || ""}
-                                      onChange={(e) => updateProductRow(product.id, { notes: e.target.value })}
-                                      className="text-sm h-8"
-                                    />
-                                  </div>
-
-                                  {/* Quantity, Price, Cost row */}
-                                  <div className="grid grid-cols-3 gap-2 mb-3">
-                                    <div>
-                                      <Label className="text-xs font-medium text-gray-700 mb-1 block">
-                                        Qty
-                                      </Label>
-                                      <Input
-                                        type="number"
-                                        min={isProductOutOfStock(product) ? "0" : "1"}
-                                        value={product.quantity}
-                                        onChange={(e) => handleQuantityInputChange(product, e.target.value)}
-                                        className={`text-center h-8 text-sm ${
-                                          isProductOutOfStock(product)
-                                            ? "border-red-400"
-                                            : ""
-                                        }`}
-                                      />
-                                      {isProductOutOfStock(product) && (
-                                        <p className="mt-1 text-[10px] text-red-600">Out of stock</p>
-                                      )}
-                                    </div>
-                                    <div>
-                                      <Label className="text-xs font-medium text-gray-700 mb-1 block">
-                                        Price
-                                      </Label>
-                                      <Input
-                                        type="number"
-                                        min="0"
-                                        step="0.01"
-                                        value={product.price}
-                                        onChange={(e) =>
-                                          updateProductRow(product.id, {
-                                            price: Number.parseFloat(e.target.value) || 0,
-                                          })
-                                        }
-                                        className="text-center h-8 text-sm"
-                                      />
-                                    </div>
-                                    <div>
-                                      <Label className="text-xs font-medium text-gray-700 mb-1 flex items-center justify-center gap-1">
-                                        <button
-                                          type="button"
-                                          onClick={() => setShowCost((prev) => !prev)}
-                                          className="inline-flex items-center gap-1"
-                                          title={showCost ? "Hide reference price" : "Show reference price"}
-                                        >
-                                          Ref
-                                          {showCost ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
-                                        </button>
-                                      </Label>
-                                      {showCost ? (
-                                        <Input
-                                          type="number"
-                                          min="0"
-                                          step="0.01"
-                                          value={product.cost || 0}
-                                          onChange={(e) =>
-                                            updateProductRow(product.id, {
-                                              cost: Number.parseFloat(e.target.value) || 0,
-                                            })
-                                          }
-                                          className="text-center h-8 text-sm"
-                                        />
-                                      ) : (
-                                        <div
-                                          className="relative group"
-                                          title={`${product.cost || 0}`}
-                                        >
-                                          <Input
-                                            type="number"
-                                            min="0"
-                                            step="0.01"
-                                            readOnly
-                                            value={product.cost || 0}
-                                            className="text-center h-8 text-sm text-transparent group-hover:text-gray-900 group-focus-within:text-gray-900 group-active:text-gray-900 transition-colors"
-                                          />
-                                          <span className="absolute inset-0 flex items-center justify-center text-gray-500 tracking-widest pointer-events-none group-hover:opacity-0 group-focus-within:opacity-0 group-active:opacity-0 transition-opacity">
-                                            ****
-                                          </span>
-                                        </div>
-                                      )}
-                                    </div>
-                                  </div>
-
-                                  {/* Total and Delete */}
-                                  <div className="flex items-center justify-between">
-                                    <div className="text-sm font-medium text-gray-900">
-                                      Total: {deviceCurrencyState} {product.total.toFixed(2)}
-                                    </div>
-                                    <Button
-                                      type="button"
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => removeProductRow(product.id)}
-                                      disabled={products.length === 1}
-                                      className="text-red-500 hover:text-red-700"
-                                    >
-                                      <Trash2 className="h-4 w-4 mr-1" />
-                                      Remove
-                                    </Button>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
+                          {memoizedProductTable}
                         </div>
-
-
-                        
-
-                        {/* Sale details section */}
                         <div className="w-full lg:w-[30%] flex flex-col bg-white min-h-0">
                           <div className="p-3 border-b border-gray-200 overflow-y-auto flex-1">
                             <div className="space-y-3">
@@ -2169,32 +2161,15 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                 </Label>
                                 <CustomerSelectSimple
                                   value={customerId}
-                                  onChange={(value, name) => {
+                                  onChange={(value, name, obj) => {
                                     setCustomerId(value)
                                     if (name) setCustomerName(name)
+                                    if (obj?.phone) setCustomerPhone(obj.phone)
                                   }}
                                   onAddNew={() => setIsNewCustomerModalOpen(true)}
                                   userId={userId}
                                   showAddNewButton={false}
                                 />
-                              </div>
-
-                              {/* Status */}
-                              <div className="space-y-1">
-                                <Label htmlFor="status" className="text-xs font-medium text-gray-900">
-                                  Status
-                                </Label>
-                                <select
-                                  id="status"
-                                  className="flex h-8 w-full items-center justify-between rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-900"
-                                  value={status}
-                                  onChange={(e) => setStatus(e.target.value)}
-                                >
-                                  <option value="Completed">Completed</option>
-                                  <option value="Credit">Credit</option>
-                                  <option value="Pending">Pending</option>
-                                  <option value="Cancelled">Cancelled</option>
-                                </select>
                               </div>
 
                               {/* Staff and Date - responsive layout */}
@@ -2222,77 +2197,92 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                 </div>
                               </div>
 
-                              {/* Received Amount for Credit */}
-                              {status === "Credit" && (
+                              {/* Payment Section */}
+                              <div className="space-y-3 pt-3 border-t border-gray-200 mt-3">
+                                <h3 className="text-sm font-semibold text-gray-900 flex items-center">
+                                  <CreditCard className="h-4 w-4 mr-2 text-blue-500" />
+                                  Payment Details
+                                </h3>
+                                
                                 <div className="space-y-1">
-                                  <Label
-                                    htmlFor="received_amount"
-                                    className="text-xs font-medium text-gray-900"
-                                  >
-                                    Received Amount
-                                  </Label>
-                                  <Input
-                                    id="received_amount"
-                                    type="number"
-                                    min="0"
-                                    max={totalAmount}
-                                    step="0.01"
-                                    value={receivedAmount}
-                                    onChange={(e) => setReceivedAmount(Number.parseFloat(e.target.value) || 0)}
-                                    className="h-8 text-xs bg-white border-gray-300 text-gray-900"
-                                    placeholder="0.00"
-                                  />
-                                  <p className="text-xs text-gray-500">
-                                    Remaining: {deviceCurrencyState} {(totalAmount - receivedAmount).toFixed(2)}
-                                  </p>
-                                </div>
-                              )}
-
-                              {/* Payment Method for Completed - responsive grid */}
-                              {status === "Completed" && (
-                                <div className="space-y-1">
-                                  <Label className="text-xs font-medium flex items-center text-gray-900">
-                                    <CreditCard className="h-3 w-3 mr-1 text-blue-500" />
+                                  <Label className="text-xs font-medium text-gray-900">
                                     Payment Method
                                   </Label>
-                                  <RadioGroup
+                                  <select
+                                    className="flex h-8 w-full items-center justify-between rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-900"
                                     value={paymentMethod}
-                                    onValueChange={setPaymentMethod}
-                                    className="grid grid-cols-1 sm:grid-cols-3 gap-1"
+                                    onChange={(e) => setPaymentMethod(e.target.value)}
                                   >
-                                    <div className="flex items-center space-x-1 bg-gray-50 p-1 rounded-md border border-gray-200">
-                                      <RadioGroupItem value="Cash" id="cash" className="h-3 w-3" />
-                                      <Label htmlFor="cash" className="cursor-pointer text-xs text-gray-900">
-                                        Cash
-                                      </Label>
-                                    </div>
-                                    <div className="flex items-center space-x-1 bg-gray-50 p-1 rounded-md border border-gray-200">
-                                      <RadioGroupItem value="Card" id="card" className="h-3 w-3" />
-                                      <Label htmlFor="card" className="cursor-pointer text-xs text-gray-900">
-                                        Card
-                                      </Label>
-                                    </div>
-                                    <div className="flex items-center space-x-1 bg-gray-50 p-1 rounded-md border border-gray-200">
-                                      <RadioGroupItem value="Online" id="online" className="h-3 w-3" />
-                                      <Label
-                                        htmlFor="online"
-                                        className="cursor-pointer text-xs text-gray-900"
-                                      >
-                                        Online
-                                      </Label>
-                                    </div>
-                                  </RadioGroup>
+                                    <option value="Cash">Cash</option>
+                                    <option value="Card">Card</option>
+                                    <option value="Bank Transfer">Bank Transfer</option>
+                                    <option value="UPI">UPI</option>
+                                    <option value="COD">Cash on Delivery (COD)</option>
+                                  </select>
                                 </div>
-                              )}
 
-                              <SaleShippingSection
-                                deviceId={deviceId}
-                                value={shipping}
-                                onChange={setShipping}
-                                customerAddress={customerAddress}
-                                currency={deviceCurrencyState}
-                                className="mt-2"
-                              />
+                                <div className="flex flex-col sm:flex-row gap-2">
+                                  <div className="flex flex-col space-y-1 flex-1">
+                                    <Label className="text-xs font-medium text-gray-900">
+                                      {paymentMethod === "COD" ? "Advance Amount Collected" : "Amount Paid"}
+                                    </Label>
+                                    <Input
+                                      type="number"
+                                      min="0"
+                                      max={totalAmount}
+                                      step="0.01"
+                                      value={paymentMethod === "COD" ? advanceAmount : receivedAmount}
+                                      onChange={(e) => {
+                                        const val = Number.parseFloat(e.target.value) || 0
+                                        if (paymentMethod === "COD") {
+                                          setAdvanceAmount(val)
+                                          setReceivedAmount(val)
+                                          setBalanceAmount(totalAmount - val)
+                                        } else {
+                                          setReceivedAmount(val)
+                                          setBalanceAmount(totalAmount - val)
+                                        }
+                                      }}
+                                      className="h-8 text-xs bg-white border-gray-300 text-gray-900"
+                                      placeholder="0.00"
+                                    />
+                                  </div>
+
+                                  <div className="flex flex-col space-y-1 flex-1">
+                                    <Label className="text-xs font-medium text-gray-900">
+                                      Payment Status
+                                    </Label>
+                                    <select
+                                      className="flex h-8 w-full items-center justify-between rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-900"
+                                      value={paymentStatus}
+                                      onChange={(e) => setPaymentStatus(e.target.value)}
+                                    >
+                                      <option value="Paid">Paid</option>
+                                      <option value="Pending">Pending</option>
+                                      <option value="Partial">Partial</option>
+                                    </select>
+                                  </div>
+                                </div>
+
+                                <div className="flex justify-between items-center bg-gray-50 p-2 rounded-md border border-gray-200">
+                                  <span className="text-xs font-medium text-gray-700">Balance Amount:</span>
+                                  <span className={`text-xs font-bold ${balanceAmount > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                                    {deviceCurrencyState} {balanceAmount.toFixed(2)}
+                                  </span>
+                                </div>
+                              </div>
+
+                                <SaleShippingSection
+                                  deviceId={deviceId}
+                                  value={shipping}
+                                  onChange={setShipping}
+                                  customerAddress={customerAddress}
+                                  currency={deviceCurrencyState}
+                                  className="mt-2"
+                                  isJobCard={originalSaleStatus === "Pending"}
+                                  customerName={customerName}
+                                  customerPhone={customerPhone}
+                                />
                             </div>
                           </div>
 

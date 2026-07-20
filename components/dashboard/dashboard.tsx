@@ -47,6 +47,7 @@ import SupplierTab from "./supplier-tab"
 import PlatformTab from "./platform-tab"
 import MasterDataTab from "./master-data-tab"
 import AttendanceTab from "./attendance-tab"
+import SalesOrdersTab from "./sales-orders-tab"
 import StaffAuthModal from "../staff/staff-auth-modal"
 import { BrandLogo } from "@/components/brand-logo"
 
@@ -63,7 +64,7 @@ import { getDeviceProfile } from "@/app/actions/auth-actions"
 import { activateStaff, clearStaff, selectActiveStaff, setStaff } from "@/store/slices/staffSlice"
 import { getStaffForAuthentication } from "@/app/actions/staff-actions"
 
-type TabType = "sale" | "sales" | "purchase" | "product" | "trending" | "customer" | "transfer" | "accounting" | "supplier" | "platform" | "master" | "attendance"
+type TabType = "sale" | "sales" | "sales-orders" | "purchase" | "product" | "trending" | "customer" | "transfer" | "accounting" | "supplier" | "platform" | "master" | "attendance"
 
 const DEFAULT_CONTENT_TAB: TabType = "sale"
 
@@ -102,7 +103,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
     if (param === "home") return "trending"
     if (
       param &&
-      ["sale", "purchase", "product", "trending", "customer", "transfer", "accounting", "supplier", "platform", "master", "attendance"].includes(
+      ["sale", "sales", "sales-orders", "purchase", "product", "trending", "customer", "transfer", "accounting", "supplier", "platform", "master", "attendance"].includes(
         param,
       )
     ) {
@@ -421,41 +422,43 @@ export function Dashboard({ onLogout }: DashboardProps) {
         case "sales":
           return (
             <SaleTab
-              userId={user?.id ?? 0}
+              userId={device?.id ?? 0}
               isAddModalOpen={activeTab === "sale" && isAddModalOpen}
               onModalClose={() => setIsAddModalOpen(false)}
               mode={salesNavView === "entry" ? "entry" : "info"}
             />
           )
+        case "sales-orders":
+          return <SalesOrdersTab />
         case "purchase":
           return (
             <PurchaseTab
-              userId={user?.id || 0}
+              userId={device?.id ?? 0}
               mode={purchaseNavView === "entry" ? "entry" : "info"}
             />
           )
         case "customer":
           return (
-            <CustomerTab userId={user?.id ?? 0} />
+            <CustomerTab userId={device?.id ?? 0} />
           )
         case "attendance":
           return <AttendanceTab />
         case "supplier":
           return (
             <SupplierTab
-              userId={user?.id ?? 0}
+              userId={device?.id ?? 0}
               isAddModalOpen={activeTab === "supplier" && isAddModalOpen}
               onModalClose={() => setIsAddModalOpen(false)}
             />
           )
         case "transfer":
-          return <TransferTab userId={user?.id || 0} />
+          return <TransferTab userId={device?.id ?? 0} />
         case "accounting":
-          return <AccountingTab userId={user?.id || 0} companyId={companyId} deviceId={deviceId || 0} />
+          return <AccountingTab userId={device?.id ?? 0} companyId={companyId} deviceId={deviceId || 0} />
         case "platform":
-          return <PlatformTab userId={user?.id || 0} />
+          return <PlatformTab userId={device?.id ?? 0} />
         case "master":
-          return <MasterDataTab userId={user?.id || 0} />
+          return <MasterDataTab userId={device?.id ?? 0} />
         default:
           return <ErrorTab name={activeTab} />
       }
@@ -470,6 +473,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
     { id: "trending", icon: <Flame className="h-4 w-4" />, label: "Trending" },
     { id: "purchase", icon: <Receipt className="h-4 w-4" />, label: "Purchase" },
     { id: "sale", icon: <Plus className="h-5 w-5" />, label: "Sales" },
+    { id: "sales-orders", icon: <Receipt className="h-4 w-4" />, label: "Sales Orders" },
     { id: "customer", icon: <User className="h-4 w-4" />, label: "Customers" },
     { id: "attendance", icon: <CalendarDays className="h-4 w-4" />, label: "Attendance" },
     { id: "supplier", icon: <Truck className="h-4 w-4" />, label: "Suppliers" },
@@ -873,7 +877,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
         onOpenChange={(open) => {
           if (!open) handleTabChange(lastContentTabRef.current)
         }}
-        userId={user?.id || 0}
+        userId={device?.id || 0}
         isAddModalOpen={activeTab === "product" && isAddModalOpen}
         onModalClose={() => setIsAddModalOpen(false)}
       />
@@ -883,7 +887,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
         onOpenChange={(open) => {
           if (!open) handleTabChange(lastContentTabRef.current)
         }}
-        userId={user?.id || 0}
+        userId={device?.id || 0}
       />
 
       {device?.id ? (

@@ -617,6 +617,30 @@ export async function getSaleDetails(saleId: number) {
       `
     })
 
+    const allocationsResult = await executeWithRetry(async () => {
+      return await sql`
+        SELECT 
+          sba.*, pb.batch_no
+        FROM sale_batch_allocations sba
+        JOIN sale_items si ON sba.sale_item_id = si.id
+        LEFT JOIN product_batches pb ON sba.batch_id = pb.id
+        WHERE si.sale_id = ${saleId}
+      `
+    })
+
+    // Attach allocations to items
+    for (const item of itemsResult) {
+      item.allocations = allocationsResult
+        .filter((a: any) => a.sale_item_id === item.id)
+        .map((a: any) => ({
+          batchId: a.batch_id,
+          batchNumber: a.batch_no,
+          quantity: a.quantity,
+          costPrice: a.cost_price,
+          sellingPrice: a.selling_price
+        }))
+    }
+
     // Calculate subtotal from items
     const subtotal = itemsResult.reduce((sum: number, item: any) => sum + Number(item.quantity) * Number(item.price), 0)
 
@@ -682,51 +706,93 @@ export async function addSale(saleData: any) {
     const productTotal = Math.max(0, subtotal - discountAmount)
     const total = productTotal + courierPaidExtra
 
-    // 🚨 FIXED: Handle received amount based on status - PROPER partial payment support for credit sales
+    let newOrderStatus = saleData.status || "Completed"
+    let newPaymentMethod = saleData.paymentMethod || "Cash"
+
+    let advanceAmount = 0
     let receivedAmount = 0
-    const isCompleted = saleData.paymentStatus?.toLowerCase() === "completed"
-    const isCancelled = saleData.paymentStatus?.toLowerCase() === "cancelled"
-    const isCredit = saleData.paymentStatus?.toLowerCase() === "credit"
+    let balanceAmount = 0
+    let newPaymentStatus = saleData.paymentStatus || "Pending"
 
-    if (isCompleted) {
-      // Completed sales: full amount received
-      receivedAmount = total
-      console.log(`✅ COMPLETED SALE: received_amount = total_amount = ${total}`)
-    } else if (isCancelled) {
-      // Cancelled sales: no payment received
-      receivedAmount = 0
-      console.log(`❌ CANCELLED SALE: received_amount = 0`)
-    } else if (isCredit) {
-      // 🚨 FIXED: Credit sales can have partial payments
-      // Use the receivedAmount from frontend, but validate it
-      const requestedReceived = Number(saleData.receivedAmount) || 0
-
-      if (requestedReceived > total) {
-        receivedAmount = total // Cap at total amount
-        console.warn(`⚠️ Received amount ${requestedReceived} capped to total ${total}`)
+    if (newPaymentMethod.toUpperCase() === "COD") {
+      advanceAmount = Number(saleData.advanceAmount) || 0
+      
+      const explicitlyReceived = Number(saleData.receivedAmount) || 0
+      receivedAmount = explicitlyReceived > advanceAmount ? explicitlyReceived : advanceAmount
+      balanceAmount = Math.max(0, total - receivedAmount)
+      
+      if (receivedAmount >= total && total > 0) {
+        newPaymentStatus = "Paid"
+        balanceAmount = 0
+        receivedAmount = total
+      } else if (receivedAmount > 0) {
+        newPaymentStatus = "Partial"
       } else {
-        receivedAmount = requestedReceived
+        newPaymentStatus = "Pending"
       }
-
-      console.log(`🔄 CREDIT SALE: Total=${total}, Received=${receivedAmount}, Outstanding=${total - receivedAmount}`)
+    } else if (["Cash", "Card", "UPI", "Bank Transfer"].includes(newPaymentMethod)) {
+      // Immediate full payments
+      advanceAmount = 0
+      receivedAmount = total
+      balanceAmount = 0
+      newPaymentStatus = "Paid"
+    } else {
+      // Legacy Credit / other methods logic
+      const requestedReceived = Number(saleData.receivedAmount) || 0
+      receivedAmount = Math.min(requestedReceived, total)
+      balanceAmount = total - receivedAmount
+      
+      if (receivedAmount >= total && total > 0) {
+        newPaymentStatus = "Paid"
+        balanceAmount = 0
+      } else if (receivedAmount > 0) {
+        newPaymentStatus = "Partial"
+      } else {
+        newPaymentStatus = "Pending"
+      }
+    }
+    // Ensure Sales Order Status syncs with Payment Status
+    if (
+      newPaymentStatus.toLowerCase() === "paid" || 
+      newPaymentStatus.toLowerCase() === "completed" || 
+      receivedAmount >= total || 
+      balanceAmount <= 0
+    ) {
+      if (newOrderStatus.toLowerCase() !== "cancelled") {
+        newPaymentStatus = "Paid"
+        receivedAmount = total
+        balanceAmount = 0
+      }
     }
 
-    const outstandingAmount = total - receivedAmount
+    // Delivery Status sync logic (independent from Payment Status "Paid" logic)
+    if (newOrderStatus.toLowerCase() !== "cancelled") {
+      const isCodApproved = newPaymentMethod.toUpperCase() === "COD" && receivedAmount > 0;
+      const isStandardApproved = newPaymentStatus.toLowerCase() === "paid" || newPaymentStatus.toLowerCase() === "completed";
+      
+      if (isCodApproved || isStandardApproved) {
+        if (!shipping.delivery_status || shipping.delivery_status.toLowerCase() === "pending") {
+          shipping.delivery_status = "Paid";
+        }
+      }
+    }
 
     const saleResult = await sql`
       INSERT INTO sales (
-        customer_id, created_by, total_amount, status, sale_date,
+        customer_id, created_by, total_amount, status, payment_status, sale_date,
         device_id, payment_method, discount, received_amount, staff_id, sale_type,
         fulfillment_type, delivery_status, courier_service_id, courier_service_name,
         packaging_type_id, packaging_type_name,
         tracking_id, shipping_address, weight_kg, length_cm, width_cm, height_cm,
-        courier_paid_extra, expense_courier, expense_packing, shipped_at, delivered_at, shipping_notes
+        courier_paid_extra, expense_courier, expense_packing, shipped_at, delivered_at, shipping_notes,
+        advance_amount, balance_amount
       )
       VALUES (
         ${saleData.customerId || null},
         ${saleData.userId},
         ${total},
-        ${saleData.paymentStatus || "Completed"},
+        ${newOrderStatus},
+        ${newPaymentStatus},
         ${saleData.saleDate || new Date()},
         ${saleData.deviceId},
         ${saleData.paymentMethod || "Cash"},
@@ -751,9 +817,11 @@ export async function addSale(saleData: any) {
         ${shipping.expense_packing},
         ${shipping.shipped_at},
         ${shipping.delivered_at},
-        ${shipping.shipping_notes}
+        ${shipping.shipping_notes},
+        ${advanceAmount},
+        ${balanceAmount}
       )
-      RETURNING *
+      RETURNING id
     `
 
     const sale = saleResult[0]
@@ -910,7 +978,9 @@ export async function addSale(saleData: any) {
             `
           }
 
-          if (!isCancelled && !isService) {
+          const isNowDeducted = ["shipped", "delivered"].includes(String(shipping.delivery_status || "").toLowerCase())
+
+          if (!isCancelled && !isService && isNowDeducted) {
             const stockResult = await updateProductStock(item.productId, variantId, alloc.batchId, alloc.quantity, "subtract", saleData.deviceId)
             if (!stockResult.success) {
               console.warn(`Stock update warning for product ${itemName}:`, stockResult.message)
@@ -1070,50 +1140,71 @@ function calculateSaleChanges(
   const productTotal = Math.max(0, subtotal - newDiscountAmount)
   const newTotal = productTotal + courierPaidExtra
 
-  // CORRECTED: Calculate new received amount based on status with proper partial payment handling
+  // Use explicit paymentStatus if provided, otherwise fallback to "Paid"
+  let newOrderStatus = newData.status || original.status || "Completed"
+  let newPaymentMethod = newData.paymentMethod || original.payment_method || "Cash"
+  let newPaymentStatus = newData.paymentStatus || "Paid"
+  
+  let advanceAmount = 0
   let newReceivedAmount = 0
-  const isCompleted = newData.paymentStatus?.toLowerCase() === "completed"
-  const isCancelled = newData.paymentStatus?.toLowerCase() === "cancelled"
-  const isCredit = newData.paymentStatus?.toLowerCase() === "credit"
+  let balanceAmount = 0
 
-  if (isCompleted) {
-    newReceivedAmount = newTotal // Full amount received for completed sales
-  } else if (isCancelled) {
-    newReceivedAmount = 0 // No payment for cancelled sales
-  } else if (isCredit) {
+  if (newPaymentMethod.toUpperCase() === "COD") {
+    advanceAmount = Number(newData.advanceAmount) || 0
+    
+    const explicitlyReceived = Number(newData.receivedAmount) || 0
+    newReceivedAmount = explicitlyReceived > advanceAmount ? explicitlyReceived : advanceAmount
+    balanceAmount = Math.max(0, newTotal - newReceivedAmount)
+
+    if (newReceivedAmount >= newTotal && newTotal > 0) {
+      newPaymentStatus = "Paid"
+      balanceAmount = 0
+      newReceivedAmount = newTotal
+    } else if (newReceivedAmount > 0) {
+      newPaymentStatus = "Partial"
+    } else {
+      newPaymentStatus = "Pending"
+    }
+  } else if (["Cash", "Card", "UPI", "Bank Transfer"].includes(newPaymentMethod)) {
+    // Immediate full payments
+    advanceAmount = 0
+    newReceivedAmount = newTotal
+    balanceAmount = 0
+    newPaymentStatus = "Paid"
+  } else {
+    // Legacy logic
     const currentReceived = Number(original.received_amount || 0)
     const requestedReceived = Number(newData.receivedAmount) || 0
-    const wasAlreadyCredit = original.status?.toLowerCase() === "credit"
+    const wasAlreadyCredit = original.status?.toLowerCase() === "credit" || original.payment_status?.toLowerCase() === "credit"
 
     if (requestedReceived > newTotal) {
-      throw new Error(
-        `Received amount (${requestedReceived}) cannot be greater than total amount (${newTotal}) for credit sales`,
-      )
+      throw new Error(`Received amount (${requestedReceived}) cannot be greater than total amount (${newTotal})`)
     }
-
     if (requestedReceived < 0) {
       throw new Error("Received amount cannot be negative")
     }
 
-    // Only block decreases when updating an existing credit sale (partial payment already recorded).
-    // Allow any received amount when converting from Completed/Pending/etc. to Credit.
     if (wasAlreadyCredit && requestedReceived < currentReceived) {
-      throw new Error(
-        `Cannot decrease received amount for credit sales. Current: ${currentReceived}, Requested: ${requestedReceived}`,
-      )
+      throw new Error(`Cannot decrease received amount. Current: ${currentReceived}, Requested: ${requestedReceived}`)
     }
-
     newReceivedAmount = requestedReceived
+    balanceAmount = newTotal - newReceivedAmount
     
-    console.log(`🔄 CREDIT SALE UPDATE: received_amount ${currentReceived} → ${newReceivedAmount}`)
-    
-    // Log if this is a payment on a credit sale
-    if (newReceivedAmount > currentReceived) {
-      console.log(`💰 CREDIT SALE PAYMENT: Customer paid ${newReceivedAmount - currentReceived}, Outstanding: ${newTotal - newReceivedAmount}`)
+    if (newReceivedAmount >= newTotal && newTotal > 0) {
+      newPaymentStatus = "Paid"
+      balanceAmount = 0
+    } else if (newReceivedAmount > 0) {
+      newPaymentStatus = "Partial"
+    } else {
+      newPaymentStatus = "Pending"
     }
   }
 
-  // Calculate original discount from original items since we don't have discount column
+  // Preserve tracking ID if not provided in update but exists in DB
+  if (shipping && !shipping.tracking_id && original.tracking_id) {
+    shipping.tracking_id = original.tracking_id
+  }
+
   const originalSubtotal = originalItems.reduce(
     (sum: number, item: any) => sum + Number(item.price) * Number(item.quantity),
     0,
@@ -1123,34 +1214,49 @@ function calculateSaleChanges(
   const originalProductTotal = Number(original.total_amount) - originalCourierExtra
   const originalDiscountAmount = Math.max(0, originalSubtotal - originalProductTotal)
 
-  const outstandingAmount = newTotal - newReceivedAmount
+  let outstandingAmount = balanceAmount
 
-  console.log("Sale changes calculation:", {
-    originalSubtotal,
-    originalProductTotal,
-    originalDiscount: originalDiscountAmount,
-    newDiscount: newDiscountAmount,
-    discountDiff: newDiscountAmount - originalDiscountAmount,
-    newStatus: newData.paymentStatus,
-    newReceived: newReceivedAmount,
-    originalReceived: original.received_amount || 0,
-    outstandingAmount,
-  })
+  // Ensure Sales Order Status syncs with Payment Status
+  if (
+    newPaymentStatus.toLowerCase() === "paid" ||
+    newPaymentStatus.toLowerCase() === "completed" ||
+    newReceivedAmount >= newTotal ||
+    outstandingAmount <= 0
+  ) {
+    if (newOrderStatus.toLowerCase() !== "cancelled") {
+      newPaymentStatus = "Paid"
+      newReceivedAmount = newTotal
+      outstandingAmount = 0
+      balanceAmount = 0
+    }
+  }
+
+  // Delivery Status sync logic (independent from Payment Status "Paid" logic)
+  if (newOrderStatus.toLowerCase() !== "cancelled") {
+    const isCodApproved = newPaymentMethod.toUpperCase() === "COD" && newReceivedAmount > 0;
+    const isStandardApproved = newPaymentStatus.toLowerCase() === "paid" || newPaymentStatus.toLowerCase() === "completed";
+    
+    if (isCodApproved || isStandardApproved) {
+      if (shipping && (!shipping.delivery_status || shipping.delivery_status.toLowerCase() === "pending")) {
+        shipping.delivery_status = "Paid";
+      }
+    }
+  }
 
   return {
-    // Basic changes
     dateChanged: new Date(original.sale_date).getTime() !== new Date(newData.saleDate).getTime(),
-    statusChanged: original.status !== newData.paymentStatus,
+    statusChanged: original.status !== newOrderStatus || original.payment_status !== newPaymentStatus,
     totalChanged: Number(original.total_amount) !== newTotal,
     discountChanged: originalDiscountAmount !== newDiscountAmount,
     receivedChanged: Number(original.received_amount || 0) !== newReceivedAmount,
     itemsChanged: JSON.stringify(originalItems) !== JSON.stringify(newItems),
 
-    // Values
     originalDate: new Date(original.sale_date),
     newDate: new Date(newData.saleDate),
     originalStatus: original.status,
-    newStatus: newData.paymentStatus,
+    newStatus: newOrderStatus,
+    originalPaymentStatus: original.payment_status,
+    newPaymentStatus: newPaymentStatus,
     originalTotal: Number(original.total_amount),
     newTotal: newTotal,
     originalDiscount: originalDiscountAmount,
@@ -1166,6 +1272,8 @@ function calculateSaleChanges(
     discountDiff: newDiscountAmount - originalDiscountAmount,
     receivedDiff: newReceivedAmount - Number(original.received_amount || 0),
     outstandingAmount: outstandingAmount,
+    advanceAmount,
+    balanceAmount,
   }
 }
 
@@ -1304,6 +1412,7 @@ export async function updateSale(saleData: any) {
             SET customer_id = ${saleData.customerId || null},
                 total_amount = ${changes.newTotal},
                 status = ${changes.newStatus},
+                payment_status = ${changes.newPaymentStatus},
                 sale_date = ${changes.newDate},
                 updated_at = ${new Date()},
                 payment_method = ${saleData.paymentMethod || "Cash"},
@@ -1327,7 +1436,9 @@ export async function updateSale(saleData: any) {
                 expense_packing = ${shipping.expense_packing},
                 shipped_at = ${shipping.shipped_at},
                 delivered_at = ${shipping.delivered_at},
-                shipping_notes = ${shipping.shipping_notes}
+                shipping_notes = ${shipping.shipping_notes},
+                advance_amount = ${changes.advanceAmount},
+                balance_amount = ${changes.balanceAmount}
             WHERE id = ${saleData.id} AND device_id = ${saleData.deviceId}
           `
         } else {
@@ -1336,6 +1447,7 @@ export async function updateSale(saleData: any) {
             SET customer_id = ${saleData.customerId || null},
                 total_amount = ${changes.newTotal},
                 status = ${changes.newStatus},
+                payment_status = ${changes.newPaymentStatus},
                 sale_date = ${changes.newDate},
                 updated_at = ${new Date()},
                 payment_method = ${saleData.paymentMethod || "Cash"},
@@ -1359,7 +1471,9 @@ export async function updateSale(saleData: any) {
                 expense_packing = ${shipping.expense_packing},
                 shipped_at = ${shipping.shipped_at},
                 delivered_at = ${shipping.delivered_at},
-                shipping_notes = ${shipping.shipping_notes}
+                shipping_notes = ${shipping.shipping_notes},
+                advance_amount = ${changes.advanceAmount},
+                balance_amount = ${changes.balanceAmount}
             WHERE id = ${saleData.id}
           `
         }
@@ -1370,15 +1484,15 @@ export async function updateSale(saleData: any) {
     // 7. Handle sale items updates with MULTI-BATCH logic
     console.log("Updating sale items with multi-batch stock tracking...")
 
-      const wasCompleted = changes.originalStatus.toLowerCase() === "completed"
       const wasCancelled = changes.originalStatus.toLowerCase() === "cancelled"
-      const isNowCompleted = changes.newStatus.toLowerCase() === "completed"
       const isNowCancelled = changes.newStatus.toLowerCase() === "cancelled"
+      const wasDeducted = ["shipped", "delivered"].includes(String(original.delivery_status || "").toLowerCase()) && !wasCancelled
+      const isNowDeducted = ["shipped", "delivered"].includes(String(shipping.delivery_status || "").toLowerCase()) && !isNowCancelled
 
       console.log("Status change analysis:", {
-        wasCompleted,
+        wasDeducted,
         wasCancelled,
-        isNowCompleted,
+        isNowDeducted,
         isNowCancelled,
         statusChanged: changes.statusChanged,
       })
@@ -1395,8 +1509,8 @@ export async function updateSale(saleData: any) {
         WHERE si.sale_id = ${saleData.id}
       `
 
-      // RESTORE STOCK: If the sale WAS completed, we restore all allocated stock back to inventory
-      if (wasCompleted && !wasCancelled) {
+      // RESTORE STOCK: If the sale WAS deducted, we restore all allocated stock back to inventory
+      if (wasDeducted) {
         console.log("Restoring stock from previous allocations...")
         for (const alloc of existingAllocations) {
           const stockResult = await updateProductStock(
@@ -1472,8 +1586,8 @@ export async function updateSale(saleData: any) {
           insertedItemId = itemResult[0].id;
         }
 
-        // RE-ALLOCATE: Create new allocations and deduct stock if the sale is currently COMPLETED
-        if (isNowCompleted && !isNowCancelled) {
+        // RE-ALLOCATE: Always create new allocations. Deduct stock if it is currently DEDUCTED (Shipped/Delivered).
+        if (!isNowCancelled) {
           const allocations = item.allocations || [];
           
           for (const alloc of allocations) {
@@ -1497,28 +1611,31 @@ export async function updateSale(saleData: any) {
               VALUES (${insertedItemId}, ${alloc.batchId}, ${alloc.quantity}, ${alloc.costPrice || item.cost || 0}, ${alloc.sellingPrice || item.price})
             `
             
-            // Deduct stock
-            const stockResult = await updateProductStock(
-              item.productId, 
-              resolvedVariantId, 
-              alloc.batchId, 
-              alloc.quantity, 
-              "subtract", 
-              saleData.deviceId
-            )
             
-            if (stockResult.success) {
-              await createStockHistoryEntry(
-                item.productId,
-                resolvedVariantId,
-                alloc.batchId,
-                "sale_edited_deducted",
-                -alloc.quantity,
-                saleData.id,
-                "sale",
-                saleData.deviceId,
-                `Sale #${saleData.id} edited - stock deducted for allocation`
+            // Deduct stock if applicable
+            if (isNowDeducted) {
+              const stockResult = await updateProductStock(
+                item.productId, 
+                resolvedVariantId, 
+                alloc.batchId, 
+                alloc.quantity, 
+                "subtract", 
+                saleData.deviceId
               )
+              
+              if (stockResult.success) {
+                await createStockHistoryEntry(
+                  item.productId,
+                  resolvedVariantId,
+                  alloc.batchId,
+                  "sale_edited_deducted",
+                  -alloc.quantity,
+                  saleData.id,
+                  "sale",
+                  saleData.deviceId,
+                  `Sale #${saleData.id} edited - stock deducted for allocation`
+                )
+              }
             }
           }
         }
@@ -1679,7 +1796,7 @@ export async function updateSaleDeliveryStatus(
 
   try {
     const rows = await sql`
-      SELECT fulfillment_type, shipped_at, delivered_at
+      SELECT delivery_status, status, fulfillment_type, shipped_at, delivered_at, payment_status
       FROM sales
       WHERE id = ${saleId}
         AND device_id = ${deviceId}
@@ -1690,16 +1807,80 @@ export async function updateSaleDeliveryStatus(
       return { success: false as const, message: "Sale not found" }
     }
 
-    if (rows[0].fulfillment_type !== "ship") {
-      return { success: false as const, message: "This sale is not a shipped order" }
-    }
-
     const shippedAt =
       rows[0].shipped_at ||
       (["Shipped", "In transit", "Delivered"].includes(deliveryStatus) ? new Date() : null)
     const deliveredAt =
       rows[0].delivered_at || (deliveryStatus === "Delivered" ? new Date() : null)
 
+    const originalDeliveryStatus = rows[0].delivery_status || "Pending"
+    const originalStatus = rows[0].status || "Completed"
+    const paymentStatus = rows[0].payment_status || "Pending"
+
+    const isPaid = paymentStatus.toLowerCase() === "paid" || paymentStatus.toLowerCase() === "completed"
+    if (!isPaid) {
+      return { success: false as const, message: "Delivery process cannot begin until payment is completed." }
+    }
+
+    const VALID_TRANSITIONS: Record<string, string[]> = {
+      "Pending": [], // No manual exits allowed
+      "Paid": ["Packed"],
+      "Packed": ["Sent"],
+      "Sent": ["Shipped"],
+      "Shipped": ["Delivered"],
+      "Delivered": [],
+      "Returned": [],
+      "Failed": []
+    }
+
+    if (deliveryStatus === "Paid") {
+      return { success: false as const, message: "Delivery Status 'Paid' can only be assigned automatically when payment is completed." }
+    }
+
+    if (deliveryStatus !== originalDeliveryStatus && !(VALID_TRANSITIONS[originalDeliveryStatus] || []).includes(deliveryStatus)) {
+      return { success: false as const, message: `Cannot move delivery status from ${originalDeliveryStatus} to ${deliveryStatus}. Invalid transition.` }
+    }
+
+    const wasCancelled = originalStatus.toLowerCase() === "cancelled"
+    const wasDeducted = ["shipped", "delivered"].includes(String(originalDeliveryStatus).toLowerCase()) && !wasCancelled
+    const isNowDeducted = ["shipped", "delivered"].includes(String(deliveryStatus).toLowerCase()) && !wasCancelled
+
+    // If there is a transition in deduction state, we need to fetch items and allocations
+    if (wasDeducted !== isNowDeducted) {
+      const existingAllocations = await sql`
+        SELECT sba.*, si.product_id, si.product_variant_id 
+        FROM sale_batch_allocations sba 
+        JOIN sale_items si ON sba.sale_item_id = si.id 
+        WHERE si.sale_id = ${saleId}
+      `
+
+      for (const alloc of existingAllocations) {
+        const operation = isNowDeducted ? "subtract" : "add"
+        const stockResult = await updateProductStock(
+          alloc.product_id, 
+          alloc.product_variant_id, 
+          alloc.batch_id, 
+          alloc.quantity, 
+          operation, 
+          deviceId
+        )
+        if (stockResult.success) {
+          await createStockHistoryEntry(
+            alloc.product_id,
+            alloc.product_variant_id,
+            alloc.batch_id,
+            isNowDeducted ? "sale_delivery_deducted" : "sale_delivery_restored",
+            isNowDeducted ? -alloc.quantity : alloc.quantity,
+            saleId,
+            "sale",
+            deviceId,
+            `Sale #${saleId} delivery status changed to ${deliveryStatus} - stock ${isNowDeducted ? "deducted" : "restored"}`
+          )
+        }
+      }
+    }
+
+    // Now update the sales table
     await sql`
       UPDATE sales
       SET delivery_status = ${deliveryStatus},

@@ -2,7 +2,7 @@
 
 import { sql } from "@/lib/db"
 import { cookies } from "next/headers"
-import { setStaffSessionCookie } from "@/lib/staff-session"
+import { setStaffSessionCookie, clearStaffSessionCookie } from "@/lib/staff-session"
 
 async function generatePasswordHash(password: string): Promise<string> {
   const encoder = new TextEncoder()
@@ -59,6 +59,10 @@ export async function login(formData: FormData) {
 
       const deviceInfo = deviceData[0] || {}
       const deviceLogo = deviceInfo.device_logo?.trim() || null
+
+      // Clear any existing staff session cookie so middleware doesn't misroute
+      // the device user back to the staff dashboard.
+      await clearStaffSessionCookie()
 
       return {
         success: true,
@@ -237,6 +241,7 @@ export async function login(formData: FormData) {
 export async function logout() {
   try {
     cookies().delete("authToken")
+    cookies().delete("ims_staff_session")
 
     return {
       success: true,
@@ -252,6 +257,7 @@ export async function logout() {
     }
   }
 }
+
 
 export async function getCurrentUser() {
   try {
@@ -394,4 +400,9 @@ export async function signUp(formData: FormData) {
       message: "An error occurred while creating your account",
     }
   }
+}
+
+export async function adminLogout() {
+  await clearStaffSessionCookie()
+  return { success: true }
 }

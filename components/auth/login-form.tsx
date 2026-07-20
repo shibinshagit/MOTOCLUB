@@ -6,13 +6,13 @@ import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { EyeIcon, EyeOffIcon, MailIcon, LockIcon, Loader2, PhoneIcon } from "lucide-react"
+import { EyeIcon, EyeOffIcon, LockIcon, Loader2, PhoneIcon } from "lucide-react"
 import { login } from "@/app/actions/auth-actions"
 import { useToast } from "@/components/ui/use-toast"
 import { notifySuccess } from "@/lib/notifications"
 import { FormAlert } from "@/components/ui/form-alert"
 import { useAppDispatch, useAppSelector } from "@/store/hooks"
-import { setDeviceData, selectDevice, loadFromStorage } from "@/store/slices/deviceSlice"
+import { setDeviceData, selectDevice } from "@/store/slices/deviceSlice"
 import { setStaff, activateStaff } from "@/store/slices/staffSlice"
 
 export default function LoginForm() {
@@ -26,10 +26,7 @@ export default function LoginForm() {
   const device = useAppSelector(selectDevice)
 
   useEffect(() => {
-    dispatch(loadFromStorage())
-  }, [dispatch])
-
-  useEffect(() => {
+    // Only redirect if we have a confirmed authenticated state
     if (device.id && device.user?.token) {
       if (device.user.role === "STAFF") {
         router.replace("/staff/dashboard")
@@ -79,8 +76,6 @@ export default function LoginForm() {
         }
 
         notifySuccess(toast, "Welcome back! You've been logged in successfully.", "Login Successful")
-
-        router.push(result.redirect || "/dashboard")
       } else {
         setError(result.message)
       }
@@ -90,17 +85,6 @@ export default function LoginForm() {
     } finally {
       setIsLoading(false)
     }
-  }
-
-  if (device.id && device.user?.token) {
-    return (
-      <div className="flex items-center justify-center py-8">
-        <div className="text-center">
-          <Loader2 className="mx-auto mb-4 h-8 w-8 animate-spin text-gray-400" />
-          <p className="text-sm text-gray-500">Redirecting to dashboard...</p>
-        </div>
-      </div>
-    )
   }
 
   return (

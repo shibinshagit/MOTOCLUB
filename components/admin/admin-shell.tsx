@@ -92,8 +92,7 @@ export default function AdminShell({ children }: AdminShellProps) {
 
   const handleLogout = async () => {
     await adminLogout()
-    router.push("/admin")
-    router.refresh()
+    router.replace("/admin")
   }
 
   const handleCreateCompany = async (e: React.FormEvent<HTMLFormElement>) => {

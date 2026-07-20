@@ -14,7 +14,7 @@ import { Loader2 } from "lucide-react"
 interface NewCustomerModalProps {
   isOpen: boolean
   onClose: () => void
-  onCustomerAdded: (customerId: number, customerName: string) => void
+  onCustomerAdded: (customerId: number, customerName: string, customerObj?: any) => void
   userId: number
 }
 
@@ -160,8 +160,8 @@ export default function NewCustomerModal({ isOpen, onClose, onCustomerAdded, use
           message: "Customer added successfully",
         })
 
-        // Pass both id and name to the callback
-        onCustomerAdded(result.data.id, result.data.name)
+        // Pass both id, name, and the full object to the callback
+        onCustomerAdded(result.data.id, result.data.name, result.data)
 
         // Don't reset form immediately to show success message
         setTimeout(() => {

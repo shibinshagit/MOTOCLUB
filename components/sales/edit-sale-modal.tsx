@@ -31,6 +31,8 @@ import NewServiceModal from "../services/new-service-modal"
 import { getSaleDetails, updateSale } from "@/app/actions/sale-actions"
 import { getProductByBarcode } from "@/app/actions/product-actions"
 import { getDeviceCurrency } from "@/app/actions/dashboard-actions"
+import SaleShippingSection from "./sale-shipping-section"
+import { mapSaleShippingFromRecord, type SaleShippingInput, DEFAULT_SALE_SHIPPING } from "@/lib/sale-shipping"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { FormAlert } from "@/components/ui/form-alert"
@@ -65,6 +67,11 @@ interface ProductRow {
   notes?: string
   isService?: boolean // Track if this is a service
   serviceId?: number // For services
+  productVariantId?: number | null
+  variantName?: string | null
+  batchId?: number | null
+  batchNumber?: string | null
+  isBatchManaged?: boolean
 }
 
 export default function EditSaleModal({ isOpen, onClose, saleId, userId, currency: propCurrency }: EditSaleModalProps) {
@@ -100,6 +107,10 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
   const barcodeTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   const [receivedAmount, setReceivedAmount] = useState(0)
+  const [advanceAmount, setAdvanceAmount] = useState(0)
+
+  // Shipping state
+  const [shipping, setShipping] = useState<SaleShippingInput>(DEFAULT_SALE_SHIPPING)
 
   // Staff state with Redux integration
   const [staffId, setStaffId] = useState<number | null>(null)
@@ -170,6 +181,9 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
           setDate(new Date(sale.sale_date))
           setCustomerId(sale.customer_id)
           setCustomerName(sale.customer_name || "")
+          setDiscountAmount(Number(sale.discount) || 0)
+          setReceivedAmount(Number(sale.received_amount) || 0)
+          setAdvanceAmount(Number(sale.advance_amount) || 0)
           setStatus(sale.status || "Completed")
           setOriginalStatus(sale.status || "Completed")
 
@@ -192,8 +206,8 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
           setTaxRate(Number(sale.tax_rate) || 0)
           setTaxAmount(Number(sale.tax) || 0)
 
-          // Set discount amount
-          setDiscountAmount(Number(sale.discount) || 0)
+          // Set shipping
+          setShipping(mapSaleShippingFromRecord(sale))
 
           // Set product rows - properly handle both products and services with actual costs
           const productRows = items.map((item: any) => {
@@ -212,6 +226,11 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
               notes: item.notes || "",
               isService: isService,
               serviceId: isService ? item.product_id : undefined, // Store service ID separately
+              productVariantId: item.product_variant_id,
+              variantName: item.variant_name,
+              batchId: item.batch_id,
+              batchNumber: item.batch_number,
+              isBatchManaged: item.is_batch_managed,
             }
           })
 
@@ -233,8 +252,6 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
                   },
                 ],
           )
-
-          setReceivedAmount(Number(sale.received_amount) || (sale.status === "Credit" ? 0 : Number(sale.total_amount)))
         } else {
           setError(result.message || "Failed to load sale details")
           setFormAlert({
@@ -716,14 +733,18 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
         userId: userId,
         deviceId: deviceId,
         items: validItems,
-        paymentStatus: status,
+        status: status === "Completed" ? "Completed" : status === "Credit" ? "Completed" : status,
+        paymentStatus:
+          status === "Credit" ? (finalReceivedAmount >= totalAmount ? "Paid" : "Partial") : status === "Completed" ? "Paid" : "Pending",
         paymentMethod: paymentMethod,
         saleDate: date?.toISOString() || new Date().toISOString(),
         originalStatus: originalStatus,
         discount: discountAmount,
         taxRate: taxRate,
         receivedAmount: finalReceivedAmount,
+        advanceAmount: advanceAmount,
         staffId: staffId,
+        ...shipping, // Include shipping fields so they aren't wiped
       }
 
       const result = await updateSale(saleData)
@@ -1202,15 +1223,46 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
                               </Label>
                             </div>
                             <div className="flex items-center space-x-2 bg-white p-2 rounded-md border border-gray-200">
-                              <RadioGroupItem value="Online" id="online" />
-                              <Label
-                                htmlFor="online"
-                                className="cursor-pointer text-gray-700 text-sm"
-                              >
-                                Online
+                              <RadioGroupItem value="UPI" id="upi" />
+                              <Label htmlFor="upi" className="cursor-pointer text-gray-700 text-sm">
+                                UPI
+                              </Label>
+                            </div>
+                            <div className="flex items-center space-x-2 bg-white p-2 rounded-md border border-gray-200">
+                              <RadioGroupItem value="Bank Transfer" id="bank-transfer" />
+                              <Label htmlFor="bank-transfer" className="cursor-pointer text-gray-700 text-sm">
+                                Bank Transfer
+                              </Label>
+                            </div>
+                            <div className="flex items-center space-x-2 bg-white p-2 rounded-md border border-gray-200">
+                              <RadioGroupItem value="COD" id="cod" />
+                              <Label htmlFor="cod" className="cursor-pointer text-gray-700 text-sm">
+                                COD
                               </Label>
                             </div>
                           </RadioGroup>
+                          
+                          {paymentMethod === "COD" && (
+                            <div className="mt-3 pt-3 border-t border-gray-200">
+                              <Label
+                                htmlFor="advance_amount"
+                                className="text-sm font-medium text-gray-700 block mb-1"
+                              >
+                                Advance Amount Collected
+                              </Label>
+                              <Input
+                                id="advance_amount"
+                                type="number"
+                                min="0"
+                                max={totalAmount}
+                                step="0.01"
+                                value={advanceAmount}
+                                onChange={(e) => setAdvanceAmount(Number.parseFloat(e.target.value) || 0)}
+                                className="h-9 bg-white border-gray-300 text-gray-900"
+                                placeholder="0.00"
+                              />
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>

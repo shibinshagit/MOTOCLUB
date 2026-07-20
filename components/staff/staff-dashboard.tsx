@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { 
   LayoutDashboard, 
@@ -15,10 +15,14 @@ import {
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { staffLogout } from "@/app/actions/staff-auth-actions"
+import { useAppDispatch, useAppSelector } from "@/store/hooks"
+import { clearDeviceData, selectDevice } from "@/store/slices/deviceSlice"
+import { clearStaff } from "@/store/slices/staffSlice"
 import { useToast } from "@/components/ui/use-toast"
 import { BrandLogo } from "@/components/brand-logo"
 import StaffAttendance from "./staff-attendance"
 import StaffInventoryTab from "./staff-inventory-tab"
+import { JobCardForm, TodaySalesList } from "./job-card"
 
 type Tab = "home" | "sales" | "create-sale" | "customers" | "attendance" | "inventory"
 
@@ -27,17 +31,29 @@ export default function StaffDashboard() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const router = useRouter()
   const { toast } = useToast()
+  const dispatch = useAppDispatch()
+  const device = useAppSelector(selectDevice)
 
   const handleLogout = async () => {
     try {
+      // Clear localStorage for this device
+      if (device?.id && typeof window !== "undefined") {
+        localStorage.removeItem(`staff_session_device_${device.id}`)
+      }
+      // Clear Redux state so LoginForm does not redirect back
+      dispatch(clearDeviceData())
+      dispatch(clearStaff())
+      // Clear the ims_staff_session JWT cookie
       await staffLogout()
-      router.push("/")
+      router.replace("/")
     } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to logout",
-        variant: "destructive",
-      })
+      // Even if the server call fails, clear local state and redirect
+      dispatch(clearDeviceData())
+      dispatch(clearStaff())
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("deviceState")
+      }
+      router.replace("/")
     }
   }
 
@@ -69,7 +85,7 @@ export default function StaffDashboard() {
         }}
       >
         <ShoppingCart className="mr-3 h-5 w-5" />
-        Create Sale
+        Create Job Card
       </Button>
       <Button
         variant={activeTab === "customers" ? "secondary" : "ghost"}
@@ -180,22 +196,11 @@ export default function StaffDashboard() {
             )}
             
             {activeTab === "sales" && (
-              <div>
-                <h1 className="text-2xl font-semibold text-gray-900 mb-6">Today's Sales</h1>
-                <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-8 text-center text-gray-500">
-                  <p>Sales tracking module goes here.</p>
-                </div>
-              </div>
+              <TodaySalesList />
             )}
 
             {activeTab === "create-sale" && (
-              <div>
-                <h1 className="text-2xl font-semibold text-gray-900 mb-6">Create Sale</h1>
-                <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-8 text-center">
-                  <p className="mb-4">Redirecting to main Point of Sale...</p>
-                  <Button onClick={() => router.push("/dashboard?tab=sale")}>Go to POS</Button>
-                </div>
-              </div>
+              <JobCardForm />
             )}
 
             {activeTab === "customers" && (

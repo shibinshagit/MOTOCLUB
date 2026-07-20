@@ -2,7 +2,9 @@ export type FulfillmentType = "pickup" | "ship"
 
 export const DELIVERY_STATUSES = [
   "Pending",
+  "Paid",
   "Packed",
+  "Sent",
   "Shipped",
   "In transit",
   "Delivered",
@@ -29,6 +31,14 @@ export type SaleShippingInput = {
   expenseCourier?: number | null
   expensePacking?: number | null
   shippingNotes?: string | null
+  
+  // Job Card granular fields
+  shippingCity?: string | null
+  shippingStreet?: string | null
+  shippingLandmark?: string | null
+  shippingAddressType?: string | null
+  shippingPincode?: string | null
+  customerPhoneOverride?: string | null
 }
 
 export type SaleShippingRecord = SaleShippingInput & {
@@ -55,6 +65,12 @@ export const DEFAULT_SALE_SHIPPING: Required<
     | "expenseCourier"
     | "expensePacking"
     | "shippingNotes"
+    | "shippingCity"
+    | "shippingStreet"
+    | "shippingLandmark"
+    | "shippingAddressType"
+    | "shippingPincode"
+    | "customerPhoneOverride"
   >
 > = {
   fulfillmentType: "pickup",
@@ -73,6 +89,12 @@ export const DEFAULT_SALE_SHIPPING: Required<
   expenseCourier: 0,
   expensePacking: 0,
   shippingNotes: "",
+  shippingCity: "",
+  shippingStreet: "",
+  shippingLandmark: "",
+  shippingAddressType: "Home",
+  shippingPincode: "",
+  customerPhoneOverride: "",
 }
 
 export function buildTrackingUrl(template?: string | null, trackingId?: string | null) {
@@ -116,6 +138,12 @@ export function normalizeSaleShippingInput(input?: SaleShippingInput | null) {
       shipped_at: null,
       delivered_at: null,
       shipping_notes: null,
+      shipping_city: null,
+      shipping_street: null,
+      shipping_landmark: null,
+      shipping_address_type: null,
+      shipping_pincode: null,
+      customer_phone_override: null,
     }
   }
 
@@ -152,6 +180,12 @@ export function normalizeSaleShippingInput(input?: SaleShippingInput | null) {
     shipped_at: shippedAt,
     delivered_at: deliveredAt,
     shipping_notes: input?.shippingNotes?.trim() || null,
+    shipping_city: input?.shippingCity?.trim() || null,
+    shipping_street: input?.shippingStreet?.trim() || null,
+    shipping_landmark: input?.shippingLandmark?.trim() || null,
+    shipping_address_type: input?.shippingAddressType?.trim() || null,
+    shipping_pincode: input?.shippingPincode?.trim() || null,
+    customer_phone_override: input?.customerPhoneOverride?.trim() || null,
   }
 }
 
@@ -164,7 +198,10 @@ export function mapSaleShippingFromRecord(record: Record<string, unknown>): Sale
     packagingTypeId: (record.packaging_type_id as number) || null,
     packagingTypeName: (record.packaging_type_name as string) || "",
     trackingId: (record.tracking_id as string) || "",
-    shippingAddress: (record.shipping_address as string) || "",
+    shippingAddress: (record.shipping_address as string) || 
+      [record.shipping_street, record.shipping_landmark, record.shipping_city, record.shipping_pincode]
+        .filter(Boolean)
+        .join(", ") || "",
     weightKg: record.weight_kg != null ? Number(record.weight_kg) : null,
     lengthCm: record.length_cm != null ? Number(record.length_cm) : null,
     widthCm: record.width_cm != null ? Number(record.width_cm) : null,
@@ -175,5 +212,11 @@ export function mapSaleShippingFromRecord(record: Record<string, unknown>): Sale
     shippingNotes: (record.shipping_notes as string) || "",
     shippedAt: (record.shipped_at as string) || null,
     deliveredAt: (record.delivered_at as string) || null,
+    shippingCity: (record.shipping_city as string) || "",
+    shippingStreet: (record.shipping_street as string) || "",
+    shippingLandmark: (record.shipping_landmark as string) || "",
+    shippingAddressType: (record.shipping_address_type as string) || "",
+    shippingPincode: (record.shipping_pincode as string) || "",
+    customerPhoneOverride: (record.customer_phone_override as string) || "",
   }
 }

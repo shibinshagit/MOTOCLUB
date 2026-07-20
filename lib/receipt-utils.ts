@@ -1263,3 +1263,86 @@ export function printPurchaseReceipt(purchase: any, items: any[], currency = "AE
 
   printWindow.document.close()
 }
+
+// Print Job Card
+export function printJobCard(sale: any, currency = 'AED') {
+  if (typeof window === 'undefined') return;
+  const printWindow = window.open('', '_blank', 'width=800,height=900');
+  if (!printWindow) { alert('Please allow pop-ups'); return; }
+  
+  const saleDate = new Date(sale.created_at || sale.sale_date);
+  const formattedDate = saleDate.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const formattedTime = saleDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+  
+  const itemsHtml = sale.items?.map((item: any) => `
+    <tr style="border-bottom: 1px solid #eee;">
+      <td style="padding: 10px 0;">${item.product_name || 'Item'} ${item.variant_name ? '('+item.variant_name+')' : ''}</td>
+      <td style="padding: 10px 0; text-align: center;">${item.quantity}</td>
+    </tr>
+  `).join('') || '';
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Job Card - ${sale.tracking_id}</title>
+      <style>
+        body { font-family: system-ui, -apple-system, sans-serif; color: #333; max-width: 800px; margin: 0 auto; padding: 40px; }
+        .header { text-align: center; margin-bottom: 40px; border-bottom: 2px solid #eee; padding-bottom: 20px; }
+        .title { font-size: 24px; font-weight: bold; margin: 0 0 10px 0; letter-spacing: 1px; }
+        .tracking { font-size: 18px; color: #666; font-family: monospace; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 40px; }
+        .box { border: 1px solid #eee; padding: 20px; border-radius: 8px; }
+        .box h3 { margin-top: 0; font-size: 14px; text-transform: uppercase; color: #666; border-bottom: 1px solid #eee; padding-bottom: 10px; }
+        .info p { margin: 5px 0; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
+        th { text-align: left; padding: 12px 0; border-bottom: 2px solid #eee; color: #666; text-transform: uppercase; font-size: 12px; }
+        .status { display: inline-block; padding: 6px 12px; background: #f8f9fa; border: 1px solid #ddd; border-radius: 20px; font-weight: 600; text-transform: capitalize; }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <h1 class="title">JOB CARD</h1>
+        <div class="tracking">${sale.tracking_id}</div>
+      </div>
+      
+      <div class="grid">
+        <div class="box info">
+          <h3>Customer Details</h3>
+          <p><strong>Name:</strong> ${sale.customer_name || 'N/A'}</p>
+          <p><strong>Phone:</strong> ${sale.customer_phone || 'N/A'}</p>
+          ${sale.shipping_street ? `<p><strong>Address:</strong> ${sale.shipping_street}, ${sale.shipping_city || ''} ${sale.shipping_pincode || ''}</p>` : ''}
+        </div>
+        <div class="box info">
+          <h3>Order Details</h3>
+          <p><strong>Date:</strong> ${formattedDate}</p>
+          <p><strong>Time:</strong> ${formattedTime}</p>
+          <p><strong>Status:</strong> <span class="status">${sale.status}</span></p>
+        </div>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Product Description</th>
+            <th style="text-align: center;">Quantity</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${itemsHtml}
+        </tbody>
+      </table>
+      
+      <div style="text-align: center; margin-top: 60px; color: #666; font-size: 14px;">
+        <p>Thank you for your business!</p>
+      </div>
+      <script>
+        window.onload = () => { window.print(); }
+      </script>
+    </body>
+    </html>
+  `;
+  
+  printWindow.document.write(html);
+  printWindow.document.close();
+}
