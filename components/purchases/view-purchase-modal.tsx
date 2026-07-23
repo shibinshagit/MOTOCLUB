@@ -497,14 +497,12 @@ export default function ViewPurchaseModal({
                               </td>
                               <td className="whitespace-nowrap px-4 py-2.5 text-left">
                                 <div className="text-xs font-medium text-slate-700">
-                                  {item.variant_name || "—"}
+                                  {item.variant_name ? (
+                                    item.batch_no || item.batch_number ? `${item.variant_name} | ${item.batch_no || item.batch_number}` : item.variant_name
+                                  ) : (
+                                    "—"
+                                  )}
                                 </div>
-                                {item.batch_number && (
-                                  <div className="text-[11px] text-slate-600 mt-0.5 flex items-center">
-                                    <span className="font-semibold text-blue-600 mr-1 uppercase text-[9px]">Batch:</span>
-                                    {item.batch_number}
-                                  </div>
-                                )}
                               </td>
                               <td className="whitespace-nowrap px-4 py-2.5 text-center text-slate-800">
                                 {getDisplayValue(item.quantity, "0")}

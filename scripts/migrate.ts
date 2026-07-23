@@ -562,6 +562,84 @@ async function createTables() {
       )
     `
   })
+
+  await run("product_variants", async () => {
+    await sql`
+      CREATE TABLE IF NOT EXISTS product_variants (
+        id SERIAL PRIMARY KEY,
+        product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+        name VARCHAR(255) NOT NULL,
+        sku VARCHAR(100),
+        barcode VARCHAR(255),
+        color VARCHAR(255),
+        size VARCHAR(255),
+        price DECIMAL(10,2) NOT NULL,
+        wholesale_price DECIMAL(10,2) DEFAULT 0,
+        msp DECIMAL(10,2) DEFAULT 0,
+        image_url TEXT,
+        image_urls JSONB DEFAULT '[]'::jsonb,
+        attributes JSONB DEFAULT '[]'::jsonb,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        length VARCHAR(100),
+        height VARCHAR(100),
+        minimum_stock INTEGER DEFAULT 0,
+        cost_price DECIMAL(12,2) DEFAULT 0,
+        mrp DECIMAL(12,2) DEFAULT 0,
+        shelf VARCHAR(255),
+        status VARCHAR(50) DEFAULT 'active'
+      )
+    `
+  })
+
+  await run("product_batches", async () => {
+    await sql`
+      CREATE TABLE IF NOT EXISTS product_batches (
+        id SERIAL PRIMARY KEY,
+        product_variant_id INTEGER NOT NULL REFERENCES product_variants(id) ON DELETE CASCADE,
+        batch_no VARCHAR(100) NOT NULL,
+        manufacture_date TIMESTAMP,
+        expiry_date TIMESTAMP,
+        cost_price DECIMAL(10,2) NOT NULL,
+        selling_price DECIMAL(10,2) NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        purchase_id INTEGER,
+        purchase_item_id INTEGER,
+        supplier_id INTEGER,
+        quantity_purchased INTEGER DEFAULT 0,
+        remaining_quantity INTEGER DEFAULT 0,
+        status VARCHAR(50) DEFAULT 'active',
+        product_id INTEGER
+      )
+    `
+  })
+
+  await run("product_batch_device_stock", async () => {
+    await sql`
+      CREATE TABLE IF NOT EXISTS product_batch_device_stock (
+        id SERIAL PRIMARY KEY,
+        batch_id INTEGER NOT NULL REFERENCES product_batches(id) ON DELETE CASCADE,
+        device_id INTEGER NOT NULL,
+        stock INTEGER DEFAULT 0 NOT NULL,
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `
+  })
+
+  await run("sale_batch_allocations", async () => {
+    await sql`
+      CREATE TABLE IF NOT EXISTS sale_batch_allocations (
+        id SERIAL PRIMARY KEY,
+        sale_item_id INTEGER REFERENCES sale_items(id) ON DELETE CASCADE,
+        batch_id INTEGER REFERENCES product_batches(id),
+        quantity INTEGER NOT NULL,
+        cost_price DECIMAL(10,2) NOT NULL,
+        selling_price DECIMAL(10,2) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `
+  })
 }
 
 async function upgradeLegacyColumns() {
@@ -578,7 +656,11 @@ async function upgradeLegacyColumns() {
     ["products.meesho_status", () => sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS meesho_status VARCHAR(20) DEFAULT 'not_listed'`],
     ["products.own_ecom_status", () => sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS own_ecom_status VARCHAR(20) DEFAULT 'not_listed'`],
     ["products.trending", () => sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS trending BOOLEAN DEFAULT false`],
+    ["products.has_variants", () => sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS has_variants BOOLEAN DEFAULT false NOT NULL`],
+    ["products.is_batch_managed", () => sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS is_batch_managed BOOLEAN DEFAULT false NOT NULL`],
     ["product_stock_history.device_id", () => sql`ALTER TABLE product_stock_history ADD COLUMN IF NOT EXISTS device_id INTEGER`],
+    ["product_stock_history.product_variant_id", () => sql`ALTER TABLE product_stock_history ADD COLUMN IF NOT EXISTS product_variant_id INTEGER`],
+    ["product_stock_history.batch_id", () => sql`ALTER TABLE product_stock_history ADD COLUMN IF NOT EXISTS batch_id INTEGER`],
     ["sales.device_id", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS device_id INTEGER`],
     ["sales.received_amount", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS received_amount DECIMAL(12,2) DEFAULT 0`],
     ["sales.staff_id", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS staff_id INTEGER`],
@@ -615,6 +697,8 @@ async function upgradeLegacyColumns() {
     ["sales.packaging_type_name", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS packaging_type_name VARCHAR(255)`],
     ["sale_items.cost", () => sql`ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS cost DECIMAL(12,2) DEFAULT 0`],
     ["sale_items.notes", () => sql`ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS notes TEXT`],
+    ["sale_items.product_variant_id", () => sql`ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS product_variant_id INTEGER`],
+    ["sale_items.batch_id", () => sql`ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS batch_id INTEGER`],
     ["purchases.device_id", () => sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS device_id INTEGER`],
     ["purchases.payment_method", () => sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50)`],
     ["purchases.purchase_status", () => sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS purchase_status VARCHAR(50) DEFAULT 'Delivered'`],
@@ -712,6 +796,21 @@ async function upgradeLegacyColumns() {
       }
     }
   })
+}
+
+async function addForeignKeys() {
+  console.log("\n── Adding foreign keys ──\n")
+
+  const fks: Array<[string, () => Promise<any>]> = [
+    ["sale_items_batch_id_fkey", () => sql`ALTER TABLE sale_items ADD CONSTRAINT sale_items_batch_id_fkey FOREIGN KEY (batch_id) REFERENCES product_batches(id) ON DELETE SET NULL`],
+    ["sale_items_product_variant_id_fkey", () => sql`ALTER TABLE sale_items ADD CONSTRAINT sale_items_product_variant_id_fkey FOREIGN KEY (product_variant_id) REFERENCES product_variants(id) ON DELETE SET NULL`],
+    ["product_stock_history_batch_id_fkey", () => sql`ALTER TABLE product_stock_history ADD CONSTRAINT product_stock_history_batch_id_fkey FOREIGN KEY (batch_id) REFERENCES product_batches(id) ON DELETE SET NULL`],
+    ["product_stock_history_product_variant_id_fkey", () => sql`ALTER TABLE product_stock_history ADD CONSTRAINT product_stock_history_product_variant_id_fkey FOREIGN KEY (product_variant_id) REFERENCES product_variants(id) ON DELETE SET NULL`]
+  ]
+
+  for (const [label, fn] of fks) {
+    await runSafe(label, fn)
+  }
 }
 
 async function migrateManualEntryCategories() {
@@ -924,6 +1023,7 @@ async function migrate() {
   try {
     await createTables()
     await upgradeLegacyColumns()
+    await addForeignKeys()
     await migrateManualEntryCategories()
     await dropLegacyTables()
     await createIndexes()

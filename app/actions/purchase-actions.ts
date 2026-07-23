@@ -136,9 +136,16 @@ export async function getUserPurchases(
 export async function getPurchaseDetails(purchaseId: number) {
   try {
     const purchaseItems = await sql`
-      SELECT pi.*, p.name as product_name, p.category
+      SELECT 
+        pi.*, 
+        p.name as product_name, 
+        p.category,
+        pv.name as variant_name,
+        pb.batch_no as batch_no
       FROM purchase_items pi
       JOIN products p ON pi.product_id = p.id
+      LEFT JOIN product_variants pv ON pi.product_variant_id = pv.id
+      LEFT JOIN product_batches pb ON pi.batch_id = pb.id
       WHERE pi.purchase_id = ${purchaseId}
     `
 
@@ -218,10 +225,7 @@ export async function createPurchase(formData: FormData) {
   resetConnectionState()
 
   try {
-    // Start a transaction
-    await sql`BEGIN`
-
-    try {
+    const result = await sql.begin(async (tx: any) => {
       // Calculate final received amount based on status
       let finalReceivedAmount = receivedAmount
       if (status.toLowerCase() === "paid") {
@@ -233,7 +237,7 @@ export async function createPurchase(formData: FormData) {
       console.log("Creating purchase with received amount:", finalReceivedAmount)
 
       // Create the purchase
-      const purchaseResult = await sql`
+      const purchaseResult = await tx`
         INSERT INTO purchases (
           supplier, total_amount, status, payment_method, purchase_status, 
           created_by, device_id, purchase_date, received_amount
@@ -246,8 +250,7 @@ export async function createPurchase(formData: FormData) {
       `
 
       if (purchaseResult.length === 0) {
-        await sql`ROLLBACK`
-        return { success: false, message: "Failed to create purchase" }
+        throw new Error("Failed to create purchase")
       }
 
       const purchaseId = purchaseResult[0].id
@@ -258,24 +261,13 @@ export async function createPurchase(formData: FormData) {
       for (let item of items) {
         // Resolve variant: use provided variant_id, or fetch the default variant.
         // If no variant exists (legacy product), auto-create one so purchase never fails.
-        let variantId = item.variant_id;
+        let variantId = item.variant_id || null;
         if (!variantId) {
-          const defaultVariant = await sql`
+          const defaultVariant = await tx`
             SELECT id FROM product_variants WHERE product_id = ${item.product_id} ORDER BY id ASC LIMIT 1
           `;
           if (defaultVariant.length > 0) {
             variantId = defaultVariant[0].id;
-          } else {
-            console.log(`[Purchase] Auto-creating default variant for product ${item.product_id}`);
-            const autoVariant = await sql`
-              INSERT INTO product_variants (
-                product_id, name, cost_price, wholesale_price, price, msp, mrp, minimum_stock, status
-              ) VALUES (
-                ${item.product_id}, 'Default', ${item.price}, ${item.price}, ${item.price},
-                ${item.price}, ${item.price}, 0, 'active'
-              ) RETURNING id
-            `;
-            variantId = autoVariant[0].id;
           }
         }
 
@@ -283,7 +275,7 @@ export async function createPurchase(formData: FormData) {
         let batchId: number | null = null;
         if (isDelivered && !isCancelled) {
           const batchNo = `PUR-${purchaseId || 0}-${item.product_id}-${Date.now().toString().slice(-4)}`;
-          const newBatch = await sql`
+          const newBatch = await tx`
             INSERT INTO product_batches (
               product_id, product_variant_id, batch_no, cost_price, selling_price,
               quantity_purchased, remaining_quantity, status, purchase_id
@@ -297,20 +289,20 @@ export async function createPurchase(formData: FormData) {
         item.variant_id = variantId;
         item.batch_id = batchId;
 
-        await sql`
+        await tx`
           INSERT INTO purchase_items (purchase_id, product_id, product_variant_id, batch_id, quantity, price, tax_percentage, tax_amount, line_total)
           VALUES (${purchaseId}, ${item.product_id}, ${item.variant_id || null}, ${item.batch_id || null}, ${item.quantity}, ${item.price}, ${item.tax_percentage}, ${item.tax_amount}, ${item.line_total})
         `
 
         // Only update stock when purchase status is Delivered AND not Cancelled
         if (isDelivered && !isCancelled) {
-          await adjustDeviceProductStock(item.product_id, (item as any).variant_id || null, (item as any).batch_id || null, deviceId, Number(item.quantity))
+          await adjustDeviceProductStock(item.product_id, (item as any).variant_id || null, (item as any).batch_id || null, deviceId, Number(item.quantity), tx)
 
           // Add stock history entry for purchase
           try {
             const historyNote = `Stock added from purchase #${purchaseId} - ${supplier}`
 
-            await sql`
+            await tx`
               INSERT INTO product_stock_history (
                 product_id, product_variant_id, batch_id, quantity, type, reference_id, reference_type, notes, created_by, device_id
               ) VALUES (
@@ -337,17 +329,13 @@ export async function createPurchase(formData: FormData) {
         deviceId,
         userId,
         purchaseDate: new Date(purchaseDate),
-      })
+      }, tx)
 
-      // Commit the transaction
-      await sql`COMMIT`
-
-      revalidatePath("/dashboard")
       return { success: true, message: "Purchase added successfully", data: purchaseResult[0] }
-    } catch (error) {
-      await sql`ROLLBACK`
-      throw error
-    }
+    })
+
+    revalidatePath("/dashboard")
+    return result
   } catch (error) {
     console.error("Add purchase error:", error)
     return {
@@ -514,22 +502,18 @@ export async function updatePurchase(formData: FormData) {
   resetConnectionState()
 
   try {
-    // Start a transaction
-    await sql`BEGIN`
-
-    try {
+    const result = await sql.begin(async (tx: any) => {
       // Get current purchase details to check status change
-      const currentPurchase = await sql`
+      const currentPurchase = await tx`
         SELECT status, purchase_status, received_amount, total_amount FROM purchases WHERE id = ${purchaseId} AND device_id = ${deviceId}
       `
 
       if (currentPurchase.length === 0) {
-        await sql`ROLLBACK`
-        return { success: false, message: "Purchase not found" }
+        throw new Error("Purchase not found")
       }
 
       // Get current items to handle stock changes properly
-      const currentItems = await sql`
+      const currentItems = await tx`
         SELECT product_id, quantity FROM purchase_items WHERE purchase_id = ${purchaseId}
       `
 
@@ -544,7 +528,7 @@ export async function updatePurchase(formData: FormData) {
       console.log("Updating purchase with received amount:", finalReceivedAmount)
 
       // Update purchase with received amount
-      const purchaseResult = await sql`
+      const purchaseResult = await tx`
         UPDATE purchases 
         SET supplier = ${supplier}, total_amount = ${totalAmount}, 
             status = ${status}, purchase_date = ${purchaseDate},
@@ -555,8 +539,7 @@ export async function updatePurchase(formData: FormData) {
       `
 
       if (purchaseResult.length === 0) {
-        await sql`ROLLBACK`
-        return { success: false, message: "Failed to update purchase" }
+        throw new Error("Failed to update purchase")
       }
 
       console.log("Purchase updated successfully:", purchaseResult[0])
@@ -611,7 +594,7 @@ export async function updatePurchase(formData: FormData) {
           })
 
           // Update the product stock for this device
-          await adjustDeviceProductStock(productId, null, null, deviceId, Number(netChange))
+          await adjustDeviceProductStock(productId, null, null, deviceId, Number(netChange), tx)
 
           // Create a single stock history entry for the net change
           try {
@@ -626,7 +609,7 @@ export async function updatePurchase(formData: FormData) {
               historyType = "adjustment" // was "purchase_update"
             }
 
-            await sql`
+            await tx`
               INSERT INTO product_stock_history (
                 product_id, quantity, type, reference_id, reference_type, notes, created_by, device_id
               ) VALUES (
@@ -644,21 +627,21 @@ export async function updatePurchase(formData: FormData) {
       console.log("Stock changes applied:", stockChanges)
 
       // Delete existing items and add new ones
-      await sql`DELETE FROM purchase_items WHERE purchase_id = ${purchaseId}`
+      await tx`DELETE FROM purchase_items WHERE purchase_id = ${purchaseId}`
 
       for (let item of items) {
         // Resolve variant: use provided variant_id, or fetch the default variant.
         // If no variant exists (legacy product), auto-create one so purchase never fails.
         let variantId = item.variant_id;
         if (!variantId) {
-          const defaultVariant = await sql`
+          const defaultVariant = await tx`
             SELECT id FROM product_variants WHERE product_id = ${item.product_id} ORDER BY id ASC LIMIT 1
           `;
           if (defaultVariant.length > 0) {
             variantId = defaultVariant[0].id;
           } else {
             console.log(`[Purchase] Auto-creating default variant for product ${item.product_id}`);
-            const autoVariant = await sql`
+            const autoVariant = await tx`
               INSERT INTO product_variants (
                 product_id, name, cost_price, wholesale_price, price, msp, mrp, minimum_stock, status
               ) VALUES (
@@ -674,7 +657,7 @@ export async function updatePurchase(formData: FormData) {
         let batchId: number | null = null;
         if (shouldAddStock) {
           const batchNo = `PUR-${purchaseId || 0}-${item.product_id}-${Date.now().toString().slice(-4)}`;
-          const newBatch = await sql`
+          const newBatch = await tx`
             INSERT INTO product_batches (
               product_id, product_variant_id, batch_no, cost_price, selling_price,
               quantity_purchased, remaining_quantity, status, purchase_id
@@ -688,7 +671,7 @@ export async function updatePurchase(formData: FormData) {
         item.variant_id = variantId;
         item.batch_id = batchId;
 
-        await sql`
+        await tx`
           INSERT INTO purchase_items (purchase_id, product_id, product_variant_id, batch_id, quantity, price, tax_percentage, tax_amount, line_total)
           VALUES (${purchaseId}, ${item.product_id}, ${item.variant_id || null}, ${item.batch_id || null}, ${item.quantity}, ${item.price}, ${item.tax_percentage}, ${item.tax_amount}, ${item.line_total})
         `
@@ -719,15 +702,11 @@ export async function updatePurchase(formData: FormData) {
         adjustmentDate: new Date(),
       })
 
-      // Commit the transaction
-      await sql`COMMIT`
-
-      revalidatePath("/dashboard")
       return { success: true, message: "Purchase updated successfully", data: purchaseResult[0] }
-    } catch (error) {
-      await sql`ROLLBACK`
-      throw error
-    }
+    })
+
+    revalidatePath("/dashboard")
+    return result
   } catch (error) {
     console.error("Update purchase error:", error)
     return {
@@ -746,17 +725,14 @@ export async function deletePurchase(purchaseId: number, deviceId: number) {
   resetConnectionState()
 
   try {
-    // Start a transaction
-    await sql`BEGIN`
-
-    try {
+    const result = await sql.begin(async (tx: any) => {
       // Get the purchase status first
-      const purchaseResult = await sql`
+      const purchaseResult = await tx`
         SELECT purchase_status, status, created_by FROM purchases WHERE id = ${purchaseId} AND device_id = ${deviceId}
       `
 
       if (purchaseResult.length === 0) {
-        await sql`ROLLBACK`
+        await tx`ROLLBACK`
         return { success: false, message: "Purchase not found" }
       }
 
@@ -765,7 +741,7 @@ export async function deletePurchase(purchaseId: number, deviceId: number) {
         purchase.purchase_status?.toLowerCase() === "delivered" && purchase.status?.toLowerCase() !== "cancelled"
 
       // Get items to restore stock if needed
-      const items = await sql`
+      const items = await tx`
         SELECT product_id, quantity FROM purchase_items WHERE purchase_id = ${purchaseId}
       `
 
@@ -777,14 +753,14 @@ export async function deletePurchase(purchaseId: number, deviceId: number) {
         // If no variant exists (legacy product), auto-create one so purchase never fails.
         let variantId = item.variant_id;
         if (!variantId) {
-          const defaultVariant = await sql`
+          const defaultVariant = await tx`
             SELECT id FROM product_variants WHERE product_id = ${item.product_id} ORDER BY id ASC LIMIT 1
           `;
           if (defaultVariant.length > 0) {
             variantId = defaultVariant[0].id;
           } else {
             console.log(`[Purchase] Auto-creating default variant for product ${item.product_id}`);
-            const autoVariant = await sql`
+            const autoVariant = await tx`
               INSERT INTO product_variants (
                 product_id, name, cost_price, wholesale_price, price, msp, mrp, minimum_stock, status
               ) VALUES (
@@ -798,7 +774,7 @@ export async function deletePurchase(purchaseId: number, deviceId: number) {
 
         // Every purchase MUST create a NEW BATCH — never reuse or merge.
         const batchNo = `PUR-${purchaseId || 0}-${item.product_id}-${Date.now().toString().slice(-4)}`;
-        const newBatch = await sql`
+        const newBatch = await tx`
           INSERT INTO product_batches (
             product_id, product_variant_id, batch_no, cost_price, selling_price,
             quantity_purchased, remaining_quantity, status, purchase_id
@@ -815,7 +791,7 @@ export async function deletePurchase(purchaseId: number, deviceId: number) {
 
           // Record negative adjustment
           try {
-            await sql`
+            await tx`
               INSERT INTO product_stock_history (
                 product_id,
                 quantity,
@@ -847,25 +823,21 @@ export async function deletePurchase(purchaseId: number, deviceId: number) {
       await deletePurchaseTransaction(purchaseId, deviceId)
 
       // Delete purchase items first
-      await sql`DELETE FROM purchase_items WHERE purchase_id = ${purchaseId}`
+      await tx`DELETE FROM purchase_items WHERE purchase_id = ${purchaseId}`
 
       // Delete the purchase with device_id check
-      const result = await sql`DELETE FROM purchases WHERE id = ${purchaseId} AND device_id = ${deviceId} RETURNING id`
+      const result = await tx`DELETE FROM purchases WHERE id = ${purchaseId} AND device_id = ${deviceId} RETURNING id`
 
       if (result.length === 0) {
-        await sql`ROLLBACK`
+        await tx`ROLLBACK`
         return { success: false, message: "Failed to delete purchase" }
       }
 
-      // Commit the transaction
-      await sql`COMMIT`
-
-      revalidatePath("/dashboard")
       return { success: true, message: "Purchase deleted successfully" }
-    } catch (error) {
-      await sql`ROLLBACK`
-      throw error
-    }
+    })
+
+    revalidatePath("/dashboard")
+    return result
   } catch (error) {
     console.error("Delete purchase error:", error)
     return {

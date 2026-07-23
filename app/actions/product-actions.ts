@@ -1117,6 +1117,13 @@ export async function createProduct(formData: FormData) {
             category,
             category_id, 
             description, 
+            price,
+            wholesale_price,
+            msp,
+            barcode,
+            color,
+            size,
+            shelf,
             image_url,
             image_urls,
             video_url,
@@ -1137,6 +1144,13 @@ export async function createProduct(formData: FormData) {
             ${category || ""}, 
             ${categoryId}, 
             ${description}, 
+            ${Number.isNaN(price) ? (productVariants[0]?.mspPrice || 0) : price},
+            ${wholesalePrice || productVariants[0]?.costPrice || 0},
+            ${msp || productVariants[0]?.mspPrice || 0},
+            ${barcode || productVariants[0]?.barcode || null},
+            ${color},
+            ${size},
+            ${shelf || productVariants[0]?.shelf || null},
             ${uploadedImageUrls[0] || null},
             ${JSON.stringify(uploadedImageUrls)},
             ${videoUrl},
@@ -1767,19 +1781,28 @@ export async function getProductStockByDevice(productId: number, userId: number)
 
   try {
     const devices = await sql`
-      SELECT d.id AS device_id, d.name AS device_name, COALESCE(pds.stock, 0) AS stock
+      SELECT 
+        d.id AS device_id, 
+        d.name AS device_name,
+        pv.name AS variant_name,
+        pb.batch_no AS batch_no,
+        COALESCE(pbds.stock, 0) AS stock
       FROM devices d
-      LEFT JOIN product_device_stock pds
-        ON pds.device_id = d.id AND pds.product_id = ${productId}
+      LEFT JOIN product_batch_device_stock pbds ON pbds.device_id = d.id
+      LEFT JOIN product_batches pb ON pb.id = pbds.batch_id AND pb.product_id = ${productId}
+      LEFT JOIN product_variants pv ON pv.id = pb.product_variant_id
       WHERE d.company_id = (
         SELECT company_id FROM devices WHERE id = ${userId}
       )
-      ORDER BY d.name ASC
+      AND (pbds.stock > 0 OR pbds.stock IS NULL)
+      ORDER BY d.name ASC, pv.name ASC, pb.created_at ASC
     `
 
     const data = devices.map((row: any) => ({
       device_id: Number(row.device_id),
       device_name: row.device_name,
+      variant_name: row.variant_name,
+      batch_no: row.batch_no,
       stock: Number(row.stock || 0),
       is_current_device: Number(row.device_id) === Number(userId),
     }))

@@ -566,6 +566,7 @@ export default function ViewSaleModal({
                         <tr className="border-b border-slate-200 bg-[#F1F4F9] text-xs font-semibold uppercase tracking-wide text-slate-600">
                           <th className="whitespace-nowrap px-4 py-2.5 text-left">#</th>
                           <th className="whitespace-nowrap px-4 py-2.5 text-left">Item</th>
+                          <th className="whitespace-nowrap px-4 py-2.5 text-left">Variant/Batch</th>
                           <th className="whitespace-nowrap px-4 py-2.5 text-center">Qty</th>
                           <th className="whitespace-nowrap px-4 py-2.5 text-right">Unit price</th>
                           <th className="whitespace-nowrap px-4 py-2.5 text-right">Cost</th>
@@ -610,6 +611,26 @@ export default function ViewSaleModal({
                                       </p>
                                     ) : null}
                                   </div>
+                                </div>
+                              </td>
+                              <td className="whitespace-nowrap px-4 py-2.5 text-left">
+                                <div className="text-xs font-medium text-slate-700 flex flex-col gap-0.5">
+                                  {item.variant_name ? (
+                                    <>
+                                      <span>{item.variant_name}</span>
+                                      {item.allocations && item.allocations.length > 0 ? (
+                                        <div className="text-[10px] text-slate-500 font-normal">
+                                          {item.allocations.map((a: any, idx: number) => (
+                                            <div key={idx}>{a.batchNumber || 'Unknown'} (x{a.quantity})</div>
+                                          ))}
+                                        </div>
+                                      ) : item.batch_number ? (
+                                        <span className="text-[10px] text-slate-500 font-normal">{item.batch_number}</span>
+                                      ) : null}
+                                    </>
+                                  ) : (
+                                    "—"
+                                  )}
                                 </div>
                               </td>
                               <td className="whitespace-nowrap px-4 py-2.5 text-center text-slate-800">

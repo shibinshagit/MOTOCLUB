@@ -5,10 +5,11 @@ import { Button } from "@/components/ui/button"
 import { format } from "date-fns"
 import { Loader2, Printer, Copy, Settings, ChevronLeft, Link2 } from "lucide-react"
 import { getProductStockHistory, getProductStockByDevice } from "@/app/actions/product-actions"
-import { createProductShareLink } from "@/app/actions/product-share-actions"
 import { printBarcodeSticker, printMultipleBarcodeStickers, encodeNumberAsLetters } from "@/lib/barcode-utils"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
+
+import { ShareProductButton } from "@/components/shared/share-product-button"
 import { getDeviceCurrency } from "@/app/actions/dashboard-actions"
 import { useStaffRestrictions } from "@/hooks/use-staff-restrictions"
 import { useToast } from "@/components/ui/use-toast"
@@ -131,7 +132,6 @@ export function ProductDetailPanel({
   const [isHistoryLimited, setIsHistoryLimited] = useState(true)
   const [printCopies, setPrintCopies] = useState(1)
   const [showPrintOptions, setShowPrintOptions] = useState(false)
-  const [isSharingLink, setIsSharingLink] = useState(false)
   const [currency, setCurrency] = useState(currencyProp || "AED") // Use prop or default to AED
   const { toast } = useToast()
 
@@ -345,32 +345,7 @@ export function ProductDetailPanel({
     }
   }
 
-  const handleShareLink = async () => {
-    if (!product?.id || !currentDeviceId) {
-      notifyError(toast, "Device not found")
-      return
-    }
 
-    setIsSharingLink(true)
-    try {
-      const result = await createProductShareLink(product.id, currentDeviceId)
-      if (!result.success || !result.url) {
-        notifyError(toast, result.message || "Failed to create share link")
-        return
-      }
-
-      await navigator.clipboard.writeText(result.url)
-      notifySuccess(
-        toast,
-        result.reused ? "Existing share link copied" : "Share link copied",
-        "Customers can view product details without price or stock.",
-      )
-    } catch {
-      notifyError(toast, "Could not copy share link")
-    } finally {
-      setIsSharingLink(false)
-    }
-  }
 
   const formatMoney = (amount: number | string) => {
     const num = typeof amount === "string" ? Number.parseFloat(amount) : amount
@@ -452,20 +427,7 @@ export function ProductDetailPanel({
         <Copy className="mr-1.5 h-3.5 w-3.5" />
         Multiple
       </Button>
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={handleShareLink}
-        disabled={isSharingLink}
-        className="h-8 border-violet-200 bg-white px-3 text-xs text-violet-700 hover:bg-violet-50"
-      >
-        {isSharingLink ? (
-          <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-        ) : (
-          <Link2 className="mr-1.5 h-3.5 w-3.5" />
-        )}
-        Share link
-      </Button>
+      <ShareProductButton product={product} currency={currency} currentDeviceId={currentDeviceId} />
       {onAdjustStock && !hideStockCount ? (
         <Button
           variant="outline"
@@ -733,6 +695,11 @@ export function ProductDetailPanel({
                           {row.is_current_device ? (
                             <span className="ml-2 text-xs text-violet-700">Current</span>
                           ) : null}
+                          {row.variant_name && (
+                            <div className="text-[11px] text-slate-500 mt-0.5">
+                              {row.variant_name} {row.batch_no ? `| ${row.batch_no}` : ''}
+                            </div>
+                          )}
                         </td>
                         <td className="px-4 py-2.5 text-right font-medium text-slate-800">{row.stock}</td>
                       </tr>

@@ -699,8 +699,50 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
       return
     }
 
-    updateProductRow(product.id, { quantity: safeRequested })
-  }, [hideStockCount, updateProductRow])
+    let allocations = product.allocations || []
+    let updatedPrice = product.price
+    let updatedCost = product.cost || 0
+
+    if (product.autoAllocate && product.isBatchManaged && product.batches && product.batches.length > 0) {
+      allocations = []
+      let remaining = safeRequested
+      const sortedBatches = [...product.batches].sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+      for (const b of sortedBatches) {
+        if (remaining <= 0) break
+        const stockCount = b.stocks?.find((s: any) => Number(s.device_id) === Number(deviceId))?.stock || b.device_stock || b.stock || 0
+        if (stockCount > 0) {
+          const allocQty = Math.min(stockCount, remaining)
+          allocations.push({ 
+            batchId: b.id || b.batch_id, 
+            quantity: allocQty, 
+            costPrice: b.cost_price ? Number(b.cost_price) : product.cost, 
+            sellingPrice: b.selling_price ? Number(b.selling_price) : (product.variants?.find((v:any) => v.id === product.productVariantId)?.price || product.price) 
+          })
+          remaining -= allocQty
+        }
+      }
+
+      if (allocations.length > 0) {
+        const totalAllocatedQty = allocations.reduce((sum, a) => sum + a.quantity, 0)
+        const totalCost = allocations.reduce((sum, a) => sum + (a.costPrice || updatedCost) * a.quantity, 0)
+        const totalPrice = allocations.reduce((sum, a) => sum + (a.sellingPrice || updatedPrice) * a.quantity, 0)
+        updatedCost = totalCost / totalAllocatedQty
+        updatedPrice = totalPrice / totalAllocatedQty
+      }
+    } else if (allocations.length > 0 && !product.autoAllocate) {
+      // If manual, we don't automatically override allocations on quantity change,
+      // but we do recalculate total based on the newly typed quantity and existing base price.
+      // Alternatively, the user can open the allocator to adjust.
+    }
+
+    updateProductRow(product.id, { 
+      quantity: safeRequested,
+      allocations: allocations,
+      price: updatedPrice,
+      cost: updatedCost,
+      total: updatedPrice * safeRequested
+    })
+  }, [hideStockCount, updateProductRow, deviceId])
 
   const handleProductSelect = (
     id: string,
@@ -743,7 +785,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     let allocations: any[] = []
     let autoAllocate = true
     let updatedPrice = price
-    let updatedCost = wholesalePrice || 0
+    let updatedCost = productObj?.cost_price ?? wholesalePrice ?? productObj?.wholesale_price ?? 0
 
     if (isBatchManaged && resolvedVariantId && batches.length > 0) {
       // Auto Allocate initially
@@ -934,7 +976,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
             productName: result.data.name,
             quantity: 1,
             price: result.data.price,
-            cost: result.data.wholesale_price || 0,
+            cost: result.data.cost_price ?? result.data.wholesale_price ?? 0,
             stock: result.data.stock || 0,
             total: result.data.price,
             notes: "",
@@ -1696,40 +1738,88 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                           value={product.productVariantId || ""}
                           onChange={(e) => {
                             const vId = e.target.value
-                            const v = product.variants?.find((vx: any) => vx.id === vId)
+                            const v = product.variants?.find((vx: any) => String(vx.id) === vId)
                             if (v) {
+                              let newAllocations: any[] = []
+                              let newPrice = v.price ? Number(v.price) : product.price
+                              let newCost = v.cost_price ? Number(v.cost_price) : product.cost
+                              let newTotal = newPrice * product.quantity
+
+                              if (product.isBatchManaged && v.batches && v.batches.length > 0) {
+                                let remaining = product.quantity
+                                const sortedBatches = [...v.batches].sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+                                for (const b of sortedBatches) {
+                                  if (remaining <= 0) break
+                                  const stockCount = b.stocks?.find((s: any) => Number(s.device_id) === Number(deviceId))?.stock || b.device_stock || b.stock || 0
+                                  if (stockCount > 0) {
+                                    const allocQty = Math.min(stockCount, remaining)
+                                    newAllocations.push({ 
+                                      batchId: b.id || b.batch_id, 
+                                      quantity: allocQty, 
+                                      costPrice: b.cost_price ? Number(b.cost_price) : newCost, 
+                                      sellingPrice: b.selling_price ? Number(b.selling_price) : newPrice 
+                                    })
+                                    remaining -= allocQty
+                                  }
+                                }
+
+                                if (newAllocations.length > 0) {
+                                  const totalAllocatedQty = newAllocations.reduce((sum, a) => sum + a.quantity, 0)
+                                  const totalCost = newAllocations.reduce((sum, a) => sum + (a.costPrice || newCost) * a.quantity, 0)
+                                  const totalPrice = newAllocations.reduce((sum, a) => sum + (a.sellingPrice || newPrice) * a.quantity, 0)
+                                  newCost = totalCost / totalAllocatedQty
+                                  newPrice = totalPrice / totalAllocatedQty
+                                  newTotal = newPrice * product.quantity
+                                }
+                              }
+
                               updateProductRow(product.id, {
                                 productVariantId: v.id,
                                 variantName: v.name,
                                 batchId: null,
                                 batchNumber: null,
-                                price: product.price,
+                                price: newPrice,
+                                cost: newCost,
+                                total: newTotal,
                                 batches: v.batches || [],
-                                allocations: [],
+                                allocations: newAllocations,
                                 autoAllocate: true
                               })
                             }
                           }}
                         >
+                          <option value="" disabled>Select Variant</option>
                           {product.variants.map((v: any) => (
                             <option key={v.id} value={v.id}>{v.name}</option>
                           ))}
                         </select>
                       )}
-                      <Button
-            variant="outline"
-            size="sm"
-            className="h-7 text-[10px] sm:text-xs px-2 flex justify-between items-center bg-blue-50/30 border-blue-200 text-blue-800 hover:bg-blue-100/50 w-full max-w-[120px]"
-            onClick={() => setAllocatorRowId(product.id)}
-            disabled={product.variants && product.variants.length > 1 && !product.productVariantId}
-          >
-            <span className="truncate">
-              {product.allocations?.length ? `Allocated (${product.allocations.reduce((sum, a) => sum + a.quantity, 0)})` : 'Allocate Batches'}
-            </span>
-            <span className="ml-1 opacity-70">
-              {product.autoAllocate ? '(Auto)' : '(Manual)'}
-            </span>
-          </Button>
+                      {product.isBatchManaged && product.batches && product.batches.length > 0 && (
+                        <div className="flex flex-col gap-1 w-full max-w-[200px]">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 text-[10px] sm:text-xs px-2 flex justify-between items-center bg-blue-50/30 border-blue-200 text-blue-800 hover:bg-blue-100/50 w-full"
+                            onClick={() => setAllocatorRowId(product.id)}
+                            disabled={product.variants && product.variants.length > 1 && !product.productVariantId}
+                          >
+                            <span className="truncate">
+                              {product.allocations?.length ? `Allocated (${product.allocations.reduce((sum, a) => sum + a.quantity, 0)})` : 'Allocate Batches'}
+                            </span>
+                            <span className="ml-1 opacity-70">
+                              {product.autoAllocate ? '(Auto)' : '(Manual)'}
+                            </span>
+                          </Button>
+                          {product.allocations && product.allocations.length > 0 && (
+                            <div className="text-[10px] text-gray-500 mt-0.5 leading-tight">
+                              {product.allocations.map((a, idx) => {
+                                const b = product.batches?.find(bx => String(bx.id || bx.batch_id) === String(a.batchId))
+                                return <div key={idx}>{b?.batch_no || 'Unknown'}: {a.quantity} qty</div>
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1740,6 +1830,9 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                   onChange={(productId, productName, price, wholesalePrice, stock, productObj) =>
                     handleProductSelect(product.id, productId, productName, price, wholesalePrice, stock, productObj)
                   }
+                  onAddNew={() => setIsNewProductModalOpen(true)}
+                  onAddNewService={() => setIsNewServiceModalOpen(true)}
+                  userId={userId}
                   error={
                     products.filter((p) => p.productId === product.productId).length > 1
                       ? "Duplicate item"
@@ -1782,12 +1875,23 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                 <span className="absolute right-2 top-2 text-[10px] text-gray-400">{deviceCurrencyState}</span>
               </div>
             </div>
-            <div className="col-span-2 text-center text-xs text-gray-500">
-              {showCost && product.productId && (
-                <span>
-                  {deviceCurrencyState} {formatCurrency(product.cost)}
-                </span>
-              )}
+            <div className="col-span-2 text-center text-xs text-gray-500 relative group">
+              {product.productId ? (
+                <div className="cursor-help w-full">
+                  {showCost ? (
+                    <span className="font-medium text-gray-900">
+                      {deviceCurrencyState} {formatCurrency(product.cost || 0)}
+                    </span>
+                  ) : (
+                    <>
+                      <span className="text-gray-400 tracking-widest group-hover:hidden">••••••</span>
+                      <span className="hidden group-hover:inline-block font-medium">
+                        {deviceCurrencyState} {formatCurrency(product.cost || 0)}
+                      </span>
+                    </>
+                  )}
+                </div>
+              ) : null}
             </div>
             <div className="col-span-1 text-right font-medium text-xs text-gray-900">
               {product.productId ? (
@@ -1876,37 +1980,85 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                           value={product.productVariantId || ""}
                           onChange={(e) => {
                             const vId = e.target.value
-                            const v = product.variants?.find((vx: any) => vx.id === vId)
+                            const v = product.variants?.find((vx: any) => String(vx.id) === vId)
                             if (v) {
+                              let newAllocations: any[] = []
+                              let newPrice = v.price ? Number(v.price) : product.price
+                              let newCost = v.cost_price ? Number(v.cost_price) : product.cost
+                              let newTotal = newPrice * product.quantity
+
+                              if (product.isBatchManaged && v.batches && v.batches.length > 0) {
+                                let remaining = product.quantity
+                                const sortedBatches = [...v.batches].sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+                                for (const b of sortedBatches) {
+                                  if (remaining <= 0) break
+                                  const stockCount = b.stocks?.find((s: any) => Number(s.device_id) === Number(deviceId))?.stock || b.device_stock || b.stock || 0
+                                  if (stockCount > 0) {
+                                    const allocQty = Math.min(stockCount, remaining)
+                                    newAllocations.push({ 
+                                      batchId: b.id || b.batch_id, 
+                                      quantity: allocQty, 
+                                      costPrice: b.cost_price ? Number(b.cost_price) : newCost, 
+                                      sellingPrice: b.selling_price ? Number(b.selling_price) : newPrice 
+                                    })
+                                    remaining -= allocQty
+                                  }
+                                }
+
+                                if (newAllocations.length > 0) {
+                                  const totalAllocatedQty = newAllocations.reduce((sum, a) => sum + a.quantity, 0)
+                                  const totalCost = newAllocations.reduce((sum, a) => sum + (a.costPrice || newCost) * a.quantity, 0)
+                                  const totalPrice = newAllocations.reduce((sum, a) => sum + (a.sellingPrice || newPrice) * a.quantity, 0)
+                                  newCost = totalCost / totalAllocatedQty
+                                  newPrice = totalPrice / totalAllocatedQty
+                                  newTotal = newPrice * product.quantity
+                                }
+                              }
+
                               updateProductRow(product.id, {
                                 productVariantId: v.id,
                                 variantName: v.name,
                                 batchId: null,
                                 batchNumber: null,
-                                price: product.price,
+                                price: newPrice,
+                                cost: newCost,
+                                total: newTotal,
                                 batches: v.batches || [],
-                                allocations: [],
+                                allocations: newAllocations,
                                 autoAllocate: true
                               })
                             }
                           }}
                         >
+                          <option value="" disabled>Select Variant</option>
                           {product.variants.map((v: any) => (
                             <option key={v.id} value={v.id}>{v.name}</option>
                           ))}
                         </select>
                       )}
-                      <Button
-            variant="outline"
-            size="sm"
-            className="h-8 text-xs px-2 flex justify-between items-center bg-blue-50/30 border-blue-200 text-blue-800 hover:bg-blue-100/50 flex-1"
-            onClick={() => setAllocatorRowId(product.id)}
-            disabled={product.variants && product.variants.length > 1 && !product.productVariantId}
-          >
-            <span className="truncate">
-              {product.allocations?.length ? `Allocated (${product.allocations.reduce((sum, a) => sum + a.quantity, 0)})` : 'Allocate Batches'}
-            </span>
-          </Button>
+                      {product.isBatchManaged && product.batches && product.batches.length > 0 && (
+                        <div className="flex flex-col gap-1 flex-1">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8 text-xs px-2 flex justify-between items-center bg-blue-50/30 border-blue-200 text-blue-800 hover:bg-blue-100/50 w-full"
+                            onClick={() => setAllocatorRowId(product.id)}
+                            disabled={product.variants && product.variants.length > 1 && !product.productVariantId}
+                          >
+                            <span className="truncate">
+                              {product.allocations?.length ? `Allocated (${product.allocations.reduce((sum, a) => sum + a.quantity, 0)})` : 'Allocate Batches'}
+                            </span>
+                          </Button>
+                          {product.allocations && product.allocations.length > 0 && (
+                            <div className="text-[11px] text-gray-500 mt-0.5 leading-tight">
+                              {product.allocations.map((a, idx) => {
+                                const b = product.batches?.find(bx => String(bx.id || bx.batch_id) === String(a.batchId))
+                                return <div key={idx}>{b?.batch_no || 'Unknown'}: {a.quantity} qty</div>
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1917,6 +2069,9 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                   onChange={(productId, productName, price, wholesalePrice, stock, productObj) =>
                     handleProductSelect(product.id, productId, productName, price, wholesalePrice, stock, productObj)
                   }
+                  onAddNew={() => setIsNewProductModalOpen(true)}
+                  onAddNewService={() => setIsNewServiceModalOpen(true)}
+                  userId={userId}
                   error={
                     products.filter((p) => p.productId === product.productId).length > 1
                       ? "Duplicate"
@@ -1967,11 +2122,22 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
               </div>
             </div>
 
-            {showCost && product.productId && (
+            {product.productId && (
               <div className="mb-2">
                 <Label className="text-[10px] text-gray-500 mb-1 block">Ref Price (Cost)</Label>
-                <div className="text-xs text-gray-700 bg-gray-100 p-1.5 rounded">
-                  {deviceCurrencyState} {formatCurrency(product.cost)}
+                <div className="text-xs text-gray-700 bg-gray-100 p-1.5 rounded relative group cursor-help w-full">
+                  {showCost ? (
+                    <span className="font-medium">
+                      {deviceCurrencyState} {formatCurrency(product.cost || 0)}
+                    </span>
+                  ) : (
+                    <>
+                      <span className="text-gray-400 tracking-widest group-hover:hidden">••••••</span>
+                      <span className="hidden group-hover:inline-block font-medium">
+                        {deviceCurrencyState} {formatCurrency(product.cost || 0)}
+                      </span>
+                    </>
+                  )}
                 </div>
               </div>
             )}

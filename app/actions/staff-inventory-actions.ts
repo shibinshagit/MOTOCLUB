@@ -1,13 +1,7 @@
 "use server"
 
-import { neon } from "@neondatabase/serverless"
+import { sql, getLastError } from "@/lib/db"
 import { getStaffSession } from "@/lib/staff-session"
-
-function getLastError() {
-  return { message: "Unknown error" }
-}
-
-const sql = neon(process.env.DATABASE_URL!)
 
 // Helper to attach ONLY staff-allowed variants and batches to products
 async function attachStaffVariantsAndBatches(products: any[], deviceId: number) {
@@ -17,7 +11,7 @@ async function attachStaffVariantsAndBatches(products: any[], deviceId: number) 
   
   // Get variants for all products
   const variants = await sql`
-    SELECT id, product_id, name, sku, barcode, msp, wholesale_price as selling_price, image_url 
+    SELECT id, product_id, name, sku, barcode, msp, price, wholesale_price, image_url 
     FROM product_variants
     WHERE product_id = ANY(${productIds})
     ORDER BY id ASC
@@ -30,10 +24,9 @@ async function attachStaffVariantsAndBatches(products: any[], deviceId: number) 
       pb.manufacture_date as mfg_date, pb.expiry_date, pb.selling_price,
       pbds.stock as device_stock, pbds.device_id, pv.name as variant_name, pv.product_id
     FROM product_batches pb
-    LEFT JOIN product_batch_device_stock pbds ON pb.id = pbds.batch_id
     LEFT JOIN product_variants pv ON pb.product_variant_id = pv.id
+    LEFT JOIN product_batch_device_stock pbds ON pb.id = pbds.batch_id AND pbds.device_id = ${deviceId}
     WHERE pv.product_id = ANY(${productIds})
-    AND pbds.device_id = ${deviceId}
     ORDER BY pb.id ASC
   `
   
@@ -42,9 +35,10 @@ async function attachStaffVariantsAndBatches(products: any[], deviceId: number) 
   
   // Group batches
   for (const b of batches) {
-    if (!batchesByProductId.has(b.product_id)) batchesByProductId.set(b.product_id, [])
+    const pid = Number(b.product_id)
+    if (!batchesByProductId.has(pid)) batchesByProductId.set(pid, [])
     
-    const productBatches = batchesByProductId.get(b.product_id)!
+    const productBatches = batchesByProductId.get(pid)!
     let existingBatch = productBatches.find((pb: any) => pb.id === b.id)
     
     if (!existingBatch) {
@@ -62,13 +56,14 @@ async function attachStaffVariantsAndBatches(products: any[], deviceId: number) 
   
   // Group variants
   for (const v of variants) {
-    if (!variantsByProductId.has(v.product_id)) variantsByProductId.set(v.product_id, [])
+    const pid = Number(v.product_id)
+    if (!variantsByProductId.has(pid)) variantsByProductId.set(pid, [])
     
     // Calculate device stock for this variant by summing its batches' device_stock
-    const variantBatches = batches.filter(b => b.product_variant_id === v.id)
-    const device_stock = variantBatches.reduce((sum, b) => sum + (b.device_stock ? Number(b.device_stock) : 0), 0)
+    const variantBatches = batches.filter((b: any) => b.product_variant_id === v.id)
+    const device_stock = variantBatches.reduce((sum: number, b: any) => sum + (b.device_stock ? Number(b.device_stock) : 0), 0)
     
-    variantsByProductId.get(v.product_id)!.push({
+    variantsByProductId.get(pid)!.push({
       ...v,
       device_stock
     })
@@ -76,14 +71,22 @@ async function attachStaffVariantsAndBatches(products: any[], deviceId: number) 
   
   // Attach to products
   return products.map(p => {
-    const pVariants = variantsByProductId.get(p.id) || []
-    const pBatches = batchesByProductId.get(p.id) || []
+    const pid = Number(p.id)
+    const pVariants = variantsByProductId.get(pid) || []
+    const pBatches = batchesByProductId.get(pid) || []
     const total_stock = pVariants.reduce((sum, v) => sum + v.device_stock, 0)
+
+    const defaultVariant = pVariants[0] || {}
 
     return {
       ...p,
+      productName: p.name,
+      variantName: defaultVariant.name || "Default",
+      sellingPrice: defaultVariant.price || 0,
+      msp: defaultVariant.msp || null,
+      wholesalePrice: defaultVariant.wholesale_price || 0,
       stock: total_stock,
-      variants: pVariants,
+      variants: pVariants.map(v => ({ ...v, selling_price: v.price || v.wholesale_price || 0 })),
       batches: pBatches
     }
   })
@@ -103,31 +106,39 @@ export async function getStaffInventory(searchTerm?: string) {
       const term = `%${searchTerm}%`
       finalQuery = await sql`
         SELECT 
-          p.id, p.name, p.category, p.description, 
+          p.id, 
+          p.name, 
+          c.name as category, 
+          p.description, 
           p.image_url, p.has_variants, p.is_batch_managed,
           (SELECT name FROM devices WHERE id = ${deviceId}) as branch_name
         FROM products p
+        LEFT JOIN product_categories c ON p.category_id = c.id
         WHERE p.created_by IN (SELECT id FROM devices WHERE company_id = ${companyId})
         AND (
           p.name ILIKE ${term} OR 
-          p.category ILIKE ${term} OR
+          c.name ILIKE ${term} OR
           EXISTS (
             SELECT 1 FROM product_variants pv 
             WHERE pv.product_id = p.id 
             AND (pv.barcode ILIKE ${term} OR pv.sku ILIKE ${term} OR pv.name ILIKE ${term})
           )
         )
-        ORDER BY p.name ASC
+        ORDER BY p.created_at DESC, p.id DESC
       `
     } else {
       finalQuery = await sql`
         SELECT 
-          p.id, p.name, p.category, p.description, 
+          p.id, 
+          p.name, 
+          c.name as category, 
+          p.description, 
           p.image_url, p.has_variants, p.is_batch_managed,
           (SELECT name FROM devices WHERE id = ${deviceId}) as branch_name
         FROM products p
+        LEFT JOIN product_categories c ON p.category_id = c.id
         WHERE p.created_by IN (SELECT id FROM devices WHERE company_id = ${companyId})
-        ORDER BY p.name ASC
+        ORDER BY p.created_at DESC, p.id DESC
       `
     }
 

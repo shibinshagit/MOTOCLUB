@@ -1,6 +1,6 @@
 import "server-only"
 
-import { neon, neonConfig } from "@neondatabase/serverless"
+import { neonConfig } from "@neondatabase/serverless"
 
 neonConfig.fetchConnectionCache = true
 ;(neonConfig as unknown as Record<string, unknown>).fetchTimeout = 30000
@@ -64,21 +64,19 @@ const createSqlClient = () => {
   logDbInit(
     useLocalDriver
       ? "Connecting to local PostgreSQL..."
-      : "Connecting to database...",
+      : "Connecting to remote database using postgres.js...",
   )
 
-  const sqlFn = useLocalDriver
-    ? (() => {
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const postgres = require("postgres") as (url: string, options?: Record<string, unknown>) => any
-        return postgres(dbUrl, {
-          max: 10,
-          idle_timeout: 20,
-          connect_timeout: 10,
-          onnotice: () => {},
-        })
-      })()
-    : neon(dbUrl)
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const postgres = require("postgres") as (url: string, options?: Record<string, unknown>) => any
+  
+  const sqlFn = postgres(dbUrl, {
+    max: 10,
+    idle_timeout: 20,
+    connect_timeout: 10,
+    ssl: useLocalDriver ? false : "require",
+    onnotice: () => {},
+  })
 
   const wrappedSql = async (...args: any[]) => {
     const now = Date.now()
@@ -115,6 +113,8 @@ const createSqlClient = () => {
     }
   }
 
+  wrappedSql.begin = sqlFn.begin ? sqlFn.begin.bind(sqlFn) : undefined;
+  
   ;(async () => {
     try {
       await wrappedSql`SELECT 1`
@@ -125,7 +125,7 @@ const createSqlClient = () => {
     }
   })()
 
-  return { sql: wrappedSql }
+  return { sql: wrappedSql as any }
 }
 
 export function createCompanyFilteredSql(companyId: number) {

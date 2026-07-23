@@ -172,8 +172,11 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
                           </div>
                           <div>
                             <p className="font-semibold text-slate-800 group-hover:text-indigo-600 transition-colors">
-                              {product.name}
+                              {product.productName || product.name}
                             </p>
+                            {product.variantName && product.variantName !== "Default" && !product.has_variants && (
+                              <p className="text-xs text-slate-500 mt-0.5">{product.variantName}</p>
+                            )}
                             {product.has_variants && (
                               <p className="text-[11px] text-slate-500 mt-0.5">{product.variants?.length || 0} variants</p>
                             )}

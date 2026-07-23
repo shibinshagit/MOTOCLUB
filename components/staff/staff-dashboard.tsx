@@ -23,6 +23,7 @@ import { BrandLogo } from "@/components/brand-logo"
 import StaffAttendance from "./staff-attendance"
 import StaffInventoryTab from "./staff-inventory-tab"
 import { JobCardForm, TodaySalesList } from "./job-card"
+import { StaffCustomerTab } from "./customers/staff-customer-tab"
 
 type Tab = "home" | "sales" | "create-sale" | "customers" | "attendance" | "inventory"
 
@@ -204,12 +205,10 @@ export default function StaffDashboard() {
             )}
 
             {activeTab === "customers" && (
-              <div>
-                <h1 className="text-2xl font-semibold text-gray-900 mb-6">Customers</h1>
-                <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-8 text-center text-gray-500">
-                  <p>Customer management module goes here.</p>
-                </div>
-              </div>
+              <StaffCustomerTab 
+                onTabChange={setActiveTab}
+                currency={device?.currency || "AED"} 
+              />
             )}
 
             {activeTab === "attendance" && (

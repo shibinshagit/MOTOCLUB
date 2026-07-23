@@ -524,7 +524,7 @@ export async function recordPurchaseTransaction(purchaseData: {
   deviceId: number
   userId: number
   purchaseDate: Date
-}) {
+}, query: any = sql) {
   try {
     // Ensure table exists
     const totalAmount = Number(purchaseData.totalAmount) || 0
@@ -562,7 +562,7 @@ export async function recordPurchaseTransaction(purchaseData: {
     })
 
     // Insert the main purchase transaction
-    const result = await sql`
+    const result = await query`
       INSERT INTO financial_transactions (
         transaction_type, reference_type, reference_id,
         amount, received_amount, cost_amount, debit_amount, credit_amount,

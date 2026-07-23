@@ -10,6 +10,9 @@ import { notifyError, notifySuccess } from "@/lib/notifications"
 import { cn } from "@/lib/utils"
 import { parseProductLinks } from "@/lib/product-links"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { ShareProductButton } from "@/components/shared/share-product-button"
+import { useAppSelector } from "@/store/hooks"
+import { selectDevice } from "@/store/slices/deviceSlice"
 
 interface StaffViewProductModalProps {
   isOpen: boolean
@@ -104,6 +107,8 @@ export default function StaffViewProductModal({
   currency = "AED",
 }: StaffViewProductModalProps) {
   const { toast } = useToast()
+  const device = useAppSelector(selectDevice)
+  const currentDeviceId = device?.id || undefined
 
   const msp = typeof product?.msp === "number" ? product.msp : Number.parseFloat(product?.msp || "0") || 0
   const retailPrice = typeof product?.selling_price === "number" ? product.selling_price : Number.parseFloat(product?.selling_price || "0") || 0
@@ -335,7 +340,8 @@ export default function StaffViewProductModal({
           </div>
         </div>
         
-        <div className="border-t bg-slate-50 px-6 py-4 shrink-0 flex justify-end">
+        <div className="border-t bg-slate-50 px-6 py-4 shrink-0 flex justify-between">
+          <ShareProductButton product={product} currency={currency} currentDeviceId={currentDeviceId} />
           <Button onClick={onClose} variant="outline">Close</Button>
         </div>
       </DialogContent>

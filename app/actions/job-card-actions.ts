@@ -118,7 +118,7 @@ export async function createJobCard(input: JobCardInput) {
         ${deviceId},
         0,
         ${staffId},
-        'product',
+        'job_card',
         ${trackingId},
         ${customerNameOverride},
         ${customerPhoneOverride},
@@ -187,6 +187,7 @@ export async function getTodayJobCards() {
       WHERE s.device_id = ${deviceId}
         AND DATE(s.sale_date) = CURRENT_DATE
         AND s.status != 'Cancelled'
+        AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%')
         AND (s.delivery_status IS NULL OR s.delivery_status NOT IN ('Delivered', 'Returned'))
       ORDER BY s.created_at DESC
     `
@@ -245,6 +246,7 @@ export async function getAllJobCards(deviceId: number) {
         WHERE d1.id = ${deviceId}
       )
         AND s.status != 'Cancelled'
+        AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%')
         AND (s.delivery_status IS NULL OR s.delivery_status NOT IN ('Delivered', 'Returned'))
       ORDER BY s.created_at DESC
     `
