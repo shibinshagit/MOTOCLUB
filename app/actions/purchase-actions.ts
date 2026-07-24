@@ -226,7 +226,9 @@ export async function createPurchase(formData: FormData) {
       const isCancelled = status.toLowerCase() === "cancelled"
 
       // Add purchase items and handle stock...
+      let itemIndex = 0;
       for (let item of items) {
+        itemIndex++;
         // Resolve variant: use provided variant_id, or fetch the default variant.
         // If no variant exists (legacy product), auto-create one so purchase never fails.
         let variantId = item.variant_id || null;
@@ -236,13 +238,24 @@ export async function createPurchase(formData: FormData) {
           `;
           if (defaultVariant.length > 0) {
             variantId = defaultVariant[0].id;
+          } else {
+            console.log(`[Purchase] Auto-creating default variant for product ${item.product_id}`);
+            const autoVariant = await tx`
+              INSERT INTO product_variants (
+                product_id, name, cost_price, wholesale_price, price, msp, mrp, minimum_stock, status
+              ) VALUES (
+                ${item.product_id}, 'Default', ${item.price}, ${item.price}, ${item.price},
+                ${item.price}, ${item.price}, 0, 'active'
+              ) RETURNING id
+            `;
+            variantId = autoVariant[0].id;
           }
         }
 
         // Every purchase MUST create a NEW BATCH — never reuse or merge.
         let batchId: number | null = null;
         if (isDelivered && !isCancelled) {
-          const batchNo = `PUR-${purchaseId || 0}-${item.product_id}-${Date.now().toString().slice(-4)}`;
+          const batchNo = `PUR-${purchaseId || 0}-${item.product_id}-${itemIndex}-${Date.now().toString().slice(-4)}`;
           const newBatch = await tx`
             INSERT INTO product_batches (
               product_id, product_variant_id, batch_no, cost_price, selling_price,
@@ -597,7 +610,9 @@ export async function updatePurchase(formData: FormData) {
       // Delete existing items and add new ones
       await tx`DELETE FROM purchase_items WHERE purchase_id = ${purchaseId}`
 
+      let itemIndex = 0;
       for (let item of items) {
+        itemIndex++;
         // Resolve variant: use provided variant_id, or fetch the default variant.
         // If no variant exists (legacy product), auto-create one so purchase never fails.
         let variantId = item.variant_id;
@@ -624,7 +639,7 @@ export async function updatePurchase(formData: FormData) {
         // Every purchase MUST create a NEW BATCH — never reuse or merge.
         let batchId: number | null = null;
         if (shouldAddStock) {
-          const batchNo = `PUR-${purchaseId || 0}-${item.product_id}-${Date.now().toString().slice(-4)}`;
+          const batchNo = `PUR-${purchaseId || 0}-${item.product_id}-${itemIndex}-${Date.now().toString().slice(-4)}`;
           const newBatch = await tx`
             INSERT INTO product_batches (
               product_id, product_variant_id, batch_no, cost_price, selling_price,
