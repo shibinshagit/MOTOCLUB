@@ -302,7 +302,7 @@ export async function createPurchase(formData: FormData) {
       return { success: true, message: "Purchase added successfully", data: purchaseResult[0] }
     })
 
-    revalidatePath("/dashboard")
+    revalidatePath("/dashboard", "layout")
     return result
   } catch (error) {
     console.error("Add purchase error:", error)
@@ -673,7 +673,7 @@ export async function updatePurchase(formData: FormData) {
       return { success: true, message: "Purchase updated successfully", data: purchaseResult[0] }
     })
 
-    revalidatePath("/dashboard")
+    revalidatePath("/dashboard", "layout")
     return result
   } catch (error) {
     console.error("Update purchase error:", error)
@@ -804,7 +804,7 @@ export async function deletePurchase(purchaseId: number, deviceId: number) {
       return { success: true, message: "Purchase deleted successfully" }
     })
 
-    revalidatePath("/dashboard")
+    revalidatePath("/dashboard", "layout")
     return result
   } catch (error) {
     console.error("Delete purchase error:", error)

@@ -10,7 +10,8 @@ import {
   resolveStaffSessionContext,
 } from "@/lib/staff-restrictions-server"
 import { parseProductLinksFromFormData, serializeProductLinks } from "@/lib/product-links"
-import { getDeviceProductStock } from "@/lib/inventory-service"
+import { getDeviceProductStock, adjustDeviceProductStock } from "@/lib/inventory-service"
+import { revalidatePath } from "next/cache"
 
 // Generate a unique barcode for a product
 async function generateProductBarcode(productId: number): Promise<string> {
@@ -1316,6 +1317,9 @@ export async function updateProduct(formData: FormData) {
   const flipkartStatusRaw = formData.get("flipkart_status")
   const meeshoStatusRaw = formData.get("meesho_status")
   const ownEcomStatusRaw = formData.get("own_ecom_status")
+  const variantsRaw = formData.get("variants") as string
+  const productVariants = variantsRaw ? JSON.parse(variantsRaw) : []
+  const isBatchManagedRaw = formData.get("is_batch_managed")
 
   if (!id || !name) {
     return { success: false, message: "ID and name are required" }
@@ -1542,6 +1546,116 @@ export async function updateProduct(formData: FormData) {
       await upsertDeviceStock(id, stockDeviceId, stock)
       // Obsolete stock logging removed because stock is entirely driven by batches/purchases now
 
+      if (productVariants.length > 0) {
+        for (const variant of productVariants) {
+          if (variant.id) {
+            await sql`
+              UPDATE product_variants SET
+                name = ${variant.variant_name || variant.name || ""},
+                sku = ${variant.sku || ""},
+                barcode = ${variant.barcode || ""},
+                cost_price = ${variant.wholesale_price ?? variant.cost_price ?? variant.costPrice ?? 0},
+                wholesale_price = ${variant.wholesale_price ?? variant.cost_price ?? variant.costPrice ?? 0},
+                price = ${variant.price ?? variant.mspPrice ?? variant.msp ?? 0},
+                msp = ${variant.price ?? variant.mspPrice ?? variant.msp ?? 0},
+                mrp = ${variant.mrp ?? 0},
+                minimum_stock = ${variant.minimum_stock ?? variant.minimumStock ?? 0},
+                shelf = ${variant.shelf || ""}
+              WHERE id = ${variant.id}
+            `
+            
+            // Adjust stock if it changed
+            try {
+              const batchStockRows = await sql`
+                SELECT COALESCE(SUM(pbds.stock), 0) as stock
+                FROM product_batch_device_stock pbds
+                JOIN product_batches pb ON pb.id = pbds.batch_id
+                WHERE pb.product_variant_id = ${variant.id} AND pbds.device_id = ${stockDeviceId}
+              `
+              const oldStock = Number(batchStockRows[0]?.stock || 0)
+              const newStock = Number(variant.stock) || 0
+              const delta = newStock - oldStock
+              if (delta !== 0) {
+                const batches = await sql`
+                  SELECT id FROM product_batches 
+                  WHERE product_id = ${id} AND product_variant_id = ${variant.id} 
+                  ORDER BY created_at ASC LIMIT 1
+                `
+                const batchId = batches.length > 0 ? batches[0].id : null
+                if (batchId) {
+                  // Adjust using inventory service
+                  await adjustDeviceProductStock(id, variant.id, batchId, stockDeviceId, delta)
+                  
+                  // Record history
+                  await sql`
+                    INSERT INTO product_stock_history (
+                      product_id, product_variant_id, batch_id, quantity, type, reference_type, notes, created_by, device_id
+                    ) VALUES (
+                      ${id}, ${variant.id}, ${batchId}, ${delta}, 'adjustment', 'manual', 'Stock adjusted from Product Edit', ${stockDeviceId}, ${stockDeviceId}
+                    )
+                  `
+                }
+              }
+            } catch (e) {
+              console.error("Failed to adjust stock during product update:", e)
+            }
+          } else {
+            // New variant added during edit
+            const insertedVariant = await sql`
+              INSERT INTO product_variants (
+                product_id, name, sku, barcode, cost_price, wholesale_price,
+                price, msp, mrp, minimum_stock, shelf, status
+              ) VALUES (
+                ${id}, ${variant.variant_name || variant.name || ""}, ${variant.sku || ""}, ${variant.barcode || ""},
+                ${variant.wholesale_price ?? variant.cost_price ?? variant.costPrice ?? 0}, ${variant.wholesale_price ?? variant.cost_price ?? variant.costPrice ?? 0}, ${variant.price ?? variant.mspPrice ?? variant.msp ?? 0},
+                ${variant.price ?? variant.mspPrice ?? variant.msp ?? 0}, ${variant.mrp ?? 0}, ${variant.minimum_stock ?? variant.minimumStock ?? 0},
+                ${variant.shelf || ""}, 'active'
+              ) RETURNING *
+            `
+            const createdVariant = insertedVariant[0]
+            
+            if (!createdVariant.barcode) {
+              const generatedBarcode = await generateProductBarcode(createdVariant.id)
+              await sql`UPDATE product_variants SET barcode = ${generatedBarcode} WHERE id = ${createdVariant.id}`
+            }
+
+            if (variant.stock && variant.stock > 0) {
+              try {
+                const initBatchNo = variant.batch_number && variant.batch_number !== "AUTO_GENERATE"
+                  ? variant.batch_number
+                  : `INIT-${id}-${createdVariant.id}-${Date.now().toString().slice(-4)}`
+                
+                const initBatch = await sql`
+                  INSERT INTO product_batches (
+                    product_id, product_variant_id, batch_no, cost_price, selling_price,
+                    quantity_purchased, remaining_quantity, status
+                  ) VALUES (
+                    ${id}, ${createdVariant.id}, ${initBatchNo}, ${createdVariant.cost_price}, ${createdVariant.price},
+                    ${variant.stock}, ${variant.stock}, 'active'
+                  ) RETURNING id
+                `
+                const initBatchId = initBatch[0].id
+
+                await sql`
+                  INSERT INTO product_batch_device_stock (batch_id, device_id, stock, updated_at)
+                  VALUES (${initBatchId}, ${stockDeviceId}, ${variant.stock}, NOW())
+                `
+
+                await sql`
+                  INSERT INTO product_stock_history (
+                    product_id, product_variant_id, batch_id, quantity, type, reference_type, notes, created_by, device_id
+                  ) VALUES (
+                    ${id}, ${createdVariant.id}, ${initBatchId}, ${variant.stock}, 'adjustment', 'manual', 'Initial stock from Product Edit', ${stockDeviceId}, ${stockDeviceId}
+                  )
+                `
+              } catch (err) {
+                console.error("Failed to create initial batch stock for new variant:", err)
+              }
+            }
+          }
+        }
+      }
+
       // Get the category name
       let categoryName = category
       if (categoryId) {
@@ -1563,6 +1677,11 @@ export async function updateProduct(formData: FormData) {
       if (removedMediaUrls.length > 0) {
         await deleteProductMediaUrls(removedMediaUrls)
       }
+
+      revalidatePath("/dashboard/products")
+      revalidatePath("/dashboard/inventory")
+      revalidatePath("/dashboard/sales")
+      revalidatePath("/dashboard/purchases")
 
       return { success: true, message: "Product updated successfully", data: updatedProduct }
     }

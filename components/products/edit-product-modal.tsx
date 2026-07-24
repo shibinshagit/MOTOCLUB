@@ -1215,7 +1215,7 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
                             value={v.variant_name || ""}
                             onChange={(e) => {
                               const newVariants = [...variants]
-                              newVariants[idx].variant_name = e.target.value
+                              newVariants[idx] = { ...newVariants[idx], variant_name: e.target.value }
                               setVariants(newVariants)
                             }}
                             placeholder="e.g. Black 256GB"
@@ -1229,7 +1229,7 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
                             value={v.sku || ""}
                             onChange={(e) => {
                               const newVariants = [...variants]
-                              newVariants[idx].sku = e.target.value
+                              newVariants[idx] = { ...newVariants[idx], sku: e.target.value }
                               setVariants(newVariants)
                             }}
                             placeholder="SKU-001"
@@ -1242,7 +1242,7 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
                             value={v.barcode || ""}
                             onChange={(e) => {
                               const newVariants = [...variants]
-                              newVariants[idx].barcode = e.target.value
+                              newVariants[idx] = { ...newVariants[idx], barcode: e.target.value }
                               setVariants(newVariants)
                             }}
                             placeholder="Barcode"
@@ -1255,7 +1255,7 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
                             value={v.shelf || ""}
                             onChange={(e) => {
                               const newVariants = [...variants]
-                              newVariants[idx].shelf = e.target.value
+                              newVariants[idx] = { ...newVariants[idx], shelf: e.target.value }
                               setVariants(newVariants)
                             }}
                             placeholder="A1-B2"
@@ -1271,7 +1271,7 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
                             value={v.wholesale_price !== null && v.wholesale_price !== undefined ? v.wholesale_price : ""}
                             onChange={(e) => {
                               const newVariants = [...variants]
-                              newVariants[idx].wholesale_price = e.target.value === "" ? null : Number(e.target.value)
+                              newVariants[idx] = { ...newVariants[idx], wholesale_price: e.target.value === "" ? null : Number(e.target.value) }
                               setVariants(newVariants)
                             }}
                             placeholder="0.00"
@@ -1289,7 +1289,7 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
                             value={v.price !== null && v.price !== undefined ? v.price : ""}
                             onChange={(e) => {
                               const newVariants = [...variants]
-                              newVariants[idx].price = e.target.value === "" ? null : Number(e.target.value)
+                              newVariants[idx] = { ...newVariants[idx], price: e.target.value === "" ? null : Number(e.target.value) }
                               setVariants(newVariants)
                             }}
                             placeholder="Selling Price"
@@ -1306,7 +1306,7 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
                             value={v.mrp !== null && v.mrp !== undefined ? v.mrp : ""}
                             onChange={(e) => {
                               const newVariants = [...variants]
-                              newVariants[idx].mrp = e.target.value === "" ? null : Number(e.target.value)
+                              newVariants[idx] = { ...newVariants[idx], mrp: e.target.value === "" ? null : Number(e.target.value) }
                               setVariants(newVariants)
                             }}
                             placeholder="MRP"
@@ -1325,13 +1325,12 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
                             value={v.stock !== undefined ? v.stock : ""}
                             onChange={(e) => {
                               const newVariants = [...variants]
-                              newVariants[idx].stock = e.target.value === "" ? 0 : Number(e.target.value)
+                              newVariants[idx] = { ...newVariants[idx], stock: e.target.value === "" ? 0 : Number(e.target.value) }
                               setVariants(newVariants)
                             }}
                             onFocus={(e) => e.target.select()}
                             placeholder="0"
                             className="h-9 border-slate-300"
-                            disabled
                           />
                         </div>
                         

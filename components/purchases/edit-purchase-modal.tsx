@@ -672,24 +672,24 @@ export default function EditPurchaseModal({
                   </div>
 
                   <div className="flex-1 overflow-y-auto">
-                    <div className="sticky top-0 z-10 grid grid-cols-12 gap-2 p-2 bg-blue-50 font-medium text-sm text-blue-800 border-b border-gray-200">
-                      <div className="col-span-4">Product</div>
-                      <div className="col-span-1 text-center">Qty</div>
-                      <div className="col-span-2 text-center">Cost</div>
-                      <div className="col-span-1 text-center">Tax %</div>
-                      <div className="col-span-2 text-center">Tax Amt</div>
-                      <div className="col-span-2 text-center">Line Total</div>
-                      <div className="col-span-1"></div>
+                    <div className="sticky top-0 z-10 flex gap-2 p-2 bg-blue-50 font-medium text-sm text-blue-800 border-b border-gray-200">
+                      <div className="flex-[3_3_0%] min-w-[150px]">Product</div>
+                      <div className="w-16 shrink-0 text-center">Qty</div>
+                      <div className="flex-[2_2_0%] min-w-[100px] text-center">Cost</div>
+                      <div className="w-16 shrink-0 text-center">Tax %</div>
+                      <div className="flex-[1.5_1.5_0%] min-w-[80px] text-center">Tax Amt</div>
+                      <div className="flex-[2_2_0%] min-w-[100px] text-center">Line Total</div>
+                      <div className="w-8 shrink-0"></div>
                     </div>
 
                     {products.map((product, index) => (
                       <div
                         key={product.id}
-                        className={`grid grid-cols-12 gap-2 p-2 items-center border-b border-gray-200 ${
+                        className={`flex gap-2 p-2 items-center border-b border-gray-200 ${
                           index % 2 === 0 ? "bg-white" : "bg-gray-50"
                         } hover:bg-blue-50 transition-colors`}
                       >
-                        <div className="col-span-4">
+                        <div className="flex-[3_3_0%] min-w-[150px]">
                           <ProductSelectSimple
                             value={product.productId}
                             onChange={(productId, productName, price, wholesalePrice) =>
@@ -701,7 +701,7 @@ export default function EditPurchaseModal({
                             allowServices={false}
                           />
                         </div>
-                        <div className="col-span-1">
+                        <div className="w-16 shrink-0">
                           <Input
                             type="number"
                             min="1"
@@ -709,10 +709,10 @@ export default function EditPurchaseModal({
                             onChange={(e) =>
                               updateProductRow(product.id, { quantity: Number.parseInt(e.target.value) || 1 })
                             }
-                            className="text-center h-9 bg-white border-gray-300 text-gray-900"
+                            className="text-center h-9 bg-white border-gray-300 text-gray-900 w-full px-1"
                           />
                         </div>
-                        <div className="col-span-2">
+                        <div className="flex-[2_2_0%] min-w-[100px]">
                           <Input
                             type="number"
                             min="0"
@@ -721,10 +721,10 @@ export default function EditPurchaseModal({
                             onChange={(e) =>
                               updateProductRow(product.id, { price: Number.parseFloat(e.target.value) || 0 })
                             }
-                            className="text-center h-9 bg-white border-gray-300 text-gray-900"
+                            className="text-center h-9 bg-white border-gray-300 text-gray-900 w-full px-2"
                           />
                         </div>
-                        <div className="col-span-1">
+                        <div className="w-16 shrink-0">
                           <Input
                             type="number"
                             min="0"
@@ -737,16 +737,16 @@ export default function EditPurchaseModal({
                                 updateProductRow(product.id, { taxPercentage: value })
                               }
                             }}
-                            className="text-center h-9 bg-white border-gray-300 text-gray-900"
+                            className="text-center h-9 bg-white border-gray-300 text-gray-900 w-full px-1"
                           />
                         </div>
-                        <div className="col-span-2 flex items-center justify-center text-sm text-gray-600">
+                        <div className="flex-[1.5_1.5_0%] min-w-[80px] flex items-center justify-center text-sm text-gray-600 truncate">
                           {localCurrency} {product.taxAmount.toFixed(2)}
                         </div>
-                        <div className="col-span-2 flex items-center justify-center font-medium text-gray-900">
+                        <div className="flex-[2_2_0%] min-w-[100px] flex items-center justify-center font-medium text-gray-900 truncate">
                           {localCurrency} {product.lineTotal.toFixed(2)}
                         </div>
-                        <div className="col-span-1 flex justify-center">
+                        <div className="w-8 shrink-0 flex justify-center">
                           <Button
                             type="button"
                             variant="ghost"

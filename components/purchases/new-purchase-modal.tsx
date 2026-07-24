@@ -184,17 +184,15 @@ export default function NewPurchaseModal({
     }
   }
 
-  // Remove a product row
-  const removeProductRow = (id: string) => {
-    if (products.length > 1) {
-      setProducts(products.filter((product) => product.id !== id))
-    }
-  }
+  // Remove product row
+  const removeProductRow = useCallback((id: string) => {
+    setProducts((prev) => prev.length > 1 ? prev.filter((product) => product.id !== id) : prev)
+  }, [])
 
   // Update product row
-  const updateProductRow = (id: string, updates: Partial<ProductRow>) => {
-    setProducts(
-      products.map((product) => {
+  const updateProductRow = useCallback((id: string, updates: Partial<ProductRow>) => {
+    setProducts((prev) =>
+      prev.map((product) => {
         if (product.id === id) {
           const updatedProduct = { ...product, ...updates }
           // Recalculate total if quantity or price changed
@@ -209,9 +207,9 @@ export default function NewPurchaseModal({
           return updatedProduct
         }
         return product
-      }),
+      })
     )
-  }
+  }, [])
 
   // Handle product selection
   const handleProductSelect = (
@@ -274,7 +272,7 @@ export default function NewPurchaseModal({
     ])
   }
 
-  const updateVariant = (rowId: string, variantId: number, updates: Partial<PurchaseVariant>) => {
+  const updateVariant = useCallback((rowId: string, variantId: number, updates: Partial<PurchaseVariant>) => {
     setProducts(current => current.map(row => {
       if (row.id !== rowId) return row
       const variants = row.variants.map(variant => {
@@ -292,7 +290,7 @@ export default function NewPurchaseModal({
       const total = variants.reduce((sum, variant) => sum + variant.quantity * variant.price, 0)
       return { ...row, variants, total }
     }))
-  }
+  }, [])
 
   // Track which row is opening the add product modal
   const handleAddNewFromRow = (rowId: string) => {
@@ -633,14 +631,14 @@ export default function NewPurchaseModal({
               </div>
 
               <div className="flex-1 overflow-y-auto">
-                <div className="sticky top-0 z-10 grid grid-cols-12 gap-2 p-2 bg-green-50 font-medium text-sm text-green-800 border-b border-gray-200">
-                  <div className="col-span-4">Product</div>
-                  <div className="col-span-1 text-center">Qty</div>
-                  <div className="col-span-2 text-center">Cost</div>
-                  <div className="col-span-1 text-center">Tax %</div>
-                  <div className="col-span-2 text-center">Tax Amt</div>
-                  <div className="col-span-2 text-center">Line Total</div>
-                  <div className="col-span-1"></div>
+                <div className="sticky top-0 z-10 flex gap-2 p-2 bg-green-50 font-medium text-sm text-green-800 border-b border-gray-200">
+                  <div className="flex-[3_3_0%] min-w-[150px]">Product</div>
+                  <div className="w-16 shrink-0 text-center">Qty</div>
+                  <div className="flex-[2_2_0%] min-w-[100px] text-center">Cost</div>
+                  <div className="w-16 shrink-0 text-center">Tax %</div>
+                  <div className="flex-[1.5_1.5_0%] min-w-[80px] text-center">Tax Amt</div>
+                  <div className="flex-[2_2_0%] min-w-[100px] text-center">Line Total</div>
+                  <div className="w-8 shrink-0"></div>
                 </div>
 
                 {products.map((product, index) => (
@@ -648,11 +646,11 @@ export default function NewPurchaseModal({
                   {product.variants.length <= 1 && (
                   <div
                     key={product.id}
-                    className={`grid grid-cols-12 gap-2 p-2 items-center border-b border-gray-200 ${
+                    className={`flex gap-2 p-2 items-center border-b border-gray-200 ${
                       index % 2 === 0 ? "bg-white" : "bg-gray-50"
                     } hover:bg-green-50 transition-colors`}
                   >
-                    <div className="col-span-4">
+                    <div className="flex-[3_3_0%] min-w-[150px]">
                       <ProductSelectSimple
                         value={product.productId}
                         onChange={(productId, productName, price, wholesalePrice, stock, productObj) =>
@@ -664,7 +662,7 @@ export default function NewPurchaseModal({
                         allowServices={false}
                       />
                     </div>
-                    <div className="col-span-1">
+                    <div className="w-16 shrink-0">
                       <Input
                         type="number"
                         min="1"
@@ -672,10 +670,10 @@ export default function NewPurchaseModal({
                         onChange={(e) =>
                           updateProductRow(product.id, { quantity: Number.parseInt(e.target.value) || 1 })
                         }
-                        className="text-center h-9 bg-white border-gray-300 text-gray-900"
+                        className="text-center h-9 bg-white border-gray-300 text-gray-900 w-full px-1"
                       />
                     </div>
-                    <div className="col-span-2">
+                    <div className="flex-[2_2_0%] min-w-[100px]">
                       <Input
                         type="number"
                         min="0"
@@ -684,10 +682,10 @@ export default function NewPurchaseModal({
                         onChange={(e) =>
                           updateProductRow(product.id, { price: Number.parseFloat(e.target.value) || 0 })
                         }
-                        className="text-center h-9 bg-white border-gray-300 text-gray-900"
+                        className="text-center h-9 bg-white border-gray-300 text-gray-900 w-full px-2"
                       />
                     </div>
-                    <div className="col-span-1">
+                    <div className="w-16 shrink-0">
                       <Input
                         type="number"
                         min="0"
@@ -700,16 +698,16 @@ export default function NewPurchaseModal({
                             updateProductRow(product.id, { taxPercentage: value })
                           }
                         }}
-                        className="text-center h-9 bg-white border-gray-300 text-gray-900"
+                        className="text-center h-9 bg-white border-gray-300 text-gray-900 w-full px-1"
                       />
                     </div>
-                    <div className="col-span-2 flex items-center justify-center text-sm text-gray-600">
+                    <div className="flex-[1.5_1.5_0%] min-w-[80px] flex items-center justify-center text-sm text-gray-600 truncate">
                       {localCurrency} {product.taxAmount.toFixed(2)}
                     </div>
-                    <div className="col-span-2 flex items-center justify-center font-medium text-gray-900">
+                    <div className="flex-[2_2_0%] min-w-[100px] flex items-center justify-center font-medium text-gray-900 truncate">
                       {localCurrency} {product.lineTotal.toFixed(2)}
                     </div>
-                    <div className="col-span-1 flex justify-center">
+                    <div className="w-8 shrink-0 flex justify-center">
                       <Button
                         type="button"
                         variant="ghost"
@@ -729,24 +727,31 @@ export default function NewPurchaseModal({
                         <ChevronDown className="h-4 w-4" />
                         Variants <span className="font-normal text-emerald-700">({product.variants.length})</span>
                       </div>
-                      <div className="grid grid-cols-12 gap-2 border-b border-gray-100 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-600">
-                        <div className="col-span-2">Variant</div><div className="col-span-1 text-center">Qty</div><div className="col-span-1 text-center">Cost</div><div className="col-span-1 text-center">Tax %</div><div className="col-span-2 text-center">Tax Amt</div><div className="col-span-2 text-center">Line Total</div><div className="col-span-1 text-center">MSP</div><div className="col-span-1 text-center">MRP</div>
+                      <div className="flex gap-2 border-b border-gray-100 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-600">
+                        <div className="flex-[3_3_0%] min-w-[120px]">Variant</div>
+                        <div className="w-16 shrink-0 text-center">Qty</div>
+                        <div className="flex-[2_2_0%] min-w-[90px] text-center">Cost</div>
+                        <div className="w-16 shrink-0 text-center">Tax %</div>
+                        <div className="flex-[1.5_1.5_0%] min-w-[70px] text-center">Tax Amt</div>
+                        <div className="flex-[2_2_0%] min-w-[90px] text-center">Line Total</div>
+                        <div className="w-16 shrink-0 text-center">MSP</div>
+                        <div className="w-16 shrink-0 text-center">MRP</div>
                       </div>
                       {product.variants.map(variant => (
-                        <div key={variant.id} className="grid grid-cols-12 gap-2 items-center border-b border-gray-100 px-3 py-2 last:border-b-0">
-                          <div className="col-span-2 min-w-0"><p className="truncate text-sm font-medium text-gray-900">{variant.name}</p><p className="truncate text-[11px] text-gray-500">Stock: {variant.stock || 0}{variant.shelf ? ` · ${variant.shelf}` : ""}{variant.barcode ? ` · ${variant.barcode}` : ""}</p></div>
-                          <Input type="number" min="0" className="col-span-1 h-8 text-center" value={variant.quantity || ""} placeholder="0" onChange={e => updateVariant(product.id, variant.id, { quantity: Math.max(0, Number.parseInt(e.target.value) || 0) })} />
-                          <Input type="number" min="0" step="0.01" className="col-span-1 h-8 text-center" value={variant.price} onChange={e => updateVariant(product.id, variant.id, { price: Number.parseFloat(e.target.value) || 0 })} />
-                          <Input type="number" min="0" max="100" step="0.01" className="col-span-1 h-8 text-center" value={variant.taxPercentage} onChange={e => {
+                        <div key={variant.id} className="flex gap-2 items-center border-b border-gray-100 px-3 py-2 last:border-b-0">
+                          <div className="flex-[3_3_0%] min-w-[120px] overflow-hidden"><p className="truncate text-sm font-medium text-gray-900">{variant.name}</p><p className="truncate text-[11px] text-gray-500">Stock: {variant.stock || 0}{variant.shelf ? ` · ${variant.shelf}` : ""}{variant.barcode ? ` · ${variant.barcode}` : ""}</p></div>
+                          <Input type="number" min="0" className="w-16 shrink-0 h-8 text-center px-1" value={variant.quantity || ""} placeholder="0" onChange={e => updateVariant(product.id, variant.id, { quantity: Math.max(0, Number.parseInt(e.target.value) || 0) })} />
+                          <Input type="number" min="0" step="0.01" className="flex-[2_2_0%] min-w-[90px] h-8 text-center px-2" value={variant.price} onChange={e => updateVariant(product.id, variant.id, { price: Number.parseFloat(e.target.value) || 0 })} />
+                          <Input type="number" min="0" max="100" step="0.01" className="w-16 shrink-0 h-8 text-center px-1" value={variant.taxPercentage} onChange={e => {
                             const value = Number.parseFloat(e.target.value) || 0
                             if (value >= 0 && value <= 100) {
                               updateVariant(product.id, variant.id, { taxPercentage: value })
                             }
                           }} />
-                          <div className="col-span-2 flex items-center justify-center text-xs text-gray-600">{localCurrency} {variant.taxAmount.toFixed(2)}</div>
-                          <div className="col-span-2 flex items-center justify-center text-xs font-medium text-gray-900">{localCurrency} {variant.lineTotal.toFixed(2)}</div>
-                          <div className="col-span-1 rounded bg-gray-50 px-1 py-2 text-center text-xs text-gray-600">{variant.msp ?? "–"}</div>
-                          <div className="col-span-1 rounded bg-gray-50 px-1 py-2 text-center text-xs text-gray-600">{variant.mrp ?? "–"}</div>
+                          <div className="flex-[1.5_1.5_0%] min-w-[70px] flex items-center justify-center text-xs text-gray-600 truncate">{localCurrency} {variant.taxAmount.toFixed(2)}</div>
+                          <div className="flex-[2_2_0%] min-w-[90px] flex items-center justify-center text-xs font-medium text-gray-900 truncate">{localCurrency} {variant.lineTotal.toFixed(2)}</div>
+                          <div className="w-16 shrink-0 rounded bg-gray-50 px-1 py-2 text-center text-xs text-gray-600 truncate">{variant.msp ?? "–"}</div>
+                          <div className="w-16 shrink-0 rounded bg-gray-50 px-1 py-2 text-center text-xs text-gray-600 truncate">{variant.mrp ?? "–"}</div>
                         </div>
                       ))}
                     </div>
