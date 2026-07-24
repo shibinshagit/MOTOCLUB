@@ -80,6 +80,9 @@ interface ProductRow {
   taxPercentage: number
   taxAmount: number
   lineTotal: number
+  quantityInput?: string
+  priceInput?: string
+  taxPercentageInput?: string
 }
 
 interface PurchaseVariantEntry {
@@ -97,6 +100,9 @@ interface PurchaseVariantEntry {
   total: number
   taxAmount: number
   lineTotal: number
+  quantityInput?: string
+  priceInput?: string
+  taxPercentageInput?: string
 }
 
 type TaxablePurchaseLine = Pick<PurchaseVariantEntry, "quantity" | "price" | "taxPercentage">
@@ -178,7 +184,8 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
   const [status, setStatus] = useState<string>("Credit")
   const [purchaseStatus, setPurchaseStatus] = useState<string>("Delivered")
   const [paymentMethod, setPaymentMethod] = useState<string>("Cash")
-  const [receivedAmount, setReceivedAmount] = useState(0)
+  const [receivedAmount, setReceivedAmount] = useState<number>(0)
+  const [discountAmount, setDiscountAmount] = useState<number>(0)
   const [products, setProducts] = useState<ProductRow[]>([
     {
       id: crypto.randomUUID(),
@@ -193,9 +200,6 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
       lineTotal: 0,
     },
   ])
-  const [subtotal, setSubtotal] = useState(0)
-  const [discountAmount, setDiscountAmount] = useState(0)
-  const [totalAmount, setTotalAmount] = useState(0)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [formAlert, setFormAlert] = useState<{ type: "success" | "error" | "warning"; message: string } | null>(null)
 
@@ -398,19 +402,22 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
     localStorage.setItem(`${purchaseDraftStorageKey}_active`, activeDraftId)
   }, [activeView, draftsHydrated, purchaseDrafts, activeDraftId, purchaseDraftStorageKey])
 
-  useEffect(() => {
-    const newSubtotal = products.reduce((sum, product) => sum + (Number(product.total) || 0), 0)
-    setSubtotal(newSubtotal)
-    const lineTaxTotal = products.reduce((sum, product) => sum + (Number(product.taxAmount) || 0), 0)
-    const finalTotal = Math.max(0, Number(newSubtotal) + lineTaxTotal - Number(discountAmount))
-    setTotalAmount(finalTotal)
+  const subtotal = useMemo(() => {
+    return products.reduce((sum, product) => sum + (Number(product.total) || 0), 0)
+  }, [products])
 
+  const totalAmount = useMemo(() => {
+    const lineTaxTotal = products.reduce((sum, product) => sum + (Number(product.taxAmount) || 0), 0)
+    return Math.max(0, Number(subtotal) + lineTaxTotal - Number(discountAmount))
+  }, [products, subtotal, discountAmount])
+
+  useEffect(() => {
     if (status === "Paid") {
-      setReceivedAmount(finalTotal)
+      setReceivedAmount(totalAmount)
     } else if (status === "Cancelled") {
       setReceivedAmount(0)
     }
-  }, [products, discountAmount, status])
+  }, [totalAmount, status])
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat("en-US", {
@@ -468,33 +475,32 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
     fetchPurchasesForMonth(purchasesViewMonth, debouncedPurchaseSearch)
   }, [activeView, deviceId, purchasesViewMonth, debouncedPurchaseSearch, fetchPurchasesForMonth])
 
-  const addProductRow = () => {
-    setProducts([...products, createEmptyProductRow()])
-  }
+  const addProductRow = useCallback(() => {
+    setProducts((current) => [...current, createEmptyProductRow()])
+  }, [])
 
-  const removeProductRow = (id: string) => {
-    if (products.length > 1) {
-      setProducts(products.filter((product) => product.id !== id))
-    }
-  }
+  const removeProductRow = useCallback((id: string) => {
+    setProducts((current) => {
+      if (current.length > 1) return current.filter((product) => product.id !== id)
+      return current
+    })
+  }, [])
 
-  const updateProductRow = (id: string, updates: Partial<ProductRow>) => {
-    setProducts(
-      products.map((product) => {
-        if (product.id === id) {
-          const updatedProduct = { ...product, ...updates }
-          Object.assign(updatedProduct, calculatePurchaseLine(updatedProduct))
-          if ((updatedProduct.variantEntries?.length || 0) > 1) {
-            updatedProduct.total = updatedProduct.variantEntries!.reduce((sum, entry) => sum + entry.total, 0)
-            updatedProduct.taxAmount = updatedProduct.variantEntries!.reduce((sum, entry) => sum + entry.taxAmount, 0)
-            updatedProduct.lineTotal = updatedProduct.total + updatedProduct.taxAmount
-          }
-          return updatedProduct
+  const updateProductRow = useCallback((id: string, updates: Partial<ProductRow>) => {
+    setProducts((current) => current.map((product) => {
+      if (product.id === id) {
+        const updatedProduct = { ...product, ...updates }
+        Object.assign(updatedProduct, calculatePurchaseLine(updatedProduct))
+        if ((updatedProduct.variantEntries?.length || 0) > 1) {
+          updatedProduct.total = updatedProduct.variantEntries!.reduce((sum, entry) => sum + entry.total, 0)
+          updatedProduct.taxAmount = updatedProduct.variantEntries!.reduce((sum, entry) => sum + entry.taxAmount, 0)
+          updatedProduct.lineTotal = updatedProduct.total + updatedProduct.taxAmount
         }
-        return product
-      }),
-    )
-  }
+        return updatedProduct
+      }
+      return product
+    }))
+  }, [])
 
   const updateVariantEntry = (rowId: string, variantId: number, updates: Partial<PurchaseVariantEntry>) => {
     setProducts(current => current.map(row => {
@@ -1114,13 +1120,17 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
               <p className="truncate text-[11px] text-gray-500">Stock: {variant.stock || 0}{variant.sku ? ` · SKU: ${variant.sku}` : ""}{variant.barcode ? ` · ${variant.barcode}` : ""}{variant.shelf ? ` · Shelf: ${variant.shelf}` : ""}</p>
             </div>
             <div className="min-w-0">
-              <Input type="number" min="0" className="h-8 border-slate-300 w-full" value={variant.quantity || ""} placeholder="0" onChange={event => updateVariantEntry(product.id, variant.id, { quantity: Math.max(0, Number.parseInt(event.target.value, 10) || 0) })} />
+              <Input type="number" min="0" className="h-8 border-slate-300 w-full" value={variant.quantityInput !== undefined ? variant.quantityInput : (variant.quantity || "")} placeholder="0" onChange={event => updateVariantEntry(product.id, variant.id, { quantityInput: event.target.value, quantity: Math.max(0, Number.parseInt(event.target.value, 10) || 0) })} />
             </div>
             <div className="min-w-0">
-              <Input type="number" min="0" step="0.01" className="h-8 border-slate-300 w-full" value={variant.price || 0} placeholder="0.00" onChange={event => updateVariantEntry(product.id, variant.id, { price: Number.parseFloat(event.target.value) || 0 })} />
+              <Input type="number" min="0" step="0.01" className="h-8 border-slate-300 w-full" value={variant.priceInput !== undefined ? variant.priceInput : (variant.price || 0)} placeholder="0.00" onChange={event => updateVariantEntry(product.id, variant.id, { priceInput: event.target.value, price: Number.parseFloat(event.target.value) || 0 })} />
             </div>
             <div className="min-w-0">
-              <Input type="number" min="0" max="100" step="0.01" className="h-8 border-slate-300 w-full" value={variant.taxPercentage || 0} onChange={event => updateVariantEntry(product.id, variant.id, { taxPercentage: Math.max(0, Math.min(100, Number.parseFloat(event.target.value) || 0)) })} />
+              <Input type="number" min="0" max="100" step="0.01" className="h-8 border-slate-300 w-full" value={variant.taxPercentageInput !== undefined ? variant.taxPercentageInput : (variant.taxPercentage || 0)} onChange={event => {
+                const val = event.target.value
+                const numVal = Number.parseFloat(val) || 0
+                updateVariantEntry(product.id, variant.id, { taxPercentageInput: val, taxPercentage: Math.max(0, Math.min(100, numVal)) })
+              }} />
             </div>
             <div className="min-w-0 text-xs text-gray-700 truncate">{currency} {amounts.taxAmount.toFixed(2)}</div>
             <div className="min-w-0 font-medium text-xs text-gray-900 truncate">{currency} {amounts.lineTotal.toFixed(2)}</div>
@@ -1185,8 +1195,8 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
           <Input
             type="number"
             min="1"
-            value={product.quantity}
-            onChange={(e) => updateProductRow(product.id, { quantity: Number.parseInt(e.target.value, 10) || 1 })}
+            value={product.quantityInput !== undefined ? product.quantityInput : product.quantity}
+            onChange={(e) => updateProductRow(product.id, { quantityInput: e.target.value, quantity: Number.parseInt(e.target.value, 10) || 1 })}
             className="h-9 border-slate-300 w-full"
           />
         )}
@@ -1197,8 +1207,8 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
             type="number"
             min="0"
             step="0.01"
-            value={product.price}
-            onChange={(e) => updateProductRow(product.id, { price: Number.parseFloat(e.target.value) || 0 })}
+            value={product.priceInput !== undefined ? product.priceInput : product.price}
+            onChange={(e) => updateProductRow(product.id, { priceInput: e.target.value, price: Number.parseFloat(e.target.value) || 0 })}
             placeholder="0.00"
             className="h-9 border-slate-300 w-full"
           />
@@ -1211,11 +1221,12 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
             min="0"
             max="100"
             step="0.01"
-            value={product.taxPercentage}
+            value={product.taxPercentageInput !== undefined ? product.taxPercentageInput : product.taxPercentage}
             onChange={(e) => {
-              const value = Number.parseFloat(e.target.value) || 0
+              const val = e.target.value
+              const value = Number.parseFloat(val) || 0
               if (value >= 0 && value <= 100) {
-                updateProductRow(product.id, { taxPercentage: value })
+                updateProductRow(product.id, { taxPercentageInput: val, taxPercentage: value })
               }
             }}
             className="h-9 border-slate-300 w-full"
@@ -1294,9 +1305,9 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
           <Input
             type="number"
             min="1"
-            value={product.quantity}
+            value={product.quantityInput !== undefined ? product.quantityInput : product.quantity}
             onChange={(e) =>
-              updateProductRow(product.id, { quantity: Number.parseInt(e.target.value, 10) || 1 })
+              updateProductRow(product.id, { quantityInput: e.target.value, quantity: Number.parseInt(e.target.value, 10) || 1 })
             }
             className="text-center h-8 text-sm"
           />
@@ -1307,9 +1318,9 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
             type="number"
             min="0"
             step="0.01"
-            value={product.price}
+            value={product.priceInput !== undefined ? product.priceInput : product.price}
             onChange={(e) =>
-              updateProductRow(product.id, { price: Number.parseFloat(e.target.value) || 0 })
+              updateProductRow(product.id, { priceInput: e.target.value, price: Number.parseFloat(e.target.value) || 0 })
             }
             className="text-center h-8 text-sm"
           />
@@ -1321,8 +1332,11 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
             min="0"
             max="100"
             step="0.01"
-            value={product.taxPercentage}
-            onChange={(e) => updateProductRow(product.id, { taxPercentage: Math.max(0, Math.min(100, Number.parseFloat(e.target.value) || 0)) })}
+            value={product.taxPercentageInput !== undefined ? product.taxPercentageInput : product.taxPercentage}
+            onChange={(e) => {
+              const val = e.target.value
+              updateProductRow(product.id, { taxPercentageInput: val, taxPercentage: Math.max(0, Math.min(100, Number.parseFloat(val) || 0)) })
+            }}
             className="text-center h-8 text-sm"
           />
         </div>
