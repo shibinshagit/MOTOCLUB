@@ -34,10 +34,13 @@ interface ProductRow {
   productId: number | null
   productName: string
   quantity: number
+  quantityInput?: string
   price: number
+  priceInput?: string
   total: number
   wholesalePrice?: number
   taxPercentage: number
+  taxPercentageInput?: string
   taxAmount: number
   lineTotal: number
   variants: PurchaseVariant[]
@@ -47,8 +50,11 @@ interface PurchaseVariant {
   id: number
   name: string
   quantity: number
+  quantityInput?: string
   price: number
+  priceInput?: string
   taxPercentage: number
+  taxPercentageInput?: string
   taxAmount: number
   lineTotal: number
   msp?: number | null
@@ -76,7 +82,7 @@ export default function NewPurchaseModal({
   const [receivedAmount, setReceivedAmount] = useState<number>(0)
   const [products, setProducts] = useState<ProductRow[]>([
     {
-      id: crypto.randomUUID(),
+      id: "default-1",
       productId: null,
       productName: "",
       quantity: 1,
@@ -89,13 +95,16 @@ export default function NewPurchaseModal({
       variants: [],
     },
   ])
-  const [subtotal, setSubtotal] = useState(0)
   
-  const [taxAmount, setTaxAmount] = useState(0)
   const [discountAmount, setDiscountAmount] = useState(0)
-  const [totalAmount, setTotalAmount] = useState(0)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [formAlert, setFormAlert] = useState<{ type: "success" | "error" | "warning"; message: string } | null>(null)
+
+  // Calculate totals synchronously during render to avoid double-renders and blinking inputs
+  const subtotal = useMemo(() => products.reduce((sum, product) => sum + (product.quantity * product.price), 0), [products])
+  const taxAmount = useMemo(() => products.reduce((sum, product) => sum + product.taxAmount, 0), [products])
+  const totalAmount = useMemo(() => Number(subtotal) + Number(taxAmount) - Number(discountAmount), [subtotal, taxAmount, discountAmount])
+
+  const [formAlert, setFormAlert] = useState<{ type: "success" | "error"; message: string } | null>(null)
   const [activeProductRowId, setActiveProductRowId] = useState<string | null>(null)
 
   // Modals for adding new product
@@ -144,35 +153,22 @@ export default function NewPurchaseModal({
       variants: [],
         },
       ])
-      setSubtotal(0)
       
       
       setDiscountAmount(0)
-      setTotalAmount(0)
       setFormAlert(null)
       setActiveProductRowId(null)
     }
   }, [isOpen])
 
-  // Calculate totals whenever products or discount changes
+  // Only auto-adjust received amount based on status when totals change
   useEffect(() => {
-    const newSubtotal = products.reduce((sum, product) => sum + (product.quantity * product.price), 0)
-    setSubtotal(newSubtotal)
-
-    const newTotalTax = products.reduce((sum, product) => sum + product.taxAmount, 0)
-    setTaxAmount(newTotalTax)
-
-    // Ensure we're working with numbers
-    const newTotalAmount = Number(newSubtotal) + Number(newTotalTax) - Number(discountAmount)
-    setTotalAmount(newTotalAmount)
-
-    // Auto-adjust received amount based on status
     if (status === "Paid") {
-      setReceivedAmount(newTotalAmount)
+      setReceivedAmount(totalAmount)
     } else if (status === "Cancelled") {
       setReceivedAmount(0)
     }
-  }, [products, discountAmount, status])
+  }, [totalAmount, status])
 
   // Handle status change
   const handleStatusChange = (newStatus: string) => {
@@ -245,8 +241,10 @@ export default function NewPurchaseModal({
       productId,
       productName,
       price: priceToUse, // Use wholesale price for purchases
+      priceInput: undefined,
       wholesalePrice,
       taxPercentage: defaultTaxPercentage,
+      taxPercentageInput: undefined,
       total: variants.length > 1 ? 0 : (products.find((p) => p.id === id)?.quantity || 1) * priceToUse,
       variants,
     })
@@ -631,14 +629,14 @@ export default function NewPurchaseModal({
               </div>
 
               <div className="flex-1 overflow-y-auto">
-                <div className="sticky top-0 z-10 flex gap-2 p-2 bg-green-50 font-medium text-sm text-green-800 border-b border-gray-200">
-                  <div className="flex-[3_3_0%] min-w-[150px]">Product</div>
-                  <div className="w-16 shrink-0 text-center">Qty</div>
-                  <div className="flex-[2_2_0%] min-w-[100px] text-center">Cost</div>
-                  <div className="w-16 shrink-0 text-center">Tax %</div>
-                  <div className="flex-[1.5_1.5_0%] min-w-[80px] text-center">Tax Amt</div>
-                  <div className="flex-[2_2_0%] min-w-[100px] text-center">Line Total</div>
-                  <div className="w-8 shrink-0"></div>
+                <div className="sticky top-0 z-10 grid grid-cols-[38fr_9fr_16fr_9fr_11fr_12fr_5fr] gap-2 p-2 bg-green-50 font-medium text-sm text-green-800 border-b border-gray-200">
+                  <div className="min-w-0">Product</div>
+                  <div className="min-w-0">Qty</div>
+                  <div className="min-w-0">Cost</div>
+                  <div className="min-w-0">Tax %</div>
+                  <div className="min-w-0">Tax Amt</div>
+                  <div className="min-w-0">Line Total</div>
+                  <div className="min-w-0"></div>
                 </div>
 
                 {products.map((product, index) => (
@@ -646,11 +644,11 @@ export default function NewPurchaseModal({
                   {product.variants.length <= 1 && (
                   <div
                     key={product.id}
-                    className={`flex gap-2 p-2 items-center border-b border-gray-200 ${
+                    className={`grid grid-cols-[38fr_9fr_16fr_9fr_11fr_12fr_5fr] gap-2 p-2 items-center border-b border-gray-200 ${
                       index % 2 === 0 ? "bg-white" : "bg-gray-50"
                     } hover:bg-green-50 transition-colors`}
                   >
-                    <div className="flex-[3_3_0%] min-w-[150px]">
+                    <div className="min-w-0">
                       <ProductSelectSimple
                         value={product.productId}
                         onChange={(productId, productName, price, wholesalePrice, stock, productObj) =>
@@ -662,52 +660,54 @@ export default function NewPurchaseModal({
                         allowServices={false}
                       />
                     </div>
-                    <div className="w-16 shrink-0">
+                    <div className="min-w-0">
                       <Input
                         type="number"
                         min="1"
-                        value={product.quantity}
+                        value={product.quantityInput !== undefined ? product.quantityInput : product.quantity}
                         onChange={(e) =>
-                          updateProductRow(product.id, { quantity: Number.parseInt(e.target.value) || 1 })
+                          updateProductRow(product.id, { quantityInput: e.target.value, quantity: Number.parseInt(e.target.value) || 1 })
                         }
-                        className="text-center h-9 bg-white border-gray-300 text-gray-900 w-full px-1"
+                        className="h-9 border-slate-300 w-full"
                       />
                     </div>
-                    <div className="flex-[2_2_0%] min-w-[100px]">
+                    <div className="min-w-0">
                       <Input
                         type="number"
                         min="0"
                         step="0.01"
-                        value={product.price}
+                        value={product.priceInput !== undefined ? product.priceInput : product.price}
                         onChange={(e) =>
-                          updateProductRow(product.id, { price: Number.parseFloat(e.target.value) || 0 })
+                          updateProductRow(product.id, { priceInput: e.target.value, price: Number.parseFloat(e.target.value) || 0 })
                         }
-                        className="text-center h-9 bg-white border-gray-300 text-gray-900 w-full px-2"
+                        placeholder="0.00"
+                        className="h-9 border-slate-300 w-full"
                       />
                     </div>
-                    <div className="w-16 shrink-0">
+                    <div className="min-w-0">
                       <Input
                         type="number"
                         min="0"
                         max="100"
                         step="0.01"
-                        value={product.taxPercentage}
+                        value={product.taxPercentageInput !== undefined ? product.taxPercentageInput : product.taxPercentage}
                         onChange={(e) => {
-                          const value = Number.parseFloat(e.target.value) || 0
-                          if (value >= 0 && value <= 100) {
-                            updateProductRow(product.id, { taxPercentage: value })
+                          const val = e.target.value
+                          const numValue = Number.parseFloat(val) || 0
+                          if (numValue >= 0 && numValue <= 100) {
+                            updateProductRow(product.id, { taxPercentageInput: val, taxPercentage: numValue })
                           }
                         }}
-                        className="text-center h-9 bg-white border-gray-300 text-gray-900 w-full px-1"
+                        className="h-9 border-slate-300 w-full"
                       />
                     </div>
-                    <div className="flex-[1.5_1.5_0%] min-w-[80px] flex items-center justify-center text-sm text-gray-600 truncate">
+                    <div className="min-w-0 text-sm text-gray-600 truncate">
                       {localCurrency} {product.taxAmount.toFixed(2)}
                     </div>
-                    <div className="flex-[2_2_0%] min-w-[100px] flex items-center justify-center font-medium text-gray-900 truncate">
+                    <div className="min-w-0 font-medium text-gray-900 truncate">
                       {localCurrency} {product.lineTotal.toFixed(2)}
                     </div>
-                    <div className="w-8 shrink-0 flex justify-center">
+                    <div className="min-w-0 flex justify-center">
                       <Button
                         type="button"
                         variant="ghost"
@@ -727,31 +727,38 @@ export default function NewPurchaseModal({
                         <ChevronDown className="h-4 w-4" />
                         Variants <span className="font-normal text-emerald-700">({product.variants.length})</span>
                       </div>
-                      <div className="flex gap-2 border-b border-gray-100 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-600">
-                        <div className="flex-[3_3_0%] min-w-[120px]">Variant</div>
-                        <div className="w-16 shrink-0 text-center">Qty</div>
-                        <div className="flex-[2_2_0%] min-w-[90px] text-center">Cost</div>
-                        <div className="w-16 shrink-0 text-center">Tax %</div>
-                        <div className="flex-[1.5_1.5_0%] min-w-[70px] text-center">Tax Amt</div>
-                        <div className="flex-[2_2_0%] min-w-[90px] text-center">Line Total</div>
-                        <div className="w-16 shrink-0 text-center">MSP</div>
-                        <div className="w-16 shrink-0 text-center">MRP</div>
+                      <div className="grid grid-cols-[28fr_8fr_14fr_8fr_10fr_12fr_10fr_10fr] gap-2 border-b border-gray-100 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-600">
+                        <div className="min-w-0">Variant</div>
+                        <div className="min-w-0">Qty</div>
+                        <div className="min-w-0">Cost</div>
+                        <div className="min-w-0">Tax %</div>
+                        <div className="min-w-0">Tax Amt</div>
+                        <div className="min-w-0">Line Total</div>
+                        <div className="min-w-0">MSP</div>
+                        <div className="min-w-0">MRP</div>
                       </div>
                       {product.variants.map(variant => (
-                        <div key={variant.id} className="flex gap-2 items-center border-b border-gray-100 px-3 py-2 last:border-b-0">
-                          <div className="flex-[3_3_0%] min-w-[120px] overflow-hidden"><p className="truncate text-sm font-medium text-gray-900">{variant.name}</p><p className="truncate text-[11px] text-gray-500">Stock: {variant.stock || 0}{variant.shelf ? ` · ${variant.shelf}` : ""}{variant.barcode ? ` · ${variant.barcode}` : ""}</p></div>
-                          <Input type="number" min="0" className="w-16 shrink-0 h-8 text-center px-1" value={variant.quantity || ""} placeholder="0" onChange={e => updateVariant(product.id, variant.id, { quantity: Math.max(0, Number.parseInt(e.target.value) || 0) })} />
-                          <Input type="number" min="0" step="0.01" className="flex-[2_2_0%] min-w-[90px] h-8 text-center px-2" value={variant.price} onChange={e => updateVariant(product.id, variant.id, { price: Number.parseFloat(e.target.value) || 0 })} />
-                          <Input type="number" min="0" max="100" step="0.01" className="w-16 shrink-0 h-8 text-center px-1" value={variant.taxPercentage} onChange={e => {
-                            const value = Number.parseFloat(e.target.value) || 0
-                            if (value >= 0 && value <= 100) {
-                              updateVariant(product.id, variant.id, { taxPercentage: value })
-                            }
-                          }} />
-                          <div className="flex-[1.5_1.5_0%] min-w-[70px] flex items-center justify-center text-xs text-gray-600 truncate">{localCurrency} {variant.taxAmount.toFixed(2)}</div>
-                          <div className="flex-[2_2_0%] min-w-[90px] flex items-center justify-center text-xs font-medium text-gray-900 truncate">{localCurrency} {variant.lineTotal.toFixed(2)}</div>
-                          <div className="w-16 shrink-0 rounded bg-gray-50 px-1 py-2 text-center text-xs text-gray-600 truncate">{variant.msp ?? "–"}</div>
-                          <div className="w-16 shrink-0 rounded bg-gray-50 px-1 py-2 text-center text-xs text-gray-600 truncate">{variant.mrp ?? "–"}</div>
+                        <div key={variant.id} className="grid grid-cols-[28fr_8fr_14fr_8fr_10fr_12fr_10fr_10fr] gap-2 items-center border-b border-gray-100 px-3 py-2 last:border-b-0">
+                          <div className="min-w-0"><p className="truncate text-sm font-medium text-gray-900">{variant.name}</p><p className="truncate text-[11px] text-gray-500">Stock: {variant.stock || 0}{variant.shelf ? ` · ${variant.shelf}` : ""}{variant.barcode ? ` · ${variant.barcode}` : ""}</p></div>
+                          <div className="min-w-0">
+                            <Input type="number" min="0" className="h-8 border-slate-300 w-full" value={variant.quantityInput !== undefined ? variant.quantityInput : (variant.quantity || "")} placeholder="0" onChange={e => updateVariant(product.id, variant.id, { quantityInput: e.target.value, quantity: Math.max(0, Number.parseInt(e.target.value) || 0) })} />
+                          </div>
+                          <div className="min-w-0">
+                            <Input type="number" min="0" step="0.01" className="h-8 border-slate-300 w-full" value={variant.priceInput !== undefined ? variant.priceInput : variant.price} placeholder="0.00" onChange={e => updateVariant(product.id, variant.id, { priceInput: e.target.value, price: Number.parseFloat(e.target.value) || 0 })} />
+                          </div>
+                          <div className="min-w-0">
+                            <Input type="number" min="0" max="100" step="0.01" className="h-8 border-slate-300 w-full" value={variant.taxPercentageInput !== undefined ? variant.taxPercentageInput : variant.taxPercentage} onChange={e => {
+                              const val = e.target.value
+                              const numValue = Number.parseFloat(val) || 0
+                              if (numValue >= 0 && numValue <= 100) {
+                                updateVariant(product.id, variant.id, { taxPercentageInput: val, taxPercentage: numValue })
+                              }
+                            }} />
+                          </div>
+                          <div className="min-w-0 text-xs text-gray-600 truncate">{localCurrency} {variant.taxAmount.toFixed(2)}</div>
+                          <div className="min-w-0 text-xs font-medium text-gray-900 truncate">{localCurrency} {variant.lineTotal.toFixed(2)}</div>
+                          <div className="min-w-0 rounded bg-gray-50 px-1 py-2 text-xs text-gray-600 truncate">{variant.msp ?? "–"}</div>
+                          <div className="min-w-0 rounded bg-gray-50 px-1 py-2 text-xs text-gray-600 truncate">{variant.mrp ?? "–"}</div>
                         </div>
                       ))}
                     </div>

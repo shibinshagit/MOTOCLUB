@@ -35,11 +35,14 @@ interface ProductRow {
   productId: number | null
   productName: string
   quantity: number
+  quantityInput?: string
   price: number
+  priceInput?: string
   total: number
   originalItemId?: number
   wholesalePrice?: number
   taxPercentage: number
+  taxPercentageInput?: string
   taxAmount: number
   lineTotal: number
 }
@@ -71,36 +74,18 @@ export default function EditPurchaseModal({
   const [purchaseStatus, setPurchaseStatus] = useState<string>("Delivered")
   const [paymentMethod, setPaymentMethod] = useState<string>("Cash")
   const [receivedAmount, setReceivedAmount] = useState<number>(0)
-  const [products, setProducts] = useState<ProductRow[]>([
-    {
-      id: crypto.randomUUID(),
-      productId: null,
-      productName: "",
-      quantity: 1,
-      price: 0,
-      total: 0,
-      wholesalePrice: 0,
-      taxPercentage: 0,
-      taxAmount: 0,
-      lineTotal: 0,
-    },
-  ])
+  const [products, setProducts] = useState<ProductRow[]>([])
   const [discountAmount, setDiscountAmount] = useState(0)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [formAlert, setFormAlert] = useState<{ type: "success" | "error" | "warning"; message: string } | null>(null)
+  
+  // Calculate totals synchronously during render to avoid double-renders and blinking inputs
+  const subtotal = useMemo(() => products.reduce((sum, product) => sum + (product.quantity * product.price), 0), [products])
+  const taxAmount = useMemo(() => products.reduce((sum, product) => sum + product.taxAmount, 0), [products])
+  const totalAmount = useMemo(() => Number(subtotal) + Number(taxAmount) - Number(discountAmount), [subtotal, taxAmount, discountAmount])
+
+  const [formAlert, setFormAlert] = useState<{ type: "success" | "error"; message: string } | null>(null)
   const [activeProductRowId, setActiveProductRowId] = useState<string | null>(null)
   const [isNewProductModalOpen, setIsNewProductModalOpen] = useState(false)
-
-  // Memoized calculations to prevent unnecessary recalculations
-  const calculations = useMemo(() => {
-    const subtotal = products.reduce((sum, product) => sum + product.total, 0)
-    const taxAmount = products.reduce((sum, product) => sum + product.taxAmount, 0)
-    const totalAmount = Number(subtotal) + Number(taxAmount) - Number(discountAmount)
-
-    return { subtotal, taxAmount, totalAmount }
-  }, [products, discountAmount])
-
-  const { subtotal, taxAmount, totalAmount } = calculations
 
   // Reset form state when modal closes or purchaseId changes
   const resetForm = useCallback(() => {
@@ -110,20 +95,7 @@ export default function EditPurchaseModal({
     setPurchaseStatus("Delivered")
     setPaymentMethod("Cash")
     setReceivedAmount(0)
-    setProducts([
-      {
-        id: crypto.randomUUID(),
-        productId: null,
-        productName: "",
-        quantity: 1,
-        price: 0,
-        total: 0,
-        wholesalePrice: 0,
-        taxPercentage: 0,
-        taxAmount: 0,
-        lineTotal: 0,
-      },
-    ])
+    setProducts([])
     setDiscountAmount(0)
     setFormAlert(null)
     setActiveProductRowId(null)
@@ -142,21 +114,17 @@ export default function EditPurchaseModal({
     setError(null)
 
     try {
-      // Fetch currency and purchase details in parallel
       const [currencyResult, purchaseResult] = await Promise.allSettled([
         getDeviceCurrency(userId),
         getPurchaseDetails(purchaseId)
       ])
 
-      // Handle currency result
       if (currencyResult.status === 'fulfilled') {
         setLocalCurrency(currencyResult.value)
       } else {
-        console.error("Error fetching currency:", currencyResult.reason)
-        setLocalCurrency("QAR") // Fallback
+        setLocalCurrency("QAR")
       }
 
-      // Handle purchase result
       if (purchaseResult.status === 'rejected') {
         throw purchaseResult.reason
       }
@@ -168,11 +136,10 @@ export default function EditPurchaseModal({
 
       const { purchase, items } = result.data!
 
-      // Set purchase data
       setDate(new Date(purchase.purchase_date))
       setSupplier(purchase.supplier || "")
+      setDiscountAmount(Number(purchase.discount_amount) || 0)
 
-      // Map old status values to new ones
       const statusMap: Record<string, string> = {
         "Pending": "Credit",
         "Received": "Paid",
@@ -184,7 +151,6 @@ export default function EditPurchaseModal({
       setPaymentMethod(purchase.payment_method || "Cash")
       setReceivedAmount(Number(purchase.received_amount) || 0)
 
-      // Set product rows with optimized mapping
       const productRows = items.map((item: any) => ({
         id: crypto.randomUUID(),
         productId: item.product_id,
@@ -199,24 +165,7 @@ export default function EditPurchaseModal({
         lineTotal: item.line_total || (item.quantity * item.price),
       }))
 
-      setProducts(
-        productRows.length > 0
-          ? productRows
-          : [
-              {
-                id: crypto.randomUUID(),
-                productId: null,
-                productName: "",
-                quantity: 1,
-                price: 0,
-                total: 0,
-                wholesalePrice: 0,
-                taxPercentage: 0,
-                taxAmount: 0,
-                lineTotal: 0,
-              },
-            ]
-      )
+      setProducts(productRows)
 
     } catch (error) {
       console.error("Error fetching purchase details:", error)
@@ -229,14 +178,12 @@ export default function EditPurchaseModal({
     }
   }, [purchaseId, isOpen, userId, toast])
 
-  // Fetch purchase details when modal opens or purchaseId changes
   useEffect(() => {
     if (isOpen && purchaseId) {
       fetchPurchaseDetails()
     }
   }, [isOpen, purchaseId, fetchPurchaseDetails])
 
-  // Reset form when modal closes
   useEffect(() => {
     if (!isOpen) {
       resetForm()
@@ -247,7 +194,6 @@ export default function EditPurchaseModal({
     }
   }, [isOpen, resetForm])
 
-  // Auto-adjust received amount based on status with debouncing
   useEffect(() => {
     if (status === "Paid") {
       setReceivedAmount(totalAmount)
@@ -256,13 +202,10 @@ export default function EditPurchaseModal({
     }
   }, [status, totalAmount])
 
-  // Optimized status change handler
   const handleStatusChange = useCallback((newStatus: string) => {
     setStatus(newStatus)
-    // Received amount will be auto-adjusted by the useEffect above
   }, [])
 
-  // Optimized product row operations
   const addProductRow = useCallback(() => {
     setProducts(prev => [
       ...prev,
@@ -293,7 +236,6 @@ export default function EditPurchaseModal({
           if (updates.quantity !== undefined || updates.price !== undefined) {
             updatedProduct.total = updatedProduct.quantity * updatedProduct.price
           }
-          // Recalculate tax amount and line total if tax percentage, quantity, or price changed
           if (updates.taxPercentage !== undefined || updates.quantity !== undefined || updates.price !== undefined) {
             updatedProduct.taxAmount = updatedProduct.quantity * updatedProduct.price * (updatedProduct.taxPercentage / 100)
             updatedProduct.lineTotal = updatedProduct.total + updatedProduct.taxAmount
@@ -305,7 +247,6 @@ export default function EditPurchaseModal({
     )
   }, [])
 
-  // Optimized product selection handler
   const handleProductSelect = useCallback((
     id: string,
     productId: number,
@@ -329,7 +270,6 @@ export default function EditPurchaseModal({
     })
   }, [products, updateProductRow])
 
-  // Modal handlers
   const handleAddNewFromRow = useCallback((rowId: string) => {
     setActiveProductRowId(rowId)
     setIsNewProductModalOpen(true)
@@ -672,28 +612,28 @@ export default function EditPurchaseModal({
                   </div>
 
                   <div className="flex-1 overflow-y-auto">
-                    <div className="sticky top-0 z-10 flex gap-2 p-2 bg-blue-50 font-medium text-sm text-blue-800 border-b border-gray-200">
-                      <div className="flex-[3_3_0%] min-w-[150px]">Product</div>
-                      <div className="w-16 shrink-0 text-center">Qty</div>
-                      <div className="flex-[2_2_0%] min-w-[100px] text-center">Cost</div>
-                      <div className="w-16 shrink-0 text-center">Tax %</div>
-                      <div className="flex-[1.5_1.5_0%] min-w-[80px] text-center">Tax Amt</div>
-                      <div className="flex-[2_2_0%] min-w-[100px] text-center">Line Total</div>
-                      <div className="w-8 shrink-0"></div>
+                    <div className="sticky top-0 z-10 grid grid-cols-[38fr_9fr_16fr_9fr_11fr_12fr_5fr] gap-2 p-2 bg-blue-50 font-medium text-sm text-blue-800 border-b border-gray-200">
+                      <div className="min-w-0">Product</div>
+                      <div className="min-w-0">Qty</div>
+                      <div className="min-w-0">Cost</div>
+                      <div className="min-w-0">Tax %</div>
+                      <div className="min-w-0">Tax Amt</div>
+                      <div className="min-w-0">Line Total</div>
+                      <div className="min-w-0"></div>
                     </div>
 
                     {products.map((product, index) => (
                       <div
                         key={product.id}
-                        className={`flex gap-2 p-2 items-center border-b border-gray-200 ${
+                        className={`grid grid-cols-[38fr_9fr_16fr_9fr_11fr_12fr_5fr] gap-2 p-2 items-center border-b border-gray-200 ${
                           index % 2 === 0 ? "bg-white" : "bg-gray-50"
                         } hover:bg-blue-50 transition-colors`}
                       >
-                        <div className="flex-[3_3_0%] min-w-[150px]">
+                        <div className="min-w-0">
                           <ProductSelectSimple
                             value={product.productId}
-                            onChange={(productId, productName, price, wholesalePrice) =>
-                              handleProductSelect(product.id, productId, productName, price, wholesalePrice)
+                            onChange={(productId, productName, price, wholesalePrice, stock, productObj) =>
+                              handleProductSelect(product.id, productId, productName, price, wholesalePrice, stock, productObj)
                             }
                             onAddNew={() => handleAddNewFromRow(product.id)}
                             userId={userId}
@@ -701,49 +641,51 @@ export default function EditPurchaseModal({
                             allowServices={false}
                           />
                         </div>
-                        <div className="w-16 shrink-0">
+                        <div className="min-w-0">
                           <Input
                             type="number"
                             min="1"
-                            value={product.quantity}
+                            value={product.quantityInput !== undefined ? product.quantityInput : product.quantity}
                             onChange={(e) =>
-                              updateProductRow(product.id, { quantity: Number.parseInt(e.target.value) || 1 })
+                              updateProductRow(product.id, { quantityInput: e.target.value, quantity: Number.parseInt(e.target.value) || 1 })
                             }
-                            className="text-center h-9 bg-white border-gray-300 text-gray-900 w-full px-1"
+                            className="h-9 border-slate-300 w-full"
                           />
                         </div>
-                        <div className="flex-[2_2_0%] min-w-[100px]">
+                        <div className="min-w-0">
                           <Input
                             type="number"
                             min="0"
                             step="0.01"
-                            value={product.price}
+                            value={product.priceInput !== undefined ? product.priceInput : product.price}
                             onChange={(e) =>
-                              updateProductRow(product.id, { price: Number.parseFloat(e.target.value) || 0 })
+                              updateProductRow(product.id, { priceInput: e.target.value, price: Number.parseFloat(e.target.value) || 0 })
                             }
-                            className="text-center h-9 bg-white border-gray-300 text-gray-900 w-full px-2"
+                            placeholder="0.00"
+                            className="h-9 border-slate-300 w-full"
                           />
                         </div>
-                        <div className="w-16 shrink-0">
+                        <div className="min-w-0">
                           <Input
                             type="number"
                             min="0"
                             max="100"
                             step="0.01"
-                            value={product.taxPercentage}
+                            value={product.taxPercentageInput !== undefined ? product.taxPercentageInput : product.taxPercentage}
                             onChange={(e) => {
-                              const value = Number.parseFloat(e.target.value) || 0
-                              if (value >= 0 && value <= 100) {
-                                updateProductRow(product.id, { taxPercentage: value })
+                              const val = e.target.value
+                              const numValue = Number.parseFloat(val) || 0
+                              if (numValue >= 0 && numValue <= 100) {
+                                updateProductRow(product.id, { taxPercentageInput: val, taxPercentage: numValue })
                               }
                             }}
-                            className="text-center h-9 bg-white border-gray-300 text-gray-900 w-full px-1"
+                            className="h-9 border-slate-300 w-full"
                           />
                         </div>
-                        <div className="flex-[1.5_1.5_0%] min-w-[80px] flex items-center justify-center text-sm text-gray-600 truncate">
+                        <div className="min-w-0 text-sm text-gray-600 truncate">
                           {localCurrency} {product.taxAmount.toFixed(2)}
                         </div>
-                        <div className="flex-[2_2_0%] min-w-[100px] flex items-center justify-center font-medium text-gray-900 truncate">
+                        <div className="min-w-0 font-medium text-gray-900 truncate">
                           {localCurrency} {product.lineTotal.toFixed(2)}
                         </div>
                         <div className="w-8 shrink-0 flex justify-center">

@@ -1099,8 +1099,8 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
         <div className="flex items-center gap-2 border-b border-emerald-100 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-900">
           <ChevronsUpDown className="h-4 w-4" /> Variants ({variants.length})
         </div>
-        <div className="grid grid-cols-12 gap-2 border-b border-gray-100 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-600">
-          <div className="col-span-4">Variant</div><div className="col-span-1 text-center">Qty</div><div className="col-span-1 text-center">Cost Price</div><div className="col-span-1 text-center">Tax %</div><div className="col-span-2 text-center">Tax Amount</div><div className="col-span-2 text-center">Line Total</div>
+        <div className="grid grid-cols-[43fr_9fr_16fr_9fr_11fr_12fr] gap-2 border-b border-gray-100 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-600">
+          <div className="min-w-0">Variant</div><div className="min-w-0">Qty</div><div className="min-w-0">Cost Price</div><div className="min-w-0">Tax %</div><div className="min-w-0">Tax Amount</div><div className="min-w-0">Line Total</div>
         </div>
         {variants.map(variant => {
           // Older saved drafts predate per-line tax fields. Recalculate here
@@ -1108,16 +1108,22 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
           const amounts = calculatePurchaseLine(variant)
 
           return (
-          <div key={variant.id} className="grid grid-cols-12 gap-2 items-center border-b border-gray-100 px-3 py-2 last:border-b-0">
-            <div className="col-span-4 min-w-0">
+          <div key={variant.id} className="grid grid-cols-[43fr_9fr_16fr_9fr_11fr_12fr] gap-2 items-center border-b border-gray-100 px-3 py-2 last:border-b-0">
+            <div className="min-w-0">
               <p className="truncate text-sm font-medium text-gray-900">{variant.name}</p>
               <p className="truncate text-[11px] text-gray-500">Stock: {variant.stock || 0}{variant.sku ? ` · SKU: ${variant.sku}` : ""}{variant.barcode ? ` · ${variant.barcode}` : ""}{variant.shelf ? ` · Shelf: ${variant.shelf}` : ""}</p>
             </div>
-            <Input type="number" min="0" className="col-span-1 h-8 text-center" value={variant.quantity || ""} placeholder="0" onChange={event => updateVariantEntry(product.id, variant.id, { quantity: Math.max(0, Number.parseInt(event.target.value, 10) || 0) })} />
-            <Input type="number" min="0" step="0.01" className="col-span-1 h-8 text-center" value={variant.price || 0} onChange={event => updateVariantEntry(product.id, variant.id, { price: Number.parseFloat(event.target.value) || 0 })} />
-            <Input type="number" min="0" max="100" step="0.01" className="col-span-1 h-8 text-center" value={variant.taxPercentage || 0} onChange={event => updateVariantEntry(product.id, variant.id, { taxPercentage: Math.max(0, Math.min(100, Number.parseFloat(event.target.value) || 0)) })} />
-            <div className="col-span-2 text-center text-xs text-gray-700">{currency} {amounts.taxAmount.toFixed(2)}</div>
-            <div className="col-span-2 text-center text-xs font-medium text-gray-900">{currency} {amounts.lineTotal.toFixed(2)}</div>
+            <div className="min-w-0">
+              <Input type="number" min="0" className="h-8 border-slate-300 w-full" value={variant.quantity || ""} placeholder="0" onChange={event => updateVariantEntry(product.id, variant.id, { quantity: Math.max(0, Number.parseInt(event.target.value, 10) || 0) })} />
+            </div>
+            <div className="min-w-0">
+              <Input type="number" min="0" step="0.01" className="h-8 border-slate-300 w-full" value={variant.price || 0} placeholder="0.00" onChange={event => updateVariantEntry(product.id, variant.id, { price: Number.parseFloat(event.target.value) || 0 })} />
+            </div>
+            <div className="min-w-0">
+              <Input type="number" min="0" max="100" step="0.01" className="h-8 border-slate-300 w-full" value={variant.taxPercentage || 0} onChange={event => updateVariantEntry(product.id, variant.id, { taxPercentage: Math.max(0, Math.min(100, Number.parseFloat(event.target.value) || 0)) })} />
+            </div>
+            <div className="min-w-0 text-xs text-gray-700 truncate">{currency} {amounts.taxAmount.toFixed(2)}</div>
+            <div className="min-w-0 font-medium text-xs text-gray-900 truncate">{currency} {amounts.lineTotal.toFixed(2)}</div>
           </div>
           )
         })}
@@ -1128,11 +1134,11 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
   const renderProductRowDesktop = (product: ProductRow, index: number) => (
     <React.Fragment key={product.id}>
     <div
-      className={`grid grid-cols-12 gap-1 p-2 items-center border-b border-gray-200 ${
+      className={`grid grid-cols-[38fr_9fr_16fr_9fr_11fr_12fr_5fr] gap-2 p-2 items-center border-b border-gray-200 ${
         index % 2 === 0 ? "bg-white" : "bg-gray-50"
       } hover:bg-gray-100 transition-colors duration-150`}
     >
-      <div className="col-span-4">
+      <div className="min-w-0">
         {product.productId && product.productName ? (
           <div className="flex flex-col">
             <div className="flex items-center justify-between">
@@ -1174,18 +1180,18 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
           />
         )}
       </div>
-      <div className="col-span-1">
+      <div className="min-w-0">
         {(!product.variantEntries || product.variantEntries.length <= 1) && (
           <Input
             type="number"
             min="1"
             value={product.quantity}
             onChange={(e) => updateProductRow(product.id, { quantity: Number.parseInt(e.target.value, 10) || 1 })}
-            className="text-center h-7 text-xs bg-white border-gray-300 text-gray-900"
+            className="h-9 border-slate-300 w-full"
           />
         )}
       </div>
-      <div className="col-span-1">
+      <div className="min-w-0">
         {(!product.variantEntries || product.variantEntries.length <= 1) && (
           <Input
             type="number"
@@ -1193,11 +1199,12 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
             step="0.01"
             value={product.price}
             onChange={(e) => updateProductRow(product.id, { price: Number.parseFloat(e.target.value) || 0 })}
-            className="text-center h-7 text-xs bg-white border-gray-300 text-gray-900"
+            placeholder="0.00"
+            className="h-9 border-slate-300 w-full"
           />
         )}
       </div>
-      <div className="col-span-1">
+      <div className="min-w-0">
         {(!product.variantEntries || product.variantEntries.length <= 1) && (
           <Input
             type="number"
@@ -1211,17 +1218,17 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
                 updateProductRow(product.id, { taxPercentage: value })
               }
             }}
-            className="text-center h-7 text-xs bg-white border-gray-300 text-gray-900"
+            className="h-9 border-slate-300 w-full"
           />
         )}
       </div>
-      <div className="col-span-2 flex items-center justify-center text-xs text-gray-600">
+      <div className="min-w-0 flex items-center text-xs text-gray-700 truncate">
         {currency} {(Number(product.taxAmount) || 0).toFixed(2)}
       </div>
-      <div className="col-span-2 flex items-center justify-center font-medium text-xs text-gray-900">
+      <div className="min-w-0 flex items-center font-medium text-xs text-gray-900 truncate">
         {currency} {(Number(product.lineTotal) || 0).toFixed(2)}
       </div>
-      <div className="col-span-1 flex justify-center">
+      <div className="min-w-0 flex justify-center">
         <Button
           type="button"
           variant="ghost"
@@ -1446,14 +1453,14 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
 
                   <div className="flex-1 overflow-x-auto overflow-y-auto min-h-0">
                     <div className="hidden lg:block sticky top-0 z-10 min-w-[640px]">
-                      <div className="grid grid-cols-12 gap-1 p-2 bg-gray-100 font-medium text-xs text-gray-700 border-b border-gray-200">
-                        <div className="col-span-4">Product</div>
-                        <div className="col-span-1 text-center">Qty</div>
-                        <div className="col-span-1 text-center">Price</div>
-                        <div className="col-span-1 text-center">Tax %</div>
-                        <div className="col-span-2 text-center">Tax Amount</div>
-                        <div className="col-span-2 text-center">Total</div>
-                        <div className="col-span-1"></div>
+                      <div className="grid grid-cols-[38fr_9fr_16fr_9fr_11fr_12fr_5fr] gap-2 p-2 bg-gray-100 font-medium text-xs text-gray-700 border-b border-gray-200">
+                        <div className="min-w-0">Product</div>
+                        <div className="min-w-0">Qty</div>
+                        <div className="min-w-0">Price</div>
+                        <div className="min-w-0">Tax %</div>
+                        <div className="min-w-0">Tax Amount</div>
+                        <div className="min-w-0">Total</div>
+                        <div className="min-w-0"></div>
                   </div>
               </div>
                     <div className="hidden lg:block min-w-[640px]">
