@@ -136,6 +136,19 @@ async function updateProductStock(
 
     const product = productCheck[0]
 
+    if (!product.has_variants) {
+      const devStock = await sql`SELECT id, stock FROM product_device_stock WHERE product_id = ${productId} AND device_id = ${deviceId} LIMIT 1`
+      const currentLegacyStock = devStock.length > 0 ? Number(devStock[0].stock || 0) : 0
+      const nextLegacyStock = operation === "subtract" ? currentLegacyStock - quantityChange : currentLegacyStock + quantityChange
+      
+      if (devStock.length > 0) {
+        await sql`UPDATE product_device_stock SET stock = ${nextLegacyStock}, updated_at = NOW() WHERE id = ${devStock[0].id}`
+      } else {
+        await sql`INSERT INTO product_device_stock (product_id, device_id, stock) VALUES (${productId}, ${deviceId}, ${nextLegacyStock})`
+      }
+      return { success: true, message: "Legacy stock updated" }
+    }
+
     let resolvedVariantId = variantId
     if (!resolvedVariantId) {
       const defaultVariant = await sql`

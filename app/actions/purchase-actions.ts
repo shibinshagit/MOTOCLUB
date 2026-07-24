@@ -5,39 +5,7 @@ import postgres from "postgres"
 import { sql, getLastError, resetConnectionState } from "@/lib/db"
 import { revalidatePath } from "next/cache"
 import { recordPurchaseTransaction, recordPurchaseAdjustment, deletePurchaseTransaction } from "./simplified-accounting"
-
-async function adjustDeviceProductStock(
-  productId: number,
-  variantId: number | null,
-  batchId: number | null,
-  deviceId: number,
-  quantityChange: number,
-  query: any = sql,
-) {
-  if (!batchId) {
-    throw new Error("Batch ID is required for stock adjustment");
-  }
-
-  // Adjust batch stock
-  const batchStock = await query`
-    SELECT id, stock FROM product_batch_device_stock
-    WHERE batch_id = ${batchId} AND device_id = ${deviceId}
-    LIMIT 1
-  `
-
-  if (batchStock.length > 0) {
-    await query`
-      UPDATE product_batch_device_stock
-      SET stock = stock + ${quantityChange}, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ${batchStock[0].id}
-    `
-  } else {
-    await query`
-      INSERT INTO product_batch_device_stock (batch_id, device_id, stock)
-      VALUES (${batchId}, ${deviceId}, ${quantityChange})
-    `
-  }
-}
+import { adjustDeviceProductStock } from "@/lib/inventory-service"
 
 export async function getPurchases() {
   try {

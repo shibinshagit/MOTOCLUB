@@ -10,7 +10,7 @@ import {
   resolveStaffSessionContext,
 } from "@/lib/staff-restrictions-server"
 import { parseProductLinksFromFormData, serializeProductLinks } from "@/lib/product-links"
-
+import { getDeviceProductStock } from "@/lib/inventory-service"
 
 // Generate a unique barcode for a product
 async function generateProductBarcode(productId: number): Promise<string> {
@@ -581,23 +581,42 @@ REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
     let companyTotalStockMap = new Map<number, number>()
     if (userId) {
       const deviceStocks = await sql`
-        SELECT pb.product_id, SUM(pbds.stock) as stock
+        SELECT pv.product_id, SUM(pbds.stock) as stock
         FROM product_batch_device_stock pbds
         JOIN product_batches pb ON pb.id = pbds.batch_id
-        WHERE pbds.device_id = ${userId}
-        GROUP BY pb.product_id
+        JOIN product_variants pv ON pv.id = pb.product_variant_id
+        JOIN products p ON p.id = pv.product_id
+        WHERE pbds.device_id = ${userId} AND p.has_variants = true
+        GROUP BY pv.product_id
+        UNION ALL
+        SELECT pds.product_id, SUM(pds.stock) as stock
+        FROM product_device_stock pds
+        JOIN products p ON p.id = pds.product_id
+        WHERE pds.device_id = ${userId} AND p.has_variants = false
+        GROUP BY pds.product_id
       `
       stockMap = new Map<number, number>(deviceStocks.map((row: any) => [Number(row.product_id), Number(row.stock)]))
 
       const companyDeviceStocks = await sql`
-        SELECT pb.product_id, COALESCE(SUM(pbds.stock), 0) AS total_stock
+        SELECT pv.product_id, COALESCE(SUM(pbds.stock), 0) AS total_stock
         FROM product_batch_device_stock pbds
         JOIN product_batches pb ON pb.id = pbds.batch_id
+        JOIN product_variants pv ON pv.id = pb.product_variant_id
+        JOIN products p ON p.id = pv.product_id
         JOIN devices d ON d.id = pbds.device_id
-        WHERE d.company_id = (
+        WHERE p.has_variants = true AND d.company_id = (
           SELECT company_id FROM devices WHERE id = ${userId}
         )
-        GROUP BY pb.product_id
+        GROUP BY pv.product_id
+        UNION ALL
+        SELECT pds.product_id, COALESCE(SUM(pds.stock), 0) AS total_stock
+        FROM product_device_stock pds
+        JOIN products p ON p.id = pds.product_id
+        JOIN devices d ON d.id = pds.device_id
+        WHERE p.has_variants = false AND d.company_id = (
+          SELECT company_id FROM devices WHERE id = ${userId}
+        )
+        GROUP BY pds.product_id
       `
       companyTotalStockMap = new Map(
         companyDeviceStocks.map((row: any) => [Number(row.product_id), Number(row.total_stock)]),
@@ -764,17 +783,7 @@ export async function getProductById(id: number, userId?: number) {
 
     let resolvedStock = 0
     if (userId) {
-      const deviceStock = await sql`
-        SELECT SUM(pbds.stock) as stock
-        FROM product_batch_device_stock pbds
-        JOIN product_batches pb ON pb.id = pbds.batch_id
-        WHERE pb.product_id = ${result[0].id} AND pbds.device_id = ${userId}
-      `
-
-      resolvedStock =
-        deviceStock.length > 0
-          ? Number(deviceStock[0].stock || 0)
-          : 0
+      resolvedStock = await getDeviceProductStock(result[0].id, userId)
     }
 
     // Include category from either category_id or legacy category field
@@ -1780,23 +1789,45 @@ export async function getProductStockByDevice(productId: number, userId: number)
   resetConnectionState()
 
   try {
-    const devices = await sql`
-      SELECT 
-        d.id AS device_id, 
-        d.name AS device_name,
-        pv.name AS variant_name,
-        pb.batch_no AS batch_no,
-        COALESCE(pbds.stock, 0) AS stock
-      FROM devices d
-      LEFT JOIN product_batch_device_stock pbds ON pbds.device_id = d.id
-      LEFT JOIN product_batches pb ON pb.id = pbds.batch_id AND pb.product_id = ${productId}
-      LEFT JOIN product_variants pv ON pv.id = pb.product_variant_id
-      WHERE d.company_id = (
-        SELECT company_id FROM devices WHERE id = ${userId}
-      )
-      AND (pbds.stock > 0 OR pbds.stock IS NULL)
-      ORDER BY d.name ASC, pv.name ASC, pb.created_at ASC
-    `
+    const productData = await sql`SELECT has_variants FROM products WHERE id = ${productId}`
+    const hasVariants = productData.length > 0 ? productData[0].has_variants : false
+
+    let devices;
+    if (hasVariants) {
+      devices = await sql`
+        SELECT 
+          d.id AS device_id, 
+          d.name AS device_name,
+          pv.name AS variant_name,
+          pb.batch_no AS batch_no,
+          COALESCE(pbds.stock, 0) AS stock
+        FROM devices d
+        LEFT JOIN product_batch_device_stock pbds ON pbds.device_id = d.id
+        LEFT JOIN product_batches pb ON pb.id = pbds.batch_id
+        LEFT JOIN product_variants pv ON pv.id = pb.product_variant_id AND pv.product_id = ${productId}
+        WHERE d.company_id = (
+          SELECT company_id FROM devices WHERE id = ${userId}
+        )
+        AND (pbds.stock > 0 OR pbds.stock IS NULL)
+        ORDER BY d.name ASC, pv.name ASC, pb.created_at ASC
+      `
+    } else {
+      devices = await sql`
+        SELECT 
+          d.id AS device_id, 
+          d.name AS device_name,
+          NULL AS variant_name,
+          NULL AS batch_no,
+          COALESCE(pds.stock, 0) AS stock
+        FROM devices d
+        LEFT JOIN product_device_stock pds ON pds.device_id = d.id AND pds.product_id = ${productId}
+        WHERE d.company_id = (
+          SELECT company_id FROM devices WHERE id = ${userId}
+        )
+        AND (pds.stock > 0 OR pds.stock IS NULL)
+        ORDER BY d.name ASC
+      `
+    }
 
     const data = devices.map((row: any) => ({
       device_id: Number(row.device_id),
@@ -1860,7 +1891,8 @@ export async function adjustProductStock(formData: FormData) {
       SELECT COALESCE(SUM(pbds.stock), 0) as stock
       FROM product_batch_device_stock pbds
       JOIN product_batches pb ON pb.id = pbds.batch_id
-      WHERE pb.product_id = ${productId} AND pbds.device_id = ${userId}
+      JOIN product_variants pv ON pv.id = pb.product_variant_id
+      WHERE pv.product_id = ${productId} AND pbds.device_id = ${userId}
     `
 
     const currentStock = Number(existingDeviceStock[0]?.stock || 0)
@@ -1909,7 +1941,8 @@ export async function adjustProductStock(formData: FormData) {
         SELECT pbds.batch_id, pbds.stock
         FROM product_batch_device_stock pbds
         JOIN product_batches pb ON pb.id = pbds.batch_id
-        WHERE pb.product_id = ${productId} AND pbds.device_id = ${userId} AND pbds.stock > 0
+        JOIN product_variants pv ON pv.id = pb.product_variant_id
+        WHERE pv.product_id = ${productId} AND pbds.device_id = ${userId} AND pbds.stock > 0
         ORDER BY pb.manufacture_date ASC NULLS LAST, pb.created_at ASC
       `
       let remaining = quantity
@@ -1998,15 +2031,7 @@ export async function getProductByBarcode(barcode: string, userId?: number) {
 
     let resolvedStock = 0
     if (userId) {
-      const deviceStock = await sql`
-        SELECT SUM(pbds.stock) as stock
-        FROM product_batch_device_stock pbds
-        JOIN product_batches pb ON pb.id = pbds.batch_id
-        WHERE pb.product_id = ${result[0].id} AND pbds.device_id = ${userId}
-      `
-      if (deviceStock.length > 0) {
-        resolvedStock = Number(deviceStock[0].stock || 0)
-      }
+      resolvedStock = await getDeviceProductStock(result[0].id, userId)
     }
 
     // Include category from either category_id or legacy category field
@@ -2050,11 +2075,19 @@ export async function getUserProducts(userId: number) {
     `
 
     const deviceStocks = await sql`
-      SELECT pb.product_id, SUM(pbds.stock) as stock
+      SELECT pv.product_id, SUM(pbds.stock) as stock
       FROM product_batch_device_stock pbds
       JOIN product_batches pb ON pb.id = pbds.batch_id
-      WHERE pbds.device_id = ${userId}
-      GROUP BY pb.product_id
+      JOIN product_variants pv ON pv.id = pb.product_variant_id
+      JOIN products p ON p.id = pv.product_id
+      WHERE pbds.device_id = ${userId} AND p.has_variants = true
+      GROUP BY pv.product_id
+      UNION ALL
+      SELECT pds.product_id, SUM(pds.stock) as stock
+      FROM product_device_stock pds
+      JOIN products p ON p.id = pds.product_id
+      WHERE pds.device_id = ${userId} AND p.has_variants = false
+      GROUP BY pds.product_id
     `
     const stockMap = new Map<number, number>(deviceStocks.map((row: any) => [Number(row.product_id), Number(row.stock)]))
 

@@ -450,7 +450,17 @@ export async function getStockByCompany(companyId: number) {
         p.price
       FROM products p
       JOIN devices d ON p.created_by = d.id
-      LEFT JOIN product_device_stock pds ON pds.product_id = p.id
+      LEFT JOIN (
+        SELECT pv.product_id, pbds.device_id, SUM(pbds.stock) as stock
+        FROM product_batch_device_stock pbds
+        JOIN product_batches pb ON pb.id = pbds.batch_id
+        JOIN product_variants pv ON pv.id = pb.product_variant_id
+        GROUP BY pv.product_id, pbds.device_id
+        UNION ALL
+        SELECT pds.product_id, pds.device_id, SUM(pds.stock) as stock
+        FROM product_device_stock pds
+        GROUP BY pds.product_id, pds.device_id
+      ) pds ON pds.product_id = p.id
       LEFT JOIN devices sd ON sd.id = pds.device_id
       WHERE d.company_id = ${companyId}
         AND (sd.company_id = ${companyId} OR sd.id IS NULL)
@@ -885,7 +895,17 @@ export async function getStockByDevice(deviceId: number) {
         p.price
       FROM products p
       JOIN devices d ON p.created_by = d.id
-      LEFT JOIN product_device_stock pds
+      LEFT JOIN (
+        SELECT pv.product_id, pbds.device_id, SUM(pbds.stock) as stock
+        FROM product_batch_device_stock pbds
+        JOIN product_batches pb ON pb.id = pbds.batch_id
+        JOIN product_variants pv ON pv.id = pb.product_variant_id
+        GROUP BY pv.product_id, pbds.device_id
+        UNION ALL
+        SELECT pds.product_id, pds.device_id, SUM(pds.stock) as stock
+        FROM product_device_stock pds
+        GROUP BY pds.product_id, pds.device_id
+      ) pds
         ON pds.product_id = p.id AND pds.device_id = ${deviceId}
       WHERE d.company_id = (
         SELECT company_id FROM devices WHERE id = ${deviceId}

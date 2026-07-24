@@ -2,6 +2,7 @@
 
 import { sql, getLastError, resetConnectionState } from "@/lib/db"
 import { revalidatePath } from "next/cache"
+import { getDeviceProductStock, adjustDeviceProductStock } from "@/lib/inventory-service"
 
 type TransferItemInput = {
   product_id: number
@@ -111,13 +112,7 @@ async function getCompanyIdForDevice(deviceId: number): Promise<number | null> {
 }
 
 async function getDeviceStockForUpdate(productId: number, variantId: number | null, deviceId: number): Promise<number> {
-  const rows = (await sql`
-    SELECT COALESCE(SUM(pbds.stock), 0) as stock
-    FROM product_batch_device_stock pbds
-    JOIN product_batches pb ON pb.id = pbds.batch_id
-    WHERE pb.product_id = ${productId} AND pbds.device_id = ${deviceId}
-  `) as any[]
-  return rows.length > 0 ? Number(rows[0].stock || 0) : 0
+  return await getDeviceProductStock(productId, deviceId);
 }
 
 async function getDeviceBatchStockForUpdate(batchId: number, deviceId: number): Promise<number> {
@@ -130,49 +125,7 @@ async function getDeviceBatchStockForUpdate(batchId: number, deviceId: number): 
   return rows.length > 0 ? Number(rows[0].stock || 0) : 0
 }
 
-async function adjustDeviceProductStock(
-  productId: number,
-  variantId: number | null,
-  batchId: number | null,
-  deviceId: number,
-  delta: number
-) {
-  const productCheck = await sql`
-    SELECT id FROM products WHERE id = ${productId}
-  `
-  if (productCheck.length === 0) return
 
-  let resolvedVariantId = variantId
-  if (!resolvedVariantId) {
-    const defaultVariant = await sql`
-      SELECT id FROM product_variants WHERE product_id = ${productId} ORDER BY id ASC LIMIT 1
-    `
-    if (defaultVariant.length > 0) {
-      resolvedVariantId = defaultVariant[0].id
-    } else {
-      return
-    }
-  }
-  
-  if (batchId) {
-    const batchStockRows = await sql`
-      SELECT stock FROM product_batch_device_stock
-      WHERE batch_id = ${batchId} AND device_id = ${deviceId}
-      LIMIT 1
-    `
-    const currentBatchStock = batchStockRows.length > 0 ? Number(batchStockRows[0].stock || 0) : 0
-    const nextBatchStock = Math.max(0, currentBatchStock + delta)
-
-    await sql`
-      INSERT INTO product_batch_device_stock (batch_id, device_id, stock, updated_at)
-      VALUES (${batchId}, ${deviceId}, ${nextBatchStock}, NOW())
-      ON CONFLICT (batch_id, device_id)
-      DO UPDATE SET stock = ${nextBatchStock}, updated_at = NOW()
-    `
-  } else {
-    // If no batch ID is specified (legacy data), do nothing since we only track by batch now
-  }
-}
 
 async function createTransferHistoryRows(
   transferId: number,
@@ -384,8 +337,17 @@ export async function getTransferFormData(userId: number, fromDeviceId?: number)
         COALESCE(pds.stock, 0) AS source_stock
       FROM products p
       JOIN devices d ON d.id = p.created_by
-      LEFT JOIN product_device_stock pds
-        ON pds.product_id = p.id AND pds.device_id = ${sourceDeviceId}
+      LEFT JOIN (
+        SELECT pv.product_id, pbds.device_id, SUM(pbds.stock) as stock
+        FROM product_batch_device_stock pbds
+        JOIN product_batches pb ON pb.id = pbds.batch_id
+        JOIN product_variants pv ON pv.id = pb.product_variant_id
+        GROUP BY pv.product_id, pbds.device_id
+        UNION ALL
+        SELECT pds.product_id, pds.device_id, SUM(pds.stock) as stock
+        FROM product_device_stock pds
+        GROUP BY pds.product_id, pds.device_id
+      ) pds ON pds.product_id = p.id AND pds.device_id = ${sourceDeviceId}
       WHERE d.company_id = ${companyId}
       ORDER BY p.name ASC
     `) as any[]
@@ -394,9 +356,15 @@ export async function getTransferFormData(userId: number, fromDeviceId?: number)
       const productIds = products.map((p) => p.id)
       
       const variants = await sql`
-        SELECT pv.*, COALESCE(pds.stock, 0) as stock
+        SELECT pv.*, COALESCE(pbds_agg.stock, 0) as stock
         FROM product_variants pv
-        LEFT JOIN product_device_stock pds ON pv.id = pds.product_variant_id AND pds.device_id = ${sourceDeviceId}
+        LEFT JOIN (
+          SELECT pb.product_variant_id, SUM(pbds.stock) as stock
+          FROM product_batch_device_stock pbds
+          JOIN product_batches pb ON pb.id = pbds.batch_id
+          WHERE pbds.device_id = ${sourceDeviceId}
+          GROUP BY pb.product_variant_id
+        ) pbds_agg ON pv.id = pbds_agg.product_variant_id
         WHERE pv.product_id = ANY(${productIds})
         ORDER BY pv.id ASC
       `
@@ -419,12 +387,19 @@ export async function getTransferFormData(userId: number, fromDeviceId?: number)
       }
 
       const batches = await sql`
-        SELECT pb.*, pv.name as variant_name, COALESCE(pbds.stock, 0) as stock
+        SELECT pb.*, pv.product_id as product_id, pv.name as variant_name, COALESCE(pbds.stock, 0) as stock
         FROM product_batches pb
-        LEFT JOIN product_variants pv ON pb.product_variant_id = pv.id
+        JOIN product_variants pv ON pb.product_variant_id = pv.id
         LEFT JOIN product_batch_device_stock pbds ON pb.id = pbds.batch_id AND pbds.device_id = ${sourceDeviceId}
-        WHERE pb.product_id = ANY(${productIds})
+        WHERE pv.product_id = ANY(${productIds})
         ORDER BY pb.id ASC
+      `
+
+      const legacyStocks = await sql`
+        SELECT pds.product_id, pds.stock
+        FROM product_device_stock pds
+        JOIN products p ON p.id = pds.product_id
+        WHERE pds.device_id = ${sourceDeviceId} AND p.has_variants = false AND p.id = ANY(${productIds})
       `
 
       const batchesByProductId = new Map<number, any[]>()

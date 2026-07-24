@@ -92,7 +92,17 @@ export async function getUserDashboardSummary(userId: number, deviceId: number) 
         COALESCE(pds.stock, 0) as stock
       FROM products p
       LEFT JOIN product_categories pc ON p.category_id = pc.id
-      LEFT JOIN product_device_stock pds
+      LEFT JOIN (
+        SELECT pv.product_id, pbds.device_id, SUM(pbds.stock) as stock
+        FROM product_batch_device_stock pbds
+        JOIN product_batches pb ON pb.id = pbds.batch_id
+        JOIN product_variants pv ON pv.id = pb.product_variant_id
+        GROUP BY pv.product_id, pbds.device_id
+        UNION ALL
+        SELECT pds.product_id, pds.device_id, SUM(pds.stock) as stock
+        FROM product_device_stock pds
+        GROUP BY pds.product_id, pds.device_id
+      ) pds
         ON pds.product_id = p.id AND pds.device_id = ${userId}
       WHERE COALESCE(pds.stock, 0) = 0
         AND p.created_by IN (
@@ -117,7 +127,17 @@ export async function getUserDashboardSummary(userId: number, deviceId: number) 
           COALESCE(pds.stock, 0) as stock
         FROM products p
         LEFT JOIN product_categories pc ON p.category_id = pc.id
-        LEFT JOIN product_device_stock pds
+        LEFT JOIN (
+          SELECT pv.product_id, pbds.device_id, SUM(pbds.stock) as stock
+          FROM product_batch_device_stock pbds
+          JOIN product_batches pb ON pb.id = pbds.batch_id
+          JOIN product_variants pv ON pv.id = pb.product_variant_id
+          GROUP BY pv.product_id, pbds.device_id
+          UNION ALL
+          SELECT pds.product_id, pds.device_id, SUM(pds.stock) as stock
+          FROM product_device_stock pds
+          GROUP BY pds.product_id, pds.device_id
+        ) pds
           ON pds.product_id = p.id AND pds.device_id = ${userId}
         WHERE COALESCE(pds.stock, 0) < 5
           AND COALESCE(pds.stock, 0) > 0
@@ -141,7 +161,17 @@ export async function getUserDashboardSummary(userId: number, deviceId: number) 
           COALESCE(pds.stock, 0) as stock
         FROM products p
         LEFT JOIN product_categories pc ON p.category_id = pc.id
-        LEFT JOIN product_device_stock pds
+        LEFT JOIN (
+          SELECT pv.product_id, pbds.device_id, SUM(pbds.stock) as stock
+          FROM product_batch_device_stock pbds
+          JOIN product_batches pb ON pb.id = pbds.batch_id
+          JOIN product_variants pv ON pv.id = pb.product_variant_id
+          GROUP BY pv.product_id, pbds.device_id
+          UNION ALL
+          SELECT pds.product_id, pds.device_id, SUM(pds.stock) as stock
+          FROM product_device_stock pds
+          GROUP BY pds.product_id, pds.device_id
+        ) pds
           ON pds.product_id = p.id AND pds.device_id = ${userId}
         WHERE COALESCE(pds.stock, 0) < 10
           AND p.created_by IN (
