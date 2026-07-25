@@ -40,142 +40,154 @@ export async function paySupplierCredit(
   resetConnectionState()
 
   try {
-    await sql`BEGIN`
-
-    const supplierResult = await sql`
-      SELECT * FROM suppliers WHERE id = ${supplierId} AND created_by = ${userId}
-    `
-
-    if (supplierResult.length === 0) {
-      await sql`ROLLBACK`
-      return { success: false, message: "Supplier not found" }
-    }
-
-    const supplier = supplierResult[0]
-
-    const creditPurchases = await sql`
-      SELECT 
-        id,
-        total_amount,
-        received_amount,
-        purchase_date,
-        status
-      FROM purchases
-      WHERE TRIM(supplier) = TRIM(${supplier.name})
-        AND created_by = ${userId}
-        AND device_id = ${deviceId}
-        AND status != 'Cancelled'
-        AND (total_amount - COALESCE(received_amount, 0)) > 0
-      ORDER BY purchase_date ASC, id ASC
-    `
-
-    console.log(`Found ${creditPurchases.length} credit purchases for supplier ${supplier.name}`)
-
-    if (creditPurchases.length === 0) {
-      await sql`ROLLBACK`
-      return { success: false, message: "No outstanding credit purchases found for this supplier" }
-    }
-
-    const totalOutstanding = creditPurchases.reduce((sum: number, purchase: any) => {
-      return sum + (Number(purchase.total_amount) - Number(purchase.received_amount || 0))
-    }, 0)
-
-    if (paymentAmount > totalOutstanding) {
-      await sql`ROLLBACK`
-      return {
-        success: false,
-        message: `Payment amount (${paymentAmount}) exceeds total outstanding balance (${totalOutstanding})`,
-      }
-    }
-
-    let remainingPayment = paymentAmount
-    const allocations: PaymentAllocation[] = []
-
-    for (const purchase of creditPurchases) {
-      if (remainingPayment <= 0) break
-
-      const currentBalance = Number(purchase.total_amount) - Number(purchase.received_amount || 0)
-      const allocationAmount = Math.min(remainingPayment, currentBalance)
-      const newReceivedAmount = Number(purchase.received_amount || 0) + allocationAmount
-      const newRemainingBalance = Number(purchase.total_amount) - newReceivedAmount
-
-      await sql`
-        UPDATE purchases 
-        SET received_amount = ${newReceivedAmount},
-            status = ${newRemainingBalance <= 0.01 ? "Paid" : "Credit"}
-        WHERE id = ${purchase.id}
+    const transactionResultData = await sql.begin(async (tx: any) => {
+      const supplierResult = await tx`
+        SELECT * FROM suppliers WHERE id = ${supplierId} AND created_by = ${userId}
       `
 
-      allocations.push({
-        purchaseId: purchase.id,
-        allocatedAmount: allocationAmount,
-        newStatus: newRemainingBalance <= 0.01 ? "Paid" : "Credit",
-        remainingBalance: newRemainingBalance,
+      if (supplierResult.length === 0) {
+        throw new Error("Supplier not found")
+      }
+
+      const supplier = supplierResult[0]
+
+      const creditPurchases = await tx`
+        SELECT 
+          id,
+          total_amount,
+          received_amount,
+          purchase_date,
+          status
+        FROM purchases
+        WHERE TRIM(supplier) = TRIM(${supplier.name})
+          AND created_by = ${userId}
+          AND device_id = ${deviceId}
+          AND status != 'Cancelled'
+          AND (total_amount - COALESCE(received_amount, 0)) > 0
+        ORDER BY purchase_date ASC, id ASC
+      `
+
+      console.log(`Found ${creditPurchases.length} credit purchases for supplier ${supplier.name}`)
+
+      if (creditPurchases.length === 0) {
+        throw new Error("No outstanding credit purchases found for this supplier")
+      }
+
+      const totalOutstanding = creditPurchases.reduce((sum: number, purchase: any) => {
+        return sum + (Number(purchase.total_amount) - Number(purchase.received_amount || 0))
+      }, 0)
+
+      if (paymentAmount > totalOutstanding) {
+        throw new Error(`Payment amount (${paymentAmount}) exceeds total outstanding balance (${totalOutstanding})`)
+      }
+
+      let remainingPayment = paymentAmount
+      const allocations: PaymentAllocation[] = []
+
+      for (const purchase of creditPurchases) {
+        if (remainingPayment <= 0) break
+
+        const currentBalance = Number(purchase.total_amount) - Number(purchase.received_amount || 0)
+        const allocationAmount = Math.min(remainingPayment, currentBalance)
+        const newReceivedAmount = Number(purchase.received_amount || 0) + allocationAmount
+        const newRemainingBalance = Number(purchase.total_amount) - newReceivedAmount
+
+        await tx`
+          UPDATE purchases 
+          SET received_amount = ${newReceivedAmount},
+              status = ${newRemainingBalance <= 0.01 ? "Paid" : "Credit"}
+          WHERE id = ${purchase.id}
+        `
+
+        allocations.push({
+          purchaseId: purchase.id,
+          allocatedAmount: allocationAmount,
+          newStatus: newRemainingBalance <= 0.01 ? "Paid" : "Credit",
+          remainingBalance: newRemainingBalance,
+        })
+
+        remainingPayment -= allocationAmount
+
+        console.log(`Allocated ${allocationAmount} to purchase ${purchase.id}, remaining balance: ${newRemainingBalance}`)
+      }
+
+      const remainingCredit = totalOutstanding - paymentAmount
+
+      console.log("Payment allocation completed:", {
+        totalPaid: paymentAmount,
+        allocationsCount: allocations.length,
+        remainingCredit,
       })
 
-      remainingPayment -= allocationAmount
+      let finalPaymentDate: Date
+      if (paymentDate) {
+        finalPaymentDate = new Date(paymentDate.getTime() - paymentDate.getTimezoneOffset() * 60000)
+        console.log("Using provided payment date:", finalPaymentDate)
+      } else {
+        const now = new Date()
+        finalPaymentDate = new Date(now.getTime() - now.getTimezoneOffset() * 60000)
+        console.log("Using current date as payment date:", finalPaymentDate)
+      }
 
-      console.log(`Allocated ${allocationAmount} to purchase ${purchase.id}, remaining balance: ${newRemainingBalance}`)
-    }
+      const debitAmount = paymentAmount
+      const creditAmount = 0
+      let description = `Supplier Payment - ${supplier.name} - ${paymentMethod} - ${allocations.length} purchase(s) affected`
+      if (notes && notes.trim()) {
+        description += ` - Notes: ${notes.trim()}`
+      }
 
-    const remainingCredit = totalOutstanding - paymentAmount
+      const insertResult = await tx`
+        INSERT INTO financial_transactions (
+          transaction_type, reference_type, reference_id,
+          amount, received_amount, cost_amount, debit_amount, credit_amount,
+          status, payment_method, description, notes, device_id, company_id, created_by, transaction_date
+        ) VALUES (
+          'supplier_payment', 'supplier', ${supplierId},
+          ${paymentAmount}, ${paymentAmount}, 0, ${debitAmount}, ${creditAmount},
+          'Completed', ${paymentMethod}, ${description}, ${notes || null}, 
+          ${deviceId}, 1, ${userId}, ${finalPaymentDate.toISOString()}
+        ) RETURNING id
+      `
 
-    console.log("Payment allocation completed:", {
-      totalPaid: paymentAmount,
-      allocationsCount: allocations.length,
-      remainingCredit,
+      const transactionId = insertResult[0]?.id
+      console.log("Supplier payment transaction recorded successfully:", transactionId)
+
+      return {
+        success: true,
+        message: "Payment processed successfully",
+        data: {
+          totalPaid: paymentAmount,
+          allocations,
+          remainingCredit,
+          transactionId,
+        },
+      }
     })
-
-    let finalPaymentDate: Date
-    if (paymentDate) {
-      finalPaymentDate = new Date(paymentDate.getTime() - paymentDate.getTimezoneOffset() * 60000)
-      console.log("Using provided payment date:", finalPaymentDate)
-    } else {
-      const now = new Date()
-      finalPaymentDate = new Date(now.getTime() - now.getTimezoneOffset() * 60000)
-      console.log("Using current date as payment date:", finalPaymentDate)
-    }
-
-    const transactionResult = await recordSupplierPayment({
-      supplierId: supplierId,
-      supplierName: supplier.name,
-      paymentAmount: paymentAmount,
-      paymentMethod: paymentMethod,
-      allocations: allocations,
-      deviceId: deviceId,
-      userId: userId,
-      paymentDate: finalPaymentDate,
-      notes: notes,
-    })
-
-    if (!transactionResult.success) {
-      console.error("Failed to record supplier payment transaction:", transactionResult.error)
-      console.log("Payment completed but transaction recording failed")
-    } else {
-      console.log("Supplier payment transaction recorded successfully:", transactionResult.transactionId)
-    }
-
-    await sql`COMMIT`
-
+    
     revalidatePath("/dashboard")
-
-    return {
-      success: true,
-      message: "Payment processed successfully",
-      data: {
-        totalPaid: paymentAmount,
-        allocations,
-        remainingCredit,
-        transactionId: transactionResult.transactionId,
-      },
-    }
+    return transactionResultData
+    
   } catch (error) {
-    await sql`ROLLBACK`
     console.error("paySupplierCredit: Error processing payment:", error)
-    console.error("paySupplierCredit: Error details:", getLastError())
+    
+    const err = error as any
+    console.error("paySupplierCredit: Error details:", {
+      message: err.message || String(error),
+      code: err.code,
+      detail: err.detail
+    })
+    
+    // If the error was thrown by us (e.g., "Supplier not found")
+    if (error instanceof Error && !(error as any).code) {
+       return {
+         success: false,
+         message: err.message
+       }
+    }
+    
     return {
       success: false,
-      message: `Payment processing failed: ${getLastError()?.message || "Unknown error"}`,
+      message: "Payment processing failed. Please try again.",
     }
   }
 }

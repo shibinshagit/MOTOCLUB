@@ -211,9 +211,11 @@ interface Product {
   price: number
   wholesale_price?: number
   msp?: number
+  mrp?: number
   stock: number
   shelf?: string
   barcode?: string
+  sku?: string
   image_url?: string
   image_urls?: string[] | string
   video_url?: string

@@ -132,7 +132,7 @@ export default function SupplierTab({
   const isRefreshing = useAppSelector(selectSuppliersRefreshing)
   const error = useAppSelector(selectSuppliersError)
   const reduxSearchTerm = useAppSelector(selectSupplierSearchTerm)
-  const currency = useAppSelector(selectSupplierCurrency)
+  const currency = useAppSelector((state) => state.device.currency) || "AED"
   const selectedSupplierId = useAppSelector(selectSelectedSupplierId)
   const stats = useAppSelector(selectSuppliersStats)
   const shouldRefresh = useAppSelector(selectShouldRefresh)
