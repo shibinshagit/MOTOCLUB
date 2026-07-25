@@ -909,44 +909,8 @@ async function checkProductDuplicates(name: string, barcode: string | null, user
       }
     }
 
-    // Check for duplicate barcode within company products (only if barcode is provided)
-    if (barcode) {
-      let barcodeQuery
-      if (excludeId) {
-        barcodeQuery = await sql`
-          SELECT id FROM products 
-          WHERE barcode = ${barcode} 
-          AND created_by IN (
-            SELECT d2.id
-            FROM devices d1
-            JOIN devices d2 ON d2.company_id = d1.company_id
-            WHERE d1.id = ${userId}
-          )
-          AND id != ${excludeId} 
-          LIMIT 1
-        `
-      } else {
-        barcodeQuery = await sql`
-          SELECT id FROM products 
-          WHERE barcode = ${barcode} 
-          AND created_by IN (
-            SELECT d2.id
-            FROM devices d1
-            JOIN devices d2 ON d2.company_id = d1.company_id
-            WHERE d1.id = ${userId}
-          )
-          LIMIT 1
-        `
-      }
-
-      if (barcodeQuery.length > 0) {
-        return {
-          isDuplicate: true,
-          field: "barcode",
-          message: `A product with the barcode "${barcode}" already exists in your company products.`,
-        }
-      }
-    }
+    // Barcode duplicate check removed as per request
+    // (Previously, checked if barcode exists across products)
 
     return { isDuplicate: false }
   } catch (error) {
@@ -1676,6 +1640,57 @@ export async function updateProduct(formData: FormData) {
       }
       if (removedMediaUrls.length > 0) {
         await deleteProductMediaUrls(removedMediaUrls)
+      }
+
+      // Fetch the updated variants and their current stock to attach them to the returned object
+      try {
+        const fetchStockDeviceId = userId || 0
+        const updatedVariants = await sql`
+          SELECT
+            pv.id,
+            pv.product_id,
+            pv.name,
+            pv.sku,
+            pv.barcode,
+            pv.cost_price,
+            pv.wholesale_price,
+            pv.price,
+            pv.msp,
+            pv.mrp,
+            pv.shelf,
+            pv.minimum_stock,
+            pv.status,
+            COALESCE((
+              SELECT SUM(pbds.stock)
+              FROM product_batch_device_stock pbds
+              JOIN product_batches pb ON pb.id = pbds.batch_id
+              WHERE pb.product_variant_id = pv.id AND pbds.device_id = ${fetchStockDeviceId}
+            ), 0) AS stock
+          FROM product_variants pv
+          WHERE pv.product_id = ${id}
+          ORDER BY pv.id ASC
+        `
+        
+        updatedProduct.variants = updatedVariants.map((v: any) => ({
+          ...v,
+          stock: Number(v.stock)
+        }))
+        updatedProduct.has_variants = updatedProduct.variants.length > 0
+        
+        if (updatedProduct.has_variants) {
+          const defaultVariant = updatedProduct.variants[0]
+          updatedProduct.stock = updatedProduct.variants.reduce((acc: number, v: any) => acc + (v.stock || 0), 0)
+          updatedProduct.msp = defaultVariant.msp ?? defaultVariant.price ?? updatedProduct.price ?? 0
+          updatedProduct.wholesale_price = defaultVariant.wholesale_price ?? updatedProduct.wholesale_price ?? 0
+          updatedProduct.cost_price = defaultVariant.cost_price ?? updatedProduct.wholesale_price ?? 0
+          updatedProduct.mrp = defaultVariant.mrp ?? defaultVariant.msp ?? updatedProduct.price ?? 0
+          updatedProduct.variant_id = defaultVariant.id
+          updatedProduct.barcode = defaultVariant.barcode ?? null
+        }
+      } catch (err) {
+        console.error("Failed to fetch updated variants for product:", err)
+        updatedProduct.variants = []
+        updatedProduct.has_variants = false
       }
 
       revalidatePath("/dashboard/products")

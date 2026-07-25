@@ -277,7 +277,7 @@ function ProductsExcelTable({
                       {product.category || "Uncategorized"}
                     </td>
                     <td className="whitespace-nowrap px-4 py-2.5 align-top text-right font-medium text-slate-800">
-                      {formatMoney(product.price)}
+                      {formatMoney(product.msp ?? product.price)}
                     </td>
                     {!hideCogs && (
                       <td className="whitespace-nowrap px-4 py-2.5 align-top text-right text-slate-600">

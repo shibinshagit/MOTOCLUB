@@ -339,7 +339,7 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
         name: product.name || "",
         companyName: product.company_name || "",
         category: product.category || "",
-        categoryId: product.category_id || null,
+        categoryId: product.category_id ? Number(product.category_id) : null,
         description: product.description || "",
         price: product.price?.toString() || "",
         wholesalePrice: product.wholesale_price?.toString() || "",
@@ -353,7 +353,24 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
       })
       
       setIsBatchManaged(product.is_batch_managed || false)
-      setVariants(product.variants || [])
+      
+      let initialVariants = product.variants || []
+      if (initialVariants.length === 0) {
+        initialVariants = [{
+          variant_name: "Default Variant",
+          sku: product.sku || "",
+          barcode: product.barcode || "",
+          shelf: product.shelf || "",
+          wholesale_price: product.wholesale_price || 0,
+          price: product.msp || product.price || 0,
+          mrp: product.mrp || 0,
+          stock: product.stock || 0,
+          minimum_stock: 0,
+          batch_number: "AUTO_GENERATE"
+        }]
+      }
+      setVariants(initialVariants)
+      
       setAttributes(parseAttributes(product.attributes))
       setProductLinks(parseProductLinks(product.link))
       let initialImageUrls: string[] = []
@@ -389,7 +406,7 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
       setTrending(Boolean(product.trending))
 
       if (product.category_id) {
-        const category = categories.find((cat) => cat.id === product.category_id)
+        const category = categories.find((cat) => cat.id === Number(product.category_id))
         setSelectedCategory(category || null)
       } else {
         setSelectedCategory(null)
@@ -515,7 +532,7 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
         setCategories(result.data)
         setFilteredCategories(result.data)
         if (product?.category_id) {
-          const category = result.data.find((cat: Category) => cat.id === product.category_id)
+          const category = result.data.find((cat: Category) => cat.id === Number(product.category_id))
           setSelectedCategory(category || null)
         }
       } else {
@@ -894,17 +911,17 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
           errors.variants = "At least one variant is required"
         } else {
           variants.forEach((v, idx) => {
-            const cost = Number.parseFloat(v.wholesale_price);
-            const msp = Number.parseFloat(v.price);
-            const mrp = v.mrp ? Number.parseFloat(v.mrp) : null;
+            const cost = Number(v.wholesale_price);
+            const msp = Number(v.price);
+            const mrp = v.mrp !== null && v.mrp !== undefined && v.mrp !== "" ? Number(v.mrp) : null;
             
             if (isNaN(cost) || cost < 0) errors[`variant_${idx}_cost`] = `Cost Price is required`;
             if (isNaN(msp) || msp < 0) errors[`variant_${idx}_msp`] = `MSP is required`;
             
-            if (!isNaN(cost) && !isNaN(msp) && msp < cost) {
+            if (Number.isFinite(cost) && Number.isFinite(msp) && msp < cost) {
               errors[`variant_${idx}_msp`] = `MSP cannot be lower than Cost Price`;
             }
-            if (mrp !== null && !isNaN(mrp) && !isNaN(msp) && mrp < msp) {
+            if (mrp !== null && Number.isFinite(mrp) && Number.isFinite(msp) && mrp < msp) {
               errors[`variant_${idx}_mrp`] = `MRP cannot be lower than MSP`;
             }
           })
@@ -930,14 +947,12 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
       submitFormData.append("category", formData.category)
       if (formData.categoryId) submitFormData.append("category_id", formData.categoryId.toString())
       submitFormData.append("description", formData.description)
-      
-      
-      
-      
-      
-      
-      
-      
+      submitFormData.append("price", formData.price)
+      submitFormData.append("wholesale_price", formData.wholesalePrice)
+      submitFormData.append("msp", formData.msp)
+      submitFormData.append("stock", formData.stock)
+      submitFormData.append("shelf", formData.shelf)
+      submitFormData.append("barcode", formData.barcode)
       submitFormData.append("suitable_for", formData.suitableFor)
       submitFormData.append("links", JSON.stringify(productLinks))
       const validAttributes = attributes.filter((a) => a.key.trim() && a.value.trim())
