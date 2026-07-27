@@ -1157,7 +1157,12 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
           }
         })
 
-        const parsedReceivedAmount = Number(sale.received_amount) || (sale.status === "Credit" ? 0 : Number(sale.total_amount))
+        let parsedReceivedAmount = Number(sale.received_amount) || 0
+        if (!sale.received_amount && (sale.payment_status === "Paid" || sale.payment_status === "Completed" || sale.status === "Completed")) {
+          // Fallback for very old records that didn't store received_amount properly
+          parsedReceivedAmount = Number(sale.total_amount)
+        }
+        
         const parsedAdvanceAmount = Number(sale.advance_amount) || 0
         const parsedBalanceAmount = Number(sale.balance_amount) || 0
         const mappedShipping = mapSaleShippingFromRecord(sale)
@@ -1290,6 +1295,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
           paymentStatus: paymentStatus,
           paymentMethod: paymentMethod,
           saleDate: date?.toISOString() || new Date().toISOString(),
+          status: status,
           originalStatus: originalSaleStatus,
           discount: discountAmount,
           receivedAmount: receivedAmount,
@@ -1325,6 +1331,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
           userId: userId,
           deviceId: deviceId,
           items: validItems,
+          status: status,
           paymentStatus: paymentStatus,
           paymentMethod: paymentMethod,
           saleDate: date?.toISOString() || new Date().toISOString(),

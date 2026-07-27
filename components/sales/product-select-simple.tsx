@@ -10,7 +10,8 @@ import { getDeviceServices } from "@/app/actions/service-actions"
 import { getCategories } from "@/app/actions/category-actions"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { useSelector } from "react-redux"
 import { selectDeviceId } from "@/store/slices/deviceSlice"
 
@@ -77,6 +78,7 @@ export default function ProductSelectSimple({
   const [categories, setCategories] = useState<any[]>([])
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null)
   const [loadingCategories, setLoadingCategories] = useState(false)
+  const [categoryOpen, setCategoryOpen] = useState(false)
 
   const debouncedSearchTerm = useDebounce(localSearchTerm, 300)
 
@@ -319,10 +321,18 @@ export default function ProductSelectSimple({
   }
 
   const handleCategoryChange = (value: string) => {
-    if (value === "all") {
-      setSelectedCategoryId(null)
-    } else {
-      setSelectedCategoryId(Number(value))
+    let newCategoryId: number | null = null;
+    if (value !== "all") {
+      newCategoryId = Number(value);
+    }
+    setSelectedCategoryId(newCategoryId);
+    setCategoryOpen(false);
+
+    // Clear currently selected product in the modal if it doesn't belong to the new category bounds
+    if (selectedProduct && newCategoryId !== null) {
+      if (selectedProduct.category_id !== newCategoryId) {
+        setSelectedProduct(null);
+      }
     }
   }
 
@@ -377,23 +387,69 @@ export default function ProductSelectSimple({
               {!isServiceMode && (
                 <div className="flex items-center gap-2">
                   <Label className="text-sm font-medium text-gray-700 whitespace-nowrap">Category</Label>
-                  <Select
-                    value={selectedCategoryId?.toString() || "all"}
-                    onValueChange={handleCategoryChange}
-                    disabled={loadingCategories}
-                  >
-                    <SelectTrigger className="h-9 bg-white border-gray-300 text-gray-900">
-                      <SelectValue placeholder="All Categories" />
-                    </SelectTrigger>
-                    <SelectContent className="bg-white border-gray-200">
-                      <SelectItem value="all">All Categories</SelectItem>
-                      {categories.map((category) => (
-                        <SelectItem key={category.id} value={category.id.toString()}>
-                          {category.parent_name ? `${category.parent_name} › ${category.name}` : category.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <Popover open={categoryOpen} onOpenChange={setCategoryOpen}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        role="combobox"
+                        aria-expanded={categoryOpen}
+                        disabled={loadingCategories}
+                        className="w-full justify-between h-9 bg-white border-gray-300 text-gray-900 overflow-hidden font-normal"
+                      >
+                        <span className="truncate text-left w-full flex-1">
+                          {selectedCategoryId
+                            ? (() => {
+                                const cat = categories.find(c => c.id === selectedCategoryId);
+                                return cat ? (cat.parent_name ? `${cat.parent_name} › ${cat.name}` : cat.name) : "All Categories";
+                              })()
+                            : "All Categories"}
+                        </span>
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[350px] max-w-[90vw] p-0 bg-white border-gray-200" align="start">
+                      <Command className="max-h-[300px]">
+                        <CommandInput placeholder="Search categories..." className="h-9" />
+                        <CommandEmpty>No categories found.</CommandEmpty>
+                        <CommandList>
+                          <CommandGroup>
+                            <CommandItem
+                              value="all"
+                              onSelect={() => handleCategoryChange("all")}
+                              className="cursor-pointer"
+                            >
+                              <Check
+                                className={cn(
+                                  "mr-2 h-4 w-4",
+                                  selectedCategoryId === null ? "opacity-100" : "opacity-0"
+                                )}
+                              />
+                              All Categories
+                            </CommandItem>
+                            {categories.map((category) => {
+                              const label = category.parent_name ? `${category.parent_name} › ${category.name}` : category.name;
+                              return (
+                                <CommandItem
+                                  key={category.id}
+                                  value={label}
+                                  onSelect={() => handleCategoryChange(category.id.toString())}
+                                  className="cursor-pointer"
+                                >
+                                  <Check
+                                    className={cn(
+                                      "mr-2 h-4 w-4",
+                                      selectedCategoryId === category.id ? "opacity-100" : "opacity-0"
+                                    )}
+                                  />
+                                  {label}
+                                </CommandItem>
+                              );
+                            })}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
                 </div>
               )}
               <div className="relative">

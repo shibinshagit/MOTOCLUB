@@ -764,7 +764,7 @@ export async function addSale(saleData: any) {
         newPaymentStatus = "Pending"
       }
     }
-    // Ensure Sales Order Status syncs with Payment Status
+    // 1. Ensure Payment Status and amounts are consistent
     if (
       newPaymentStatus.toLowerCase() === "paid" || 
       newPaymentStatus.toLowerCase() === "completed" || 
@@ -775,6 +775,15 @@ export async function addSale(saleData: any) {
         newPaymentStatus = "Paid"
         receivedAmount = total
         balanceAmount = 0
+      }
+    }
+
+    // 2. Automatically derive Sales Status from actual payment state
+    if (newOrderStatus.toLowerCase() !== "cancelled") {
+      if (newPaymentStatus.toLowerCase() === "paid" || (balanceAmount <= 0 && receivedAmount > 0)) {
+        newOrderStatus = "Completed"
+      } else {
+        newOrderStatus = "Pending"
       }
     }
 
@@ -1178,30 +1187,19 @@ function calculateSaleChanges(
     } else {
       newPaymentStatus = "Pending"
     }
-  } else if (["Cash", "Card", "UPI", "Bank Transfer"].includes(newPaymentMethod)) {
-    // Immediate full payments
-    advanceAmount = 0
-    newReceivedAmount = newTotal
-    balanceAmount = 0
-    newPaymentStatus = "Paid"
   } else {
-    // Legacy logic
-    const currentReceived = Number(original.received_amount || 0)
-    const requestedReceived = Number(newData.receivedAmount) || 0
-    const wasAlreadyCredit = original.status?.toLowerCase() === "credit" || original.payment_status?.toLowerCase() === "credit"
+    // For Cash, Card, Bank Transfer, UPI, Credit, etc.
+    const explicitlyReceived = Number(newData.receivedAmount) || 0
+    newReceivedAmount = explicitlyReceived
 
-    if (requestedReceived > newTotal) {
-      throw new Error(`Received amount (${requestedReceived}) cannot be greater than total amount (${newTotal})`)
-    }
-    if (requestedReceived < 0) {
+    if (newReceivedAmount < 0) {
       throw new Error("Received amount cannot be negative")
     }
-
-    if (wasAlreadyCredit && requestedReceived < currentReceived) {
-      throw new Error(`Cannot decrease received amount. Current: ${currentReceived}, Requested: ${requestedReceived}`)
+    if (newReceivedAmount > newTotal) {
+      throw new Error(`Received amount (${newReceivedAmount}) cannot be greater than total amount (${newTotal})`)
     }
-    newReceivedAmount = requestedReceived
-    balanceAmount = newTotal - newReceivedAmount
+
+    balanceAmount = Math.max(0, newTotal - newReceivedAmount)
     
     if (newReceivedAmount >= newTotal && newTotal > 0) {
       newPaymentStatus = "Paid"
@@ -1229,7 +1227,7 @@ function calculateSaleChanges(
 
   let outstandingAmount = balanceAmount
 
-  // Ensure Sales Order Status syncs with Payment Status
+  // 1. Ensure Payment Status and amounts are consistent
   if (
     newPaymentStatus.toLowerCase() === "paid" ||
     newPaymentStatus.toLowerCase() === "completed" ||
@@ -1241,6 +1239,15 @@ function calculateSaleChanges(
       newReceivedAmount = newTotal
       outstandingAmount = 0
       balanceAmount = 0
+    }
+  }
+
+  // 2. Automatically derive Sales Status from actual payment state
+  if (newOrderStatus.toLowerCase() !== "cancelled") {
+    if (newPaymentStatus.toLowerCase() === "paid" || (balanceAmount <= 0 && newReceivedAmount > 0)) {
+      newOrderStatus = "Completed"
+    } else {
+      newOrderStatus = "Pending"
     }
   }
 

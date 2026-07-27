@@ -100,7 +100,7 @@ export function JobCardForm() {
   }
 
   const updateProductRow = (id: string, field: keyof ProductRow, value: any) => {
-    setProducts(products.map((p) => p.id === id ? { ...p, [field]: value } : p))
+    setProducts(prev => prev.map((p) => p.id === id ? { ...p, [field]: value } : p))
   }
 
   const handleProductSelect = (
@@ -113,7 +113,7 @@ export function JobCardForm() {
     productObj?: any
   ) => {
     const defaultCostPrice = productObj?.cost_price || productObj?.variants?.[0]?.cost_price || 0
-    setProducts(products.map((p) => {
+    setProducts(prev => prev.map((p) => {
       if (p.id === rowId) {
         return {
           ...p,

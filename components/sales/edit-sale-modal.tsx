@@ -715,16 +715,16 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
     setIsSubmitting(true)
 
     try {
-      // Calculate the correct received amount based on status
+      // Use the actual received amount entered by the user
       let finalReceivedAmount = receivedAmount
-      if (status === "Completed") {
-        finalReceivedAmount = totalAmount // Full amount for completed
-      } else if (status === "Cancelled") {
-        finalReceivedAmount = 0 // No amount for cancelled
-      } else if (status === "Pending") {
-        finalReceivedAmount = 0 // No amount for pending
+
+      // Determine payment status strictly based on amounts
+      let newPaymentStatus = "Pending"
+      if (finalReceivedAmount >= totalAmount && totalAmount > 0) {
+        newPaymentStatus = "Paid"
+      } else if (finalReceivedAmount > 0) {
+        newPaymentStatus = "Partial"
       }
-      // For Credit status, use the entered receivedAmount
 
       // Prepare the sale data with payment method
       const saleData = {
@@ -733,9 +733,8 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
         userId: userId,
         deviceId: deviceId,
         items: validItems,
-        status: status === "Completed" ? "Completed" : status === "Credit" ? "Completed" : status,
-        paymentStatus:
-          status === "Credit" ? (finalReceivedAmount >= totalAmount ? "Paid" : "Partial") : status === "Completed" ? "Paid" : "Pending",
+        status: status, // Map dropdown directly to fulfillment status
+        paymentStatus: newPaymentStatus,
         paymentMethod: paymentMethod,
         saleDate: date?.toISOString() || new Date().toISOString(),
         originalStatus: originalStatus,
@@ -1110,30 +1109,7 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
                             </div>
                           </div>
 
-                          <div className="space-y-1">
-                            <Label htmlFor="status" className="text-sm font-medium text-gray-700">
-                              Status
-                            </Label>
-                            <Select value={status} onValueChange={setStatus}>
-                              <SelectTrigger className="h-9 bg-white border-gray-300 text-gray-900">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent className="bg-white border-gray-200">
-                                <SelectItem value="Completed" className="text-gray-900">
-                                  Completed
-                                </SelectItem>
-                                <SelectItem value="Credit" className="text-gray-900">
-                                  Credit
-                                </SelectItem>
-                                <SelectItem value="Pending" className="text-gray-900">
-                                  Pending
-                                </SelectItem>
-                                <SelectItem value="Cancelled" className="text-gray-900">
-                                  Cancelled
-                                </SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
+
 
                           <div className="space-y-1">
                             <Label htmlFor="date" className="text-sm font-medium text-gray-700">
@@ -1167,50 +1143,47 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
                           </div>
                         </div>
 
-                        {/* Received Amount - only show for Credit status */}
-                        {status === "Credit" && (
-                          <div className="space-y-1">
-                            <Label
-                              htmlFor="received_amount"
-                              className="text-sm font-medium text-gray-700"
-                            >
-                              Received Amount
-                            </Label>
-                            <Input
-                              id="received_amount"
-                              type="number"
-                              min="0"
-                              max={totalAmount}
-                              step="0.01"
-                              value={receivedAmount}
-                              onChange={(e) => setReceivedAmount(Number.parseFloat(e.target.value) || 0)}
-                              className="h-9 bg-white border-gray-300 text-gray-900"
-                              placeholder="0.00"
-                            />
-                            <p className="text-xs text-gray-500">
-                              Remaining: {currency} {(totalAmount - receivedAmount).toFixed(2)}
-                            </p>
-                          </div>
-                        )}
+                        {/* Received Amount - always visible */}
+                        <div className="space-y-1">
+                          <Label
+                            htmlFor="received_amount"
+                            className="text-sm font-medium text-gray-700"
+                          >
+                            Received Amount
+                          </Label>
+                          <Input
+                            id="received_amount"
+                            type="number"
+                            min="0"
+                            max={totalAmount}
+                            step="0.01"
+                            value={receivedAmount}
+                            onChange={(e) => setReceivedAmount(Number.parseFloat(e.target.value) || 0)}
+                            className="h-9 bg-white border-gray-300 text-gray-900"
+                            placeholder="0.00"
+                          />
+                          <p className="text-xs text-gray-500">
+                            Remaining: {currency} {Math.max(0, totalAmount - receivedAmount).toFixed(2)}
+                          </p>
+                        </div>
                       </div>
 
-                      {/* Payment Method - compact layout when status is Completed */}
-                      {status === "Completed" && (
-                        <div className="space-y-2">
-                          <Label
-                            htmlFor="payment-method"
-                            className="text-sm font-medium text-gray-700 flex items-center"
-                          >
-                            <CreditCard className="h-3.5 w-3.5 mr-1 text-blue-600" />
-                            Payment Method
-                          </Label>
-                          <RadioGroup
-                            value={paymentMethod}
-                            onValueChange={setPaymentMethod}
-                            className="grid grid-cols-3 gap-2"
-                            id="payment-method"
-                          >
-                            <div className="flex items-center space-x-2 bg-white p-2 rounded-md border border-gray-200">
+                      {/* Payment Method - always visible */}
+                      <div className="space-y-2">
+                        <Label
+                          htmlFor="payment-method"
+                          className="text-sm font-medium text-gray-700 flex items-center"
+                        >
+                          <CreditCard className="h-3.5 w-3.5 mr-1 text-blue-600" />
+                          Payment Method
+                        </Label>
+                        <RadioGroup
+                          value={paymentMethod}
+                          onValueChange={setPaymentMethod}
+                          className="grid grid-cols-3 gap-2"
+                          id="payment-method"
+                        >
+                          <div className="flex items-center space-x-2 bg-white p-2 rounded-md border border-gray-200">
                               <RadioGroupItem value="Cash" id="cash" />
                               <Label htmlFor="cash" className="cursor-pointer text-gray-700 text-sm">
                                 Cash
@@ -1264,7 +1237,6 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
                             </div>
                           )}
                         </div>
-                      )}
                     </div>
                   </div>
 
