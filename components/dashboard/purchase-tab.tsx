@@ -322,9 +322,8 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
     setDraftsHydrated(true)
   }, [activeView, purchaseDraftStorageKey, createEmptyDraft])
 
-  useEffect(() => {
-    if (activeView !== "entry" || !draftsHydrated) return
-    const activeDraft = purchaseDrafts.find((d) => d.id === activeDraftId)
+  const restoreDraft = useCallback((draftId: string, drafts: PurchaseDraftSnapshot[]) => {
+    const activeDraft = drafts.find((d) => d.id === draftId)
     if (!activeDraft) return
 
     draftSwitchingRef.current = true
@@ -347,7 +346,13 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
     setTimeout(() => {
       draftSwitchingRef.current = false
     }, 0)
-  }, [activeView, draftsHydrated, activeDraftId, purchaseDrafts, createEmptyProductRow])
+  }, [createEmptyProductRow])
+
+  useEffect(() => {
+    if (activeView !== "entry" || !draftsHydrated) return
+    restoreDraft(activeDraftId, purchaseDrafts)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeView, draftsHydrated, activeDraftId])
 
   useEffect(() => {
     if (activeView !== "entry" || !draftsHydrated || !activeDraftId) return
