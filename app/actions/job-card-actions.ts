@@ -282,3 +282,46 @@ export async function getAllJobCards(deviceId: number) {
     return { success: false, message: error.message || "Failed to fetch all Job Cards", data: [] }
   }
 }
+
+export async function getStaffSalesAnalytics(targetMonthStr?: string) {
+  noStore()
+  try {
+    const session = await getStaffSession()
+    if (!session) {
+      return { success: false, message: "Unauthorized", data: [] }
+    }
+    const staffId = session.staffId
+
+    // Define the date boundaries
+    const date = targetMonthStr ? new Date(targetMonthStr) : new Date()
+    const year = date.getFullYear()
+    const month = date.getMonth() + 1 // 1-12
+    const startDate = `${year}-${String(month).padStart(2, '0')}-01`
+    
+    // Calculate next month to get exclusive upper bound
+    const nextMonth = month === 12 ? 1 : month + 1
+    const nextYear = month === 12 ? year + 1 : year
+    const endDate = `${nextYear}-${String(nextMonth).padStart(2, '0')}-01`
+
+    // Query for total amounts grouped by day, only for this staff's job_card sales
+    const analytics = await sql`
+      SELECT 
+        DATE(sale_date) as date,
+        COUNT(id) as order_count,
+        SUM(total_amount) as sales_amount
+      FROM sales
+      WHERE staff_id = ${staffId}
+        AND (sale_type = 'job_card' OR tracking_id LIKE 'JC-%')
+        AND status != 'Cancelled'
+        AND sale_date >= ${startDate}
+        AND sale_date < ${endDate}
+      GROUP BY DATE(sale_date)
+      ORDER BY date ASC
+    `
+    
+    return { success: true, data: analytics }
+  } catch (error: any) {
+    console.error("getStaffSalesAnalytics Error:", error)
+    return { success: false, message: error.message || "Failed to fetch analytics", data: [] }
+  }
+}

@@ -1,5 +1,5 @@
 "use client"
-import { useState, useEffect } from "react"
+import React, { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -52,7 +52,7 @@ const useDebounce = (value: string, delay: number) => {
 const normalize = (str: string) =>
   (str || "").toLowerCase().replace(/\s+/g, "").trim()
 
-export default function ProductSelectSimple({
+function ProductSelectSimple({
   id,
   value,
   onChange,
@@ -593,3 +593,12 @@ export default function ProductSelectSimple({
     </div>
   )
 }
+
+export default React.memo(ProductSelectSimple, (prev, next) => {
+  return prev.value === next.value && 
+         prev.userId === next.userId && 
+         prev.refreshTrigger === next.refreshTrigger &&
+         prev.usePriceType === next.usePriceType &&
+         prev.allowServices === next.allowServices &&
+         prev.error === next.error
+})

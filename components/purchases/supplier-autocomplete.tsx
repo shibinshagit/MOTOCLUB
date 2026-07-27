@@ -134,8 +134,10 @@ export default function SupplierAutocomplete({
   }
 
   const handleClear = (event: React.MouseEvent) => {
+    event.preventDefault()
     event.stopPropagation()
     onChange("")
+    setSearchTerm("")
   }
 
   const handleCreateSupplier = async (event: React.FormEvent) => {
@@ -207,7 +209,7 @@ export default function SupplierAutocomplete({
         </span>
         <span className="ml-2 flex shrink-0 items-center gap-1">
           {value && (
-            <span
+            <div
               role="button"
               tabIndex={0}
               className="rounded p-0.5 hover:bg-gray-100"
@@ -220,7 +222,7 @@ export default function SupplierAutocomplete({
               }}
             >
               <X className={cn("text-gray-500", isCompact ? "h-3 w-3" : "h-3.5 w-3.5")} />
-            </span>
+            </div>
           )}
           <ChevronsUpDown className={cn("opacity-50", isCompact ? "h-3 w-3" : "h-4 w-4")} />
         </span>

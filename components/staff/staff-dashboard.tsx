@@ -24,12 +24,14 @@ import StaffAttendance from "./staff-attendance"
 import StaffInventoryTab from "./staff-inventory-tab"
 import { JobCardForm, TodaySalesList } from "./job-card"
 import { StaffCustomerTab } from "./customers/staff-customer-tab"
+import { StaffSalesChart } from "./staff-sales-chart"
 
 type Tab = "home" | "sales" | "create-sale" | "customers" | "attendance" | "inventory"
 
 export default function StaffDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>("home")
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+  const [chartSummary, setChartSummary] = useState({ sales: 0, orders: 0 })
   const router = useRouter()
   const { toast } = useToast()
   const dispatch = useAppDispatch()
@@ -175,13 +177,22 @@ export default function StaffDashboard() {
         <main className="flex-1 overflow-y-auto bg-gray-50 p-6">
           <div className="max-w-7xl mx-auto">
             {activeTab === "home" && (
-              <div>
-                <h1 className="text-2xl font-semibold text-gray-900 mb-6">Welcome to Staff Portal</h1>
+              <div className="space-y-6">
+                <h1 className="text-2xl font-semibold text-gray-900">Welcome to Staff Portal</h1>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                   <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
                     <h3 className="text-lg font-medium text-gray-900">Today's Performance</h3>
                     <p className="mt-2 text-sm text-gray-500">View your sales and activity for today.</p>
                     <Button className="mt-4" variant="outline" onClick={() => setActiveTab("sales")}>View Sales</Button>
+                  </div>
+                  <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex flex-col justify-between">
+                    <div>
+                      <h3 className="text-lg font-medium text-gray-900">This Month's Sales</h3>
+                      <p className="mt-2 text-3xl font-bold text-gray-900">
+                        {new Intl.NumberFormat("en-US", { style: "currency", currency: device?.currency || "INR", maximumFractionDigits: 0 }).format(chartSummary.sales)}
+                      </p>
+                      <p className="text-sm text-gray-500 mt-1">{chartSummary.orders} Total Orders</p>
+                    </div>
                   </div>
                   <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
                     <h3 className="text-lg font-medium text-gray-900">New Transaction</h3>
@@ -192,6 +203,13 @@ export default function StaffDashboard() {
                       router.push("/dashboard?tab=sale")
                     }}>Open POS</Button>
                   </div>
+                </div>
+
+                <div className="w-full">
+                  <StaffSalesChart 
+                    currency={device?.currency || "INR"} 
+                    onSummaryUpdate={setChartSummary} 
+                  />
                 </div>
               </div>
             )}
