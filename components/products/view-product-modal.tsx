@@ -368,9 +368,9 @@ export function ProductDetailPanel({
       <span className="ml-2 text-[11px] font-normal text-slate-500">Code: {encodedWholesalePrice}</span>
     ) : null
     return (
-      <span className="group/cost relative inline-block">
-        <span className="group-hover/cost:hidden">****</span>
-        <span className="hidden group-hover/cost:inline">
+      <span className="group/cost relative inline-grid items-center justify-items-start">
+        <span className="col-start-1 row-start-1 group-hover/cost:opacity-0 transition-opacity">****</span>
+        <span className="col-start-1 row-start-1 opacity-0 group-hover/cost:opacity-100 transition-opacity">
           {costValue}
           {code}
         </span>

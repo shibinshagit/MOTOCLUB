@@ -3,11 +3,11 @@ import { fetchSharedProductByToken } from "@/lib/product-share-data"
 import { ProductPublicView } from "@/components/products/product-public-view"
 
 type ShareProductPageProps = {
-  params: Promise<{ token: string }>
+  params: { token: string }
 }
 
 export async function generateMetadata({ params }: ShareProductPageProps): Promise<Metadata> {
-  const { token } = await params
+  const { token } = params
   const result = await fetchSharedProductByToken(token, { recordView: false })
 
   if (!result.success || !result.data) {
@@ -25,7 +25,7 @@ export async function generateMetadata({ params }: ShareProductPageProps): Promi
 }
 
 export default async function ShareProductPage({ params }: ShareProductPageProps) {
-  const { token } = await params
+  const { token } = params
   const result = await fetchSharedProductByToken(token, { recordView: true })
 
   if (!result.success || !result.data) {

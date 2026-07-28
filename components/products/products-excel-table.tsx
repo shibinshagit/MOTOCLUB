@@ -281,9 +281,9 @@ function ProductsExcelTable({
                     </td>
                     {!hideCogs && (
                       <td className="whitespace-nowrap px-4 py-2.5 align-top text-right text-slate-600">
-                        <span className="group/cost relative inline-block">
-                          <span className="group-hover/cost:hidden">****</span>
-                          <span className="hidden group-hover/cost:inline">{formatMoney(product.wholesale_price || 0)}</span>
+                        <span className="group/cost relative inline-grid items-center justify-items-end">
+                          <span className="col-start-1 row-start-1 group-hover/cost:opacity-0">****</span>
+                          <span className="col-start-1 row-start-1 opacity-0 group-hover/cost:opacity-100">{formatMoney(product.wholesale_price || 0)}</span>
                         </span>
                       </td>
                     )}
