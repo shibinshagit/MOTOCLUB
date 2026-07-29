@@ -1085,6 +1085,7 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
                           </Label>
                           <CustomerSelectSimple
                             value={customerId}
+                            initialCustomerName={customerName}
                             onChange={(value, name) => {
                               setCustomerId(value)
                               if (name) setCustomerName(name)

@@ -27,6 +27,21 @@ export async function getCustomerById(customerId: number) {
   }
 }
 
+export async function getCustomerAddresses(customerId: number) {
+  if (!customerId) return { success: false, data: [] }
+  try {
+    const addresses = await sql`
+      SELECT * FROM customer_addresses
+      WHERE customer_id = ${customerId}
+      ORDER BY is_default DESC, created_at DESC
+    `
+    return { success: true, data: addresses }
+  } catch (error) {
+    console.error("getCustomerAddresses error:", error)
+    return { success: false, data: [] }
+  }
+}
+
 export async function getCustomers(userId?: number, limit?: number, searchTerm?: string) {
   // Reset connection state to allow a fresh attempt
   resetConnectionState()
@@ -167,6 +182,8 @@ export async function addCustomer(formData: FormData) {
   const userId = Number.parseInt(formData.get("user_id") as string)
 
   const city = (formData.get("city") as string) || null
+  const district = (formData.get("district") as string) || null
+  const state = (formData.get("state") as string) || null
   const street = (formData.get("street") as string) || null
   const landmark = (formData.get("landmark") as string) || null
   const address_type = (formData.get("address_type") as string) || null
@@ -194,12 +211,23 @@ export async function addCustomer(formData: FormData) {
 
   try {
     const result = await sql`
-    INSERT INTO customers (name, email, phone, address, created_by, city, street, landmark, address_type, pincode)
-    VALUES (${name}, ${email}, ${phone}, ${finalAddress}, ${userId}, ${city}, ${street}, ${landmark}, ${address_type}, ${pincode})
+    INSERT INTO customers (name, email, phone, address, created_by, city, district, state, street, landmark, address_type, pincode)
+    VALUES (${name}, ${email}, ${phone}, ${finalAddress}, ${userId}, ${city}, ${district}, ${state}, ${street}, ${landmark}, ${address_type}, ${pincode})
     RETURNING *
   `
 
     if (result.length > 0) {
+      const customerId = result[0].id
+      if (city || street || landmark || pincode || district || state) {
+        await sql`
+          INSERT INTO customer_addresses (
+            customer_id, phone, city, district, state, pincode, street, landmark, address_type, is_default
+          ) VALUES (
+            ${customerId}, ${phone || null}, ${city}, ${district}, ${state}, ${pincode}, ${street}, ${landmark}, ${address_type || 'Home'}, true
+          )
+        `
+      }
+
       revalidatePath("/dashboard")
       return { success: true, message: "Customer added successfully", data: result[0] }
     }
@@ -409,5 +437,60 @@ export async function deleteCustomer(id: number) {
       success: false,
       message: `Database error: ${getLastError()?.message || "Unknown error"}. Please try again later.`,
     }
+  }
+}
+
+export async function addSecondaryCustomerAddress(customerId: number, data: any) {
+  if (!customerId) return { success: false, message: "Customer ID is required" }
+  resetConnectionState()
+
+  try {
+    const isDefault = data.is_default === true
+
+    if (isDefault) {
+      await sql`UPDATE customer_addresses SET is_default = false WHERE customer_id = ${customerId}`
+    } else {
+      const existing = await sql`SELECT id FROM customer_addresses WHERE customer_id = ${customerId} LIMIT 1`
+      if (existing.length === 0) {
+        data.is_default = true // Force default if it's the first address
+      }
+    }
+
+    const result = await sql`
+      INSERT INTO customer_addresses (
+        customer_id, phone, city, district, state, pincode, street, landmark, address_type, is_default
+      ) VALUES (
+        ${customerId},
+        ${data.phone || null},
+        ${data.city || null},
+        ${data.district || null},
+        ${data.state || null},
+        ${data.pincode || null},
+        ${data.street || null},
+        ${data.landmark || null},
+        ${data.address_type || 'Other'},
+        ${data.is_default === true}
+      )
+      RETURNING *
+    `
+
+    return { success: true, data: result[0], message: "Address added successfully" }
+  } catch (error) {
+    console.error("addSecondaryCustomerAddress error:", error)
+    return { success: false, message: "Failed to add address" }
+  }
+}
+
+export async function setDefaultCustomerAddress(customerId: number, addressId: number) {
+  if (!customerId || !addressId) return { success: false, message: "Invalid parameters" }
+  resetConnectionState()
+
+  try {
+    await sql`UPDATE customer_addresses SET is_default = false WHERE customer_id = ${customerId}`
+    await sql`UPDATE customer_addresses SET is_default = true WHERE id = ${addressId} AND customer_id = ${customerId}`
+    return { success: true, message: "Default address updated" }
+  } catch (error) {
+    console.error("setDefaultCustomerAddress error:", error)
+    return { success: false, message: "Failed to update default address" }
   }
 }

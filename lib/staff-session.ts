@@ -10,6 +10,7 @@ export interface StaffSessionPayload extends JWTPayload {
   staffId: number
   companyId: number | null
   deviceId: number
+  deviceName?: string
   branchId: number
   role: string
   phoneNumber: string

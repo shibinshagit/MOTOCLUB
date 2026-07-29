@@ -8,6 +8,9 @@ import { getStaffInventory } from "@/app/actions/staff-inventory-actions"
 import { useToast } from "@/components/ui/use-toast"
 import { cn } from "@/lib/utils"
 import StaffViewProductModal from "./staff-view-product-modal"
+import { ShareProductButton } from "@/components/shared/share-product-button"
+import { useSelector } from "react-redux"
+import { selectDeviceCurrency, selectDeviceId } from "@/store/slices/deviceSlice"
 
 interface StaffInventoryTabProps {}
 
@@ -32,11 +35,13 @@ function SummaryCard({ title, value, icon, tone }: any) {
 }
 
 export default function StaffInventoryTab({}: StaffInventoryTabProps) {
+  const { toast } = useToast()
+  const currency = useSelector(selectDeviceCurrency)
+  const deviceId = useSelector(selectDeviceId)
   const [products, setProducts] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState("")
   const [selectedProduct, setSelectedProduct] = useState<any>(null)
-  const { toast } = useToast()
 
   const loadInventory = async (search?: string) => {
     setLoading(true)
@@ -135,19 +140,20 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
                   <th className="px-6 py-4 font-semibold text-right">MSP</th>
                   <th className="px-6 py-4 font-semibold text-right">Available Stock</th>
                   <th className="px-6 py-4 font-semibold text-center">Status</th>
+                  <th className="px-6 py-4 font-semibold text-center">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {loading && products.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="px-6 py-12 text-center text-slate-500">
+                    <td colSpan={9} className="px-6 py-12 text-center text-slate-500">
                       <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2 text-indigo-500" />
                       Loading inventory...
                     </td>
                   </tr>
                 ) : products.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="px-6 py-12 text-center text-slate-500">
+                    <td colSpan={9} className="px-6 py-12 text-center text-slate-500">
                       <Package className="h-8 w-8 mx-auto mb-2 text-slate-300" />
                       No products found
                     </td>
@@ -232,6 +238,15 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
                             IN STOCK
                           </span>
                         )}
+                      </td>
+                      <td className="px-6 py-3 text-center" onClick={(e) => e.stopPropagation()}>
+                        <ShareProductButton 
+                          product={product} 
+                          currency={currency} 
+                          currentDeviceId={deviceId || undefined} 
+                          className="h-8 border-violet-200 bg-white px-3 text-xs text-violet-700 hover:bg-violet-50"
+                          label="Share" 
+                        />
                       </td>
                     </tr>
                   ))

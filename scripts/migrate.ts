@@ -165,6 +165,26 @@ async function createTables() {
     `
   })
 
+  await run("customer_addresses", async () => {
+    await sql`
+      CREATE TABLE IF NOT EXISTS customer_addresses (
+        id SERIAL PRIMARY KEY,
+        customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+        phone VARCHAR(50),
+        city VARCHAR(255),
+        district VARCHAR(255),
+        state VARCHAR(255),
+        pincode VARCHAR(20),
+        street TEXT,
+        landmark VARCHAR(255),
+        address_type VARCHAR(50),
+        is_default BOOLEAN DEFAULT false,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `
+  })
+
   await run("product_categories", async () => {
     await sql`
       CREATE TABLE IF NOT EXISTS product_categories (
@@ -740,6 +760,10 @@ async function upgradeLegacyColumns() {
     ["customers.landmark", () => sql`ALTER TABLE customers ADD COLUMN IF NOT EXISTS landmark VARCHAR(255)`],
     ["customers.address_type", () => sql`ALTER TABLE customers ADD COLUMN IF NOT EXISTS address_type VARCHAR(50)`],
     ["customers.pincode", () => sql`ALTER TABLE customers ADD COLUMN IF NOT EXISTS pincode VARCHAR(20)`],
+    ["customers.district", () => sql`ALTER TABLE customers ADD COLUMN IF NOT EXISTS district VARCHAR(255)`],
+    ["customers.state", () => sql`ALTER TABLE customers ADD COLUMN IF NOT EXISTS state VARCHAR(255)`],
+    ["sales.shipping_district", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS shipping_district VARCHAR(255)`],
+    ["sales.shipping_state", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS shipping_state VARCHAR(255)`],
   ]
 
   for (const [label, fn] of columns) {

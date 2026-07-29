@@ -266,6 +266,7 @@ export default function StaffViewProductModal({
                         <th className="whitespace-nowrap px-4 py-2.5 text-left">Barcode</th>
                         <th className="whitespace-nowrap px-4 py-2.5 text-right">Selling Price</th>
                         <th className="whitespace-nowrap px-4 py-2.5 text-right">Available Stock</th>
+                        <th className="whitespace-nowrap px-4 py-2.5 text-center">Action</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -284,6 +285,22 @@ export default function StaffViewProductModal({
                             {v.selling_price !== null && v.selling_price !== undefined ? `${currency} ${Number(v.selling_price).toFixed(2)}` : `Default (${formatMoney(retailPrice)})`}
                           </td>
                           <td className="px-4 py-2.5 text-right font-semibold text-emerald-700">{v.device_stock || 0}</td>
+                          <td className="px-4 py-2.5 text-center">
+                            <ShareProductButton 
+                              product={{
+                                ...product,
+                                variantName: v.variant_name || v.name,
+                                sellingPrice: v.selling_price !== null && v.selling_price !== undefined ? v.selling_price : retailPrice,
+                                stock: v.device_stock || 0,
+                                barcode: v.barcode || product.barcode,
+                                sku: v.sku || product.sku
+                              }} 
+                              currency={currency} 
+                              currentDeviceId={currentDeviceId} 
+                              className="h-8 border-violet-200 bg-white px-3 text-xs text-violet-700 hover:bg-violet-50"
+                              label="Share" 
+                            />
+                          </td>
                         </tr>
                       ))}
                     </tbody>

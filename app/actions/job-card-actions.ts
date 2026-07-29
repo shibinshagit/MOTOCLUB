@@ -21,10 +21,15 @@ export interface JobCardInput {
 
   // Structured shipping address
   shippingCity?: string
+  shippingDistrict?: string
+  shippingState?: string
   shippingStreet?: string
   shippingLandmark?: string
   shippingAddressType?: string
   shippingPincode?: string
+  shippingPhone?: string
+
+  courierPaidExtra?: number
 
   products: JobCardProductInput[]
 }
@@ -42,7 +47,7 @@ export async function createJobCard(input: JobCardInput) {
     // 1. Resolve Customer
     let resolvedCustomerId = input.customerId
     let customerNameOverride = input.customerName
-    let customerPhoneOverride = input.customerPhone || null
+    let customerPhoneOverride = input.shippingPhone || input.customerPhone || null
 
     if (!resolvedCustomerId && input.customerName) {
       // Create new customer with structured address fields
@@ -50,6 +55,8 @@ export async function createJobCard(input: JobCardInput) {
       formData.append("name", input.customerName)
       formData.append("phone", input.customerPhone || "")
       formData.append("city", input.shippingCity || "")
+      formData.append("district", input.shippingDistrict || "")
+      formData.append("state", input.shippingState || "")
       formData.append("street", input.shippingStreet || "")
       formData.append("landmark", input.shippingLandmark || "")
       formData.append("address_type", input.shippingAddressType || "Home")
@@ -59,6 +66,39 @@ export async function createJobCard(input: JobCardInput) {
       const res = await addCustomer(formData)
       if (res.success && res.data) {
         resolvedCustomerId = res.data.id
+      }
+    }
+
+    // Save/Update Customer Address in customer_addresses if we have address data
+    if (resolvedCustomerId && (input.shippingCity || input.shippingStreet || input.shippingPincode || input.shippingDistrict || input.shippingState)) {
+      // Check if exact address exists for this customer
+      const existingAddress = await sql`
+        SELECT id FROM customer_addresses 
+        WHERE customer_id = ${resolvedCustomerId} 
+          AND (street = ${input.shippingStreet || null} OR (street IS NULL AND CAST(${input.shippingStreet || null} AS text) IS NULL))
+          AND (city = ${input.shippingCity || null} OR (city IS NULL AND CAST(${input.shippingCity || null} AS text) IS NULL))
+        LIMIT 1
+      `
+      
+      if (existingAddress.length === 0) {
+        // We'll mark the new address as default and reset others if needed
+        await sql`UPDATE customer_addresses SET is_default = false WHERE customer_id = ${resolvedCustomerId}`
+        await sql`
+          INSERT INTO customer_addresses (
+            customer_id, phone, city, district, state, pincode, street, landmark, address_type, is_default
+          ) VALUES (
+            ${resolvedCustomerId},
+            ${input.shippingPhone || input.customerPhone || null},
+            ${input.shippingCity || null},
+            ${input.shippingDistrict || null},
+            ${input.shippingState || null},
+            ${input.shippingPincode || null},
+            ${input.shippingStreet || null},
+            ${input.shippingLandmark || null},
+            ${input.shippingAddressType || 'Home'},
+            true
+          )
+        `
       }
     }
 
@@ -102,10 +142,13 @@ export async function createJobCard(input: JobCardInput) {
         customer_name_override,
         customer_phone_override,
         shipping_city,
+        shipping_district,
+        shipping_state,
         shipping_street,
         shipping_landmark,
         shipping_address_type,
         shipping_pincode,
+        courier_paid_extra,
         created_by,
         advance_amount,
         balance_amount
@@ -123,10 +166,13 @@ export async function createJobCard(input: JobCardInput) {
         ${customerNameOverride},
         ${customerPhoneOverride},
         ${input.shippingCity || null},
+        ${input.shippingDistrict || null},
+        ${input.shippingState || null},
         ${input.shippingStreet || null},
         ${input.shippingLandmark || null},
         ${input.shippingAddressType || 'Home'},
         ${input.shippingPincode || null},
+        ${input.courierPaidExtra || 0},
         ${deviceId},
         0,
         ${totalAmount}
@@ -165,7 +211,7 @@ export async function createJobCard(input: JobCardInput) {
   }
 }
 
-export async function getTodayJobCards() {
+export async function getTodayJobCards(monthStr?: string, searchTerm?: string) {
   noStore()
   try {
     const session = await getStaffSession()
@@ -177,20 +223,73 @@ export async function getTodayJobCards() {
 
     // Retrieve today's sales with status='Pending' (Job Cards)
     // We want the sale items as well.
-    const sales = await sql`
-      SELECT 
-        s.*,
-        COALESCE(c.name, s.customer_name_override) as customer_name,
-        COALESCE(c.phone, s.customer_phone_override) as customer_phone
-      FROM sales s
-      LEFT JOIN customers c ON s.customer_id = c.id
-      WHERE s.device_id = ${deviceId}
-        AND DATE(s.sale_date) = CURRENT_DATE
-        AND s.status != 'Cancelled'
-        AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%')
-        AND (s.delivery_status IS NULL OR s.delivery_status NOT IN ('Delivered', 'Returned'))
-      ORDER BY s.created_at DESC
-    `
+    // Handle search pattern
+    const searchPattern = searchTerm ? `%${searchTerm.toLowerCase()}%` : null;
+    const startDate = (monthStr && monthStr.match(/^\d{4}-\d{2}$/)) ? monthStr + '-01' : null;
+
+    let sales;
+
+    if (startDate && searchPattern) {
+      sales = await sql`
+        SELECT s.*, COALESCE(c.name, s.customer_name_override) as customer_name, COALESCE(c.phone, s.customer_phone_override) as customer_phone
+        FROM sales s LEFT JOIN customers c ON s.customer_id = c.id
+        WHERE s.device_id = ${deviceId}
+          AND s.sale_date >= ${startDate}::date
+          AND s.sale_date < (${startDate}::date + interval '1 month')
+          AND s.status != 'Cancelled'
+          AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%')
+          AND (s.delivery_status IS NULL OR s.delivery_status NOT IN ('Delivered', 'Returned'))
+          AND (
+            LOWER(COALESCE(c.name, s.customer_name_override)) LIKE ${searchPattern}
+            OR LOWER(COALESCE(c.phone, s.customer_phone_override)) LIKE ${searchPattern}
+            OR LOWER(s.tracking_id) LIKE ${searchPattern}
+            OR CAST(s.id AS TEXT) LIKE ${searchPattern}
+          )
+        ORDER BY s.created_at DESC
+      `
+    } else if (startDate && !searchPattern) {
+      sales = await sql`
+        SELECT s.*, COALESCE(c.name, s.customer_name_override) as customer_name, COALESCE(c.phone, s.customer_phone_override) as customer_phone
+        FROM sales s LEFT JOIN customers c ON s.customer_id = c.id
+        WHERE s.device_id = ${deviceId}
+          AND s.sale_date >= ${startDate}::date
+          AND s.sale_date < (${startDate}::date + interval '1 month')
+          AND s.status != 'Cancelled'
+          AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%')
+          AND (s.delivery_status IS NULL OR s.delivery_status NOT IN ('Delivered', 'Returned'))
+        ORDER BY s.created_at DESC
+      `
+    } else if (!startDate && searchPattern) {
+      sales = await sql`
+        SELECT s.*, COALESCE(c.name, s.customer_name_override) as customer_name, COALESCE(c.phone, s.customer_phone_override) as customer_phone
+        FROM sales s LEFT JOIN customers c ON s.customer_id = c.id
+        WHERE s.device_id = ${deviceId}
+          AND s.sale_date >= date_trunc('month', CURRENT_DATE)
+          AND s.sale_date < date_trunc('month', CURRENT_DATE) + interval '1 month'
+          AND s.status != 'Cancelled'
+          AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%')
+          AND (s.delivery_status IS NULL OR s.delivery_status NOT IN ('Delivered', 'Returned'))
+          AND (
+            LOWER(COALESCE(c.name, s.customer_name_override)) LIKE ${searchPattern}
+            OR LOWER(COALESCE(c.phone, s.customer_phone_override)) LIKE ${searchPattern}
+            OR LOWER(s.tracking_id) LIKE ${searchPattern}
+            OR CAST(s.id AS TEXT) LIKE ${searchPattern}
+          )
+        ORDER BY s.created_at DESC
+      `
+    } else {
+      sales = await sql`
+        SELECT s.*, COALESCE(c.name, s.customer_name_override) as customer_name, COALESCE(c.phone, s.customer_phone_override) as customer_phone
+        FROM sales s LEFT JOIN customers c ON s.customer_id = c.id
+        WHERE s.device_id = ${deviceId}
+          AND s.sale_date >= date_trunc('month', CURRENT_DATE)
+          AND s.sale_date < date_trunc('month', CURRENT_DATE) + interval '1 month'
+          AND s.status != 'Cancelled'
+          AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%')
+          AND (s.delivery_status IS NULL OR s.delivery_status NOT IN ('Delivered', 'Returned'))
+        ORDER BY s.created_at DESC
+      `
+    }
 
     // Fetch items for these sales
     const saleIds = sales.map((s: any) => s.id)

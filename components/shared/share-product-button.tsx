@@ -15,9 +15,10 @@ interface ShareProductButtonProps {
   currency?: string
   currentDeviceId?: number
   className?: string
+  label?: string
 }
 
-export function ShareProductButton({ product, currency = "AED", currentDeviceId, className }: ShareProductButtonProps) {
+export function ShareProductButton({ product, currency = "AED", currentDeviceId, className, label = "Share Product" }: ShareProductButtonProps) {
   const { toast } = useToast()
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [includeStock, setIncludeStock] = useState(false)
@@ -133,7 +134,7 @@ export function ShareProductButton({ product, currency = "AED", currentDeviceId,
         ) : (
           <Share2 className="mr-1.5 h-3.5 w-3.5" />
         )}
-        Share Product
+        {label}
       </Button>
 
       <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>

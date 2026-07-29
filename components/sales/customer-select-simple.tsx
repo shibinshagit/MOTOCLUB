@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Check, ChevronsUpDown, Loader2, Search, User, X, Plus } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { getCustomers, addCustomer } from "@/app/actions/customer-actions"
+import { getCustomers, addCustomer, getCustomerById } from "@/app/actions/customer-actions"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 
@@ -14,6 +14,7 @@ import { addCustomer as addCustomerAction } from "@/store/slices/customerSlice"
 interface CustomerSelectSimpleProps {
   id?: string
   value: number | null
+  initialCustomerName?: string
   onChange: (value: number, name: string, customerObj?: any) => void
   onAddNew: () => void
   onCreateCustomer?: (name: string, phone: string) => Promise<{ success: boolean; data?: any; message?: string }>
@@ -24,6 +25,7 @@ interface CustomerSelectSimpleProps {
 export default function CustomerSelectSimple({
   id,
   value,
+  initialCustomerName,
   onChange,
   onAddNew,
   onCreateCustomer,
@@ -120,13 +122,42 @@ export default function CustomerSelectSimple({
 
   // Set selected customer when external value changes
   useEffect(() => {
-    if (value) {
-      const c = customers.find((c) => Number(c.id) === Number(value))
-      setSelectedCustomer(c ?? null)
-    } else {
-      setSelectedCustomer(null)
+    let isMounted = true
+
+    const resolveCustomer = async () => {
+      if (value) {
+        const c = customers.find((c) => Number(c.id) === Number(value))
+        if (c) {
+          setSelectedCustomer(c)
+        } else {
+          // Temporarily use initialCustomerName to prevent "Select customer..." flash if provided
+          if (initialCustomerName) {
+            setSelectedCustomer({ id: value, name: initialCustomerName })
+          }
+          
+          // Only attempt to fetch if customers are actually loaded (not initially empty)
+          // or if we have a value but no customers array yet, we can try to fetch it.
+          try {
+            const res = await getCustomerById(Number(value))
+            if (res.success && res.data && isMounted) {
+              setSelectedCustomer(res.data)
+              // We could theoretically inject it into `customers`, but setting selectedCustomer is enough for the display
+            }
+          } catch (e) {
+            console.error("Failed to fetch missing customer for select:", e)
+          }
+        }
+      } else {
+        setSelectedCustomer(null)
+      }
     }
-  }, [value, customers])
+
+    resolveCustomer()
+
+    return () => {
+      isMounted = false
+    }
+  }, [value, customers, initialCustomerName])
 
   // Click outside to close
   useEffect(() => {

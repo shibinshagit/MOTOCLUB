@@ -20,6 +20,7 @@ interface ProductSelectSimpleProps {
   value: number | null
   onChange: (value: number, name: string, price: number, wholesalePrice?: number, stock?: number, productObj?: any) => void
   onAddNew?: () => void
+
   onAddNewService?: () => void
   userId?: number
   refreshTrigger?: boolean
@@ -28,6 +29,7 @@ interface ProductSelectSimpleProps {
   allowServices?: boolean
   searchBufferSize?: number
   error?: string
+  hideServiceIcon?: boolean
 }
 
 // Helper: truncate names
@@ -65,6 +67,7 @@ function ProductSelectSimple({
   allowServices = true,
   searchBufferSize = 50,
   error,
+  hideServiceIcon = false,
 }: ProductSelectSimpleProps) {
   const deviceId = useSelector(selectDeviceId)
   const [open, setOpen] = useState(false)
@@ -350,10 +353,12 @@ function ProductSelectSimple({
         <div className="flex items-center min-w-0 flex-1">
           {selectedProduct ? (
             <>
-              {isServiceMode || (selectedProduct && "category" in selectedProduct) ? (
-                <Wrench className="mr-2 h-4 w-4 text-green-600 flex-shrink-0" />
-              ) : (
-                <Package className="mr-2 h-4 w-4 text-blue-600 flex-shrink-0" />
+              {!hideServiceIcon && (
+                isServiceMode || (selectedProduct && "category" in selectedProduct) ? (
+                  <Wrench className="mr-2 h-4 w-4 text-green-600 flex-shrink-0" />
+                ) : (
+                  <Package className="mr-2 h-4 w-4 text-blue-600 flex-shrink-0" />
+                )
               )}
               <span className="truncate" title={selectedProduct.name}>
                 {truncateName(selectedProduct.name)}
@@ -361,10 +366,12 @@ function ProductSelectSimple({
             </>
           ) : (
             <>
-              {isServiceMode ? (
-                <Wrench className="mr-2 h-4 w-4 text-green-600 flex-shrink-0" />
-              ) : (
-                <Package className="mr-2 h-4 w-4 text-blue-600 flex-shrink-0" />
+              {!hideServiceIcon && (
+                isServiceMode ? (
+                  <Wrench className="mr-2 h-4 w-4 text-green-600 flex-shrink-0" />
+                ) : (
+                  <Package className="mr-2 h-4 w-4 text-blue-600 flex-shrink-0" />
+                )
               )}
               <span className="truncate">Select {isServiceMode ? "service" : "product"}...</span>
             </>
@@ -600,5 +607,6 @@ export default React.memo(ProductSelectSimple, (prev, next) => {
          prev.refreshTrigger === next.refreshTrigger &&
          prev.usePriceType === next.usePriceType &&
          prev.allowServices === next.allowServices &&
-         prev.error === next.error
+         prev.error === next.error &&
+         prev.hideServiceIcon === next.hideServiceIcon
 })

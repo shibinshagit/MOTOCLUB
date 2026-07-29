@@ -11,7 +11,8 @@ import {
   Menu,
   X,
   CreditCard,
-  Package
+  Package,
+  Plus
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { staffLogout } from "@/app/actions/staff-auth-actions"
@@ -22,15 +23,17 @@ import { useToast } from "@/components/ui/use-toast"
 import { BrandLogo } from "@/components/brand-logo"
 import StaffAttendance from "./staff-attendance"
 import StaffInventoryTab from "./staff-inventory-tab"
-import { JobCardForm, TodaySalesList } from "./job-card"
+import { TodaySalesList } from "./job-card"
+import { CreateJobCardModal } from "./job-card/create-job-card-modal"
 import { StaffCustomerTab } from "./customers/staff-customer-tab"
 import { StaffSalesChart } from "./staff-sales-chart"
 
-type Tab = "home" | "sales" | "create-sale" | "customers" | "attendance" | "inventory"
+type Tab = "home" | "sales" | "customers" | "attendance" | "inventory"
 
 export default function StaffDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>("home")
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+  const [isJobCardModalOpen, setIsJobCardModalOpen] = useState(false)
   const [chartSummary, setChartSummary] = useState({ sales: 0, orders: 0 })
   const router = useRouter()
   const { toast } = useToast()
@@ -70,26 +73,7 @@ export default function StaffDashboard() {
         <LayoutDashboard className="mr-3 h-5 w-5" />
         Dashboard Home
       </Button>
-      <Button
-        variant={activeTab === "sales" ? "secondary" : "ghost"}
-        className="w-full justify-start"
-        onClick={() => { setActiveTab("sales"); setIsMobileMenuOpen(false) }}
-      >
-        <CreditCard className="mr-3 h-5 w-5" />
-        Today's Sales
-      </Button>
-      <Button
-        variant={activeTab === "create-sale" ? "secondary" : "ghost"}
-        className="w-full justify-start"
-        onClick={() => {
-          // Alternatively, this could link out to the main POS 
-          setActiveTab("create-sale"); 
-          setIsMobileMenuOpen(false)
-        }}
-      >
-        <ShoppingCart className="mr-3 h-5 w-5" />
-        Create Job Card
-      </Button>
+
       <Button
         variant={activeTab === "customers" ? "secondary" : "ghost"}
         className="w-full justify-start"
@@ -127,6 +111,11 @@ export default function StaffDashboard() {
           </div>
           <div className="px-4 pb-4">
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Staff Portal</p>
+            {device?.name && (
+              <p className="text-sm font-medium text-slate-800 mt-1 truncate" title={device.name}>
+                {device.name}
+              </p>
+            )}
           </div>
           <NavigationMenu />
         </div>
@@ -160,6 +149,14 @@ export default function StaffDashboard() {
               <div className="flex-shrink-0 flex items-center px-4 mb-5">
                 <BrandLogo />
               </div>
+              <div className="px-4 pb-4">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Staff Portal</p>
+                {device?.name && (
+                  <p className="text-sm font-medium text-slate-800 mt-1 truncate" title={device.name}>
+                    {device.name}
+                  </p>
+                )}
+              </div>
               <NavigationMenu />
             </div>
             <div className="flex-shrink-0 flex border-t border-gray-200 p-4">
@@ -178,7 +175,12 @@ export default function StaffDashboard() {
           <div className="max-w-7xl mx-auto">
             {activeTab === "home" && (
               <div className="space-y-6">
-                <h1 className="text-2xl font-semibold text-gray-900">Welcome to Staff Portal</h1>
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                  <h1 className="text-2xl font-semibold text-gray-900">Welcome to Staff Portal</h1>
+                  <Button onClick={() => setIsJobCardModalOpen(true)} className="whitespace-nowrap">
+                    <Plus className="mr-2 h-4 w-4" /> Create Job Card
+                  </Button>
+                </div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                   <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
                     <h3 className="text-lg font-medium text-gray-900">Today's Performance</h3>
@@ -211,15 +213,11 @@ export default function StaffDashboard() {
                     onSummaryUpdate={setChartSummary} 
                   />
                 </div>
-              </div>
-            )}
-            
-            {activeTab === "sales" && (
-              <TodaySalesList />
-            )}
 
-            {activeTab === "create-sale" && (
-              <JobCardForm />
+                <div className="w-full mt-8 border-t pt-8">
+                  <TodaySalesList onOpenCreateModal={() => setIsJobCardModalOpen(true)} />
+                </div>
+              </div>
             )}
 
             {activeTab === "customers" && (
@@ -241,6 +239,7 @@ export default function StaffDashboard() {
           </div>
         </main>
       </div>
+      <CreateJobCardModal isOpen={isJobCardModalOpen} onClose={() => setIsJobCardModalOpen(false)} />
     </div>
   )
 }

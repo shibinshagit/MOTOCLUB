@@ -27,8 +27,8 @@ export async function getStaffCustomers(searchTerm?: string) {
       return { success: false, message: "Unauthorized. Staff session not found." }
     }
     
-    // In the staff app, we scope strictly by the device/company
-    const companyId = session.companyId || session.deviceId
+    // In the staff app, we scope strictly by the device
+    const deviceId = session.deviceId
 
     let customers = []
     
@@ -46,7 +46,7 @@ export async function getStaffCustomers(searchTerm?: string) {
           COALESCE(SUM(s.total_amount - s.received_amount), 0) as outstanding_amount
         FROM customers c
         LEFT JOIN sales s ON c.id = s.customer_id
-        WHERE (c.created_by = ${companyId} OR c.created_by IN (SELECT id FROM devices WHERE company_id = ${companyId}))
+        WHERE c.created_by = ${deviceId}
         AND (
           LOWER(c.name) LIKE ${searchPattern}
           OR LOWER(c.email) LIKE ${searchPattern}
@@ -67,7 +67,7 @@ export async function getStaffCustomers(searchTerm?: string) {
           COALESCE(SUM(s.total_amount - s.received_amount), 0) as outstanding_amount
         FROM customers c
         LEFT JOIN sales s ON c.id = s.customer_id
-        WHERE (c.created_by = ${companyId} OR c.created_by IN (SELECT id FROM devices WHERE company_id = ${companyId}))
+        WHERE c.created_by = ${deviceId}
         GROUP BY c.id
         ORDER BY c.created_at DESC
       `
@@ -80,7 +80,7 @@ export async function getStaffCustomers(searchTerm?: string) {
         try {
           const session = await getStaffSession()
           if (!session) return { success: false, message: "Unauthorized." }
-          const companyId = session.companyId || session.deviceId
+          const deviceId = session.deviceId
 
           let fallbackCustomers = []
           if (searchTerm && searchTerm.trim() !== "") {
@@ -93,7 +93,7 @@ export async function getStaffCustomers(searchTerm?: string) {
                 COALESCE(SUM(s.total_amount - s.received_amount), 0) as outstanding_amount
               FROM customers c
               LEFT JOIN sales s ON c.id = s.customer_id
-              WHERE (c.created_by = ${companyId} OR c.created_by IN (SELECT id FROM devices WHERE company_id = ${companyId}))
+              WHERE c.created_by = ${deviceId}
               AND (
                 LOWER(c.name) LIKE ${searchPattern}
                 OR LOWER(c.email) LIKE ${searchPattern}
@@ -112,7 +112,7 @@ export async function getStaffCustomers(searchTerm?: string) {
                 COALESCE(SUM(s.total_amount - s.received_amount), 0) as outstanding_amount
               FROM customers c
               LEFT JOIN sales s ON c.id = s.customer_id
-              WHERE (c.created_by = ${companyId} OR c.created_by IN (SELECT id FROM devices WHERE company_id = ${companyId}))
+              WHERE c.created_by = ${deviceId}
               GROUP BY c.id
               ORDER BY c.created_at DESC
             `
@@ -140,7 +140,7 @@ export async function addStaffCustomer(formData: FormData) {
     if (!session) {
       return { success: false, message: "Unauthorized. Staff session not found." }
     }
-    const companyId = session.companyId || session.deviceId
+    const deviceId = session.deviceId
 
     const name = formData.get("name") as string
     const email = (formData.get("email") as string) || ""
@@ -157,7 +157,7 @@ export async function addStaffCustomer(formData: FormData) {
     try {
       const result = await sql`
         INSERT INTO customers (name, email, phone, address, created_by, vehicle_details, notes)
-        VALUES (${name}, ${email}, ${phone}, ${address}, ${companyId}, ${vehicleDetails}, ${notes})
+        VALUES (${name}, ${email}, ${phone}, ${address}, ${deviceId}, ${vehicleDetails}, ${notes})
         RETURNING *
       `
       
@@ -169,7 +169,7 @@ export async function addStaffCustomer(formData: FormData) {
         const fallbackAddress = [address, vehicleDetails ? `Vehicle: ${vehicleDetails}` : null, notes ? `Notes: ${notes}` : null].filter(Boolean).join(" | ");
         const result = await sql`
           INSERT INTO customers (name, email, phone, address, created_by)
-          VALUES (${name}, ${email}, ${phone}, ${fallbackAddress}, ${companyId})
+          VALUES (${name}, ${email}, ${phone}, ${fallbackAddress}, ${deviceId})
           RETURNING *
         `
         revalidatePath("/staff/dashboard")
@@ -194,7 +194,7 @@ export async function updateStaffCustomer(formData: FormData) {
     if (!session) {
       return { success: false, message: "Unauthorized. Staff session not found." }
     }
-    const companyId = session.companyId || session.deviceId
+    const deviceId = session.deviceId
 
     const id = Number.parseInt(formData.get("id") as string)
     const name = formData.get("name") as string
@@ -209,7 +209,7 @@ export async function updateStaffCustomer(formData: FormData) {
     }
 
     // Strictly enforce RBAC by checking if the customer belongs to the company
-    const check = await sql`SELECT id FROM customers WHERE id = ${id} AND (created_by = ${companyId} OR created_by IN (SELECT id FROM devices WHERE company_id = ${companyId}))`
+    const check = await sql`SELECT id FROM customers WHERE id = ${id} AND created_by = ${deviceId}`
     if (check.length === 0) {
       return { success: false, message: "Unauthorized or Customer not found." }
     }

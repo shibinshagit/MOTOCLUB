@@ -37,7 +37,8 @@ export async function staffLogin(formData: FormData) {
         s.restricted_values,
         d.id as device_id,
         d.company_id,
-        d.is_active as device_active
+        d.is_active as device_active,
+        d.name as device_name
       FROM staff s
       LEFT JOIN devices d ON s.device_id = d.id
       WHERE s.phone = ${phone} AND s.staff_password_hash = ${password_hash}
@@ -87,15 +88,16 @@ export async function staffLogin(formData: FormData) {
 
     // Set secure JWT session
     await setStaffSessionCookie({
-      staff_id: staff.staff_id,
-      company_id: staff.company_id,
-      device_id: staff.device_id,
+      staffId: staff.staff_id,
+      companyId: staff.company_id,
+      deviceId: staff.device_id,
+      deviceName: staff.device_name,
       role: staff.role,
       permissions: {
         restricted_pages,
         restricted_values,
       },
-    })
+    } as any)
 
     return {
       success: true,

@@ -2334,6 +2334,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                 </Label>
                                 <CustomerSelectSimple
                                   value={customerId}
+                                  initialCustomerName={customerName}
                                   onChange={(value, name, obj) => {
                                     setCustomerId(value)
                                     if (name) setCustomerName(name)

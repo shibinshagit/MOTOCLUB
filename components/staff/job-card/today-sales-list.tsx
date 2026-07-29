@@ -8,7 +8,8 @@ import { selectDeviceCurrency, selectDeviceId } from "@/store/slices/deviceSlice
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { ChevronDown, ChevronUp, MapPin, Phone, User, Calendar, Layers, MessageCircle, Printer, Edit, Trash2 } from "lucide-react"
+import { Input } from "@/components/ui/input"
+import { ChevronDown, ChevronUp, MapPin, Phone, User, Calendar, Layers, MessageCircle, Printer, Edit, Trash2, Search, X } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 import { useConfirm } from "@/hooks/use-confirm"
 import { printJobCard } from "@/lib/receipt-utils"
@@ -16,7 +17,7 @@ import EditSaleModal from "@/components/sales/edit-sale-modal"
 import { DeliveryStatusSelect } from "@/components/sales/delivery-status-select"
 import { format } from "date-fns"
 
-export function TodaySalesList() {
+export function TodaySalesList({ onOpenCreateModal }: { onOpenCreateModal?: () => void }) {
   const currency = useSelector(selectDeviceCurrency)
   const deviceId = useSelector(selectDeviceId)
   const { toast } = useToast()
@@ -26,16 +27,28 @@ export function TodaySalesList() {
   const [loading, setLoading] = useState(true)
   const [expandedSaleId, setExpandedSaleId] = useState<number | null>(null)
   
+  // Search and Filter State
+  const [monthStr, setMonthStr] = useState<string>(format(new Date(), "yyyy-MM"))
+  const [searchTerm, setSearchTerm] = useState("")
+  const [debouncedSearch, setDebouncedSearch] = useState("")
+
   // Edit Modal State
   const [editingSaleId, setEditingSaleId] = useState<number | null>(null)
 
   useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchTerm)
+    }, 500)
+    return () => clearTimeout(timer)
+  }, [searchTerm])
+
+  useEffect(() => {
     fetchSales()
-  }, [])
+  }, [debouncedSearch, monthStr])
 
   const fetchSales = async () => {
     setLoading(true)
-    const res = await getTodayJobCards()
+    const res = await getTodayJobCards(monthStr, debouncedSearch)
     if (res.success && res.data) {
       setSales(res.data)
     }
@@ -98,7 +111,7 @@ export function TodaySalesList() {
     return (
       <div className="flex items-center justify-center p-12">
         <div className="animate-spin rounded-full border-4 border-primary border-t-transparent h-8 w-8 mr-2" />
-        <p className="text-gray-500">Loading today's sales...</p>
+        <p className="text-gray-500">Loading monthly sales...</p>
       </div>
     )
   }
@@ -108,7 +121,7 @@ export function TodaySalesList() {
       <Card className="border-dashed border-gray-300">
         <CardContent className="flex flex-col items-center justify-center p-12 text-center">
           <Calendar className="h-12 w-12 text-gray-300 mb-4" />
-          <h3 className="font-semibold text-lg text-gray-700">No Sales Created Today</h3>
+          <h3 className="font-semibold text-lg text-gray-700">No Sales Created This Month</h3>
           <p className="text-gray-500 text-sm mt-1">Create your first Job Card to see it appear here.</p>
         </CardContent>
       </Card>
@@ -132,14 +145,47 @@ export function TodaySalesList() {
         />
       )}
 
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h2 className="text-xl font-bold tracking-tight text-gray-900">Today's Sales / Job Cards</h2>
-          <p className="text-sm text-gray-500">All pending sales orders created today</p>
+          <h2 className="text-xl font-bold tracking-tight text-gray-900">Monthly Sales / Job Cards</h2>
+          <p className="text-sm text-gray-500">All pending sales orders created in the selected month</p>
         </div>
-        <Button variant="outline" size="sm" onClick={fetchSales}>
-          Refresh List
-        </Button>
+        <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+          <div className="relative w-full sm:w-64">
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-500" />
+            <Input
+              type="text"
+              placeholder="Search customers or ID..."
+              className="pl-9 pr-8"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+            {searchTerm && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="absolute right-1 top-1 h-7 w-7 text-gray-400 hover:text-gray-600"
+                onClick={() => setSearchTerm("")}
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
+          <Input
+            type="month"
+            className="w-full sm:w-auto"
+            value={monthStr}
+            onChange={(e) => setMonthStr(e.target.value)}
+          />
+          <Button variant="outline" size="icon" onClick={fetchSales} title="Refresh">
+            <Layers className="h-4 w-4" />
+          </Button>
+          {onOpenCreateModal && (
+            <Button onClick={onOpenCreateModal}>
+              + Create Job Card
+            </Button>
+          )}
+        </div>
       </div>
 
       <div className="rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden">
@@ -284,7 +330,6 @@ export function TodaySalesList() {
                                       <th className="px-4 py-3 text-left">Product</th>
                                       <th className="px-4 py-3 text-left">Variant</th>
                                       <th className="px-4 py-3 text-center">Qty</th>
-                                      <th className="px-4 py-3 text-right">Cost Price</th>
                                       <th className="px-4 py-3 text-right">Selling Price</th>
                                       <th className="px-4 py-3 text-right">Total</th>
                                     </tr>
@@ -295,7 +340,6 @@ export function TodaySalesList() {
                                         <td className="px-4 py-3 font-medium text-slate-800">{item.product_name || "Unknown Product"}</td>
                                         <td className="px-4 py-3 text-slate-500 text-xs">{item.variant_name || "Default"}</td>
                                         <td className="px-4 py-3 text-center text-slate-700 font-medium">{item.quantity}</td>
-                                        <td className="px-4 py-3 text-right text-slate-400 text-xs">{currency} {Number(item.cost).toFixed(2)}</td>
                                         <td className="px-4 py-3 text-right text-slate-700">{currency} {Number(item.price).toFixed(2)}</td>
                                         <td className="px-4 py-3 text-right font-bold text-slate-900">{currency} {(Number(item.price) * item.quantity).toFixed(2)}</td>
                                       </tr>
@@ -305,9 +349,17 @@ export function TodaySalesList() {
                               </div>
 
                               <div className="flex justify-end pt-2">
-                                <div className="flex gap-4 items-center bg-emerald-50 px-4 py-2.5 rounded-lg border border-emerald-100 shadow-sm">
-                                  <span className="text-xs font-semibold uppercase tracking-wider text-emerald-700">Order Total</span>
-                                  <span className="text-lg font-black text-emerald-900">{currency} {Number(sale.total_amount).toFixed(2)}</span>
+                                <div className="space-y-2">
+                                  {Number(sale.courier_paid_extra || 0) > 0 && (
+                                    <div className="flex justify-end text-sm text-slate-600 px-4">
+                                      <span className="mr-4">Courier Paid (Extra):</span>
+                                      <span>{currency} {Number(sale.courier_paid_extra).toFixed(2)}</span>
+                                    </div>
+                                  )}
+                                  <div className="flex gap-4 items-center bg-emerald-50 px-4 py-2.5 rounded-lg border border-emerald-100 shadow-sm">
+                                    <span className="text-xs font-semibold uppercase tracking-wider text-emerald-700">Order Total</span>
+                                    <span className="text-lg font-black text-emerald-900">{currency} {Number(sale.total_amount).toFixed(2)}</span>
+                                  </div>
                                 </div>
                               </div>
                             </div>
