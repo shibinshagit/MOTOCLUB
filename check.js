@@ -1,0 +1,1 @@
+const parser = require('@babel/parser'); const fs = require('fs'); try { parser.parse(fs.readFileSync('components/sales/edit-sale-modal.tsx', 'utf8'), {sourceType: 'module', plugins: ['jsx', 'typescript']}); console.log('Parsed successfully'); } catch(e) { console.error('Error at line', e.loc.line, 'col', e.loc.column, ':', e.message); }  

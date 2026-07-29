@@ -473,7 +473,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
     { id: "trending", icon: <Flame className="h-4 w-4" />, label: "Trending" },
     { id: "purchase", icon: <Receipt className="h-4 w-4" />, label: "Purchase" },
     { id: "sale", icon: <Plus className="h-5 w-5" />, label: "Sales" },
-    { id: "sales-orders", icon: <Receipt className="h-4 w-4" />, label: "Sales Orders" },
+    { id: "sales-orders", icon: <Receipt className="h-4 w-4" />, label: "Order List" },
     { id: "customer", icon: <User className="h-4 w-4" />, label: "Customers" },
     { id: "attendance", icon: <CalendarDays className="h-4 w-4" />, label: "Attendance" },
     { id: "supplier", icon: <Truck className="h-4 w-4" />, label: "Suppliers" },

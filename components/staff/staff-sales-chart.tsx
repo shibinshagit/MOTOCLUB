@@ -133,7 +133,7 @@ export function StaffSalesChart({ currency = "INR", onSummaryUpdate }: StaffSale
   return (
     <Card className="w-full">
       <CardHeader className="flex flex-col sm:flex-row items-center justify-between pb-6 gap-4">
-        <CardTitle className="text-xl font-semibold text-gray-800">Sales Orders Trend</CardTitle>
+        <CardTitle className="text-xl font-semibold text-gray-800">Order List Trend</CardTitle>
         <div className="flex items-center gap-4">
           <div className="flex items-center bg-gray-100 rounded-md p-1">
             <Button
@@ -179,7 +179,7 @@ export function StaffSalesChart({ currency = "INR", onSummaryUpdate }: StaffSale
           </div>
         ) : !hasData ? (
           <div className="h-[350px] w-full flex items-center justify-center text-gray-500">
-            No sales orders for this period
+            No orders for this period
           </div>
         ) : (
           <div className="h-[350px] w-full mt-4">

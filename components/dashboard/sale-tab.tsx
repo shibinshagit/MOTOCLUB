@@ -133,6 +133,7 @@ interface SaleDraftSnapshot {
   isEditMode: boolean
   editingSaleId: number | null
   originalSaleStatus: string
+  isLoadingEdit?: boolean
 }
 
 function getMonthRange(month: Date) {
@@ -335,6 +336,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
       isEditMode: false,
       editingSaleId: null,
       originalSaleStatus: "",
+      isLoadingEdit: false,
     }),
     [activeStaff?.id, activeStaff?.name, createEmptyProductRow],
   )
@@ -1091,7 +1093,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
   }
 
   // Load sale data for editing
-  const loadSaleForEdit = async (saleId: number) => {
+  const loadSaleForEdit = async (saleId: number, targetDraftId: string) => {
     const requestId = ++editLoadRequestRef.current
     try {
       setFormAlert(null)
@@ -1103,33 +1105,18 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
       if (result.success && result.data) {
         const { sale, items } = result.data
 
-        // Set sale data
-        setDate(new Date(sale.sale_date))
-        setCustomerId(sale.customer_id)
-        setCustomerName(sale.customer_name || sale.customer_name_override || "")
-        setCustomerPhone(sale.customer_phone || sale.customer_phone_override || "")
-        setStatus(sale.status || "Completed")
-        setPaymentStatus(sale.payment_status || "Paid")
-        setOriginalSaleStatus(sale.status || "Completed")
-
         // Set staff information
+        let resolvedStaffId = null
+        let resolvedStaffName = ""
         if (sale.staff_id) {
-          setStaffId(sale.staff_id)
-          setStaffName(sale.staff_name || "")
+          resolvedStaffId = sale.staff_id
+          resolvedStaffName = sale.staff_name || ""
         } else if (activeStaff) {
-          setStaffId(activeStaff.id)
-          setStaffName(activeStaff.name)
+          resolvedStaffId = activeStaff.id
+          resolvedStaffName = activeStaff.name
         }
 
-        // Set payment method
-        if ("payment_method" in sale) {
-          setPaymentMethod(sale.payment_method || "Cash")
-        } else {
-          setPaymentMethod("Cash")
-        }
-
-        setTotalAmount(Number(sale.total_amount) || 0)
-        setDiscountAmount(Number(sale.discount) || 0)
+        const resolvedPaymentMethod = "payment_method" in sale ? (sale.payment_method || "Cash") : "Cash"
 
         // Set product rows with actual costs
         const productRows = items.map((item: any) => {
@@ -1168,20 +1155,11 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
         const mappedShipping = mapSaleShippingFromRecord(sale)
 
         const finalProducts = productRows.length > 0 ? productRows : [createEmptyProductRow()]
-        setProducts(finalProducts)
-
-        setReceivedAmount(parsedReceivedAmount)
-        setAdvanceAmount(parsedAdvanceAmount)
-        setBalanceAmount(parsedBalanceAmount)
-        setShipping(mappedShipping)
-
-        setIsEditMode(true)
-        setEditingSaleId(saleId)
 
         // Force update the draft to prevent hydration loop from resetting it to empty
         setSaleDrafts((prev) =>
           prev.map((draft) =>
-            draft.id === activeDraftId
+            draft.id === targetDraftId
               ? {
                   ...draft,
                   date: new Date(sale.sale_date).toISOString(),
@@ -1191,9 +1169,9 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                   status: sale.status || "Completed",
                   paymentStatus: sale.payment_status || "Paid",
                   originalSaleStatus: sale.status || "Completed",
-                  staffId: sale.staff_id || (activeStaff ? activeStaff.id : null),
-                  staffName: sale.staff_name || (activeStaff ? activeStaff.name : ""),
-                  paymentMethod: sale.payment_method || "Cash",
+                  staffId: resolvedStaffId,
+                  staffName: resolvedStaffName,
+                  paymentMethod: resolvedPaymentMethod,
                   discountAmount: Number(sale.discount) || 0,
                   products: finalProducts,
                   receivedAmount: parsedReceivedAmount,
@@ -1203,6 +1181,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                   isEditMode: true,
                   editingSaleId: saleId,
                   name: `Edit #${saleId}`,
+                  isLoadingEdit: false,
                 }
               : draft
           )
@@ -1273,10 +1252,18 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
       return
     }
 
-    if (status === "Credit" && receivedAmount > totalAmount) {
+    if (paymentStatus === "Credit" && receivedAmount > totalAmount) {
       setFormAlert({
         type: "error",
         message: "Received amount cannot be greater than total amount",
+      })
+      return
+    }
+
+    if (paymentStatus === "Credit" && !customerId) {
+      setFormAlert({
+        type: "error",
+        message: "Please select a customer for a credit sale.",
       })
       return
     }
@@ -1395,12 +1382,33 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
   const handleEditSale = (sale: any) => {
     // User explicitly requested edit again; clear last closed guard.
     lastClosedEditSaleIdRef.current = null
+    
+    let targetDraftId = activeDraftId
+    const existingDraft = saleDrafts.find((draft) => draft.isEditMode && draft.editingSaleId === sale.id)
+    if (existingDraft) {
+      targetDraftId = existingDraft.id
+      draftSwitchingRef.current = true
+      setActiveDraftId(existingDraft.id)
+      setPendingEditSaleId(sale.id)
+      setPendingEditDraftId(existingDraft.id)
+    } else {
+      const newEditDraft = createEmptyDraft(`Edit #${sale.id}`)
+      newEditDraft.isEditMode = true
+      newEditDraft.editingSaleId = sale.id
+      newEditDraft.originalSaleStatus = "Completed"
+      newEditDraft.isLoadingEdit = true
+      targetDraftId = newEditDraft.id
+      draftSwitchingRef.current = true
+      setSaleDrafts((prev) => [...prev, newEditDraft])
+      setActiveDraftId(newEditDraft.id)
+      setPendingEditSaleId(sale.id)
+      setPendingEditDraftId(newEditDraft.id)
+    }
+
     if (activeView === "info") {
       switchView("entry")
-      loadSaleForEdit(sale.id)
-      return
     }
-    loadSaleForEdit(sale.id)
+    loadSaleForEdit(sale.id, targetDraftId)
   }
 
   // Handle print invoice from view modal
@@ -1441,6 +1449,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
       newEditDraft.isEditMode = true
       newEditDraft.editingSaleId = editSaleId
       newEditDraft.originalSaleStatus = "Completed"
+      newEditDraft.isLoadingEdit = true
       draftSwitchingRef.current = true
       setSaleDrafts((prev) => [...prev, newEditDraft])
       setActiveDraftId(newEditDraft.id)
@@ -1467,13 +1476,13 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
   ])
 
   useEffect(() => {
-    if (!pendingEditSaleId || !pendingEditDraftId) return
-    if (activeDraftId !== pendingEditDraftId) return
-
-    loadSaleForEdit(pendingEditSaleId)
-    setPendingEditSaleId(null)
-    setPendingEditDraftId("")
-  }, [activeDraftId, pendingEditSaleId, pendingEditDraftId])
+    if (pendingEditSaleId && pendingEditDraftId && draftsHydrated) {
+      loadSaleForEdit(pendingEditSaleId, pendingEditDraftId)
+      setPendingEditSaleId(null)
+      setPendingEditDraftId("")
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingEditSaleId, pendingEditDraftId, draftsHydrated])
 
   // Handle delete sale from view modal
   const handleDeleteSaleFromView = async (saleId: number) => {
@@ -2182,6 +2191,9 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     </div>
   ), [products, showCost, deviceCurrencyState, hideStockCount, updateProductRow, removeProductRow, addProductRow, handleQuantityInputChange, handleProductSelect, setAllocatorRowId, setIsNewServiceModalOpen])
 
+  const currentActiveDraft = saleDrafts.find(d => d.id === activeDraftId)
+  const isDraftLoading = currentActiveDraft?.isLoadingEdit || false
+
   const salesEntryView = (
     <div className="min-h-[calc(100vh-100px)] bg-gray-50 text-gray-900 p-2 sm:p-3">
       <div className="mb-4">
@@ -2248,10 +2260,16 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
               {/* Main Sale Form Section - FIXED SCROLL */}
               <div className="flex-1 xl:w-3/4 flex flex-col min-h-0">
                 <Card className="flex-1 overflow-hidden bg-white border-gray-200 shadow-sm flex flex-col">
-                  <CardContent className="p-0 h-full flex flex-col">
-                    
-                    {/* Fixed Header Section */}
-                    <div className="flex-shrink-0">
+                  {isDraftLoading ? (
+                    <div className="flex-1 flex flex-col items-center justify-center p-12 bg-white">
+                      <Loader2 className="h-8 w-8 animate-spin text-blue-600 mb-4" />
+                      <p className="text-gray-500 font-medium">Loading sale details...</p>
+                    </div>
+                  ) : (
+                    <CardContent className="p-0 h-full flex flex-col">
+                      
+                      {/* Fixed Header Section */}
+                      <div className="flex-shrink-0">
                       {/* Edit mode indicator */}
                       {isEditMode && (
                         <div className="p-2 bg-orange-50 border-b border-orange-200">
@@ -2433,7 +2451,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                     >
                                       <option value="Paid">Paid</option>
                                       <option value="Pending">Pending</option>
-                                      <option value="Partial">Partial</option>
+                                      <option value="Credit">Credit</option>
                                     </select>
                                   </div>
                                 </div>
@@ -2594,7 +2612,8 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
         )
       })()}
     
-          </CardContent>
+                    </CardContent>
+                  )}
                 </Card>
               </div>
             </div>

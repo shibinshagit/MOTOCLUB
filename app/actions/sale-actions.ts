@@ -723,65 +723,40 @@ export async function addSale(saleData: any) {
     let newPaymentMethod = saleData.paymentMethod || "Cash"
 
     let advanceAmount = 0
-    let receivedAmount = 0
+    let receivedAmount = Number(saleData.receivedAmount) || 0
     let balanceAmount = 0
     let newPaymentStatus = saleData.paymentStatus || "Pending"
 
+    // If Credit, validate customer
+    if (newPaymentStatus.toLowerCase() === "credit" && !saleData.customerId) {
+      return { success: false, message: "Please select a customer for a credit sale." }
+    }
+
     if (newPaymentMethod.toUpperCase() === "COD") {
       advanceAmount = Number(saleData.advanceAmount) || 0
-      
-      const explicitlyReceived = Number(saleData.receivedAmount) || 0
-      receivedAmount = explicitlyReceived > advanceAmount ? explicitlyReceived : advanceAmount
-      balanceAmount = Math.max(0, total - receivedAmount)
-      
-      if (receivedAmount >= total && total > 0) {
-        newPaymentStatus = "Paid"
-        balanceAmount = 0
-        receivedAmount = total
-      } else if (receivedAmount > 0) {
-        newPaymentStatus = "Partial"
-      } else {
-        newPaymentStatus = "Pending"
-      }
-    } else if (["Cash", "Card", "UPI", "Bank Transfer"].includes(newPaymentMethod)) {
-      // Immediate full payments
-      advanceAmount = 0
-      receivedAmount = total
-      balanceAmount = 0
-      newPaymentStatus = "Paid"
-    } else {
-      // Legacy Credit / other methods logic
-      const requestedReceived = Number(saleData.receivedAmount) || 0
-      receivedAmount = Math.min(requestedReceived, total)
-      balanceAmount = total - receivedAmount
-      
-      if (receivedAmount >= total && total > 0) {
-        newPaymentStatus = "Paid"
-        balanceAmount = 0
-      } else if (receivedAmount > 0) {
-        newPaymentStatus = "Partial"
-      } else {
-        newPaymentStatus = "Pending"
-      }
+      receivedAmount = receivedAmount > advanceAmount ? receivedAmount : advanceAmount
     }
+
+    receivedAmount = Math.min(receivedAmount, total)
+    balanceAmount = total - receivedAmount
+
     // 1. Ensure Payment Status and amounts are consistent
-    if (
-      newPaymentStatus.toLowerCase() === "paid" || 
-      newPaymentStatus.toLowerCase() === "completed" || 
-      receivedAmount >= total || 
-      balanceAmount <= 0
-    ) {
+    if (newPaymentStatus.toLowerCase() === "paid" || receivedAmount >= total) {
       if (newOrderStatus.toLowerCase() !== "cancelled") {
         newPaymentStatus = "Paid"
         receivedAmount = total
         balanceAmount = 0
       }
+    } else if (newPaymentStatus.toLowerCase() !== "credit") {
+      newPaymentStatus = "Pending"
     }
 
     // 2. Automatically derive Sales Status from actual payment state
     if (newOrderStatus.toLowerCase() !== "cancelled") {
-      if (newPaymentStatus.toLowerCase() === "paid" || (balanceAmount <= 0 && receivedAmount > 0)) {
+      if (newPaymentStatus.toLowerCase() === "paid") {
         newOrderStatus = "Completed"
+      } else if (newPaymentStatus.toLowerCase() === "credit") {
+        newOrderStatus = "Credit"
       } else {
         newOrderStatus = "Pending"
       }
@@ -1168,48 +1143,20 @@ function calculateSaleChanges(
   let newPaymentStatus = newData.paymentStatus || "Paid"
   
   let advanceAmount = 0
-  let newReceivedAmount = 0
+  let newReceivedAmount = Number(newData.receivedAmount) || 0
   let balanceAmount = 0
 
   if (newPaymentMethod.toUpperCase() === "COD") {
     advanceAmount = Number(newData.advanceAmount) || 0
-    
-    const explicitlyReceived = Number(newData.receivedAmount) || 0
-    newReceivedAmount = explicitlyReceived > advanceAmount ? explicitlyReceived : advanceAmount
-    balanceAmount = Math.max(0, newTotal - newReceivedAmount)
-
-    if (newReceivedAmount >= newTotal && newTotal > 0) {
-      newPaymentStatus = "Paid"
-      balanceAmount = 0
-      newReceivedAmount = newTotal
-    } else if (newReceivedAmount > 0) {
-      newPaymentStatus = "Partial"
-    } else {
-      newPaymentStatus = "Pending"
-    }
-  } else {
-    // For Cash, Card, Bank Transfer, UPI, Credit, etc.
-    const explicitlyReceived = Number(newData.receivedAmount) || 0
-    newReceivedAmount = explicitlyReceived
-
-    if (newReceivedAmount < 0) {
-      throw new Error("Received amount cannot be negative")
-    }
-    if (newReceivedAmount > newTotal) {
-      throw new Error(`Received amount (${newReceivedAmount}) cannot be greater than total amount (${newTotal})`)
-    }
-
-    balanceAmount = Math.max(0, newTotal - newReceivedAmount)
-    
-    if (newReceivedAmount >= newTotal && newTotal > 0) {
-      newPaymentStatus = "Paid"
-      balanceAmount = 0
-    } else if (newReceivedAmount > 0) {
-      newPaymentStatus = "Partial"
-    } else {
-      newPaymentStatus = "Pending"
-    }
+    newReceivedAmount = newReceivedAmount > advanceAmount ? newReceivedAmount : advanceAmount
   }
+
+  if (newReceivedAmount < 0) {
+    throw new Error("Received amount cannot be negative")
+  }
+
+  newReceivedAmount = Math.min(newReceivedAmount, newTotal)
+  balanceAmount = Math.max(0, newTotal - newReceivedAmount)
 
   // Preserve tracking ID if not provided in update but exists in DB
   if (shipping && !shipping.tracking_id && original.tracking_id) {
@@ -1231,8 +1178,7 @@ function calculateSaleChanges(
   if (
     newPaymentStatus.toLowerCase() === "paid" ||
     newPaymentStatus.toLowerCase() === "completed" ||
-    newReceivedAmount >= newTotal ||
-    outstandingAmount <= 0
+    newReceivedAmount >= newTotal
   ) {
     if (newOrderStatus.toLowerCase() !== "cancelled") {
       newPaymentStatus = "Paid"
@@ -1240,12 +1186,16 @@ function calculateSaleChanges(
       outstandingAmount = 0
       balanceAmount = 0
     }
+  } else if (newPaymentStatus.toLowerCase() !== "credit") {
+    newPaymentStatus = "Pending"
   }
 
   // 2. Automatically derive Sales Status from actual payment state
   if (newOrderStatus.toLowerCase() !== "cancelled") {
-    if (newPaymentStatus.toLowerCase() === "paid" || (balanceAmount <= 0 && newReceivedAmount > 0)) {
+    if (newPaymentStatus.toLowerCase() === "paid") {
       newOrderStatus = "Completed"
+    } else if (newPaymentStatus.toLowerCase() === "credit") {
+      newOrderStatus = "Credit"
     } else {
       newOrderStatus = "Pending"
     }
@@ -1416,12 +1366,19 @@ export async function updateSale(saleData: any) {
     }
 
     // 4. CORRECTED: Validate received amount for credit sales with proper logic
-    const isCredit = changes.newStatus.toLowerCase() === "credit"
+    const isCredit = changes.newPaymentStatus.toLowerCase() === "credit"
 
     if (isCredit && changes.newReceived > changes.newTotal) {
       return {
         success: false,
         message: `Received amount (${changes.newReceived}) cannot be greater than total amount (${changes.newTotal})`,
+      }
+    }
+    
+    if (isCredit && !saleData.customerId) {
+      return {
+        success: false,
+        message: "Please select a customer for a credit sale.",
       }
     }
 
@@ -1809,6 +1766,7 @@ export async function updateSaleDeliveryStatus(
   saleId: number,
   deviceId: number,
   deliveryStatus: string,
+  trackingId?: string
 ) {
   if (!saleId || !deviceId) {
     return { success: false as const, message: "Sale ID and device ID are required" }
@@ -1901,20 +1859,68 @@ export async function updateSaleDeliveryStatus(
     }
 
     // Now update the sales table
+    if (trackingId !== undefined) {
+      await sql`
+        UPDATE sales
+        SET delivery_status = ${deliveryStatus},
+            tracking_id = ${trackingId},
+            shipped_at = ${shippedAt},
+            delivered_at = ${deliveredAt},
+            updated_at = NOW()
+        WHERE id = ${saleId}
+          AND device_id = ${deviceId}
+      `
+    } else {
+      await sql`
+        UPDATE sales
+        SET delivery_status = ${deliveryStatus},
+            shipped_at = ${shippedAt},
+            delivered_at = ${deliveredAt},
+            updated_at = NOW()
+        WHERE id = ${saleId}
+          AND device_id = ${deviceId}
+      `
+    }
+
+    revalidatePath("/dashboard")
+    return { success: true as const, message: "Delivery status updated" }
+  } catch (error) {
+    console.error("updateSaleDeliveryStatus error:", error)
+    return {
+      success: false as const,
+      message: `Database error: ${error instanceof Error ? error.message : "Unknown error"}`,
+    }
+  }
+}
+
+export async function updateSaleTracking(saleId: number, deviceId: number, trackingId: string) {
+  if (!saleId || !deviceId) {
+    return { success: false as const, message: "Sale ID and device ID are required" }
+  }
+
+  try {
+    const rows = await sql`
+      SELECT id FROM sales
+      WHERE id = ${saleId} AND device_id = ${deviceId}
+      LIMIT 1
+    `
+
+    if (rows.length === 0) {
+      return { success: false as const, message: "Sale not found" }
+    }
+
     await sql`
       UPDATE sales
-      SET delivery_status = ${deliveryStatus},
-          shipped_at = ${shippedAt},
-          delivered_at = ${deliveredAt},
+      SET tracking_id = ${trackingId},
           updated_at = NOW()
       WHERE id = ${saleId}
         AND device_id = ${deviceId}
     `
 
     revalidatePath("/dashboard")
-    return { success: true as const, message: "Delivery status updated" }
+    return { success: true as const, message: "Tracking information updated" }
   } catch (error) {
-    console.error("updateSaleDeliveryStatus error:", error)
+    console.error("updateSaleTracking error:", error)
     return {
       success: false as const,
       message: `Database error: ${error instanceof Error ? error.message : "Unknown error"}`,

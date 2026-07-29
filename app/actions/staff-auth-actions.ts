@@ -102,7 +102,7 @@ export async function staffLogin(formData: FormData) {
     return {
       success: true,
       message: "Login successful",
-      redirect: "/staff/dashboard",
+      redirect: staff.role === "partner" ? "/partner/dashboard" : "/staff/dashboard",
     }
   } catch (error) {
     console.error("Staff login error:", error)

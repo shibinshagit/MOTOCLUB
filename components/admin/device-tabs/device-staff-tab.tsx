@@ -28,7 +28,7 @@ type StaffMember = {
   name: string
   phone: string
   email?: string
-  role?: "admin" | "staff"
+  role?: "admin" | "staff" | "partner"
   restricted_pages?: StaffPageId[] | string[] | null
   restricted_values?: StaffValueRestriction[] | string[] | null
   position: string
@@ -45,7 +45,7 @@ type StaffFormState = {
   name: string
   phone: string
   email: string
-  role: "admin" | "staff"
+  role: "admin" | "staff" | "partner"
   restrictedPages: StaffPageId[]
   restrictedValues: StaffValueRestriction[]
   position: string
@@ -329,12 +329,14 @@ export default function DeviceStaffTab({ deviceId }: DeviceStaffTabProps) {
                     <Badge
                       variant="outline"
                       className={
-                        member.role === "admin"
-                          ? "border-gray-300 bg-gray-100 text-gray-700"
-                          : "border-gray-200 bg-white text-gray-600"
+                        member.role === "partner"
+                          ? "border-purple-300 bg-purple-100 text-purple-700"
+                          : member.role === "admin"
+                            ? "border-gray-300 bg-gray-100 text-gray-700"
+                            : "border-gray-200 bg-white text-gray-600"
                       }
                     >
-                      {member.role === "admin" ? "Admin" : "Normal Staff"}
+                      {member.role === "partner" ? "Partner" : member.role === "admin" ? "Admin" : "Normal Staff"}
                     </Badge>
                     {member.is_active && (
                       <Badge variant="outline" className="border-green-200 bg-green-50 text-green-700">
@@ -420,13 +422,13 @@ export default function DeviceStaffTab({ deviceId }: DeviceStaffTabProps) {
               <select
                 value={form.role}
                 onChange={(e) => {
-                  const role = e.target.value === "admin" ? "admin" : "staff"
+                  const role = e.target.value as "admin" | "staff" | "partner"
                   setForm((prev) => ({
                     ...prev,
                     role,
-                    restrictedPages: role === "admin" ? [] : prev.restrictedPages,
+                    restrictedPages: (role === "admin" || role === "partner") ? [] : prev.restrictedPages,
                     restrictedValues:
-                      role === "admin"
+                      (role === "admin" || role === "partner")
                         ? []
                         : prev.restrictedValues.length > 0 || editingStaff
                           ? prev.restrictedValues
@@ -436,7 +438,8 @@ export default function DeviceStaffTab({ deviceId }: DeviceStaffTabProps) {
                 className={`mt-1 h-10 w-full rounded-md border px-3 text-sm ${ADMIN_DIALOG_INPUT_CLASS}`}
               >
                 <option value="staff">Normal Staff</option>
-                <option value="admin">Admin</option>
+                <option value="admin">Admin Staff</option>
+                <option value="partner">Partner</option>
               </select>
             </div>
             <div>

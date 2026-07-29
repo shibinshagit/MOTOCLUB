@@ -5,6 +5,7 @@ import { updateSaleDeliveryStatus } from "@/app/actions/sale-actions"
 import { useToast } from "@/components/ui/use-toast"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
+import { TrackingDetailsModal } from "./tracking-details-modal"
 
 const VALID_TRANSITIONS: Record<string, string[]> = {
   "Pending": [], // No manual exits allowed
@@ -44,6 +45,9 @@ export function DeliveryStatusSelect({
   
   // WhatsApp Notification State
   const [whatsappStep, setWhatsappStep] = useState<"none" | "prepare" | "confirm">("none")
+  
+  // Tracking Modal State
+  const [isTrackingModalOpen, setIsTrackingModalOpen] = useState(false)
 
   const handleUpdateStatus = async (newStatus: string) => {
     setLoading(true)
@@ -65,6 +69,25 @@ export function DeliveryStatusSelect({
     }
   }
 
+  const handleUpdateStatusWithTracking = async (trackingId: string) => {
+    setLoading(true)
+    try {
+      const res = await updateSaleDeliveryStatus(saleId, deviceId, "Shipped", trackingId)
+      if (res.success) {
+        setStatus("Shipped")
+        toast({ title: "Success", description: "Delivery status and tracking updated." })
+        if (onStatusChange) {
+          onStatusChange("Shipped")
+        }
+      } else {
+        throw new Error(res.message)
+      }
+    } finally {
+      setLoading(false)
+      setIsTrackingModalOpen(false)
+    }
+  }
+
   const handleChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newStatus = e.target.value
     if (newStatus === status) return
@@ -72,6 +95,11 @@ export function DeliveryStatusSelect({
     if (newStatus === "Sent") {
       setWhatsappStep("prepare")
       return // Halt the update until confirmation
+    }
+
+    if (newStatus === "Shipped") {
+      setIsTrackingModalOpen(true)
+      return // Halt the update until tracking is provided/saved
     }
 
     await handleUpdateStatus(newStatus)
@@ -137,6 +165,23 @@ export function DeliveryStatusSelect({
       </div>
 
       {/* Prepare Customer Notification Dialog */}
+      {isTrackingModalOpen && (
+        <TrackingDetailsModal
+          isOpen={isTrackingModalOpen}
+          onClose={() => {
+            setIsTrackingModalOpen(false)
+            // Revert select back to old status since user cancelled tracking input
+            setStatus(currentStatus || "Pending")
+          }}
+          onSave={handleUpdateStatusWithTracking}
+          initialTrackingId={trackingId}
+          currentDeliveryStatus={status}
+          targetDeliveryStatus="Shipped"
+          saleId={saleId}
+          deviceId={deviceId}
+        />
+      )}
+
       <Dialog open={whatsappStep === "prepare"} onOpenChange={(open) => !open && handleCancelWhatsappFlow()}>
         <DialogContent onClick={(e) => e.stopPropagation()}>
           <DialogHeader>

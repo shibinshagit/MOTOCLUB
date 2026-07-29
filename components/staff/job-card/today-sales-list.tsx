@@ -15,6 +15,7 @@ import { useConfirm } from "@/hooks/use-confirm"
 import { printJobCard } from "@/lib/receipt-utils"
 import EditSaleModal from "@/components/sales/edit-sale-modal"
 import { DeliveryStatusSelect } from "@/components/sales/delivery-status-select"
+import { TrackingCell } from "@/components/sales/tracking-cell"
 import { format } from "date-fns"
 
 export function TodaySalesList({ onOpenCreateModal }: { onOpenCreateModal?: () => void }) {
@@ -148,7 +149,7 @@ export function TodaySalesList({ onOpenCreateModal }: { onOpenCreateModal?: () =
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h2 className="text-xl font-bold tracking-tight text-gray-900">Monthly Sales / Job Cards</h2>
-          <p className="text-sm text-gray-500">All pending sales orders created in the selected month</p>
+          <p className="text-sm text-gray-500">All pending orders created in the selected month</p>
         </div>
         <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
           <div className="relative w-full sm:w-64">
@@ -234,7 +235,15 @@ export function TodaySalesList({ onOpenCreateModal }: { onOpenCreateModal?: () =
                       </td>
                       <td className="max-w-[180px] truncate px-4 py-2.5 font-medium text-slate-700">{sale.customer_name || "N/A"}</td>
                       <td className="whitespace-nowrap px-4 py-2.5 text-slate-500">{sale.customer_phone || "N/A"}</td>
-                      <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-slate-600">{sale.tracking_id}</td>
+                      <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-slate-600">
+                        <TrackingCell 
+                          saleId={sale.id}
+                          deviceId={deviceId || 0}
+                          trackingId={sale.tracking_id}
+                          deliveryStatus={sale.delivery_status}
+                          onUpdate={fetchSales}
+                        />
+                      </td>
                       <td className="whitespace-nowrap px-4 py-2.5 text-center font-medium text-slate-700">{itemQuantity}</td>
                       <td className="whitespace-nowrap px-4 py-2.5 text-right font-bold text-slate-800">
                         {currency} {Number(sale.total_amount).toFixed(2)}

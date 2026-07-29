@@ -172,8 +172,8 @@ export async function login(formData: FormData) {
         `
       }
 
-      const role = staff.role === "admin" ? "ADMIN" : "STAFF"
-      const redirect = role === "STAFF" ? "/staff/dashboard" : "/dashboard"
+      const role = staff.role === "admin" ? "ADMIN" : staff.role === "partner" ? "PARTNER" : "STAFF"
+      const redirect = staff.role === "partner" ? "/partner/dashboard" : role === "STAFF" ? "/staff/dashboard" : "/dashboard"
       const deviceLogo = staff.device_logo?.trim() || null
 
       return {

@@ -27,6 +27,27 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next()
   }
 
+  // Handle partner routes specifically
+  if (pathname.startsWith("/partner")) {
+    const staffToken = request.cookies.get("ims_staff_session")?.value
+
+    if (!staffToken) {
+      return NextResponse.redirect(new URL("/", request.url))
+    }
+
+    try {
+      const { payload } = await jwtVerify(staffToken, SECRET_KEY)
+      const role = (payload as any).role as string | undefined
+
+      if (role !== "partner") {
+        return NextResponse.redirect(new URL("/", request.url))
+      }
+      return NextResponse.next()
+    } catch (error) {
+      return NextResponse.redirect(new URL("/", request.url))
+    }
+  }
+
   // Handle staff routes specifically
   if (pathname.startsWith("/staff")) {
     const staffToken = request.cookies.get("ims_staff_session")?.value
@@ -37,7 +58,12 @@ export async function middleware(request: NextRequest) {
 
     try {
       // Verify JWT for Edge runtime compatibility
-      await jwtVerify(staffToken, SECRET_KEY)
+      const { payload } = await jwtVerify(staffToken, SECRET_KEY)
+      const role = (payload as any).role as string | undefined
+      
+      if (role === "partner") {
+        return NextResponse.redirect(new URL("/partner/dashboard", request.url))
+      }
       return NextResponse.next()
     } catch (error) {
       // Invalid or expired token
@@ -56,9 +82,12 @@ export async function middleware(request: NextRequest) {
         const { payload } = await jwtVerify(staffToken, SECRET_KEY)
         const role = (payload as any).role as string | undefined
 
-        // Only redirect pure "staff" role — "admin" staff are allowed in the dashboard
         if (role === "staff") {
           return NextResponse.redirect(new URL("/staff/dashboard", request.url))
+        }
+        
+        if (role === "partner") {
+          return NextResponse.redirect(new URL("/partner/dashboard", request.url))
         }
       } catch {
         // Token invalid/expired — let client-side handle it
@@ -72,5 +101,5 @@ export async function middleware(request: NextRequest) {
 
 // Match dashboard and staff routes
 export const config = {
-  matcher: ["/dashboard/:path*", "/staff/:path*"],
+  matcher: ["/dashboard/:path*", "/staff/:path*", "/partner/:path*"],
 }

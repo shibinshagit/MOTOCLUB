@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { getAllJobCards } from "@/app/actions/job-card-actions"
 import { deleteSale } from "@/app/actions/sale-actions"
 import { DeliveryStatusSelect } from "@/components/sales/delivery-status-select"
+import { TrackingCell } from "@/components/sales/tracking-cell"
 import { useSelector } from "react-redux"
 import { selectDeviceCurrency, selectDeviceId } from "@/store/slices/deviceSlice"
 import { Card, CardContent } from "@/components/ui/card"
@@ -61,7 +62,7 @@ export default function SalesOrdersTab() {
 
   const handleEdit = (sale: any) => {
     if (sale.status !== "Pending") {
-      toast({ title: "Not Allowed", description: "Only pending sales orders can be edited.", variant: "destructive" })
+      toast({ title: "Not Allowed", description: "Only pending orders can be edited.", variant: "destructive" })
       return
     }
     setEditingSaleId(sale.id)
@@ -78,8 +79,8 @@ export default function SalesOrdersTab() {
 
   const handleDelete = async (saleId: number) => {
     const isConfirmed = await confirm({
-      title: "Delete Sales Order",
-      description: "Are you sure you want to delete this Sales Order? This action cannot be undone.",
+      title: "Delete Order",
+      description: "Are you sure you want to delete this order? This action cannot be undone.",
       confirmLabel: "Delete",
       cancelLabel: "Cancel",
       destructive: true
@@ -91,10 +92,10 @@ export default function SalesOrdersTab() {
       if (!deviceId) throw new Error("No device ID")
       const res = await deleteSale(saleId, deviceId)
       if (res.success) {
-        toast({ title: "Success", description: "Sales Order deleted successfully." })
+        toast({ title: "Success", description: "Order deleted successfully." })
         fetchSales() // Refresh
       } else {
-        toast({ title: "Error", description: res.message || "Failed to delete Sales Order.", variant: "destructive" })
+        toast({ title: "Error", description: res.message || "Failed to delete order.", variant: "destructive" })
       }
     } catch (error) {
       toast({ title: "Error", description: "An error occurred.", variant: "destructive" })
@@ -116,7 +117,7 @@ export default function SalesOrdersTab() {
     return (
       <div className="flex items-center justify-center p-12">
         <div className="animate-spin rounded-full border-4 border-primary border-t-transparent h-8 w-8 mr-2" />
-        <p className="text-gray-500">Loading sales orders...</p>
+        <p className="text-gray-500">Loading orders...</p>
       </div>
     )
   }
@@ -149,8 +150,8 @@ export default function SalesOrdersTab() {
 
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h2 className="text-2xl font-bold tracking-tight text-gray-900">Sales Orders</h2>
-          <p className="text-sm text-gray-500">Manage and process all pending sales orders (Job Cards)</p>
+          <h2 className="text-2xl font-bold tracking-tight text-gray-900">Order List</h2>
+          <p className="text-sm text-gray-500">Manage and process all pending orders</p>
         </div>
         
         <div className="flex w-full md:w-auto items-center gap-2">
@@ -174,7 +175,7 @@ export default function SalesOrdersTab() {
         <Card className="border-dashed border-gray-300">
           <CardContent className="flex flex-col items-center justify-center p-12 text-center">
             <Calendar className="h-12 w-12 text-gray-300 mb-4" />
-            <h3 className="font-semibold text-lg text-gray-700">No Pending Sales Orders</h3>
+            <h3 className="font-semibold text-lg text-gray-700">No Pending Orders</h3>
             <p className="text-gray-500 text-sm mt-1">
               {searchTerm ? "Try adjusting your search criteria." : "When staff create Job Cards, they will appear here."}
             </p>
@@ -229,7 +230,15 @@ export default function SalesOrdersTab() {
                         </td>
                         <td className="max-w-[180px] truncate px-4 py-2.5 font-medium text-slate-700">{sale.customer_name || "N/A"}</td>
                         <td className="whitespace-nowrap px-4 py-2.5 text-slate-500">{sale.customer_phone || "N/A"}</td>
-                        <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-slate-600">{sale.tracking_id}</td>
+                        <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-slate-600">
+                          <TrackingCell 
+                            saleId={sale.id}
+                            deviceId={deviceId || 0}
+                            trackingId={sale.tracking_id}
+                            deliveryStatus={sale.delivery_status}
+                            onUpdate={fetchSales}
+                          />
+                        </td>
                         <td className="whitespace-nowrap px-4 py-2.5 text-center font-medium text-slate-700">{itemQuantity}</td>
                         <td className="whitespace-nowrap px-4 py-2.5 text-right font-bold text-slate-800">
                           {currency} {Number(sale.total_amount).toFixed(2)}

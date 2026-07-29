@@ -18,8 +18,10 @@ async function generatePasswordHash(password: string): Promise<string> {
   return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("")
 }
 
-function normalizeStaffRole(role?: string): "admin" | "staff" {
-  return role === "admin" ? "admin" : "staff"
+function normalizeStaffRole(role?: string): "admin" | "staff" | "partner" {
+  if (role === "admin") return "admin"
+  if (role === "partner") return "partner"
+  return "staff"
 }
 
 function normalizeRestrictedPages(pages?: StaffPageId[]): StaffPageId[] {
@@ -27,19 +29,19 @@ function normalizeRestrictedPages(pages?: StaffPageId[]): StaffPageId[] {
 }
 
 function normalizeRestrictedValues(
-  role: "admin" | "staff",
+  role: "admin" | "staff" | "partner",
   values?: StaffValueRestriction[],
 ): StaffValueRestriction[] {
-  if (role === "admin") return []
+  if (role === "admin" || role === "partner") return []
   const parsed = parseStringArray<StaffValueRestriction>(values)
   return parsed.length > 0 ? parsed : [...DEFAULT_STAFF_VALUE_RESTRICTIONS]
 }
 
 function normalizeRestrictedValuesForUpdate(
-  role: "admin" | "staff",
+  role: "admin" | "staff" | "partner",
   values?: StaffValueRestriction[],
 ): StaffValueRestriction[] {
-  if (role === "admin") return []
+  if (role === "admin" || role === "partner") return []
   return parseStringArray<StaffValueRestriction>(values)
 }
 
@@ -86,7 +88,7 @@ export async function updateStaff(
     name: string
     phone: string
     email?: string
-    role?: "admin" | "staff"
+    role?: "admin" | "staff" | "partner"
     restrictedPages?: StaffPageId[]
     restrictedValues?: StaffValueRestriction[]
     position: string
@@ -231,7 +233,7 @@ export async function addStaff(staffData: {
   name: string
   phone: string
   email?: string
-  role?: "admin" | "staff"
+  role?: "admin" | "staff" | "partner"
   restrictedPages?: StaffPageId[]
   restrictedValues?: StaffValueRestriction[]
   position: string

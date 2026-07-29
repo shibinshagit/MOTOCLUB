@@ -723,7 +723,7 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
       if (finalReceivedAmount >= totalAmount && totalAmount > 0) {
         newPaymentStatus = "Paid"
       } else if (finalReceivedAmount > 0) {
-        newPaymentStatus = "Partial"
+        newPaymentStatus = "Credit"
       }
 
       // Prepare the sale data with payment method

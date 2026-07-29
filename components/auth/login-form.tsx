@@ -30,6 +30,8 @@ export default function LoginForm() {
     if (device.id && device.user?.token) {
       if (device.user.role === "STAFF") {
         router.replace("/staff/dashboard")
+      } else if (device.user.role === "PARTNER") {
+        router.replace("/partner/dashboard")
       } else {
         router.replace("/dashboard")
       }

@@ -14,6 +14,14 @@ import {
 } from "@/components/sales/excel-column-filter"
 import { getSaleDeliveryLabel } from "@/lib/sale-shipping"
 
+function getSaleStatusLabel(sale: any): string {
+  if (sale.status === "Cancelled") return "Cancelled";
+  const pStatus = sale.payment_status?.toLowerCase();
+  if (pStatus === "paid" || pStatus === "completed") return "Completed";
+  if (pStatus === "credit" || pStatus === "partial") return "Credit";
+  return "Pending";
+}
+
 function SaleStatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
     Completed: "bg-emerald-50 text-emerald-700 border-emerald-200",
@@ -129,7 +137,7 @@ export default function SalesExcelTable({
   const valueGetters = useMemo(
     () => ({
       saleId: (sale: any) => String(sale.id),
-      status: (sale: any) => sale.status || "",
+      status: (sale: any) => getSaleStatusLabel(sale),
       delivery: (sale: any) => getSaleDeliveryLabel(sale),
       date: (sale: any) => format(new Date(sale.sale_date), "yyyy-MM-dd"),
       customer: (sale: any) => sale.customer_name || "Walk-in",
@@ -375,7 +383,7 @@ export default function SalesExcelTable({
                       <td className="whitespace-nowrap px-4 py-2.5 text-xs text-muted-foreground">{index + 1}</td>
                       <td className="whitespace-nowrap px-4 py-2.5 font-semibold text-slate-800">#{sale.id}</td>
                       <td className="whitespace-nowrap px-4 py-2.5">
-                        <SaleStatusBadge status={sale.status} />
+                        <SaleStatusBadge status={getSaleStatusLabel(sale)} />
                       </td>
                       <td className="whitespace-nowrap px-4 py-2.5">
                         <DeliveryStatusBadge status={getSaleDeliveryLabel(sale)} />

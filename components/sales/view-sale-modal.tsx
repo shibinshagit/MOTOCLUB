@@ -204,9 +204,13 @@ export default function ViewSaleModal({
     return value
   }
 
-  const getStatusDisplay = (status: any) => {
-    if (!status) return "Pending"
-    return status
+  const getStatusDisplay = (sale: any) => {
+    if (!sale) return "Pending"
+    if (sale.status === "Cancelled") return "Cancelled"
+    const pStatus = sale.payment_status?.toLowerCase()
+    if (pStatus === "paid" || pStatus === "completed") return "Completed"
+    if (pStatus === "credit" || pStatus === "partial") return "Credit"
+    return "Pending"
   }
 
   const getPaymentMethodDisplay = (paymentMethod: any) => {
@@ -416,7 +420,7 @@ export default function ViewSaleModal({
     </div>
   )
 
-  const status = saleData ? getStatusDisplay(saleData.status) : "Pending"
+  const status = saleData ? getStatusDisplay(saleData) : "Pending"
   const received = saleData ? getReceivedAmount() : 0
   const balance = saleData ? getRemainingAmount() : 0
   const deleteInProgress = isDeleting || isDeletingLocal
