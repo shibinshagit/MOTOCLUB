@@ -1805,7 +1805,7 @@ export async function updateSaleDeliveryStatus(
     const isAdmin = !staffSession
 
     const rows = await sql`
-      SELECT delivery_status, status, fulfillment_type, shipped_at, delivered_at, payment_status, tracking_id, sale_type
+      SELECT delivery_status, status, fulfillment_type, shipped_at, delivered_at, payment_status, tracking_id, sale_type, staff_id
       FROM sales
       WHERE id = ${saleId}
         AND device_id = ${deviceId}
@@ -1814,6 +1814,10 @@ export async function updateSaleDeliveryStatus(
 
     if (rows.length === 0) {
       return { success: false as const, message: "Sale not found" }
+    }
+
+    if (!isAdmin && rows[0].staff_id !== staffSession.staffId) {
+      return { success: false as const, message: "Unauthorized. You can only update your own sales." }
     }
 
     const shippedAt =

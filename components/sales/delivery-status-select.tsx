@@ -146,13 +146,9 @@ export function DeliveryStatusSelect({
   // Only show the current status and valid next statuses
   let availableOptions = [currentStatus]
   
-  if (userRole === "admin") {
-    const adminAllowed = ["Paid", "Packed", "Sent", "Shipping", "Delivered", "Returned", "Failed"]
-    if (adminAllowed.includes(currentStatus)) {
-      availableOptions = [...adminAllowed]
-    } else {
-      availableOptions = [currentStatus, ...(VALID_TRANSITIONS[currentStatus] || [])]
-    }
+  const allowedStatuses = ["Paid", "Packed", "Sent", "Shipping", "Delivered", "Returned", "Failed"]
+  if (allowedStatuses.includes(currentStatus)) {
+    availableOptions = [...allowedStatuses]
   } else {
     availableOptions = [currentStatus, ...(VALID_TRANSITIONS[currentStatus] || [])]
   }

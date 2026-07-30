@@ -260,10 +260,14 @@ export async function updateJobCard(id: number, input: any) {
         shipping_pincode = ${input.shippingPincode || null},
         courier_paid_extra = ${input.courierPaidExtra || 0},
         balance_amount = ${totalAmount} - received_amount
-      WHERE id = ${id} AND device_id = ${deviceId}
+      WHERE id = ${id} AND device_id = ${deviceId} AND staff_id = ${session.staffId}
       RETURNING tracking_id
     `
     
+    if (updatedSaleRows.length === 0) {
+      return { success: false, message: "Job Card not found or unauthorized" }
+    }
+
     const trackingId = updatedSaleRows[0]?.tracking_id || ""
 
     // 4. Delete existing sale items
@@ -321,6 +325,7 @@ export async function getTodayJobCards(monthStr?: string, searchTerm?: string) {
         SELECT s.*, COALESCE(c.name, s.customer_name_override) as customer_name, COALESCE(c.phone, s.customer_phone_override) as customer_phone
         FROM sales s LEFT JOIN customers c ON s.customer_id = c.id
         WHERE s.device_id = ${deviceId}
+          AND s.staff_id = ${session.staffId}
           AND s.sale_date >= ${startDate}::date
           AND s.sale_date < (${startDate}::date + interval '1 month')
           AND s.status != 'Cancelled'
@@ -339,6 +344,7 @@ export async function getTodayJobCards(monthStr?: string, searchTerm?: string) {
         SELECT s.*, COALESCE(c.name, s.customer_name_override) as customer_name, COALESCE(c.phone, s.customer_phone_override) as customer_phone
         FROM sales s LEFT JOIN customers c ON s.customer_id = c.id
         WHERE s.device_id = ${deviceId}
+          AND s.staff_id = ${session.staffId}
           AND s.sale_date >= ${startDate}::date
           AND s.sale_date < (${startDate}::date + interval '1 month')
           AND s.status != 'Cancelled'
@@ -351,6 +357,7 @@ export async function getTodayJobCards(monthStr?: string, searchTerm?: string) {
         SELECT s.*, COALESCE(c.name, s.customer_name_override) as customer_name, COALESCE(c.phone, s.customer_phone_override) as customer_phone
         FROM sales s LEFT JOIN customers c ON s.customer_id = c.id
         WHERE s.device_id = ${deviceId}
+          AND s.staff_id = ${session.staffId}
           AND s.sale_date >= date_trunc('month', CURRENT_DATE)
           AND s.sale_date < date_trunc('month', CURRENT_DATE) + interval '1 month'
           AND s.status != 'Cancelled'
@@ -369,6 +376,7 @@ export async function getTodayJobCards(monthStr?: string, searchTerm?: string) {
         SELECT s.*, COALESCE(c.name, s.customer_name_override) as customer_name, COALESCE(c.phone, s.customer_phone_override) as customer_phone
         FROM sales s LEFT JOIN customers c ON s.customer_id = c.id
         WHERE s.device_id = ${deviceId}
+          AND s.staff_id = ${session.staffId}
           AND s.sale_date >= date_trunc('month', CURRENT_DATE)
           AND s.sale_date < date_trunc('month', CURRENT_DATE) + interval '1 month'
           AND s.status != 'Cancelled'
@@ -478,7 +486,8 @@ export async function getStaffSalesAnalytics(deviceId: number, targetMonthStr?: 
     }
 
     // Define the date boundaries
-    const date = targetMonthStr ? new Date(targetMonthStr) : new Date()
+    // Add time component to prevent timezone shift when parsing YYYY-MM-DD
+    const date = targetMonthStr ? new Date(targetMonthStr + 'T12:00:00') : new Date()
     const year = date.getFullYear()
     const month = date.getMonth() + 1 // 1-12
     const startDate = `${year}-${String(month).padStart(2, '0')}-01`
@@ -496,9 +505,10 @@ export async function getStaffSalesAnalytics(deviceId: number, targetMonthStr?: 
         SUM(total_amount) as sales_amount
       FROM sales
       WHERE device_id = ${deviceId}
+        AND staff_id = ${session.staffId}
         AND status != 'Cancelled'
-        AND sale_date >= ${startDate}
-        AND sale_date < ${endDate}
+        AND sale_date >= ${startDate}::date
+        AND sale_date < ${endDate}::date
       GROUP BY TO_CHAR(sale_date, 'YYYY-MM-DD')
       ORDER BY date ASC
     `

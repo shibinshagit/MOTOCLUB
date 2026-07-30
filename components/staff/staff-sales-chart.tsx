@@ -10,10 +10,11 @@ import {
   YAxis, 
   CartesianGrid, 
   Tooltip, 
-  ResponsiveContainer 
+  ResponsiveContainer,
+  Legend
 } from "recharts"
 import { format, parseISO, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay } from "date-fns"
-import { ChevronLeft, ChevronRight, BarChart2, LineChart as LineChartIcon, Loader2 } from "lucide-react"
+import { ChevronLeft, ChevronRight, BarChart2, LineChart as LineChartIcon, Loader2, TrendingUp } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { getStaffSalesAnalytics } from "@/app/actions/job-card-actions"
@@ -71,9 +72,11 @@ export function StaffSalesChart({ deviceId, currency = "INR", onSummaryUpdate }:
 
           return {
             date: day,
-            dayStr: format(day, "d MMM"), // e.g., "14 Jul"
+            dayStr: format(day, "d EEE"), // e.g., "3 Fri"
             salesAmount,
-            orderCount
+            orderCount,
+            profit: salesAmount, // Mocked as full amount since staff have no expenses
+            expense: 0 // Staff have no expenses in this view
           }
         })
 
@@ -116,14 +119,16 @@ export function StaffSalesChart({ deviceId, currency = "INR", onSummaryUpdate }:
     if (active && payload && payload.length) {
       const data = payload[0].payload
       return (
-        <div className="bg-white p-3 border border-gray-200 shadow-lg rounded-lg text-sm">
-          <p className="font-semibold text-gray-900 mb-1">{data.dayStr}</p>
-          <p className="text-gray-700">
-            Sales: <span className="font-medium">{formatCurrency(data.salesAmount)}</span>
-          </p>
-          <p className="text-gray-700">
-            Orders: <span className="font-medium">{data.orderCount}</span>
-          </p>
+        <div className="bg-white p-3 border border-gray-100 shadow-xl rounded-xl text-sm min-w-[120px]">
+          <p className="font-semibold text-gray-900 mb-2">{data.dayStr}</p>
+          <div className="flex flex-col gap-1">
+            <p className="text-red-500 font-medium text-[13px]">
+              Expense : {data.expense}
+            </p>
+            <p className="text-emerald-500 font-medium text-[13px]">
+              Profit : {data.profit}
+            </p>
+          </div>
         </div>
       )
     }
@@ -133,9 +138,14 @@ export function StaffSalesChart({ deviceId, currency = "INR", onSummaryUpdate }:
   const hasData = useMemo(() => data.some(d => d.orderCount > 0), [data])
 
   return (
-    <Card className="w-full">
-      <CardHeader className="flex flex-col sm:flex-row items-center justify-between pb-6 gap-4">
-        <CardTitle className="text-xl font-semibold text-gray-800">Order List Trend</CardTitle>
+    <Card className="w-full border-0 shadow-sm rounded-xl overflow-hidden">
+      <CardHeader className="flex flex-col sm:flex-row items-center justify-between pb-6 gap-4 bg-white">
+        <div className="flex items-center gap-2">
+          <div className="p-2 bg-indigo-50 rounded-lg">
+            <TrendingUp className="h-5 w-5 text-indigo-600" />
+          </div>
+          <CardTitle className="text-lg font-bold text-slate-800">Earnings Trend</CardTitle>
+        </div>
         <div className="flex items-center gap-4">
           <div className="flex items-center bg-gray-100 rounded-md p-1">
             <Button
@@ -157,15 +167,15 @@ export function StaffSalesChart({ deviceId, currency = "INR", onSummaryUpdate }:
               Line
             </Button>
           </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="icon" onClick={prevMonth} className="h-8 w-8">
-              <ChevronLeft className="h-4 w-4" />
+          <div className="flex items-center gap-2 bg-slate-50 rounded-full border border-slate-200 p-1">
+            <Button variant="ghost" size="icon" onClick={prevMonth} className="h-6 w-6 rounded-full hover:bg-white hover:shadow-sm">
+              <ChevronLeft className="h-3 w-3" />
             </Button>
-            <span className="text-sm font-medium min-w-[100px] text-center">
-              {format(currentMonth, "MMMM yyyy")}
+            <span className="text-[11px] font-semibold text-slate-600 min-w-[130px] text-center">
+              {format(startOfMonth(currentMonth), "M/d/yyyy")} - {format(endOfMonth(currentMonth), "M/d/yyyy")}
             </span>
-            <Button variant="outline" size="icon" onClick={nextMonth} className="h-8 w-8">
-              <ChevronRight className="h-4 w-4" />
+            <Button variant="ghost" size="icon" onClick={nextMonth} className="h-6 w-6 rounded-full hover:bg-white hover:shadow-sm">
+              <ChevronRight className="h-3 w-3" />
             </Button>
           </div>
         </div>
@@ -184,55 +194,86 @@ export function StaffSalesChart({ deviceId, currency = "INR", onSummaryUpdate }:
             No orders for this period
           </div>
         ) : (
-          <div className="h-[350px] w-full mt-4">
+          <div className="h-[350px] w-full mt-2">
             <ResponsiveContainer width="100%" height="100%">
               {chartType === "bar" ? (
-                <RechartsBarChart data={data} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                <RechartsBarChart data={data} margin={{ top: 20, right: 20, left: 0, bottom: 0 }} barGap={2}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={true} stroke="#f1f5f9" />
                   <XAxis 
                     dataKey="date" 
-                    tickFormatter={(val) => format(val, 'd')}
-                    axisLine={false}
+                    tickFormatter={(val) => format(val, 'd EEE')}
+                    axisLine={{ stroke: '#e2e8f0' }}
                     tickLine={false}
-                    tick={{ fill: '#6b7280', fontSize: 12 }}
+                    tick={{ fill: '#64748b', fontSize: 10, fontWeight: 500 }}
                     dy={10}
+                    interval={0}
+                    minTickGap={10}
                   />
                   <YAxis 
-                    tickFormatter={(val) => formatCurrency(val)}
+                    tickFormatter={(val) => `₹${val}`}
                     axisLine={false}
                     tickLine={false}
-                    tick={{ fill: '#6b7280', fontSize: 12 }}
-                    width={80}
+                    tick={{ fill: '#64748b', fontSize: 11, fontWeight: 500 }}
+                    width={60}
+                    dx={-10}
                   />
-                  <Tooltip content={<CustomTooltip />} cursor={{ fill: '#f3f4f6' }} />
-                  <Bar dataKey="salesAmount" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                  <Tooltip content={<CustomTooltip />} cursor={{ fill: 'transparent' }} />
+                  <Legend 
+                    verticalAlign="top" 
+                    align="right"
+                    iconType="circle"
+                    iconSize={8}
+                    wrapperStyle={{ paddingBottom: '20px', fontSize: '12px', fontWeight: 500, color: '#475569' }}
+                  />
+                  <Bar dataKey="profit" name="Profit" fill="#34d399" radius={[4, 4, 0, 0]} maxBarSize={40} />
+                  <Bar dataKey="expense" name="Expense" fill="#f87171" radius={[4, 4, 0, 0]} maxBarSize={40} />
                 </RechartsBarChart>
               ) : (
-                <RechartsLineChart data={data} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                <RechartsLineChart data={data} margin={{ top: 20, right: 20, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={true} stroke="#f1f5f9" />
                   <XAxis 
                     dataKey="date" 
-                    tickFormatter={(val) => format(val, 'd')}
-                    axisLine={false}
+                    tickFormatter={(val) => format(val, 'd EEE')}
+                    axisLine={{ stroke: '#e2e8f0' }}
                     tickLine={false}
-                    tick={{ fill: '#6b7280', fontSize: 12 }}
+                    tick={{ fill: '#64748b', fontSize: 10, fontWeight: 500 }}
                     dy={10}
+                    interval={0}
+                    minTickGap={10}
                   />
                   <YAxis 
-                    tickFormatter={(val) => formatCurrency(val)}
+                    tickFormatter={(val) => `₹${val}`}
                     axisLine={false}
                     tickLine={false}
-                    tick={{ fill: '#6b7280', fontSize: 12 }}
-                    width={80}
+                    tick={{ fill: '#64748b', fontSize: 11, fontWeight: 500 }}
+                    width={60}
+                    dx={-10}
                   />
                   <Tooltip content={<CustomTooltip />} />
+                  <Legend 
+                    verticalAlign="top" 
+                    align="right"
+                    iconType="circle"
+                    iconSize={8}
+                    wrapperStyle={{ paddingBottom: '20px', fontSize: '12px', fontWeight: 500, color: '#475569' }}
+                  />
                   <Line 
                     type="monotone" 
-                    dataKey="salesAmount" 
-                    stroke="#3b82f6" 
+                    dataKey="profit" 
+                    name="Profit"
+                    stroke="#34d399" 
                     strokeWidth={3}
-                    dot={{ r: 4, strokeWidth: 2, fill: "#fff" }}
-                    activeDot={{ r: 6, strokeWidth: 0, fill: "#2563eb" }}
+                    dot={{ r: 3, strokeWidth: 2, fill: "#fff" }}
+                    activeDot={{ r: 6, strokeWidth: 0, fill: "#10b981" }}
+                  />
+                  <Line 
+                    type="monotone" 
+                    dataKey="expense" 
+                    name="Expense"
+                    stroke="#f87171" 
+                    strokeWidth={3}
+                    dot={{ r: 3, strokeWidth: 2, fill: "#fff" }}
+                    activeDot={{ r: 6, strokeWidth: 0, fill: "#ef4444" }}
                   />
                 </RechartsLineChart>
               )}

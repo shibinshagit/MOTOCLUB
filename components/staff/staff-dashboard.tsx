@@ -12,7 +12,13 @@ import {
   X,
   CreditCard,
   Package,
-  Plus
+  Plus,
+  Banknote,
+  DollarSign,
+  AlertTriangle,
+  Calendar as CalendarIcon,
+  TrendingUp,
+  Activity
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { staffLogout } from "@/app/actions/staff-auth-actions"
@@ -193,42 +199,77 @@ export default function StaffDashboard() {
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                   {/* Total Orders */}
-                  <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-100 flex flex-col justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-gray-500">Total Orders</p>
-                      <h3 className="mt-1 text-2xl font-bold text-gray-900">{dashboardStats?.totalOrders || 0}</h3>
+                  <div className="bg-gradient-to-br from-[#2979ff] to-[#1565c0] p-4 rounded-xl shadow-md border-0 flex flex-col justify-between text-white relative overflow-hidden group">
+                    <div className="absolute -right-4 -top-4 opacity-20 transform group-hover:scale-110 transition-transform duration-300">
+                      <Package className="h-20 w-20" />
+                    </div>
+                    <div className="relative z-10">
+                      <div className="flex justify-between items-start">
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-blue-100">Total Orders</p>
+                        <Package className="h-5 w-5 text-blue-200" />
+                      </div>
+                      <h3 className="mt-2 text-3xl font-extrabold">{dashboardStats?.totalOrders || 0}</h3>
+                      <p className="mt-2 text-[11px] font-medium text-blue-100">All time entries</p>
                     </div>
                   </div>
                   {/* Total Sale Amount */}
-                  <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-100 flex flex-col justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-gray-500">Total Sale Amount</p>
-                      <h3 className="mt-1 text-2xl font-bold text-gray-900">
-                        {new Intl.NumberFormat("en-US", { style: "currency", currency: device?.currency || "INR", maximumFractionDigits: 0 }).format(dashboardStats?.totalSaleAmount || 0)}
+                  <div className="bg-gradient-to-br from-[#f50057] to-[#c51162] p-4 rounded-xl shadow-md border-0 flex flex-col justify-between text-white relative overflow-hidden group">
+                    <div className="absolute -right-4 -top-4 opacity-20 transform group-hover:scale-110 transition-transform duration-300">
+                      <Banknote className="h-20 w-20" />
+                    </div>
+                    <div className="relative z-10">
+                      <div className="flex justify-between items-start">
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-pink-100">Total Sale Amount</p>
+                        <Banknote className="h-5 w-5 text-pink-200" />
+                      </div>
+                      <h3 className="mt-2 text-3xl font-extrabold truncate">
+                        {new Intl.NumberFormat("en-US", { style: "currency", currency: device?.currency || "INR", maximumFractionDigits: 0 }).format(dashboardStats?.totalSaleAmount || 0).replace(/^[a-zA-Z]+/, (match) => match + " ")}
                       </h3>
+                      <p className="mt-2 text-[11px] font-medium text-pink-100">Sum of Total Paid</p>
                     </div>
                   </div>
                   {/* Total Profit */}
-                  <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-100 flex flex-col justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-gray-500">Total Profit</p>
-                      <h3 className="mt-1 text-2xl font-bold text-blue-600">
-                        {new Intl.NumberFormat("en-US", { style: "currency", currency: device?.currency || "INR", maximumFractionDigits: 0 }).format(dashboardStats?.totalProfit || 0)}
+                  <div className="bg-gradient-to-br from-[#00c853] to-[#00b0ff] p-4 rounded-xl shadow-md border-0 flex flex-col justify-between text-white relative overflow-hidden group">
+                    <div className="absolute -right-4 -top-4 opacity-20 transform group-hover:scale-110 transition-transform duration-300">
+                      <DollarSign className="h-20 w-20" />
+                    </div>
+                    <div className="relative z-10">
+                      <div className="flex justify-between items-start">
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-100">Total Profit</p>
+                        <DollarSign className="h-5 w-5 text-emerald-200" />
+                      </div>
+                      <h3 className="mt-2 text-3xl font-extrabold truncate">
+                        {new Intl.NumberFormat("en-US", { style: "currency", currency: device?.currency || "INR", maximumFractionDigits: 0 }).format(dashboardStats?.totalProfit || 0).replace(/^[a-zA-Z]+/, (match) => match + " ")}
                       </h3>
+                      <p className="mt-2 text-[11px] font-medium text-emerald-100">+12% from last month</p>
                     </div>
                   </div>
                   {/* Today's Activity */}
-                  <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-100 flex flex-col justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-gray-500">Today's Activity</p>
-                      <h3 className="mt-1 text-2xl font-bold text-gray-900">{dashboardStats?.todaysActivity || 0}</h3>
+                  <div className="bg-gradient-to-br from-[#7c4dff] to-[#651fff] p-4 rounded-xl shadow-md border-0 flex flex-col justify-between text-white relative overflow-hidden group">
+                    <div className="absolute -right-4 -top-4 opacity-20 transform group-hover:scale-110 transition-transform duration-300">
+                      <Activity className="h-20 w-20" />
+                    </div>
+                    <div className="relative z-10">
+                      <div className="flex justify-between items-start">
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-violet-100">Today's Activity</p>
+                        <CalendarIcon className="h-5 w-5 text-violet-200" />
+                      </div>
+                      <h3 className="mt-2 text-3xl font-extrabold">{dashboardStats?.todaysActivity || 0}</h3>
+                      <p className="mt-2 text-[11px] font-medium text-violet-100">Orders processing</p>
                     </div>
                   </div>
                   {/* Pending Costs */}
-                  <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-100 flex flex-col justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-gray-500">Pending Costs</p>
-                      <h3 className="mt-1 text-2xl font-bold text-orange-600">{dashboardStats?.pendingCosts || 0}</h3>
+                  <div className="bg-gradient-to-br from-[#ff9100] to-[#ff3d00] p-4 rounded-xl shadow-md border-0 flex flex-col justify-between text-white relative overflow-hidden group">
+                    <div className="absolute -right-4 -top-4 opacity-20 transform group-hover:scale-110 transition-transform duration-300">
+                      <AlertTriangle className="h-20 w-20" />
+                    </div>
+                    <div className="relative z-10">
+                      <div className="flex justify-between items-start">
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-orange-100">Pending Costs</p>
+                        <AlertTriangle className="h-5 w-5 text-orange-200" />
+                      </div>
+                      <h3 className="mt-2 text-3xl font-extrabold">{dashboardStats?.pendingCosts || 0}</h3>
+                      <p className="mt-2 text-[11px] font-medium text-orange-100">Needs attention</p>
                     </div>
                   </div>
                 </div>

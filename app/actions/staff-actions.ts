@@ -656,28 +656,28 @@ export async function getStaffDashboardStats(deviceId: number) {
       sql`
         SELECT COUNT(*) as total
         FROM sales
-        WHERE device_id = ${deviceId} AND status != 'Cancelled'
+        WHERE device_id = ${deviceId} AND staff_id = ${session.staffId} AND status != 'Cancelled'
       `,
       
       // 2. Total Sale Amount
       sql`
         SELECT COALESCE(SUM(total_amount), 0) as total
         FROM sales
-        WHERE device_id = ${deviceId} AND status != 'Cancelled'
+        WHERE device_id = ${deviceId} AND staff_id = ${session.staffId} AND status != 'Cancelled'
       `,
       
       // 3. Manual Income
       sql`
         SELECT COALESCE(SUM(amount), 0) as total
         FROM financial_transactions
-        WHERE transaction_type = 'income' AND device_id = ${deviceId}
+        WHERE transaction_type = 'income' AND device_id = ${deviceId} AND staff_id = ${session.staffId}
       `,
       
       // 4. Manual Expenses
       sql`
         SELECT COALESCE(SUM(amount), 0) as total
         FROM financial_transactions
-        WHERE transaction_type = 'expense' AND device_id = ${deviceId}
+        WHERE transaction_type = 'expense' AND device_id = ${deviceId} AND staff_id = ${session.staffId}
       `,
       
       // 5. Total COGS
@@ -686,22 +686,22 @@ export async function getStaffDashboardStats(deviceId: number) {
         FROM sale_items si
         JOIN sales s ON si.sale_id = s.id
         JOIN products p ON si.product_id = p.id
-        WHERE s.device_id = ${deviceId} AND s.status != 'Cancelled'
+        WHERE s.device_id = ${deviceId} AND s.staff_id = ${session.staffId} AND s.status != 'Cancelled'
       `,
       
       // 6. Today's Activity
       sql`
         SELECT COUNT(*) as total
         FROM sales
-        WHERE device_id = ${deviceId} AND DATE(sale_date) = ${today} AND status != 'Cancelled'
+        WHERE device_id = ${deviceId} AND staff_id = ${session.staffId} AND DATE(sale_date) = ${today} AND status != 'Cancelled'
       `,
 
       // 7. Pending Costs (Pending Payables/Expenses)
       sql`
         SELECT 
-          (SELECT COUNT(*) FROM purchases WHERE payment_status != 'Paid' AND status != 'Cancelled' AND device_id = ${deviceId})
+          (SELECT COUNT(*) FROM purchases WHERE status != 'Paid' AND status != 'Cancelled' AND device_id = ${deviceId} AND staff_id = ${session.staffId})
           +
-          (SELECT COUNT(*) FROM financial_transactions WHERE transaction_type = 'expense' AND status = 'Pending' AND device_id = ${deviceId})
+          (SELECT COUNT(*) FROM financial_transactions WHERE transaction_type = 'expense' AND status = 'Pending' AND device_id = ${deviceId} AND staff_id = ${session.staffId})
         as total
       `
     ]);
