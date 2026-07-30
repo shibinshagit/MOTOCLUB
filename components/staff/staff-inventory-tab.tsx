@@ -43,11 +43,11 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
   const [searchTerm, setSearchTerm] = useState("")
   const [selectedProduct, setSelectedProduct] = useState<any>(null)
 
-  const loadInventory = async (search?: string) => {
+  const loadInventory = async () => {
     setLoading(true)
     try {
-      const res = await getStaffInventory(search)
-      if (res.success) {
+      const res = await getStaffInventory() // Fetch all once
+      if (res.success && 'data' in res) {
         setProducts(res.data || [])
       } else {
         toast({ title: "Error", description: res.message, variant: "destructive" })
@@ -63,19 +63,25 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
     loadInventory()
   }, [])
 
-  // Optional: debounce search later, for now we can just search on submit or type
-  useEffect(() => {
-    const delayDebounceFn = setTimeout(() => {
-      loadInventory(searchTerm)
-    }, 500)
-    return () => clearTimeout(delayDebounceFn)
-  }, [searchTerm])
+  const filteredProducts = useMemo(() => {
+    if (!searchTerm.trim()) return products
+    
+    const q = searchTerm.toLowerCase()
+    return products.filter((p: any) => {
+      const nameMatch = (p.name || "").toLowerCase().includes(q)
+      const categoryMatch = (p.category || "").toLowerCase().includes(q)
+      const barcodeMatch = (p.barcode || p.variants?.[0]?.barcode || "").toLowerCase().includes(q)
+      const skuMatch = (p.sku || p.variants?.[0]?.sku || "").toLowerCase().includes(q)
+      return nameMatch || categoryMatch || barcodeMatch || skuMatch
+    })
+  }, [products, searchTerm])
 
   const stats = useMemo(() => {
     const total = products.length
-    const available = products.filter(p => p.stock > 0).length
-    const low = products.filter(p => p.stock > 0 && p.stock <= 5).length
-    const out = products.filter(p => p.stock <= 0).length
+    // If stock is null (restricted by RBAC), we don't count them in these buckets
+    const available = products.filter(p => p.stock !== null && p.stock > 0).length
+    const low = products.filter(p => p.stock !== null && p.stock > 0 && p.stock <= 5).length
+    const out = products.filter(p => p.stock !== null && p.stock <= 0).length
     return { total, available, low, out }
   }, [products])
 
@@ -89,7 +95,7 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
             <p className="text-sm text-slate-500 mt-1">View available stock and product locations</p>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => loadInventory(searchTerm)} disabled={loading}>
+            <Button variant="outline" size="sm" onClick={() => loadInventory()} disabled={loading}>
               <RefreshCw className={cn("h-4 w-4 mr-2", loading && "animate-spin")} />
               Refresh
             </Button>
@@ -151,7 +157,7 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
                       Loading inventory...
                     </td>
                   </tr>
-                ) : products.length === 0 ? (
+                ) : filteredProducts.length === 0 ? (
                   <tr>
                     <td colSpan={9} className="px-6 py-12 text-center text-slate-500">
                       <Package className="h-8 w-8 mx-auto mb-2 text-slate-300" />
@@ -159,7 +165,7 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
                     </td>
                   </tr>
                 ) : (
-                  products.map((product) => (
+                  filteredProducts.map((product) => (
                     <tr 
                       key={product.id} 
                       onClick={() => setSelectedProduct(product)}
@@ -178,10 +184,10 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
                           </div>
                           <div>
                             <p className="font-semibold text-slate-800 group-hover:text-indigo-600 transition-colors">
-                              {product.productName || product.name}
+                              {product.name}
                             </p>
-                            {product.variantName && product.variantName !== "Default" && !product.has_variants && (
-                              <p className="text-xs text-slate-500 mt-0.5">{product.variantName}</p>
+                            {product.variants?.[0]?.name && product.variants[0].name !== "Default" && !product.has_variants && (
+                              <p className="text-xs text-slate-500 mt-0.5">{product.variants[0].name}</p>
                             )}
                             {product.has_variants && (
                               <p className="text-[11px] text-slate-500 mt-0.5">{product.variants?.length || 0} variants</p>
@@ -190,52 +196,39 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
                         </div>
                       </td>
                       <td className="px-6 py-3 text-slate-600">{product.category || "—"}</td>
-                      <td className="px-6 py-3 font-mono text-xs text-slate-500">{product.variants?.[0]?.barcode || "—"}</td>
+                      <td className="px-6 py-3 font-mono text-xs text-slate-500">{product.barcode || product.variants?.[0]?.barcode || "—"}</td>
                       <td className="px-6 py-3 text-slate-600">{product.branch_name || "Main"}</td>
                       <td className="px-6 py-3 text-right font-medium text-slate-800">
                         {(() => {
-                          let prices: number[] = []
-                          if (product.batches && product.batches.length > 0) {
-                            prices = product.batches.map((b: any) => Number(b.selling_price || 0)).filter((p: number) => p > 0)
-                          }
-                          if (prices.length === 0 && product.variants) {
-                            prices = product.variants.map((v: any) => Number(v.selling_price || 0)).filter((p: number) => p > 0)
-                          }
-                          
-                          if (!product.has_variants || (product.variants && product.variants.length <= 1)) {
-                             const singlePrice = prices.length > 0 ? Math.max(...prices) : Number(product.variants?.[0]?.msp || 0)
-                             return `AED ${singlePrice.toFixed(2)}`
-                          }
-
-                          if (prices.length > 0) {
-                             const minPrice = Math.min(...prices)
-                             return `From AED ${minPrice.toFixed(2)}`
-                          }
-                          
-                          return "AED 0.00"
+                          const sellingPrice = Number(product.msp ?? product.price ?? 0)
+                          return `${currency} ${sellingPrice.toFixed(2)}`
                         })()}
                       </td>
                       <td className="px-6 py-3 text-right font-medium text-slate-600">
                         {(() => {
-                          const msp = Number(product.variants?.[0]?.msp || 0)
-                          return msp > 0 ? `AED ${msp.toFixed(2)}` : "—"
+                          const msp = Number(product.msp || product.variants?.[0]?.msp || 0)
+                          return msp > 0 ? `${currency} ${msp.toFixed(2)}` : "—"
                         })()}
                       </td>
                       <td className="px-6 py-3 text-right font-bold text-slate-700">
-                        {product.stock}
+                        {product.stock === null ? "—" : product.stock}
                       </td>
                       <td className="px-6 py-3 text-center">
-                        {product.stock <= 0 ? (
-                          <span className="inline-flex items-center px-2 py-1 rounded-full text-[10px] font-bold bg-red-50 text-red-700 border border-red-100">
-                            OUT OF STOCK
+                        {product.stock === null ? (
+                          <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200">
+                            Hidden
+                          </span>
+                        ) : product.stock <= 0 ? (
+                          <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-50 text-red-700 border border-red-200">
+                            Out of Stock
                           </span>
                         ) : product.stock <= 5 ? (
-                          <span className="inline-flex items-center px-2 py-1 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-100">
-                            LOW STOCK
+                          <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200">
+                            Low Stock
                           </span>
                         ) : (
-                          <span className="inline-flex items-center px-2 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-100">
-                            IN STOCK
+                          <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            In Stock
                           </span>
                         )}
                       </td>

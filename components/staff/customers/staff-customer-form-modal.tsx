@@ -32,8 +32,6 @@ export default function StaffCustomerFormModal({
     phone: "",
     email: "",
     address: "",
-    vehicle_details: "",
-    notes: "",
   })
 
   useEffect(() => {
@@ -44,8 +42,6 @@ export default function StaffCustomerFormModal({
           phone: customerToEdit.phone || "",
           email: customerToEdit.email || "",
           address: customerToEdit.address || "",
-          vehicle_details: customerToEdit.vehicle_details || "",
-          notes: customerToEdit.notes || "",
         })
       } else {
         setFormData({
@@ -53,8 +49,6 @@ export default function StaffCustomerFormModal({
           phone: "",
           email: "",
           address: "",
-          vehicle_details: "",
-          notes: "",
         })
       }
     }
@@ -80,8 +74,6 @@ export default function StaffCustomerFormModal({
     data.append("phone", formData.phone)
     data.append("email", formData.email)
     data.append("address", formData.address)
-    data.append("vehicle_details", formData.vehicle_details)
-    data.append("notes", formData.notes)
 
     try {
       let result
@@ -161,34 +153,11 @@ export default function StaffCustomerFormModal({
             />
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="vehicle_details">Vehicle Details</Label>
-            <Input
-              id="vehicle_details"
-              name="vehicle_details"
-              value={formData.vehicle_details}
-              onChange={handleInputChange}
-              placeholder="Make, Model, License Plate"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="notes">Notes</Label>
-            <Textarea
-              id="notes"
-              name="notes"
-              value={formData.notes}
-              onChange={handleInputChange}
-              placeholder="Any additional information..."
-              rows={3}
-            />
-          </div>
-
-          <DialogFooter className="pt-4">
+          <DialogFooter className="bg-slate-50 px-6 py-4 border-t border-slate-200 mt-2">
             <Button type="button" variant="outline" onClick={onClose} disabled={isSubmitting}>
               Cancel
             </Button>
-            <Button type="submit" disabled={isSubmitting}>
+            <Button type="submit" disabled={isSubmitting} className="bg-brand-blue hover:bg-brand-blue/90">
               {isSubmitting ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />

@@ -27,7 +27,7 @@ export default function StaffViewCustomerModal({ isOpen, onClose, customer, curr
   const customerType = getCustomerType(Number(customer.order_count) || 0)
 
   const handleShare = async () => {
-    const text = `👤 Customer: ${customer.name}\n📞 Phone: ${customer.phone || "N/A"}\n✉️ Email: ${customer.email || "N/A"}\n📍 Address: ${customer.address || "N/A"}\n🚗 Vehicle: ${customer.vehicle_details || "N/A"}\n📝 Notes: ${customer.notes || "N/A"}`
+    const text = `👤 Customer: ${customer.name}\n📞 Phone: ${customer.phone || "N/A"}\n✉️ Email: ${customer.email || "N/A"}\n📍 Address: ${customer.address || "N/A"}`
 
     if (navigator.share) {
       try {
@@ -111,10 +111,10 @@ export default function StaffViewCustomerModal({ isOpen, onClose, customer, curr
             </div>
           </div>
 
-          {/* Vehicle & Notes */}
+          {/* Notes */}
           <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
             <h3 className="font-semibold text-slate-800 flex items-center gap-2">
-              <Car className="h-4 w-4 text-slate-500" /> Vehicle & Additional Details
+              <FileText className="h-4 w-4 text-slate-500" /> Additional Details
             </h3>
             <Separator />
             <div className="space-y-4">

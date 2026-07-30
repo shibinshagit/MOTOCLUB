@@ -110,8 +110,8 @@ export default function StaffViewProductModal({
   const device = useAppSelector(selectDevice)
   const currentDeviceId = device?.id || undefined
 
-  const msp = typeof product?.msp === "number" ? product.msp : Number.parseFloat(product?.msp || "0") || 0
-  const retailPrice = typeof product?.selling_price === "number" ? product.selling_price : Number.parseFloat(product?.selling_price || "0") || 0
+  const msp = Number(product?.variants?.[0]?.msp || 0)
+  const retailPrice = Number(product?.msp ?? product?.price ?? 0)
 
   const mediaImageUrls = useMemo(() => {
     if (!product) return []
@@ -167,7 +167,7 @@ export default function StaffViewProductModal({
   }
 
   const stockDisplay = () => {
-    if (!product) return "—"
+    if (product.stock === null) return "Hidden"
     const stock = Number(product.stock) || 0
     if (stock === 0) return "Out of stock"
     if (stock < 5) return `${stock} · Low`

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { 
   LayoutDashboard, 
@@ -16,6 +16,7 @@ import {
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { staffLogout } from "@/app/actions/staff-auth-actions"
+import { getStaffDashboardStats } from "@/app/actions/staff-actions"
 import { useAppDispatch, useAppSelector } from "@/store/hooks"
 import { clearDeviceData, selectDevice } from "@/store/slices/deviceSlice"
 import { clearStaff } from "@/store/slices/staffSlice"
@@ -24,7 +25,7 @@ import { BrandLogo } from "@/components/brand-logo"
 import StaffAttendance from "./staff-attendance"
 import StaffInventoryTab from "./staff-inventory-tab"
 import { TodaySalesList } from "./job-card"
-import { CreateJobCardModal } from "./job-card/create-job-card-modal"
+import { JobCardModal } from "./job-card/job-card-modal"
 import { StaffCustomerTab } from "./customers/staff-customer-tab"
 import { StaffSalesChart } from "./staff-sales-chart"
 
@@ -35,10 +36,19 @@ export default function StaffDashboard() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [isJobCardModalOpen, setIsJobCardModalOpen] = useState(false)
   const [chartSummary, setChartSummary] = useState({ sales: 0, orders: 0 })
+  const [dashboardStats, setDashboardStats] = useState<any>(null)
   const router = useRouter()
   const { toast } = useToast()
   const dispatch = useAppDispatch()
   const device = useAppSelector(selectDevice)
+
+  useEffect(() => {
+    if (activeTab === "home" && device?.id) {
+      getStaffDashboardStats(device.id).then(res => {
+        if (res.success) setDashboardStats(res.data)
+      })
+    }
+  }, [activeTab, device?.id])
 
   const handleLogout = async () => {
     try {
@@ -239,7 +249,8 @@ export default function StaffDashboard() {
           </div>
         </main>
       </div>
-      <CreateJobCardModal isOpen={isJobCardModalOpen} onClose={() => setIsJobCardModalOpen(false)} />
+      <JobCardModal
+        isOpen={isJobCardModalOpen} onClose={() => setIsJobCardModalOpen(false)} />
     </div>
   )
 }

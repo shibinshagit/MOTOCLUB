@@ -1,14 +1,14 @@
 "use server"
 
 import { sql } from "@/lib/db"
-import { revalidatePath } from "next/cache"
+import { revalidatePath, unstable_noStore as noStore } from "next/cache"
 import {
   DEFAULT_STAFF_VALUE_RESTRICTIONS,
   parseStringArray,
   type StaffPageId,
   type StaffValueRestriction,
 } from "@/lib/staff-restrictions"
-import { clearStaffSessionCookie, setStaffSessionCookie } from "@/lib/staff-session"
+import { clearStaffSessionCookie, setStaffSessionCookie, getStaffSession } from "@/lib/staff-session"
 
 async function generatePasswordHash(password: string): Promise<string> {
   const encoder = new TextEncoder()
@@ -629,5 +629,108 @@ export async function clearStaffSession(deviceId: number) {
   } catch (error) {
     console.error("Error clearing staff session:", error)
     return { success: false, message: "Failed to clear staff session" }
+  }
+}
+
+
+export async function getStaffDashboardStats(deviceId: number) {
+  noStore()
+  try {
+    const session = await getStaffSession()
+    if (!session) {
+      return { success: false, message: "Unauthorized", data: null }
+    }
+
+    const today = new Date().toISOString().split('T')[0];
+
+    const [
+      totalOrdersResult,
+      totalSalesResult,
+      manualIncomeResult,
+      manualExpensesResult,
+      totalCOGSResult,
+      todaysActivityResult,
+      pendingCostsResult
+    ] = await Promise.all([
+      // 1. Total Orders
+      sql`
+        SELECT COUNT(*) as total
+        FROM sales
+        WHERE device_id = ${deviceId} AND status != 'Cancelled'
+      `,
+      
+      // 2. Total Sale Amount
+      sql`
+        SELECT COALESCE(SUM(total_amount), 0) as total
+        FROM sales
+        WHERE device_id = ${deviceId} AND status != 'Cancelled'
+      `,
+      
+      // 3. Manual Income
+      sql`
+        SELECT COALESCE(SUM(amount), 0) as total
+        FROM financial_transactions
+        WHERE transaction_type = 'income' AND device_id = ${deviceId}
+      `,
+      
+      // 4. Manual Expenses
+      sql`
+        SELECT COALESCE(SUM(amount), 0) as total
+        FROM financial_transactions
+        WHERE transaction_type = 'expense' AND device_id = ${deviceId}
+      `,
+      
+      // 5. Total COGS
+      sql`
+        SELECT COALESCE(SUM(si.quantity * p.wholesale_price), 0) as total_cogs
+        FROM sale_items si
+        JOIN sales s ON si.sale_id = s.id
+        JOIN products p ON si.product_id = p.id
+        WHERE s.device_id = ${deviceId} AND s.status != 'Cancelled'
+      `,
+      
+      // 6. Today's Activity
+      sql`
+        SELECT COUNT(*) as total
+        FROM sales
+        WHERE device_id = ${deviceId} AND DATE(sale_date) = ${today} AND status != 'Cancelled'
+      `,
+
+      // 7. Pending Costs (Pending Payables/Expenses)
+      sql`
+        SELECT 
+          (SELECT COUNT(*) FROM purchases WHERE payment_status != 'Paid' AND status != 'Cancelled' AND device_id = ${deviceId})
+          +
+          (SELECT COUNT(*) FROM financial_transactions WHERE transaction_type = 'expense' AND status = 'Pending' AND device_id = ${deviceId})
+        as total
+      `
+    ]);
+
+    const totalOrders = Number(totalOrdersResult[0]?.total) || 0;
+    const totalSales = Number(totalSalesResult[0]?.total) || 0;
+    const manualIncome = Number(manualIncomeResult[0]?.total) || 0;
+    const manualExpenses = Number(manualExpensesResult[0]?.total) || 0;
+    const totalCOGS = Number(totalCOGSResult[0]?.total_cogs) || 0;
+    const todaysActivity = Number(todaysActivityResult[0]?.total) || 0;
+    const pendingCosts = Number(pendingCostsResult[0]?.total) || 0;
+
+    const grossProfit = totalSales - totalCOGS;
+    const netManualProfit = manualIncome - manualExpenses;
+    const totalProfit = grossProfit + netManualProfit;
+
+    return {
+      success: true,
+      data: {
+        totalOrders,
+        totalSaleAmount: totalSales,
+        totalProfit,
+        todaysActivity,
+        pendingCosts
+      }
+    };
+
+  } catch (error: any) {
+    console.error("getStaffDashboardStats Error:", error);
+    return { success: false, message: error.message || "Failed to fetch dashboard stats", data: null };
   }
 }

@@ -10,7 +10,8 @@ import { Plus, Trash2, CheckCircle2, User, Phone, MapPin, Loader2 } from "lucide
 import { useToast } from "@/components/ui/use-toast"
 import { useSelector } from "react-redux"
 import { selectDeviceId, selectDeviceCurrency } from "@/store/slices/deviceSlice"
-import { createJobCard } from "@/app/actions/job-card-actions"
+import { createJobCard, updateJobCard } from "@/app/actions/job-card-actions"
+import { getSaleDetails } from "@/app/actions/sale-actions"
 import { getCustomerAddresses, addSecondaryCustomerAddress, setDefaultCustomerAddress } from "@/app/actions/customer-actions"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 
@@ -32,13 +33,59 @@ interface ProductRow {
   costPrice: number // Cost price (read-only from inventory)
 }
 
-export function JobCardForm({ onClose }: { onClose?: () => void }) {
+export function JobCardForm({ onClose, editSaleId }: { onClose?: () => void, editSaleId?: number | null }) {
   const deviceId = useSelector(selectDeviceId)
   const currency = useSelector(selectDeviceCurrency)
   const { toast } = useToast()
 
   const [isLoading, setIsLoading] = useState(false)
   const [isSuccess, setIsSuccess] = useState(false)
+
+  useEffect(() => {
+    if (editSaleId) {
+      loadExistingData(editSaleId)
+    }
+  }, [editSaleId])
+
+  const loadExistingData = async (id: number) => {
+    setIsLoading(true)
+    const res = await getSaleDetails(id)
+    if (res.success && res.data) {
+      const sale = res.data.sale
+      const items = res.data.items
+      setCustomerId(sale.customer_id)
+      setCustomerName(sale.customer_name_override || sale.customer_name || "")
+      setCustomerPhone(sale.customer_phone_override || sale.customer_phone || "")
+      setShippingCity(sale.shipping_city || "")
+      setShippingDistrict(sale.shipping_district || "")
+      setShippingState(sale.shipping_state || "")
+      setShippingStreet(sale.shipping_street || "")
+      setShippingLandmark(sale.shipping_landmark || "")
+      setShippingAddressType(sale.shipping_address_type || "Home")
+      setShippingPincode(sale.shipping_pincode || "")
+      setShippingPhone(sale.customer_phone_override || sale.customer_phone || "")
+      setCourierPaidExtra(sale.courier_paid_extra > 0 ? sale.courier_paid_extra : "")
+      
+      if (items && items.length > 0) {
+        setProducts(items.map((item: any) => ({
+          id: crypto.randomUUID(),
+          productId: item.product_id,
+          productName: item.product_name,
+          productObj: null,
+          variantId: item.product_variant_id,
+          variantName: item.variant_name || "",
+          quantity: item.quantity,
+          price: item.price || item.wholesale_price,
+          msp: item.msp || 0,
+          costPrice: item.cost || item.wholesale_price || 0,
+        })))
+      }
+    } else {
+      toast({ title: "Error", description: "Failed to load Job Card data", variant: "destructive" })
+    }
+    setIsLoading(false)
+  }
+
   const [successData, setSuccessData] = useState<{ saleId: number; trackingId: string } | null>(null)
 
   // Form State
@@ -257,7 +304,12 @@ export function JobCardForm({ onClose }: { onClose?: () => void }) {
         }))
       }
 
-      const res = await createJobCard(input)
+      let res;
+      if (editSaleId) {
+        res = await updateJobCard(editSaleId, input)
+      } else {
+        res = await createJobCard(input)
+      }
 
       if (res.success && res.data) {
         setSuccessData(res.data)
@@ -317,13 +369,22 @@ export function JobCardForm({ onClose }: { onClose?: () => void }) {
     return products.reduce((sum, p) => sum + (p.price * p.quantity), 0)
   }
 
+  if (isLoading && editSaleId) {
+    return (
+      <div className="flex flex-col items-center justify-center py-32 space-y-4 min-h-[50vh]">
+        <Loader2 className="h-10 w-10 animate-spin text-primary" />
+        <p className="text-sm font-medium text-slate-500">Loading Job Card data...</p>
+      </div>
+    )
+  }
+
   return (
     <>
     <form onSubmit={handleSubmit} className="space-y-6 max-w-5xl mx-auto pb-24">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold tracking-tight text-gray-900">Create Job Card</h1>
-        <p className="text-muted-foreground text-sm">Internal order creation screen without inventory/accounting updates</p>
+        <h1 className="text-2xl font-bold tracking-tight text-gray-900">{editSaleId ? "Edit Job Card" : "Create Job Card"}</h1>
+        <p className="text-muted-foreground text-sm">Internal order {editSaleId ? "editing" : "creation"} screen without inventory/accounting updates</p>
       </div>
 
       <div className="space-y-6">
