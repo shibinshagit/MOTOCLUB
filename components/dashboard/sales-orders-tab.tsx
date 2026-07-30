@@ -251,6 +251,7 @@ export default function SalesOrdersTab() {
                             orderNumber={sale.id}
                             paymentStatus={sale.payment_status}
                             isJobCard={sale.sale_type === 'job_card'}
+                            userRole="admin"
                             onStatusChange={() => fetchSales()}
                           />
                         </td>

@@ -684,6 +684,8 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
         notes: p.notes,
         isService: p.isService,
         serviceId: p.serviceId,
+        productVariantId: p.productVariantId,
+        batchId: p.batchId,
       }))
 
     if (validItems.length === 0) {

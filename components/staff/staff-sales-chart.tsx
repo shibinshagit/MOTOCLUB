@@ -19,11 +19,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { getStaffSalesAnalytics } from "@/app/actions/job-card-actions"
 
 interface StaffSalesChartProps {
+  deviceId: number
   currency: string
   onSummaryUpdate?: (totals: { sales: number; orders: number }) => void
 }
 
-export function StaffSalesChart({ currency = "INR", onSummaryUpdate }: StaffSalesChartProps) {
+export function StaffSalesChart({ deviceId, currency = "INR", onSummaryUpdate }: StaffSalesChartProps) {
   const [currentMonth, setCurrentMonth] = useState(startOfMonth(new Date()))
   const [chartType, setChartType] = useState<"bar" | "line">("bar")
   const [data, setData] = useState<any[]>([])
@@ -38,7 +39,7 @@ export function StaffSalesChart({ currency = "INR", onSummaryUpdate }: StaffSale
       setError(null)
       try {
         const monthStr = format(currentMonth, 'yyyy-MM-dd')
-        const result = await getStaffSalesAnalytics(monthStr)
+        const result = await getStaffSalesAnalytics(deviceId, monthStr)
         
         if (!mounted) return
 
@@ -59,8 +60,9 @@ export function StaffSalesChart({ currency = "INR", onSummaryUpdate }: StaffSale
         let totalOrders = 0
 
         const formattedData = daysInMonth.map(day => {
-          // Find matching row from DB
-          const row = rawData.find((r: any) => isSameDay(parseISO(r.date), day))
+          // Find matching row from DB using safe string matching
+          const dayString = format(day, 'yyyy-MM-dd')
+          const row = rawData.find((r: any) => r.date === dayString)
           const salesAmount = row ? Number(row.sales_amount) : 0
           const orderCount = row ? Number(row.order_count) : 0
           

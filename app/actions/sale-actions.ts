@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache"
 import { recordSaleTransaction, recordSaleAdjustment, deleteSaleTransaction, syncSaleShippingTransactions } from "./simplified-accounting"
 import { filterSalesForStaff } from "@/lib/staff-restrictions-server"
 import { normalizeSaleShippingInput } from "@/lib/sale-shipping"
+import { getStaffSession } from "@/lib/staff-session"
 
 function getShippingAmounts(shipping: ReturnType<typeof normalizeSaleShippingInput>) {
   if (shipping.fulfillment_type !== "ship") {
@@ -1375,10 +1376,10 @@ export async function updateSale(saleData: any) {
       }
     }
     
-    if (isCredit && !saleData.customerId) {
+    if (!saleData.customerId) {
       return {
         success: false,
-        message: "Please select a customer for a credit sale.",
+        message: "Please select a customer before updating this sale.",
       }
     }
 
@@ -1734,8 +1735,35 @@ export async function updateSale(saleData: any) {
         // Don't fail the sale update if accounting fails
       }
 
+    // 8.5 Sync Job Card Delivery Status if fully paid
+    try {
+      if (changes.newPaymentStatus.toLowerCase() === "paid") {
+        const jobCardResult = await sql`
+          SELECT id, delivery_status 
+          FROM job_cards 
+          WHERE sale_id = ${saleData.id}
+        `
+
+        if (jobCardResult.length > 0) {
+          const jobCard = jobCardResult[0]
+          // Only update to Paid if it's currently Pending
+          if (jobCard.delivery_status?.toLowerCase() === "pending") {
+            await sql`
+              UPDATE job_cards
+              SET delivery_status = 'Paid',
+                  updated_at = ${new Date()}
+              WHERE id = ${jobCard.id}
+            `
+            console.log(`Job Card ${jobCard.id} delivery status synced to Paid`)
+          }
+        }
+      }
+    } catch (jobCardSyncError) {
+      console.error("Error syncing job card delivery status:", jobCardSyncError)
+    }
+
     // 9. Revalidate the dashboard page to show the updated sale
-    revalidatePath("/dashboard")
+    revalidatePath("/", "layout")
 
     console.log(`Sale ${saleData.id} updated successfully:`, {
       status: changes.newStatus,
@@ -1773,6 +1801,9 @@ export async function updateSaleDeliveryStatus(
   }
 
   try {
+    const staffSession = await getStaffSession()
+    const isAdmin = !staffSession
+
     const rows = await sql`
       SELECT delivery_status, status, fulfillment_type, shipped_at, delivered_at, payment_status, tracking_id, sale_type
       FROM sales
@@ -1787,7 +1818,7 @@ export async function updateSaleDeliveryStatus(
 
     const shippedAt =
       rows[0].shipped_at ||
-      (["Shipped", "In transit", "Delivered"].includes(deliveryStatus) ? new Date() : null)
+      (["Shipping", "In transit", "Delivered"].includes(deliveryStatus) ? new Date() : null)
     const deliveredAt =
       rows[0].delivered_at || (deliveryStatus === "Delivered" ? new Date() : null)
 
@@ -1801,28 +1832,37 @@ export async function updateSaleDeliveryStatus(
       return { success: false as const, message: "Delivery process cannot begin until payment is completed." }
     }
 
-    const VALID_TRANSITIONS: Record<string, string[]> = {
-      "Pending": isJobCard ? ["Shipped"] : [], // No manual exits allowed except for Job Cards
+    const baseTransitions: Record<string, string[]> = {
+      "Pending": [], // No manual exits allowed
       "Paid": ["Packed"],
       "Packed": ["Sent"],
-      "Sent": ["Shipped"],
-      "Shipped": ["Delivered"],
+      "Sent": ["Shipping"],
+      "Shipping": ["Delivered"],
       "Delivered": [],
       "Returned": [],
       "Failed": []
+    }
+
+    let validTransitions = baseTransitions[originalDeliveryStatus] || []
+
+    if (isAdmin) {
+      const adminAllowed = ["Paid", "Packed", "Sent", "Shipping", "Delivered", "Returned", "Failed"]
+      if (adminAllowed.includes(originalDeliveryStatus)) {
+        validTransitions = adminAllowed.filter(s => s !== originalDeliveryStatus)
+      }
     }
 
     if (deliveryStatus === "Paid") {
       return { success: false as const, message: "Delivery Status 'Paid' can only be assigned automatically when payment is completed." }
     }
 
-    if (deliveryStatus !== originalDeliveryStatus && !(VALID_TRANSITIONS[originalDeliveryStatus] || []).includes(deliveryStatus)) {
+    if (deliveryStatus !== originalDeliveryStatus && !validTransitions.includes(deliveryStatus)) {
       return { success: false as const, message: `Cannot move delivery status from ${originalDeliveryStatus} to ${deliveryStatus}. Invalid transition.` }
     }
 
     const wasCancelled = originalStatus.toLowerCase() === "cancelled"
-    const wasDeducted = ["shipped", "delivered"].includes(String(originalDeliveryStatus).toLowerCase()) && !wasCancelled
-    const isNowDeducted = ["shipped", "delivered"].includes(String(deliveryStatus).toLowerCase()) && !wasCancelled
+    const wasDeducted = ["shipping", "delivered"].includes(String(originalDeliveryStatus).toLowerCase()) && !wasCancelled
+    const isNowDeducted = ["shipping", "delivered"].includes(String(deliveryStatus).toLowerCase()) && !wasCancelled
 
     // If there is a transition in deduction state, we need to fetch items and allocations
     if (wasDeducted !== isNowDeducted) {
@@ -1869,7 +1909,7 @@ export async function updateSaleDeliveryStatus(
 
     while (!updateSuccess && retries > 0) {
       try {
-        if (deliveryStatus === "Shipped" && !newTrackingId) {
+        if (deliveryStatus === "Shipping" && !newTrackingId) {
           const activeIdsResult = await sql`
             SELECT tracking_id 
             FROM sales 
@@ -1944,7 +1984,8 @@ export async function updateSaleTracking(saleId: number, deviceId: number, track
         AND device_id = ${deviceId}
     `
 
-    revalidatePath("/dashboard")
+    revalidatePath("/", "layout")
+
     return { success: true as const, message: "Tracking information updated" }
   } catch (error) {
     console.error("updateSaleTracking error:", error)

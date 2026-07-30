@@ -30,6 +30,7 @@ interface ProductSelectSimpleProps {
   searchBufferSize?: number
   error?: string
   hideServiceIcon?: boolean
+  initialProductName?: string
 }
 
 // Helper: truncate names
@@ -68,6 +69,7 @@ function ProductSelectSimple({
   searchBufferSize = 50,
   error,
   hideServiceIcon = false,
+  initialProductName,
 }: ProductSelectSimpleProps) {
   const deviceId = useSelector(selectDeviceId)
   const [open, setOpen] = useState(false)
@@ -146,6 +148,8 @@ function ProductSelectSimple({
         const product = products.find((p) => p.id === value)
         if (product && (!selectedProduct || selectedProduct.id !== value)) {
           setSelectedProduct(product)
+        } else if (initialProductName && (!selectedProduct || selectedProduct.id !== value)) {
+          setSelectedProduct({ id: value, name: initialProductName } as any)
         } else if (!hasSearched && (!selectedProduct || selectedProduct.id !== value)) {
           fetchSelectedProduct(value)
         }
@@ -153,7 +157,7 @@ function ProductSelectSimple({
     } else {
       setSelectedProduct(null)
     }
-  }, [value, products, services, isServiceMode, hasSearched, selectedProduct])
+  }, [value, products, services, isServiceMode, hasSearched, selectedProduct, initialProductName])
 
   // Search products with normalization
   const searchProducts = async (searchTerm: string) => {

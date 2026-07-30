@@ -11,8 +11,8 @@ const VALID_TRANSITIONS: Record<string, string[]> = {
   "Pending": [], // No manual exits allowed
   "Paid": ["Packed"],
   "Packed": ["Sent"],
-  "Sent": ["Shipped"],
-  "Shipped": ["Delivered"],
+  "Sent": ["Shipping"],
+  "Shipping": ["Delivered"],
   "Delivered": [],
   "Returned": [],
   "Failed": []
@@ -28,6 +28,7 @@ export function DeliveryStatusSelect({
   orderNumber,
   paymentStatus,
   isJobCard,
+  userRole,
   onStatusChange
 }: {
   saleId: number
@@ -39,6 +40,7 @@ export function DeliveryStatusSelect({
   orderNumber?: string | number
   paymentStatus?: string
   isJobCard?: boolean
+  userRole?: "admin" | "staff"
   onStatusChange?: (newStatus: string) => void
 }) {
   const { toast } = useToast()
@@ -74,12 +76,12 @@ export function DeliveryStatusSelect({
   const handleUpdateStatusWithTracking = async (trackingId: string) => {
     setLoading(true)
     try {
-      const res = await updateSaleDeliveryStatus(saleId, deviceId, "Shipped", trackingId)
+      const res = await updateSaleDeliveryStatus(saleId, deviceId, "Shipping", trackingId)
       if (res.success) {
-        setStatus("Shipped")
+        setStatus("Shipping")
         toast({ title: "Success", description: "Delivery status and tracking updated." })
         if (onStatusChange) {
-          onStatusChange("Shipped")
+          onStatusChange("Shipping")
         }
       } else {
         throw new Error(res.message)
@@ -99,7 +101,7 @@ export function DeliveryStatusSelect({
       return // Halt the update until confirmation
     }
 
-    if (newStatus === "Shipped") {
+    if (newStatus === "Shipping") {
       setIsTrackingModalOpen(true)
       return // Halt the update until tracking is provided/saved
     }
@@ -134,7 +136,7 @@ export function DeliveryStatusSelect({
       case "Paid": return "border-blue-300"
       case "Packed": return "border-indigo-300"
       case "Sent": return "border-purple-300"
-      case "Shipped": return "border-cyan-300"
+      case "Shipping": return "border-cyan-300"
       case "Delivered": return "border-green-400"
       case "Returned": return "border-red-300"
       default: return "border-gray-300"
@@ -142,9 +144,19 @@ export function DeliveryStatusSelect({
   }
 
   // Only show the current status and valid next statuses
-  const baseTransitions = VALID_TRANSITIONS[currentStatus] || []
-  const transitions = (currentStatus === "Pending" && isJobCard) ? ["Shipped"] : baseTransitions
-  const availableOptions = [currentStatus, ...transitions]
+  let availableOptions = [currentStatus]
+  
+  if (userRole === "admin") {
+    const adminAllowed = ["Paid", "Packed", "Sent", "Shipping", "Delivered", "Returned", "Failed"]
+    if (adminAllowed.includes(currentStatus)) {
+      availableOptions = [...adminAllowed]
+    } else {
+      availableOptions = [currentStatus, ...(VALID_TRANSITIONS[currentStatus] || [])]
+    }
+  } else {
+    availableOptions = [currentStatus, ...(VALID_TRANSITIONS[currentStatus] || [])]
+  }
+
   // Deduplicate in case currentStatus is somehow in the valid transitions
   const uniqueOptions = Array.from(new Set(availableOptions))
 
@@ -180,7 +192,7 @@ export function DeliveryStatusSelect({
           onSave={handleUpdateStatusWithTracking}
           initialTrackingId={trackingId}
           currentDeliveryStatus={status}
-          targetDeliveryStatus="Shipped"
+          targetDeliveryStatus="Shipping"
           saleId={saleId}
           deviceId={deviceId}
         />

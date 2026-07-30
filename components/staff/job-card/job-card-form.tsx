@@ -70,7 +70,7 @@ export function JobCardForm({ onClose, editSaleId }: { onClose?: () => void, edi
         setProducts(items.map((item: any) => ({
           id: crypto.randomUUID(),
           productId: item.product_id,
-          productName: item.product_name,
+          productName: item.service_name || item.product_name || "",
           productObj: null,
           variantId: item.product_variant_id,
           variantName: item.variant_name || "",
@@ -193,6 +193,15 @@ export function JobCardForm({ onClose, editSaleId }: { onClose?: () => void, edi
     
     setProducts(prev => prev.map((p) => {
       if (p.id === rowId) {
+        // If we're hydrating an existing row (product ID matches and we already have a name),
+        // we just want to inject the full product object without overwriting saved prices/variants.
+        if (p.productId === productId && p.productName) {
+          return {
+            ...p,
+            productObj: productObj || p.productObj
+          }
+        }
+        
         return {
           ...p,
           productId,
@@ -400,6 +409,7 @@ export function JobCardForm({ onClose, editSaleId }: { onClose?: () => void, edi
               <Label className="text-xs text-gray-500">Select Existing Customer (Optional)</Label>
               <CustomerSelectSimple
                 value={customerId}
+                initialCustomerName={customerName}
                 onChange={async (id, name, customerObj) => {
                   setCustomerId(id)
                   setCustomerName(name)
@@ -674,6 +684,7 @@ export function JobCardForm({ onClose, editSaleId }: { onClose?: () => void, edi
                     <td className="p-2">
                       <ProductSelectSimple
                         value={product.productId}
+                        initialProductName={product.productName}
                         onChange={(id, name, price, ws, stock, obj) => handleProductSelect(product.id, id, name, price, ws, stock, obj)}
                         onAddNew={() => {}}
                         userId={deviceId || 1}
@@ -774,9 +785,8 @@ export function JobCardForm({ onClose, editSaleId }: { onClose?: () => void, edi
               <div className="h-px bg-gray-200 w-full" />
               <div className="flex justify-between font-bold text-gray-900 text-base">
                 <span>Estimated Total:</span>
-                <span>{currency} {calculateSubtotal().toFixed(2)}</span>
+                <span>{currency} {(calculateSubtotal() + (Number(courierPaidExtra) || 0)).toFixed(2)}</span>
               </div>
-              <p className="text-[10px] text-gray-500 text-right mt-1">* Courier fee is tracked separately as an expense</p>
             </div>
           </div>
           

@@ -121,7 +121,7 @@ export function normalizeSaleShippingInput(input?: SaleShippingInput | null) {
   if (fulfillmentType === "pickup") {
     return {
       fulfillment_type: "pickup" as const,
-      delivery_status: null,
+      delivery_status: input?.deliveryStatus || null,
       courier_service_id: null,
       courier_service_name: null,
       packaging_type_id: null,

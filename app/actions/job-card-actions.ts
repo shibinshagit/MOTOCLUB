@@ -215,7 +215,87 @@ export async function createJobCard(input: JobCardInput) {
 }
 
 export async function updateJobCard(id: number, input: any) {
-  return { success: false, message: "Updating job cards is currently not supported.", data: null }
+  try {
+    const session = await getStaffSession()
+    if (!session) return { success: false, message: "Unauthorized" }
+
+    const deviceId = session.deviceId
+
+    // 1. Calculate new totals
+    let itemsSubtotal = 0
+    let totalCost = 0
+    for (const p of input.products) {
+      itemsSubtotal += p.price * p.quantity
+      totalCost += p.costPrice * p.quantity
+    }
+    const totalAmount = itemsSubtotal + (Number(input.courierPaidExtra) || 0)
+
+    // 2. Resolve Customer
+    let resolvedCustomerId = input.customerId
+    let customerNameOverride = input.customerName || null
+    let customerPhoneOverride = input.customerPhone || null
+
+    if (resolvedCustomerId && (!customerNameOverride || !customerPhoneOverride)) {
+      const custRows = await sql`SELECT name, phone FROM customers WHERE id = ${resolvedCustomerId}`
+      if (custRows.length > 0) {
+        if (!customerNameOverride) customerNameOverride = custRows[0].name
+        if (!customerPhoneOverride) customerPhoneOverride = custRows[0].phone
+      }
+    }
+
+    // 3. Update the sales record
+    const updatedSaleRows = await sql`
+      UPDATE sales SET
+        customer_id = ${resolvedCustomerId || null},
+        total_amount = ${totalAmount},
+        total_cost = ${totalCost},
+        customer_name_override = ${customerNameOverride},
+        customer_phone_override = ${customerPhoneOverride},
+        shipping_city = ${input.shippingCity || null},
+        shipping_district = ${input.shippingDistrict || null},
+        shipping_state = ${input.shippingState || null},
+        shipping_street = ${input.shippingStreet || null},
+        shipping_landmark = ${input.shippingLandmark || null},
+        shipping_address_type = ${input.shippingAddressType || 'Home'},
+        shipping_pincode = ${input.shippingPincode || null},
+        courier_paid_extra = ${input.courierPaidExtra || 0},
+        balance_amount = ${totalAmount} - received_amount
+      WHERE id = ${id} AND device_id = ${deviceId}
+      RETURNING tracking_id
+    `
+    
+    const trackingId = updatedSaleRows[0]?.tracking_id || ""
+
+    // 4. Delete existing sale items
+    await sql`DELETE FROM sale_items WHERE sale_id = ${id}`
+
+    // 5. Insert new sale items
+    for (const p of input.products) {
+      await sql`
+        INSERT INTO sale_items (
+          sale_id,
+          product_id,
+          product_variant_id,
+          quantity,
+          price,
+          cost
+        ) VALUES (
+          ${id},
+          ${p.productId},
+          ${p.variantId || null},
+          ${p.quantity},
+          ${p.price},
+          ${p.costPrice}
+        )
+      `
+    }
+
+    revalidatePath("/staff/dashboard")
+    return { success: true, data: { saleId: id, trackingId } }
+  } catch (error: any) {
+    console.error("updateJobCard Error:", error)
+    return { success: false, message: error.message || "Failed to update Job Card" }
+  }
 }
 
 export async function getTodayJobCards(monthStr?: string, searchTerm?: string) {
@@ -389,14 +469,13 @@ export async function getAllJobCards(deviceId: number) {
   }
 }
 
-export async function getStaffSalesAnalytics(targetMonthStr?: string) {
+export async function getStaffSalesAnalytics(deviceId: number, targetMonthStr?: string) {
   noStore()
   try {
     const session = await getStaffSession()
     if (!session) {
       return { success: false, message: "Unauthorized", data: [] }
     }
-    const staffId = session.staffId
 
     // Define the date boundaries
     const date = targetMonthStr ? new Date(targetMonthStr) : new Date()
@@ -409,19 +488,18 @@ export async function getStaffSalesAnalytics(targetMonthStr?: string) {
     const nextYear = month === 12 ? year + 1 : year
     const endDate = `${nextYear}-${String(nextMonth).padStart(2, '0')}-01`
 
-    // Query for total amounts grouped by day, only for this staff's job_card sales
+    // Query for total amounts grouped by day
     const analytics = await sql`
       SELECT 
-        DATE(sale_date) as date,
+        TO_CHAR(sale_date, 'YYYY-MM-DD') as date,
         COUNT(id) as order_count,
         SUM(total_amount) as sales_amount
       FROM sales
-      WHERE staff_id = ${staffId}
-        AND (sale_type = 'job_card' OR tracking_id LIKE 'JC-%')
+      WHERE device_id = ${deviceId}
         AND status != 'Cancelled'
         AND sale_date >= ${startDate}
         AND sale_date < ${endDate}
-      GROUP BY DATE(sale_date)
+      GROUP BY TO_CHAR(sale_date, 'YYYY-MM-DD')
       ORDER BY date ASC
     `
     

@@ -535,7 +535,8 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
   }
 
   // Enhanced sale handlers for ViewSaleModal
-  const handleEditSale = (saleId: number) => {
+  const handleEditSale = (saleOrId: any) => {
+    const saleId = typeof saleOrId === 'object' && saleOrId !== null ? saleOrId.id : saleOrId;
     setViewSaleId(null)
     setEditSaleId(saleId)
   }

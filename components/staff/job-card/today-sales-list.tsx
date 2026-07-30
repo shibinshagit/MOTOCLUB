@@ -234,6 +234,7 @@ export function TodaySalesList({ onOpenCreateModal }: { onOpenCreateModal?: () =
                           orderNumber={sale.id}
                           paymentStatus={sale.payment_status}
                           isJobCard={true}
+                          userRole="staff"
                           onStatusChange={() => fetchSales()}
                         />
                       </td>

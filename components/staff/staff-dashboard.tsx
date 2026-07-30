@@ -191,37 +191,56 @@ export default function StaffDashboard() {
                     <Plus className="mr-2 h-4 w-4" /> Create Job Card
                   </Button>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
-                    <h3 className="text-lg font-medium text-gray-900">Today's Performance</h3>
-                    <p className="mt-2 text-sm text-gray-500">View your sales and activity for today.</p>
-                    <Button className="mt-4" variant="outline" onClick={() => setActiveTab("sales")}>View Sales</Button>
-                  </div>
-                  <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex flex-col justify-between">
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                  {/* Total Orders */}
+                  <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-100 flex flex-col justify-between">
                     <div>
-                      <h3 className="text-lg font-medium text-gray-900">This Month's Sales</h3>
-                      <p className="mt-2 text-3xl font-bold text-gray-900">
-                        {new Intl.NumberFormat("en-US", { style: "currency", currency: device?.currency || "INR", maximumFractionDigits: 0 }).format(chartSummary.sales)}
-                      </p>
-                      <p className="text-sm text-gray-500 mt-1">{chartSummary.orders} Total Orders</p>
+                      <p className="text-sm font-medium text-gray-500">Total Orders</p>
+                      <h3 className="mt-1 text-2xl font-bold text-gray-900">{dashboardStats?.totalOrders || 0}</h3>
                     </div>
                   </div>
-                  <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
-                    <h3 className="text-lg font-medium text-gray-900">New Transaction</h3>
-                    <p className="mt-2 text-sm text-gray-500">Quickly start a new sale or invoice.</p>
-                    <Button className="mt-4" onClick={() => {
-                      // Standard behavior usually redirects to the main app dashboard for creating sales
-                      // assuming the staff session gives them access.
-                      router.push("/dashboard?tab=sale")
-                    }}>Open POS</Button>
+                  {/* Total Sale Amount */}
+                  <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-100 flex flex-col justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-500">Total Sale Amount</p>
+                      <h3 className="mt-1 text-2xl font-bold text-gray-900">
+                        {new Intl.NumberFormat("en-US", { style: "currency", currency: device?.currency || "INR", maximumFractionDigits: 0 }).format(dashboardStats?.totalSaleAmount || 0)}
+                      </h3>
+                    </div>
+                  </div>
+                  {/* Total Profit */}
+                  <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-100 flex flex-col justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-500">Total Profit</p>
+                      <h3 className="mt-1 text-2xl font-bold text-blue-600">
+                        {new Intl.NumberFormat("en-US", { style: "currency", currency: device?.currency || "INR", maximumFractionDigits: 0 }).format(dashboardStats?.totalProfit || 0)}
+                      </h3>
+                    </div>
+                  </div>
+                  {/* Today's Activity */}
+                  <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-100 flex flex-col justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-500">Today's Activity</p>
+                      <h3 className="mt-1 text-2xl font-bold text-gray-900">{dashboardStats?.todaysActivity || 0}</h3>
+                    </div>
+                  </div>
+                  {/* Pending Costs */}
+                  <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-100 flex flex-col justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-500">Pending Costs</p>
+                      <h3 className="mt-1 text-2xl font-bold text-orange-600">{dashboardStats?.pendingCosts || 0}</h3>
+                    </div>
                   </div>
                 </div>
 
                 <div className="w-full">
-                  <StaffSalesChart 
-                    currency={device?.currency || "INR"} 
-                    onSummaryUpdate={setChartSummary} 
-                  />
+                  {device?.id && (
+                    <StaffSalesChart 
+                      deviceId={device.id}
+                      currency={device?.currency || "INR"} 
+                      onSummaryUpdate={setChartSummary} 
+                    />
+                  )}
                 </div>
 
                 <div className="w-full mt-8 border-t pt-8">

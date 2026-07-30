@@ -356,7 +356,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
   }, [])
 
   useEffect(() => {
-    if (activeView !== "entry") return
+    if (draftsHydrated) return
     try {
       const rawDrafts = localStorage.getItem(saleDraftStorageKey)
       const rawActiveId = localStorage.getItem(`${saleDraftStorageKey}_active`)
@@ -378,7 +378,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     setSaleDrafts([initialDraft])
     setActiveDraftId(initialDraft.id)
     setDraftsHydrated(true)
-  }, [activeView, saleDraftStorageKey, createEmptyDraft])
+  }, [saleDraftStorageKey, createEmptyDraft, draftsHydrated])
 
   useEffect(() => {
     if (activeView !== "entry" || !draftsHydrated) return
