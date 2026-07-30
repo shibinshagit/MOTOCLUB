@@ -211,11 +211,6 @@ export function StaffCustomerTab({ currency = "AED", onTabChange }: { currency?:
                           </div>
                           <div>
                             <div className="font-semibold text-slate-900">{customer.name}</div>
-                            {customer.vehicle_details && (
-                              <div className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
-                                <Car className="h-3 w-3" /> {customer.vehicle_details.substring(0, 20)}...
-                              </div>
-                            )}
                           </div>
                         </div>
                       </td>

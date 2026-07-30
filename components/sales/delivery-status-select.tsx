@@ -26,6 +26,7 @@ export function DeliveryStatusSelect({
   trackingId,
   orderNumber,
   paymentStatus,
+  isJobCard,
   onStatusChange
 }: {
   saleId: number
@@ -36,6 +37,7 @@ export function DeliveryStatusSelect({
   trackingId?: string
   orderNumber?: string | number
   paymentStatus?: string
+  isJobCard?: boolean
   onStatusChange?: (newStatus: string) => void
 }) {
   const { toast } = useToast()
@@ -112,7 +114,9 @@ export function DeliveryStatusSelect({
   }
 
   // Only show the current status and valid next statuses
-  const availableOptions = [currentStatus, ...(VALID_TRANSITIONS[currentStatus] || [])]
+  const baseTransitions = VALID_TRANSITIONS[currentStatus] || []
+  const transitions = (currentStatus === "Pending" && isJobCard) ? ["Shipped"] : baseTransitions
+  const availableOptions = [currentStatus, ...transitions]
   // Deduplicate in case currentStatus is somehow in the valid transitions
   const uniqueOptions = Array.from(new Set(availableOptions))
 

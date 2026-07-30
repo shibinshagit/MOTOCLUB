@@ -1816,7 +1816,7 @@ export async function updateSaleDeliveryStatus(
 
   try {
     const rows = await sql`
-      SELECT delivery_status, status, fulfillment_type, shipped_at, delivered_at, payment_status
+      SELECT delivery_status, status, fulfillment_type, shipped_at, delivered_at, payment_status, tracking_id, sale_type
       FROM sales
       WHERE id = ${saleId}
         AND device_id = ${deviceId}
@@ -1836,14 +1836,15 @@ export async function updateSaleDeliveryStatus(
     const originalDeliveryStatus = rows[0].delivery_status || "Pending"
     const originalStatus = rows[0].status || "Completed"
     const paymentStatus = rows[0].payment_status || "Pending"
+    const isJobCard = rows[0].sale_type === 'job_card'
 
     const isPaid = paymentStatus.toLowerCase() === "paid" || paymentStatus.toLowerCase() === "completed"
-    if (!isPaid) {
+    if (!isJobCard && !isPaid) {
       return { success: false as const, message: "Delivery process cannot begin until payment is completed." }
     }
 
     const VALID_TRANSITIONS: Record<string, string[]> = {
-      "Pending": [], // No manual exits allowed
+      "Pending": isJobCard ? ["Shipped"] : [], // No manual exits allowed except for Job Cards
       "Paid": ["Packed"],
       "Packed": ["Sent"],
       "Sent": ["Shipped"],
@@ -1900,19 +1901,58 @@ export async function updateSaleDeliveryStatus(
       }
     }
 
-    // Now update the sales table
-    await sql`
-      UPDATE sales
-      SET delivery_status = ${deliveryStatus},
-          shipped_at = ${shippedAt},
-          delivered_at = ${deliveredAt},
-          updated_at = NOW()
-      WHERE id = ${saleId}
-        AND device_id = ${deviceId}
-    `
+    // Now update the sales table, with retry for DOD tracking ID allocation
+    let newTrackingId = rows[0].tracking_id;
+    if (newTrackingId && newTrackingId.startsWith('JC-')) {
+      newTrackingId = null;
+    }
+    let updateSuccess = false;
+    let retries = 5;
+
+    while (!updateSuccess && retries > 0) {
+      try {
+        if (deliveryStatus === "Shipped" && !newTrackingId) {
+          const activeIdsResult = await sql`
+            SELECT tracking_id 
+            FROM sales 
+            WHERE device_id = ${deviceId} 
+              AND tracking_id LIKE 'DOD %' 
+              AND delivery_status NOT IN ('Delivered', 'Returned', 'Failed') 
+              AND status != 'Cancelled'
+          `;
+          const activeIds = new Set(activeIdsResult.map((r: any) => parseInt(String(r.tracking_id).replace('DOD ', ''), 10) || 0));
+          let nextNum = 1;
+          while (activeIds.has(nextNum)) {
+            nextNum++;
+          }
+          newTrackingId = 'DOD ' + String(nextNum).padStart(3, '0');
+        }
+
+        await sql`
+          UPDATE sales
+          SET delivery_status = ${deliveryStatus},
+              shipped_at = ${shippedAt},
+              delivered_at = ${deliveredAt},
+              tracking_id = COALESCE(tracking_id, ${newTrackingId}),
+              updated_at = NOW()
+          WHERE id = ${saleId}
+            AND device_id = ${deviceId}
+        `
+        updateSuccess = true;
+      } catch (err: any) {
+        if (err.message && (err.message.includes('idx_sales_active_dod_tracking') || err.message.includes('unique constraint'))) {
+          retries--;
+          newTrackingId = null; // reset to try allocation again
+          if (retries === 0) throw new Error("Could not allocate a unique DOD tracking ID. Please try again.");
+          continue;
+        }
+        throw err;
+      }
+    }
 
     revalidatePath("/dashboard")
-    return { success: true as const, message: "Delivery status updated" }
+    revalidatePath("/staff/dashboard")
+    return { success: true as const, message: "Delivery status updated", trackingId: newTrackingId }
   } catch (error) {
     console.error("updateSaleDeliveryStatus error:", error)
     return {
@@ -1933,7 +1973,7 @@ export async function deleteSale(saleId: number, deviceId: number) {
   try {
     return await executeWithRetry(async () => {
       const saleRows = await sql`
-        SELECT id, device_id, status
+        SELECT id, device_id, status, sale_type
         FROM sales
         WHERE id = ${saleId}
         LIMIT 1
@@ -1941,6 +1981,10 @@ export async function deleteSale(saleId: number, deviceId: number) {
 
       if (saleRows.length === 0) {
         return { success: false, message: "Sale not found" }
+      }
+
+      if (saleRows[0].sale_type === 'job_card') {
+        return { success: false, message: "Job Cards cannot be deleted" }
       }
 
       const sale = saleRows[0]

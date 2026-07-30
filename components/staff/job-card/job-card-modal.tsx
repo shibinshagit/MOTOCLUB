@@ -3,17 +3,18 @@
 import { Dialog, DialogContent } from "@/components/ui/dialog"
 import { JobCardForm } from "./job-card-form"
 
-interface CreateJobCardModalProps {
+interface JobCardModalProps {
   isOpen: boolean
   onClose: () => void
+  editSaleId?: number | null
 }
 
-export function CreateJobCardModal({ isOpen, onClose }: CreateJobCardModalProps) {
+export function JobCardModal({ isOpen, onClose, editSaleId }: JobCardModalProps) {
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto p-0">
         <div className="p-6">
-          <JobCardForm onClose={onClose} />
+          <JobCardForm onClose={onClose} editSaleId={editSaleId} />
         </div>
       </DialogContent>
     </Dialog>

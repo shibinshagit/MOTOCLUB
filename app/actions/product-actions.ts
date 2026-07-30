@@ -191,7 +191,13 @@ async function upsertDeviceStock(_productId: number, _deviceId: number, _stock: 
 // Add this improved version to your product-actions.ts file
 // Replace the existing getProducts function
 
-export async function getProducts(userId?: number, limit?: number, searchTerm?: string, categoryId?: number | null) {
+export async function getProducts(
+  userId?: number,
+  limit?: number,
+  searchTerm?: string,
+  categoryId?: number | null,
+  skipRbac?: boolean
+) {
   resetConnectionState()
 
   console.log("getProducts called with:", { userId, limit, searchTerm, categoryId })
@@ -735,6 +741,10 @@ REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
 
     console.log(`Found ${mappedProducts.length} products`)
 
+    if (skipRbac) {
+      return { success: true, data: mappedProducts }
+    }
+    
     return { success: true, data: await filterProductsForStaff(mappedProducts, userId) }
   } catch (error) {
     console.error("Get products error:", error)

@@ -15,7 +15,7 @@ import { ChevronDown, ChevronUp, MapPin, Phone, User, Calendar, Layers, Printer,
 import { useToast } from "@/components/ui/use-toast"
 import { useConfirm } from "@/hooks/use-confirm"
 import { printJobCard } from "@/lib/receipt-utils"
-import EditSaleModal from "@/components/sales/edit-sale-modal"
+import { JobCardModal } from "@/components/staff/job-card/job-card-modal"
 import ViewSaleModal from "@/components/sales/view-sale-modal"
 import { format } from "date-fns"
 
@@ -76,30 +76,7 @@ export default function SalesOrdersTab() {
     router.push(`/dashboard?tab=sale&editSaleId=${saleId}`)
   }
 
-  const handleDelete = async (saleId: number) => {
-    const isConfirmed = await confirm({
-      title: "Delete Sales Order",
-      description: "Are you sure you want to delete this Sales Order? This action cannot be undone.",
-      confirmLabel: "Delete",
-      cancelLabel: "Cancel",
-      destructive: true
-    })
 
-    if (!isConfirmed) return
-
-    try {
-      if (!deviceId) throw new Error("No device ID")
-      const res = await deleteSale(saleId, deviceId)
-      if (res.success) {
-        toast({ title: "Success", description: "Sales Order deleted successfully." })
-        fetchSales() // Refresh
-      } else {
-        toast({ title: "Error", description: res.message || "Failed to delete Sales Order.", variant: "destructive" })
-      }
-    } catch (error) {
-      toast({ title: "Error", description: "An error occurred.", variant: "destructive" })
-    }
-  }
 
   const filteredSales = sales.filter((sale) => {
     if (!searchTerm) return true
@@ -126,15 +103,13 @@ export default function SalesOrdersTab() {
       {ConfirmDialog}
       
       {editingSaleId && (
-        <EditSaleModal
+        <JobCardModal
           isOpen={true}
           onClose={() => {
             setEditingSaleId(null)
             fetchSales()
           }}
-          saleId={editingSaleId}
-          userId={deviceId || 0}
-          currency={currency}
+          editSaleId={editingSaleId}
         />
       )}
       
@@ -191,7 +166,7 @@ export default function SalesOrdersTab() {
                   <th className="whitespace-nowrap px-4 py-2.5 text-left">Date & Time</th>
                   <th className="whitespace-nowrap px-4 py-2.5 text-left">Customer</th>
                   <th className="whitespace-nowrap px-4 py-2.5 text-left">Phone</th>
-                  <th className="whitespace-nowrap px-4 py-2.5 text-left">Tracking</th>
+                  <th className="whitespace-nowrap px-4 py-2.5 text-left">Tracking ID</th>
                   <th className="whitespace-nowrap px-4 py-2.5 text-center">Items</th>
                   <th className="whitespace-nowrap px-4 py-2.5 text-right">Total</th>
                   <th className="whitespace-nowrap px-4 py-2.5 text-center">Delivery Status</th>
@@ -229,7 +204,9 @@ export default function SalesOrdersTab() {
                         </td>
                         <td className="max-w-[180px] truncate px-4 py-2.5 font-medium text-slate-700">{sale.customer_name || "N/A"}</td>
                         <td className="whitespace-nowrap px-4 py-2.5 text-slate-500">{sale.customer_phone || "N/A"}</td>
-                        <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-slate-600">{sale.tracking_id}</td>
+                        <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-slate-600">
+                          {sale.tracking_id || '—'}
+                        </td>
                         <td className="whitespace-nowrap px-4 py-2.5 text-center font-medium text-slate-700">{itemQuantity}</td>
                         <td className="whitespace-nowrap px-4 py-2.5 text-right font-bold text-slate-800">
                           {currency} {Number(sale.total_amount).toFixed(2)}
@@ -244,6 +221,7 @@ export default function SalesOrdersTab() {
                             trackingId={sale.tracking_id}
                             orderNumber={sale.id}
                             paymentStatus={sale.payment_status}
+                            isJobCard={sale.sale_type === 'job_card'}
                             onStatusChange={() => fetchSales()}
                           />
                         </td>
@@ -264,9 +242,7 @@ export default function SalesOrdersTab() {
                             <Button variant="ghost" size="icon" className="h-8 w-8 text-violet-600 hover:text-violet-700 hover:bg-violet-50" onClick={() => handleEdit(sale)} title="Edit">
                               <Edit className="h-4 w-4" />
                             </Button>
-                            <Button variant="ghost" size="icon" className="h-8 w-8 text-rose-600 hover:text-rose-700 hover:bg-rose-50" onClick={() => handleDelete(sale.id)} title="Delete">
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
+
                           </div>
                         </td>
                       </tr>
@@ -284,7 +260,14 @@ export default function SalesOrdersTab() {
                                 </h4>
                                 
                                 <div className="space-y-3 text-sm text-slate-600">
+                                  {sale.job_card_number && (
+                                    <div className="mb-4 bg-slate-50 p-3 rounded-lg border border-slate-100">
+                                      <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 block mb-1">Job Card #</span>
+                                      <p className="font-mono text-slate-800 text-sm font-bold">{sale.job_card_number}</p>
+                                    </div>
+                                  )}
                                   <div>
+                                    <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 block mb-1">Customer Details</span>
                                     <p className="font-medium text-slate-800 text-base">{sale.customer_name || "N/A"}</p>
                                     <p className="flex items-center gap-1.5 mt-1"><Phone className="h-3.5 w-3.5 text-slate-400" /> {sale.customer_phone || "N/A"}</p>
                                   </div>

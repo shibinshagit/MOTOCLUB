@@ -119,12 +119,13 @@ export async function createJobCard(input: JobCardInput) {
     const trackingId = `JC-${dateStr}-${sequence}`
 
     // 3. Calculate Totals
-    let totalAmount = 0
+    let itemsSubtotal = 0
     let totalCost = 0
     for (const p of input.products) {
-      totalAmount += p.price * p.quantity
+      itemsSubtotal += p.price * p.quantity
       totalCost += p.costPrice * p.quantity
     }
+    const totalAmount = itemsSubtotal + (Number(input.courierPaidExtra) || 0)
 
     // 4. Insert Sale (Status: Pending)
     const saleRows = await sql`
@@ -138,6 +139,7 @@ export async function createJobCard(input: JobCardInput) {
         received_amount,
         staff_id,
         sale_type,
+        job_card_number,
         tracking_id,
         customer_name_override,
         customer_phone_override,
@@ -163,6 +165,7 @@ export async function createJobCard(input: JobCardInput) {
         ${staffId},
         'job_card',
         ${trackingId},
+        null,
         ${customerNameOverride},
         ${customerPhoneOverride},
         ${input.shippingCity || null},
@@ -209,6 +212,10 @@ export async function createJobCard(input: JobCardInput) {
     console.error("createJobCard Error:", error)
     return { success: false, message: error.message || "Failed to create Job Card" }
   }
+}
+
+export async function updateJobCard(id: number, input: any) {
+  return { success: false, message: "Updating job cards is currently not supported.", data: null }
 }
 
 export async function getTodayJobCards(monthStr?: string, searchTerm?: string) {
