@@ -15,7 +15,7 @@ import { Input } from "@/components/ui/input"
 import { ChevronDown, ChevronUp, MapPin, Phone, User, Calendar, Layers, Printer, Edit, Trash2, Search, PlayCircle, Eye } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 import { useConfirm } from "@/hooks/use-confirm"
-import { printJobCard } from "@/lib/receipt-utils"
+import { printJobCard, printBatchJobCards } from "@/lib/receipt-utils"
 import { JobCardModal } from "@/components/staff/job-card/job-card-modal"
 import ViewSaleModal from "@/components/sales/view-sale-modal"
 import { format } from "date-fns"
@@ -35,6 +35,26 @@ export default function SalesOrdersTab() {
   // Modal States
   const [editingSaleId, setEditingSaleId] = useState<number | null>(null)
   const [viewingSaleId, setViewingSaleId] = useState<number | null>(null)
+  
+  const [selectedSales, setSelectedSales] = useState<number[]>([])
+
+  const toggleSelectSale = (id: number) => {
+    setSelectedSales(prev => prev.includes(id) ? prev.filter(sId => sId !== id) : [...prev, id])
+  }
+
+  const toggleSelectAll = () => {
+    if (selectedSales.length === filteredSales.length && filteredSales.length > 0) {
+      setSelectedSales([])
+    } else {
+      setSelectedSales(filteredSales.map(s => s.id))
+    }
+  }
+
+  const handleBatchPrint = () => {
+    if (selectedSales.length === 0) return
+    const salesToPrint = sales.filter(s => selectedSales.includes(s.id))
+    printBatchJobCards(salesToPrint, currency)
+  }
 
   useEffect(() => {
     if (deviceId) {
@@ -165,6 +185,12 @@ export default function SalesOrdersTab() {
           <Button variant="outline" size="sm" onClick={fetchSales} className="h-9">
             Refresh
           </Button>
+          {selectedSales.length > 0 && (
+            <Button variant="default" size="sm" onClick={handleBatchPrint} className="h-9 bg-indigo-600 hover:bg-indigo-700 text-white gap-2">
+              <Printer className="h-4 w-4" />
+              Print ({selectedSales.length})
+            </Button>
+          )}
         </div>
       </div>
 
@@ -184,6 +210,14 @@ export default function SalesOrdersTab() {
             <table className="min-w-full border-separate border-spacing-0 text-sm">
               <thead>
                 <tr className="border-b border-slate-200 bg-[#F1F4F9] text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  <th className="w-12 whitespace-nowrap px-4 py-2.5 text-left">
+                    <input 
+                      type="checkbox" 
+                      className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600 cursor-pointer"
+                      checked={filteredSales.length > 0 && selectedSales.length === filteredSales.length}
+                      onChange={toggleSelectAll}
+                    />
+                  </th>
                   <th className="w-12 whitespace-nowrap px-4 py-2.5 text-left"></th>
                   <th className="whitespace-nowrap px-4 py-2.5 text-left">Order #</th>
                   <th className="whitespace-nowrap px-4 py-2.5 text-left">Date & Time</th>
@@ -199,6 +233,7 @@ export default function SalesOrdersTab() {
               <tbody>
                 {filteredSales.map((sale, index) => {
                   const isExpanded = expandedSaleId === sale.id
+                  const isSelected = selectedSales.includes(sale.id)
                   const itemQuantity = sale.items?.reduce((sum: number, i: any) => sum + i.quantity, 0) || 0
                   
                   const saleDate = new Date(sale.created_at || sale.sale_date)
@@ -210,9 +245,17 @@ export default function SalesOrdersTab() {
                   return (
                     <div key={sale.id} className="contents">
                       <tr 
-                        className={`group cursor-pointer border-b border-slate-200 transition-colors hover:bg-violet-50/50 ${rowBg}`}
+                        className={`group cursor-pointer border-b border-slate-200 transition-colors hover:bg-violet-50/50 ${rowBg} ${isSelected ? 'bg-indigo-50/50' : ''}`}
                         onClick={() => toggleExpand(sale.id)}
                       >
+                        <td className="whitespace-nowrap px-4 py-2.5 text-center" onClick={(e) => e.stopPropagation()}>
+                          <input 
+                            type="checkbox" 
+                            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600 cursor-pointer"
+                            checked={isSelected}
+                            onChange={() => toggleSelectSale(sale.id)}
+                          />
+                        </td>
                         <td className="whitespace-nowrap px-4 py-2.5 text-center" onClick={(e) => e.stopPropagation()}>
                           <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:text-slate-600" onClick={() => toggleExpand(sale.id)}>
                             {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}

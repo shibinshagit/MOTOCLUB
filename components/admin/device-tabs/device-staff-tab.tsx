@@ -39,6 +39,7 @@ type StaffMember = {
   id_card_number?: string
   address?: string
   is_active: boolean
+  linked_partner_id?: number | null
 }
 
 type StaffFormState = {
@@ -57,6 +58,8 @@ type StaffFormState = {
   address: string
   password: string
   isActive: boolean
+  linkedPartnerId: string
+  newPartnerName: string
 }
 
 const emptyForm: StaffFormState = {
@@ -75,6 +78,8 @@ const emptyForm: StaffFormState = {
   address: "",
   password: "",
   isActive: true,
+  linkedPartnerId: "",
+  newPartnerName: "",
 }
 
 function toDateInputValue(value: unknown): string {
@@ -121,6 +126,7 @@ export default function DeviceStaffTab({ deviceId }: DeviceStaffTabProps) {
   const [editingStaff, setEditingStaff] = useState<StaffMember | null>(null)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [form, setForm] = useState<StaffFormState>(emptyForm)
+  const [partners, setPartners] = useState<{ id: number; name: string }[]>([])
 
   const activeStaffCount = useMemo(() => staff.filter((member) => member.is_active).length, [staff])
 
@@ -132,6 +138,13 @@ export default function DeviceStaffTab({ deviceId }: DeviceStaffTabProps) {
         throw new Error(result.message || "Failed to fetch staff")
       }
       setStaff(result.data as StaffMember[])
+
+      // Also fetch courier partners
+      const { getMasterDataItems } = await import("@/app/actions/master-data-actions")
+      const partnersResult = await getMasterDataItems(deviceId, "courier")
+      if (partnersResult.success) {
+        setPartners(partnersResult.data.map((p: any) => ({ id: p.id, name: p.name })))
+      }
     } catch (error) {
       notifyError(toast, error instanceof Error ? error.message : "Failed to load staff")
     } finally {
@@ -188,6 +201,8 @@ export default function DeviceStaffTab({ deviceId }: DeviceStaffTabProps) {
       address: member.address || "",
       password: "",
       isActive: member.is_active,
+      linkedPartnerId: member.linked_partner_id ? String(member.linked_partner_id) : "",
+      newPartnerName: "",
     })
     setIsDialogOpen(true)
   }
@@ -253,6 +268,21 @@ export default function DeviceStaffTab({ deviceId }: DeviceStaffTabProps) {
         deviceId,
         password: form.password.trim() || undefined,
         isActive: form.isActive,
+        linkedPartnerId: form.linkedPartnerId ? Number(form.linkedPartnerId) : null,
+      }
+
+      // Handle auto-create partner
+      const partnerName = form.newPartnerName.trim() || form.name.trim()
+      if (form.role === "partner" && !form.linkedPartnerId && partnerName) {
+        const { createMasterDataItem } = await import("@/app/actions/master-data-actions")
+        const newPartnerResult = await createMasterDataItem(deviceId, deviceId, {
+          category: "courier",
+          name: partnerName,
+          isActive: true
+        })
+        if (newPartnerResult.success && newPartnerResult.data) {
+          payload.linkedPartnerId = newPartnerResult.data.id
+        }
       }
 
       if (wasEditing && editingStaff) {
@@ -497,7 +527,47 @@ export default function DeviceStaffTab({ deviceId }: DeviceStaffTabProps) {
                 placeholder={editingStaff ? "Leave empty to keep current password" : "Set staff login password"}
               />
             </div>
+
           </div>
+
+          {form.role === "partner" && (
+            <div className="mt-4 space-y-4 rounded-lg border border-gray-200 bg-purple-50/50 p-4">
+              <div>
+                <h4 className="text-sm font-medium text-gray-900 flex items-center gap-2">
+                  Link to Service (Partner)
+                </h4>
+                <p className="mt-1 text-xs text-gray-500 mb-4">
+                  Select an existing courier partner service to link this login to. Leave empty to auto-create a new one based on the Name above.
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <Label className={ADMIN_DIALOG_LABEL_CLASS}>Existing Partner Service</Label>
+                    <select
+                      value={form.linkedPartnerId}
+                      onChange={(e) => setForm(prev => ({ ...prev, linkedPartnerId: e.target.value, newPartnerName: "" }))}
+                      className={`mt-1 h-10 w-full rounded-md border px-3 text-sm ${ADMIN_DIALOG_INPUT_CLASS}`}
+                    >
+                      <option value="">-- Create New --</option>
+                      {partners.map(p => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  {!form.linkedPartnerId && (
+                    <div>
+                      <Label className={ADMIN_DIALOG_LABEL_CLASS}>New Partner Name</Label>
+                      <Input
+                        value={form.newPartnerName}
+                        onChange={(e) => setForm(prev => ({ ...prev, newPartnerName: e.target.value }))}
+                        placeholder={form.name || "Enter new partner name"}
+                        className={`mt-1 ${ADMIN_DIALOG_INPUT_CLASS}`}
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
 
           {form.role === "staff" && (
             <div className="mt-4 space-y-4 rounded-lg border border-gray-200 bg-gray-50 p-4">

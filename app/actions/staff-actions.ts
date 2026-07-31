@@ -63,6 +63,21 @@ export async function getDeviceStaff(deviceId: number) {
   }
 }
 
+// Get all active partners globally (across all devices)
+export async function getAllActivePartners() {
+  try {
+    const partners = await sql`
+      SELECT * FROM staff 
+      WHERE role = 'partner' AND is_active = true
+      ORDER BY name ASC
+    `
+    return { success: true, data: partners }
+  } catch (error) {
+    console.error("Error fetching partners:", error)
+    return { success: false, message: "Failed to fetch partners", data: [] }
+  }
+}
+
 // Get only active staff for a device
 export async function getActiveStaff(deviceId: number) {
   try {
@@ -101,6 +116,7 @@ export async function updateStaff(
     deviceId: number
     password?: string
     isActive?: boolean
+    linkedPartnerId?: number | null
   },
 ) {
   try {
@@ -169,6 +185,7 @@ export async function updateStaff(
         address = ${staffData.address || null},
         is_active = ${isActive},
         staff_password_hash = COALESCE(${newPasswordHash}, staff_password_hash),
+        linked_partner_id = ${staffData.linkedPartnerId || null},
         updated_at = NOW()
       WHERE id = ${staffId} AND device_id = ${staffData.deviceId}
       RETURNING *
@@ -247,6 +264,7 @@ export async function addStaff(staffData: {
   userId?: number
   password: string
   isActive?: boolean
+  linkedPartnerId?: number | null
 }) {
   try {
     // Validate required IDs
@@ -273,7 +291,7 @@ export async function addStaff(staffData: {
     const result = await sql`
       INSERT INTO staff (
         name, phone, email, role, restricted_pages, restricted_values, position, salary, salary_date, joined_on, 
-        age, id_card_number, address, device_id, created_by, is_active, staff_password_hash
+        age, id_card_number, address, device_id, created_by, is_active, staff_password_hash, linked_partner_id
       ) VALUES (
         ${staffData.name},
         ${staffData.phone},
@@ -291,7 +309,8 @@ export async function addStaff(staffData: {
         ${staffData.deviceId},
         ${createdBy},
         ${isActive},
-        ${staffPasswordHash}
+        ${staffPasswordHash},
+        ${staffData.linkedPartnerId || null}
       ) RETURNING *
     `
 
@@ -458,7 +477,7 @@ export async function deleteStaff(staffId: number, deviceId: number) {
 
     // Check if this is the active staff
     const staffToDelete = await sql`
-      SELECT is_active, name FROM staff 
+      SELECT is_active, name, linked_partner_id FROM staff 
       WHERE id = ${staffId} AND device_id = ${deviceId}
     `
 
@@ -467,6 +486,14 @@ export async function deleteStaff(staffId: number, deviceId: number) {
     }
 
     const wasActive = staffToDelete[0].is_active
+
+    // Delete linked master data item if exists
+    if (staffToDelete[0].linked_partner_id) {
+      await sql`
+        DELETE FROM master_data 
+        WHERE id = ${staffToDelete[0].linked_partner_id} AND device_id = ${deviceId}
+      `
+    }
 
     // Delete the staff member
     await sql`

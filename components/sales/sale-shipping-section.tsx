@@ -6,7 +6,8 @@ import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
-import { getMasterDataItems } from "@/app/actions/master-data-actions"
+import { getMasterDataItems, getAllGlobalCouriers } from "@/app/actions/master-data-actions"
+import { getDeviceServices, addService } from "@/app/actions/service-actions"
 import { getPackagingDefaultCost } from "@/lib/master-data"
 import {
   DEFAULT_SALE_SHIPPING,
@@ -39,27 +40,46 @@ export default function SaleShippingSection({
   customerPhone = "",
 }: SaleShippingSectionProps) {
   const shipping = { ...DEFAULT_SALE_SHIPPING, ...value }
-  const [couriers, setCouriers] = useState<MasterDataItem[]>([])
+  const [courierPartners, setCourierPartners] = useState<MasterDataItem[]>([])
+  const [allServices, setAllServices] = useState<any[]>([])
   const [packagingTypes, setPackagingTypes] = useState<MasterDataItem[]>([])
+  
+  const [isCreatingService, setIsCreatingService] = useState(false)
+  const [newServiceName, setNewServiceName] = useState("")
+  const [newServicePrice, setNewServicePrice] = useState("0")
 
   useEffect(() => {
+    console.log("[SaleShippingSection] Mounted with deviceId:", deviceId)
     if (!deviceId) return
 
-    Promise.all([getMasterDataItems(deviceId, "courier"), getMasterDataItems(deviceId, "packaging")]).then(
-      ([courierResult, packagingResult]) => {
+    Promise.all([
+      getMasterDataItems(deviceId, "courier"), 
+      getMasterDataItems(deviceId, "packaging"),
+      getDeviceServices(deviceId)
+    ]).then(
+      ([courierResult, packagingResult, servicesResult]) => {
+        console.log("[SaleShippingSection] Courier Result:", courierResult)
         if (courierResult.success) {
-          setCouriers((courierResult.data || []).filter((item: any) => item.is_active !== false))
+          setCourierPartners((courierResult.data || []).filter((item: any) => item.is_active !== false))
         }
         if (packagingResult.success) {
           setPackagingTypes((packagingResult.data || []).filter((item: any) => item.is_active !== false))
+        }
+        if (servicesResult.success) {
+          setAllServices(servicesResult.data || [])
         }
       },
     )
   }, [deviceId])
 
-  const selectedCourier = useMemo(
-    () => couriers.find((courier) => courier.id === shipping.courierServiceId) || null,
-    [couriers, shipping.courierServiceId],
+  const availableServices = useMemo(() => {
+    if (!shipping.courierPartnerId) return []
+    return allServices.filter(s => s.partner_id === shipping.courierPartnerId)
+  }, [allServices, shipping.courierPartnerId])
+
+  const selectedCourierPartner = useMemo(
+    () => courierPartners.find((courier) => courier.id === shipping.courierPartnerId) || null,
+    [courierPartners, shipping.courierPartnerId],
   )
 
   const selectedPackaging = useMemo(
@@ -86,17 +106,61 @@ export default function SaleShippingSection({
     })
   }
 
-  const handleCourierChange = (courierId: string) => {
-    if (!courierId) {
+  const handleCourierPartnerChange = (partnerId: string) => {
+    if (!partnerId) {
+      patch({ courierPartnerId: null, courierServiceId: null, courierServiceName: "" })
+      return
+    }
+    const partner = courierPartners.find((item) => String(item.id) === partnerId)
+    patch({
+      courierPartnerId: partner?.id || null,
+      courierServiceId: null,
+      courierServiceName: "",
+      fulfillmentType: "ship",
+    })
+  }
+
+  const handleCourierServiceChange = (serviceId: string) => {
+    if (serviceId === "create_new") {
+      setIsCreatingService(true)
+      return
+    }
+    if (!serviceId) {
       patch({ courierServiceId: null, courierServiceName: "" })
       return
     }
 
-    const courier = couriers.find((item) => String(item.id) === courierId)
+    const service = availableServices.find((item) => String(item.id) === serviceId)
     patch({
-      courierServiceId: courier?.id || null,
-      courierServiceName: courier?.name || "",
+      courierServiceId: service?.id || null,
+      courierServiceName: service?.name || "",
     })
+  }
+
+  const handleCreateService = async () => {
+    if (!deviceId || !shipping.courierPartnerId || !newServiceName.trim()) return
+    try {
+      const result = await addService({
+        name: newServiceName.trim(),
+        price: Number(newServicePrice) || 0,
+        deviceId,
+        userId: deviceId, // fallback
+        partnerId: shipping.courierPartnerId,
+      })
+      if (result.success && result.data) {
+        const newService = { ...result.data, partner_id: shipping.courierPartnerId }
+        setAllServices(prev => [...prev, newService])
+        patch({
+          courierServiceId: newService.id,
+          courierServiceName: newService.name,
+        })
+        setIsCreatingService(false)
+        setNewServiceName("")
+        setNewServicePrice("0")
+      }
+    } catch (error) {
+      console.error("Failed to create service", error)
+    }
   }
 
   const handlePackagingChange = (packagingId: string) => {
@@ -133,9 +197,73 @@ export default function SaleShippingSection({
             </div>
             
             <div>
-              <Label className="text-[10px] font-semibold uppercase tracking-wide text-blue-600/80">Order Tracking</Label>
-              <div className="mt-1 bg-white p-2 border border-blue-100 rounded-md">
-                <div className="text-xs font-medium text-slate-700">Tracking ID: <span className="font-mono bg-slate-100 px-1 rounded text-slate-900">{shipping.trackingId || "N/A"}</span></div>
+              <Label className="text-[10px] font-semibold uppercase tracking-wide text-blue-600/80 mb-2 block">Courier Fulfillment</Label>
+              <div className="space-y-2 bg-white p-2 border border-blue-100 rounded-md">
+                <div>
+                  <Label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                    Courier Partner <span className="text-red-500">*</span>
+                  </Label>
+                  <select
+                    value={shipping.courierPartnerId ? String(shipping.courierPartnerId) : ""}
+                    onChange={(e) => handleCourierPartnerChange(e.target.value)}
+                    className="flex h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-900"
+                  >
+                    <option value="">Select partner</option>
+                    {courierPartners.map((courier) => (
+                      <option key={courier.id} value={courier.id}>
+                        {courier.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                
+                <div>
+                  <Label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                    Courier Service <span className="text-red-500">*</span>
+                  </Label>
+                  {isCreatingService ? (
+                    <div className="flex flex-col gap-1 rounded border border-slate-200 bg-slate-50 p-1.5">
+                      <Input 
+                        placeholder="Service Name" 
+                        value={newServiceName} 
+                        onChange={e => setNewServiceName(e.target.value)} 
+                        className="h-7 text-xs bg-white" 
+                      />
+                      <div className="flex gap-1">
+                        <button type="button" onClick={handleCreateService} className="flex-1 bg-slate-900 text-white rounded text-[10px] py-1 font-medium">Save</button>
+                        <button type="button" onClick={() => setIsCreatingService(false)} className="flex-1 bg-slate-200 text-slate-700 rounded text-[10px] py-1 font-medium">Cancel</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <select
+                      value={shipping.courierServiceId ? String(shipping.courierServiceId) : ""}
+                      onChange={(e) => handleCourierServiceChange(e.target.value)}
+                      disabled={!shipping.courierPartnerId}
+                      className="flex h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-900 disabled:opacity-50"
+                    >
+                      <option value="">Select service</option>
+                      {availableServices.map((service) => (
+                        <option key={service.id} value={service.id}>
+                          {service.name}
+                        </option>
+                      ))}
+                      {shipping.courierPartnerId && <option value="create_new">+ Create New Courier Service</option>}
+                    </select>
+                  )}
+                </div>
+              </div>
+            </div>
+            
+            <div>
+              <Label className="text-[10px] font-semibold uppercase tracking-wide text-blue-600/80 mb-2 block">Order Tracking</Label>
+              <div className="bg-white p-2 border border-blue-100 rounded-md">
+                <div className="text-xs font-medium text-slate-700 mb-1">Tracking ID:</div>
+                <Input
+                  value={shipping.trackingId || ""}
+                  onChange={(e) => patch({ trackingId: e.target.value })}
+                  placeholder="AWB / tracking number"
+                  className="h-8 border-slate-200 text-xs w-full"
+                />
               </div>
             </div>
           </div>
@@ -225,20 +353,55 @@ export default function SaleShippingSection({
 
             <div className="space-y-1">
               <Label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                Courier service
+                Courier Partner
               </Label>
               <select
-                value={shipping.courierServiceId ? String(shipping.courierServiceId) : ""}
-                onChange={(e) => handleCourierChange(e.target.value)}
+                value={shipping.courierPartnerId ? String(shipping.courierPartnerId) : ""}
+                onChange={(e) => handleCourierPartnerChange(e.target.value)}
                 className="flex h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-900"
               >
-                <option value="">Select courier</option>
-                {couriers.map((courier) => (
+                <option value="">Select partner</option>
+                {courierPartners.map((courier) => (
                   <option key={courier.id} value={courier.id}>
                     {courier.name}
                   </option>
                 ))}
               </select>
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                Courier service
+              </Label>
+              {isCreatingService ? (
+                <div className="flex flex-col gap-1 rounded border border-slate-200 bg-slate-50 p-1.5">
+                  <Input 
+                    placeholder="Service Name" 
+                    value={newServiceName} 
+                    onChange={e => setNewServiceName(e.target.value)} 
+                    className="h-7 text-xs bg-white" 
+                  />
+                  <div className="flex gap-1">
+                    <button type="button" onClick={handleCreateService} className="flex-1 bg-slate-900 text-white rounded text-[10px] py-1 font-medium">Save</button>
+                    <button type="button" onClick={() => setIsCreatingService(false)} className="flex-1 bg-slate-200 text-slate-700 rounded text-[10px] py-1 font-medium">Cancel</button>
+                  </div>
+                </div>
+              ) : (
+                <select
+                  value={shipping.courierServiceId ? String(shipping.courierServiceId) : ""}
+                  onChange={(e) => handleCourierServiceChange(e.target.value)}
+                  disabled={!shipping.courierPartnerId}
+                  className="flex h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-900 disabled:opacity-50"
+                >
+                  <option value="">Select service</option>
+                  {availableServices.map((service) => (
+                    <option key={service.id} value={service.id}>
+                      {service.name}
+                    </option>
+                  ))}
+                  {shipping.courierPartnerId && <option value="create_new">+ Create New Courier Service</option>}
+                </select>
+              )}
             </div>
 
             <div className="space-y-1">
@@ -398,16 +561,16 @@ export default function SaleShippingSection({
             </p>
           ) : null}
 
-          {selectedCourier?.tracking_url_template && shipping.trackingId ? (
+          {selectedCourierPartner?.tracking_url_template && shipping.trackingId ? (
             <p className="text-[11px] text-slate-500">
-              Tracking template available for {selectedCourier.name}. Link can be opened after saving the sale.
+              Tracking template available for {selectedCourierPartner.name}. Link can be opened after saving the sale.
             </p>
           ) : null}
 
           <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-500">
             <span className="inline-flex items-center gap-1">
               <Truck className="h-3.5 w-3.5" />
-              {selectedCourier?.name || "No courier selected"}
+              {selectedCourierPartner?.name || "No courier selected"}
             </span>
             <span className="inline-flex items-center gap-1">
               <Package className="h-3.5 w-3.5" />

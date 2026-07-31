@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input"
 import { ChevronDown, ChevronUp, MapPin, Phone, User, Calendar, Layers, MessageCircle, Printer, Edit, Trash2, Search, X } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 import { useConfirm } from "@/hooks/use-confirm"
-import { printJobCard } from "@/lib/receipt-utils"
+import { printJobCard, printBatchJobCards } from "@/lib/receipt-utils"
 import { JobCardModal } from "./job-card-modal"
 import { DeliveryStatusSelect } from "@/components/sales/delivery-status-select"
 import { TrackingCell } from "@/components/sales/tracking-cell"
@@ -32,6 +32,26 @@ export function TodaySalesList({ onOpenCreateModal }: { onOpenCreateModal?: () =
   const [monthStr, setMonthStr] = useState<string>(format(new Date(), "yyyy-MM"))
   const [searchTerm, setSearchTerm] = useState("")
   const [debouncedSearch, setDebouncedSearch] = useState("")
+
+  const [selectedSales, setSelectedSales] = useState<number[]>([])
+
+  const toggleSelectSale = (id: number) => {
+    setSelectedSales(prev => prev.includes(id) ? prev.filter(sId => sId !== id) : [...prev, id])
+  }
+
+  const toggleSelectAll = () => {
+    if (selectedSales.length === sales.length && sales.length > 0) {
+      setSelectedSales([])
+    } else {
+      setSelectedSales(sales.map(s => s.id))
+    }
+  }
+
+  const handleBatchPrint = () => {
+    if (selectedSales.length === 0) return
+    const salesToPrint = sales.filter(s => selectedSales.includes(s.id))
+    printBatchJobCards(salesToPrint, currency)
+  }
 
   // Edit Modal State
   const [editingSaleId, setEditingSaleId] = useState<number | null>(null)
@@ -156,6 +176,12 @@ export function TodaySalesList({ onOpenCreateModal }: { onOpenCreateModal?: () =
           <Button variant="outline" size="icon" onClick={fetchSales} title="Refresh">
             <Layers className="h-4 w-4" />
           </Button>
+          {selectedSales.length > 0 && (
+            <Button variant="default" onClick={handleBatchPrint} className="bg-indigo-600 hover:bg-indigo-700 text-white gap-2 px-3">
+              <Printer className="h-4 w-4" />
+              Print ({selectedSales.length})
+            </Button>
+          )}
           {onOpenCreateModal && (
             <Button onClick={onOpenCreateModal}>
               + Create Job Card
@@ -169,6 +195,14 @@ export function TodaySalesList({ onOpenCreateModal }: { onOpenCreateModal?: () =
           <table className="min-w-full border-separate border-spacing-0 text-sm">
             <thead>
               <tr className="border-b border-slate-200 bg-[#F1F4F9] text-xs font-semibold uppercase tracking-wide text-slate-600">
+                <th className="w-12 whitespace-nowrap px-4 py-2.5 text-left">
+                  <input 
+                    type="checkbox" 
+                    className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600 cursor-pointer"
+                    checked={sales.length > 0 && selectedSales.length === sales.length}
+                    onChange={toggleSelectAll}
+                  />
+                </th>
                 <th className="w-12 whitespace-nowrap px-4 py-2.5 text-left"></th>
                 <th className="whitespace-nowrap px-4 py-2.5 text-left">Date & Time</th>
                 <th className="whitespace-nowrap px-4 py-2.5 text-left">Customer</th>
@@ -183,6 +217,7 @@ export function TodaySalesList({ onOpenCreateModal }: { onOpenCreateModal?: () =
             <tbody>
               {sales.map((sale, index) => {
                 const isExpanded = expandedSaleId === sale.id
+                const isSelected = selectedSales.includes(sale.id)
                 const itemQuantity = sale.items?.reduce((sum: number, i: any) => sum + i.quantity, 0) || 0
                 
                 const saleDate = new Date(sale.created_at || sale.sale_date)
@@ -194,9 +229,17 @@ export function TodaySalesList({ onOpenCreateModal }: { onOpenCreateModal?: () =
                 return (
                   <div key={sale.id} className="contents">
                     <tr 
-                      className={`group cursor-pointer border-b border-slate-200 transition-colors hover:bg-violet-50/50 ${rowBg}`}
+                      className={`group cursor-pointer border-b border-slate-200 transition-colors hover:bg-violet-50/50 ${rowBg} ${isSelected ? 'bg-indigo-50/50' : ''}`}
                       onClick={() => toggleExpand(sale.id)}
                     >
+                      <td className="whitespace-nowrap px-4 py-2.5 text-center" onClick={(e) => e.stopPropagation()}>
+                        <input 
+                          type="checkbox" 
+                          className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600 cursor-pointer"
+                          checked={isSelected}
+                          onChange={() => toggleSelectSale(sale.id)}
+                        />
+                      </td>
                       <td className="whitespace-nowrap px-4 py-2.5 text-center" onClick={(e) => e.stopPropagation()}>
                         <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:text-slate-600" onClick={() => toggleExpand(sale.id)}>
                           {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}

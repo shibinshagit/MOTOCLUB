@@ -78,6 +78,24 @@ export async function getMasterDataItems(deviceId: number, category?: MasterData
   }
 }
 
+export async function getAllGlobalCouriers() {
+  try {
+    const rows = await sql`
+      SELECT *
+      FROM master_data
+      WHERE category = 'courier' AND is_active = true
+      ORDER BY sort_order ASC, name ASC
+    `
+    return {
+      success: true as const,
+      data: rows.map((row: Record<string, unknown>) => mapMasterDataRow(row)),
+    }
+  } catch (error) {
+    console.error("getAllGlobalCouriers error:", error)
+    return { success: false as const, message: "Failed to load global couriers", data: [] as MasterDataItem[] }
+  }
+}
+
 export async function createMasterDataItem(deviceId: number, userId: number, input: MasterDataInput) {
   if (!deviceId || !userId) {
     return { success: false as const, message: "Device and user are required" }

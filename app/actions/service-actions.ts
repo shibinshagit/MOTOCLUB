@@ -36,13 +36,14 @@ export async function addService(serviceData: {
   price: number
   deviceId: number
   userId: number
+  partnerId?: number | null
 }) {
   try {
     await initializeServicesSchema()
 
     const result = await sql`
-      INSERT INTO services (name, price, device_id, created_by)
-      VALUES (${serviceData.name}, ${serviceData.price}, ${serviceData.deviceId}, ${serviceData.userId})
+      INSERT INTO services (name, price, device_id, created_by, partner_id)
+      VALUES (${serviceData.name}, ${serviceData.price}, ${serviceData.deviceId}, ${serviceData.userId}, ${serviceData.partnerId || null})
       RETURNING *
     `
 

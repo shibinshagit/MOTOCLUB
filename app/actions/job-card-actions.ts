@@ -102,23 +102,7 @@ export async function createJobCard(input: JobCardInput) {
       }
     }
 
-    // 2. Generate Tracking Number: JC-YYYYMMDD-XXXX
-    const now = new Date()
-    const year = now.getFullYear()
-    const month = String(now.getMonth() + 1).padStart(2, "0")
-    const day = String(now.getDate()).padStart(2, "0")
-    const dateStr = `${year}${month}${day}`
-
-    // Count today's sales to get sequence suffix
-    const countTodayRows = await sql`
-      SELECT COUNT(id) as count 
-      FROM sales 
-      WHERE DATE(sale_date) = CURRENT_DATE
-    `
-    const sequence = String(Number(countTodayRows[0].count) + 1).padStart(4, "0")
-    const trackingId = `JC-${dateStr}-${sequence}`
-
-    // 3. Calculate Totals
+    // Totals calculated below
     let itemsSubtotal = 0
     let totalCost = 0
     for (const p of input.products) {
@@ -127,62 +111,98 @@ export async function createJobCard(input: JobCardInput) {
     }
     const totalAmount = itemsSubtotal + (Number(input.courierPaidExtra) || 0)
 
-    // 4. Insert Sale (Status: Pending)
-    const saleRows = await sql`
-      INSERT INTO sales (
-        customer_id,
-        total_amount,
-        total_cost,
-        status,
-        payment_status,
-        device_id,
-        received_amount,
-        staff_id,
-        sale_type,
-        job_card_number,
-        tracking_id,
-        customer_name_override,
-        customer_phone_override,
-        shipping_city,
-        shipping_district,
-        shipping_state,
-        shipping_street,
-        shipping_landmark,
-        shipping_address_type,
-        shipping_pincode,
-        courier_paid_extra,
-        created_by,
-        advance_amount,
-        balance_amount
-      ) VALUES (
-        ${resolvedCustomerId || null},
-        ${totalAmount},
-        ${totalCost},
-        'Pending',
-        'Pending',
-        ${deviceId},
-        0,
-        ${staffId},
-        'job_card',
-        ${trackingId},
-        null,
-        ${customerNameOverride},
-        ${customerPhoneOverride},
-        ${input.shippingCity || null},
-        ${input.shippingDistrict || null},
-        ${input.shippingState || null},
-        ${input.shippingStreet || null},
-        ${input.shippingLandmark || null},
-        ${input.shippingAddressType || 'Home'},
-        ${input.shippingPincode || null},
-        ${input.courierPaidExtra || 0},
-        ${deviceId},
-        0,
-        ${totalAmount}
-      )
-      RETURNING id
-    `
-    const saleId = saleRows[0].id
+    let trackingId = ""
+    let saleId = 0
+    let updateSuccess = false
+    let retries = 5
+
+    while (!updateSuccess && retries > 0) {
+      try {
+        // Find next available DOD ID
+        const activeIdsResult = await sql`
+          SELECT tracking_id 
+          FROM sales 
+          WHERE device_id = ${deviceId} 
+            AND tracking_id LIKE 'DOD%'
+            AND (delivery_status IS NULL OR delivery_status NOT IN ('Delivered', 'Returned', 'Failed'))
+            AND status != 'Cancelled'
+        `
+        const activeIds = new Set(
+          activeIdsResult.map((r: any) => parseInt(String(r.tracking_id).replace('DOD', ''), 10) || 0)
+        )
+        let nextNum = 1
+        while (activeIds.has(nextNum)) {
+          nextNum++
+        }
+        trackingId = 'DOD' + String(nextNum).padStart(3, '0')
+
+    // 3. Calculate Totals
+        // Insert Sale (Status: Pending)
+        const saleRows = await sql`
+          INSERT INTO sales (
+            customer_id,
+            total_amount,
+            total_cost,
+            status,
+            payment_status,
+            device_id,
+            received_amount,
+            staff_id,
+            sale_type,
+            job_card_number,
+            tracking_id,
+            customer_name_override,
+            customer_phone_override,
+            shipping_city,
+            shipping_district,
+            shipping_state,
+            shipping_street,
+            shipping_landmark,
+            shipping_address_type,
+            shipping_pincode,
+            courier_paid_extra,
+            created_by,
+            advance_amount,
+            balance_amount
+          ) VALUES (
+            ${resolvedCustomerId || null},
+            ${totalAmount},
+            ${totalCost},
+            'Pending',
+            'Pending',
+            ${deviceId},
+            0,
+            ${staffId},
+            'job_card',
+            ${trackingId},
+            ${trackingId},
+            ${customerNameOverride},
+            ${customerPhoneOverride},
+            ${input.shippingCity || null},
+            ${input.shippingDistrict || null},
+            ${input.shippingState || null},
+            ${input.shippingStreet || null},
+            ${input.shippingLandmark || null},
+            ${input.shippingAddressType || 'Home'},
+            ${input.shippingPincode || null},
+            ${input.courierPaidExtra || 0},
+            ${deviceId},
+            0,
+            ${totalAmount}
+          )
+          RETURNING id
+        `
+        saleId = saleRows[0].id
+        updateSuccess = true
+      } catch (err: any) {
+        if (err.message && (err.message.includes('idx_sales_active_dod_tracking') || err.message.includes('unique constraint'))) {
+          retries--
+          if (retries === 0) throw new Error("Could not allocate a unique DOD tracking ID after 5 attempts. Please try again.")
+          continue
+        }
+        throw err
+      }
+    }
 
     // 5. Insert Sale Items
     for (const p of input.products) {
@@ -441,7 +461,7 @@ export async function getAllJobCards(deviceId: number) {
       )
         AND s.status != 'Cancelled'
         AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%')
-        AND (s.delivery_status IS NULL OR s.delivery_status NOT IN ('Delivered', 'Returned'))
+        AND (s.delivery_status IS NULL OR s.delivery_status != 'Returned')
       ORDER BY s.created_at DESC
     `
 

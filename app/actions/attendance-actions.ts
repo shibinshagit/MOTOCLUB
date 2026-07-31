@@ -130,7 +130,7 @@ export async function getFilteredAttendance(
         AND a.date <= ${filters.endDate}::date
       WHERE s.device_id = ${deviceId} 
         AND s.is_active = true
-        AND s.role = 'staff'
+        AND s.role IN ('staff', 'admin')
       ORDER BY s.name ASC, a.date DESC
     `
 

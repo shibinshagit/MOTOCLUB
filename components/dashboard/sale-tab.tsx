@@ -134,6 +134,7 @@ interface SaleDraftSnapshot {
   editingSaleId: number | null
   originalSaleStatus: string
   isLoadingEdit?: boolean
+  saleDeviceId?: number | null
 }
 
 function getMonthRange(month: Date) {
@@ -337,6 +338,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
       editingSaleId: null,
       originalSaleStatus: "",
       isLoadingEdit: false,
+      saleDeviceId: null,
     }),
     [activeStaff?.id, activeStaff?.name, createEmptyProductRow],
   )
@@ -1182,6 +1184,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                   editingSaleId: saleId,
                   name: `Edit #${saleId}`,
                   isLoadingEdit: false,
+                  saleDeviceId: sale.device_id,
                 }
               : draft
           )
@@ -1300,6 +1303,10 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
             type: "success",
             message: "Sale updated successfully",
           })
+          toast({
+            title: "Success",
+            description: "Sale updated successfully",
+          })
 
           setTimeout(() => {
             finalizeDraftAfterSave()
@@ -1308,6 +1315,11 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
           setFormAlert({
             type: "error",
             message: result.message || "Failed to update the sale",
+          })
+          toast({
+            title: "Error",
+            description: result.message || "Failed to update the sale",
+            variant: "destructive",
           })
         }
       } else {
@@ -1337,6 +1349,10 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
           setFormAlert({
             type: "success",
             message: "Sale completed successfully",
+          })
+          toast({
+            title: "Success",
+            description: "Sale completed successfully",
           })
 
           if (result.data && result.data.sale) {
@@ -1510,7 +1526,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
       }
     } catch (error) {
       console.error("Delete sale error:", error)
-      notifyError(toast, "An unexpected error occurred")
+      notifyError(toast, error instanceof Error ? error.message : "An unexpected error occurred")
     } finally {
       setIsDeleting(false)
     }
@@ -1893,18 +1909,26 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
             </div>
             <div className="col-span-2 text-center text-xs text-gray-500 relative group">
               {product.productId ? (
-                <div className="cursor-help w-full">
+                <div className="w-full">
                   {showCost ? (
-                    <span className="font-medium text-gray-900">
-                      {deviceCurrencyState} {formatCurrency(product.cost || 0)}
-                    </span>
+                    <div className="relative">
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={product.cost || ""}
+                        onChange={(e) => updateProductRow(product.id, { cost: Number.parseFloat(e.target.value) || 0 })}
+                        className="h-8 text-xs text-right pr-6 bg-white border-gray-300 text-gray-900"
+                      />
+                      <span className="absolute right-2 top-2 text-[10px] text-gray-400">{deviceCurrencyState}</span>
+                    </div>
                   ) : (
-                    <>
+                    <div className="cursor-help w-full">
                       <span className="text-gray-400 tracking-widest group-hover:hidden">••••••</span>
                       <span className="hidden group-hover:inline-block font-medium">
                         {deviceCurrencyState} {formatCurrency(product.cost || 0)}
                       </span>
-                    </>
+                    </div>
                   )}
                 </div>
               ) : null}
@@ -2141,18 +2165,26 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
             {product.productId && (
               <div className="mb-2">
                 <Label className="text-[10px] text-gray-500 mb-1 block">Ref Price (Cost)</Label>
-                <div className="text-xs text-gray-700 bg-gray-100 p-1.5 rounded relative group cursor-help w-full">
+                <div className="w-full">
                   {showCost ? (
-                    <span className="font-medium">
-                      {deviceCurrencyState} {formatCurrency(product.cost || 0)}
-                    </span>
+                    <div className="relative">
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={product.cost || ""}
+                        onChange={(e) => updateProductRow(product.id, { cost: Number.parseFloat(e.target.value) || 0 })}
+                        className="h-8 text-xs pr-8 bg-white border-gray-300 text-gray-900"
+                      />
+                      <span className="absolute right-2 top-2 text-[10px] text-gray-400">{deviceCurrencyState}</span>
+                    </div>
                   ) : (
-                    <>
+                    <div className="text-xs text-gray-700 bg-gray-100 p-1.5 rounded relative group cursor-help w-full">
                       <span className="text-gray-400 tracking-widest group-hover:hidden">••••••</span>
                       <span className="hidden group-hover:inline-block font-medium">
                         {deviceCurrencyState} {formatCurrency(product.cost || 0)}
                       </span>
-                    </>
+                    </div>
                   )}
                 </div>
               </div>
@@ -2465,7 +2497,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                               </div>
 
                                 <SaleShippingSection
-                                  deviceId={deviceId}
+                                  deviceId={saleDrafts.find(d => d.id === activeDraftId)?.saleDeviceId || deviceId}
                                   value={shipping}
                                   onChange={setShipping}
                                   customerAddress={customerAddress}

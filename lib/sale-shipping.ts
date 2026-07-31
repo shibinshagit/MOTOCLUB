@@ -17,6 +17,7 @@ export type DeliveryStatus = (typeof DELIVERY_STATUSES)[number]
 export type SaleShippingInput = {
   fulfillmentType?: FulfillmentType
   deliveryStatus?: DeliveryStatus | string | null
+  courierPartnerId?: number | null
   courierServiceId?: number | null
   courierServiceName?: string | null
   packagingTypeId?: number | null
@@ -51,6 +52,7 @@ export const DEFAULT_SALE_SHIPPING: Required<
     SaleShippingInput,
     | "fulfillmentType"
     | "deliveryStatus"
+    | "courierPartnerId"
     | "courierServiceId"
     | "courierServiceName"
     | "packagingTypeId"
@@ -75,6 +77,7 @@ export const DEFAULT_SALE_SHIPPING: Required<
 > = {
   fulfillmentType: "pickup",
   deliveryStatus: "Pending",
+  courierPartnerId: null,
   courierServiceId: null,
   courierServiceName: "",
   packagingTypeId: null,
@@ -122,6 +125,7 @@ export function normalizeSaleShippingInput(input?: SaleShippingInput | null) {
     return {
       fulfillment_type: "pickup" as const,
       delivery_status: input?.deliveryStatus || null,
+      courier_partner_id: null,
       courier_service_id: null,
       courier_service_name: null,
       packaging_type_id: null,
@@ -164,6 +168,7 @@ export function normalizeSaleShippingInput(input?: SaleShippingInput | null) {
   return {
     fulfillment_type: "ship" as const,
     delivery_status: deliveryStatus,
+    courier_partner_id: input?.courierPartnerId || null,
     courier_service_id: input?.courierServiceId || null,
     courier_service_name: input?.courierServiceName?.trim() || null,
     packaging_type_id: input?.packagingTypeId || null,
@@ -193,6 +198,7 @@ export function mapSaleShippingFromRecord(record: Record<string, unknown>): Sale
   return {
     fulfillmentType: (record.fulfillment_type as FulfillmentType) || "pickup",
     deliveryStatus: (record.delivery_status as string) || "Pending",
+    courierPartnerId: (record.courier_partner_id as number) || null,
     courierServiceId: (record.courier_service_id as number) || null,
     courierServiceName: (record.courier_service_name as string) || "",
     packagingTypeId: (record.packaging_type_id as number) || null,

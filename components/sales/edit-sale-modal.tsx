@@ -111,6 +111,7 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
 
   // Shipping state
   const [shipping, setShipping] = useState<SaleShippingInput>(DEFAULT_SALE_SHIPPING)
+  const [saleDeviceId, setSaleDeviceId] = useState<number | null>(null)
 
   // Staff state with Redux integration
   const [staffId, setStaffId] = useState<number | null>(null)
@@ -186,12 +187,13 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
           setAdvanceAmount(Number(sale.advance_amount) || 0)
           setStatus(sale.status || "Completed")
           setOriginalStatus(sale.status || "Completed")
+          setSaleDeviceId(sale.device_id || null)
 
           // Set staff information from sale data or use active staff from Redux
           if (sale.staff_id) {
             setStaffId(sale.staff_id)
           } else if (activeStaff) {
-            setStaffId(activeStaff.id)
+            setStaffId((activeStaff as any).id)
           }
 
           setPaymentMethod(sale.payment_method || "Cash")
@@ -705,13 +707,38 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
       return
     }
 
-    // Add staff validation in handleSubmit:
     if (!staffId) {
       setFormAlert({
         type: "error",
         message: "Please select a staff member",
       })
       return
+    }
+
+    const isJobCard = originalStatus === "Pending"
+
+    if (isJobCard) {
+      if (!customerId) {
+        setFormAlert({
+          type: "error",
+          message: "Please select a customer for the job card",
+        })
+        return
+      }
+      if (!shipping.courierPartnerId) {
+        setFormAlert({
+          type: "error",
+          message: "Please select a courier partner",
+        })
+        return
+      }
+      if (!shipping.courierServiceId) {
+        setFormAlert({
+          type: "error",
+          message: "Please select a courier service",
+        })
+        return
+      }
     }
 
     setIsSubmitting(true)
@@ -1108,7 +1135,7 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
                               Staff *
                             </Label>
                             <div className="h-9 rounded-md border border-gray-200 bg-white px-3 flex items-center text-sm text-gray-900">
-                              {activeStaff?.name || "Authenticate staff from dashboard"}
+                              {(activeStaff as any)?.name || "Authenticate staff from dashboard"}
                             </div>
                           </div>
 
@@ -1241,6 +1268,18 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
                           )}
                         </div>
                     </div>
+                    
+                    <SaleShippingSection
+                      deviceId={saleDeviceId || deviceId}
+                      value={shipping}
+                      onChange={setShipping}
+                      customerAddress={""}
+                      currency={currency}
+                      className="mt-2"
+                      isJobCard={originalStatus === "Pending"}
+                      customerName={customerName}
+                      customerPhone={""}
+                    />
                   </div>
 
                   {/* Sale summary */}

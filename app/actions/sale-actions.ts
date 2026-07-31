@@ -98,6 +98,7 @@ function shippingFieldsChanged(original: any, shipping: ReturnType<typeof normal
   return (
     (original.fulfillment_type || "pickup") !== shipping.fulfillment_type ||
     (original.delivery_status || null) !== shipping.delivery_status ||
+    (original.courier_partner_id || null) !== shipping.courier_partner_id ||
     (original.courier_service_id || null) !== shipping.courier_service_id ||
     (original.courier_service_name || null) !== shipping.courier_service_name ||
     (original.packaging_type_id || null) !== shipping.packaging_type_id ||
@@ -581,7 +582,7 @@ export async function getSaleDetails(saleId: number) {
         FROM sales s
         LEFT JOIN customers c ON s.customer_id = c.id
         LEFT JOIN staff st ON s.staff_id = st.id
-        LEFT JOIN master_data md ON md.id = s.courier_service_id
+        LEFT JOIN master_data md ON md.id = s.courier_partner_id
         WHERE s.id = ${saleId}
       `
     })
@@ -779,7 +780,7 @@ export async function addSale(saleData: any) {
       INSERT INTO sales (
         customer_id, created_by, total_amount, status, payment_status, sale_date,
         device_id, payment_method, discount, received_amount, staff_id, sale_type,
-        fulfillment_type, delivery_status, courier_service_id, courier_service_name,
+        fulfillment_type, delivery_status, courier_partner_id, courier_service_id, courier_service_name,
         packaging_type_id, packaging_type_name,
         tracking_id, shipping_address, weight_kg, length_cm, width_cm, height_cm,
         courier_paid_extra, expense_courier, expense_packing, shipped_at, delivered_at, shipping_notes,
@@ -800,6 +801,7 @@ export async function addSale(saleData: any) {
         ${saleData.saleType || "product"},
         ${shipping.fulfillment_type},
         ${shipping.delivery_status},
+        ${shipping.courier_partner_id},
         ${shipping.courier_service_id},
         ${shipping.courier_service_name},
         ${shipping.packaging_type_id},
@@ -1204,13 +1206,8 @@ function calculateSaleChanges(
 
   // Delivery Status sync logic (independent from Payment Status "Paid" logic)
   if (newOrderStatus.toLowerCase() !== "cancelled") {
-    const isCodApproved = newPaymentMethod.toUpperCase() === "COD" && newReceivedAmount > 0;
-    const isStandardApproved = newPaymentStatus.toLowerCase() === "paid" || newPaymentStatus.toLowerCase() === "completed";
-    
-    if (isCodApproved || isStandardApproved) {
-      if (shipping && (!shipping.delivery_status || shipping.delivery_status.toLowerCase() === "pending")) {
-        shipping.delivery_status = "Paid";
-      }
+    if (shipping && (!shipping.delivery_status || shipping.delivery_status.toLowerCase() === "pending")) {
+      shipping.delivery_status = "Paid";
     }
   }
 
@@ -1383,6 +1380,23 @@ export async function updateSale(saleData: any) {
       }
     }
 
+    // Validate courier fields for Job Cards requiring shipping
+    const isJobCard = original.sale_type === "job_card" || saleData.saleType === "job_card" || original.status === "Pending"
+    if (isJobCard && shipping.fulfillment_type === "ship") {
+      if (!shipping.courier_partner_id) {
+        return {
+          success: false,
+          message: "Please select a Courier Partner for this shipment.",
+        }
+      }
+      if (!shipping.courier_service_id) {
+        return {
+          success: false,
+          message: "Please select a Courier Service for this shipment.",
+        }
+      }
+    }
+
     const updateSaleRecord = async (whereDeviceScoped: boolean) => {
         if (whereDeviceScoped) {
           await sql`
@@ -1399,6 +1413,7 @@ export async function updateSale(saleData: any) {
                 staff_id = ${saleData.staffId || null},
                 fulfillment_type = ${shipping.fulfillment_type},
                 delivery_status = ${shipping.delivery_status},
+                courier_partner_id = ${shipping.courier_partner_id},
                 courier_service_id = ${shipping.courier_service_id},
                 courier_service_name = ${shipping.courier_service_name},
                 packaging_type_id = ${shipping.packaging_type_id},
@@ -1434,6 +1449,7 @@ export async function updateSale(saleData: any) {
                 staff_id = ${saleData.staffId || null},
                 fulfillment_type = ${shipping.fulfillment_type},
                 delivery_status = ${shipping.delivery_status},
+                courier_partner_id = ${shipping.courier_partner_id},
                 courier_service_id = ${shipping.courier_service_id},
                 courier_service_name = ${shipping.courier_service_name},
                 packaging_type_id = ${shipping.packaging_type_id},
@@ -1630,22 +1646,26 @@ export async function updateSale(saleData: any) {
 
       // 7.5. Update sale type based on current items
       try {
-        const serviceCheck = await sql`
-          SELECT COUNT(*) as service_count
-          FROM sale_items si
-          WHERE si.sale_id = ${saleData.id}
-          AND EXISTS (SELECT 1 FROM services s WHERE s.id = si.product_id)
-        `
+        if (original.sale_type !== 'job_card') {
+          const serviceCheck = await sql`
+            SELECT COUNT(*) as service_count
+            FROM sale_items si
+            WHERE si.sale_id = ${saleData.id}
+            AND EXISTS (SELECT 1 FROM services s WHERE s.id = si.product_id)
+          `
 
-        const newSaleType = serviceCheck[0]?.service_count > 0 ? "service" : "product"
+          const newSaleType = serviceCheck[0]?.service_count > 0 ? "service" : "product"
 
-        await sql`
-          UPDATE sales 
-          SET sale_type = ${newSaleType}
-          WHERE id = ${saleData.id}
-        `
+          await sql`
+            UPDATE sales 
+            SET sale_type = ${newSaleType}
+            WHERE id = ${saleData.id}
+          `
 
-        console.log(`Sale type updated to: ${newSaleType} (has ${serviceCheck[0]?.service_count || 0} services)`)
+          console.log(`Sale type updated to: ${newSaleType} (has ${serviceCheck[0]?.service_count || 0} services)`)
+        } else {
+          console.log(`Sale type kept as job_card for sale ${saleData.id}`)
+        }
       } catch (err) {
         console.log("Error updating sale type:", err)
       }
@@ -1802,7 +1822,7 @@ export async function updateSaleDeliveryStatus(
 
   try {
     const staffSession = await getStaffSession()
-    const isAdmin = !staffSession
+    const isAdmin = !staffSession || staffSession.role === "admin"
 
     const rows = await sql`
       SELECT delivery_status, status, fulfillment_type, shipped_at, delivered_at, payment_status, tracking_id, sale_type, staff_id
@@ -1918,16 +1938,16 @@ export async function updateSaleDeliveryStatus(
             SELECT tracking_id 
             FROM sales 
             WHERE device_id = ${deviceId} 
-              AND tracking_id LIKE 'DOD %' 
-              AND delivery_status NOT IN ('Delivered', 'Returned', 'Failed') 
+              AND tracking_id LIKE 'DOD%' 
+              AND (delivery_status IS NULL OR delivery_status NOT IN ('Delivered', 'Returned', 'Failed')) 
               AND status != 'Cancelled'
           `;
-          const activeIds = new Set(activeIdsResult.map((r: any) => parseInt(String(r.tracking_id).replace('DOD ', ''), 10) || 0));
+          const activeIds = new Set(activeIdsResult.map((r: any) => parseInt(String(r.tracking_id).replace('DOD', ''), 10) || 0));
           let nextNum = 1;
           while (activeIds.has(nextNum)) {
             nextNum++;
           }
-          newTrackingId = 'DOD ' + String(nextNum).padStart(3, '0');
+          newTrackingId = 'DOD' + String(nextNum).padStart(3, '0');
         }
 
         await sql`
@@ -2021,9 +2041,7 @@ export async function deleteSale(saleId: number, deviceId: number) {
         return { success: false, message: "Sale not found" }
       }
 
-      if (saleRows[0].sale_type === 'job_card') {
-        return { success: false, message: "Job Cards cannot be deleted" }
-      }
+
 
       const sale = saleRows[0]
       const saleDeviceId = Number(sale.device_id || deviceId)

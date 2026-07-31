@@ -4,6 +4,10 @@ import { sql } from "@/lib/db"
 import Link from "next/link"
 import { LogOut, LayoutDashboard, UserCircle } from "lucide-react"
 import { LogoutButton } from "./logout-button"
+import { getPartnerSales, getPartnerDashboardStats } from "@/app/actions/partner-actions"
+import { PartnerSalesTable } from "./partner-sales-table"
+import { PartnerSalesChart } from "./partner-sales-chart"
+import { Package, Banknote, Calendar, Truck } from "lucide-react"
 
 export default async function PartnerDashboardPage() {
   const session = await getStaffSession()
@@ -17,7 +21,8 @@ export default async function PartnerDashboardPage() {
     SELECT 
       s.name as partner_name,
       d.name as device_name,
-      c.name as company_name
+      c.name as company_name,
+      s.linked_partner_id
     FROM staff s
     JOIN devices d ON s.device_id = d.id
     LEFT JOIN companies c ON d.company_id = c.id
@@ -30,6 +35,21 @@ export default async function PartnerDashboardPage() {
   }
 
   const data = result[0]
+
+  let sales: any[] = []
+  let stats = { totalOrders: 0, activeOrders: 0, totalEarnings: 0, todayActivity: 0 }
+  
+  const [salesResult, statsResult] = await Promise.all([
+    getPartnerSales(session.staffId),
+    getPartnerDashboardStats(session.staffId)
+  ])
+
+  if (salesResult.success && salesResult.data) {
+    sales = salesResult.data
+  }
+  if (statsResult.success && statsResult.data) {
+    stats = statsResult.data
+  }
 
   return (
     <div className="flex h-full w-full">
@@ -77,32 +97,77 @@ export default async function PartnerDashboardPage() {
             </p>
           </header>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-              <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wide mb-1">
-                Company
-              </h3>
-              <p className="text-xl font-semibold text-gray-900">
-                {data.company_name || "MOTO CLUB"}
-              </p>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+            {/* Total Orders */}
+            <div className="bg-gradient-to-br from-[#2979ff] to-[#1565c0] p-4 rounded-xl shadow-md border-0 flex flex-col justify-between text-white relative overflow-hidden group">
+              <div className="absolute -right-4 -top-4 opacity-20 transform group-hover:scale-110 transition-transform duration-300">
+                <Package className="h-20 w-20" />
+              </div>
+              <div className="relative z-10">
+                <div className="flex justify-between items-start">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-blue-100">Total Orders</p>
+                  <Package className="h-5 w-5 text-blue-200" />
+                </div>
+                <h3 className="mt-2 text-3xl font-extrabold">{stats.totalOrders}</h3>
+                <p className="mt-2 text-[11px] font-medium text-blue-100">All time entries</p>
+              </div>
             </div>
-            
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-              <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wide mb-1">
-                Assigned Branch
-              </h3>
-              <p className="text-xl font-semibold text-gray-900">
-                {data.device_name}
-              </p>
+
+            {/* My Earnings */}
+            <div className="bg-gradient-to-br from-[#00c853] to-[#00b0ff] p-4 rounded-xl shadow-md border-0 flex flex-col justify-between text-white relative overflow-hidden group">
+              <div className="absolute -right-4 -top-4 opacity-20 transform group-hover:scale-110 transition-transform duration-300">
+                <Banknote className="h-20 w-20" />
+              </div>
+              <div className="relative z-10">
+                <div className="flex justify-between items-start">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-100">My Earnings</p>
+                  <Banknote className="h-5 w-5 text-emerald-200" />
+                </div>
+                <h3 className="mt-2 text-3xl font-extrabold truncate">
+                  ₹{stats.totalEarnings.toFixed(2)}
+                </h3>
+                <p className="mt-2 text-[11px] font-medium text-emerald-100">From Courier Cost</p>
+              </div>
+            </div>
+
+            {/* Today's Activity */}
+            <div className="bg-gradient-to-br from-[#7c4dff] to-[#651fff] p-4 rounded-xl shadow-md border-0 flex flex-col justify-between text-white relative overflow-hidden group">
+              <div className="absolute -right-4 -top-4 opacity-20 transform group-hover:scale-110 transition-transform duration-300">
+                <Calendar className="h-20 w-20" />
+              </div>
+              <div className="relative z-10">
+                <div className="flex justify-between items-start">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-purple-100">Today's Activity</p>
+                  <Calendar className="h-5 w-5 text-purple-200" />
+                </div>
+                <h3 className="mt-2 text-3xl font-extrabold">{stats.todayActivity}</h3>
+                <p className="mt-2 text-[11px] font-medium text-purple-100">Orders processing</p>
+              </div>
+            </div>
+
+            {/* Active Orders */}
+            <div className="bg-gradient-to-br from-[#ff6d00] to-[#ff3d00] p-4 rounded-xl shadow-md border-0 flex flex-col justify-between text-white relative overflow-hidden group">
+              <div className="absolute -right-4 -top-4 opacity-20 transform group-hover:scale-110 transition-transform duration-300">
+                <Truck className="h-20 w-20" />
+              </div>
+              <div className="relative z-10">
+                <div className="flex justify-between items-start">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-orange-100">Active Orders</p>
+                  <Truck className="h-5 w-5 text-orange-200" />
+                </div>
+                <h3 className="mt-2 text-3xl font-extrabold">{stats.activeOrders}</h3>
+                <p className="mt-2 text-[11px] font-medium text-orange-100">In Progress</p>
+              </div>
             </div>
           </div>
 
-          <div className="mt-8 bg-white rounded-xl shadow-sm border border-gray-200 p-12 flex flex-col items-center justify-center text-center">
-            <LayoutDashboard className="h-16 w-16 text-gray-300 mb-4" />
-            <h2 className="text-xl font-medium text-gray-900">Dashboard Ready</h2>
-            <p className="text-gray-500 mt-2 max-w-md">
-              Your partner account is successfully set up. Future modules (sales, reports, customers) will appear here.
-            </p>
+          <div className="mb-8">
+            <PartnerSalesChart partnerId={session.staffId} />
+          </div>
+
+          <div className="mt-8">
+            <h2 className="text-xl font-bold text-gray-900 mb-4">Assigned Orders</h2>
+            <PartnerSalesTable initialSales={sales} />
           </div>
         </div>
       </main>
