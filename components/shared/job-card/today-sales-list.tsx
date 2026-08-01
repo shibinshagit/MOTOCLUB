@@ -194,8 +194,8 @@ export function TodaySalesList({ onOpenCreateModal }: { onOpenCreateModal?: () =
         <div className="overflow-x-auto">
           <table className="min-w-full border-separate border-spacing-0 text-sm">
             <thead>
-              <tr className="border-b border-slate-200 bg-[#F1F4F9] text-xs font-semibold uppercase tracking-wide text-slate-600">
-                <th className="w-12 whitespace-nowrap px-4 py-2.5 text-left">
+              <tr className="border-b border-t border-slate-200 bg-white text-xs font-bold uppercase tracking-wider text-slate-500">
+                <th className="w-12 whitespace-nowrap px-4 py-4 text-left">
                   <input 
                     type="checkbox" 
                     className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600 cursor-pointer"
@@ -203,15 +203,14 @@ export function TodaySalesList({ onOpenCreateModal }: { onOpenCreateModal?: () =
                     onChange={toggleSelectAll}
                   />
                 </th>
-                <th className="w-12 whitespace-nowrap px-4 py-2.5 text-left"></th>
-                <th className="whitespace-nowrap px-4 py-2.5 text-left">Date & Time</th>
-                <th className="whitespace-nowrap px-4 py-2.5 text-left">Customer</th>
-                <th className="whitespace-nowrap px-4 py-2.5 text-left">Phone</th>
-                <th className="whitespace-nowrap px-4 py-2.5 text-left">Tracking ID</th>
-                <th className="whitespace-nowrap px-4 py-2.5 text-center">Items</th>
-                <th className="whitespace-nowrap px-4 py-2.5 text-right">Total Amount</th>
-                <th className="whitespace-nowrap px-4 py-2.5 text-center">Delivery Status</th>
-                <th className="sticky right-0 z-20 min-w-[5.5rem] whitespace-nowrap border-l border-slate-200 bg-[#F1F4F9] px-4 py-2.5 text-right shadow-[-8px_0_12px_-8px_rgba(15,23,42,0.12)]">Actions</th>
+                <th className="w-10 whitespace-nowrap px-2 py-4 text-left"></th>
+                <th className="whitespace-nowrap px-4 py-4 text-left">Date</th>
+                <th className="whitespace-nowrap px-4 py-4 text-left">Customer</th>
+                <th className="whitespace-nowrap px-4 py-4 text-left">Tracking</th>
+                <th className="whitespace-nowrap px-4 py-4 text-center">Products</th>
+                <th className="whitespace-nowrap px-4 py-4 text-right">Total Paid</th>
+                <th className="whitespace-nowrap px-4 py-4 text-center">Status</th>
+                <th className="sticky right-0 z-20 min-w-[5.5rem] whitespace-nowrap border-l border-slate-200 bg-white px-4 py-4 text-center shadow-[-8px_0_12px_-8px_rgba(15,23,42,0.05)]">WA</th>
               </tr>
             </thead>
             <tbody>
@@ -229,10 +228,10 @@ export function TodaySalesList({ onOpenCreateModal }: { onOpenCreateModal?: () =
                 return (
                   <div key={sale.id} className="contents">
                     <tr 
-                      className={`group cursor-pointer border-b border-slate-200 transition-colors hover:bg-violet-50/50 ${rowBg} ${isSelected ? 'bg-indigo-50/50' : ''}`}
+                      className={`group cursor-pointer border-b border-slate-100 transition-colors hover:bg-slate-50/80 bg-white ${isSelected ? 'bg-indigo-50/30' : ''}`}
                       onClick={() => toggleExpand(sale.id)}
                     >
-                      <td className="whitespace-nowrap px-4 py-2.5 text-center" onClick={(e) => e.stopPropagation()}>
+                      <td className="whitespace-nowrap px-4 py-4 text-left" onClick={(e) => e.stopPropagation()}>
                         <input 
                           type="checkbox" 
                           className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600 cursor-pointer"
@@ -240,33 +239,43 @@ export function TodaySalesList({ onOpenCreateModal }: { onOpenCreateModal?: () =
                           onChange={() => toggleSelectSale(sale.id)}
                         />
                       </td>
-                      <td className="whitespace-nowrap px-4 py-2.5 text-center" onClick={(e) => e.stopPropagation()}>
+                      <td className="whitespace-nowrap px-2 py-4 text-center" onClick={(e) => e.stopPropagation()}>
                         <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:text-slate-600" onClick={() => toggleExpand(sale.id)}>
                           {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                         </Button>
                       </td>
-                      <td className="whitespace-nowrap px-4 py-2.5">
-                        <div className="flex flex-col">
-                          <span className="font-medium text-slate-800">{dateFormatted}</span>
-                          <span className="text-xs text-slate-500">{timeFormatted}</span>
+                      <td className="whitespace-nowrap px-4 py-4">
+                        <div className="flex flex-col text-slate-600 text-sm">
+                          {dateFormatted}
                         </div>
                       </td>
-                      <td className="max-w-[180px] truncate px-4 py-2.5 font-medium text-slate-700">{sale.customer_name || "N/A"}</td>
-                      <td className="whitespace-nowrap px-4 py-2.5 text-slate-500">{sale.customer_phone || "N/A"}</td>
-                      <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-slate-600">
-                        <TrackingCell 
-                          saleId={sale.id}
-                          deviceId={deviceId || 0}
-                          trackingId={sale.tracking_id}
-                          deliveryStatus={sale.delivery_status}
-                          onUpdate={fetchSales}
-                        />
+                      <td className="max-w-[200px] truncate px-4 py-4">
+                        <div className="flex flex-col">
+                          <span className="font-bold text-slate-900">{sale.customer_name || "N/A"}</span>
+                          <span className="text-xs text-slate-500 mt-0.5">{sale.customer_phone || "N/A"}</span>
+                        </div>
                       </td>
-                      <td className="whitespace-nowrap px-4 py-2.5 text-center font-medium text-slate-700">{itemQuantity}</td>
-                      <td className="whitespace-nowrap px-4 py-2.5 text-right font-bold text-slate-800">
-                        {currency} {Number(sale.total_amount).toFixed(2)}
+                      <td className="whitespace-nowrap px-4 py-4">
+                        <div className="flex flex-col items-start gap-1">
+                          <span className="text-sm text-slate-600 font-medium">
+                            {sale.tracking_id}
+                          </span>
+                          <span className="text-[10px] font-bold text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded-full">
+                            #{sale.id}
+                          </span>
+                        </div>
                       </td>
-                      <td className="whitespace-nowrap px-4 py-2.5 text-center" onClick={(e) => e.stopPropagation()}>
+                      <td className="whitespace-nowrap px-4 py-4 text-center">
+                        <span className="inline-flex items-center justify-center bg-slate-100 text-slate-700 px-2.5 py-1 rounded-full text-xs font-semibold">
+                          {itemQuantity} Item{itemQuantity !== 1 ? 's' : ''}
+                        </span>
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-4 text-right">
+                        <div className="font-bold text-slate-900 text-sm">
+                          {currency} {Number(sale.total_amount).toFixed(2)}
+                        </div>
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-4 text-center" onClick={(e) => e.stopPropagation()}>
                         <DeliveryStatusSelect 
                           saleId={sale.id}
                           deviceId={deviceId || 0}
@@ -282,20 +291,19 @@ export function TodaySalesList({ onOpenCreateModal }: { onOpenCreateModal?: () =
                         />
                       </td>
                       <td 
-                        className={`sticky right-0 z-10 min-w-[5.5rem] whitespace-nowrap border-l border-slate-200 px-4 py-2.5 text-right shadow-[-8px_0_12px_-8px_rgba(15,23,42,0.12)] group-hover:bg-violet-50/50 ${rowBg}`} 
+                        className={`sticky right-0 z-10 min-w-[8rem] whitespace-nowrap border-l border-slate-100 bg-white px-4 py-4 text-center shadow-[-8px_0_12px_-8px_rgba(15,23,42,0.05)]`} 
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <div className="flex items-center justify-end gap-1">
-                          <Button variant="ghost" size="icon" className="h-8 w-8 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50" onClick={() => handleWhatsApp(sale)} title="WhatsApp">
+                        <div className="flex items-center justify-center gap-2">
+                          <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full bg-[#128C7E] text-white hover:bg-[#075E54] hover:text-white shadow-sm" onClick={() => handleWhatsApp(sale)} title="WhatsApp">
                             <MessageCircle className="h-4 w-4" />
                           </Button>
-                          <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50" onClick={() => handlePrint(sale)} title="Print">
+                          <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full bg-slate-700 text-white hover:bg-slate-800 hover:text-white shadow-sm" onClick={() => handlePrint(sale)} title="Print">
                             <Printer className="h-4 w-4" />
                           </Button>
-                          <Button variant="ghost" size="icon" className="h-8 w-8 text-violet-600 hover:text-violet-700 hover:bg-violet-50" onClick={() => handleEdit(sale)} title="Edit">
+                          <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full bg-blue-500 text-white hover:bg-blue-600 hover:text-white shadow-sm" onClick={() => handleEdit(sale)} title="Edit">
                             <Edit className="h-4 w-4" />
                           </Button>
-
                         </div>
                       </td>
                     </tr>

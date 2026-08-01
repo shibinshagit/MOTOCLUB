@@ -135,20 +135,25 @@ export async function getPartnerDashboardStats(partnerId: number) {
 
 export async function getPartnerSalesAnalytics(partnerId: number, monthStr: string) {
   try {
-    const [year, month] = monthStr.split('-')
-    const startDate = `${year}-${month}-01`
-    const endDate = `${year}-${month}-31` // SQLite handles this correctly
+    const [yearStr, monthStrPart] = monthStr.split('-')
+    const year = parseInt(yearStr, 10)
+    const month = parseInt(monthStrPart, 10)
+    
+    const startDate = `${year}-${String(month).padStart(2, '0')}-01`
+    const nextMonth = month === 12 ? 1 : month + 1
+    const nextYear = month === 12 ? year + 1 : year
+    const endDate = `${nextYear}-${String(nextMonth).padStart(2, '0')}-01`
     
     const result = await sql`
       SELECT 
-        DATE(sale_date) as date,
+        TO_CHAR(sale_date, 'YYYY-MM-DD') as date,
         SUM(COALESCE(expense_courier, 0)) as earnings_amount,
         COUNT(*) as order_count
       FROM sales
       WHERE courier_partner_id = (SELECT linked_partner_id FROM staff WHERE id = ${partnerId})
-        AND DATE(sale_date) >= ${startDate}
-        AND DATE(sale_date) <= ${endDate}
-      GROUP BY DATE(sale_date)
+        AND sale_date >= ${startDate}::date
+        AND sale_date < ${endDate}::date
+      GROUP BY TO_CHAR(sale_date, 'YYYY-MM-DD')
       ORDER BY date ASC
     `
     

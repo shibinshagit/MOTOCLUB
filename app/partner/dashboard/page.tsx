@@ -54,31 +54,31 @@ export default async function PartnerDashboardPage() {
   return (
     <div className="flex h-full w-full">
       {/* Sidebar */}
-      <aside className="w-64 bg-gray-900 text-white flex flex-col hidden md:flex">
-        <div className="p-6 border-b border-gray-800">
-          <h2 className="text-xl font-bold tracking-tight">{data.company_name || "MOTO CLUB"}</h2>
-          <p className="text-sm text-gray-400 mt-1">{data.device_name}</p>
+      <aside className="w-64 bg-white border-r flex flex-col hidden md:flex">
+        <div className="p-6 border-b border-gray-200">
+          <h2 className="text-xl font-bold tracking-tight text-slate-800">{data.company_name || "MOTO CLUB"}</h2>
+          <p className="text-sm text-slate-500 mt-1">{data.device_name}</p>
         </div>
-        <div className="p-4">
+        <div className="p-4 flex-grow">
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">
             Partner Portal
           </p>
           <nav className="space-y-1">
             <Link
               href="/partner/dashboard"
-              className="flex items-center gap-3 px-3 py-2 bg-gray-800 text-white rounded-md"
+              className="flex items-center gap-3 px-3 py-2 bg-slate-100 text-slate-900 rounded-md font-medium"
             >
-              <LayoutDashboard className="h-5 w-5" />
+              <LayoutDashboard className="h-5 w-5 text-slate-600" />
               Dashboard
             </Link>
           </nav>
         </div>
-        <div className="mt-auto p-4 border-t border-gray-800">
+        <div className="mt-auto p-4 border-t border-gray-200">
           <div className="flex items-center gap-3 mb-4 px-2">
-            <UserCircle className="h-8 w-8 text-gray-400" />
+            <UserCircle className="h-8 w-8 text-slate-400" />
             <div className="flex flex-col">
-              <span className="text-sm font-medium">{data.partner_name}</span>
-              <span className="text-xs text-gray-400">Partner</span>
+              <span className="text-sm font-medium text-slate-800">{data.partner_name}</span>
+              <span className="text-xs text-slate-500">Partner</span>
             </div>
           </div>
           <LogoutButton />
