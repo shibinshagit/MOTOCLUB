@@ -378,7 +378,7 @@ export async function deleteSupplierPayment(paymentId: number, deviceId: number)
 
     console.log('Reversing payment:', { supplierId, amount })
 
-    await sql`BEGIN`
+    // await sql`BEGIN`
 
     try {
       // Get supplier name
@@ -389,7 +389,7 @@ export async function deleteSupplierPayment(paymentId: number, deviceId: number)
       const supplierName = supplierResult.length > 0 ? supplierResult[0].name : null
 
       if (!supplierName) {
-        await sql`ROLLBACK`
+        // await sql`ROLLBACK`
         return {
           success: false,
           message: "Supplier not found",
@@ -458,7 +458,7 @@ export async function deleteSupplierPayment(paymentId: number, deviceId: number)
         WHERE id = ${paymentId} AND device_id = ${deviceId}
       `
 
-      await sql`COMMIT`
+      // await sql`COMMIT`
 
       console.log('Supplier payment deleted successfully')
 
@@ -470,7 +470,7 @@ export async function deleteSupplierPayment(paymentId: number, deviceId: number)
         message: "Supplier payment deleted successfully",
       }
     } catch (error) {
-      await sql`ROLLBACK`
+      // await sql`ROLLBACK`
       throw error
     }
   } catch (error) {
@@ -518,7 +518,7 @@ export async function updateSupplierPayment(data: {
       }
     }
 
-    await sql`BEGIN`
+    // await sql`BEGIN`
 
     try {
       // Get the original payment
@@ -530,7 +530,7 @@ export async function updateSupplierPayment(data: {
       `
 
       if (originalPayment.length === 0) {
-        await sql`ROLLBACK`
+        // await sql`ROLLBACK`
         return {
           success: false,
           message: "Payment not found",
@@ -553,7 +553,7 @@ export async function updateSupplierPayment(data: {
       const supplierId = payment.reference_id
       
       if (!supplierId) {
-        await sql`ROLLBACK`
+        // await sql`ROLLBACK`
         return {
           success: false,
           message: "Invalid supplier ID in payment record",
@@ -565,7 +565,7 @@ export async function updateSupplierPayment(data: {
       `
       
       if (supplierResult.length === 0) {
-        await sql`ROLLBACK`
+        // await sql`ROLLBACK`
         return {
           success: false,
           message: "Supplier not found",
@@ -631,7 +631,7 @@ export async function updateSupplierPayment(data: {
           }
           
           if (remainingToAllocate > 0) {
-            await sql`ROLLBACK`
+            // await sql`ROLLBACK`
             return {
               success: false,
               message: `Cannot allocate ${remainingToAllocate.toFixed(2)} - no outstanding balance available. Total new amount would exceed supplier's outstanding balance.`,
@@ -717,7 +717,7 @@ export async function updateSupplierPayment(data: {
           AND device_id = ${data.deviceId}
       `
 
-      await sql`COMMIT`
+      // await sql`COMMIT`
 
       console.log('Supplier payment updated successfully - all financial fields synchronized')
 
@@ -737,7 +737,7 @@ export async function updateSupplierPayment(data: {
         }
       }
     } catch (error) {
-      await sql`ROLLBACK`
+      // await sql`ROLLBACK`
       throw error
     }
   } catch (error) {

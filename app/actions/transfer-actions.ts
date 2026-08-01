@@ -628,12 +628,12 @@ export async function createWarehouseTransfer(formData: FormData) {
 
   resetConnectionState()
   try {
-    await sql`BEGIN`
+    // await sql`BEGIN`
     const actorCompanyId = await getCompanyIdForDevice(userId)
     const fromCompanyId = await getCompanyIdForDevice(fromDeviceId)
     const toCompanyId = await getCompanyIdForDevice(toDeviceId)
     if (!actorCompanyId || actorCompanyId !== fromCompanyId || actorCompanyId !== toCompanyId) {
-      await sql`ROLLBACK`
+      // await sql`ROLLBACK`
       return { success: false, message: "Devices must belong to the same company" }
     }
 
@@ -641,7 +641,7 @@ export async function createWarehouseTransfer(formData: FormData) {
       items.reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.unit_cost || 0), 0).toFixed(2),
     )
     if (paidAmount > totalAmount) {
-      await sql`ROLLBACK`
+      // await sql`ROLLBACK`
       return { success: false, message: "Paid amount cannot exceed transfer amount" }
     }
 
@@ -690,7 +690,7 @@ export async function createWarehouseTransfer(formData: FormData) {
       })
     }
 
-    await sql`COMMIT`
+    // await sql`COMMIT`
     revalidatePath("/dashboard")
     return {
       success: true,
@@ -698,7 +698,7 @@ export async function createWarehouseTransfer(formData: FormData) {
       data: { id: transferId, status: initialStatus },
     }
   } catch (error: any) {
-    await sql`ROLLBACK`
+    // await sql`ROLLBACK`
     console.error("Create warehouse transfer error:", error)
     return {
       success: false,
@@ -751,12 +751,12 @@ export async function updateWarehouseTransfer(formData: FormData) {
 
   resetConnectionState()
   try {
-    await sql`BEGIN`
+    // await sql`BEGIN`
     const actorCompanyId = await getCompanyIdForDevice(userId)
     const fromCompanyId = await getCompanyIdForDevice(fromDeviceId)
     const toCompanyId = await getCompanyIdForDevice(toDeviceId)
     if (!actorCompanyId || actorCompanyId !== fromCompanyId || actorCompanyId !== toCompanyId) {
-      await sql`ROLLBACK`
+      // await sql`ROLLBACK`
       return { success: false, message: "Devices must belong to the same company" }
     }
 
@@ -764,7 +764,7 @@ export async function updateWarehouseTransfer(formData: FormData) {
       items.reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.unit_cost || 0), 0).toFixed(2),
     )
     if (paidAmount > totalAmount) {
-      await sql`ROLLBACK`
+      // await sql`ROLLBACK`
       return { success: false, message: "Paid amount cannot exceed transfer amount" }
     }
 
@@ -775,18 +775,18 @@ export async function updateWarehouseTransfer(formData: FormData) {
       LIMIT 1
     `) as any[]
     if (transferRows.length === 0) {
-      await sql`ROLLBACK`
+      // await sql`ROLLBACK`
       return { success: false, message: "Transfer not found" }
     }
 
     const transfer = transferRows[0]
     const currentStatus = String(transfer.status).toLowerCase()
     if (currentStatus === "cancelled") {
-      await sql`ROLLBACK`
+      // await sql`ROLLBACK`
       return { success: false, message: "Cancelled transfers cannot be edited" }
     }
     if (currentStatus === "rejected") {
-      await sql`ROLLBACK`
+      // await sql`ROLLBACK`
       return { success: false, message: "Rejected transfers cannot be edited" }
     }
 
@@ -930,11 +930,11 @@ export async function updateWarehouseTransfer(formData: FormData) {
       })
     }
 
-    await sql`COMMIT`
+    // await sql`COMMIT`
     revalidatePath("/dashboard")
     return { success: true, message: "Transfer updated successfully" }
   } catch (error: any) {
-    await sql`ROLLBACK`
+    // await sql`ROLLBACK`
     console.error("Update warehouse transfer error:", error)
     return {
       success: false,
@@ -950,10 +950,10 @@ export async function cancelWarehouseTransfer(transferId: number, userId: number
 
   resetConnectionState()
   try {
-    await sql`BEGIN`
+    // await sql`BEGIN`
     const actorCompanyId = await getCompanyIdForDevice(userId)
     if (!actorCompanyId) {
-      await sql`ROLLBACK`
+      // await sql`ROLLBACK`
       return { success: false, message: "Device/company not found" }
     }
 
@@ -964,18 +964,18 @@ export async function cancelWarehouseTransfer(transferId: number, userId: number
       LIMIT 1
     `) as any[]
     if (transferRows.length === 0) {
-      await sql`ROLLBACK`
+      // await sql`ROLLBACK`
       return { success: false, message: "Transfer not found" }
     }
 
     const transfer = transferRows[0]
     const cancelStatus = String(transfer.status).toLowerCase()
     if (cancelStatus === "cancelled") {
-      await sql`ROLLBACK`
+      // await sql`ROLLBACK`
       return { success: false, message: "Transfer is already cancelled" }
     }
     if (cancelStatus === "rejected") {
-      await sql`ROLLBACK`
+      // await sql`ROLLBACK`
       return { success: false, message: "Rejected transfers cannot be cancelled" }
     }
 
@@ -1017,11 +1017,11 @@ export async function cancelWarehouseTransfer(transferId: number, userId: number
       WHERE id = ${transferId}
     `
 
-    await sql`COMMIT`
+    // await sql`COMMIT`
     revalidatePath("/dashboard")
     return { success: true, message: "Transfer cancelled successfully" }
   } catch (error: any) {
-    await sql`ROLLBACK`
+    // await sql`ROLLBACK`
     console.error("Cancel warehouse transfer error:", error)
     return {
       success: false,
@@ -1039,10 +1039,10 @@ export async function acceptWarehouseTransfer(transferId: number, userId: number
 
   resetConnectionState()
   try {
-    await sql`BEGIN`
+    // await sql`BEGIN`
     const actorCompanyId = await getCompanyIdForDevice(userId)
     if (!actorCompanyId) {
-      await sql`ROLLBACK`
+      // await sql`ROLLBACK`
       return { success: false, message: "Device/company not found" }
     }
 
@@ -1055,13 +1055,13 @@ export async function acceptWarehouseTransfer(transferId: number, userId: number
       LIMIT 1
     `) as any[]
     if (transferRows.length === 0) {
-      await sql`ROLLBACK`
+      // await sql`ROLLBACK`
       return { success: false, message: "Transfer not found" }
     }
 
     const transfer = transferRows[0]
     if (String(transfer.status).toLowerCase() !== "pending") {
-      await sql`ROLLBACK`
+      // await sql`ROLLBACK`
       return { success: false, message: "Only pending requests can be accepted" }
     }
 
@@ -1070,7 +1070,7 @@ export async function acceptWarehouseTransfer(transferId: number, userId: number
 
     // Only the source warehouse (the one giving up stock) can approve.
     if (userId !== fromDeviceId) {
-      await sql`ROLLBACK`
+      // await sql`ROLLBACK`
       return { success: false, message: "Only the source warehouse can accept this request" }
     }
 
@@ -1088,7 +1088,7 @@ export async function acceptWarehouseTransfer(transferId: number, userId: number
     }))
 
     if (items.length === 0) {
-      await sql`ROLLBACK`
+      // await sql`ROLLBACK`
       return { success: false, message: "This request has no items to transfer" }
     }
 
@@ -1130,11 +1130,11 @@ export async function acceptWarehouseTransfer(transferId: number, userId: number
       WHERE id = ${transferId}
     `
 
-    await sql`COMMIT`
+    // await sql`COMMIT`
     revalidatePath("/dashboard")
     return { success: true, message: "Transfer request accepted" }
   } catch (error: any) {
-    await sql`ROLLBACK`
+    // await sql`ROLLBACK`
     console.error("Accept warehouse transfer error:", error)
     return {
       success: false,
@@ -1156,10 +1156,10 @@ export async function rejectWarehouseTransfer(transferId: number, userId: number
 
   resetConnectionState()
   try {
-    await sql`BEGIN`
+    // await sql`BEGIN`
     const actorCompanyId = await getCompanyIdForDevice(userId)
     if (!actorCompanyId) {
-      await sql`ROLLBACK`
+      // await sql`ROLLBACK`
       return { success: false, message: "Device/company not found" }
     }
 
@@ -1170,17 +1170,17 @@ export async function rejectWarehouseTransfer(transferId: number, userId: number
       LIMIT 1
     `) as any[]
     if (transferRows.length === 0) {
-      await sql`ROLLBACK`
+      // await sql`ROLLBACK`
       return { success: false, message: "Transfer not found" }
     }
 
     const transfer = transferRows[0]
     if (String(transfer.status).toLowerCase() !== "pending") {
-      await sql`ROLLBACK`
+      // await sql`ROLLBACK`
       return { success: false, message: "Only pending requests can be rejected" }
     }
     if (userId !== Number(transfer.from_device_id)) {
-      await sql`ROLLBACK`
+      // await sql`ROLLBACK`
       return { success: false, message: "Only the source warehouse can reject this request" }
     }
 
@@ -1194,11 +1194,11 @@ export async function rejectWarehouseTransfer(transferId: number, userId: number
       WHERE id = ${transferId}
     `
 
-    await sql`COMMIT`
+    // await sql`COMMIT`
     revalidatePath("/dashboard")
     return { success: true, message: "Transfer request rejected" }
   } catch (error: any) {
-    await sql`ROLLBACK`
+    // await sql`ROLLBACK`
     console.error("Reject warehouse transfer error:", error)
     return {
       success: false,

@@ -188,7 +188,7 @@ export async function collectCustomerCredit(
   resetConnectionState()
 
   try {
-    await sql`BEGIN`
+    // await sql`BEGIN`
 
     const customerRows = await sql`
       SELECT id, name FROM customers
@@ -197,7 +197,7 @@ export async function collectCustomerCredit(
     `
 
     if (customerRows.length === 0) {
-      await sql`ROLLBACK`
+      // await sql`ROLLBACK`
       return { success: false, message: "Customer not found" }
     }
 
@@ -236,7 +236,7 @@ export async function collectCustomerCredit(
       console.error("Failed to record customer payment transaction:", transactionResult.error)
     }
 
-    await sql`COMMIT`
+    // await sql`COMMIT`
     revalidatePath("/dashboard")
 
     return {
@@ -251,7 +251,7 @@ export async function collectCustomerCredit(
       },
     }
   } catch (error) {
-    await sql`ROLLBACK`
+    // await sql`ROLLBACK`
     console.error("collectCustomerCredit error:", error)
     return {
       success: false,
@@ -389,7 +389,7 @@ export async function deleteCustomerPayment(paymentId: number, deviceId: number,
     const stored = parseStoredPaymentNotes(payment.notes)
     const paymentAmount = Number(payment.amount || 0)
 
-    await sql`BEGIN`
+    // await sql`BEGIN`
 
     await reverseCustomerPaymentOnSales({
       storedAllocations: stored?.allocations,
@@ -401,12 +401,12 @@ export async function deleteCustomerPayment(paymentId: number, deviceId: number,
       WHERE id = ${paymentId} AND device_id = ${deviceId}
     `
 
-    await sql`COMMIT`
+    // await sql`COMMIT`
     revalidatePath("/dashboard")
 
     return { success: true, message: "Payment undone successfully" }
   } catch (error) {
-    await sql`ROLLBACK`
+    // await sql`ROLLBACK`
     console.error("Error deleting customer payment:", error)
     return {
       success: false,
@@ -435,7 +435,7 @@ export async function updateCustomerPayment(data: {
   resetConnectionState()
 
   try {
-    await sql`BEGIN`
+    // await sql`BEGIN`
 
     const paymentRows = await sql`
       SELECT *
@@ -447,7 +447,7 @@ export async function updateCustomerPayment(data: {
     `
 
     if (paymentRows.length === 0) {
-      await sql`ROLLBACK`
+      // await sql`ROLLBACK`
       return { success: false, message: "Payment not found" }
     }
 
@@ -473,7 +473,7 @@ export async function updateCustomerPayment(data: {
 
     if (Math.abs(amountDiff) > 0.01) {
       if (!stored?.allocations?.length) {
-        await sql`ROLLBACK`
+        // await sql`ROLLBACK`
         return { success: false, message: "Cannot edit payment without stored sale allocations" }
       }
 
@@ -525,12 +525,12 @@ export async function updateCustomerPayment(data: {
         AND device_id = ${data.deviceId}
     `
 
-    await sql`COMMIT`
+    // await sql`COMMIT`
     revalidatePath("/dashboard")
 
     return { success: true, message: "Payment updated successfully" }
   } catch (error) {
-    await sql`ROLLBACK`
+    // await sql`ROLLBACK`
     console.error("Error updating customer payment:", error)
     return {
       success: false,

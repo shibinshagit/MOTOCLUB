@@ -340,11 +340,11 @@ export async function payWarehouseCredit(
   resetConnectionState()
 
   try {
-    await sql`BEGIN`
+    // await sql`BEGIN`
 
     const companyId = await getCompanyIdForDevice(payerDeviceId)
     if (!companyId) {
-      await sql`ROLLBACK`
+      // await sql`ROLLBACK`
       return { success: false, message: "Payer warehouse not found" }
     }
 
@@ -354,7 +354,7 @@ export async function payWarehouseCredit(
       LIMIT 1
     `
     if (creditorRows.length === 0) {
-      await sql`ROLLBACK`
+      // await sql`ROLLBACK`
       return { success: false, message: "Creditor warehouse not found" }
     }
     const creditorName = String(creditorRows[0].name || `Warehouse #${creditorWarehouseId}`)
@@ -395,7 +395,7 @@ export async function payWarehouseCredit(
 
     await rebuildBulkPaymentNotesForWarehousePair(creditorWarehouseId, payerDeviceId, userId)
 
-    await sql`COMMIT`
+    // await sql`COMMIT`
     revalidatePath("/dashboard")
 
     return {
@@ -410,7 +410,7 @@ export async function payWarehouseCredit(
       },
     }
   } catch (error) {
-    await sql`ROLLBACK`
+    // await sql`ROLLBACK`
     console.error("payWarehouseCredit error:", error)
     return {
       success: false,
@@ -566,7 +566,7 @@ export async function deleteWarehousePayment(paymentId: number, deviceId: number
       return { success: false, message: "Warehouse not found" }
     }
 
-    await sql`BEGIN`
+    // await sql`BEGIN`
 
     await reverseWarehousePaymentOnTransfers({
       companyId,
@@ -584,12 +584,12 @@ export async function deleteWarehousePayment(paymentId: number, deviceId: number
 
     await rebuildBulkPaymentNotesForWarehousePair(creditorWarehouseId, deviceId, userId)
 
-    await sql`COMMIT`
+    // await sql`COMMIT`
     revalidatePath("/dashboard")
 
     return { success: true, message: "Payment undone successfully" }
   } catch (error) {
-    await sql`ROLLBACK`
+    // await sql`ROLLBACK`
     console.error("Error deleting warehouse payment:", error)
     return {
       success: false,
@@ -618,7 +618,7 @@ export async function updateWarehousePayment(data: {
   resetConnectionState()
 
   try {
-    await sql`BEGIN`
+    // await sql`BEGIN`
 
     const paymentRows = await sql`
       SELECT *
@@ -630,7 +630,7 @@ export async function updateWarehousePayment(data: {
     `
 
     if (paymentRows.length === 0) {
-      await sql`ROLLBACK`
+      // await sql`ROLLBACK`
       return { success: false, message: "Payment not found" }
     }
 
@@ -641,7 +641,7 @@ export async function updateWarehousePayment(data: {
     const companyId = await getCompanyIdForDevice(data.deviceId)
 
     if (!companyId) {
-      await sql`ROLLBACK`
+      // await sql`ROLLBACK`
       return { success: false, message: "Warehouse not found" }
     }
 
@@ -740,12 +740,12 @@ export async function updateWarehousePayment(data: {
 
     await rebuildBulkPaymentNotesForWarehousePair(creditorWarehouseId, data.deviceId, data.userId)
 
-    await sql`COMMIT`
+    // await sql`COMMIT`
     revalidatePath("/dashboard")
 
     return { success: true, message: "Payment updated successfully" }
   } catch (error) {
-    await sql`ROLLBACK`
+    // await sql`ROLLBACK`
     console.error("Error updating warehouse payment:", error)
     return {
       success: false,

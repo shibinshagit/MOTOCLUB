@@ -12,11 +12,11 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { ChevronDown, ChevronUp, MapPin, Phone, User, Calendar, Layers, Printer, Edit, Trash2, Search, PlayCircle, Eye } from "lucide-react"
+import { ChevronDown, ChevronUp, MapPin, Phone, User, Calendar, Layers, Printer, Edit, Trash2, Search, PlayCircle, Eye, Plus } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 import { useConfirm } from "@/hooks/use-confirm"
 import { printJobCard, printBatchJobCards } from "@/lib/receipt-utils"
-import { JobCardModal } from "@/components/staff/job-card/job-card-modal"
+import { JobCardModal } from "@/components/shared/job-card/job-card-modal"
 import ViewSaleModal from "@/components/sales/view-sale-modal"
 import { format } from "date-fns"
 
@@ -35,6 +35,7 @@ export default function SalesOrdersTab() {
   // Modal States
   const [editingSaleId, setEditingSaleId] = useState<number | null>(null)
   const [viewingSaleId, setViewingSaleId] = useState<number | null>(null)
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   
   const [selectedSales, setSelectedSales] = useState<number[]>([])
 
@@ -155,6 +156,16 @@ export default function SalesOrdersTab() {
           editSaleId={editingSaleId}
         />
       )}
+
+      {isCreateModalOpen && (
+        <JobCardModal
+          isOpen={true}
+          onClose={() => {
+            setIsCreateModalOpen(false)
+            fetchSales()
+          }}
+        />
+      )}
       
       {viewingSaleId && (
         <ViewSaleModal
@@ -184,6 +195,9 @@ export default function SalesOrdersTab() {
           </div>
           <Button variant="outline" size="sm" onClick={fetchSales} className="h-9">
             Refresh
+          </Button>
+          <Button size="sm" onClick={() => setIsCreateModalOpen(true)} className="h-9 gap-2">
+            <Plus className="h-4 w-4" /> Create Job Card
           </Button>
           {selectedSales.length > 0 && (
             <Button variant="default" size="sm" onClick={handleBatchPrint} className="h-9 bg-indigo-600 hover:bg-indigo-700 text-white gap-2">

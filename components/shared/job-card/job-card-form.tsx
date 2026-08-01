@@ -294,6 +294,7 @@ export function JobCardForm({ onClose, editSaleId }: { onClose?: () => void, edi
         customerName,
         customerPhone,
         customerId,
+        deviceId,
         shippingPhone,
         shippingCity,
         shippingDistrict,

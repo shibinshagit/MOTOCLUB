@@ -207,7 +207,7 @@ export async function deleteCompany(id: number) {
     }
 
     // Begin a transaction to ensure data integrity
-    await sql`BEGIN`
+    // await sql`BEGIN`
 
     try {
       // For each device, delete related data
@@ -278,7 +278,7 @@ export async function deleteCompany(id: number) {
       await sql`DELETE FROM companies WHERE id = ${id}`
 
       // Commit the transaction
-      await sql`COMMIT`
+      // await sql`COMMIT`
 
       revalidatePath("/admin", "layout")
 
@@ -288,7 +288,7 @@ export async function deleteCompany(id: number) {
     } catch (error) {
       // If any error occurs, rollback the transaction
       try {
-        await sql`ROLLBACK`
+        // await sql`ROLLBACK`
       } catch (rollbackError) {
         console.error("Error during rollback:", rollbackError)
       }
@@ -703,7 +703,7 @@ export async function deleteDevice(id: number) {
   await requireAdmin()
   try {
         // Begin a transaction to ensure data integrity
-    await sql`BEGIN`
+    // await sql`BEGIN`
 
     try {
       // Delete related data first
@@ -763,7 +763,7 @@ export async function deleteDevice(id: number) {
       await sql`DELETE FROM devices WHERE id = ${id}`
 
       // Commit the transaction
-      await sql`COMMIT`
+      // await sql`COMMIT`
 
       revalidatePath("/admin", "layout")
 
@@ -773,7 +773,7 @@ export async function deleteDevice(id: number) {
     } catch (error) {
       // If any error occurs, rollback the transaction
       try {
-        await sql`ROLLBACK`
+        // await sql`ROLLBACK`
       } catch (rollbackError) {
         console.error("Error during rollback:", rollbackError)
       }

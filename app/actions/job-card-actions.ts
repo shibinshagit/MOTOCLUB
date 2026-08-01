@@ -18,6 +18,7 @@ export interface JobCardInput {
   customerName: string
   customerPhone?: string
   customerId?: number | null
+  deviceId?: number | null
 
   // Structured shipping address
   shippingCity?: string
@@ -36,13 +37,28 @@ export interface JobCardInput {
 
 export async function createJobCard(input: JobCardInput) {
   try {
-    const session = await getStaffSession()
-    if (!session) {
-      return { success: false, message: "Unauthorized. Staff session not found." }
-    }
+    let deviceId: number
+    let staffId: number | null = null
+    let createdBy: number
 
-    const deviceId = session.deviceId
-    const staffId = session.staffId
+    const session = await getStaffSession()
+    if (session) {
+      deviceId = session.deviceId
+      staffId = session.staffId
+      createdBy = deviceId
+    } else {
+      const { getAdminSession } = await import("./admin-auth-actions")
+      const adminSession = await getAdminSession()
+      if (adminSession.authenticated) {
+        if (!input.deviceId) {
+          return { success: false, message: "Device ID required for Admin creation" }
+        }
+        deviceId = input.deviceId
+        createdBy = adminSession.admin.id
+      } else {
+        return { success: false, message: "Unauthorized. Staff or Admin session not found." }
+      }
+    }
 
     // 1. Resolve Customer
     let resolvedCustomerId = input.customerId
@@ -61,7 +77,7 @@ export async function createJobCard(input: JobCardInput) {
       formData.append("landmark", input.shippingLandmark || "")
       formData.append("address_type", input.shippingAddressType || "Home")
       formData.append("pincode", input.shippingPincode || "")
-      formData.append("user_id", String(session.companyId || deviceId))
+      formData.append("user_id", String(session?.companyId || deviceId))
       
       const res = await addCustomer(formData)
       if (res.success && res.data) {
@@ -186,7 +202,7 @@ export async function createJobCard(input: JobCardInput) {
             ${input.shippingAddressType || 'Home'},
             ${input.shippingPincode || null},
             ${input.courierPaidExtra || 0},
-            ${deviceId},
+            ${createdBy},
             0,
             ${totalAmount}
           )
@@ -236,10 +252,25 @@ export async function createJobCard(input: JobCardInput) {
 
 export async function updateJobCard(id: number, input: any) {
   try {
-    const session = await getStaffSession()
-    if (!session) return { success: false, message: "Unauthorized" }
+    let deviceId: number
+    let staffId: number | null = null
 
-    const deviceId = session.deviceId
+    const session = await getStaffSession()
+    if (session) {
+      deviceId = session.deviceId
+      staffId = session.staffId
+    } else {
+      const { getAdminSession } = await import("./admin-auth-actions")
+      const adminSession = await getAdminSession()
+      if (adminSession.authenticated) {
+        if (!input.deviceId) {
+          return { success: false, message: "Device ID required for Admin update" }
+        }
+        deviceId = input.deviceId
+      } else {
+        return { success: false, message: "Unauthorized" }
+      }
+    }
 
     // 1. Calculate new totals
     let itemsSubtotal = 0
@@ -280,7 +311,7 @@ export async function updateJobCard(id: number, input: any) {
         shipping_pincode = ${input.shippingPincode || null},
         courier_paid_extra = ${input.courierPaidExtra || 0},
         balance_amount = ${totalAmount} - received_amount
-      WHERE id = ${id} AND device_id = ${deviceId} AND staff_id = ${session.staffId}
+      WHERE id = ${id} AND device_id = ${deviceId} ${staffId ? sql`AND staff_id = ${staffId}` : sql``}
       RETURNING tracking_id
     `
     
