@@ -294,26 +294,54 @@ export async function updateJobCard(id: number, input: any) {
       }
     }
 
-    // 3. Update the sales record
-    const updatedSaleRows = await sql`
-      UPDATE sales SET
-        customer_id = ${resolvedCustomerId || null},
-        total_amount = ${totalAmount},
-        total_cost = ${totalCost},
-        customer_name_override = ${customerNameOverride},
-        customer_phone_override = ${customerPhoneOverride},
-        shipping_city = ${input.shippingCity || null},
-        shipping_district = ${input.shippingDistrict || null},
-        shipping_state = ${input.shippingState || null},
-        shipping_street = ${input.shippingStreet || null},
-        shipping_landmark = ${input.shippingLandmark || null},
-        shipping_address_type = ${input.shippingAddressType || 'Home'},
-        shipping_pincode = ${input.shippingPincode || null},
-        courier_paid_extra = ${input.courierPaidExtra || 0},
-        balance_amount = ${totalAmount} - received_amount
-      WHERE id = ${id} AND device_id = ${deviceId} ${staffId ? sql`AND staff_id = ${staffId}` : sql``}
-      RETURNING tracking_id
-    `
+    // 3. Fetch current received_amount to compute balance
+    const currentRows = await sql`SELECT received_amount FROM sales WHERE id = ${id}`
+    const currentReceived = Number(currentRows[0]?.received_amount) || 0
+    const balanceAmount = totalAmount - currentReceived
+
+    // 4. Update the sales record (split by staffId to avoid nested sql template issues)
+    let updatedSaleRows
+    if (staffId) {
+      updatedSaleRows = await sql`
+        UPDATE sales SET
+          customer_id = ${resolvedCustomerId || null},
+          total_amount = ${totalAmount},
+          total_cost = ${totalCost},
+          customer_name_override = ${customerNameOverride},
+          customer_phone_override = ${customerPhoneOverride},
+          shipping_city = ${input.shippingCity || null},
+          shipping_district = ${input.shippingDistrict || null},
+          shipping_state = ${input.shippingState || null},
+          shipping_street = ${input.shippingStreet || null},
+          shipping_landmark = ${input.shippingLandmark || null},
+          shipping_address_type = ${input.shippingAddressType || 'Home'},
+          shipping_pincode = ${input.shippingPincode || null},
+          courier_paid_extra = ${input.courierPaidExtra || 0},
+          balance_amount = ${balanceAmount}
+        WHERE id = ${id} AND device_id = ${deviceId} AND staff_id = ${staffId}
+        RETURNING tracking_id
+      `
+    } else {
+      updatedSaleRows = await sql`
+        UPDATE sales SET
+          customer_id = ${resolvedCustomerId || null},
+          total_amount = ${totalAmount},
+          total_cost = ${totalCost},
+          customer_name_override = ${customerNameOverride},
+          customer_phone_override = ${customerPhoneOverride},
+          shipping_city = ${input.shippingCity || null},
+          shipping_district = ${input.shippingDistrict || null},
+          shipping_state = ${input.shippingState || null},
+          shipping_street = ${input.shippingStreet || null},
+          shipping_landmark = ${input.shippingLandmark || null},
+          shipping_address_type = ${input.shippingAddressType || 'Home'},
+          shipping_pincode = ${input.shippingPincode || null},
+          courier_paid_extra = ${input.courierPaidExtra || 0},
+          balance_amount = ${balanceAmount}
+        WHERE id = ${id} AND device_id = ${deviceId}
+        RETURNING tracking_id
+      `
+    }
     
     if (updatedSaleRows.length === 0) {
       return { success: false, message: "Job Card not found or unauthorized" }
@@ -568,5 +596,30 @@ export async function getStaffSalesAnalytics(deviceId: number, targetMonthStr?: 
   } catch (error: any) {
     console.error("getStaffSalesAnalytics Error:", error)
     return { success: false, message: error.message || "Failed to fetch analytics", data: [] }
+  }
+}
+
+export async function markJobCardPaid(saleId: number, deviceId: number) {
+  try {
+    const session = await getStaffSession()
+    if (!session) {
+      return { success: false, message: "Unauthorized" }
+    }
+
+    await sql`
+      UPDATE sales 
+      SET 
+        payment_status = 'Paid',
+        delivery_status = 'Paid',
+        received_amount = total_amount,
+        balance_amount = 0
+      WHERE id = ${saleId} AND device_id = ${deviceId}
+    `
+    revalidatePath("/staff/dashboard")
+    revalidatePath("/dashboard")
+    return { success: true }
+  } catch (error: any) {
+    console.error("markJobCardPaid Error:", error)
+    return { success: false, message: error.message || "Failed to update Job Card status" }
   }
 }

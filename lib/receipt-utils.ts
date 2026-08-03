@@ -1265,17 +1265,22 @@ export function printPurchaseReceipt(purchase: any, items: any[], currency = "AE
 }
 
 // Print Job Card
-export function printJobCard(sale: any, currency = 'AED') {
+export function printJobCard(sale: any, currency = 'AED', businessInfo: any = {}) {
   if (typeof window === 'undefined') return;
   const printWindow = window.open('', '_blank', 'width=800,height=900');
   if (!printWindow) { alert('Please allow pop-ups'); return; }
   
-  const itemsHtml = sale.items?.map((item: any) => `
-    <tr>
-      <td style="padding: 10px 0;">${item.product_name || 'Item'} ${item.variant_name ? '('+item.variant_name+')' : ''}</td>
-      <td style="padding: 10px 0; text-align: left;">${item.quantity}</td>
-    </tr>
-  `).join('') || '';
+  const business = {
+    name: getCachedPlatformName(),
+    logo: getDefaultDeviceLogoUrl() || "",
+    ...businessInfo,
+  }
+  const logoUrl = business.device_logo || business.logo || business.logo_url || getDefaultDeviceLogoUrl() || "";
+  const fromName = business.device_name || business.name || 'Moto Club Online';
+
+  const itemsText = sale.items?.map((item: any) => {
+    return `${item.product_name || 'Item'} ${item.variant_name ? '('+item.variant_name+')' : ''}${item.quantity > 1 ? ` x${item.quantity}` : ''}`
+  }).join(', ') || '';
 
   const addressLines = [
     sale.shipping_street,
@@ -1288,47 +1293,50 @@ export function printJobCard(sale: any, currency = 'AED') {
     <head>
       <title>Job Card - ${sale.id}</title>
       <style>
-        body { font-family: system-ui, -apple-system, sans-serif; color: #000; max-width: 800px; margin: 0 auto; padding: 40px; font-size: 15px; line-height: 1.6; }
-        .section { margin-bottom: 25px; }
-        table { width: 100%; border-collapse: collapse; margin: 40px 0; }
-        th { text-align: left; padding: 10px 0; border-bottom: 1px solid #000; font-weight: normal; }
-        td { border-bottom: 1px dashed #eee; }
-        p { margin: 2px 0; }
-        .spacer { height: 15px; }
+        body { font-family: system-ui, -apple-system, sans-serif; color: #000; max-width: 800px; margin: 0 auto; padding: 40px; line-height: 1.6; }
+        .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 25px; min-height: 60px; }
+        .logo { max-width: 200px; max-height: 80px; }
+        .section { margin-bottom: 20px; }
+        .to-section { font-size: 20px; font-weight: bold; }
+        .to-title { text-decoration: underline; font-size: 22px; margin-bottom: 10px; }
+        .from-section { font-size: 18px; font-weight: bold; }
+        .from-title { text-decoration: underline; margin-bottom: 10px; }
+        .products-text { font-size: 14px; text-align: center; color: #555; margin-top: 30px; margin-bottom: 10px; }
+        .order-id { font-size: 16px; text-align: center; color: #555; }
+        p { margin: 4px 0; }
+        hr { border: none; border-top: 1px dashed #000; margin: 20px 0; }
       </style>
     </head>
     <body>
-      <div class="section">
-        <p>To,</p>
-        <div class="spacer"></div>
-        <p style="font-weight: bold; text-transform: uppercase;">${sale.customer_name || 'N/A'}</p>
+      <div class="header">
+        <div></div>
+        ${logoUrl ? `<img src="${logoUrl}" alt="Logo" class="logo" onerror="this.style.display='none'"/>` : '<div></div>'}
+      </div>
+      
+      <div class="section to-section">
+        <p class="to-title">To,</p>
+        <p style="text-transform: uppercase;">${sale.customer_name || 'N/A'}</p>
         ${addressLines.map(line => `<p>${line}</p>`).join('')}
         ${sale.shipping_pincode ? `<p>Pin:- ${sale.shipping_pincode}</p>` : ''}
         <p>Ph:- ${sale.customer_phone || 'N/A'}</p>
       </div>
 
-      <table>
-        <thead>
-          <tr>
-            <th>Product Description</th>
-            <th style="width: 150px;">Quantity</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${itemsHtml}
-        </tbody>
-      </table>
+      <hr />
 
-      <div class="section">
-        <p>Order ID: ${sale.id}</p>
-      </div>
-
-      <div class="section" style="margin-top: 50px;">
-        <p>From,</p>
-        <div class="spacer"></div>
-        <p>Moto Club Online</p>
+      <div class="section from-section">
+        <p class="from-title">From,</p>
+        <p>${fromName}</p>
         <p>Pin:- 676503</p>
         <p>Ph:- 9995442239</p>
+      </div>
+
+      <hr />
+
+      <div class="products-text">
+        ${itemsText}
+      </div>
+      <div class="order-id">
+        Order ID: ${sale.id}
       </div>
       
       <script>
@@ -1342,18 +1350,23 @@ export function printJobCard(sale: any, currency = 'AED') {
   printWindow.document.close();
 }
 
-export function printBatchJobCards(sales: any[], currency = 'AED') {
+export function printBatchJobCards(sales: any[], currency = 'AED', businessInfo: any = {}) {
   if (typeof window === 'undefined' || !sales || sales.length === 0) return;
   const printWindow = window.open('', '_blank', 'width=800,height=900');
   if (!printWindow) { alert('Please allow pop-ups'); return; }
   
+  const business = {
+    name: getCachedPlatformName(),
+    logo: getDefaultDeviceLogoUrl() || "",
+    ...businessInfo,
+  }
+  const logoUrl = business.device_logo || business.logo || business.logo_url || getDefaultDeviceLogoUrl() || "";
+  const fromName = business.device_name || business.name || 'Moto Club Online';
+  
   const pagesHtml = sales.map((sale, index) => {
-    const itemsHtml = sale.items?.map((item: any) => `
-      <tr>
-        <td style="padding: 10px 0;">${item.product_name || 'Item'} ${item.variant_name ? '('+item.variant_name+')' : ''}</td>
-        <td style="padding: 10px 0; text-align: left;">${item.quantity}</td>
-      </tr>
-    `).join('') || '';
+    const itemsText = sale.items?.map((item: any) => {
+      return `${item.product_name || 'Item'} ${item.variant_name ? '('+item.variant_name+')' : ''}${item.quantity > 1 ? ` x${item.quantity}` : ''}`
+    }).join(', ') || '';
 
     const addressLines = [
       sale.shipping_street,
@@ -1362,37 +1375,35 @@ export function printBatchJobCards(sales: any[], currency = 'AED') {
 
     return `
       <div class="page" ${index < sales.length - 1 ? 'style="page-break-after: always;"' : ''}>
-        <div class="section">
-          <p>To,</p>
-          <div class="spacer"></div>
-          <p style="font-weight: bold; text-transform: uppercase;">${sale.customer_name || 'N/A'}</p>
+        <div class="header">
+          <div></div>
+          ${logoUrl ? `<img src="${logoUrl}" alt="Logo" class="logo" onerror="this.style.display='none'"/>` : '<div></div>'}
+        </div>
+
+        <div class="section to-section">
+          <p class="to-title">To,</p>
+          <p style="text-transform: uppercase;">${sale.customer_name || 'N/A'}</p>
           ${addressLines.map(line => `<p>${line}</p>`).join('')}
           ${sale.shipping_pincode ? `<p>Pin:- ${sale.shipping_pincode}</p>` : ''}
           <p>Ph:- ${sale.customer_phone || 'N/A'}</p>
         </div>
 
-        <table>
-          <thead>
-            <tr>
-              <th>Product Description</th>
-              <th style="width: 150px;">Quantity</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${itemsHtml}
-          </tbody>
-        </table>
+        <hr />
 
-        <div class="section">
-          <p>Order ID: ${sale.id}</p>
-        </div>
-
-        <div class="section" style="margin-top: 50px;">
-          <p>From,</p>
-          <div class="spacer"></div>
-          <p>Moto Club Online</p>
+        <div class="section from-section">
+          <p class="from-title">From,</p>
+          <p>${fromName}</p>
           <p>Pin:- 676503</p>
           <p>Ph:- 9995442239</p>
+        </div>
+
+        <hr />
+
+        <div class="products-text">
+          ${itemsText}
+        </div>
+        <div class="order-id">
+          Order ID: ${sale.id}
         </div>
       </div>
     `;
@@ -1404,13 +1415,18 @@ export function printBatchJobCards(sales: any[], currency = 'AED') {
     <head>
       <title>Batch Job Cards</title>
       <style>
-        body { font-family: system-ui, -apple-system, sans-serif; color: #000; max-width: 800px; margin: 0 auto; padding: 40px; font-size: 15px; line-height: 1.6; }
-        .section { margin-bottom: 25px; }
-        table { width: 100%; border-collapse: collapse; margin: 40px 0; }
-        th { text-align: left; padding: 10px 0; border-bottom: 1px solid #000; font-weight: normal; }
-        td { border-bottom: 1px dashed #eee; }
-        p { margin: 2px 0; }
-        .spacer { height: 15px; }
+        body { font-family: system-ui, -apple-system, sans-serif; color: #000; max-width: 800px; margin: 0 auto; padding: 40px; line-height: 1.6; }
+        .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 25px; min-height: 60px; }
+        .logo { max-width: 200px; max-height: 80px; }
+        .section { margin-bottom: 20px; }
+        .to-section { font-size: 20px; font-weight: bold; }
+        .to-title { text-decoration: underline; font-size: 22px; margin-bottom: 10px; }
+        .from-section { font-size: 18px; font-weight: bold; }
+        .from-title { text-decoration: underline; margin-bottom: 10px; }
+        .products-text { font-size: 14px; text-align: center; color: #555; margin-top: 30px; margin-bottom: 10px; }
+        .order-id { font-size: 16px; text-align: center; color: #555; }
+        p { margin: 4px 0; }
+        hr { border: none; border-top: 1px dashed #000; margin: 20px 0; }
         
         @media print {
           body { padding: 0; }

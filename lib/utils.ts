@@ -29,3 +29,31 @@ export const formatCurrency = (amount: number, currency = "QAR") => {
     currency: format.currency,
   }).format(amount)
 }
+
+export function formatPhoneNumber(phone: string | null | undefined): string {
+  if (!phone) return ""
+  let digits = phone.replace(/\D/g, "")
+  if (!digits) return ""
+  
+  if (digits.length === 10 && /^[6-9]/.test(digits)) {
+    return "+91 " + digits
+  }
+  if (digits.length === 10 && digits.startsWith("05")) {
+    return "+971 " + digits.substring(1)
+  }
+  if (digits.length === 9 && digits.startsWith("5")) {
+    return "+971 " + digits
+  }
+  if (digits.length === 12 && digits.startsWith("91")) {
+    return "+91 " + digits.substring(2)
+  }
+  if (digits.length === 12 && (digits.startsWith("971") || digits.startsWith("0971"))) {
+    // 0971 is 4 chars, wait digits is 12, so 971 is 3 chars.
+    return "+971 " + digits.substring(3)
+  }
+  
+  if (phone.includes(" ")) return phone;
+
+  // Fallback for unknown country codes
+  return phone.startsWith("+") ? phone : "+" + digits
+}

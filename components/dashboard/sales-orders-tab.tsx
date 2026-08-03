@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ChevronDown, ChevronUp, MapPin, Phone, User, Calendar, Layers, Printer, Edit, Trash2, Search, PlayCircle, Eye, Plus } from "lucide-react"
+import { formatPhoneNumber } from "@/lib/utils"
 import { useToast } from "@/components/ui/use-toast"
 import { useConfirm } from "@/hooks/use-confirm"
 import { printJobCard, printBatchJobCards } from "@/lib/receipt-utils"
@@ -283,15 +284,22 @@ export default function SalesOrdersTab() {
                           </div>
                         </td>
                         <td className="max-w-[180px] truncate px-4 py-2.5 font-medium text-slate-700">{sale.customer_name || "N/A"}</td>
-                        <td className="whitespace-nowrap px-4 py-2.5 text-slate-500">{sale.customer_phone || "N/A"}</td>
+                        <td className="whitespace-nowrap px-4 py-2.5 text-slate-500">{sale.customer_phone ? formatPhoneNumber(sale.customer_phone) : "N/A"}</td>
                         <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-slate-600">
-                          <TrackingCell 
-                            saleId={sale.id}
-                            deviceId={deviceId || 0}
-                            trackingId={sale.tracking_id}
-                            deliveryStatus={sale.delivery_status}
-                            onUpdate={fetchSales}
-                          />
+                          <div className="flex flex-col gap-0.5">
+                            <TrackingCell 
+                              saleId={sale.id}
+                              deviceId={deviceId || 0}
+                              trackingId={sale.tracking_id}
+                              deliveryStatus={sale.delivery_status}
+                              onUpdate={fetchSales}
+                            />
+                            {sale.courier_service_name && (
+                              <span className="text-[10px] font-sans font-medium text-violet-600 bg-violet-50 px-1.5 py-0.5 rounded w-fit">
+                                {sale.courier_service_name}
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="whitespace-nowrap px-4 py-2.5 text-center font-medium text-slate-700">{itemQuantity}</td>
                         <td className="whitespace-nowrap px-4 py-2.5 text-right font-bold text-slate-800">
@@ -341,7 +349,7 @@ export default function SalesOrdersTab() {
                             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
                               
                               {/* Summary Card */}
-                              <div className="col-span-1 lg:col-span-1 space-y-6">
+                              <div className="col-span-1 lg:col-span-1 space-y-6 order-2 lg:order-2">
                                 <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
                                   <User className="h-4 w-4 text-slate-500" /> Customer Information
                                 </h4>
@@ -356,7 +364,7 @@ export default function SalesOrdersTab() {
                                   <div>
                                     <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 block mb-1">Customer Details</span>
                                     <p className="font-medium text-slate-800 text-base">{sale.customer_name || "N/A"}</p>
-                                    <p className="flex items-center gap-1.5 mt-1"><Phone className="h-3.5 w-3.5 text-slate-400" /> {sale.customer_phone || "N/A"}</p>
+                                    <p className="flex items-center gap-1.5 mt-1"><Phone className="h-3.5 w-3.5 text-slate-400" /> {sale.customer_phone ? formatPhoneNumber(sale.customer_phone) : "N/A"}</p>
                                   </div>
                                   
                                   {sale.shipping_street && (
@@ -385,7 +393,7 @@ export default function SalesOrdersTab() {
                               </div>
   
                               {/* Line Items */}
-                              <div className="col-span-1 lg:col-span-2 space-y-4">
+                              <div className="col-span-1 lg:col-span-2 space-y-4 order-1 lg:order-1">
                                 <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
                                   <Layers className="h-4 w-4 text-slate-500" /> Product Line Items
                                 </h4>
@@ -418,9 +426,17 @@ export default function SalesOrdersTab() {
                                 </div>
   
                                 <div className="flex justify-end pt-2">
-                                  <div className="flex gap-4 items-center bg-emerald-50 px-4 py-2.5 rounded-lg border border-emerald-100 shadow-sm">
-                                    <span className="text-xs font-semibold uppercase tracking-wider text-emerald-700">Order Total</span>
-                                    <span className="text-lg font-black text-emerald-900">{currency} {Number(sale.total_amount).toFixed(2)}</span>
+                                  <div className="space-y-2">
+                                    {Number(sale.courier_paid_extra || 0) > 0 && (
+                                      <div className="flex justify-end text-sm text-slate-600 px-4">
+                                        <span className="mr-4">Courier Paid (Extra):</span>
+                                        <span>{currency} {Number(sale.courier_paid_extra).toFixed(2)}</span>
+                                      </div>
+                                    )}
+                                    <div className="flex gap-4 items-center bg-emerald-50 px-4 py-2.5 rounded-lg border border-emerald-100 shadow-sm">
+                                      <span className="text-xs font-semibold uppercase tracking-wider text-emerald-700">Order Total</span>
+                                      <span className="text-lg font-black text-emerald-900">{currency} {Number(sale.total_amount).toFixed(2)}</span>
+                                    </div>
                                   </div>
                                 </div>
                               </div>

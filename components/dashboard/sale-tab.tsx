@@ -29,6 +29,7 @@ import {
   Edit,
   X,
 } from "lucide-react"
+import { JobCardWhatsappConfirmation } from "@/components/shared/job-card/job-card-whatsapp-confirmation"
 import { getUserSales, deleteSale, addSale, getSaleDetails, updateSale } from "@/app/actions/sale-actions"
 import { useToast } from "@/components/ui/use-toast"
 import { notifyError, notifySuccess, notifyWarning } from "@/lib/notifications"
@@ -189,6 +190,17 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
   const [editingSaleId, setEditingSaleId] = useState<number | null>(null)
   const [allocatorRowId, setAllocatorRowId] = useState<string | null>(null)
   const [originalSaleStatus, setOriginalSaleStatus] = useState<string>("")
+
+  // WhatsApp Confirmation state
+  const [whatsappModalData, setWhatsappModalData] = useState<{
+    saleId: number;
+    trackingId: string;
+    customerName: string;
+    customerPhone: string;
+    shippingAddress: string;
+    products: any[];
+    totalAmount: number;
+  } | null>(null)
 
   const [receivedAmount, setReceivedAmount] = useState(0)
   const [advanceAmount, setAdvanceAmount] = useState(0)
@@ -541,11 +553,12 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     }, 0)
     setSubtotal(newSubtotal)
     const discount = typeof discountAmount === "number" ? discountAmount : 0
+    const isJobCard = originalSaleStatus === "Pending" || (shipping.trackingId || "").startsWith("JC-")
     const courierExtra =
-      shipping.fulfillmentType === "ship" ? Number(shipping.courierPaidExtra) || 0 : 0
+      (shipping.fulfillmentType === "ship" || isJobCard) ? Number(shipping.courierPaidExtra) || 0 : 0
     const finalTotal = Math.max(0, newSubtotal - discount + courierExtra)
     setTotalAmount(finalTotal)
-  }, [products, discountAmount, shipping.fulfillmentType, shipping.courierPaidExtra])
+  }, [products, discountAmount, shipping.fulfillmentType, shipping.courierPaidExtra, originalSaleStatus, shipping.trackingId])
 
   // Auto-calculate received amount based on paymentStatus and paymentMethod
   useEffect(() => {
@@ -1309,7 +1322,32 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
           })
 
           setTimeout(() => {
-            finalizeDraftAfterSave()
+            const isJobCard = result.data?.sale_type === "job_card" || (result.data?.tracking_id || "").startsWith("JC-")
+            const origDelivery = result.data?.original_delivery_status || "Pending"
+            const wasPendingDelivery = origDelivery.toLowerCase() === "pending"
+            
+            if (isJobCard && wasPendingDelivery) {
+              const addressParts = [
+                shipping.shippingStreet,
+                shipping.shippingLandmark,
+                shipping.shippingCity,
+                shipping.shippingPincode
+              ].filter(Boolean)
+              
+              const finalAddress = shipping.shippingAddress || addressParts.join(", ")
+              
+              setWhatsappModalData({
+                saleId: editingSaleId,
+                trackingId: result.data?.tracking_id || "",
+                customerName: customerName || "",
+                customerPhone: customerPhone || "",
+                shippingAddress: finalAddress,
+                products: products.filter(p => p.productId !== null),
+                totalAmount: Number(totalAmount)
+              })
+            } else {
+              finalizeDraftAfterSave()
+            }
           }, 1500)
         } else {
           setFormAlert({
@@ -2503,7 +2541,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                   customerAddress={customerAddress}
                                   currency={deviceCurrencyState}
                                   className="mt-2"
-                                  isJobCard={originalSaleStatus === "Pending"}
+                                  isJobCard={originalSaleStatus === "Pending" || (shipping.trackingId || "").startsWith("JC-")}
                                   customerName={customerName}
                                   customerPhone={customerPhone}
                                 />
@@ -2535,7 +2573,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                   </div>
                                 </div>
 
-                                {shipping.fulfillmentType === "ship" &&
+                                {(shipping.fulfillmentType === "ship" || (originalSaleStatus === "Pending" || (shipping.trackingId || "").startsWith("JC-"))) &&
                                 Number(shipping.courierPaidExtra) > 0 ? (
                                   <div className="flex justify-between items-center py-1 border-t border-gray-200">
                                     <span className="font-medium text-xs text-gray-900">Courier charge:</span>
@@ -2546,7 +2584,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                   </div>
                                 ) : null}
 
-                                {shipping.fulfillmentType === "ship" &&
+                                {(shipping.fulfillmentType === "ship" || (originalSaleStatus === "Pending" || (shipping.trackingId || "").startsWith("JC-"))) &&
                                 (Number(shipping.expenseCourier) > 0 ||
                                   Number(shipping.expensePacking) > 0) ? (
                                   <div className="rounded-md border border-amber-100 bg-amber-50/60 px-2 py-1.5 text-[11px] text-amber-800">
@@ -2756,6 +2794,28 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                 </Label>
               </div>
             </div>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* WhatsApp Modal for POS Updates */}
+      {whatsappModalData && (
+        <Dialog open={true} onOpenChange={(open) => !open && setWhatsappModalData(null)}>
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto p-0">
+            <JobCardWhatsappConfirmation
+              saleId={whatsappModalData.saleId}
+              trackingId={whatsappModalData.trackingId}
+              deviceId={deviceId || 0}
+              customerName={whatsappModalData.customerName}
+              customerPhone={whatsappModalData.customerPhone}
+              shippingAddress={whatsappModalData.shippingAddress}
+              products={whatsappModalData.products}
+              totalAmount={whatsappModalData.totalAmount}
+              onComplete={() => {
+                setWhatsappModalData(null)
+                finalizeDraftAfterSave()
+              }}
+            />
           </DialogContent>
         </Dialog>
       )}

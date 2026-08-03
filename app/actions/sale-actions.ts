@@ -1359,6 +1359,9 @@ export async function updateSale(saleData: any) {
           discount: changes.newDiscount,
           received_amount: changes.newReceived,
           outstanding_amount: changes.outstandingAmount,
+          tracking_id: original.tracking_id,
+          sale_type: original.sale_type,
+          original_delivery_status: original.delivery_status,
         },
       }
     }
@@ -1799,6 +1802,9 @@ export async function updateSale(saleData: any) {
         discount: changes.newDiscount,
         received_amount: changes.newReceived,
         outstanding_amount: changes.outstandingAmount,
+        tracking_id: original.tracking_id,
+        sale_type: original.sale_type,
+        original_delivery_status: original.delivery_status,
       },
     }
   } catch (error) {

@@ -47,6 +47,7 @@ export default function CustomerSelectSimple({
   const [formData, setFormData] = useState({ name: "", phone: "" })
   const [formLoading, setFormLoading] = useState(false)
   const [formErrors, setFormErrors] = useState<{ name?: string; phone?: string }>({})
+  const [countryCode, setCountryCode] = useState("+971")
 
   const containerRef = useRef<HTMLDivElement>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
@@ -167,6 +168,7 @@ export default function CustomerSelectSimple({
         setOpen(false)
         setShowForm(false)
         setFormData({ name: "", phone: "" })
+        setCountryCode("+971")
         setFormErrors({})
         setSearchTerm("")
       }
@@ -245,8 +247,8 @@ export default function CustomerSelectSimple({
     if (!formData.name.trim()) errors.name = "Name is required"
     if (!formData.phone.trim()) errors.phone = "Phone number is required"
     else {
-      const cleanPhone = formData.phone.replace(/[\s\-\(\)\.]/g, "")
-      if (!/^\d{7,15}$/.test(cleanPhone)) errors.phone = "Please enter a valid phone number"
+      const cleanPhone = formData.phone.replace(/[\s\-\(\)\.\+]/g, "")
+      if (!/^\d{5,15}$/.test(cleanPhone)) errors.phone = "Please enter a valid phone number"
     }
     setFormErrors(errors)
     return Object.keys(errors).length === 0
@@ -278,7 +280,8 @@ export default function CustomerSelectSimple({
     setFormLoading(true)
     try {
       const createFn = onCreateCustomer ?? createCustomerApi
-      const result = await createFn(formData.name.trim(), formData.phone.trim())
+      const fullPhone = countryCode + formData.phone.trim()
+      const result = await createFn(formData.name.trim(), fullPhone)
 
       if (result.success && result.data) {
         const newCustomer = result.data
@@ -430,20 +433,38 @@ export default function CustomerSelectSimple({
                   </div>
                   <div className="space-y-1">
                     <label className="text-xs font-medium">Phone <span className="text-red-500">*</span></label>
-                    <Input
-                      ref={phoneInputRef}
-                      placeholder="Phone Number"
-                      value={formData.phone}
-                      onChange={(e) => handleFormInputChange("phone", e.target.value)}
-                      className={cn("h-9", formErrors.phone && "border-red-500 focus-visible:ring-red-500")}
-                      disabled={formLoading}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault()
-                          handleCreateCustomer(e)
-                        }
-                      }}
-                    />
+                    <div className="flex gap-2">
+                      <select
+                        value={countryCode}
+                        onChange={(e) => setCountryCode(e.target.value)}
+                        className="h-9 w-[100px] rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                        disabled={formLoading}
+                      >
+                        <option value="+971">+971 (AE)</option>
+                        <option value="+91">+91 (IN)</option>
+                        <option value="+1">+1 (US)</option>
+                        <option value="+44">+44 (UK)</option>
+                        <option value="+966">+966 (SA)</option>
+                        <option value="+974">+974 (QA)</option>
+                        <option value="+968">+968 (OM)</option>
+                        <option value="+973">+973 (BH)</option>
+                        <option value="+965">+965 (KW)</option>
+                      </select>
+                      <Input
+                        ref={phoneInputRef}
+                        placeholder="Phone Number"
+                        value={formData.phone}
+                        onChange={(e) => handleFormInputChange("phone", e.target.value)}
+                        className={cn("h-9 flex-1", formErrors.phone && "border-red-500 focus-visible:ring-red-500")}
+                        disabled={formLoading}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault()
+                            handleCreateCustomer(e)
+                          }
+                        }}
+                      />
+                    </div>
                     {formErrors.phone && <p className="text-[10px] text-red-500">{formErrors.phone}</p>}
                   </div>
                   

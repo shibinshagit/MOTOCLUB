@@ -200,15 +200,15 @@ export default function SaleShippingSection({
               <Label className="text-[10px] font-semibold uppercase tracking-wide text-blue-600/80 mb-2 block">Courier Fulfillment</Label>
               <div className="space-y-2 bg-white p-2 border border-blue-100 rounded-md">
                 <div>
-                  <Label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                  <Label className="text-sm font-extrabold uppercase tracking-wide text-slate-900">
                     Courier Partner <span className="text-red-500">*</span>
                   </Label>
                   <select
                     value={shipping.courierPartnerId ? String(shipping.courierPartnerId) : ""}
                     onChange={(e) => handleCourierPartnerChange(e.target.value)}
-                    className="flex h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-900"
+                    className="flex h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm font-bold text-slate-900"
                   >
-                    <option value="">Select partner</option>
+                    <option value="" className="font-normal">Select partner</option>
                     {courierPartners.map((courier) => (
                       <option key={courier.id} value={courier.id}>
                         {courier.name}
@@ -218,7 +218,7 @@ export default function SaleShippingSection({
                 </div>
                 
                 <div>
-                  <Label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                  <Label className="text-sm font-extrabold uppercase tracking-wide text-slate-900">
                     Courier Service <span className="text-red-500">*</span>
                   </Label>
                   {isCreatingService ? (
@@ -227,11 +227,11 @@ export default function SaleShippingSection({
                         placeholder="Service Name" 
                         value={newServiceName} 
                         onChange={e => setNewServiceName(e.target.value)} 
-                        className="h-7 text-xs bg-white" 
+                        className="h-9 text-sm font-bold bg-white" 
                       />
                       <div className="flex gap-1">
-                        <button type="button" onClick={handleCreateService} className="flex-1 bg-slate-900 text-white rounded text-[10px] py-1 font-medium">Save</button>
-                        <button type="button" onClick={() => setIsCreatingService(false)} className="flex-1 bg-slate-200 text-slate-700 rounded text-[10px] py-1 font-medium">Cancel</button>
+                        <button type="button" onClick={handleCreateService} className="flex-1 bg-slate-900 text-white rounded text-xs py-1.5 font-bold">Save</button>
+                        <button type="button" onClick={() => setIsCreatingService(false)} className="flex-1 bg-slate-200 text-slate-700 rounded text-xs py-1.5 font-bold">Cancel</button>
                       </div>
                     </div>
                   ) : (
@@ -239,9 +239,9 @@ export default function SaleShippingSection({
                       value={shipping.courierServiceId ? String(shipping.courierServiceId) : ""}
                       onChange={(e) => handleCourierServiceChange(e.target.value)}
                       disabled={!shipping.courierPartnerId}
-                      className="flex h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-900 disabled:opacity-50"
+                      className="flex h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm font-bold text-slate-900 disabled:opacity-50"
                     >
-                      <option value="">Select service</option>
+                      <option value="" className="font-normal">Select service</option>
                       {availableServices.map((service) => (
                         <option key={service.id} value={service.id}>
                           {service.name}
@@ -352,15 +352,15 @@ export default function SaleShippingSection({
             </div>
 
             <div className="space-y-1">
-              <Label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+              <Label className="text-xs font-bold uppercase tracking-wide text-slate-700">
                 Courier Partner
               </Label>
               <select
                 value={shipping.courierPartnerId ? String(shipping.courierPartnerId) : ""}
                 onChange={(e) => handleCourierPartnerChange(e.target.value)}
-                className="flex h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-900"
+                className="flex h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-900"
               >
-                <option value="">Select partner</option>
+                <option value="" className="font-normal">Select partner</option>
                 {courierPartners.map((courier) => (
                   <option key={courier.id} value={courier.id}>
                     {courier.name}

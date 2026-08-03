@@ -195,8 +195,10 @@ export function normalizeSaleShippingInput(input?: SaleShippingInput | null) {
 }
 
 export function mapSaleShippingFromRecord(record: Record<string, unknown>): SaleShippingRecord {
+  const isJobCard = record.sale_type === "job_card" || String(record.tracking_id || "").startsWith("JC-")
+  const defaultFulfillment = isJobCard ? "ship" : "pickup"
   return {
-    fulfillmentType: (record.fulfillment_type as FulfillmentType) || "pickup",
+    fulfillmentType: (record.fulfillment_type as FulfillmentType) || defaultFulfillment,
     deliveryStatus: (record.delivery_status as string) || "Pending",
     courierPartnerId: (record.courier_partner_id as number) || null,
     courierServiceId: (record.courier_service_id as number) || null,

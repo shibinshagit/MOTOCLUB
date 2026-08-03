@@ -17,6 +17,7 @@ import { JobCardModal } from "./job-card-modal"
 import { DeliveryStatusSelect } from "@/components/sales/delivery-status-select"
 import { TrackingCell } from "@/components/sales/tracking-cell"
 import { format } from "date-fns"
+import { formatPhoneNumber } from "@/lib/utils"
 
 export function TodaySalesList({ onOpenCreateModal }: { onOpenCreateModal?: () => void }) {
   const currency = useSelector(selectDeviceCurrency)
@@ -252,7 +253,7 @@ export function TodaySalesList({ onOpenCreateModal }: { onOpenCreateModal?: () =
                       <td className="max-w-[200px] truncate px-4 py-4">
                         <div className="flex flex-col">
                           <span className="font-bold text-slate-900">{sale.customer_name || "N/A"}</span>
-                          <span className="text-xs text-slate-500 mt-0.5">{sale.customer_phone || "N/A"}</span>
+                          <span className="text-xs text-slate-500 mt-0.5">{sale.customer_phone ? formatPhoneNumber(sale.customer_phone) : "N/A"}</span>
                         </div>
                       </td>
                       <td className="whitespace-nowrap px-4 py-4">
@@ -315,7 +316,7 @@ export function TodaySalesList({ onOpenCreateModal }: { onOpenCreateModal?: () =
                           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
                             
                             {/* Summary Card */}
-                            <div className="col-span-1 lg:col-span-1 space-y-6">
+                            <div className="col-span-1 lg:col-span-1 space-y-6 order-2 lg:order-2">
                               <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
                                 <User className="h-4 w-4 text-slate-500" /> Customer & Order Summary
                               </h4>
@@ -330,7 +331,7 @@ export function TodaySalesList({ onOpenCreateModal }: { onOpenCreateModal?: () =
                                   <div>
                                     <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 block mb-1">Customer Details</span>
                                   <p className="font-medium text-slate-800 text-base">{sale.customer_name || "N/A"}</p>
-                                  <p className="flex items-center gap-1.5 mt-1"><Phone className="h-3.5 w-3.5 text-slate-400" /> {sale.customer_phone || "N/A"}</p>
+                                  <p className="flex items-center gap-1.5 mt-1"><Phone className="h-3.5 w-3.5 text-slate-400" /> {sale.customer_phone ? formatPhoneNumber(sale.customer_phone) : "N/A"}</p>
                                 </div>
                                 
                                 {sale.shipping_street && (
@@ -359,7 +360,7 @@ export function TodaySalesList({ onOpenCreateModal }: { onOpenCreateModal?: () =
                             </div>
 
                             {/* Line Items */}
-                            <div className="col-span-1 lg:col-span-2 space-y-4">
+                            <div className="col-span-1 lg:col-span-2 space-y-4 order-1 lg:order-1">
                               <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
                                 <Layers className="h-4 w-4 text-slate-500" /> Product Line Items
                               </h4>
