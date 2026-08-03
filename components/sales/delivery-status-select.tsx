@@ -6,14 +6,15 @@ import { useToast } from "@/components/ui/use-toast"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { TrackingDetailsModal } from "./tracking-details-modal"
+import { AlertTriangle, RotateCcw, Package } from "lucide-react"
 
 const VALID_TRANSITIONS: Record<string, string[]> = {
   "Pending": [], // No manual exits allowed
-  "Paid": ["Packed"],
-  "Packed": ["Sent"],
-  "Sent": ["Shipping"],
-  "Shipping": ["Delivered"],
-  "Delivered": [],
+  "Paid": ["Packed", "Returned"],
+  "Packed": ["Sent", "Returned"],
+  "Sent": ["Shipping", "Returned"],
+  "Shipping": ["Delivered", "Returned"],
+  "Delivered": ["Returned"],
   "Returned": [],
   "Failed": []
 }
@@ -53,13 +54,16 @@ export function DeliveryStatusSelect({
   // Tracking Modal State
   const [isTrackingModalOpen, setIsTrackingModalOpen] = useState(false)
 
+  // Return Confirmation State
+  const [returnConfirmOpen, setReturnConfirmOpen] = useState(false)
+
   const handleUpdateStatus = async (newStatus: string) => {
     setLoading(true)
     try {
       const res = await updateSaleDeliveryStatus(saleId, deviceId, newStatus)
       if (res.success) {
         setStatus(newStatus)
-        toast({ title: "Success", description: `Delivery status updated to ${newStatus}.` })
+        toast({ title: "Success", description: res.message || `Delivery status updated to ${newStatus}.` })
         if (onStatusChange) {
           onStatusChange(newStatus)
         }
@@ -96,6 +100,11 @@ export function DeliveryStatusSelect({
     const newStatus = e.target.value
     if (newStatus === status) return
 
+    if (newStatus === "Returned") {
+      setReturnConfirmOpen(true)
+      return // Show confirmation dialog first
+    }
+
     if (newStatus === "Sent") {
       setWhatsappStep("prepare")
       return // Halt the update until confirmation
@@ -107,6 +116,11 @@ export function DeliveryStatusSelect({
     }
 
     await handleUpdateStatus(newStatus)
+  }
+
+  const handleConfirmReturn = async () => {
+    setReturnConfirmOpen(false)
+    await handleUpdateStatus("Returned")
   }
 
   const handleOpenWhatsApp = () => {
@@ -175,6 +189,58 @@ export function DeliveryStatusSelect({
           ))}
         </select>
       </div>
+
+      {/* Return Confirmation Dialog */}
+      <Dialog open={returnConfirmOpen} onOpenChange={(open) => !open && setReturnConfirmOpen(false)}>
+        <DialogContent onClick={(e) => e.stopPropagation()} className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <AlertTriangle className="h-5 w-5" />
+              Confirm Order Return
+            </DialogTitle>
+            <DialogDescription className="text-slate-600 mt-2">
+              This action <strong>cannot be undone</strong>. Please confirm you want to mark this order as Returned.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-3 space-y-3">
+            <div className="rounded-lg border border-red-100 bg-red-50 p-3 space-y-2">
+              <p className="text-sm font-semibold text-red-800 flex items-center gap-1.5">
+                <RotateCcw className="h-4 w-4" /> What will happen:
+              </p>
+              <ul className="text-sm text-red-700 space-y-1 list-disc list-inside">
+                <li>Order status will be set to <strong>Cancelled</strong></li>
+                <li>All product stock will be <strong>fully restored</strong> to inventory</li>
+                <li>Stock history will be updated with a return entry</li>
+                <li>This order will be removed from the active order list</li>
+              </ul>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-1 text-sm">
+              <div className="flex justify-between text-slate-600">
+                <span>Order #</span>
+                <span className="font-mono font-semibold">{orderNumber || saleId}</span>
+              </div>
+              {customerName && (
+                <div className="flex justify-between text-slate-600">
+                  <span>Customer</span>
+                  <span className="font-medium">{customerName}</span>
+                </div>
+              )}
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setReturnConfirmOpen(false)} disabled={loading}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleConfirmReturn}
+              disabled={loading}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              {loading ? "Processing..." : "Yes, Mark as Returned"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Prepare Customer Notification Dialog */}
       {isTrackingModalOpen && (

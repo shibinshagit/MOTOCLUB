@@ -54,13 +54,6 @@ export function TrackingCell({ saleId, deviceId, trackingId, deliveryStatus, onU
             >
               {isCopied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
             </button>
-            <button
-              onClick={() => setIsModalOpen(true)}
-              className="p-1 text-slate-400 hover:text-blue-600 rounded hover:bg-slate-100"
-              title="Update tracking ID"
-            >
-              <Edit2 className="h-3 w-3" />
-            </button>
           </div>
         </>
       ) : (

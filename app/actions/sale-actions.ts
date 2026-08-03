@@ -1891,11 +1891,121 @@ export async function updateSaleDeliveryStatus(
     }
 
     const wasCancelled = originalStatus.toLowerCase() === "cancelled"
-    const wasDeducted = ["shipping", "delivered"].includes(String(originalDeliveryStatus).toLowerCase()) && !wasCancelled
-    const isNowDeducted = ["shipping", "delivered"].includes(String(deliveryStatus).toLowerCase()) && !wasCancelled
+    
+    // Determine if stock was previously deducted (Shipping or Delivered states deduct stock)
+    const wasStockDeducted = ["shipping", "delivered"].includes(String(originalDeliveryStatus).toLowerCase()) && !wasCancelled
+    // Determine if stock should be deducted after this transition
+    const shouldDeductStock = ["shipping", "delivered"].includes(String(deliveryStatus).toLowerCase()) && !wasCancelled
 
+    const isReturned = deliveryStatus.toLowerCase() === "returned"
+
+    // ===== PROFESSIONAL RETURN HANDLING =====
+    if (isReturned) {
+      // Fetch ALL sale items with their batch allocations for precise rollback
+      const saleItemsWithAllocations = await sql`
+        SELECT 
+          si.id as sale_item_id,
+          si.product_id,
+          si.product_variant_id,
+          si.quantity,
+          si.price,
+          si.cost,
+          sba.batch_id,
+          sba.quantity as allocated_qty
+        FROM sale_items si
+        LEFT JOIN sale_batch_allocations sba ON sba.sale_item_id = si.id
+        WHERE si.sale_id = ${saleId}
+      `
+
+      // Group by sale_item_id to handle items with/without batch allocations
+      const itemMap = new Map<number, any>()
+      for (const row of saleItemsWithAllocations) {
+        if (!itemMap.has(row.sale_item_id)) {
+          itemMap.set(row.sale_item_id, { ...row, allocations: [] })
+        }
+        if (row.batch_id) {
+          itemMap.get(row.sale_item_id).allocations.push({
+            batch_id: row.batch_id,
+            quantity: row.allocated_qty,
+          })
+        }
+      }
+
+      for (const item of itemMap.values()) {
+        // Only restore stock for actual products (not services)
+        if (!item.product_id) continue
+
+        if (item.allocations.length > 0) {
+          // Restore stock batch-by-batch using exact allocation records
+          for (const alloc of item.allocations) {
+            const stockResult = await updateProductStock(
+              item.product_id,
+              item.product_variant_id,
+              alloc.batch_id,
+              alloc.quantity,
+              "add",
+              deviceId
+            )
+            if (stockResult.success) {
+              await createStockHistoryEntry(
+                item.product_id,
+                item.product_variant_id,
+                alloc.batch_id,
+                "return_restocked",
+                alloc.quantity,
+                saleId,
+                "sale",
+                deviceId,
+                `Sale #${saleId} marked as Returned - stock restored to original batch`
+              )
+            } else {
+              console.warn(`Stock restore warning for product ${item.product_id}:`, stockResult.message)
+            }
+          }
+        } else if (wasStockDeducted) {
+          // No batch allocations - restore using generic add (creates a new adjustment batch)
+          const stockResult = await updateProductStock(
+            item.product_id,
+            item.product_variant_id,
+            null,
+            item.quantity,
+            "add",
+            deviceId
+          )
+          if (stockResult.success) {
+            await createStockHistoryEntry(
+              item.product_id,
+              item.product_variant_id,
+              null,
+              "return_restocked",
+              item.quantity,
+              saleId,
+              "sale",
+              deviceId,
+              `Sale #${saleId} marked as Returned - stock restored (no batch record found)`
+            )
+          }
+        }
+      }
+
+      // Mark sale as Cancelled and update financial fields
+      await sql`
+        UPDATE sales
+        SET delivery_status = 'Returned',
+            status = 'Cancelled',
+            updated_at = NOW()
+        WHERE id = ${saleId}
+          AND device_id = ${deviceId}
+      `
+
+      revalidatePath("/dashboard")
+      revalidatePath("/staff/dashboard")
+      return { success: true as const, message: "Order marked as Returned. Stock has been fully restored.", trackingId: rows[0].tracking_id }
+    }
+
+    // ===== NORMAL DELIVERY STATUS TRANSITIONS =====
     // If there is a transition in deduction state, we need to fetch items and allocations
-    if (wasDeducted !== isNowDeducted) {
+    if (wasStockDeducted !== shouldDeductStock) {
       const existingAllocations = await sql`
         SELECT sba.*, si.product_id, si.product_variant_id 
         FROM sale_batch_allocations sba 
@@ -1904,7 +2014,7 @@ export async function updateSaleDeliveryStatus(
       `
 
       for (const alloc of existingAllocations) {
-        const operation = isNowDeducted ? "subtract" : "add"
+        const operation = shouldDeductStock ? "subtract" : "add"
         const stockResult = await updateProductStock(
           alloc.product_id, 
           alloc.product_variant_id, 
@@ -1918,12 +2028,12 @@ export async function updateSaleDeliveryStatus(
             alloc.product_id,
             alloc.product_variant_id,
             alloc.batch_id,
-            isNowDeducted ? "sale_delivery_deducted" : "sale_delivery_restored",
-            isNowDeducted ? -alloc.quantity : alloc.quantity,
+            shouldDeductStock ? "sale_delivery_deducted" : "sale_delivery_restored",
+            shouldDeductStock ? -alloc.quantity : alloc.quantity,
             saleId,
             "sale",
             deviceId,
-            `Sale #${saleId} delivery status changed to ${deliveryStatus} - stock ${isNowDeducted ? "deducted" : "restored"}`
+            `Sale #${saleId} delivery status changed to ${deliveryStatus} - stock ${shouldDeductStock ? "deducted" : "restored"}`
           )
         }
       }

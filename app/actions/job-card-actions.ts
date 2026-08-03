@@ -407,9 +407,9 @@ export async function getTodayJobCards(monthStr?: string, searchTerm?: string) {
           AND s.staff_id = ${session.staffId}
           AND s.sale_date >= ${startDate}::date
           AND s.sale_date < (${startDate}::date + interval '1 month')
-          AND s.status != 'Cancelled'
+          AND (s.status != 'Cancelled' OR s.delivery_status = 'Returned')
           AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%')
-          AND (s.delivery_status IS NULL OR s.delivery_status NOT IN ('Delivered', 'Returned'))
+          AND (s.delivery_status IS NULL OR s.delivery_status != 'Delivered')
           AND (
             LOWER(COALESCE(c.name, s.customer_name_override)) LIKE ${searchPattern}
             OR LOWER(COALESCE(c.phone, s.customer_phone_override)) LIKE ${searchPattern}
@@ -426,9 +426,9 @@ export async function getTodayJobCards(monthStr?: string, searchTerm?: string) {
           AND s.staff_id = ${session.staffId}
           AND s.sale_date >= ${startDate}::date
           AND s.sale_date < (${startDate}::date + interval '1 month')
-          AND s.status != 'Cancelled'
+          AND (s.status != 'Cancelled' OR s.delivery_status = 'Returned')
           AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%')
-          AND (s.delivery_status IS NULL OR s.delivery_status NOT IN ('Delivered', 'Returned'))
+          AND (s.delivery_status IS NULL OR s.delivery_status != 'Delivered')
         ORDER BY s.created_at DESC
       `
     } else if (!startDate && searchPattern) {
@@ -439,9 +439,9 @@ export async function getTodayJobCards(monthStr?: string, searchTerm?: string) {
           AND s.staff_id = ${session.staffId}
           AND s.sale_date >= date_trunc('month', CURRENT_DATE)
           AND s.sale_date < date_trunc('month', CURRENT_DATE) + interval '1 month'
-          AND s.status != 'Cancelled'
+          AND (s.status != 'Cancelled' OR s.delivery_status = 'Returned')
           AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%')
-          AND (s.delivery_status IS NULL OR s.delivery_status NOT IN ('Delivered', 'Returned'))
+          AND (s.delivery_status IS NULL OR s.delivery_status != 'Delivered')
           AND (
             LOWER(COALESCE(c.name, s.customer_name_override)) LIKE ${searchPattern}
             OR LOWER(COALESCE(c.phone, s.customer_phone_override)) LIKE ${searchPattern}
@@ -458,9 +458,9 @@ export async function getTodayJobCards(monthStr?: string, searchTerm?: string) {
           AND s.staff_id = ${session.staffId}
           AND s.sale_date >= date_trunc('month', CURRENT_DATE)
           AND s.sale_date < date_trunc('month', CURRENT_DATE) + interval '1 month'
-          AND s.status != 'Cancelled'
+          AND (s.status != 'Cancelled' OR s.delivery_status = 'Returned')
           AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%')
-          AND (s.delivery_status IS NULL OR s.delivery_status NOT IN ('Delivered', 'Returned'))
+          AND (s.delivery_status IS NULL OR s.delivery_status != 'Delivered')
         ORDER BY s.created_at DESC
       `
     }
@@ -518,9 +518,8 @@ export async function getAllJobCards(deviceId: number) {
         JOIN devices d2 ON d2.company_id = d1.company_id
         WHERE d1.id = ${deviceId}
       )
-        AND s.status != 'Cancelled'
+        AND (s.status != 'Cancelled' OR s.delivery_status = 'Returned')
         AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%')
-        AND (s.delivery_status IS NULL OR s.delivery_status != 'Returned')
       ORDER BY s.created_at DESC
     `
 
