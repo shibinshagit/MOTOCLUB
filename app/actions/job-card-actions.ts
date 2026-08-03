@@ -401,8 +401,10 @@ export async function getTodayJobCards(monthStr?: string, searchTerm?: string) {
 
     if (startDate && searchPattern) {
       sales = await sql`
-        SELECT s.*, COALESCE(c.name, s.customer_name_override) as customer_name, COALESCE(c.phone, s.customer_phone_override) as customer_phone
-        FROM sales s LEFT JOIN customers c ON s.customer_id = c.id
+        SELECT s.*, COALESCE(c.name, s.customer_name_override) as customer_name, COALESCE(c.phone, s.customer_phone_override) as customer_phone, d.name as branch_name, d.name as device_name, d.logo_url as device_logo
+        FROM sales s 
+        LEFT JOIN customers c ON s.customer_id = c.id
+        LEFT JOIN devices d ON s.device_id = d.id
         WHERE s.device_id = ${deviceId}
           AND s.staff_id = ${session.staffId}
           AND s.sale_date >= ${startDate}::date
@@ -420,8 +422,10 @@ export async function getTodayJobCards(monthStr?: string, searchTerm?: string) {
       `
     } else if (startDate && !searchPattern) {
       sales = await sql`
-        SELECT s.*, COALESCE(c.name, s.customer_name_override) as customer_name, COALESCE(c.phone, s.customer_phone_override) as customer_phone
-        FROM sales s LEFT JOIN customers c ON s.customer_id = c.id
+        SELECT s.*, COALESCE(c.name, s.customer_name_override) as customer_name, COALESCE(c.phone, s.customer_phone_override) as customer_phone, d.name as branch_name, d.name as device_name, d.logo_url as device_logo
+        FROM sales s 
+        LEFT JOIN customers c ON s.customer_id = c.id
+        LEFT JOIN devices d ON s.device_id = d.id
         WHERE s.device_id = ${deviceId}
           AND s.staff_id = ${session.staffId}
           AND s.sale_date >= ${startDate}::date
@@ -433,8 +437,10 @@ export async function getTodayJobCards(monthStr?: string, searchTerm?: string) {
       `
     } else if (!startDate && searchPattern) {
       sales = await sql`
-        SELECT s.*, COALESCE(c.name, s.customer_name_override) as customer_name, COALESCE(c.phone, s.customer_phone_override) as customer_phone
-        FROM sales s LEFT JOIN customers c ON s.customer_id = c.id
+        SELECT s.*, COALESCE(c.name, s.customer_name_override) as customer_name, COALESCE(c.phone, s.customer_phone_override) as customer_phone, d.name as branch_name, d.name as device_name, d.logo_url as device_logo
+        FROM sales s 
+        LEFT JOIN customers c ON s.customer_id = c.id
+        LEFT JOIN devices d ON s.device_id = d.id
         WHERE s.device_id = ${deviceId}
           AND s.staff_id = ${session.staffId}
           AND s.sale_date >= date_trunc('month', CURRENT_DATE)
@@ -452,8 +458,10 @@ export async function getTodayJobCards(monthStr?: string, searchTerm?: string) {
       `
     } else {
       sales = await sql`
-        SELECT s.*, COALESCE(c.name, s.customer_name_override) as customer_name, COALESCE(c.phone, s.customer_phone_override) as customer_phone
-        FROM sales s LEFT JOIN customers c ON s.customer_id = c.id
+        SELECT s.*, COALESCE(c.name, s.customer_name_override) as customer_name, COALESCE(c.phone, s.customer_phone_override) as customer_phone, d.name as branch_name, d.name as device_name, d.logo_url as device_logo
+        FROM sales s 
+        LEFT JOIN customers c ON s.customer_id = c.id
+        LEFT JOIN devices d ON s.device_id = d.id
         WHERE s.device_id = ${deviceId}
           AND s.staff_id = ${session.staffId}
           AND s.sale_date >= date_trunc('month', CURRENT_DATE)
@@ -509,6 +517,7 @@ export async function getAllJobCards(deviceId: number) {
         COALESCE(c.name, s.customer_name_override) as customer_name,
         COALESCE(c.phone, s.customer_phone_override) as customer_phone,
         d.name as branch_name,
+        d.name as device_name,
         d.logo_url as device_logo
       FROM sales s
       LEFT JOIN customers c ON s.customer_id = c.id

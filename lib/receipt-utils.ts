@@ -1281,7 +1281,7 @@ export function printJobCard(sale: any, currency = 'AED', businessInfo: any = {}
     rawLogo = `${window.location.origin}${rawLogo}`;
   }
   const logoUrl = rawLogo;
-  const fromName = business.device_name || business.name || 'Moto Club Online';
+  const fromName = sale?.branch_name || sale?.device_name || business.device_name || business.branch_name || business.name || 'Moto Club Online';
 
   const itemsText = sale.items?.map((item: any) => {
     return `${item.product_name || 'Item'} ${item.variant_name ? '('+item.variant_name+')' : ''}${item.quantity > 1 ? ` x${item.quantity}` : ''}`
@@ -1369,13 +1369,12 @@ export function printBatchJobCards(sales: any[], currency = 'AED', businessInfo:
     baseLogo = `${window.location.origin}${baseLogo}`;
   }
 
-  const fromName = business.device_name || business.name || 'Moto Club Online';
-  
   const pagesHtml = sales.map((sale, index) => {
     let logoUrl = sale.device_logo || sale.logo_url || sale.logo || baseLogo;
     if (logoUrl && typeof window !== "undefined" && logoUrl.startsWith("/")) {
       logoUrl = `${window.location.origin}${logoUrl}`;
     }
+    const fromName = sale?.branch_name || sale?.device_name || business.device_name || business.branch_name || business.name || 'Moto Club Online';
 
     const itemsText = sale.items?.map((item: any) => {
       return `${item.product_name || 'Item'} ${item.variant_name ? '('+item.variant_name+')' : ''}${item.quantity > 1 ? ` x${item.quantity}` : ''}`
