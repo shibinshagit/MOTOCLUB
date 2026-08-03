@@ -1275,7 +1275,12 @@ export function printJobCard(sale: any, currency = 'AED', businessInfo: any = {}
     logo: getDefaultDeviceLogoUrl() || "",
     ...businessInfo,
   }
-  const logoUrl = business.device_logo || business.logo || business.logo_url || getDefaultDeviceLogoUrl() || "";
+  
+  let rawLogo = sale?.device_logo || sale?.logo_url || sale?.logo || business.device_logo || business.logo || business.logo_url || getDefaultDeviceLogoUrl() || "";
+  if (rawLogo && typeof window !== "undefined" && rawLogo.startsWith("/")) {
+    rawLogo = `${window.location.origin}${rawLogo}`;
+  }
+  const logoUrl = rawLogo;
   const fromName = business.device_name || business.name || 'Moto Club Online';
 
   const itemsText = sale.items?.map((item: any) => {
@@ -1293,29 +1298,28 @@ export function printJobCard(sale: any, currency = 'AED', businessInfo: any = {}
     <head>
       <title>Job Card - ${sale.id}</title>
       <style>
-        body { font-family: system-ui, -apple-system, sans-serif; color: #000; max-width: 800px; margin: 0 auto; padding: 40px; line-height: 1.6; }
-        .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 25px; min-height: 60px; }
-        .logo { max-width: 200px; max-height: 80px; }
+        @page { margin: 12mm 15mm; }
+        body { font-family: system-ui, -apple-system, sans-serif; color: #000; max-width: 850px; margin: 0 auto; padding: 10px; line-height: 1.4; }
+        .header { display: flex; justify-content: flex-end; align-items: flex-start; margin-bottom: 15px; }
+        .logo { max-width: 320px; max-height: 130px; object-fit: contain; }
         .section { margin-bottom: 20px; }
-        .to-section { font-size: 20px; font-weight: bold; }
-        .to-title { text-decoration: underline; font-size: 22px; margin-bottom: 10px; }
-        .from-section { font-size: 18px; font-weight: bold; }
-        .from-title { text-decoration: underline; margin-bottom: 10px; }
-        .products-text { font-size: 14px; text-align: center; color: #555; margin-top: 30px; margin-bottom: 10px; }
-        .order-id { font-size: 16px; text-align: center; color: #555; }
-        p { margin: 4px 0; }
-        hr { border: none; border-top: 1px dashed #000; margin: 20px 0; }
+        .to-section { font-size: 32px; font-weight: 900; margin-top: 10px; margin-bottom: 22px; }
+        .to-title { text-decoration: underline; font-size: 42px; font-weight: 900; margin-bottom: 12px; display: inline-block; }
+        .customer-name { font-size: 35px; font-weight: 900; text-transform: uppercase; margin-bottom: 10px; letter-spacing: 0.5px; }
+        .from-section { font-size: 26px; font-weight: 900; margin-top: 18px; }
+        .from-title { text-decoration: underline; font-size: 32px; font-weight: 900; margin-bottom: 10px; display: inline-block; }
+        .products-text { font-size: 22px; text-align: center; color: #000; margin-top: 25px; margin-bottom: 8px; font-weight: 800; }
+        .order-id { font-size: 30px; text-align: center; color: #000; font-weight: 900; }
+        p { margin: 6px 0; }
+        hr { border: none; border-top: 3px dashed #000; margin: 22px 0; }
       </style>
     </head>
     <body>
-      <div class="header">
-        <div></div>
-        ${logoUrl ? `<img src="${logoUrl}" alt="Logo" class="logo" onerror="this.style.display='none'"/>` : '<div></div>'}
-      </div>
+      ${logoUrl ? `<div class="header"><img src="${logoUrl}" alt="Logo" class="logo" /></div>` : ''}
       
       <div class="section to-section">
         <p class="to-title">To,</p>
-        <p style="text-transform: uppercase;">${sale.customer_name || 'N/A'}</p>
+        <p class="customer-name">${sale.customer_name || 'N/A'}</p>
         ${addressLines.map(line => `<p>${line}</p>`).join('')}
         ${sale.shipping_pincode ? `<p>Pin:- ${sale.shipping_pincode}</p>` : ''}
         <p>Ph:- ${sale.customer_phone || 'N/A'}</p>
@@ -1360,10 +1364,19 @@ export function printBatchJobCards(sales: any[], currency = 'AED', businessInfo:
     logo: getDefaultDeviceLogoUrl() || "",
     ...businessInfo,
   }
-  const logoUrl = business.device_logo || business.logo || business.logo_url || getDefaultDeviceLogoUrl() || "";
+  let baseLogo = business.device_logo || business.logo || business.logo_url || getDefaultDeviceLogoUrl() || "";
+  if (baseLogo && typeof window !== "undefined" && baseLogo.startsWith("/")) {
+    baseLogo = `${window.location.origin}${baseLogo}`;
+  }
+
   const fromName = business.device_name || business.name || 'Moto Club Online';
   
   const pagesHtml = sales.map((sale, index) => {
+    let logoUrl = sale.device_logo || sale.logo_url || sale.logo || baseLogo;
+    if (logoUrl && typeof window !== "undefined" && logoUrl.startsWith("/")) {
+      logoUrl = `${window.location.origin}${logoUrl}`;
+    }
+
     const itemsText = sale.items?.map((item: any) => {
       return `${item.product_name || 'Item'} ${item.variant_name ? '('+item.variant_name+')' : ''}${item.quantity > 1 ? ` x${item.quantity}` : ''}`
     }).join(', ') || '';
@@ -1375,14 +1388,11 @@ export function printBatchJobCards(sales: any[], currency = 'AED', businessInfo:
 
     return `
       <div class="page" ${index < sales.length - 1 ? 'style="page-break-after: always;"' : ''}>
-        <div class="header">
-          <div></div>
-          ${logoUrl ? `<img src="${logoUrl}" alt="Logo" class="logo" onerror="this.style.display='none'"/>` : '<div></div>'}
-        </div>
+        ${logoUrl ? `<div class="header"><img src="${logoUrl}" alt="Logo" class="logo" /></div>` : ''}
 
         <div class="section to-section">
           <p class="to-title">To,</p>
-          <p style="text-transform: uppercase;">${sale.customer_name || 'N/A'}</p>
+          <p class="customer-name">${sale.customer_name || 'N/A'}</p>
           ${addressLines.map(line => `<p>${line}</p>`).join('')}
           ${sale.shipping_pincode ? `<p>Pin:- ${sale.shipping_pincode}</p>` : ''}
           <p>Ph:- ${sale.customer_phone || 'N/A'}</p>
@@ -1415,22 +1425,24 @@ export function printBatchJobCards(sales: any[], currency = 'AED', businessInfo:
     <head>
       <title>Batch Job Cards</title>
       <style>
-        body { font-family: system-ui, -apple-system, sans-serif; color: #000; max-width: 800px; margin: 0 auto; padding: 40px; line-height: 1.6; }
-        .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 25px; min-height: 60px; }
-        .logo { max-width: 200px; max-height: 80px; }
+        @page { margin: 12mm 15mm; }
+        body { font-family: system-ui, -apple-system, sans-serif; color: #000; max-width: 850px; margin: 0 auto; padding: 10px; line-height: 1.4; }
+        .header { display: flex; justify-content: flex-end; align-items: flex-start; margin-bottom: 15px; }
+        .logo { max-width: 320px; max-height: 130px; object-fit: contain; }
         .section { margin-bottom: 20px; }
-        .to-section { font-size: 20px; font-weight: bold; }
-        .to-title { text-decoration: underline; font-size: 22px; margin-bottom: 10px; }
-        .from-section { font-size: 18px; font-weight: bold; }
-        .from-title { text-decoration: underline; margin-bottom: 10px; }
-        .products-text { font-size: 14px; text-align: center; color: #555; margin-top: 30px; margin-bottom: 10px; }
-        .order-id { font-size: 16px; text-align: center; color: #555; }
-        p { margin: 4px 0; }
-        hr { border: none; border-top: 1px dashed #000; margin: 20px 0; }
+        .to-section { font-size: 32px; font-weight: 900; margin-top: 10px; margin-bottom: 22px; }
+        .to-title { text-decoration: underline; font-size: 42px; font-weight: 900; margin-bottom: 12px; display: inline-block; }
+        .customer-name { font-size: 35px; font-weight: 900; text-transform: uppercase; margin-bottom: 10px; letter-spacing: 0.5px; }
+        .from-section { font-size: 26px; font-weight: 900; margin-top: 18px; }
+        .from-title { text-decoration: underline; font-size: 32px; font-weight: 900; margin-bottom: 10px; display: inline-block; }
+        .products-text { font-size: 22px; text-align: center; color: #000; margin-top: 25px; margin-bottom: 8px; font-weight: 800; }
+        .order-id { font-size: 30px; text-align: center; color: #000; font-weight: 900; }
+        p { margin: 6px 0; }
+        hr { border: none; border-top: 3px dashed #000; margin: 22px 0; }
         
         @media print {
           body { padding: 0; }
-          .page { margin-bottom: 0; padding: 20px; }
+          .page { margin-bottom: 0; padding: 10px; }
         }
       </style>
     </head>

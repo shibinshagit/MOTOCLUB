@@ -508,7 +508,8 @@ export async function getAllJobCards(deviceId: number) {
         s.*,
         COALESCE(c.name, s.customer_name_override) as customer_name,
         COALESCE(c.phone, s.customer_phone_override) as customer_phone,
-        d.name as branch_name
+        d.name as branch_name,
+        d.logo_url as device_logo
       FROM sales s
       LEFT JOIN customers c ON s.customer_id = c.id
       JOIN devices d ON s.device_id = d.id
