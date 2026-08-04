@@ -506,7 +506,56 @@ export async function getWarehouseTransfers(userId: number, searchTerm?: string,
       LIMIT 300
     `) as any[]
 
-    return { success: true, data: transfers }
+    const transferIds = transfers.map((t: any) => Number(t.id))
+    let transferItems: any[] = []
+    if (transferIds.length > 0) {
+      transferItems = (await sql`
+        SELECT
+          ti.id,
+          ti.transfer_id,
+          ti.product_id,
+          ti.product_variant_id,
+          ti.batch_id,
+          ti.quantity,
+          COALESCE(ti.unit_cost, 0)::numeric AS unit_cost,
+          COALESCE(ti.total_cost, 0)::numeric AS total_cost,
+          p.name AS product_name,
+          p.barcode,
+          pv.name AS variant_name,
+          pb.batch_no AS batch_number
+        FROM stock_transfer_items ti
+        LEFT JOIN products p ON p.id = ti.product_id
+        LEFT JOIN product_variants pv ON pv.id = ti.product_variant_id
+        LEFT JOIN product_batches pb ON pb.id = ti.batch_id
+        WHERE ti.transfer_id = ANY(${transferIds})
+        ORDER BY ti.id ASC
+      `) as any[]
+    }
+
+    const transfersWithItems = transfers.map((t: any) => {
+      const tId = Number(t.id)
+      const items = transferItems
+        .filter((item: any) => Number(item.transfer_id) === tId)
+        .map((row: any) => ({
+          id: Number(row.id),
+          product_id: Number(row.product_id),
+          product_variant_id: row.product_variant_id ? Number(row.product_variant_id) : null,
+          batch_id: row.batch_id ? Number(row.batch_id) : null,
+          quantity: Number(row.quantity),
+          unit_cost: Number(row.unit_cost || 0),
+          total_cost: Number(row.total_cost || 0),
+          product_name: row.product_name || `Product #${row.product_id}`,
+          barcode: row.barcode || "",
+          variant_name: row.variant_name || null,
+          batch_number: row.batch_number || null,
+        }))
+      return {
+        ...t,
+        items,
+      }
+    })
+
+    return { success: true, data: transfersWithItems }
   } catch (error) {
     console.error("Get warehouse transfers error:", error)
     return {
@@ -553,9 +602,13 @@ export async function getWarehouseTransferById(transferId: number, userId: numbe
         COALESCE(ti.unit_cost, 0)::numeric AS unit_cost,
         COALESCE(ti.total_cost, 0)::numeric AS total_cost,
         p.name AS product_name,
-        p.barcode
+        p.barcode,
+        pv.name AS variant_name,
+        pb.batch_no AS batch_number
       FROM stock_transfer_items ti
       LEFT JOIN products p ON p.id = ti.product_id
+      LEFT JOIN product_variants pv ON pv.id = ti.product_variant_id
+      LEFT JOIN product_batches pb ON pb.id = ti.batch_id
       WHERE ti.transfer_id = ${transferId}
       ORDER BY ti.id ASC
     `) as any[]
@@ -567,11 +620,15 @@ export async function getWarehouseTransferById(transferId: number, userId: numbe
         items: items.map((row) => ({
           id: Number(row.id),
           product_id: Number(row.product_id),
+          product_variant_id: row.product_variant_id ? Number(row.product_variant_id) : null,
+          batch_id: row.batch_id ? Number(row.batch_id) : null,
           quantity: Number(row.quantity),
           unit_cost: Number(row.unit_cost || 0),
           total_cost: Number(row.total_cost || 0),
           product_name: row.product_name || `Product #${row.product_id}`,
           barcode: row.barcode || "",
+          variant_name: row.variant_name || null,
+          batch_number: row.batch_number || null,
         })),
       },
     }

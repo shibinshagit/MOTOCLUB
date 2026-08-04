@@ -175,6 +175,12 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
   const hideCogs = isValueHidden("cogs")
   const hideStockCount = isValueHidden("stock_count")
 
+  useEffect(() => {
+    return () => {
+      document.body.style.pointerEvents = ""
+    }
+  }, [])
+
   // Sales data from Redux
   const sales = useSelector(selectSales)
   const isLoading = useSelector(selectSalesLoading)
@@ -1540,27 +1546,24 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
 
   // Handle delete sale from view modal
   const handleDeleteSaleFromView = async (saleId: number) => {
-    if (!deviceId) {
-      notifyError(toast, "Device ID not found")
-      return
-    }
+    const targetDeviceId = deviceId || 0
 
     try {
       setIsDeleting(true)
-      const result = await deleteSale(saleId, deviceId)
+      dispatch(removeSale(saleId))
+      setIsViewSaleModalOpen(false)
+      setSelectedSaleId(null)
+      
+      const result = await deleteSale(saleId, targetDeviceId)
 
       if (result.success) {
         markInventoryStale(dispatch)
-        dispatch(removeSale(saleId))
-        setIsViewSaleModalOpen(false)
-        setSelectedSaleId(null)
         notifySuccess(toast, "Sale deleted successfully")
         if (activeView === "info") {
           fetchSalesForMonth(salesViewMonth)
         }
       } else {
         notifyError(toast, result.message || "Failed to delete sale")
-        throw new Error(result.message || "Failed to delete sale")
       }
     } catch (error) {
       console.error("Delete sale error:", error)

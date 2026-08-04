@@ -6,16 +6,26 @@ import { getAllJobCards } from "@/app/actions/job-card-actions"
 import { deleteSale } from "@/app/actions/sale-actions"
 import { DeliveryStatusSelect } from "@/components/sales/delivery-status-select"
 import { TrackingCell } from "@/components/sales/tracking-cell"
-import { useSelector } from "react-redux"
+import { useDispatch, useSelector } from "react-redux"
 import { selectDeviceCurrency, selectDeviceId } from "@/store/slices/deviceSlice"
+import { markInventoryStale } from "@/lib/inventory-sync"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { ChevronDown, ChevronUp, MapPin, Phone, User, Calendar, Layers, Printer, Edit, Trash2, Search, PlayCircle, Eye, Plus } from "lucide-react"
+import { ChevronDown, ChevronUp, MapPin, Phone, User, Calendar, Layers, Printer, Edit, Trash2, Search, PlayCircle, Eye, Plus, Loader2 } from "lucide-react"
 import { formatPhoneNumber } from "@/lib/utils"
 import { useToast } from "@/components/ui/use-toast"
-import { useConfirm } from "@/hooks/use-confirm"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { printJobCard, printBatchJobCards } from "@/lib/receipt-utils"
 import { JobCardModal } from "@/components/shared/job-card/job-card-modal"
 import ViewSaleModal from "@/components/sales/view-sale-modal"
@@ -23,10 +33,10 @@ import { format } from "date-fns"
 
 export default function SalesOrdersTab() {
   const router = useRouter()
+  const dispatch = useDispatch()
   const currency = useSelector(selectDeviceCurrency)
   const deviceId = useSelector(selectDeviceId)
   const { toast } = useToast()
-  const { confirm, ConfirmDialog } = useConfirm()
 
   const [sales, setSales] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -59,15 +69,12 @@ export default function SalesOrdersTab() {
   }
 
   useEffect(() => {
-    if (deviceId) {
-      fetchSales()
-    }
+    fetchSales()
   }, [deviceId])
 
   const fetchSales = async () => {
     setLoading(true)
-    if (!deviceId) return
-    const res = await getAllJobCards(deviceId)
+    const res = await getAllJobCards(deviceId || 0)
     if (res.success && res.data) {
       setSales(res.data)
     }
@@ -93,36 +100,33 @@ export default function SalesOrdersTab() {
   const handleView = (sale: any) => {
     setViewingSaleId(sale.id)
   }
-  
+
   const handleOpenInPOS = (saleId: number) => {
     // Navigates to the POS tab and loads the sale as a draft for checkout
     router.push(`/dashboard?tab=sale&editSaleId=${saleId}`)
   }
 
-  const handleDelete = async (saleId: number) => {
-    const isConfirmed = await confirm({
-      title: "Delete Order",
-      description: "Are you sure you want to delete this order? This action cannot be undone.",
-      confirmLabel: "Delete",
-      cancelLabel: "Cancel",
-      destructive: true
-    })
-
-    if (!isConfirmed) return
-
+  const handleDelete = async (saleId: number): Promise<boolean> => {
     try {
-      if (!deviceId) throw new Error("No device ID")
-      const res = await deleteSale(saleId, deviceId)
+      setSales(prev => prev.filter(s => s.id !== saleId))
+      const res = await deleteSale(saleId, deviceId || 0)
       if (res.success) {
+        markInventoryStale(dispatch)
         toast({ title: "Success", description: "Order deleted successfully." })
         fetchSales() // Refresh
+        return true
       } else {
         toast({ title: "Error", description: res.message || "Failed to delete order.", variant: "destructive" })
+        fetchSales()
+        return false
       }
     } catch (error) {
-      toast({ title: "Error", description: "An error occurred.", variant: "destructive" })
+      console.error("Failed to delete order:", error)
+      toast({ title: "Error", description: "An error occurred while deleting the order.", variant: "destructive" })
+      return false
     }
   }
+
   const filteredSales = sales.filter((sale) => {
     if (!searchTerm) return true
     const term = searchTerm.toLowerCase()
@@ -133,6 +137,12 @@ export default function SalesOrdersTab() {
       sale.id?.toString().includes(term)
     )
   })
+
+  useEffect(() => {
+    return () => {
+      document.body.style.pointerEvents = ""
+    }
+  }, [])
 
   if (loading) {
     return (
@@ -145,8 +155,6 @@ export default function SalesOrdersTab() {
 
   return (
     <div className="space-y-4 p-4 md:p-6 pb-20">
-      {ConfirmDialog}
-      
       {editingSaleId && (
         <JobCardModal
           isOpen={true}
@@ -174,6 +182,23 @@ export default function SalesOrdersTab() {
           onClose={() => setViewingSaleId(null)}
           saleId={viewingSaleId}
           currency={currency}
+          onEdit={(saleData) => {
+            setViewingSaleId(null)
+            if (saleData?.id) {
+              const targetSale = sales.find(s => s.id === saleData.id) || saleData
+              handleEdit(targetSale)
+            }
+          }}
+          onDelete={async (saleId) => {
+            setViewingSaleId(null)
+            await handleDelete(saleId)
+          }}
+          onPrintInvoice={(saleId) => {
+            const targetSale = sales.find(s => s.id === saleId)
+            if (targetSale) {
+              handlePrint(targetSale)
+            }
+          }}
         />
       )}
 
@@ -337,7 +362,9 @@ export default function SalesOrdersTab() {
                             <Button variant="ghost" size="icon" className="h-8 w-8 text-violet-600 hover:text-violet-700 hover:bg-violet-50" onClick={() => handleEdit(sale)} title="Edit">
                               <Edit className="h-4 w-4" />
                             </Button>
-
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-rose-600 hover:text-rose-700 hover:bg-rose-50" onClick={() => handleDelete(sale.id)} title="Delete Order">
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
                           </div>
                         </td>
                       </tr>

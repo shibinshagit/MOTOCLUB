@@ -505,33 +505,51 @@ export async function getTodayJobCards(monthStr?: string, searchTerm?: string) {
   }
 }
 
-export async function getAllJobCards(deviceId: number) {
+export async function getAllJobCards(deviceId?: number) {
   noStore()
   try {
-    if (!deviceId) return { success: false, message: "Device ID required", data: [] }
+    let sales: any[] = []
 
-    // Retrieve all pending sales for all devices in the same company
-    const sales = await sql`
-      SELECT 
-        s.*,
-        COALESCE(c.name, s.customer_name_override) as customer_name,
-        COALESCE(c.phone, s.customer_phone_override) as customer_phone,
-        d.name as branch_name,
-        d.name as device_name,
-        d.logo_url as device_logo
-      FROM sales s
-      LEFT JOIN customers c ON s.customer_id = c.id
-      JOIN devices d ON s.device_id = d.id
-      WHERE s.device_id IN (
-        SELECT d2.id
-        FROM devices d1
-        JOIN devices d2 ON d2.company_id = d1.company_id
-        WHERE d1.id = ${deviceId}
-      )
-        AND (s.status != 'Cancelled' OR s.delivery_status = 'Returned')
-        AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%')
-      ORDER BY s.created_at DESC
-    `
+    if (deviceId && deviceId > 0) {
+      sales = await sql`
+        SELECT 
+          s.*,
+          COALESCE(c.name, s.customer_name_override) as customer_name,
+          COALESCE(c.phone, s.customer_phone_override) as customer_phone,
+          d.name as branch_name,
+          d.name as device_name,
+          d.logo_url as device_logo
+        FROM sales s
+        LEFT JOIN customers c ON s.customer_id = c.id
+        JOIN devices d ON s.device_id = d.id
+        WHERE s.device_id IN (
+          SELECT d2.id
+          FROM devices d1
+          JOIN devices d2 ON d2.company_id = d1.company_id
+          WHERE d1.id = ${deviceId}
+        )
+          AND (s.status != 'Cancelled' OR s.delivery_status = 'Returned')
+          AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%')
+        ORDER BY s.created_at DESC
+      `
+    } else {
+      sales = await sql`
+        SELECT 
+          s.*,
+          COALESCE(c.name, s.customer_name_override) as customer_name,
+          COALESCE(c.phone, s.customer_phone_override) as customer_phone,
+          d.name as branch_name,
+          d.name as device_name,
+          d.logo_url as device_logo
+        FROM sales s
+        LEFT JOIN customers c ON s.customer_id = c.id
+        LEFT JOIN devices d ON s.device_id = d.id
+        WHERE (s.status != 'Cancelled' OR s.delivery_status = 'Returned')
+          AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%')
+        ORDER BY s.created_at DESC
+        LIMIT 200
+      `
+    }
 
     // Fetch items for these sales
     const saleIds = sales.map((s: any) => s.id)

@@ -1,7 +1,7 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
-import { ArrowRightLeft, Check, ChevronDown, CreditCard, Eye, FilePenLine, History, Loader2, Pencil, Plus, RefreshCw, Search, Trash2, Undo2, Wallet, X } from "lucide-react"
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
+import { ArrowRightLeft, Check, ChevronDown, ChevronUp, CreditCard, Eye, FilePenLine, History, Layers, Loader2, Pencil, Plus, RefreshCw, Search, Trash2, Undo2, Wallet, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -136,6 +136,32 @@ export default function TransferTab({ userId }: TransferTabProps) {
   const [loadingWarehousePayments, setLoadingWarehousePayments] = useState(false)
   const [editWarehousePaymentId, setEditWarehousePaymentId] = useState<number | null>(null)
   const [undoingPaymentId, setUndoingPaymentId] = useState<number | null>(null)
+  const [expandedTransferId, setExpandedTransferId] = useState<number | null>(null)
+  const [loadingExpandedId, setLoadingExpandedId] = useState<number | null>(null)
+
+  const toggleExpand = async (id: number, transferObj?: any) => {
+    if (expandedTransferId === id) {
+      setExpandedTransferId(null)
+      return
+    }
+    setExpandedTransferId(id)
+
+    if (transferObj && (!transferObj.items || transferObj.items.length === 0)) {
+      try {
+        setLoadingExpandedId(id)
+        const res = await getWarehouseTransferById(id, userId)
+        if (res.success && res.data && res.data.items) {
+          setTransfers((prev) =>
+            prev.map((t) => (t.id === id ? { ...t, items: res.data.items } : t))
+          )
+        }
+      } catch (err) {
+        console.error("Failed to load transfer items on expand:", err)
+      } finally {
+        setLoadingExpandedId(null)
+      }
+    }
+  }
 
   const selectedSourceStockMap = useMemo(() => {
     return new Map(products.map((p) => [p.id, p.source_stock]))
@@ -859,6 +885,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
             <table className="w-full min-w-[860px]">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
+                  <th className="w-10 p-3 text-center text-xs font-medium text-gray-500 uppercase"></th>
                   <th className="text-left p-3 text-xs font-medium text-gray-500 uppercase">ID</th>
                   <th className="text-left p-3 text-xs font-medium text-gray-500 uppercase">Date</th>
                   <th className="text-left p-3 text-xs font-medium text-gray-500 uppercase">From</th>
@@ -872,101 +899,274 @@ export default function TransferTab({ userId }: TransferTabProps) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {transfers.map((transfer) => (
-                  <tr key={transfer.id} className="hover:bg-gray-50">
-                    <td className="p-3 text-sm font-medium text-blue-600">#{transfer.id}</td>
-                    <td className="p-3 text-sm text-gray-700">
-                      {new Date(transfer.transfer_date || transfer.created_at).toLocaleDateString()}
-                    </td>
-                    <td className="p-3 text-sm text-gray-700">{transfer.from_device_name}</td>
-                    <td className="p-3 text-sm text-gray-700">{transfer.to_device_name}</td>
-                    <td className="p-3 text-sm text-gray-700">{transfer.item_count}</td>
-                    <td className="p-3 text-sm text-gray-700">{transfer.total_quantity}</td>
-                    <td className="p-3 text-sm text-gray-700">
-                      {Number(transfer.total_amount || 0).toFixed(2)}
-                    </td>
-                    <td className="p-3 text-sm text-gray-700">
-                      <div className="flex flex-col">
-                        <span className="capitalize">{String(transfer.payment_status || "unpaid")}</span>
-                        <span className="text-xs text-gray-500">
-                          {Number(transfer.paid_amount || 0).toFixed(2)}
-                          {transfer.payment_method ? ` • ${transfer.payment_method}` : ""}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="p-3">
-                      {getStatusBadge(transfer.status)}
-                      {String(transfer.status).toLowerCase() === "rejected" && transfer.rejection_reason ? (
-                        <div className="text-xs text-rose-600 mt-1 max-w-[180px]">
-                          Reason: {transfer.rejection_reason}
-                        </div>
-                      ) : null}
-                    </td>
-                    <td className="p-3">
-                      {(() => {
-                        const status = String(transfer.status).toLowerCase()
-                        const isTerminal = status === "cancelled" || status === "rejected"
-                        const isPending = status === "pending"
-                        const isSender = Number(transfer.from_device_id) === userId
-                        const busy = actioningId === Number(transfer.id)
-                        return (
-                          <div className="flex flex-wrap gap-2">
-                            <Button size="sm" variant="outline" onClick={() => handleOpenView(Number(transfer.id))}>
-                              <Eye className="h-3.5 w-3.5 mr-1" />
-                              View
-                            </Button>
-                            {isPending && isSender ? (
-                              <>
+                {transfers.map((transfer) => {
+                  const isExpanded = expandedTransferId === transfer.id
+                  return (
+                    <Fragment key={transfer.id}>
+                      <tr 
+                        className={`hover:bg-violet-50/40 cursor-pointer transition-colors ${isExpanded ? "bg-slate-50/80 font-medium" : ""}`}
+                        onClick={() => toggleExpand(transfer.id, transfer)}
+                      >
+                        <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-slate-400 hover:text-slate-600"
+                            onClick={() => toggleExpand(transfer.id, transfer)}
+                            title={isExpanded ? "Collapse details" : "Expand details"}
+                          >
+                            {isExpanded ? <ChevronUp className="h-4 w-4 text-indigo-600" /> : <ChevronDown className="h-4 w-4" />}
+                          </Button>
+                        </td>
+                        <td className="p-3 text-sm font-semibold text-blue-600">#{transfer.id}</td>
+                        <td className="p-3 text-sm text-gray-700">
+                          {new Date(transfer.transfer_date || transfer.created_at).toLocaleDateString()}
+                        </td>
+                        <td className="p-3 text-sm text-gray-700">{transfer.from_device_name}</td>
+                        <td className="p-3 text-sm text-gray-700">{transfer.to_device_name}</td>
+                        <td className="p-3 text-sm text-gray-700">{transfer.item_count}</td>
+                        <td className="p-3 text-sm text-gray-700">{transfer.total_quantity}</td>
+                        <td className="p-3 text-sm font-semibold text-gray-800">
+                          {Number(transfer.total_amount || 0).toFixed(2)}
+                        </td>
+                        <td className="p-3 text-sm text-gray-700">
+                          <div className="flex flex-col">
+                            <span className="capitalize">{String(transfer.payment_status || "unpaid")}</span>
+                            <span className="text-xs text-gray-500">
+                              {Number(transfer.paid_amount || 0).toFixed(2)}
+                              {transfer.payment_method ? ` • ${transfer.payment_method}` : ""}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="p-3">
+                          {getStatusBadge(transfer.status)}
+                          {String(transfer.status).toLowerCase() === "rejected" && transfer.rejection_reason ? (
+                            <div className="text-xs text-rose-600 mt-1 max-w-[180px]">
+                              Reason: {transfer.rejection_reason}
+                            </div>
+                          ) : null}
+                        </td>
+                        <td className="p-3" onClick={(e) => e.stopPropagation()}>
+                          {(() => {
+                            const status = String(transfer.status).toLowerCase()
+                            const isTerminal = status === "cancelled" || status === "rejected"
+                            const isPending = status === "pending"
+                            const isSender = Number(transfer.from_device_id) === userId
+                            const busy = actioningId === Number(transfer.id)
+                            return (
+                              <div className="flex flex-wrap gap-2">
+                                <Button size="sm" variant="outline" onClick={() => handleOpenView(Number(transfer.id))}>
+                                  <Eye className="h-3.5 w-3.5 mr-1" />
+                                  View
+                                </Button>
+                                {isPending && isSender ? (
+                                  <>
+                                    <Button
+                                      size="sm"
+                                      className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                                      onClick={() => handleAcceptTransfer(Number(transfer.id))}
+                                      disabled={busy}
+                                    >
+                                      {busy ? (
+                                        <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                                      ) : (
+                                        <Check className="h-3.5 w-3.5 mr-1" />
+                                      )}
+                                      Accept
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="text-rose-600 hover:text-rose-700 border-rose-200 hover:border-rose-300"
+                                      onClick={() => openRejectDialog(Number(transfer.id))}
+                                      disabled={busy}
+                                    >
+                                      <X className="h-3.5 w-3.5 mr-1" />
+                                      Reject
+                                    </Button>
+                                  </>
+                                ) : null}
                                 <Button
                                   size="sm"
-                                  className="bg-emerald-600 hover:bg-emerald-700 text-white"
-                                  onClick={() => handleAcceptTransfer(Number(transfer.id))}
-                                  disabled={busy}
+                                  variant="outline"
+                                  onClick={() => handleOpenEdit(Number(transfer.id))}
+                                  disabled={isTerminal}
                                 >
-                                  {busy ? (
-                                    <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                                  ) : (
-                                    <Check className="h-3.5 w-3.5 mr-1" />
-                                  )}
-                                  Accept
+                                  <Pencil className="h-3.5 w-3.5 mr-1" />
+                                  Edit
                                 </Button>
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  className="text-rose-600 hover:text-rose-700 border-rose-200 hover:border-rose-300"
-                                  onClick={() => openRejectDialog(Number(transfer.id))}
-                                  disabled={busy}
+                                  className="text-red-600 hover:text-red-700 border-red-200 hover:border-red-300"
+                                  onClick={() => handleCancelTransfer(Number(transfer.id))}
+                                  disabled={isTerminal}
                                 >
-                                  <X className="h-3.5 w-3.5 mr-1" />
-                                  Reject
+                                  <Trash2 className="h-3.5 w-3.5 mr-1" />
+                                  Cancel
                                 </Button>
-                              </>
-                            ) : null}
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleOpenEdit(Number(transfer.id))}
-                              disabled={isTerminal}
-                            >
-                              <Pencil className="h-3.5 w-3.5 mr-1" />
-                              Edit
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="text-red-600 hover:text-red-700 border-red-200 hover:border-red-300"
-                              onClick={() => handleCancelTransfer(Number(transfer.id))}
-                              disabled={isTerminal}
-                            >
-                              <Trash2 className="h-3.5 w-3.5 mr-1" />
-                              Cancel
-                            </Button>
-                          </div>
-                        )
-                      })()}
-                    </td>
-                  </tr>
-                ))}
+                              </div>
+                            )
+                          })()}
+                        </td>
+                      </tr>
+
+                      {/* Dropdown / Expanded Products Details Row */}
+                      {isExpanded && (
+                        <tr key={`expanded-${transfer.id}`} className="bg-slate-50/70 border-b border-slate-200">
+                          <td colSpan={11} className="p-4 sm:p-6">
+                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                              {/* Product Line Items Table */}
+                              <div className="col-span-1 lg:col-span-2 space-y-3">
+                                <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
+                                  <Layers className="h-4 w-4 text-indigo-600" />
+                                  Transfer Product Details ({transfer.items?.length || transfer.item_count || 0} item{transfer.items?.length !== 1 ? 's' : ''})
+                                </h4>
+
+                                {loadingExpandedId === transfer.id ? (
+                                  <div className="flex items-center justify-center p-8 text-slate-500 text-sm">
+                                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                    Loading product details...
+                                  </div>
+                                ) : !transfer.items || transfer.items.length === 0 ? (
+                                  <div className="p-6 text-center text-slate-500 text-sm border rounded-lg bg-slate-50">
+                                    No product items found for this transfer.
+                                  </div>
+                                ) : (
+                                  <div className="rounded-lg border border-slate-200 overflow-hidden text-sm shadow-sm">
+                                    <table className="w-full">
+                                      <thead className="bg-slate-100/90 text-slate-600 text-xs uppercase tracking-wider font-semibold border-b border-slate-200">
+                                        <tr>
+                                          <th className="px-3 py-2.5 text-left">#</th>
+                                          <th className="px-3 py-2.5 text-left">Product Name</th>
+                                          <th className="px-3 py-2.5 text-left">Variant / Batch</th>
+                                          <th className="px-3 py-2.5 text-center">Qty</th>
+                                          <th className="px-3 py-2.5 text-right">Unit Cost</th>
+                                          <th className="px-3 py-2.5 text-right">Total Cost</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-slate-100 text-xs sm:text-sm">
+                                        {transfer.items.map((item: any, idx: number) => {
+                                          const unitCost = Number(item.unit_cost || 0)
+                                          const totalCost = Number(item.total_cost || unitCost * (item.quantity || 0))
+                                          return (
+                                            <tr key={item.id || idx} className="hover:bg-slate-50/60 transition-colors">
+                                              <td className="px-3 py-2.5 text-slate-400 font-mono text-xs">{idx + 1}</td>
+                                              <td className="px-3 py-2.5 font-medium text-slate-800">
+                                                <div>{item.product_name || `Product #${item.product_id}`}</div>
+                                                {item.barcode && <div className="text-[11px] font-mono text-slate-400">Barcode: {item.barcode}</div>}
+                                              </td>
+                                              <td className="px-3 py-2.5 text-slate-600 text-xs">
+                                                {item.variant_name || item.batch_number ? (
+                                                  <div className="flex flex-col gap-0.5">
+                                                    {item.variant_name && <span className="font-medium text-slate-700">{item.variant_name}</span>}
+                                                    {item.batch_number && <span className="text-[11px] text-slate-400">Batch: {item.batch_number}</span>}
+                                                  </div>
+                                                ) : (
+                                                  <span className="text-slate-400 italic">Default</span>
+                                                )}
+                                              </td>
+                                              <td className="px-3 py-2.5 text-center font-bold text-slate-700">{item.quantity}</td>
+                                              <td className="px-3 py-2.5 text-right text-slate-600">{formatCurrency(unitCost)}</td>
+                                              <td className="px-3 py-2.5 text-right font-semibold text-slate-900">{formatCurrency(totalCost)}</td>
+                                            </tr>
+                                          )
+                                        })}
+                                      </tbody>
+                                      <tfoot className="bg-slate-50 border-t border-slate-200 text-xs font-medium text-slate-700">
+                                        <tr>
+                                          <td colSpan={3} className="px-3 py-2 text-right font-bold text-slate-600">Total:</td>
+                                          <td className="px-3 py-2 text-center font-extrabold text-slate-900">{transfer.total_quantity || transfer.items.reduce((acc: number, i: any) => acc + (i.quantity || 0), 0)}</td>
+                                          <td></td>
+                                          <td className="px-3 py-2 text-right font-extrabold text-slate-900">{formatCurrency(transfer.total_amount)}</td>
+                                        </tr>
+                                      </tfoot>
+                                    </table>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Transfer Summary Card */}
+                              <div className="col-span-1 space-y-4 border-l border-slate-100 pl-0 lg:pl-6">
+                                <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
+                                  <ArrowRightLeft className="h-4 w-4 text-indigo-600" />
+                                  Transfer Summary
+                                </h4>
+
+                                <div className="space-y-3 text-xs sm:text-sm text-slate-600">
+                                  <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 flex justify-between items-center">
+                                    <div>
+                                      <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 block">From Warehouse</span>
+                                      <p className="font-semibold text-slate-800">{transfer.from_device_name}</p>
+                                    </div>
+                                    <span className="text-slate-400">➔</span>
+                                    <div className="text-right">
+                                      <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 block">To Warehouse</span>
+                                      <p className="font-semibold text-slate-800">{transfer.to_device_name}</p>
+                                    </div>
+                                  </div>
+
+                                  <div className="grid grid-cols-2 gap-2 text-xs">
+                                    <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                                      <span className="text-[10px] font-semibold uppercase text-slate-400 block">Transfer Date</span>
+                                      <span className="font-medium text-slate-800">{new Date(transfer.transfer_date || transfer.created_at).toLocaleDateString()}</span>
+                                    </div>
+                                    <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                                      <span className="text-[10px] font-semibold uppercase text-slate-400 block">Status</span>
+                                      <span className="font-semibold">{getStatusBadge(transfer.status)}</span>
+                                    </div>
+                                  </div>
+
+                                  <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 space-y-1 text-xs">
+                                    <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 block mb-1 flex items-center gap-1">
+                                      <Wallet className="h-3 w-3 text-slate-400" /> Payment Summary
+                                    </span>
+                                    <div className="flex justify-between py-0.5">
+                                      <span className="text-slate-500">Status:</span>
+                                      <span className="font-semibold text-slate-800 capitalize">{transfer.payment_status || "unpaid"}</span>
+                                    </div>
+                                    <div className="flex justify-between py-0.5">
+                                      <span className="text-slate-500">Total Amount:</span>
+                                      <span className="font-bold text-slate-800">{formatCurrency(transfer.total_amount)}</span>
+                                    </div>
+                                    <div className="flex justify-between py-0.5">
+                                      <span className="text-slate-500">Paid Amount:</span>
+                                      <span className="font-bold text-emerald-600">{formatCurrency(transfer.paid_amount)}</span>
+                                    </div>
+                                    <div className="flex justify-between py-0.5 pt-1 border-t border-slate-200">
+                                      <span className="text-slate-500 font-medium">Balance Due:</span>
+                                      <span className="font-bold text-rose-600">{formatCurrency(Math.max(0, Number(transfer.total_amount || 0) - Number(transfer.paid_amount || 0)))}</span>
+                                    </div>
+                                    {transfer.payment_method && (
+                                      <div className="flex justify-between py-0.5 text-slate-500">
+                                        <span>Payment Method:</span>
+                                        <span>{transfer.payment_method}</span>
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  {transfer.notes && (
+                                    <div className="bg-amber-50/60 p-3 rounded-lg border border-amber-100 text-xs">
+                                      <span className="font-semibold text-amber-800 block mb-0.5">Notes:</span>
+                                      <p className="text-amber-900 whitespace-pre-wrap">{transfer.notes}</p>
+                                    </div>
+                                  )}
+
+                                  {transfer.rejection_reason && (
+                                    <div className="bg-rose-50 p-3 rounded-lg border border-rose-100 text-xs">
+                                      <span className="font-semibold text-rose-800 block mb-0.5">Rejection Reason:</span>
+                                      <p className="text-rose-900">{transfer.rejection_reason}</p>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  )
+                })}
               </tbody>
             </table>
           </div>

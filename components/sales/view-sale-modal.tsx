@@ -7,7 +7,16 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Edit, Loader2, Package, Printer, RotateCcw, Trash2, Wrench } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 import { notifyError, notifySuccess } from "@/lib/notifications"
-import { useConfirm } from "@/hooks/use-confirm"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { FormAlert } from "@/components/ui/form-alert"
 import { format } from "date-fns"
 import { useSelector } from "react-redux"
@@ -126,9 +135,14 @@ export default function ViewSaleModal({
   const [isItemLoading, setIsItemLoading] = useState(false)
   const [isUpdatingDelivery, setIsUpdatingDelivery] = useState(false)
   const { toast } = useToast()
-  const { confirm, ConfirmDialog, isConfirmOpen } = useConfirm()
 
   const closeDetailProduct = () => setDetailProduct(null)
+
+  useEffect(() => {
+    return () => {
+      document.body.style.pointerEvents = ""
+    }
+  }, [])
 
   const deviceCurrency = useSelector(selectDeviceCurrency) || currency || "AED"
   const deviceId = useSelector(selectDeviceId)
@@ -280,20 +294,11 @@ export default function ViewSaleModal({
 
   const handleDelete = async () => {
     if (!onDelete || !saleId || isDeleting || isDeletingLocal) return
-
-    const shouldDelete = await confirm({
-      title: "Delete this sale?",
-      description:
-        "This permanently removes the sale, its accounting entries, and restores product stock where applicable. This cannot be undone.",
-      confirmLabel: "Delete sale",
-      destructive: true,
-    })
-    if (!shouldDelete) return
-
     try {
       setIsDeletingLocal(true)
       await onDelete(saleId)
-    } catch {
+    } catch (err) {
+      console.error("Delete sale error:", err)
       notifyError(toast, "Failed to delete sale")
     } finally {
       setIsDeletingLocal(false)
@@ -308,13 +313,9 @@ export default function ViewSaleModal({
       return
     }
 
-    const confirmReturn = await confirm({
-      title: "Return this sale?",
-      description:
-        "This will change the sale status to Cancelled, restore product stock, and create accounting adjustments. This action cannot be undone.",
-      destructive: true,
-      confirmLabel: "Return sale",
-    })
+    const confirmReturn = window.confirm(
+      "This will change the sale status to Cancelled, restore product stock, and create accounting adjustments. This action cannot be undone. Do you want to proceed?"
+    )
 
     if (!confirmReturn) return
 
@@ -427,15 +428,8 @@ export default function ViewSaleModal({
 
   return (
     <>
-      <Dialog open={isOpen} modal={!isConfirmOpen} onOpenChange={(open) => !open && !deleteInProgress && onClose()}>
-        <DialogContent
-          overlayClassName={cn(
-            "duration-0 data-[state=open]:animate-none data-[state=closed]:animate-none",
-            isConfirmOpen && "pointer-events-none",
-          )}
-          className="max-w-5xl gap-0 overflow-hidden border-slate-200 p-0 duration-0 data-[state=open]:animate-none data-[state=closed]:animate-none sm:max-w-5xl [&>button]:top-3 [&>button]:right-3"
-          style={isConfirmOpen ? { pointerEvents: "none" } : undefined}
-        >
+      <Dialog open={isOpen} onOpenChange={(open) => !open && !deleteInProgress && onClose()}>
+        <DialogContent className="max-w-5xl gap-0 overflow-hidden border-slate-200 p-0 duration-0 data-[state=open]:animate-none data-[state=closed]:animate-none sm:max-w-5xl [&>button]:top-3 [&>button]:right-3">
           <DialogHeader className="space-y-0 border-b border-slate-200 bg-[#F1F4F9] px-4 py-3 text-left">
             <DialogTitle className="sr-only">Sale {saleId ? `#${saleId}` : "details"}</DialogTitle>
             <div className="flex flex-wrap items-center gap-2 pr-10">
@@ -808,8 +802,6 @@ export default function ViewSaleModal({
           ) : null}
         </DialogContent>
       </Dialog>
-
-      {ConfirmDialog}
     </>
   )
 }
