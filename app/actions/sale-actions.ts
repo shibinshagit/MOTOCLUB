@@ -2040,9 +2040,11 @@ export async function updateSaleDeliveryStatus(
     }
 
     // Now update the sales table, with retry for DOD tracking ID allocation
-    let newTrackingId = rows[0].tracking_id;
-    if (newTrackingId && newTrackingId.startsWith('JC-')) {
-      newTrackingId = null;
+    // If the caller supplied a tracking ID, always use it (overwrite the old one)
+    let newTrackingId: string | null = trackingId || null;
+    const existingTrackingId = rows[0].tracking_id;
+    if (!newTrackingId) {
+      newTrackingId = (existingTrackingId && !existingTrackingId.startsWith('JC-')) ? existingTrackingId : null;
     }
     let updateSuccess = false;
     let retries = 5;
@@ -2066,16 +2068,31 @@ export async function updateSaleDeliveryStatus(
           newTrackingId = 'DOD' + String(nextNum).padStart(3, '0');
         }
 
-        await sql`
-          UPDATE sales
-          SET delivery_status = ${deliveryStatus},
-              shipped_at = ${shippedAt},
-              delivered_at = ${deliveredAt},
-              tracking_id = COALESCE(tracking_id, ${newTrackingId}),
-              updated_at = NOW()
-          WHERE id = ${saleId}
-            AND device_id = ${deviceId}
-        `
+        if (trackingId) {
+          // User explicitly provided a tracking ID — always overwrite the stored one
+          await sql`
+            UPDATE sales
+            SET delivery_status = ${deliveryStatus},
+                shipped_at = ${shippedAt},
+                delivered_at = ${deliveredAt},
+                tracking_id = ${newTrackingId},
+                updated_at = NOW()
+            WHERE id = ${saleId}
+              AND device_id = ${deviceId}
+          `
+        } else {
+          // No tracking ID supplied — only fill if currently null (preserves existing)
+          await sql`
+            UPDATE sales
+            SET delivery_status = ${deliveryStatus},
+                shipped_at = ${shippedAt},
+                delivered_at = ${deliveredAt},
+                tracking_id = COALESCE(tracking_id, ${newTrackingId}),
+                updated_at = NOW()
+            WHERE id = ${saleId}
+              AND device_id = ${deviceId}
+          `
+        }
         updateSuccess = true;
       } catch (err: any) {
         if (err.message && (err.message.includes('idx_sales_active_dod_tracking') || err.message.includes('unique constraint'))) {
