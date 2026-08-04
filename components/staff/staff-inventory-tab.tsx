@@ -1,13 +1,14 @@
 "use client"
 
 import { useState, useEffect, useMemo } from "react"
-import { Package, Search, PackageOpen, AlertTriangle, AlertCircle, RefreshCw, Loader2 } from "lucide-react"
+import { Package, Search, PackageOpen, AlertTriangle, AlertCircle, RefreshCw, Loader2, ImageIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { getStaffInventory } from "@/app/actions/staff-inventory-actions"
 import { useToast } from "@/components/ui/use-toast"
 import { cn } from "@/lib/utils"
 import StaffViewProductModal from "./staff-view-product-modal"
+import StaffMediaEditModal from "./staff-media-edit-modal"
 import { ShareProductButton } from "@/components/shared/share-product-button"
 import { useSelector } from "react-redux"
 import { selectDeviceCurrency, selectDeviceId } from "@/store/slices/deviceSlice"
@@ -42,6 +43,7 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState("")
   const [selectedProduct, setSelectedProduct] = useState<any>(null)
+  const [mediaEditProduct, setMediaEditProduct] = useState<any>(null)
 
   const loadInventory = async () => {
     setLoading(true)
@@ -62,6 +64,15 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
   useEffect(() => {
     loadInventory()
   }, [])
+
+  const handleProductUpdated = (updatedProduct: any) => {
+    setProducts((prev) =>
+      prev.map((p) => (p.id === updatedProduct.id ? { ...p, ...updatedProduct } : p))
+    )
+    if (selectedProduct?.id === updatedProduct.id) {
+      setSelectedProduct((prev: any) => (prev ? { ...prev, ...updatedProduct } : null))
+    }
+  }
 
   const filteredProducts = useMemo(() => {
     if (!searchTerm.trim()) return products
@@ -92,7 +103,7 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <h1 className="text-xl font-bold text-slate-800">Inventory Management</h1>
-            <p className="text-sm text-slate-500 mt-1">View available stock and product locations</p>
+            <p className="text-sm text-slate-500 mt-1">View stock, locations, and manage product photos & videos</p>
           </div>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={() => loadInventory()} disabled={loading}>
@@ -125,12 +136,8 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
               className="pl-9 bg-slate-50 border-slate-200"
             />
           </div>
-          <div className="flex items-center gap-2">
-            <div className="px-3 py-1.5 bg-slate-100 text-slate-600 text-sm rounded-md font-medium">
-              Read Only Mode
-            </div>
-          </div>
         </div>
+
 
         {/* Table */}
         <div className="bg-white rounded-b-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -233,13 +240,25 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
                         )}
                       </td>
                       <td className="px-6 py-3 text-center" onClick={(e) => e.stopPropagation()}>
-                        <ShareProductButton 
-                          product={product} 
-                          currency={currency} 
-                          currentDeviceId={deviceId || undefined} 
-                          className="h-8 border-violet-200 bg-white px-3 text-xs text-violet-700 hover:bg-violet-50"
-                          label="Share" 
-                        />
+                        <div className="flex items-center justify-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setMediaEditProduct(product)}
+                            className="h-8 border-slate-200 bg-white px-2.5 text-xs text-slate-700 hover:bg-slate-50"
+                            title="Edit photos and videos"
+                          >
+                            <ImageIcon className="h-3.5 w-3.5 mr-1 text-violet-600" />
+                            Media
+                          </Button>
+                          <ShareProductButton 
+                            product={product} 
+                            currency={currency} 
+                            currentDeviceId={deviceId || undefined} 
+                            className="h-8 border-violet-200 bg-white px-3 text-xs text-violet-700 hover:bg-violet-50"
+                            label="Share" 
+                          />
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -254,7 +273,18 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
         isOpen={!!selectedProduct} 
         onClose={() => setSelectedProduct(null)} 
         product={selectedProduct} 
+        onProductUpdated={handleProductUpdated}
       />
+
+      {mediaEditProduct && (
+        <StaffMediaEditModal
+          isOpen={!!mediaEditProduct}
+          onClose={() => setMediaEditProduct(null)}
+          product={mediaEditProduct}
+          onSuccess={handleProductUpdated}
+        />
+      )}
     </div>
   )
 }
+

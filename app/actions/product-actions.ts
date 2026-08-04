@@ -54,15 +54,17 @@ export async function encodeNumberAsLetters(num: number): Promise<string> {
   return result
 }
 
-// Upload image to Vercel Blob with explicit token handling
+// Upload image to Vercel Blob with explicit token handling, or fallback to Data URL
 async function uploadProductImage(file: File, productName: string): Promise<string | null> {
   try {
-    // Get the token from environment variables
     const token = process.env.BLOB_READ_WRITE_TOKEN
 
     if (!token) {
-      console.error("BLOB_READ_WRITE_TOKEN environment variable is not set")
-      throw new Error("Blob storage token not configured")
+      console.warn("BLOB_READ_WRITE_TOKEN environment variable is not set. Using Data URL fallback.")
+      const buffer = await file.arrayBuffer()
+      const base64 = Buffer.from(buffer).toString("base64")
+      const mime = file.type || "image/jpeg"
+      return `data:${mime};base64,${base64}`
     }
 
     // Create a safe filename
@@ -84,10 +86,12 @@ async function uploadProductImage(file: File, productName: string): Promise<stri
   } catch (error) {
     console.error("Error uploading image:", error)
 
-    // Return more specific error information
     if (error instanceof Error) {
       if (error.message.includes("token")) {
-        throw new Error("Image upload failed: Blob storage not properly configured")
+        const buffer = await file.arrayBuffer()
+        const base64 = Buffer.from(buffer).toString("base64")
+        const mime = file.type || "image/jpeg"
+        return `data:${mime};base64,${base64}`
       } else if (error.message.includes("network")) {
         throw new Error("Image upload failed: Network error")
       } else {
@@ -104,8 +108,11 @@ async function uploadProductVideo(file: File, productName: string): Promise<stri
     const token = process.env.BLOB_READ_WRITE_TOKEN
 
     if (!token) {
-      console.error("BLOB_READ_WRITE_TOKEN environment variable is not set")
-      throw new Error("Blob storage token not configured")
+      console.warn("BLOB_READ_WRITE_TOKEN environment variable is not set. Using Data URL fallback.")
+      const buffer = await file.arrayBuffer()
+      const base64 = Buffer.from(buffer).toString("base64")
+      const mime = file.type || "video/mp4"
+      return `data:${mime};base64,${base64}`
     }
 
     const timestamp = Date.now()
@@ -122,11 +129,15 @@ async function uploadProductVideo(file: File, productName: string): Promise<stri
   } catch (error) {
     console.error("Error uploading video:", error)
     if (error instanceof Error) {
-      throw new Error(`Video upload failed: ${error.message}`)
+      const buffer = await file.arrayBuffer()
+      const base64 = Buffer.from(buffer).toString("base64")
+      const mime = file.type || "video/mp4"
+      return `data:${mime};base64,${base64}`
     }
     return null
   }
 }
+
 
 const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024
 const MAX_VIDEO_SIZE_BYTES = 50 * 1024 * 1024
@@ -588,47 +599,70 @@ REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
     let companyTotalStockMap = new Map<number, number>()
     if (userId) {
       const deviceStocks = await sql`
-        SELECT pv.product_id, SUM(pbds.stock) as stock
-        FROM product_batch_device_stock pbds
-        JOIN product_batches pb ON pb.id = pbds.batch_id
-        JOIN product_variants pv ON pv.id = pb.product_variant_id
-        JOIN products p ON p.id = pv.product_id
-        WHERE pbds.device_id = ${userId} AND p.has_variants = true
-        GROUP BY pv.product_id
-        UNION ALL
-        SELECT pds.product_id, SUM(pds.stock) as stock
-        FROM product_device_stock pds
-        JOIN products p ON p.id = pds.product_id
-        WHERE pds.device_id = ${userId} AND p.has_variants = false
-        GROUP BY pds.product_id
+        SELECT 
+          p.id AS product_id,
+          (
+            COALESCE((
+              SELECT SUM(pbds.stock)
+              FROM product_batch_device_stock pbds
+              JOIN product_batches pb ON pb.id = pbds.batch_id
+              JOIN product_variants pv ON pv.id = pb.product_variant_id
+              WHERE pv.product_id = p.id AND pbds.device_id = ${userId}
+            ), 0)
+            +
+            COALESCE((
+              SELECT SUM(pds.stock)
+              FROM product_device_stock pds
+              WHERE pds.product_id = p.id AND pds.device_id = ${userId}
+            ), 0)
+          ) AS stock
+        FROM products p
+        WHERE p.created_by IN (
+          SELECT d2.id
+          FROM devices d1
+          JOIN devices d2 ON d2.company_id = d1.company_id
+          WHERE d1.id = ${userId}
+        )
       `
       stockMap = new Map<number, number>(deviceStocks.map((row: any) => [Number(row.product_id), Number(row.stock)]))
 
       const companyDeviceStocks = await sql`
-        SELECT pv.product_id, COALESCE(SUM(pbds.stock), 0) AS total_stock
-        FROM product_batch_device_stock pbds
-        JOIN product_batches pb ON pb.id = pbds.batch_id
-        JOIN product_variants pv ON pv.id = pb.product_variant_id
-        JOIN products p ON p.id = pv.product_id
-        JOIN devices d ON d.id = pbds.device_id
-        WHERE p.has_variants = true AND d.company_id = (
-          SELECT company_id FROM devices WHERE id = ${userId}
+        SELECT 
+          p.id AS product_id,
+          (
+            COALESCE((
+              SELECT SUM(pbds.stock)
+              FROM product_batch_device_stock pbds
+              JOIN product_batches pb ON pb.id = pbds.batch_id
+              JOIN product_variants pv ON pv.id = pb.product_variant_id
+              JOIN devices d ON d.id = pbds.device_id
+              WHERE pv.product_id = p.id AND d.company_id = (
+                SELECT company_id FROM devices WHERE id = ${userId}
+              )
+            ), 0)
+            +
+            COALESCE((
+              SELECT SUM(pds.stock)
+              FROM product_device_stock pds
+              JOIN devices d ON d.id = pds.device_id
+              WHERE pds.product_id = p.id AND d.company_id = (
+                SELECT company_id FROM devices WHERE id = ${userId}
+              )
+            ), 0)
+          ) AS total_stock
+        FROM products p
+        WHERE p.created_by IN (
+          SELECT d2.id
+          FROM devices d1
+          JOIN devices d2 ON d2.company_id = d1.company_id
+          WHERE d1.id = ${userId}
         )
-        GROUP BY pv.product_id
-        UNION ALL
-        SELECT pds.product_id, COALESCE(SUM(pds.stock), 0) AS total_stock
-        FROM product_device_stock pds
-        JOIN products p ON p.id = pds.product_id
-        JOIN devices d ON d.id = pds.device_id
-        WHERE p.has_variants = false AND d.company_id = (
-          SELECT company_id FROM devices WHERE id = ${userId}
-        )
-        GROUP BY pds.product_id
       `
       companyTotalStockMap = new Map(
         companyDeviceStocks.map((row: any) => [Number(row.product_id), Number(row.total_stock)]),
       )
     }
+
 
     // Fetch default variant for every product so the purchase UI always has pricing
     const productIds: number[] = (products as any[]).map((p: any) => Number(p.id))
@@ -1517,9 +1551,6 @@ export async function updateProduct(formData: FormData) {
     }
 
     if (result.length > 0) {
-      await upsertDeviceStock(id, stockDeviceId, stock)
-      // Obsolete stock logging removed because stock is entirely driven by batches/purchases now
-
       if (productVariants.length > 0) {
         for (const variant of productVariants) {
           if (variant.id) {
@@ -1540,14 +1571,8 @@ export async function updateProduct(formData: FormData) {
             
             // Adjust stock if it changed
             try {
-              const batchStockRows = await sql`
-                SELECT COALESCE(SUM(pbds.stock), 0) as stock
-                FROM product_batch_device_stock pbds
-                JOIN product_batches pb ON pb.id = pbds.batch_id
-                WHERE pb.product_variant_id = ${variant.id} AND pbds.device_id = ${stockDeviceId}
-              `
-              const oldStock = Number(batchStockRows[0]?.stock || 0)
-              const newStock = Number(variant.stock) || 0
+              const oldStock = await getDeviceProductStock(id, stockDeviceId)
+              const newStock = variant.stock !== undefined && variant.stock !== null ? Number(variant.stock) : Number(stock) || 0
               const delta = newStock - oldStock
               if (delta !== 0) {
                 const batches = await sql`
@@ -1555,20 +1580,34 @@ export async function updateProduct(formData: FormData) {
                   WHERE product_id = ${id} AND product_variant_id = ${variant.id} 
                   ORDER BY created_at ASC LIMIT 1
                 `
-                const batchId = batches.length > 0 ? batches[0].id : null
-                if (batchId) {
-                  // Adjust using inventory service
-                  await adjustDeviceProductStock(id, variant.id, batchId, stockDeviceId, delta)
-                  
-                  // Record history
-                  await sql`
-                    INSERT INTO product_stock_history (
-                      product_id, product_variant_id, batch_id, quantity, type, reference_type, notes, created_by, device_id
+                let batchId = batches.length > 0 ? batches[0].id : null
+                if (!batchId) {
+                  const initBatchNo = `ADJ-${id}-${variant.id}-${Date.now().toString().slice(-4)}`
+                  const costPrice = Number(variant.wholesale_price ?? variant.cost_price ?? wholesalePrice ?? 0)
+                  const sellingPrice = Number(variant.price ?? variant.msp ?? msp ?? price ?? 0)
+                  const initBatch = await sql`
+                    INSERT INTO product_batches (
+                      product_id, product_variant_id, batch_no, cost_price, selling_price,
+                      quantity_purchased, remaining_quantity, status
                     ) VALUES (
-                      ${id}, ${variant.id}, ${batchId}, ${delta}, 'adjustment', 'manual', 'Stock adjusted from Product Edit', ${stockDeviceId}, ${stockDeviceId}
-                    )
+                      ${id}, ${variant.id}, ${initBatchNo}, ${costPrice}, ${sellingPrice},
+                      ${Math.max(0, newStock)}, ${Math.max(0, newStock)}, 'active'
+                    ) RETURNING id
                   `
+                  batchId = initBatch[0].id
                 }
+
+                // Adjust using inventory service
+                await adjustDeviceProductStock(id, variant.id, batchId, stockDeviceId, delta)
+                
+                // Record history
+                await sql`
+                  INSERT INTO product_stock_history (
+                    product_id, product_variant_id, batch_id, quantity, type, reference_type, notes, created_by, device_id
+                  ) VALUES (
+                    ${id}, ${variant.id}, ${batchId}, ${delta}, 'adjustment', 'manual', 'Stock adjusted from Product Edit', ${stockDeviceId}, ${stockDeviceId}
+                  )
+                `
               }
             } catch (e) {
               console.error("Failed to adjust stock during product update:", e)
@@ -1628,7 +1667,66 @@ export async function updateProduct(formData: FormData) {
             }
           }
         }
+      } else {
+        // Handle single product stock adjustment when productVariants array is empty
+        try {
+          const oldStock = await getDeviceProductStock(id, stockDeviceId)
+          const newStock = Number(stock) || 0
+          const delta = newStock - oldStock
+          if (delta !== 0) {
+            const existingVariants = await sql`
+              SELECT id FROM product_variants WHERE product_id = ${id} ORDER BY id ASC LIMIT 1
+            `
+            let variantId = existingVariants.length > 0 ? existingVariants[0].id : null
+            if (!variantId) {
+              const insertedVariant = await sql`
+                INSERT INTO product_variants (
+                  product_id, name, sku, barcode, cost_price, wholesale_price,
+                  price, msp, mrp, minimum_stock, shelf, status
+                ) VALUES (
+                  ${id}, ${name}, ${""}, ${barcode || ""},
+                  ${wholesalePrice || 0}, ${wholesalePrice || 0}, ${msp || price || 0},
+                  ${msp || price || 0}, 0, 0, ${shelf || ""}, 'active'
+                ) RETURNING id
+              `
+              variantId = insertedVariant[0].id
+            }
+
+            const batches = await sql`
+              SELECT id FROM product_batches 
+              WHERE product_id = ${id} AND product_variant_id = ${variantId} 
+              ORDER BY created_at ASC LIMIT 1
+            `
+            let batchId = batches.length > 0 ? batches[0].id : null
+            if (!batchId) {
+              const initBatchNo = `ADJ-${id}-${variantId}-${Date.now().toString().slice(-4)}`
+              const initBatch = await sql`
+                INSERT INTO product_batches (
+                  product_id, product_variant_id, batch_no, cost_price, selling_price,
+                  quantity_purchased, remaining_quantity, status
+                ) VALUES (
+                  ${id}, ${variantId}, ${initBatchNo}, ${wholesalePrice || 0}, ${msp || price || 0},
+                  ${Math.max(0, newStock)}, ${Math.max(0, newStock)}, 'active'
+                ) RETURNING id
+              `
+              batchId = initBatch[0].id
+            }
+
+            await adjustDeviceProductStock(id, variantId, batchId, stockDeviceId, delta)
+
+            await sql`
+              INSERT INTO product_stock_history (
+                product_id, product_variant_id, batch_id, quantity, type, reference_type, notes, created_by, device_id
+              ) VALUES (
+                ${id}, ${variantId}, ${batchId}, ${delta}, 'adjustment', 'manual', 'Stock adjusted from Product Edit', ${stockDeviceId}, ${stockDeviceId}
+              )
+            `
+          }
+        } catch (err) {
+          console.error("Failed to adjust single product stock during update:", err)
+        }
       }
+
 
       // Get the category name
       let categoryName = category
@@ -2219,21 +2317,33 @@ export async function getUserProducts(userId: number) {
     `
 
     const deviceStocks = await sql`
-      SELECT pv.product_id, SUM(pbds.stock) as stock
-      FROM product_batch_device_stock pbds
-      JOIN product_batches pb ON pb.id = pbds.batch_id
-      JOIN product_variants pv ON pv.id = pb.product_variant_id
-      JOIN products p ON p.id = pv.product_id
-      WHERE pbds.device_id = ${userId} AND p.has_variants = true
-      GROUP BY pv.product_id
-      UNION ALL
-      SELECT pds.product_id, SUM(pds.stock) as stock
-      FROM product_device_stock pds
-      JOIN products p ON p.id = pds.product_id
-      WHERE pds.device_id = ${userId} AND p.has_variants = false
-      GROUP BY pds.product_id
+      SELECT 
+        p.id AS product_id,
+        (
+          COALESCE((
+            SELECT SUM(pbds.stock)
+            FROM product_batch_device_stock pbds
+            JOIN product_batches pb ON pb.id = pbds.batch_id
+            JOIN product_variants pv ON pv.id = pb.product_variant_id
+            WHERE pv.product_id = p.id AND pbds.device_id = ${userId}
+          ), 0)
+          +
+          COALESCE((
+            SELECT SUM(pds.stock)
+            FROM product_device_stock pds
+            WHERE pds.product_id = p.id AND pds.device_id = ${userId}
+          ), 0)
+        ) AS stock
+      FROM products p
+      WHERE p.created_by IN (
+        SELECT d2.id
+        FROM devices d1
+        JOIN devices d2 ON d2.company_id = d1.company_id
+        WHERE d1.id = ${userId}
+      )
     `
     const stockMap = new Map<number, number>(deviceStocks.map((row: any) => [Number(row.product_id), Number(row.stock)]))
+
 
     // Map the results to include category and device-specific stock
     const mappedProducts = products.map((product: any) => ({

@@ -5,26 +5,25 @@ import { sql } from "@/lib/db"
  * abstracting away whether it is a legacy or variant product.
  */
 export async function getDeviceProductStock(productId: number, deviceId: number): Promise<number> {
-  const products = await sql`SELECT has_variants FROM products WHERE id = ${productId}`
-  if (!products.length) return 0
-  
-  if (products[0].has_variants) {
-    const rows = await sql`
-      SELECT COALESCE(SUM(pbds.stock), 0) as stock
-      FROM product_batch_device_stock pbds
-      JOIN product_batches pb ON pb.id = pbds.batch_id
-      JOIN product_variants pv ON pv.id = pb.product_variant_id
-      WHERE pv.product_id = ${productId} AND pbds.device_id = ${deviceId}
-    `
-    return Number(rows[0]?.stock || 0)
-  } else {
-    const rows = await sql`
-      SELECT COALESCE(SUM(stock), 0) as stock
-      FROM product_device_stock
-      WHERE product_id = ${productId} AND device_id = ${deviceId}
-    `
-    return Number(rows[0]?.stock || 0)
-  }
+  const rows = await sql`
+    SELECT 
+      (
+        COALESCE((
+          SELECT SUM(pbds.stock)
+          FROM product_batch_device_stock pbds
+          JOIN product_batches pb ON pb.id = pbds.batch_id
+          JOIN product_variants pv ON pv.id = pb.product_variant_id
+          WHERE pv.product_id = ${productId} AND pbds.device_id = ${deviceId}
+        ), 0)
+        +
+        COALESCE((
+          SELECT SUM(pds.stock)
+          FROM product_device_stock pds
+          WHERE pds.product_id = ${productId} AND pds.device_id = ${deviceId}
+        ), 0)
+      ) as stock
+  `
+  return Number(rows[0]?.stock || 0)
 }
 
 /**
@@ -39,18 +38,36 @@ export async function adjustDeviceProductStock(
   quantityChange: number,
   query: any = sql
 ) {
-  const products = await query`SELECT has_variants FROM products WHERE id = ${productId}`
+  const products = await query`SELECT id, has_variants FROM products WHERE id = ${productId}`
   if (!products.length) throw new Error("Product not found")
 
-  if (products[0].has_variants) {
-    if (!batchId) {
-      throw new Error("Batch ID is required for variant product stock adjustment")
+  let effectiveBatchId = batchId
+
+  if (!effectiveBatchId) {
+    let batchRows
+    if (variantId) {
+      batchRows = await query`
+        SELECT id FROM product_batches 
+        WHERE product_id = ${productId} AND product_variant_id = ${variantId}
+        ORDER BY created_at ASC LIMIT 1
+      `
+    } else {
+      batchRows = await query`
+        SELECT id FROM product_batches 
+        WHERE product_id = ${productId}
+        ORDER BY created_at ASC LIMIT 1
+      `
     }
     
-    // Adjust batch stock
+    if (batchRows.length > 0) {
+      effectiveBatchId = batchRows[0].id
+    }
+  }
+
+  if (effectiveBatchId) {
     const batchStock = await query`
       SELECT id, stock FROM product_batch_device_stock
-      WHERE batch_id = ${batchId} AND device_id = ${deviceId}
+      WHERE batch_id = ${effectiveBatchId} AND device_id = ${deviceId}
       LIMIT 1
     `
 
@@ -63,11 +80,11 @@ export async function adjustDeviceProductStock(
     } else {
       await query`
         INSERT INTO product_batch_device_stock (batch_id, device_id, stock)
-        VALUES (${batchId}, ${deviceId}, ${quantityChange})
+        VALUES (${effectiveBatchId}, ${deviceId}, ${quantityChange})
       `
     }
   } else {
-    // Adjust legacy stock
+    // Legacy stock fallback
     const legacyStock = await query`
       SELECT id, stock FROM product_device_stock
       WHERE product_id = ${productId} AND device_id = ${deviceId}
@@ -88,3 +105,4 @@ export async function adjustDeviceProductStock(
     }
   }
 }
+
