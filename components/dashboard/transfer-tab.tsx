@@ -1614,7 +1614,14 @@ export default function TransferTab({ userId }: TransferTabProps) {
                               .filter((p) => {
                                 const q = (rowProductSearch[idx] || "").trim().toLowerCase()
                                 if (!q) return true
-                                return p.name.toLowerCase().includes(q) || p.barcode.toLowerCase().includes(q)
+                                const nameMatch = p.name.toLowerCase().includes(q)
+                                // Only match barcode if query is purely numeric OR at least 4 chars
+                                // This prevents a single digit like "3" matching inside every barcode
+                                const barcode = (p.barcode || "").toLowerCase()
+                                const barcodeMatch = (/^\d+$/.test(q) || q.length >= 4)
+                                  ? (barcode.startsWith(q) || barcode === q)
+                                  : false
+                                return nameMatch || barcodeMatch
                               })
                               .map((p) => (
                                 <button
@@ -1672,7 +1679,12 @@ export default function TransferTab({ userId }: TransferTabProps) {
                             {products.filter((p) => {
                               const q = (rowProductSearch[idx] || "").trim().toLowerCase()
                               if (!q) return true
-                              return p.name.toLowerCase().includes(q) || p.barcode.toLowerCase().includes(q)
+                              const nameMatch = p.name.toLowerCase().includes(q)
+                              const barcode = (p.barcode || "").toLowerCase()
+                              const barcodeMatch = (/^\d+$/.test(q) || q.length >= 4)
+                                ? (barcode.startsWith(q) || barcode === q)
+                                : false
+                              return nameMatch || barcodeMatch
                             }).length === 0 ? (
                               <p className="py-6 text-center text-sm text-gray-500 bg-white">No product found.</p>
                             ) : null}
