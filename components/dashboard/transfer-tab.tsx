@@ -1,7 +1,7 @@
 "use client"
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
-import { ArrowRightLeft, Check, ChevronDown, ChevronUp, CreditCard, Eye, FilePenLine, History, Layers, Loader2, Pencil, Plus, RefreshCw, Search, Trash2, Undo2, Wallet, X } from "lucide-react"
+import { ArrowRightLeft, Calendar, Check, ChevronDown, ChevronUp, CreditCard, Eye, FilePenLine, History, Layers, Loader2, Pencil, Plus, RefreshCw, Search, Trash2, Undo2, Wallet, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -27,6 +27,7 @@ import {
   cancelWarehouseTransfer,
   createWarehouseTransfer,
   getTransferFormData,
+  getTransferDashboardStats,
   getWarehouseSettlementSummaries,
   getWarehouseTransferById,
   getWarehouseTransfers,
@@ -208,11 +209,41 @@ export default function TransferTab({ userId }: TransferTabProps) {
     }
   }, [userId, toast])
 
+  const [datePreset, setDatePreset] = useState<string>("all")
+  const [customStart, setCustomStart] = useState<string>("")
+  const [customEnd, setCustomEnd] = useState<string>("")
+  const [fromDeviceFilter, setFromDeviceFilter] = useState<number>(0)
+  const [toDeviceFilter, setToDeviceFilter] = useState<number>(0)
+  const [dashboardStats, setDashboardStats] = useState({ pendingApprovals: 0, approvedToday: 0, rejectedToday: 0, transferValueToday: 0 })
+  const [isSummaryModalOpen, setIsSummaryModalOpen] = useState(false)
+  const [viewReasonModal, setViewReasonModal] = useState<{ isOpen: boolean; reason: string; rejectedBy?: string; transferId: number | null }>({ isOpen: false, reason: "", transferId: null })
+
+  const loadDashboardStats = useCallback(async () => {
+    if (!userId) return
+    try {
+      const res = await getTransferDashboardStats(userId)
+      if (res.success && res.data) {
+        setDashboardStats(res.data)
+      }
+    } catch (err) {
+      console.error("Load dashboard stats error:", err)
+    }
+  }, [userId])
+
   const loadTransfers = useCallback(async () => {
     if (!userId) return
     try {
       setIsLoading(true)
-      const result = await getWarehouseTransfers(userId, searchTerm, statusFilter)
+      const result = await getWarehouseTransfers(
+        userId,
+        searchTerm,
+        statusFilter,
+        datePreset,
+        customStart,
+        customEnd,
+        fromDeviceFilter,
+        toDeviceFilter,
+      )
       if (result.success) {
         setTransfers((result.data || []) as any[])
       } else {
@@ -224,7 +255,220 @@ export default function TransferTab({ userId }: TransferTabProps) {
     } finally {
       setIsLoading(false)
     }
-  }, [userId, searchTerm, statusFilter, toast])
+  }, [userId, searchTerm, statusFilter, datePreset, customStart, customEnd, fromDeviceFilter, toDeviceFilter, toast])
+
+  const handleExportExcel = () => {
+    if (transfers.length === 0) {
+      notifyWarning(toast, "No transfer records to export")
+      return
+    }
+
+    const headers = [
+      "Transfer No",
+      "Date",
+      "From Device",
+      "To Device",
+      "Status",
+      "Product Name",
+      "Variant / Batch",
+      "Quantity",
+      "Unit Cost",
+      "Line Total",
+      "Transfer Total",
+      "Created By",
+    ]
+
+    const rows: string[][] = []
+    let grandTotal = 0
+    let totalItemsCount = 0
+
+    transfers.forEach((t) => {
+      const transferTotal = Number(t.total_amount || 0)
+      grandTotal += transferTotal
+
+      if (t.items && t.items.length > 0) {
+        t.items.forEach((item: any, idx: number) => {
+          totalItemsCount += Number(item.quantity || 0)
+          rows.push([
+            `#${t.id}`,
+            toDateInputValue(t.transfer_date) || t.transfer_date,
+            t.from_device_name || "",
+            t.to_device_name || "",
+            (t.approval_status || t.status || "").toUpperCase(),
+            item.product_name || `Product #${item.product_id}`,
+            item.variant_name || item.batch_number || "-",
+            String(item.quantity || 0),
+            Number(item.unit_cost || 0).toFixed(2),
+            Number(item.total_cost || 0).toFixed(2),
+            idx === 0 ? transferTotal.toFixed(2) : "",
+            t.created_by_name || `User #${t.created_by}`,
+          ])
+        })
+      } else {
+        rows.push([
+          `#${t.id}`,
+          toDateInputValue(t.transfer_date) || t.transfer_date,
+          t.from_device_name || "",
+          t.to_device_name || "",
+          (t.approval_status || t.status || "").toUpperCase(),
+          "No items listed",
+          "-",
+          String(t.total_quantity || 0),
+          "0.00",
+          "0.00",
+          transferTotal.toFixed(2),
+          t.created_by_name || `User #${t.created_by}`,
+        ])
+      }
+    })
+
+    const csvContent = [
+      headers.join(","),
+      ...rows.map((r) => r.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")),
+      "",
+      `"Total Transfers","${transfers.length}"`,
+      `"Total Items Transferred","${totalItemsCount}"`,
+      `"Overall Total Amount","${grandTotal.toFixed(2)}"`,
+    ].join("\n")
+
+    const blob = new Blob(["\ufeff" + csvContent], { type: "text/csv;charset=utf-8;" })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement("a")
+    link.setAttribute("href", url)
+    link.setAttribute("download", `transfer_summary_report_${new Date().toISOString().slice(0, 10)}.csv`)
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    notifySuccess(toast, "Detailed transfer report exported to Excel/CSV successfully")
+  }
+
+  const handleExportPDF = () => {
+    if (transfers.length === 0) {
+      notifyWarning(toast, "No transfer records to export")
+      return
+    }
+
+    const grandTotal = transfers.reduce((sum, t) => sum + Number(t.total_amount || 0), 0)
+    const totalItemsCount = transfers.reduce((sum, t) => sum + Number(t.total_quantity || 0), 0)
+
+    const printWindow = window.open("", "_blank")
+    if (!printWindow) return
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Stock Transfers Detailed Summary</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 20px; color: #1e293b; background: #fff; }
+            .header { margin-bottom: 20px; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; }
+            h2 { margin: 0 0 5px 0; color: #0f172a; font-size: 20px; }
+            p { margin: 0; color: #64748b; font-size: 12px; }
+            .transfer-card { margin-bottom: 20px; border: 1px solid #cbd5e1; border-radius: 6px; overflow: hidden; page-break-inside: avoid; }
+            .transfer-header { background-color: #f8fafc; padding: 10px 12px; font-size: 12px; font-weight: bold; display: flex; justify-content: space-between; border-bottom: 1px solid #cbd5e1; }
+            table { width: 100%; border-collapse: collapse; font-size: 11px; }
+            th, td { border: 1px solid #e2e8f0; padding: 6px 8px; text-align: left; }
+            th { background-color: #f1f5f9; color: #475569; font-weight: bold; }
+            .text-right { text-align: right; }
+            .badge { display: inline-block; padding: 2px 6px; font-size: 10px; font-weight: bold; border-radius: 4px; text-transform: uppercase; }
+            .badge-approved { background: #dcfce7; color: #166534; }
+            .badge-pending { background: #fef3c7; color: #92400e; }
+            .badge-rejected { background: #ffe4e6; color: #9f1239; }
+            .summary-box { margin-top: 25px; padding: 16px; background-color: #0f172a; color: #fff; border-radius: 8px; font-family: monospace; font-size: 14px; }
+            .summary-row { display: flex; justify-content: space-between; margin-bottom: 6px; }
+            .summary-row:last-child { margin-bottom: 0; border-top: 1px solid #334155; padding-top: 8px; font-size: 16px; font-weight: bold; color: #34d399; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h2>Stock Transfers Detailed Summary Report</h2>
+            <p>Generated Date: ${new Date().toLocaleString()} | Filter Range: ${datePreset.toUpperCase().replace("_", " ")}</p>
+          </div>
+
+          ${transfers
+            .map(
+              (t) => `
+            <div class="transfer-card">
+              <div class="transfer-header">
+                <div>
+                  <span style="color: #2563eb; font-weight: bold;">Transfer #${t.id}</span>
+                  <span style="margin: 0 8px; color: #94a3b8;">|</span>
+                  <span>Date: ${toDateInputValue(t.transfer_date) || t.transfer_date}</span>
+                  <span style="margin: 0 8px; color: #94a3b8;">|</span>
+                  <span>${t.from_device_name} &rarr; ${t.to_device_name}</span>
+                </div>
+                <div>
+                  <span class="badge ${
+                    (t.approval_status || t.status || "").toLowerCase() === "approved" || (t.approval_status || t.status || "").toLowerCase() === "completed"
+                      ? "badge-approved"
+                      : (t.approval_status || t.status || "").toLowerCase() === "rejected"
+                      ? "badge-rejected"
+                      : "badge-pending"
+                  }">
+                    ${(t.approval_status || t.status || "").toUpperCase()}
+                  </span>
+                  <span style="margin-left: 12px; font-weight: bold;">Total: ${formatCurrency(Number(t.total_amount || 0))}</span>
+                </div>
+              </div>
+              <table>
+                <thead>
+                  <tr>
+                    <th style="width: 35%;">Product</th>
+                    <th style="width: 25%;">Variant / Batch</th>
+                    <th class="text-right" style="width: 12%;">Qty</th>
+                    <th class="text-right" style="width: 14%;">Unit Cost</th>
+                    <th class="text-right" style="width: 14%;">Line Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${
+                    t.items && t.items.length > 0
+                      ? t.items
+                          .map(
+                            (item: any) => `
+                        <tr>
+                          <td>${item.product_name || `Product #${item.product_id}`}</td>
+                          <td>${item.variant_name || item.batch_number || "-"}</td>
+                          <td class="text-right">${item.quantity || 0}</td>
+                          <td class="text-right">${formatCurrency(Number(item.unit_cost || 0))}</td>
+                          <td class="text-right" style="font-weight: bold;">${formatCurrency(Number(item.total_cost || 0))}</td>
+                        </tr>
+                      `,
+                          )
+                          .join("")
+                      : `<tr><td colSpan="5" style="text-align: center; color: #94a3b8;">No line items listed</td></tr>`
+                  }
+                </tbody>
+              </table>
+            </div>
+          `,
+            )
+            .join("")}
+
+          <div class="summary-box">
+            <div class="summary-row">
+              <span>Total Transfers:</span>
+              <span style="color: #fbbf24;">${transfers.length}</span>
+            </div>
+            <div class="summary-row">
+              <span>Total Items Transferred:</span>
+              <span style="color: #fbbf24;">${totalItemsCount}</span>
+            </div>
+            <div class="summary-row">
+              <span>Overall Filtered Amount:</span>
+              <span>${formatCurrency(grandTotal)}</span>
+            </div>
+          </div>
+
+          <script>
+            window.onload = function() { window.print(); }
+          </script>
+        </body>
+      </html>
+    `
+    printWindow.document.write(html)
+    printWindow.document.close()
+  }
 
   const loadFormData = useCallback(
     async (fromDeviceId: number) => {
@@ -240,9 +484,10 @@ export default function TransferTab({ userId }: TransferTabProps) {
   )
 
   useEffect(() => {
+    loadFormData(userId)
     loadTransfers()
     loadSettlements()
-  }, [loadTransfers, loadSettlements])
+  }, [loadFormData, loadTransfers, loadSettlements, userId])
 
   useEffect(() => {
     const timeout = setTimeout(() => {
@@ -738,7 +983,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
             <h1 className="text-lg font-semibold">Warehouse Transfers</h1>
           </div>
           <div className="flex gap-2">
-            <Button variant="secondary" size="sm" onClick={refreshAll} disabled={isLoading || isLoadingSettlements}>
+            <Button variant="secondary" size="sm" onClick={() => { refreshAll(); loadDashboardStats(); }} disabled={isLoading || isLoadingSettlements}>
               <RefreshCw className={`h-4 w-4 mr-1 ${isLoading ? "animate-spin" : ""}`} />
               Refresh
             </Button>
@@ -750,121 +995,158 @@ export default function TransferTab({ userId }: TransferTabProps) {
         </div>
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-          <div>
-            <h2 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
-              <Wallet className="h-4 w-4 text-indigo-600" />
-              Transfer payments
-            </h2>
-            <p className="text-xs text-gray-500 mt-1">
-              Money still pending on completed transfers
-            </p>
+      {/* Dashboard Stat Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        <Card className="border border-amber-200 bg-amber-50/50 shadow-sm">
+          <CardContent className="p-4 flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-amber-700">Pending Approvals</p>
+              <h3 className="text-2xl font-bold text-amber-900 mt-1">{dashboardStats.pendingApprovals}</h3>
+            </div>
+            <div className="relative p-2.5 bg-amber-100 rounded-xl text-amber-700">
+              <RefreshCw className="h-5 w-5" />
+              {dashboardStats.pendingApprovals > 0 && (
+                <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-rose-600 text-[10px] font-bold text-white">
+                  {dashboardStats.pendingApprovals}
+                </span>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border border-emerald-200 bg-emerald-50/50 shadow-sm">
+          <CardContent className="p-4 flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-emerald-700">Approved Today</p>
+              <h3 className="text-2xl font-bold text-emerald-900 mt-1">{dashboardStats.approvedToday}</h3>
+            </div>
+            <div className="p-2.5 bg-emerald-100 rounded-xl text-emerald-700">
+              <Check className="h-5 w-5" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border border-rose-200 bg-rose-50/50 shadow-sm">
+          <CardContent className="p-4 flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-rose-700">Rejected Today</p>
+              <h3 className="text-2xl font-bold text-rose-900 mt-1">{dashboardStats.rejectedToday}</h3>
+            </div>
+            <div className="p-2.5 bg-rose-100 rounded-xl text-rose-700">
+              <X className="h-5 w-5" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border border-indigo-200 bg-indigo-50/50 shadow-sm">
+          <CardContent className="p-4 flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-indigo-700">Transfer Value Today</p>
+              <h3 className="text-2xl font-bold text-indigo-900 mt-1">{formatCurrency(dashboardStats.transferValueToday)}</h3>
+            </div>
+            <div className="p-2.5 bg-indigo-100 rounded-xl text-indigo-700">
+              <Wallet className="h-5 w-5" />
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Date Filter & Control Bar */}
+      <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider mr-1">Date Filter:</span>
+            {[
+              { id: "all", label: "All" },
+              { id: "today", label: "Today" },
+              { id: "yesterday", label: "Yesterday" },
+              { id: "this_week", label: "This Week" },
+              { id: "this_month", label: "This Month" },
+              { id: "custom", label: "Custom Range" },
+            ].map((p) => (
+              <Button
+                key={p.id}
+                type="button"
+                variant={datePreset === p.id ? "default" : "outline"}
+                size="sm"
+                className={`h-8 text-xs ${datePreset === p.id ? "bg-indigo-600 hover:bg-indigo-700 text-white" : "border-slate-200 text-slate-600"}`}
+                onClick={() => setDatePreset(p.id)}
+              >
+                {p.label}
+              </Button>
+            ))}
+
+            {datePreset === "custom" && (
+              <div className="flex items-center gap-2 ml-1">
+                <Input
+                  type="date"
+                  className="h-8 text-xs w-36 border-slate-200"
+                  value={customStart}
+                  onChange={(e) => setCustomStart(e.target.value)}
+                />
+                <span className="text-xs text-slate-400">to</span>
+                <Input
+                  type="date"
+                  className="h-8 text-xs w-36 border-slate-200"
+                  value={customEnd}
+                  onChange={(e) => setCustomEnd(e.target.value)}
+                />
+              </div>
+            )}
           </div>
-          <div className="flex flex-wrap gap-2 text-xs">
-            <span className="rounded-full bg-rose-50 text-rose-700 px-3 py-1 border border-rose-100">
-              To pay: {formatCurrency(settlementTotals.weOwe)}
-            </span>
-            <span className="rounded-full bg-emerald-50 text-emerald-700 px-3 py-1 border border-emerald-100">
-              To collect: {formatCurrency(settlementTotals.theyOweUs)}
-            </span>
+
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              className="h-8 text-xs gap-1.5 font-semibold bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm"
+              onClick={() => setIsSummaryModalOpen(true)}
+            >
+              <FilePenLine className="h-3.5 w-3.5" />
+              <span>Transfer Summary</span>
+            </Button>
           </div>
         </div>
 
-        {isLoadingSettlements ? (
-          <div className="py-8 text-center text-gray-500">
-            <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2" />
-            Loading...
-          </div>
-        ) : settlements.length === 0 ? (
-          <div className="py-6 text-center text-sm text-gray-500">
-            No payment balances with other warehouses yet
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3">
-            {settlements.map((warehouse) => (
-              <Card key={warehouse.warehouse_id} className="border border-gray-200 shadow-sm">
-                <CardContent className="p-4 space-y-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <div className="font-semibold text-gray-900">{warehouse.warehouse_name}</div>
-                    </div>
-                    <div className="flex flex-wrap gap-1 justify-end">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleOpenPaymentHistory(warehouse)}
-                      >
-                        <History className="h-3.5 w-3.5 mr-1" />
-                        Payments
-                      </Button>
-                      {warehouse.we_owe > 0.01 && (
-                        <Button size="sm" onClick={() => handlePayWarehouse(warehouse)}>
-                          <CreditCard className="h-3.5 w-3.5 mr-1" />
-                          Pay now
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="rounded-md border border-rose-100 bg-rose-50/50 p-3 space-y-1.5">
-                    <div className="text-xs font-semibold text-rose-800">They sent stock to you</div>
-                    <div className="flex justify-between text-xs text-gray-600">
-                      <span>Total amount</span>
-                      <span className="font-medium">{formatCurrency(warehouse.total_received)}</span>
-                    </div>
-                    <div className="flex justify-between text-xs text-gray-600">
-                      <span>Already paid</span>
-                      <span className="font-medium">{formatCurrency(warehouse.paid_to_them)}</span>
-                    </div>
-                    <div className="flex justify-between text-sm pt-1 border-t border-rose-100">
-                      <span className="font-medium text-rose-800">Still to pay</span>
-                      <span className="font-bold text-rose-700">{formatCurrency(warehouse.we_owe)}</span>
-                    </div>
-                  </div>
-
-                  <div className="rounded-md border border-emerald-100 bg-emerald-50/50 p-3 space-y-1.5">
-                    <div className="text-xs font-semibold text-emerald-800">You sent stock to them</div>
-                    <div className="flex justify-between text-xs text-gray-600">
-                      <span>Total amount</span>
-                      <span className="font-medium">{formatCurrency(warehouse.total_sent)}</span>
-                    </div>
-                    <div className="flex justify-between text-xs text-gray-600">
-                      <span>Already received</span>
-                      <span className="font-medium">{formatCurrency(warehouse.collected_from_them)}</span>
-                    </div>
-                    <div className="flex justify-between text-sm pt-1 border-t border-emerald-100">
-                      <span className="font-medium text-emerald-800">Still to collect</span>
-                      <span className="font-bold text-emerald-700">{formatCurrency(warehouse.they_owe_us)}</span>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div className="relative md:col-span-2">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 pt-1">
+          <div className="relative md:col-span-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
             <Input
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search by ID, warehouse, or notes..."
-              className="pl-9"
+              placeholder="Search ID/warehouse..."
+              className="pl-9 text-xs h-9"
             />
           </div>
+          <select
+            value={fromDeviceFilter}
+            onChange={(e) => setFromDeviceFilter(Number(e.target.value))}
+            className="h-9 rounded-md border border-gray-300 bg-white px-2 text-xs"
+          >
+            <option value={0}>All From Devices</option>
+            {devices.map((d) => (
+              <option key={d.id} value={d.id}>From: {d.name}</option>
+            ))}
+          </select>
+          <select
+            value={toDeviceFilter}
+            onChange={(e) => setToDeviceFilter(Number(e.target.value))}
+            className="h-9 rounded-md border border-gray-300 bg-white px-2 text-xs"
+          >
+            <option value={0}>All To Devices</option>
+            {devices.map((d) => (
+              <option key={d.id} value={d.id}>To: {d.name}</option>
+            ))}
+          </select>
           <select
             value={statusFilter}
             onChange={(e) =>
               setStatusFilter(e.target.value as "all" | "pending" | "completed" | "rejected" | "cancelled")
             }
-            className="h-10 rounded-md border border-gray-300 bg-white px-3 text-sm"
+            className="h-9 rounded-md border border-gray-300 bg-white px-3 text-xs"
           >
             <option value="all">All Status</option>
-            <option value="pending">Pending</option>
+            <option value="pending">Pending Approval</option>
+            <option value="approved">Approved</option>
             <option value="completed">Completed</option>
             <option value="rejected">Rejected</option>
             <option value="cancelled">Cancelled</option>
@@ -882,7 +1164,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
           <div className="p-10 text-center text-gray-500">No transfers found</div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[860px]">
+            <table className="w-full min-w-[900px]">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
                   <th className="w-10 p-3 text-center text-xs font-medium text-gray-500 uppercase"></th>
@@ -893,14 +1175,22 @@ export default function TransferTab({ userId }: TransferTabProps) {
                   <th className="text-left p-3 text-xs font-medium text-gray-500 uppercase">Items</th>
                   <th className="text-left p-3 text-xs font-medium text-gray-500 uppercase">Qty</th>
                   <th className="text-left p-3 text-xs font-medium text-gray-500 uppercase">Amount</th>
-                  <th className="text-left p-3 text-xs font-medium text-gray-500 uppercase">Payment</th>
-                  <th className="text-left p-3 text-xs font-medium text-gray-500 uppercase">Status</th>
+                  <th className="text-left p-3 text-xs font-medium text-gray-500 uppercase">Approval Status</th>
+                  <th className="text-left p-3 text-xs font-medium text-gray-500 uppercase">Approved By / Date</th>
                   <th className="text-left p-3 text-xs font-medium text-gray-500 uppercase">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {transfers.map((transfer) => {
                   const isExpanded = expandedTransferId === transfer.id
+                  const statusStr = String(transfer.approval_status || transfer.status || "").toLowerCase()
+                  const isPending = statusStr === "pending" || statusStr === "pending_approval"
+                  const isApproved = statusStr === "approved" || statusStr === "completed"
+                  const isRejected = statusStr === "rejected"
+                  const isCancelled = statusStr === "cancelled"
+                  const isRecipientDevice = Number(transfer.to_device_id) === Number(userId)
+                  const busy = actioningId === Number(transfer.id)
+
                   return (
                     <Fragment key={transfer.id}>
                       <tr 
@@ -929,85 +1219,105 @@ export default function TransferTab({ userId }: TransferTabProps) {
                         <td className="p-3 text-sm font-semibold text-gray-800">
                           {Number(transfer.total_amount || 0).toFixed(2)}
                         </td>
-                        <td className="p-3 text-sm text-gray-700">
-                          <div className="flex flex-col">
-                            <span className="capitalize">{String(transfer.payment_status || "unpaid")}</span>
-                            <span className="text-xs text-gray-500">
-                              {Number(transfer.paid_amount || 0).toFixed(2)}
-                              {transfer.payment_method ? ` • ${transfer.payment_method}` : ""}
-                            </span>
-                          </div>
-                        </td>
                         <td className="p-3">
-                          {getStatusBadge(transfer.status)}
-                          {String(transfer.status).toLowerCase() === "rejected" && transfer.rejection_reason ? (
-                            <div className="text-xs text-rose-600 mt-1 max-w-[180px]">
-                              Reason: {transfer.rejection_reason}
+                          {getStatusBadge(transfer.approval_status || transfer.status)}
+                        </td>
+                        <td className="p-3 text-xs text-gray-600">
+                          {isApproved && (
+                            <div>
+                              <div className="font-semibold text-slate-800">{transfer.approved_by_name || `User #${transfer.approved_by || ''}`}</div>
+                              <div className="text-[11px] text-slate-400">{transfer.approved_at ? new Date(transfer.approved_at).toLocaleDateString() : ""}</div>
                             </div>
-                          ) : null}
+                          )}
+                          {isRejected && (
+                            <div>
+                              <div className="font-semibold text-rose-700">{transfer.rejected_by_name || `User #${transfer.rejected_by || ''}`}</div>
+                              <div className="text-[11px] text-rose-400">{transfer.rejected_at ? new Date(transfer.rejected_at).toLocaleDateString() : ""}</div>
+                            </div>
+                          )}
+                          {isPending && (
+                            <span className="text-amber-600 italic">
+                              {isRecipientDevice ? "Awaiting your approval" : `Awaiting ${transfer.to_device_name}`}
+                            </span>
+                          )}
+                          {isCancelled && (
+                            <span className="text-slate-400">Cancelled</span>
+                          )}
                         </td>
                         <td className="p-3" onClick={(e) => e.stopPropagation()}>
-                          {(() => {
-                            const status = String(transfer.status).toLowerCase()
-                            const isTerminal = status === "cancelled" || status === "rejected"
-                            const isPending = status === "pending"
-                            const isSender = Number(transfer.from_device_id) === userId
-                            const busy = actioningId === Number(transfer.id)
-                            return (
-                              <div className="flex flex-wrap gap-2">
-                                <Button size="sm" variant="outline" onClick={() => handleOpenView(Number(transfer.id))}>
-                                  <Eye className="h-3.5 w-3.5 mr-1" />
-                                  View
+                          <div className="flex flex-wrap gap-1.5">
+                            <Button size="sm" variant="outline" className="h-7 text-xs px-2" onClick={() => handleOpenView(Number(transfer.id))}>
+                              <Eye className="h-3.5 w-3.5 mr-1 text-slate-500" />
+                              View
+                            </Button>
+
+                            {isPending && isRecipientDevice ? (
+                              <>
+                                <Button
+                                  size="sm"
+                                  className="h-7 text-xs px-2 bg-emerald-600 hover:bg-emerald-700 text-white"
+                                  onClick={() => handleAcceptTransfer(Number(transfer.id))}
+                                  disabled={busy}
+                                >
+                                  {busy ? (
+                                    <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                                  ) : (
+                                    <Check className="h-3.5 w-3.5 mr-1" />
+                                  )}
+                                  Approve
                                 </Button>
-                                {isPending && isSender ? (
-                                  <>
-                                    <Button
-                                      size="sm"
-                                      className="bg-emerald-600 hover:bg-emerald-700 text-white"
-                                      onClick={() => handleAcceptTransfer(Number(transfer.id))}
-                                      disabled={busy}
-                                    >
-                                      {busy ? (
-                                        <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                                      ) : (
-                                        <Check className="h-3.5 w-3.5 mr-1" />
-                                      )}
-                                      Accept
-                                    </Button>
-                                    <Button
-                                      size="sm"
-                                      variant="outline"
-                                      className="text-rose-600 hover:text-rose-700 border-rose-200 hover:border-rose-300"
-                                      onClick={() => openRejectDialog(Number(transfer.id))}
-                                      disabled={busy}
-                                    >
-                                      <X className="h-3.5 w-3.5 mr-1" />
-                                      Reject
-                                    </Button>
-                                  </>
-                                ) : null}
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  onClick={() => handleOpenEdit(Number(transfer.id))}
-                                  disabled={isTerminal}
+                                  className="h-7 text-xs px-2 text-rose-600 hover:text-rose-700 border-rose-200 hover:border-rose-300"
+                                  onClick={() => openRejectDialog(Number(transfer.id))}
+                                  disabled={busy}
                                 >
-                                  <Pencil className="h-3.5 w-3.5 mr-1" />
+                                  <X className="h-3.5 w-3.5 mr-1" />
+                                  Reject
+                                </Button>
+                              </>
+                            ) : null}
+
+                            {isRejected && transfer.rejection_reason ? (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 text-xs px-2 text-rose-700 border-rose-200 hover:bg-rose-50"
+                                onClick={() => setViewReasonModal({
+                                  isOpen: true,
+                                  reason: transfer.rejection_reason,
+                                  rejectedBy: transfer.rejected_by_name || `User #${transfer.rejected_by || ''}`,
+                                  transferId: transfer.id
+                                })}
+                              >
+                                View Reason
+                              </Button>
+                            ) : null}
+
+                            {!isRejected && !isCancelled ? (
+                              <>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 text-xs px-2"
+                                  onClick={() => handleOpenEdit(Number(transfer.id))}
+                                >
+                                  <Pencil className="h-3.5 w-3.5 mr-1 text-slate-500" />
                                   Edit
                                 </Button>
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  className="text-red-600 hover:text-red-700 border-red-200 hover:border-red-300"
+                                  className="h-7 text-xs px-2 text-rose-600 hover:text-rose-700 border-rose-200 hover:border-rose-300"
                                   onClick={() => handleCancelTransfer(Number(transfer.id))}
-                                  disabled={isTerminal}
                                 >
-                                  <Trash2 className="h-3.5 w-3.5 mr-1" />
-                                  Cancel
+                                  <Trash2 className="h-3.5 w-3.5 mr-1 text-rose-500" />
+                                  Delete
                                 </Button>
-                              </div>
-                            )
-                          })()}
+                              </>
+                            ) : null}
+                          </div>
                         </td>
                       </tr>
 
@@ -1735,6 +2045,33 @@ export default function TransferTab({ userId }: TransferTabProps) {
                 </div>
               </div>
 
+              <div className="rounded-md border border-slate-200 bg-slate-50/70 p-3 text-xs space-y-2">
+                <h4 className="font-bold text-slate-800 text-xs uppercase tracking-wider border-b border-slate-200 pb-1 flex items-center gap-1">
+                  <History className="h-3.5 w-3.5 text-indigo-600" /> Audit Log & Device Approval Details
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+                  <div>
+                    <span className="text-slate-400 block font-medium">Created By:</span>
+                    <span className="font-semibold text-slate-800">{viewTransferDetail.transfer.created_by_name || `User #${viewTransferDetail.transfer.created_by}`}</span>
+                    <span className="text-[11px] text-slate-400 block">{new Date(viewTransferDetail.transfer.created_at).toLocaleString()}</span>
+                  </div>
+                  {viewTransferDetail.transfer.approved_by && (
+                    <div>
+                      <span className="text-emerald-600 block font-medium">Approved By:</span>
+                      <span className="font-semibold text-slate-800">{viewTransferDetail.transfer.approved_by_name || `User #${viewTransferDetail.transfer.approved_by}`}</span>
+                      <span className="text-[11px] text-slate-400 block">{viewTransferDetail.transfer.approved_at ? new Date(viewTransferDetail.transfer.approved_at).toLocaleString() : ''}</span>
+                    </div>
+                  )}
+                  {viewTransferDetail.transfer.rejected_by && (
+                    <div>
+                      <span className="text-rose-600 block font-medium">Rejected By:</span>
+                      <span className="font-semibold text-slate-800">{viewTransferDetail.transfer.rejected_by_name || `User #${viewTransferDetail.transfer.rejected_by}`}</span>
+                      <span className="text-[11px] text-slate-400 block">{viewTransferDetail.transfer.rejected_at ? new Date(viewTransferDetail.transfer.rejected_at).toLocaleString() : ''}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
               {String(viewTransferDetail.transfer.status || "").toLowerCase() === "rejected" &&
               viewTransferDetail.transfer.rejection_reason ? (
                 <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-sm">
@@ -1941,6 +2278,227 @@ export default function TransferTab({ userId }: TransferTabProps) {
         userId={userId}
         deviceId={userId}
       />
+
+      {/* Transfer Summary Modal */}
+      <Dialog open={isSummaryModalOpen} onOpenChange={setIsSummaryModalOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex flex-wrap items-center justify-between border-b pb-3 gap-2">
+              <span className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                <FilePenLine className="h-5 w-5 text-indigo-600" />
+                Transfer Summary Report
+              </span>
+              <div className="flex items-center gap-2">
+                <Button size="sm" variant="outline" className="h-8 text-xs gap-1 border-slate-300 hover:bg-slate-50" onClick={handleExportExcel}>
+                  <ArrowRightLeft className="h-3.5 w-3.5 text-emerald-600" />
+                  Export Excel / CSV
+                </Button>
+                <Button size="sm" className="h-8 text-xs gap-1 bg-indigo-600 hover:bg-indigo-700 text-white" onClick={handleExportPDF}>
+                  Download PDF / Print
+                </Button>
+              </div>
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            {/* Modal Interactive Date & Time Filter Bar */}
+            <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2.5 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-xs font-bold text-slate-700 uppercase tracking-wider mr-1 flex items-center gap-1">
+                    <Calendar className="h-3.5 w-3.5 text-indigo-600" /> Filter Time & Date:
+                  </span>
+                  {[
+                    { id: "all", label: "All" },
+                    { id: "today", label: "Today" },
+                    { id: "yesterday", label: "Yesterday" },
+                    { id: "this_week", label: "This Week" },
+                    { id: "this_month", label: "This Month" },
+                    { id: "custom", label: "Custom Range" },
+                  ].map((p) => (
+                    <Button
+                      key={p.id}
+                      type="button"
+                      variant={datePreset === p.id ? "default" : "outline"}
+                      size="sm"
+                      className={`h-7 text-xs px-2.5 font-medium ${
+                        datePreset === p.id
+                          ? "bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm"
+                          : "border-slate-200 text-slate-600 bg-white hover:bg-slate-50"
+                      }`}
+                      onClick={() => setDatePreset(p.id)}
+                    >
+                      {p.label}
+                    </Button>
+                  ))}
+                </div>
+                <div className="text-xs text-slate-500 font-medium bg-white px-2.5 py-1 rounded-md border border-slate-200">
+                  Total Transfers: <strong className="text-slate-900 font-bold ml-1">{transfers.length}</strong>
+                </div>
+              </div>
+
+              {/* From & To Device Filter Row */}
+              <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-slate-200 text-xs">
+                <div className="flex items-center gap-1.5">
+                  <span className="font-bold text-slate-700">From Device:</span>
+                  <select
+                    value={fromDeviceFilter}
+                    onChange={(e) => setFromDeviceFilter(Number(e.target.value))}
+                    className="h-8 rounded-md border border-slate-300 bg-white px-2 text-xs font-medium text-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  >
+                    <option value={0}>All From Devices</option>
+                    {devices.map((d) => (
+                      <option key={d.id} value={d.id}>{d.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <span className="font-bold text-slate-700">To Device:</span>
+                  <select
+                    value={toDeviceFilter}
+                    onChange={(e) => setToDeviceFilter(Number(e.target.value))}
+                    className="h-8 rounded-md border border-slate-300 bg-white px-2 text-xs font-medium text-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  >
+                    <option value={0}>All To Devices</option>
+                    {devices.map((d) => (
+                      <option key={d.id} value={d.id}>{d.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {datePreset === "custom" && (
+                  <div className="flex items-center gap-2 ml-auto">
+                    <span className="font-semibold text-slate-600">From Date:</span>
+                    <Input
+                      type="date"
+                      className="h-8 text-xs w-36 border-slate-300 bg-white"
+                      value={customStart}
+                      onChange={(e) => setCustomStart(e.target.value)}
+                    />
+                    <span className="font-semibold text-slate-600">To Date:</span>
+                    <Input
+                      type="date"
+                      className="h-8 text-xs w-36 border-slate-300 bg-white"
+                      value={customEnd}
+                      onChange={(e) => setCustomEnd(e.target.value)}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {transfers.length === 0 ? (
+              <div className="p-8 text-center text-slate-400 border border-dashed border-slate-200 rounded-xl">
+                No transfer records found for the selected date filter.
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {transfers.map((t) => (
+                  <div key={t.id} className="border border-slate-200 rounded-xl overflow-hidden shadow-sm bg-white">
+                    <div className="bg-slate-50 px-4 py-2.5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2 text-xs">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-bold text-blue-600 text-sm">#{t.id}</span>
+                        <span className="text-slate-400">•</span>
+                        <span className="text-slate-600">{new Date(t.transfer_date || t.created_at).toLocaleDateString()}</span>
+                        <span className="text-slate-400">•</span>
+                        <span className="font-semibold text-slate-800">{t.from_device_name} &rarr; {t.to_device_name}</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        {getStatusBadge(t.approval_status || t.status)}
+                        <span className="font-bold text-slate-900 text-sm">{formatCurrency(t.total_amount)}</span>
+                      </div>
+                    </div>
+
+                    {/* Detailed Line Items */}
+                    <div className="p-3">
+                      <table className="w-full text-xs text-left border-collapse">
+                        <thead>
+                          <tr className="border-b border-slate-100 text-slate-400 font-semibold text-[11px]">
+                            <th className="py-1 px-2">Product</th>
+                            <th className="py-1 px-2">Variant / Batch</th>
+                            <th className="py-1 px-2 text-right">Qty</th>
+                            <th className="py-1 px-2 text-right">Unit Cost</th>
+                            <th className="py-1 px-2 text-right">Line Total</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-50">
+                          {t.items && t.items.length > 0 ? (
+                            t.items.map((item: any, idx: number) => (
+                              <tr key={item.id || idx} className="hover:bg-slate-50/50 text-slate-700">
+                                <td className="py-1.5 px-2 font-medium">{item.product_name || `Product #${item.product_id}`}</td>
+                                <td className="py-1.5 px-2 text-slate-500">{item.variant_name || item.batch_number || "-"}</td>
+                                <td className="py-1.5 px-2 text-right font-medium">{item.quantity || 0}</td>
+                                <td className="py-1.5 px-2 text-right text-slate-500">{formatCurrency(item.unit_cost)}</td>
+                                <td className="py-1.5 px-2 text-right font-semibold text-slate-900">{formatCurrency(item.total_cost)}</td>
+                              </tr>
+                            ))
+                          ) : (
+                            <tr>
+                              <td colSpan={5} className="py-2 text-center text-slate-400 italic">No line items listed</td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Bottom Overall Summary Footer */}
+            <div className="bg-slate-900 text-white p-4 rounded-xl space-y-2 font-mono text-sm shadow-md">
+              <div className="flex justify-between border-b border-slate-800 pb-2">
+                <span>Total Transfers Count:</span>
+                <span className="font-bold text-amber-400">{transfers.length}</span>
+              </div>
+              <div className="flex justify-between border-b border-slate-800 pb-2">
+                <span>Total Items Transferred:</span>
+                <span className="font-bold text-amber-400">
+                  {transfers.reduce((sum, t) => sum + Number(t.total_quantity || 0), 0)}
+                </span>
+              </div>
+              <div className="flex justify-between text-base pt-1">
+                <span>Overall Total Amount (Filtered):</span>
+                <span className="font-extrabold text-emerald-400">
+                  {formatCurrency(transfers.reduce((sum, t) => sum + Number(t.total_amount || 0), 0))}
+                </span>
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* View Rejection Reason Modal */}
+      <Dialog open={viewReasonModal.isOpen} onOpenChange={(open) => setViewReasonModal((prev) => ({ ...prev, isOpen: open }))}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-rose-700 flex items-center gap-2">
+              <X className="h-5 w-5 text-rose-600" />
+              Transfer #{viewReasonModal.transferId} Rejected
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-3 py-2">
+            <div className="bg-rose-50 border border-rose-200 rounded-lg p-3 text-xs space-y-2">
+              <div>
+                <span className="text-slate-500 block font-semibold">Rejected By:</span>
+                <span className="text-slate-800 font-medium">{viewReasonModal.rejectedBy || "System"}</span>
+              </div>
+              <div>
+                <span className="text-slate-500 block font-semibold">Rejection Reason:</span>
+                <p className="text-rose-900 font-semibold text-sm mt-1">{viewReasonModal.reason}</p>
+              </div>
+            </div>
+            <div className="flex justify-end">
+              <Button size="sm" variant="outline" onClick={() => setViewReasonModal((prev) => ({ ...prev, isOpen: false }))}>
+                Close
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {ConfirmDialog}
     </div>
   )

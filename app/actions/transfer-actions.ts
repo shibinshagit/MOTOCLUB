@@ -454,7 +454,60 @@ export async function getTransferFormData(userId: number, fromDeviceId?: number)
   }
 }
 
-export async function getWarehouseTransfers(userId: number, searchTerm?: string, statusFilter?: string) {
+function getDateBounds(preset?: string, customStart?: string, customEnd?: string): { startDate: string | null; endDate: string | null } {
+  if (!preset || preset === "all") {
+    return { startDate: null, endDate: null }
+  }
+
+  const now = new Date()
+  const todayStr = now.toISOString().slice(0, 10)
+
+  if (preset === "today") {
+    return { startDate: `${todayStr} 00:00:00`, endDate: `${todayStr} 23:59:59` }
+  }
+
+  if (preset === "yesterday") {
+    const yest = new Date(now)
+    yest.setDate(yest.getDate() - 1)
+    const yestStr = yest.toISOString().slice(0, 10)
+    return { startDate: `${yestStr} 00:00:00`, endDate: `${yestStr} 23:59:59` }
+  }
+
+  if (preset === "this_week") {
+    const dayOfWeek = now.getDay()
+    const diffToMonday = (dayOfWeek === 0 ? -6 : 1) - dayOfWeek
+    const monday = new Date(now)
+    monday.setDate(now.getDate() + diffToMonday)
+    const mondayStr = monday.toISOString().slice(0, 10)
+    return { startDate: `${mondayStr} 00:00:00`, endDate: `${todayStr} 23:59:59` }
+  }
+
+  if (preset === "this_month") {
+    const year = now.getFullYear()
+    const month = String(now.getMonth() + 1).padStart(2, "0")
+    const startStr = `${year}-${month}-01`
+    return { startDate: `${startStr} 00:00:00`, endDate: `${todayStr} 23:59:59` }
+  }
+
+  if (preset === "custom") {
+    const start = customStart && /^\d{4}-\d{2}-\d{2}$/.test(customStart) ? `${customStart} 00:00:00` : null
+    const end = customEnd && /^\d{4}-\d{2}-\d{2}$/.test(customEnd) ? `${customEnd} 23:59:59` : null
+    return { startDate: start, endDate: end }
+  }
+
+  return { startDate: null, endDate: null }
+}
+
+export async function getWarehouseTransfers(
+  userId: number,
+  searchTerm?: string,
+  statusFilter?: string,
+  datePreset?: string,
+  customStart?: string,
+  customEnd?: string,
+  fromDeviceIdFilter?: number,
+  toDeviceIdFilter?: number,
+) {
   if (!userId) {
     return { success: false, message: "User ID is required", data: [] }
   }
@@ -467,13 +520,18 @@ export async function getWarehouseTransfers(userId: number, searchTerm?: string,
     const search = (searchTerm || "").trim().toLowerCase()
     const status = (statusFilter || "all").trim().toLowerCase()
     const searchPattern = `%${search}%`
+    const { startDate, endDate } = getDateBounds(datePreset, customStart, customEnd)
+
+    const fromId = Number(fromDeviceIdFilter || 0)
+    const toId = Number(toDeviceIdFilter || 0)
 
     const transfers = (await sql`
       SELECT
         t.id,
         t.from_device_id,
         t.to_device_id,
-        t.status,
+        COALESCE(t.approval_status, t.status) AS status,
+        COALESCE(t.approval_status, t.status) AS approval_status,
         COALESCE(t.total_amount, 0)::numeric AS total_amount,
         COALESCE(t.payment_status, 'unpaid') AS payment_status,
         COALESCE(t.payment_method, '') AS payment_method,
@@ -482,18 +540,37 @@ export async function getWarehouseTransfers(userId: number, searchTerm?: string,
         t.notes,
         t.rejection_reason,
         t.created_by,
+        t.approved_by,
+        t.approved_at,
+        t.rejected_by,
+        t.rejected_at,
         t.created_at,
         t.updated_at,
         df.name AS from_device_name,
         dt.name AS to_device_name,
+        u_create.name AS created_by_name,
+        u_approve.name AS approved_by_name,
+        u_reject.name AS rejected_by_name,
         COUNT(ti.id)::int AS item_count,
         COALESCE(SUM(ti.quantity), 0)::int AS total_quantity
       FROM stock_transfers t
       JOIN devices df ON df.id = t.from_device_id
       JOIN devices dt ON dt.id = t.to_device_id
+      LEFT JOIN devices u_create ON u_create.id = t.created_by
+      LEFT JOIN devices u_approve ON u_approve.id = t.approved_by
+      LEFT JOIN devices u_reject ON u_reject.id = t.rejected_by
       LEFT JOIN stock_transfer_items ti ON ti.transfer_id = t.id
       WHERE t.company_id = ${companyId}
-        AND (${status} = 'all' OR LOWER(t.status) = ${status})
+        AND (t.from_device_id = ${userId} OR t.to_device_id = ${userId})
+        AND (${fromId} = 0 OR t.from_device_id = ${fromId})
+        AND (${toId} = 0 OR t.to_device_id = ${toId})
+        AND (
+          ${status} = 'all'
+          OR LOWER(COALESCE(t.approval_status, t.status)) = ${status}
+          OR (${status} = 'pending' AND LOWER(COALESCE(t.approval_status, t.status)) IN ('pending', 'pending_approval'))
+        )
+        AND (${startDate}::timestamp IS NULL OR COALESCE(t.transfer_date, t.created_at) >= ${startDate}::timestamp)
+        AND (${endDate}::timestamp IS NULL OR COALESCE(t.transfer_date, t.created_at) <= ${endDate}::timestamp)
         AND (
           ${search} = ''
           OR CAST(t.id AS TEXT) LIKE ${searchPattern}
@@ -501,7 +578,7 @@ export async function getWarehouseTransfers(userId: number, searchTerm?: string,
           OR LOWER(COALESCE(dt.name, '')) LIKE ${searchPattern}
           OR LOWER(COALESCE(t.notes, '')) LIKE ${searchPattern}
         )
-      GROUP BY t.id, df.name, dt.name
+      GROUP BY t.id, df.name, dt.name, u_create.name, u_approve.name, u_reject.name
       ORDER BY COALESCE(t.transfer_date, t.created_at) DESC, t.id DESC
       LIMIT 300
     `) as any[]
@@ -706,52 +783,29 @@ export async function createWarehouseTransfer(formData: FormData) {
     // creating device is NOT the source warehouse. When the source warehouse
     // itself creates the transfer (pushing its own stock out), it completes
     // immediately.
-    const isRequest = fromDeviceId !== userId
-    const initialStatus = isRequest ? "pending" : "completed"
+    const initialStatus = "pending_approval"
 
     const transferRows = (await sql`
       INSERT INTO stock_transfers (
-        company_id, from_device_id, to_device_id, status, total_amount, payment_status, payment_method, paid_amount, payment_notes, transfer_date, notes, created_by, created_at, updated_at
+        company_id, from_device_id, to_device_id, status, approval_status, total_amount, payment_status, payment_method, paid_amount, payment_notes, transfer_date, notes, created_by, created_at, updated_at
       ) VALUES (
-        ${actorCompanyId}, ${fromDeviceId}, ${toDeviceId}, ${initialStatus}, ${totalAmount}, ${paymentStatus}, ${paymentMethod || null}, ${paidAmount}, ${paymentNotes || null}, COALESCE(${transferDate}::timestamp, NOW()), ${notes}, ${userId}, NOW(), NOW()
+        ${actorCompanyId}, ${fromDeviceId}, ${toDeviceId}, ${initialStatus}, ${initialStatus}, ${totalAmount}, ${paymentStatus}, ${paymentMethod || null}, ${paidAmount}, ${paymentNotes || null}, COALESCE(${transferDate}::timestamp, NOW()), ${notes}, ${userId}, NOW(), NOW()
       )
       RETURNING id
     `) as any[]
     const transferId = Number(transferRows[0].id)
 
     for (const item of items) {
-      // Pending requests don't move stock yet — that happens on acceptance.
-      if (!isRequest) {
-        await moveStockBetweenDevices(item.product_id, item.product_variant_id, item.batch_id, item.quantity, fromDeviceId, toDeviceId, transferId, userId)
-      }
       await sql`
         INSERT INTO stock_transfer_items (transfer_id, product_id, product_variant_id, batch_id, quantity, unit_cost, total_cost, created_at)
         VALUES (${transferId}, ${item.product_id}, ${item.product_variant_id || null}, ${item.batch_id || null}, ${item.quantity}, ${item.unit_cost}, ${Number((item.quantity * item.unit_cost).toFixed(2))}, NOW())
       `
     }
 
-    // No financial impact until a request is accepted.
-    if (!isRequest) {
-      await recordTransferLedger({
-        transferId,
-        companyId: actorCompanyId,
-        fromDeviceId,
-        toDeviceId,
-        totalAmount,
-        paidAmount,
-        paymentStatus,
-        paymentMethod,
-        paymentNotes,
-        userId,
-        transferDate,
-      })
-    }
-
-    // await sql`COMMIT`
     revalidatePath("/dashboard")
     return {
       success: true,
-      message: isRequest ? "Transfer request sent for approval" : "Transfer completed successfully",
+      message: "Transfer request created successfully and sent for approval",
       data: { id: transferId, status: initialStatus },
     }
   } catch (error: any) {
@@ -1096,15 +1150,13 @@ export async function acceptWarehouseTransfer(transferId: number, userId: number
 
   resetConnectionState()
   try {
-    // await sql`BEGIN`
     const actorCompanyId = await getCompanyIdForDevice(userId)
     if (!actorCompanyId) {
-      // await sql`ROLLBACK`
       return { success: false, message: "Device/company not found" }
     }
 
     const transferRows = (await sql`
-      SELECT id, status, from_device_id, to_device_id, total_amount, paid_amount,
+      SELECT id, status, approval_status, from_device_id, to_device_id, total_amount, paid_amount,
              payment_status, payment_method, payment_notes,
              TO_CHAR(COALESCE(transfer_date, created_at), 'YYYY-MM-DD') AS transfer_date_str
       FROM stock_transfers
@@ -1112,23 +1164,20 @@ export async function acceptWarehouseTransfer(transferId: number, userId: number
       LIMIT 1
     `) as any[]
     if (transferRows.length === 0) {
-      // await sql`ROLLBACK`
       return { success: false, message: "Transfer not found" }
     }
 
     const transfer = transferRows[0]
-    if (String(transfer.status).toLowerCase() !== "pending") {
-      // await sql`ROLLBACK`
-      return { success: false, message: "Only pending requests can be accepted" }
+    const currentStatus = String(transfer.approval_status || transfer.status).toLowerCase()
+    if (currentStatus !== "pending" && currentStatus !== "pending_approval") {
+      return { success: false, message: "Only pending requests can be approved" }
     }
 
     const fromDeviceId = Number(transfer.from_device_id)
     const toDeviceId = Number(transfer.to_device_id)
 
-    // Only the source warehouse (the one giving up stock) can approve.
-    if (userId !== fromDeviceId) {
-      // await sql`ROLLBACK`
-      return { success: false, message: "Only the source warehouse can accept this request" }
+    if (toDeviceId !== userId) {
+      return { success: false, message: "Only the destination device can approve this transfer request" }
     }
 
     const itemsRows = (await sql`
@@ -1145,7 +1194,6 @@ export async function acceptWarehouseTransfer(transferId: number, userId: number
     }))
 
     if (items.length === 0) {
-      // await sql`ROLLBACK`
       return { success: false, message: "This request has no items to transfer" }
     }
 
@@ -1180,18 +1228,17 @@ export async function acceptWarehouseTransfer(transferId: number, userId: number
 
     await sql`
       UPDATE stock_transfers
-      SET status = 'completed',
+      SET status = 'approved',
+          approval_status = 'approved',
           approved_by = ${userId},
           approved_at = NOW(),
           updated_at = NOW()
       WHERE id = ${transferId}
     `
 
-    // await sql`COMMIT`
     revalidatePath("/dashboard")
-    return { success: true, message: "Transfer request accepted" }
+    return { success: true, message: "Transfer request approved successfully" }
   } catch (error: any) {
-    // await sql`ROLLBACK`
     console.error("Accept warehouse transfer error:", error)
     return {
       success: false,
@@ -1200,7 +1247,7 @@ export async function acceptWarehouseTransfer(transferId: number, userId: number
   }
 }
 
-// Sender rejects a pending request with a reason. No stock or money moves.
+// Destination or source device rejects a pending request with a reason. No stock or money moves.
 export async function rejectWarehouseTransfer(transferId: number, userId: number, reason: string) {
   if (!transferId || !userId) {
     return { success: false, message: "Transfer ID and user ID are required" }
@@ -1213,37 +1260,36 @@ export async function rejectWarehouseTransfer(transferId: number, userId: number
 
   resetConnectionState()
   try {
-    // await sql`BEGIN`
     const actorCompanyId = await getCompanyIdForDevice(userId)
     if (!actorCompanyId) {
-      // await sql`ROLLBACK`
       return { success: false, message: "Device/company not found" }
     }
 
     const transferRows = (await sql`
-      SELECT id, status, from_device_id
+      SELECT id, status, approval_status, from_device_id, to_device_id
       FROM stock_transfers
       WHERE id = ${transferId} AND company_id = ${actorCompanyId}
       LIMIT 1
     `) as any[]
     if (transferRows.length === 0) {
-      // await sql`ROLLBACK`
       return { success: false, message: "Transfer not found" }
     }
 
     const transfer = transferRows[0]
-    if (String(transfer.status).toLowerCase() !== "pending") {
-      // await sql`ROLLBACK`
+    const currentStatus = String(transfer.approval_status || transfer.status).toLowerCase()
+    if (currentStatus !== "pending" && currentStatus !== "pending_approval") {
       return { success: false, message: "Only pending requests can be rejected" }
     }
-    if (userId !== Number(transfer.from_device_id)) {
-      // await sql`ROLLBACK`
-      return { success: false, message: "Only the source warehouse can reject this request" }
+
+    const toDeviceId = Number(transfer.to_device_id)
+    if (toDeviceId !== userId) {
+      return { success: false, message: "Only the destination device can reject this transfer request" }
     }
 
     await sql`
       UPDATE stock_transfers
       SET status = 'rejected',
+          approval_status = 'rejected',
           rejection_reason = ${rejectionReason},
           rejected_by = ${userId},
           rejected_at = NOW(),
@@ -1414,6 +1460,65 @@ export async function getWarehouseSettlementSummaries(deviceId: number) {
       message: `Database error: ${getLastError()?.message || "Unknown error"}.`,
       data: [] as WarehouseSettlementSummary[],
     }
+  }
+}
+
+export async function getTransferDashboardStats(userId: number) {
+  if (!userId) {
+    return { success: false, data: { pendingApprovals: 0, approvedToday: 0, rejectedToday: 0, transferValueToday: 0 } }
+  }
+
+  resetConnectionState()
+  try {
+    const companyId = await getCompanyIdForDevice(userId)
+    if (!companyId) return { success: false, data: { pendingApprovals: 0, approvedToday: 0, rejectedToday: 0, transferValueToday: 0 } }
+
+    const pendingRows = (await sql`
+      SELECT COUNT(*)::int as count
+      FROM stock_transfers
+      WHERE company_id = ${companyId}
+        AND to_device_id = ${userId}
+        AND LOWER(COALESCE(approval_status, status)) IN ('pending', 'pending_approval')
+    `) as any[]
+
+    const approvedTodayRows = (await sql`
+      SELECT COUNT(*)::int as count
+      FROM stock_transfers
+      WHERE company_id = ${companyId}
+        AND (from_device_id = ${userId} OR to_device_id = ${userId})
+        AND LOWER(COALESCE(approval_status, status)) IN ('approved', 'completed')
+        AND approved_at >= CURRENT_DATE
+    `) as any[]
+
+    const rejectedTodayRows = (await sql`
+      SELECT COUNT(*)::int as count
+      FROM stock_transfers
+      WHERE company_id = ${companyId}
+        AND (from_device_id = ${userId} OR to_device_id = ${userId})
+        AND LOWER(COALESCE(approval_status, status)) = 'rejected'
+        AND rejected_at >= CURRENT_DATE
+    `) as any[]
+
+    const valueTodayRows = (await sql`
+      SELECT COALESCE(SUM(total_amount), 0)::numeric as total
+      FROM stock_transfers
+      WHERE company_id = ${companyId}
+        AND (from_device_id = ${userId} OR to_device_id = ${userId})
+        AND created_at >= CURRENT_DATE
+    `) as any[]
+
+    return {
+      success: true,
+      data: {
+        pendingApprovals: Number(pendingRows[0]?.count || 0),
+        approvedToday: Number(approvedTodayRows[0]?.count || 0),
+        rejectedToday: Number(rejectedTodayRows[0]?.count || 0),
+        transferValueToday: Number(valueTodayRows[0]?.total || 0),
+      },
+    }
+  } catch (err) {
+    console.error("Get transfer dashboard stats error:", err)
+    return { success: false, data: { pendingApprovals: 0, approvedToday: 0, rejectedToday: 0, transferValueToday: 0 } }
   }
 }
 

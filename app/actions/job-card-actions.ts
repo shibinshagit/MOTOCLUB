@@ -521,13 +521,8 @@ export async function getAllJobCards(deviceId?: number) {
           d.logo_url as device_logo
         FROM sales s
         LEFT JOIN customers c ON s.customer_id = c.id
-        JOIN devices d ON s.device_id = d.id
-        WHERE s.device_id IN (
-          SELECT d2.id
-          FROM devices d1
-          JOIN devices d2 ON d2.company_id = d1.company_id
-          WHERE d1.id = ${deviceId}
-        )
+        LEFT JOIN devices d ON s.device_id = d.id
+        WHERE s.device_id = ${deviceId}
           AND (s.status != 'Cancelled' OR s.delivery_status = 'Returned')
           AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%')
         ORDER BY s.created_at DESC

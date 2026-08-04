@@ -492,6 +492,12 @@ async function createTables() {
         rejected_at TIMESTAMP
       )
     `
+    await sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS approval_status VARCHAR(30) DEFAULT 'pending_approval'`
+    await sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS approved_by INTEGER`
+    await sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP`
+    await sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS rejected_by INTEGER`
+    await sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS rejected_at TIMESTAMP`
+    await sql`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS rejection_reason TEXT`
   })
 
   await run("stock_transfer_items", async () => {
