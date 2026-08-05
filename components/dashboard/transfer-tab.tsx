@@ -730,6 +730,9 @@ export default function TransferTab({ userId }: TransferTabProps) {
       next[index] = isOpen
       return next
     })
+    if (!isOpen) {
+      setProductSearchTerm(index, "")
+    }
   }
 
   const addItemRow = () => {
@@ -763,8 +766,13 @@ export default function TransferTab({ userId }: TransferTabProps) {
   }
 
   const handleSourceChange = async (fromDeviceId: number) => {
-    setFormData((prev) => ({ ...prev, fromDeviceId }))
+    setFormData((prev) => ({
+      ...prev,
+      fromDeviceId,
+      toDeviceId: prev.toDeviceId === fromDeviceId ? 0 : prev.toDeviceId,
+    }))
     setRowWarnings({})
+    setRowProductSearch((prev) => prev.map(() => ""))
     await loadFormData(fromDeviceId)
   }
 

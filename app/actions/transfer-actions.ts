@@ -338,15 +338,19 @@ export async function getTransferFormData(userId: number, fromDeviceId?: number)
       FROM products p
       JOIN devices d ON d.id = p.created_by
       LEFT JOIN (
-        SELECT pv.product_id, pbds.device_id, SUM(pbds.stock) as stock
-        FROM product_batch_device_stock pbds
-        JOIN product_batches pb ON pb.id = pbds.batch_id
-        JOIN product_variants pv ON pv.id = pb.product_variant_id
-        GROUP BY pv.product_id, pbds.device_id
-        UNION ALL
-        SELECT pds.product_id, pds.device_id, SUM(pds.stock) as stock
-        FROM product_device_stock pds
-        GROUP BY pds.product_id, pds.device_id
+        SELECT product_id, device_id, SUM(stock) as stock
+        FROM (
+          SELECT pv.product_id, pbds.device_id, SUM(pbds.stock) as stock
+          FROM product_batch_device_stock pbds
+          JOIN product_batches pb ON pb.id = pbds.batch_id
+          JOIN product_variants pv ON pv.id = pb.product_variant_id
+          GROUP BY pv.product_id, pbds.device_id
+          UNION ALL
+          SELECT pds.product_id, pds.device_id, SUM(pds.stock) as stock
+          FROM product_device_stock pds
+          GROUP BY pds.product_id, pds.device_id
+        ) combined
+        GROUP BY product_id, device_id
       ) pds ON pds.product_id = p.id AND pds.device_id = ${sourceDeviceId}
       WHERE d.company_id = ${companyId}
       ORDER BY p.name ASC
