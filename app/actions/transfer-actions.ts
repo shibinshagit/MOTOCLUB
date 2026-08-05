@@ -307,14 +307,14 @@ async function reverseTransferItems(
 
 export async function getTransferFormData(userId: number, fromDeviceId?: number) {
   if (!userId) {
-    return { success: false, message: "User ID is required", data: { devices: [], products: [] } }
+    return { success: false, message: "User ID is required", data: { devices: [], products: [], categories: [] } }
   }
 
   resetConnectionState()
   try {
     const companyId = await getCompanyIdForDevice(userId)
     if (!companyId) {
-      return { success: false, message: "Device/company not found", data: { devices: [], products: [] } }
+      return { success: false, message: "Device/company not found", data: { devices: [], products: [], categories: [] } }
     }
 
     const sourceDeviceId = Number(fromDeviceId || userId)
@@ -333,10 +333,13 @@ export async function getTransferFormData(userId: number, fromDeviceId?: number)
         p.barcode,
         p.has_variants,
         p.is_batch_managed,
+        p.category_id,
+        COALESCE(pc.name, 'Uncategorized') AS category_name,
         COALESCE(p.wholesale_price, 0) AS default_unit_cost,
         COALESCE(pds.stock, 0) AS source_stock
       FROM products p
       JOIN devices d ON d.id = p.created_by
+      LEFT JOIN product_categories pc ON pc.id = p.category_id
       LEFT JOIN (
         SELECT product_id, device_id, SUM(stock) as stock
         FROM (
@@ -431,14 +434,33 @@ export async function getTransferFormData(userId: number, fromDeviceId?: number)
       }
     }
 
+    // Build unique category list from the products
+    const categoryMap = new Map<number | null, string>()
+    for (const p of products) {
+      const catId = p.category_id ? Number(p.category_id) : null
+      if (!categoryMap.has(catId)) {
+        categoryMap.set(catId, p.category_name || "Uncategorized")
+      }
+    }
+    const categories = Array.from(categoryMap.entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => {
+        if (a.id === null) return 1
+        if (b.id === null) return -1
+        return a.name.localeCompare(b.name)
+      })
+
     return {
       success: true,
       data: {
         devices: devices.map((d) => ({ id: Number(d.id), name: d.name })),
+        categories,
         products: products.map((p) => ({
           id: Number(p.id),
           name: p.name,
           barcode: p.barcode || "",
+          category_id: p.category_id ? Number(p.category_id) : null,
+          category_name: p.category_name || "Uncategorized",
           default_unit_cost: Number(p.default_unit_cost || 0),
           source_stock: Number(p.source_stock || 0),
           has_variants: Boolean(p.has_variants),
@@ -453,7 +475,7 @@ export async function getTransferFormData(userId: number, fromDeviceId?: number)
     return {
       success: false,
       message: `Database error: ${getLastError()?.message || "Unknown error"}.`,
-      data: { devices: [], products: [] },
+      data: { devices: [], products: [], categories: [] },
     }
   }
 }

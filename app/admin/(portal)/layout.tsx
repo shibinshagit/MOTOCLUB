@@ -2,6 +2,8 @@ import { redirect } from "next/navigation"
 import { getAdminSession } from "@/app/actions/admin-auth-actions"
 import AdminShell from "@/components/admin/admin-shell"
 
+export const dynamic = 'force-dynamic'
+
 export default async function AdminPortalLayout({
   children,
 }: Readonly<{

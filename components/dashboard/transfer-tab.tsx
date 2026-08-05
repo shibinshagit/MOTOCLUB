@@ -1,7 +1,7 @@
 "use client"
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
-import { ArrowRightLeft, Calendar, Check, ChevronDown, ChevronUp, CreditCard, Eye, FilePenLine, History, Layers, Loader2, Pencil, Plus, RefreshCw, Search, Trash2, Undo2, Wallet, X } from "lucide-react"
+import { ArrowRightLeft, Calendar, Check, ChevronDown, ChevronUp, ChevronsUpDown, CreditCard, Eye, FilePenLine, History, Layers, Loader2, Pencil, Plus, RefreshCw, Search, Trash2, Undo2, Wallet, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -9,6 +9,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Badge } from "@/components/ui/badge"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { useToast } from "@/components/ui/use-toast"
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
+import { Label } from "@/components/ui/label"
 import { notifyError, notifySuccess, notifyWarning } from "@/lib/notifications"
 import { markInventoryStale } from "@/lib/inventory-sync"
 import { useConfirm } from "@/hooks/use-confirm"
@@ -118,8 +120,11 @@ export default function TransferTab({ userId }: TransferTabProps) {
 
   const [devices, setDevices] = useState<Array<{ id: number; name: string }>>([])
   const [products, setProducts] = useState<any[]>([])
+  const [categories, setCategories] = useState<Array<{ id: number | null; name: string }>>([])
   const [rowProductSearch, setRowProductSearch] = useState<string[]>([""])
   const [rowProductOpen, setRowProductOpen] = useState<boolean[]>([false])
+  const [rowSelectedCategory, setRowSelectedCategory] = useState<Array<number | null | "all">>([ "all"])
+  const [rowCategoryOpen, setRowCategoryOpen] = useState<boolean[]>([false])
   const [rowWarnings, setRowWarnings] = useState<Record<number, string>>({})
   const [settlements, setSettlements] = useState<WarehouseSettlementSummary[]>([])
   const [isLoadingSettlements, setIsLoadingSettlements] = useState(false)
@@ -476,6 +481,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
       if (result.success) {
         setDevices(result.data.devices || [])
         setProducts(result.data.products || [])
+        setCategories(result.data.categories || [])
       } else {
         notifyError(toast, result.message || "Failed to load transfer form data")
       }
@@ -501,6 +507,8 @@ export default function TransferTab({ userId }: TransferTabProps) {
     setEditOriginal(null)
     setRowProductSearch([""])
     setRowProductOpen([false])
+    setRowSelectedCategory(["all"])
+    setRowCategoryOpen([false])
     setRowWarnings({})
     setFormData({
       fromDeviceId: userId || devices[0]?.id || 0,
@@ -735,10 +743,28 @@ export default function TransferTab({ userId }: TransferTabProps) {
     }
   }
 
+  const setRowCategory = (index: number, catId: number | null | "all") => {
+    setRowSelectedCategory((prev) => {
+      const next = [...prev]
+      next[index] = catId
+      return next
+    })
+  }
+
+  const setCatOpen = (index: number, isOpen: boolean) => {
+    setRowCategoryOpen((prev) => {
+      const next = [...prev]
+      next[index] = isOpen
+      return next
+    })
+  }
+
   const addItemRow = () => {
     setFormData((prev) => ({ ...prev, items: [...prev.items, { product_id: 0, quantity: 1, unit_cost: 0 }] }))
     setRowProductSearch((prev) => [...prev, ""])
     setRowProductOpen((prev) => [...prev, false])
+    setRowSelectedCategory((prev) => [...prev, "all"])
+    setRowCategoryOpen((prev) => [...prev, false])
   }
 
   const removeItemRow = (index: number) => {
@@ -753,6 +779,14 @@ export default function TransferTab({ userId }: TransferTabProps) {
     setRowProductOpen((prev) => {
       const open = prev.filter((_, i) => i !== index)
       return open.length > 0 ? open : [false]
+    })
+    setRowSelectedCategory((prev) => {
+      const cats = prev.filter((_, i) => i !== index)
+      return cats.length > 0 ? cats : ["all"]
+    })
+    setRowCategoryOpen((prev) => {
+      const opens = prev.filter((_, i) => i !== index)
+      return opens.length > 0 ? opens : [false]
     })
     setRowWarnings((prev) => {
       const next: Record<number, string> = {}
@@ -773,6 +807,8 @@ export default function TransferTab({ userId }: TransferTabProps) {
     }))
     setRowWarnings({})
     setRowProductSearch((prev) => prev.map(() => ""))
+    setRowSelectedCategory((prev) => prev.map(() => "all"))
+    setRowCategoryOpen((prev) => prev.map(() => false))
     await loadFormData(fromDeviceId)
   }
 
@@ -1602,7 +1638,66 @@ export default function TransferTab({ userId }: TransferTabProps) {
                           onOpenAutoFocus={(event) => event.preventDefault()}
                           onWheel={(e) => e.stopPropagation()}
                         >
-                          <div className="border-b border-gray-200 bg-white p-2">
+                          <div className="border-b border-gray-200 bg-white p-3 space-y-2">
+                            {categories.length > 0 && (
+                              <div className="flex items-center gap-2">
+                                <Label className="text-sm font-medium text-gray-700 whitespace-nowrap">Category</Label>
+                                <Popover open={Boolean(rowCategoryOpen[idx])} onOpenChange={(open) => setCatOpen(idx, open)}>
+                                  <PopoverTrigger asChild>
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      role="combobox"
+                                      aria-expanded={Boolean(rowCategoryOpen[idx])}
+                                      className="flex-1 justify-between h-9 bg-white border-gray-300 text-gray-900 font-normal overflow-hidden"
+                                    >
+                                      <span className="truncate text-left flex-1">
+                                        {(rowSelectedCategory[idx] ?? "all") === "all"
+                                          ? "All Categories"
+                                          : (() => {
+                                              const cat = categories.find((c) => c.id === rowSelectedCategory[idx])
+                                              return cat ? cat.name : "All Categories"
+                                            })()}
+                                      </span>
+                                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                    </Button>
+                                  </PopoverTrigger>
+                                  <PopoverContent
+                                    className="w-[280px] p-0 bg-white border-gray-200"
+                                    align="start"
+                                    onWheel={(e) => e.stopPropagation()}
+                                  >
+                                    <Command className="max-h-[260px]">
+                                      <CommandInput placeholder="Search categories..." className="h-9" />
+                                      <CommandEmpty>No categories found.</CommandEmpty>
+                                      <CommandList>
+                                        <CommandGroup>
+                                          <CommandItem
+                                            value="all"
+                                            onSelect={() => { setRowCategory(idx, "all"); setCatOpen(idx, false) }}
+                                            className="cursor-pointer"
+                                          >
+                                            <Check className={`mr-2 h-4 w-4 ${(rowSelectedCategory[idx] ?? "all") === "all" ? "opacity-100" : "opacity-0"}`} />
+                                            All Categories
+                                          </CommandItem>
+                                          {categories.map((cat) => (
+                                            <CommandItem
+                                              key={cat.id ?? "uncategorized"}
+                                              value={cat.name}
+                                              onSelect={() => { setRowCategory(idx, cat.id); setCatOpen(idx, false) }}
+                                              className="cursor-pointer"
+                                            >
+                                              <Check className={`mr-2 h-4 w-4 ${rowSelectedCategory[idx] === cat.id ? "opacity-100" : "opacity-0"}`} />
+                                              {cat.name}
+                                            </CommandItem>
+                                          ))}
+                                        </CommandGroup>
+                                      </CommandList>
+                                    </Command>
+                                  </PopoverContent>
+                                </Popover>
+                              </div>
+                            )}
                             <div className="relative">
                               <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                               <Input
@@ -1620,11 +1715,19 @@ export default function TransferTab({ userId }: TransferTabProps) {
                           >
                             {products
                               .filter((p) => {
+                                // Category filter
+                                const selectedCat = rowSelectedCategory[idx] ?? "all"
+                                if (selectedCat !== "all") {
+                                  if (selectedCat === null) {
+                                    if (p.category_id !== null && p.category_id !== undefined) return false
+                                  } else {
+                                    if (Number(p.category_id) !== Number(selectedCat)) return false
+                                  }
+                                }
+                                // Text filter
                                 const q = (rowProductSearch[idx] || "").trim().toLowerCase()
                                 if (!q) return true
                                 const nameMatch = p.name.toLowerCase().includes(q)
-                                // Only match barcode if query is purely numeric OR at least 4 chars
-                                // This prevents a single digit like "3" matching inside every barcode
                                 const barcode = (p.barcode || "").toLowerCase()
                                 const barcodeMatch = (/^\d+$/.test(q) || q.length >= 4)
                                   ? (barcode.startsWith(q) || barcode === q)
@@ -1675,6 +1778,11 @@ export default function TransferTab({ userId }: TransferTabProps) {
                                   <div className="min-w-0">
                                     <p className="truncate text-sm font-medium text-gray-900">{p.name}</p>
                                     <p className="truncate text-xs text-gray-500">{p.barcode || "No barcode"}</p>
+                                    {p.category_name && p.category_name !== "Uncategorized" && (
+                                      <span className="inline-block mt-0.5 text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600 font-medium">
+                                        {p.category_name}
+                                      </span>
+                                    )}
                                   </div>
                                   <div className="flex items-center gap-2 shrink-0">
                                     <span className="text-xs rounded-full bg-blue-100 text-blue-700 px-2 py-0.5">
@@ -1685,6 +1793,14 @@ export default function TransferTab({ userId }: TransferTabProps) {
                                 </button>
                               ))}
                             {products.filter((p) => {
+                              const selectedCat = rowSelectedCategory[idx] ?? "all"
+                              if (selectedCat !== "all") {
+                                if (selectedCat === null) {
+                                  if (p.category_id !== null && p.category_id !== undefined) return false
+                                } else {
+                                  if (Number(p.category_id) !== Number(selectedCat)) return false
+                                }
+                              }
                               const q = (rowProductSearch[idx] || "").trim().toLowerCase()
                               if (!q) return true
                               const nameMatch = p.name.toLowerCase().includes(q)
