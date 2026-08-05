@@ -190,6 +190,12 @@ export default function ViewSaleModal({
       return { subtotal: 0, total: 0, remaining: 0 }
     }
 
+    // Use the DB-stored total_amount as the authoritative total (it already includes courier_paid_extra)
+    const total = Number.parseFloat(saleData.total_amount) || 0
+    const discount = Number.parseFloat(saleData.discount) || 0
+    const courierPaidExtra = saleData.fulfillment_type === "ship" ? Number(saleData.courier_paid_extra) || 0 : 0
+
+    // Subtotal = items sum (without courier or discount adjustments)
     let subtotal = 0
     if (saleItems && saleItems.length > 0) {
       subtotal = saleItems.reduce((sum: number, item: any) => {
@@ -198,13 +204,10 @@ export default function ViewSaleModal({
         return sum + price * quantity
       }, 0)
     } else {
-      const total = Number.parseFloat(saleData.total_amount) || 0
-      const discount = Number.parseFloat(saleData.discount) || 0
-      subtotal = total + discount
+      // Fallback: derive from stored total
+      subtotal = total - courierPaidExtra + discount
     }
 
-    const discount = Number.parseFloat(saleData.discount) || 0
-    const total = subtotal - discount
     const receivedAmount = Number.parseFloat(saleData.received_amount) || 0
     const remaining = Math.max(0, total - receivedAmount)
 
@@ -212,6 +215,7 @@ export default function ViewSaleModal({
   }
 
   const { subtotal, total, remaining } = calculateTotals()
+
 
   const getDisplayValue = (value: any, fallback = "—") => {
     if (value === null || value === undefined || value === "") return fallback

@@ -1135,8 +1135,7 @@ function calculateSaleChanges(
     0,
   )
   const newDiscountAmount = Number(newData.discount) || 0
-  const courierPaidExtra =
-    shipping?.fulfillment_type === "ship" ? Number(shipping.courier_paid_extra) || 0 : 0
+  const courierPaidExtra = Number(shipping?.courier_paid_extra) || 0
   const productTotal = Math.max(0, subtotal - newDiscountAmount)
   const newTotal = productTotal + courierPaidExtra
 
@@ -1383,22 +1382,6 @@ export async function updateSale(saleData: any) {
       }
     }
 
-    // Validate courier fields for Job Cards requiring shipping
-    const isJobCard = original.sale_type === "job_card" || saleData.saleType === "job_card" || original.status === "Pending"
-    if (isJobCard && shipping.fulfillment_type === "ship") {
-      if (!shipping.courier_partner_id) {
-        return {
-          success: false,
-          message: "Please select a Courier Partner for this shipment.",
-        }
-      }
-      if (!shipping.courier_service_id) {
-        return {
-          success: false,
-          message: "Please select a Courier Service for this shipment.",
-        }
-      }
-    }
 
     const updateSaleRecord = async (whereDeviceScoped: boolean) => {
         if (whereDeviceScoped) {

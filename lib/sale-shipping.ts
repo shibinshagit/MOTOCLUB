@@ -119,7 +119,8 @@ export function getSaleDeliveryLabel(sale: {
 }
 
 export function normalizeSaleShippingInput(input?: SaleShippingInput | null) {
-  const fulfillmentType: FulfillmentType = input?.fulfillmentType === "ship" ? "ship" : "pickup"
+  const isShip = input?.fulfillmentType === "ship" || Number(input?.courierPaidExtra) > 0
+  const fulfillmentType: FulfillmentType = isShip ? "ship" : "pickup"
 
   if (fulfillmentType === "pickup") {
     return {
@@ -136,9 +137,9 @@ export function normalizeSaleShippingInput(input?: SaleShippingInput | null) {
       length_cm: null,
       width_cm: null,
       height_cm: null,
-      courier_paid_extra: 0,
-      expense_courier: 0,
-      expense_packing: 0,
+      courier_paid_extra: Number(input?.courierPaidExtra) || 0,
+      expense_courier: Number(input?.expenseCourier) || 0,
+      expense_packing: Number(input?.expensePacking) || 0,
       shipped_at: null,
       delivered_at: null,
       shipping_notes: null,
@@ -196,9 +197,12 @@ export function normalizeSaleShippingInput(input?: SaleShippingInput | null) {
 
 export function mapSaleShippingFromRecord(record: Record<string, unknown>): SaleShippingRecord {
   const isJobCard = record.sale_type === "job_card" || String(record.tracking_id || "").startsWith("JC-")
-  const defaultFulfillment = isJobCard ? "ship" : "pickup"
+  const hasCourier = Number(record.courier_paid_extra) > 0
+  const defaultFulfillment = (isJobCard || hasCourier) ? "ship" : "pickup"
+  const mappedFulfillment = record.fulfillment_type as FulfillmentType
+  const fulfillmentType = (mappedFulfillment === "ship" || hasCourier) ? "ship" : (mappedFulfillment || defaultFulfillment)
   return {
-    fulfillmentType: (record.fulfillment_type as FulfillmentType) || defaultFulfillment,
+    fulfillmentType,
     deliveryStatus: (record.delivery_status as string) || "Pending",
     courierPartnerId: (record.courier_partner_id as number) || null,
     courierServiceId: (record.courier_service_id as number) || null,

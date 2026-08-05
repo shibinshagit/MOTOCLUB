@@ -296,7 +296,7 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
     }
   }, [isOpen])
 
-  // Calculate totals whenever products or discount or tax changes
+  // Calculate totals whenever products or discount or tax or shipping changes
   useEffect(() => {
     const newSubtotal = products.reduce((sum, product) => sum + product.total, 0)
     setSubtotal(newSubtotal)
@@ -306,9 +306,13 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
     const newTaxAmount = afterDiscount * (taxRate / 100)
     setTaxAmount(newTaxAmount)
 
-    // Calculate total: subtotal - discount + tax
-    setTotalAmount(afterDiscount + newTaxAmount)
-  }, [products, discountAmount, taxRate])
+    // Include courier charge in total (applies for ship fulfillment type)
+    const courierExtra = shipping?.fulfillmentType === "ship" ? Number(shipping?.courierPaidExtra) || 0 : 0
+
+    // Calculate total: subtotal - discount + tax + courier charge
+    setTotalAmount(afterDiscount + newTaxAmount + courierExtra)
+  }, [products, discountAmount, taxRate, shipping])
+
 
   // Validate received amount when total or status changes
   useEffect(() => {
@@ -725,21 +729,8 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
         })
         return
       }
-      if (!shipping.courierPartnerId) {
-        setFormAlert({
-          type: "error",
-          message: "Please select a courier partner",
-        })
-        return
-      }
-      if (!shipping.courierServiceId) {
-        setFormAlert({
-          type: "error",
-          message: "Please select a courier service",
-        })
-        return
-      }
     }
+
 
     setIsSubmitting(true)
 
@@ -1310,6 +1301,13 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
                           </div>
                         </div>
 
+                        {shipping?.fulfillmentType === "ship" && Number(shipping?.courierPaidExtra) > 0 && (
+                          <div className="flex justify-between items-center py-2 border-t border-gray-200">
+                            <span className="font-medium text-gray-700">Courier Charge:</span>
+                            <span className="text-lg text-blue-700">+ {currency} {Number(shipping.courierPaidExtra).toFixed(2)}</span>
+                          </div>
+                        )}
+
                         <div className="flex justify-between items-center py-3 border-t border-gray-200 bg-blue-50 p-3 rounded-md">
                           <span className="font-bold text-blue-800 text-lg">Total Amount:</span>
                           <div className="font-bold text-blue-800 text-xl">
@@ -1317,6 +1315,7 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
                           </div>
                         </div>
                       </CardContent>
+
                     </Card>
 
                     {/* Update Sale button */}
