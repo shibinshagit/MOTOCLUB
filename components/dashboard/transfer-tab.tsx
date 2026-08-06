@@ -28,6 +28,7 @@ import {
   acceptWarehouseTransfer,
   cancelWarehouseTransfer,
   createWarehouseTransfer,
+  deleteWarehouseTransfer,
   getTransferFormData,
   getTransferDashboardStats,
   getWarehouseSettlementSummaries,
@@ -623,6 +624,19 @@ export default function TransferTab({ userId }: TransferTabProps) {
     }
     markInventoryStale(dispatch)
     notifySuccess(toast, result.message || "Transfer cancelled" )
+    await loadTransfers()
+    await loadSettlements()
+  }
+
+  const handleDeleteTransfer = async (transferId: number) => {
+    if (!(await confirm("Delete this transfer? Stock will be reversed automatically."))) return
+    const result = await deleteWarehouseTransfer(transferId, userId)
+    if (!result.success) {
+      notifyError(toast, result.message || "Failed to delete transfer")
+      return
+    }
+    markInventoryStale(dispatch)
+    notifySuccess(toast, result.message || "Transfer deleted")
     await loadTransfers()
     await loadSettlements()
   }
@@ -1354,7 +1368,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
                                   size="sm"
                                   variant="outline"
                                   className="h-7 text-xs px-2 text-rose-600 hover:text-rose-700 border-rose-200 hover:border-rose-300"
-                                  onClick={() => handleCancelTransfer(Number(transfer.id))}
+                                  onClick={() => handleDeleteTransfer(Number(transfer.id))}
                                 >
                                   <Trash2 className="h-3.5 w-3.5 mr-1 text-rose-500" />
                                   Delete

@@ -169,6 +169,7 @@ async function moveStockBetweenDevices(
   transferId: number,
   actorDeviceId: number,
   historyNotes?: string,
+  allowInsufficientStock: boolean = false,
 ) {
   const lockOrder = [fromDeviceId, toDeviceId].sort((a, b) => a - b)
   await getDeviceStockForUpdate(productId, variantId, lockOrder[0])
@@ -188,15 +189,17 @@ async function moveStockBetweenDevices(
     }
   }
 
-  if (batchId) {
-    const fromBatchStock = await getDeviceBatchStockForUpdate(batchId, fromDeviceId)
-    if (fromBatchStock < quantity) {
-      throw new Error(`Insufficient batch stock for product ID ${productId}. Available: ${fromBatchStock}, required: ${quantity}.`)
-    }
-  } else {
-    const fromStock = await getDeviceStockForUpdate(productId, resolvedVariantId, fromDeviceId)
-    if (fromStock < quantity) {
-      throw new Error(`Insufficient stock for product ID ${productId}. Available: ${fromStock}, required: ${quantity}.`)
+  if (!allowInsufficientStock) {
+    if (batchId) {
+      const fromBatchStock = await getDeviceBatchStockForUpdate(batchId, fromDeviceId)
+      if (fromBatchStock < quantity) {
+        throw new Error(`Insufficient batch stock for product ID ${productId}. Available: ${fromBatchStock}, required: ${quantity}.`)
+      }
+    } else {
+      const fromStock = await getDeviceStockForUpdate(productId, resolvedVariantId, fromDeviceId)
+      if (fromStock < quantity) {
+        throw new Error(`Insufficient stock for product ID ${productId}. Available: ${fromStock}, required: ${quantity}.`)
+      }
     }
   }
 
@@ -289,6 +292,7 @@ async function reverseTransferItems(
   originalToDeviceId: number,
   actorDeviceId: number,
   notePrefix: string,
+  allowInsufficientStock: boolean = true,
 ) {
   for (const item of items) {
     await moveStockBetweenDevices(
@@ -301,6 +305,7 @@ async function reverseTransferItems(
       transferId,
       actorDeviceId,
       `${notePrefix} #${transferId}`,
+      allowInsufficientStock,
     )
   }
 }
@@ -906,7 +911,7 @@ export async function updateWarehouseTransfer(formData: FormData) {
     }
 
     const transferRows = (await sql`
-      SELECT id, status, from_device_id, to_device_id
+      SELECT id, status, approval_status, from_device_id, to_device_id
       FROM stock_transfers
       WHERE id = ${transferId} AND company_id = ${actorCompanyId}
       LIMIT 1
@@ -917,7 +922,7 @@ export async function updateWarehouseTransfer(formData: FormData) {
     }
 
     const transfer = transferRows[0]
-    const currentStatus = String(transfer.status).toLowerCase()
+    const currentStatus = String(transfer.approval_status || transfer.status || "").toLowerCase()
     if (currentStatus === "cancelled") {
       // await sql`ROLLBACK`
       return { success: false, message: "Cancelled transfers cannot be edited" }
@@ -929,7 +934,7 @@ export async function updateWarehouseTransfer(formData: FormData) {
 
     // A pending request hasn't moved any stock or recorded any financials yet,
     // so editing it only updates the proposed details/items.
-    const isPending = currentStatus === "pending"
+    const isPending = currentStatus === "pending" || currentStatus === "pending_approval"
 
     const existingItemsRows = (await sql`
       SELECT product_id, product_variant_id, batch_id, quantity
@@ -986,6 +991,7 @@ export async function updateWarehouseTransfer(formData: FormData) {
             transferId,
             userId,
             `Transfer edit change +${delta} #${transferId}`,
+            false,
           )
         } else {
           await moveStockBetweenDevices(
@@ -998,6 +1004,7 @@ export async function updateWarehouseTransfer(formData: FormData) {
             transferId,
             userId,
             `Transfer edit change ${delta} #${transferId}`,
+            true,
           )
         }
       }
@@ -1009,6 +1016,7 @@ export async function updateWarehouseTransfer(formData: FormData) {
         originalToDeviceId,
         userId,
         "Transfer edit reversal",
+        true,
       )
 
       for (const item of items) {
@@ -1022,6 +1030,7 @@ export async function updateWarehouseTransfer(formData: FormData) {
           transferId,
           userId,
           `Transfer edit apply #${transferId}`,
+          false,
         )
       }
     }
@@ -1087,38 +1096,32 @@ export async function cancelWarehouseTransfer(transferId: number, userId: number
 
   resetConnectionState()
   try {
-    // await sql`BEGIN`
     const actorCompanyId = await getCompanyIdForDevice(userId)
     if (!actorCompanyId) {
-      // await sql`ROLLBACK`
       return { success: false, message: "Device/company not found" }
     }
 
     const transferRows = (await sql`
-      SELECT id, status, from_device_id, to_device_id
+      SELECT id, status, approval_status, from_device_id, to_device_id
       FROM stock_transfers
       WHERE id = ${transferId} AND company_id = ${actorCompanyId}
       LIMIT 1
     `) as any[]
     if (transferRows.length === 0) {
-      // await sql`ROLLBACK`
       return { success: false, message: "Transfer not found" }
     }
 
     const transfer = transferRows[0]
-    const cancelStatus = String(transfer.status).toLowerCase()
+    const cancelStatus = String(transfer.approval_status || transfer.status || "").toLowerCase()
     if (cancelStatus === "cancelled") {
-      // await sql`ROLLBACK`
       return { success: false, message: "Transfer is already cancelled" }
     }
     if (cancelStatus === "rejected") {
-      // await sql`ROLLBACK`
       return { success: false, message: "Rejected transfers cannot be cancelled" }
     }
 
-    // Only completed transfers have moved stock / recorded financials that need
-    // to be reversed. Pending requests have done neither.
-    if (cancelStatus !== "pending") {
+    // Only completed/approved transfers have moved stock / recorded financials that need to be reversed.
+    if (cancelStatus !== "pending" && cancelStatus !== "pending_approval") {
       const itemsRows = (await sql`
         SELECT product_id, product_variant_id, batch_id, quantity
         FROM stock_transfer_items
@@ -1140,6 +1143,7 @@ export async function cancelWarehouseTransfer(transferId: number, userId: number
         Number(transfer.to_device_id),
         userId,
         "Transfer cancellation reversal",
+        true,
       )
 
       await deleteTransferLedger(transferId)
@@ -1148,18 +1152,84 @@ export async function cancelWarehouseTransfer(transferId: number, userId: number
     await sql`
       UPDATE stock_transfers
       SET status = 'cancelled',
+          approval_status = 'cancelled',
           cancelled_at = NOW(),
           cancelled_by = ${userId},
           updated_at = NOW()
       WHERE id = ${transferId}
     `
 
-    // await sql`COMMIT`
     revalidatePath("/dashboard")
     return { success: true, message: "Transfer cancelled successfully" }
   } catch (error: any) {
-    // await sql`ROLLBACK`
     console.error("Cancel warehouse transfer error:", error)
+    return {
+      success: false,
+      message: error?.message || `Database error: ${getLastError()?.message || "Unknown error"}.`,
+    }
+  }
+}
+
+export async function deleteWarehouseTransfer(transferId: number, userId: number) {
+  if (!transferId || !userId) {
+    return { success: false, message: "Transfer ID and user ID are required" }
+  }
+
+  resetConnectionState()
+  try {
+    const actorCompanyId = await getCompanyIdForDevice(userId)
+    if (!actorCompanyId) {
+      return { success: false, message: "Device/company not found" }
+    }
+
+    const transferRows = (await sql`
+      SELECT id, status, approval_status, from_device_id, to_device_id
+      FROM stock_transfers
+      WHERE id = ${transferId} AND company_id = ${actorCompanyId}
+      LIMIT 1
+    `) as any[]
+    if (transferRows.length === 0) {
+      return { success: true, message: "Transfer deleted successfully" }
+    }
+
+    const transfer = transferRows[0]
+    const currentStatus = String(transfer.approval_status || transfer.status || "").toLowerCase()
+
+    if (currentStatus !== "pending" && currentStatus !== "pending_approval" && currentStatus !== "cancelled" && currentStatus !== "rejected") {
+      const itemsRows = (await sql`
+        SELECT product_id, product_variant_id, batch_id, quantity
+        FROM stock_transfer_items
+        WHERE transfer_id = ${transferId}
+        ORDER BY id ASC
+      `) as any[]
+
+      const items = itemsRows.map((row) => ({
+        product_id: Number(row.product_id),
+        product_variant_id: row.product_variant_id ? Number(row.product_variant_id) : null,
+        batch_id: row.batch_id ? Number(row.batch_id) : null,
+        quantity: Number(row.quantity),
+      }))
+
+      await reverseTransferItems(
+        transferId,
+        items,
+        Number(transfer.from_device_id),
+        Number(transfer.to_device_id),
+        userId,
+        "Transfer deletion reversal",
+        true,
+      )
+
+      await deleteTransferLedger(transferId)
+    }
+
+    await sql`DELETE FROM stock_transfer_items WHERE transfer_id = ${transferId}`
+    await sql`DELETE FROM stock_transfers WHERE id = ${transferId}`
+
+    revalidatePath("/dashboard")
+    return { success: true, message: "Transfer deleted successfully" }
+  } catch (error: any) {
+    console.error("Delete warehouse transfer error:", error)
     return {
       success: false,
       message: error?.message || `Database error: ${getLastError()?.message || "Unknown error"}.`,
