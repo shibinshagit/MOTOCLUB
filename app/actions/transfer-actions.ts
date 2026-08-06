@@ -189,9 +189,30 @@ async function moveStockBetweenDevices(
     }
   }
 
+  let effectiveBatchId = batchId
+
+  if (effectiveBatchId) {
+    const fromBatchStock = await getDeviceBatchStockForUpdate(effectiveBatchId, fromDeviceId)
+    if (fromBatchStock < quantity) {
+      const availableBatch = (await sql`
+        SELECT pb.id, COALESCE(pbds.stock, 0) as stock
+        FROM product_batches pb
+        JOIN product_batch_device_stock pbds ON pbds.batch_id = pb.id
+        WHERE pb.product_id = ${productId}
+          AND pbds.device_id = ${fromDeviceId}
+          AND pbds.stock > 0
+        ORDER BY pbds.stock DESC, pb.created_at ASC
+        LIMIT 1
+      `) as any[]
+      if (availableBatch.length > 0) {
+        effectiveBatchId = Number(availableBatch[0].id)
+      }
+    }
+  }
+
   if (!allowInsufficientStock) {
-    if (batchId) {
-      const fromBatchStock = await getDeviceBatchStockForUpdate(batchId, fromDeviceId)
+    if (effectiveBatchId) {
+      const fromBatchStock = await getDeviceBatchStockForUpdate(effectiveBatchId, fromDeviceId)
       if (fromBatchStock < quantity) {
         throw new Error(`Insufficient batch stock for product ID ${productId}. Available: ${fromBatchStock}, required: ${quantity}.`)
       }
@@ -203,10 +224,10 @@ async function moveStockBetweenDevices(
     }
   }
 
-  await adjustDeviceProductStock(productId, resolvedVariantId, batchId, fromDeviceId, -quantity)
-  await adjustDeviceProductStock(productId, resolvedVariantId, batchId, toDeviceId, quantity)
+  await adjustDeviceProductStock(productId, resolvedVariantId, effectiveBatchId, fromDeviceId, -quantity)
+  await adjustDeviceProductStock(productId, resolvedVariantId, effectiveBatchId, toDeviceId, quantity)
 
-  await createTransferHistoryRows(transferId, productId, resolvedVariantId, batchId, quantity, fromDeviceId, toDeviceId, actorDeviceId, historyNotes)
+  await createTransferHistoryRows(transferId, productId, resolvedVariantId, effectiveBatchId, quantity, fromDeviceId, toDeviceId, actorDeviceId, historyNotes)
 }
 
 async function getDeviceNames(fromDeviceId: number, toDeviceId: number): Promise<{ from: string; to: string }> {
@@ -1305,6 +1326,7 @@ export async function acceptWarehouseTransfer(transferId: number, userId: number
         transferId,
         userId,
         `Transfer request accepted #${transferId}`,
+        true,
       )
     }
 
