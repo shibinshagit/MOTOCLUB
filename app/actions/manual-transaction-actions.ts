@@ -1,5 +1,6 @@
 "use server"
 
+import { format } from "date-fns"
 import { sql } from "@/lib/db"
 import {
   buildManualEntryDescription,
@@ -174,20 +175,25 @@ export async function updateManualTransaction(
       categoryId = masterCategory?.id || 0
     }
 
+    const txDate = data.transaction_date ? new Date(data.transaction_date) : new Date()
+    const formattedTxDate = format(txDate, "yyyy-MM-dd HH:mm:ss")
+
     const result = await sql`
       UPDATE financial_transactions
       SET 
         amount = ${data.amount},
+        received_amount = ${data.amount},
         description = ${description},
         category_name = ${category},
         reference_id = ${categoryId},
-        transaction_type = ${data.type},
+        reference_type = 'manual',
+        transaction_type = 'manual',
         payment_method = ${data.payment_method},
-        transaction_date = ${data.transaction_date},
+        transaction_date = ${formattedTxDate},
         debit_amount = ${debitAmount},
         credit_amount = ${creditAmount},
         updated_at = NOW()
-      WHERE id = ${transactionId} AND reference_type = 'manual'
+      WHERE id = ${transactionId}
       RETURNING id
     `
 

@@ -1,5 +1,6 @@
 "use server"
 
+import { format } from "date-fns"
 import { sql } from "@/lib/db"
 
 // Record supplier payment transaction
@@ -774,6 +775,9 @@ export async function recordManualTransaction(transactionData: {
     const category = transactionData.category.trim() || "Other"
     const description = `Manual Entry - ${category} - ${transactionData.description}`
 
+    const txDate = transactionData.transactionDate ? new Date(transactionData.transactionDate) : new Date()
+    const formattedTxDate = format(txDate, "yyyy-MM-dd HH:mm:ss")
+
     const result = await sql`
       INSERT INTO financial_transactions (
         transaction_type, reference_type, reference_id,
@@ -783,7 +787,7 @@ export async function recordManualTransaction(transactionData: {
         'manual', 'manual', ${transactionData.categoryId || 0},
         ${amount}, ${amount}, 0, ${debitAmount}, ${creditAmount},
         'Manual Entry', ${transactionData.paymentMethod}, ${description}, ${category},
-        ${transactionData.deviceId}, 1, ${transactionData.userId}, ${transactionData.transactionDate}
+        ${transactionData.deviceId}, 1, ${transactionData.userId}, ${formattedTxDate}
       ) RETURNING id
     `
 
@@ -974,6 +978,23 @@ export async function getFinancialSummary(
   try {
     console.log("Getting financial summary for device:", deviceId, "date range:", fromDateStr, "to", toDateStr)
 
+    // Auto-repair any previous manual entries whose transaction_type, reference_type, or date was improperly overwritten
+    try {
+      await sql`
+        UPDATE financial_transactions 
+        SET 
+          transaction_type = 'manual', 
+          reference_type = 'manual',
+          received_amount = amount,
+          transaction_date = created_at
+        WHERE device_id = ${deviceId} 
+          AND (reference_type = 'manual' OR transaction_type = 'manual' OR description LIKE 'Manual Entry%')
+          AND (transaction_type != 'manual' OR reference_type != 'manual' OR received_amount = 0 OR transaction_date::date > created_at::date)
+      `
+    } catch (repairErr) {
+      console.log("Non-fatal: manual transaction auto-repair skipped", repairErr)
+    }
+
     // Query transactions (fromDateStr/toDateStr are YYYY-MM-DD from the client calendar)
     let transactions
     if (fromDateStr && toDateStr) {
@@ -981,7 +1002,11 @@ export async function getFinancialSummary(
       transactions = await sql`
         SELECT * FROM financial_transactions 
         WHERE device_id = ${deviceId} 
-          AND transaction_date::date BETWEEN ${fromDateStr}::date AND ${toDateStr}::date
+          AND (
+            transaction_date::date BETWEEN ${fromDateStr}::date AND ${toDateStr}::date
+            OR created_at::date BETWEEN ${fromDateStr}::date AND ${toDateStr}::date
+            OR (transaction_date + interval '5 hours 30 minutes')::date BETWEEN ${fromDateStr}::date AND ${toDateStr}::date
+          )
         ORDER BY transaction_date DESC, id DESC
       `
     } else {
@@ -1154,6 +1179,7 @@ export async function getFinancialSummary(
           date: tx.transaction_date,
           description: tx.description || `${tx.transaction_type} #${tx.reference_id}`,
           type: tx.transaction_type,
+          reference_type: tx.reference_type,
           status: status,
           amount: amount,
           received: received,

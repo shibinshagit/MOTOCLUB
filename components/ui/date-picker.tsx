@@ -61,13 +61,14 @@ export function SimpleDateInput({ className, onDateChange, value, placeholder = 
   const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const dateValue = e.target.value
     if (dateValue) {
-      const newDate = new Date(dateValue)
-      if (!isNaN(newDate.getTime())) {
+      const [year, month, day] = dateValue.split("-").map(Number)
+      if (year && month && day) {
+        const newDate = new Date(year, month - 1, day, 12, 0, 0)
         onDateChange(newDate)
+        return
       }
-    } else {
-      onDateChange(undefined)
     }
+    onDateChange(undefined)
   }
 
   const formatDateForInput = (date: Date | undefined) => {

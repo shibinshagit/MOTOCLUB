@@ -6,6 +6,7 @@ interface Transaction {
   date: string
   description: string
   type: string
+  reference_type?: string
   status: string
   amount: number
   received: number

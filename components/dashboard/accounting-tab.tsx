@@ -839,6 +839,8 @@ const filteredTransactions =
       matchesType = type === "purchase" ||
                    description.toLowerCase().startsWith("purchase") ||
                    (type === 'adjustment' && description.includes('Purchase'))
+    } else if (filterType === "manual") {
+      matchesType = type === "manual" || transaction.reference_type?.toLowerCase() === "manual"
     } else if (filterType !== "all") {
       matchesType = transaction.type === filterType
     }
@@ -849,7 +851,9 @@ const filteredTransactions =
 const pettyCashTransactions =
   financialData?.transactions?.filter((transaction) => {
     if (!transaction) return false
-    if (transaction.type?.toLowerCase() !== "manual") return false
+    const typeLower = transaction.type?.toLowerCase()
+    const refTypeLower = transaction.reference_type?.toLowerCase()
+    if (typeLower !== "manual" && refTypeLower !== "manual") return false
     return matchesSearchAndDateRange(transaction)
   }) || []
 
@@ -1156,7 +1160,7 @@ const getMoneyFlowAmount = (transaction: any) => {
   }
   
   // For manual transactions - money in/out based on type
-  if (type === 'manual') {
+  if (type === 'manual' || transaction.reference_type?.toLowerCase() === 'manual') {
     return credit > 0 ? credit : -debit
   }
   
@@ -1284,7 +1288,7 @@ const getMoneyFlowInfo = (transaction: any) => {
   }
   
   // Manual transactions
-  if (type === 'manual') {
+  if (type === 'manual' || transaction.reference_type?.toLowerCase() === 'manual') {
     const credit = n(transaction.credit)
     const debit = n(transaction.debit)
     
@@ -1817,7 +1821,7 @@ const getEnhancedDescription = (transaction: any) => {
   }
   
   // Manual transactions
-  if (type === 'manual') {
+  if (type === 'manual' || transaction.reference_type?.toLowerCase() === 'manual') {
     return `Manual Entry: ${description || 'No description'}`
   }
   
@@ -1872,7 +1876,7 @@ const renderTransactionList = (
 
         const isSale = transaction.type === "sale" || transaction.description?.toLowerCase().startsWith("sale")
         const isPurchase = transaction.type === "purchase" || transaction.description?.toLowerCase().startsWith("purchase")
-        const isManual = transaction.type === "manual" || transaction.description?.toLowerCase().includes("manual")
+        const isManual = transaction.type === "manual" || transaction.reference_type === "manual" || transaction.description?.toLowerCase().includes("manual")
         const isSupplierPayment = transaction.type === 'supplier_payment' ||
                                  transaction.description?.toLowerCase().includes('supplier payment')
 

@@ -84,7 +84,17 @@ export default function EditManualTransactionModal({
           setCategoryId(txn.category_id ? String(txn.category_id) : "")
           setCategoryName(txn.category || "")
           setPaymentMethod(txn.payment_method || "Cash")
-          setTransactionDate(new Date(txn.transaction_date))
+          
+          const dateStr = String(txn.transaction_date).split("T")[0]
+          const [y, m, d] = dateStr.split("-").map(Number)
+          if (y && m && d) {
+            setTransactionDate(new Date(y, m - 1, d, 12, 0, 0))
+          } else {
+            const parsedDate = new Date(txn.transaction_date)
+            if (!isNaN(parsedDate.getTime())) {
+              setTransactionDate(parsedDate)
+            }
+          }
         } else {
           notifyError(toast, response.message || "Failed to load transaction")
           onClose()
@@ -98,8 +108,10 @@ export default function EditManualTransactionModal({
       }
     }
 
-    fetchTransaction()
-  }, [isOpen, transactionId, toast, onClose])
+    if (isOpen && transactionId) {
+      fetchTransaction()
+    }
+  }, [isOpen, transactionId])
 
   useEffect(() => {
     const resolveCategoryId = async () => {
