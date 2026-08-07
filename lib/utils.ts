@@ -57,3 +57,56 @@ export function formatPhoneNumber(phone: string | null | undefined): string {
   // Fallback for unknown country codes
   return phone.startsWith("+") ? phone : "+" + digits
 }
+
+export function parseSaleDate(dateInput: any): Date {
+  if (!dateInput) return new Date()
+  if (dateInput instanceof Date) return dateInput
+  const str = String(dateInput).trim()
+  const match = str.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (match) {
+    const [, y, m, d] = match
+    return new Date(Number(y), Number(m) - 1, Number(d))
+  }
+  const parsed = new Date(str)
+  return isNaN(parsed.getTime()) ? new Date() : parsed
+}
+
+export function parseSaleDateTime(sale: any): Date {
+  const rawDate = sale?.sale_date || sale?.created_at
+  if (!rawDate) return new Date()
+
+  if (typeof rawDate === "string" && rawDate.includes("-")) {
+    const parts = rawDate.split("T")
+    const dateParts = parts[0].split("-")
+    if (dateParts.length === 3) {
+      const year = parseInt(dateParts[0], 10)
+      const month = parseInt(dateParts[1], 10) - 1
+      const day = parseInt(dateParts[2], 10)
+
+      let hours = 0
+      let minutes = 0
+      let seconds = 0
+
+      const timeSource = (parts.length > 1 && !parts[1].startsWith("00:00:00"))
+        ? rawDate
+        : sale?.created_at
+
+      if (timeSource && typeof timeSource === "string" && timeSource.includes("T")) {
+        const timePart = timeSource.split("T")[1]
+        const timeSubParts = timePart.split(":")
+        if (timeSubParts.length >= 2) {
+          hours = parseInt(timeSubParts[0], 10)
+          minutes = parseInt(timeSubParts[1], 10)
+          seconds = parseInt(timeSubParts[2] || "0", 10)
+        }
+      }
+
+      const d = new Date(year, month, day, hours, minutes, seconds)
+      if (!isNaN(d.getTime())) return d
+    }
+  }
+
+  const d = new Date(rawDate)
+  return isNaN(d.getTime()) ? new Date() : d
+}
+

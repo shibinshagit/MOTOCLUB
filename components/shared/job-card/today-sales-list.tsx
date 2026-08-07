@@ -17,7 +17,7 @@ import { JobCardModal } from "./job-card-modal"
 import { DeliveryStatusSelect } from "@/components/sales/delivery-status-select"
 import { TrackingCell } from "@/components/sales/tracking-cell"
 import { format } from "date-fns"
-import { formatPhoneNumber } from "@/lib/utils"
+import { formatPhoneNumber, parseSaleDateTime } from "@/lib/utils"
 
 export function TodaySalesList({ onOpenCreateModal }: { onOpenCreateModal?: () => void }) {
   const currency = useSelector(selectDeviceCurrency)
@@ -220,7 +220,7 @@ export function TodaySalesList({ onOpenCreateModal }: { onOpenCreateModal?: () =
                 const isSelected = selectedSales.includes(sale.id)
                 const itemQuantity = sale.items?.reduce((sum: number, i: any) => sum + i.quantity, 0) || 0
                 
-                const saleDate = new Date(sale.created_at || sale.sale_date)
+                const saleDate = parseSaleDateTime(sale)
                 const dateFormatted = format(saleDate, "dd MMM yyyy")
                 const timeFormatted = format(saleDate, "hh:mm a")
 

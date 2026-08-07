@@ -13,6 +13,8 @@ import {
   type ExcelColumnFilterValue,
 } from "@/components/sales/excel-column-filter"
 import { getSaleDeliveryLabel } from "@/lib/sale-shipping"
+import { DeliveryStatusSelect } from "@/components/sales/delivery-status-select"
+import { parseSaleDate } from "@/lib/utils"
 
 function getSaleStatusLabel(sale: any): string {
   if (sale.status === "Cancelled") return "Cancelled";
@@ -94,6 +96,8 @@ interface SalesExcelTableProps {
   getRemainingAmount: (sale: any) => number
   onViewSale: (sale: any) => void
   onEditSale: (sale: any) => void
+  deviceId?: number
+  onRefreshSales?: () => void
 }
 
 function TableSkeleton() {
@@ -133,13 +137,15 @@ export default function SalesExcelTable({
   getRemainingAmount,
   onViewSale,
   onEditSale,
+  deviceId,
+  onRefreshSales,
 }: SalesExcelTableProps) {
   const valueGetters = useMemo(
     () => ({
       saleId: (sale: any) => String(sale.id),
       status: (sale: any) => getSaleStatusLabel(sale),
       delivery: (sale: any) => getSaleDeliveryLabel(sale),
-      date: (sale: any) => format(new Date(sale.sale_date), "yyyy-MM-dd"),
+      date: (sale: any) => format(parseSaleDate(sale.sale_date), "yyyy-MM-dd"),
       customer: (sale: any) => sale.customer_name || "Walk-in",
       payment: (sale: any) => getPaymentMethodDisplay(sale),
       total: (sale: any) => formatCurrency(Number(sale.total_amount)),
@@ -385,11 +391,31 @@ export default function SalesExcelTable({
                       <td className="whitespace-nowrap px-4 py-2.5">
                         <SaleStatusBadge status={getSaleStatusLabel(sale)} />
                       </td>
-                      <td className="whitespace-nowrap px-4 py-2.5">
-                        <DeliveryStatusBadge status={getSaleDeliveryLabel(sale)} />
+                      <td className="whitespace-nowrap px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
+                        {getSaleDeliveryLabel(sale) === "Pickup" ? (
+                          <DeliveryStatusBadge status="Pickup" />
+                        ) : (
+                          <DeliveryStatusSelect
+                            saleId={sale.id}
+                            deviceId={sale.device_id || deviceId || 0}
+                            currentStatus={sale.delivery_status || "Pending"}
+                            customerName={sale.customer_name}
+                            customerPhone={sale.customer_phone || sale.customer_phone_override}
+                            trackingId={sale.tracking_id}
+                            orderNumber={sale.id}
+                            paymentStatus={sale.payment_status}
+                            isJobCard={sale.sale_type === "job_card" || sale.fulfillment_type === "ship"}
+                            userRole="admin"
+                            onStatusChange={() => {
+                              if (onRefreshSales) {
+                                onRefreshSales()
+                              }
+                            }}
+                          />
+                        )}
                       </td>
                       <td className="whitespace-nowrap px-4 py-2.5 text-slate-700">
-                        {format(new Date(sale.sale_date), "yyyy-MM-dd")}
+                        {format(parseSaleDate(sale.sale_date), "yyyy-MM-dd")}
                       </td>
                       <td className="max-w-[180px] truncate px-4 py-2.5 text-slate-700">
                         {sale.customer_name || "Walk-in"}

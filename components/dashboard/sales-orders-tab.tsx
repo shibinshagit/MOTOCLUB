@@ -14,7 +14,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ChevronDown, ChevronUp, MapPin, Phone, User, Calendar, Layers, Printer, Edit, Trash2, Search, PlayCircle, Eye, Plus, Loader2 } from "lucide-react"
-import { formatPhoneNumber } from "@/lib/utils"
+import { formatPhoneNumber, parseSaleDateTime } from "@/lib/utils"
 import { useToast } from "@/components/ui/use-toast"
 import {
   AlertDialog,
@@ -276,7 +276,7 @@ export default function SalesOrdersTab() {
                   const isSelected = selectedSales.includes(sale.id)
                   const itemQuantity = sale.items?.reduce((sum: number, i: any) => sum + i.quantity, 0) || 0
                   
-                  const saleDate = new Date(sale.created_at || sale.sale_date)
+                  const saleDate = parseSaleDateTime(sale)
                   const dateFormatted = format(saleDate, "dd MMM yyyy")
                   const timeFormatted = format(saleDate, "hh:mm a")
   

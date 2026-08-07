@@ -1721,6 +1721,8 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
       getRemainingAmount={getRemainingAmount}
       onViewSale={handleViewSale}
       onEditSale={handleEditSale}
+      deviceId={deviceId || 0}
+      onRefreshSales={() => fetchSalesForMonth(salesViewMonth)}
     />
   )
 
