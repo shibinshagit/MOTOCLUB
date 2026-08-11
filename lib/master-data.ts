@@ -5,14 +5,19 @@ export const MASTER_DATA_CATEGORIES = [
     description: "Shipping partners used on sales and deliveries.",
   },
   {
-    id: "packaging",
-    label: "Packaging Types",
-    description: "Common packaging options for shipped orders.",
-  },
-  {
     id: "manual_category",
     label: "Manual Entry Categories",
     description: "Standard categories for petty cash and manual accounting entries.",
+  },
+  {
+    id: "trending",
+    label: "Trending Products",
+    description: "View and manage products highlighted in trending lists.",
+  },
+  {
+    id: "staff",
+    label: "Staff Management",
+    description: "Manage staff members, roles, sales performance, payroll, and staff requests.",
   },
 ] as const
 

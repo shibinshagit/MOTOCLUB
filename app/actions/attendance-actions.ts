@@ -279,3 +279,37 @@ export async function getMyAttendance(month: number, year: number) {
     return { success: false, message: "Failed to fetch attendance" }
   }
 }
+
+export async function saveAttendanceNote(dateStr: string, remarks: string) {
+  try {
+    const session = await getStaffSession()
+    if (!session) return { success: false, message: "Unauthorized" }
+
+    const existing = await sql`
+      SELECT id FROM staff_attendance
+      WHERE staff_id = ${session.staffId} AND date = ${dateStr}::date
+    `
+
+    if (existing.length > 0) {
+      await sql`
+        UPDATE staff_attendance
+        SET remarks = ${remarks}, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ${existing[0].id}
+      `
+    } else {
+      await sql`
+        INSERT INTO staff_attendance (
+          company_id, device_id, staff_id, date, remarks, status
+        ) VALUES (
+          ${session.companyId || null}, ${session.deviceId}, ${session.staffId}, ${dateStr}::date, ${remarks}, 'Note'
+        )
+      `
+    }
+
+    revalidatePath("/dashboard")
+    return { success: true, message: "Note saved successfully" }
+  } catch (error: any) {
+    console.error("Save attendance note error:", error)
+    return { success: false, message: error.message || "Failed to save note" }
+  }
+}

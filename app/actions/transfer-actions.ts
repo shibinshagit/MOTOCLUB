@@ -798,8 +798,8 @@ export async function createWarehouseTransfer(formData: FormData) {
   if (fromDeviceId === toDeviceId) {
     return { success: false, message: "Source and destination warehouse cannot be the same" }
   }
-  if (items.length === 0) {
-    return { success: false, message: "At least one valid product is required" }
+  if (items.length === 0 && paidAmount <= 0) {
+    return { success: false, message: "At least one product or paid amount is required" }
   }
   const allowedPaymentStatuses = new Set(["unpaid", "partial", "paid"])
   if (!allowedPaymentStatuses.has(paymentStatus)) {
@@ -898,8 +898,8 @@ export async function updateWarehouseTransfer(formData: FormData) {
   if (fromDeviceId === toDeviceId) {
     return { success: false, message: "Source and destination warehouse cannot be the same" }
   }
-  if (items.length === 0) {
-    return { success: false, message: "At least one valid product is required" }
+  if (items.length === 0 && paidAmount <= 0) {
+    return { success: false, message: "At least one product or paid amount is required" }
   }
   const allowedPaymentStatuses = new Set(["unpaid", "partial", "paid"])
   if (!allowedPaymentStatuses.has(paymentStatus)) {
@@ -1310,24 +1310,22 @@ export async function acceptWarehouseTransfer(transferId: number, userId: number
       quantity: Number(row.quantity),
     }))
 
-    if (items.length === 0) {
-      return { success: false, message: "This request has no items to transfer" }
-    }
-
-    // Authoritative stock check + movement happens here, at acceptance time.
-    for (const item of items) {
-      await moveStockBetweenDevices(
-        item.product_id,
-        item.product_variant_id,
-        item.batch_id,
-        item.quantity,
-        fromDeviceId,
-        toDeviceId,
-        transferId,
-        userId,
-        `Transfer request accepted #${transferId}`,
-        true,
-      )
+    // Authoritative stock check + movement happens here if items are present.
+    if (items.length > 0) {
+      for (const item of items) {
+        await moveStockBetweenDevices(
+          item.product_id,
+          item.product_variant_id,
+          item.batch_id,
+          item.quantity,
+          fromDeviceId,
+          toDeviceId,
+          transferId,
+          userId,
+          `Transfer request accepted #${transferId}`,
+          true,
+        )
+      }
     }
 
     await recordTransferLedger({

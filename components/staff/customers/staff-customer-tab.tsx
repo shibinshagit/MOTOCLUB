@@ -15,21 +15,32 @@ import {
   Car,
   ShoppingCart,
   MessageCircle,
+  Copy,
+  Check,
 } from "lucide-react"
 import StaffCustomerFormModal from "./staff-customer-form-modal"
 import StaffViewCustomerModal from "./staff-view-customer-modal"
 import { useToast } from "@/components/ui/use-toast"
-import { notifyError } from "@/lib/notifications"
+import { notifyError, notifySuccess } from "@/lib/notifications"
 import { getStaffCustomers, type StaffCustomer } from "@/app/actions/staff-customer-actions"
 import { formatDistanceToNow } from "date-fns"
 import { useRouter } from "next/navigation"
 
-export function StaffCustomerTab({ currency = "AED", onTabChange }: { currency?: string, onTabChange?: (tab: any) => void }) {
+export function StaffCustomerTab({
+  currency = "AED",
+  onTabChange,
+  onOpenCreateJobCard,
+}: {
+  currency?: string
+  onTabChange?: (tab: any) => void
+  onOpenCreateJobCard?: (customer?: any) => void
+}) {
   const [customers, setCustomers] = useState<StaffCustomer[]>([])
   const [searchTerm, setSearchTerm] = useState("")
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [isSearching, setIsSearching] = useState(false)
+  const [copiedPhoneId, setCopiedPhoneId] = useState<number | null>(null)
   
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
@@ -102,19 +113,32 @@ export function StaffCustomerTab({ currency = "AED", onTabChange }: { currency?:
     return { label: "New", color: "bg-gray-100 text-gray-800 border-gray-200" }
   }
 
-  const handleCreateSale = (customer: StaffCustomer) => {
-    if (onTabChange) {
-      onTabChange("create-sale") // Route to Job Card creation
+  const handleCreateSale = (e: React.MouseEvent, customer: StaffCustomer) => {
+    e.stopPropagation()
+    if (onOpenCreateJobCard) {
+      onOpenCreateJobCard(customer)
+    } else if (onTabChange) {
+      onTabChange("create-sale")
     } else {
       router.push(`/dashboard?tab=sale&customer=${customer.id}`)
     }
+  }
+
+  const handleCopyPhone = (e: React.MouseEvent, phone: string, customerId: number) => {
+    e.stopPropagation()
+    if (!phone) return
+    navigator.clipboard.writeText(phone)
+    setCopiedPhoneId(customerId)
+    notifySuccess(toast, `Phone number ${phone} copied to clipboard!`)
+    setTimeout(() => setCopiedPhoneId(null), 2000)
   }
 
   const handleCall = (phone: string) => {
     window.location.href = `tel:${phone}`
   }
 
-  const handleWhatsApp = (phone: string, name: string) => {
+  const handleWhatsApp = (e: React.MouseEvent, phone: string, name: string) => {
+    e.stopPropagation()
     const cleanPhone = phone.replace(/[^0-9]/g, "")
     window.open(`https://wa.me/${cleanPhone}?text=Hi ${name},`, "_blank")
   }
@@ -203,27 +227,46 @@ export function StaffCustomerTab({ currency = "AED", onTabChange }: { currency?:
                 customers.map((customer) => {
                   const type = getCustomerType(Number(customer.order_count) || 0)
                   return (
-                    <tr key={customer.id} className="hover:bg-slate-50/50 transition-colors">
+                    <tr
+                      key={customer.id}
+                      onClick={() => handleViewCustomer(customer)}
+                      className="hover:bg-slate-50/80 transition-colors cursor-pointer group"
+                    >
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
-                          <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-bold">
+                          <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-bold group-hover:bg-blue-600 group-hover:text-white transition-colors">
                             {customer.name.charAt(0).toUpperCase()}
                           </div>
                           <div>
-                            <div className="font-semibold text-slate-900">{customer.name}</div>
+                            <div className="font-semibold text-slate-900 group-hover:text-blue-600 transition-colors">
+                              {customer.name}
+                            </div>
                           </div>
                         </div>
                       </td>
                       <td className="px-6 py-4">
                         <div className="space-y-1">
                           {customer.phone && (
-                            <div className="flex items-center gap-2 text-slate-600">
-                              <Phone className="h-3 w-3" /> {customer.phone}
+                            <div className="flex items-center gap-1.5 text-slate-700 font-medium">
+                              <Phone className="h-3.5 w-3.5 text-slate-400" />
+                              <span>{customer.phone}</span>
+                              <button
+                                type="button"
+                                onClick={(e) => handleCopyPhone(e, customer.phone, customer.id)}
+                                className="p-1 hover:bg-slate-200 rounded text-slate-400 hover:text-slate-700 transition-colors ml-1"
+                                title="Copy Phone Number"
+                              >
+                                {copiedPhoneId === customer.id ? (
+                                  <Check className="h-3.5 w-3.5 text-emerald-600" />
+                                ) : (
+                                  <Copy className="h-3.5 w-3.5" />
+                                )}
+                              </button>
                             </div>
                           )}
                           {customer.email && (
-                            <div className="flex items-center gap-2 text-slate-600">
-                              <Mail className="h-3 w-3" /> {customer.email}
+                            <div className="flex items-center gap-2 text-slate-500 text-xs">
+                              <Mail className="h-3 w-3 text-slate-400" /> {customer.email}
                             </div>
                           )}
                         </div>
@@ -245,15 +288,36 @@ export function StaffCustomerTab({ currency = "AED", onTabChange }: { currency?:
                       </td>
                       <td className="px-6 py-4 text-right">
                         <div className="flex items-center justify-end gap-2">
-                          <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-600" onClick={() => handleViewCustomer(customer)} title="View Profile">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-blue-600 hover:bg-blue-50"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleViewCustomer(customer)
+                            }}
+                            title="View Customer Details"
+                          >
                             <User className="h-4 w-4" />
                           </Button>
                           {customer.phone && (
-                            <Button variant="ghost" size="icon" className="h-8 w-8 text-emerald-600" onClick={() => handleWhatsApp(customer.phone, customer.name)} title="WhatsApp">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-emerald-600 hover:bg-emerald-50"
+                              onClick={(e) => handleWhatsApp(e, customer.phone, customer.name)}
+                              title="WhatsApp Customer"
+                            >
                               <MessageCircle className="h-4 w-4" />
                             </Button>
                           )}
-                          <Button variant="ghost" size="icon" className="h-8 w-8 text-violet-600" onClick={() => handleCreateSale(customer)} title="New Job Card">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-violet-600 hover:bg-violet-50"
+                            onClick={(e) => handleCreateSale(e, customer)}
+                            title="Create Job Card for Customer"
+                          >
                             <ShoppingCart className="h-4 w-4" />
                           </Button>
                         </div>

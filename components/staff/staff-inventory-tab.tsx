@@ -12,6 +12,7 @@ import StaffMediaEditModal from "./staff-media-edit-modal"
 import { ShareProductButton } from "@/components/shared/share-product-button"
 import { useSelector } from "react-redux"
 import { selectDeviceCurrency, selectDeviceId } from "@/store/slices/deviceSlice"
+import { filterProductsSemantic } from "@/lib/product-search"
 
 interface StaffInventoryTabProps {}
 
@@ -37,8 +38,8 @@ function SummaryCard({ title, value, icon, tone }: any) {
 
 export default function StaffInventoryTab({}: StaffInventoryTabProps) {
   const { toast } = useToast()
-  const currency = useSelector(selectDeviceCurrency)
-  const deviceId = useSelector(selectDeviceId)
+  const currency = useSelector((state: any) => selectDeviceCurrency(state)) as string
+  const deviceId = useSelector((state: any) => selectDeviceId(state)) as number | undefined
   const [products, setProducts] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState("")
@@ -75,16 +76,7 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
   }
 
   const filteredProducts = useMemo(() => {
-    if (!searchTerm.trim()) return products
-    
-    const q = searchTerm.toLowerCase()
-    return products.filter((p: any) => {
-      const nameMatch = (p.name || "").toLowerCase().includes(q)
-      const categoryMatch = (p.category || "").toLowerCase().includes(q)
-      const barcodeMatch = (p.barcode || p.variants?.[0]?.barcode || "").toLowerCase().includes(q)
-      const skuMatch = (p.sku || p.variants?.[0]?.sku || "").toLowerCase().includes(q)
-      return nameMatch || categoryMatch || barcodeMatch || skuMatch
-    })
+    return filterProductsSemantic(products, searchTerm)
   }, [products, searchTerm])
 
   const stats = useMemo(() => {
@@ -130,7 +122,7 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
           <div className="relative w-full max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
             <Input 
-              placeholder="Search by name, SKU, or barcode..." 
+              placeholder="Search by name, category, status, price, barcode..." 
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-9 bg-slate-50 border-slate-200"
@@ -148,8 +140,7 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
                   <th className="px-6 py-4 font-semibold">Product</th>
                   <th className="px-6 py-4 font-semibold">Category</th>
                   <th className="px-6 py-4 font-semibold">Barcode</th>
-                  <th className="px-6 py-4 font-semibold">Warehouse</th>
-                  <th className="px-6 py-4 font-semibold text-right">Selling Price</th>
+                  <th className="px-6 py-4 font-semibold text-right">Price</th>
                   <th className="px-6 py-4 font-semibold text-right">MSP</th>
                   <th className="px-6 py-4 font-semibold text-right">Available Stock</th>
                   <th className="px-6 py-4 font-semibold text-center">Status</th>
@@ -159,14 +150,14 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
               <tbody className="divide-y divide-slate-100">
                 {loading && products.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="px-6 py-12 text-center text-slate-500">
+                    <td colSpan={8} className="px-6 py-12 text-center text-slate-500">
                       <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2 text-indigo-500" />
                       Loading inventory...
                     </td>
                   </tr>
                 ) : filteredProducts.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="px-6 py-12 text-center text-slate-500">
+                    <td colSpan={8} className="px-6 py-12 text-center text-slate-500">
                       <Package className="h-8 w-8 mx-auto mb-2 text-slate-300" />
                       No products found
                     </td>
@@ -204,7 +195,6 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
                       </td>
                       <td className="px-6 py-3 text-slate-600">{product.category || "—"}</td>
                       <td className="px-6 py-3 font-mono text-xs text-slate-500">{product.barcode || product.variants?.[0]?.barcode || "—"}</td>
-                      <td className="px-6 py-3 text-slate-600">{product.branch_name || "Main"}</td>
                       <td className="px-6 py-3 text-right font-medium text-slate-800">
                         {(() => {
                           const sellingPrice = Number(product.msp ?? product.price ?? 0)

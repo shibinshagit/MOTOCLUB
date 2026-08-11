@@ -25,7 +25,7 @@ import { staffLogout } from "@/app/actions/staff-auth-actions"
 import { getStaffDashboardStats } from "@/app/actions/staff-actions"
 import { useAppDispatch, useAppSelector } from "@/store/hooks"
 import { clearDeviceData, selectDevice } from "@/store/slices/deviceSlice"
-import { clearStaff } from "@/store/slices/staffSlice"
+import { clearStaff, selectActiveStaff } from "@/store/slices/staffSlice"
 import { useToast } from "@/components/ui/use-toast"
 import { BrandLogo } from "@/components/brand-logo"
 import StaffAttendance from "./staff-attendance"
@@ -34,27 +34,38 @@ import { TodaySalesList } from "@/components/shared/job-card"
 import { JobCardModal } from "@/components/shared/job-card/job-card-modal"
 import { StaffCustomerTab } from "./customers/staff-customer-tab"
 import { StaffSalesChart } from "./staff-sales-chart"
+import StaffProfileTab from "./staff-profile-tab"
 
-type Tab = "home" | "sales" | "customers" | "attendance" | "inventory"
+type Tab = "home" | "profile" | "customers" | "inventory"
 
 export default function StaffDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>("home")
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [isJobCardModalOpen, setIsJobCardModalOpen] = useState(false)
+  const [selectedCustomerForJobCard, setSelectedCustomerForJobCard] = useState<any>(null)
   const [chartSummary, setChartSummary] = useState({ sales: 0, orders: 0 })
   const [dashboardStats, setDashboardStats] = useState<any>(null)
+  const [fetchedStaffName, setFetchedStaffName] = useState<string>("")
   const router = useRouter()
   const { toast } = useToast()
   const dispatch = useAppDispatch()
   const device = useAppSelector(selectDevice)
+  const activeStaff = useAppSelector(selectActiveStaff)
 
   useEffect(() => {
     if (activeTab === "home" && device?.id) {
       getStaffDashboardStats(device.id).then(res => {
-        if (res.success) setDashboardStats(res.data)
+        if (res.success && res.data) {
+          setDashboardStats(res.data)
+          if (res.data.staffName) {
+            setFetchedStaffName(res.data.staffName)
+          }
+        }
       })
     }
   }, [activeTab, device?.id])
+
+  const userName = fetchedStaffName || activeStaff?.name || device?.user?.name || ""
 
   const handleLogout = async () => {
     try {
@@ -98,6 +109,7 @@ export default function StaffDashboard() {
         <Users className="mr-3 h-5 w-5" />
         Customer List
       </Button>
+
       <Button
         variant={activeTab === "inventory" ? "secondary" : "ghost"}
         className="w-full justify-start"
@@ -106,13 +118,14 @@ export default function StaffDashboard() {
         <Package className="mr-3 h-5 w-5" />
         Inventory
       </Button>
+
       <Button
-        variant={activeTab === "attendance" ? "secondary" : "ghost"}
+        variant={activeTab === "profile" ? "secondary" : "ghost"}
         className="w-full justify-start"
-        onClick={() => { setActiveTab("attendance"); setIsMobileMenuOpen(false) }}
+        onClick={() => { setActiveTab("profile"); setIsMobileMenuOpen(false) }}
       >
-        <UserCircle className="mr-3 h-5 w-5" />
-        My Attendance
+        <UserCircle className="mr-3 h-5 w-5 text-blue-600" />
+        My Profile
       </Button>
     </nav>
   )
@@ -131,6 +144,12 @@ export default function StaffDashboard() {
               <p className="text-sm font-medium text-slate-800 mt-1 truncate" title={device.name}>
                 {device.name}
               </p>
+            )}
+            {userName && (
+              <div className="flex items-center gap-1.5 mt-1.5 text-xs font-medium text-blue-700 bg-blue-50 px-2.5 py-1 rounded-md border border-blue-100">
+                <UserCircle className="h-4 w-4 text-blue-600 flex-shrink-0" />
+                <span className="truncate font-semibold" title={userName}>{userName}</span>
+              </div>
             )}
           </div>
           <NavigationMenu />
@@ -172,6 +191,12 @@ export default function StaffDashboard() {
                     {device.name}
                   </p>
                 )}
+                {userName && (
+                  <div className="flex items-center gap-1.5 mt-1.5 text-xs font-medium text-blue-700 bg-blue-50 px-2.5 py-1 rounded-md border border-blue-100">
+                    <UserCircle className="h-4 w-4 text-blue-600 flex-shrink-0" />
+                    <span className="truncate font-semibold" title={userName}>{userName}</span>
+                  </div>
+                )}
               </div>
               <NavigationMenu />
             </div>
@@ -192,7 +217,9 @@ export default function StaffDashboard() {
             {activeTab === "home" && (
               <div className="space-y-6">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                  <h1 className="text-2xl font-semibold text-gray-900">Welcome to Staff Portal</h1>
+                  <h1 className="text-2xl font-semibold text-gray-900">
+                    Welcome{userName ? `, ${userName}` : ''} to Staff Portal
+                  </h1>
                   <Button onClick={() => setIsJobCardModalOpen(true)} className="whitespace-nowrap">
                     <Plus className="mr-2 h-4 w-4" /> Create Job Card
                   </Button>
@@ -228,20 +255,20 @@ export default function StaffDashboard() {
                       <p className="mt-2 text-[11px] font-medium text-pink-100">Sum of Total Paid</p>
                     </div>
                   </div>
-                  {/* Total Profit */}
+                  {/* Today's Sale */}
                   <div className="bg-gradient-to-br from-[#00c853] to-[#00b0ff] p-4 rounded-xl shadow-md border-0 flex flex-col justify-between text-white relative overflow-hidden group">
                     <div className="absolute -right-4 -top-4 opacity-20 transform group-hover:scale-110 transition-transform duration-300">
-                      <DollarSign className="h-20 w-20" />
+                      <TrendingUp className="h-20 w-20" />
                     </div>
                     <div className="relative z-10">
                       <div className="flex justify-between items-start">
-                        <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-100">Total Profit</p>
-                        <DollarSign className="h-5 w-5 text-emerald-200" />
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-100">Today's Sale</p>
+                        <TrendingUp className="h-5 w-5 text-emerald-200" />
                       </div>
                       <h3 className="mt-2 text-3xl font-extrabold truncate">
-                        {new Intl.NumberFormat("en-US", { style: "currency", currency: device?.currency || "INR", maximumFractionDigits: 0 }).format(dashboardStats?.totalProfit || 0).replace(/^[a-zA-Z]+/, (match) => match + " ")}
+                        {new Intl.NumberFormat("en-US", { style: "currency", currency: device?.currency || "INR", maximumFractionDigits: 0 }).format(dashboardStats?.todaysSales || 0).replace(/^[a-zA-Z]+/, (match) => match + " ")}
                       </h3>
-                      <p className="mt-2 text-[11px] font-medium text-emerald-100">+12% from last month</p>
+                      <p className="mt-2 text-[11px] font-medium text-emerald-100">Today's total sales</p>
                     </div>
                   </div>
                   {/* Today's Activity */}
@@ -290,15 +317,19 @@ export default function StaffDashboard() {
               </div>
             )}
 
+            {activeTab === "profile" && (
+              <StaffProfileTab />
+            )}
+
             {activeTab === "customers" && (
               <StaffCustomerTab 
                 onTabChange={setActiveTab}
+                onOpenCreateJobCard={(customer) => {
+                  setSelectedCustomerForJobCard(customer || null)
+                  setIsJobCardModalOpen(true)
+                }}
                 currency={device?.currency || "AED"} 
               />
-            )}
-
-            {activeTab === "attendance" && (
-              <StaffAttendance />
             )}
 
             {activeTab === "inventory" && (
@@ -310,7 +341,13 @@ export default function StaffDashboard() {
         </main>
       </div>
       <JobCardModal
-        isOpen={isJobCardModalOpen} onClose={() => setIsJobCardModalOpen(false)} />
+        isOpen={isJobCardModalOpen} 
+        onClose={() => {
+          setIsJobCardModalOpen(false)
+          setSelectedCustomerForJobCard(null)
+        }} 
+        initialCustomer={selectedCustomerForJobCard}
+      />
     </div>
   )
 }

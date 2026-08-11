@@ -35,7 +35,15 @@ interface ProductRow {
   costPrice: number // Cost price (read-only from inventory)
 }
 
-export function JobCardForm({ onClose, editSaleId }: { onClose?: () => void, editSaleId?: number | null }) {
+export function JobCardForm({
+  onClose,
+  editSaleId,
+  initialCustomer,
+}: {
+  onClose?: () => void
+  editSaleId?: number | null
+  initialCustomer?: any
+}) {
   const deviceId = useSelector(selectDeviceId)
   const currency = useSelector(selectDeviceCurrency)
   const { toast } = useToast()
@@ -46,8 +54,31 @@ export function JobCardForm({ onClose, editSaleId }: { onClose?: () => void, edi
   useEffect(() => {
     if (editSaleId) {
       loadExistingData(editSaleId)
+    } else if (initialCustomer) {
+      setCustomerId(initialCustomer.id || null)
+      setCustomerName(initialCustomer.name || "")
+      const formattedPhone = formatPhoneNumber(initialCustomer.phone || "")
+      setCustomerPhone(formattedPhone)
+      setShippingPhone(formattedPhone)
+      if (initialCustomer.id) {
+        getCustomerAddresses(initialCustomer.id).then((res) => {
+          if (res.success && res.data && res.data.length > 0) {
+            setCustomerAddresses(res.data)
+            const defaultAddr = res.data.find((a: any) => a.is_default) || res.data[0]
+            setShippingCity(defaultAddr.city || "")
+            setShippingDistrict(defaultAddr.district || "")
+            setShippingState(defaultAddr.state || "")
+            setShippingStreet(defaultAddr.street || "")
+            setShippingArea(defaultAddr.area || "")
+            setShippingLandmark(defaultAddr.landmark || "")
+            setShippingAddressType(defaultAddr.address_type || "Home")
+            setShippingPincode(defaultAddr.pincode || "")
+            setShippingPhone(formatPhoneNumber(defaultAddr.phone || initialCustomer.phone || ""))
+          }
+        })
+      }
     }
-  }, [editSaleId])
+  }, [editSaleId, initialCustomer])
 
   const loadExistingData = async (id: number) => {
     setIsLoading(true)
@@ -298,13 +329,13 @@ export function JobCardForm({ onClose, editSaleId }: { onClose?: () => void, edi
       return
     }
 
-    if (!shippingStreet.trim()) {
-      toast({ title: "Validation Error", description: "Shopname / House name is required", variant: "destructive" })
+    if (!shippingPhone.trim() && !customerPhone.trim()) {
+      toast({ title: "Validation Error", description: "Contact Number / Phone is required", variant: "destructive" })
       return
     }
 
-    if (!shippingCity.trim()) {
-      toast({ title: "Validation Error", description: "City is required", variant: "destructive" })
+    if (!shippingPincode.trim()) {
+      toast({ title: "Validation Error", description: "Pincode is required", variant: "destructive" })
       return
     }
 
@@ -648,13 +679,12 @@ export function JobCardForm({ onClose, editSaleId }: { onClose?: () => void, edi
             <div className="space-y-4">
               <div className="space-y-1">
                 <Label className="text-xs font-medium text-gray-700 flex items-center gap-1">
-                  Shopname / House name <span className="text-red-500">*</span>
+                  Shopname / House name
                 </Label>
                 <Input 
                   value={shippingStreet} 
                   onChange={(e) => setShippingStreet(e.target.value)} 
                   placeholder="e.g. Al Madina Supermarket / Villa 34"
-                  required
                 />
               </div>
               <div className="space-y-1">
@@ -669,21 +699,23 @@ export function JobCardForm({ onClose, editSaleId }: { onClose?: () => void, edi
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <Label className="text-xs font-medium text-gray-700 flex items-center gap-1">
-                    City <span className="text-red-500">*</span>
+                    City
                   </Label>
                   <Input 
                     value={shippingCity} 
                     onChange={(e) => setShippingCity(e.target.value)} 
                     placeholder="e.g. Dubai"
-                    required
                   />
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-xs font-medium text-gray-700">Pincode</Label>
+                  <Label className="text-xs font-medium text-gray-700">
+                    Pincode <span className="text-red-500">*</span>
+                  </Label>
                   <Input 
                     value={shippingPincode} 
                     onChange={(e) => setShippingPincode(e.target.value)} 
-                    placeholder="e.g. 00000"
+                    placeholder="e.g. 673001"
+                    required
                   />
                 </div>
               </div>

@@ -11,6 +11,10 @@ import { Switch } from "@/components/ui/switch"
 import { useToast } from "@/components/ui/use-toast"
 import { notifyError, notifySuccess, notifyWarning } from "@/lib/notifications"
 import { addStaff, deleteStaff, getDeviceStaff, updateStaff, updateStaffStatus } from "@/app/actions/staff-actions"
+import PayrollRequestsTab from "@/components/admin/payroll-requests-tab"
+import { StaffProfileModal } from "@/components/admin/staff-profile-modal"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Users, FileText, Eye } from "lucide-react"
 import {
   ADMIN_DIALOG_SCROLL_CLASS,
   ADMIN_DIALOG_INPUT_CLASS,
@@ -40,6 +44,8 @@ type StaffMember = {
   address?: string
   is_active: boolean
   linked_partner_id?: number | null
+  total_sales_amount?: number
+  total_orders_count?: number
 }
 
 type StaffFormState = {
@@ -119,6 +125,7 @@ function ToggleRow({
 }
 
 export default function DeviceStaffTab({ deviceId }: DeviceStaffTabProps) {
+  const [activeSubTab, setActiveSubTab] = useState<"members" | "requests">("members")
   const { toast } = useToast()
   const [staff, setStaff] = useState<StaffMember[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -127,6 +134,8 @@ export default function DeviceStaffTab({ deviceId }: DeviceStaffTabProps) {
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [form, setForm] = useState<StaffFormState>(emptyForm)
   const [partners, setPartners] = useState<{ id: number; name: string }[]>([])
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false)
+  const [selectedStaffForProfile, setSelectedStaffForProfile] = useState<StaffMember | null>(null)
 
   const activeStaffCount = useMemo(() => staff.filter((member) => member.is_active).length, [staff])
 
@@ -326,22 +335,41 @@ export default function DeviceStaffTab({ deviceId }: DeviceStaffTabProps) {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-4 rounded-xl border">
         <div>
-          <h3 className="text-lg font-semibold text-gray-900">Staff Access</h3>
+          <h3 className="text-lg font-bold text-gray-900">Staff Access & Requests</h3>
           <p className="text-sm text-gray-500">
-            Manage staff logins, roles, and access restrictions.
-            {activeStaffCount > 0 ? ` ${activeStaffCount} active.` : ""}
+            Manage staff accounts, access restrictions, salary advances, credit and leave requests.
           </p>
         </div>
-        <Button onClick={openCreateDialog}>
-          <Plus className="mr-2 h-4 w-4" />
-          Add Staff
-        </Button>
+
+        <Tabs value={activeSubTab} onValueChange={(val: any) => setActiveSubTab(val)}>
+          <TabsList className="bg-slate-100 p-1">
+            <TabsTrigger value="members" className="text-xs font-semibold">
+              <Users className="h-3.5 w-3.5 mr-1.5" />
+              Staff Members ({activeStaffCount})
+            </TabsTrigger>
+            <TabsTrigger value="requests" className="text-xs font-semibold">
+              <FileText className="h-3.5 w-3.5 mr-1.5 text-blue-600" />
+              Staff Requests & Payroll
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
       </div>
 
-      <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
+      {activeSubTab === "requests" ? (
+        <PayrollRequestsTab deviceId={deviceId} />
+      ) : (
+        <div className="space-y-4">
+          <div className="flex justify-end">
+            <Button onClick={openCreateDialog}>
+              <Plus className="mr-2 h-4 w-4" />
+              Add Staff
+            </Button>
+          </div>
+
+          <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
         {isLoading ? (
           <div className="flex items-center justify-center py-10 text-gray-500">
             <Loader2 className="mr-2 h-5 w-5 animate-spin" />
@@ -373,6 +401,9 @@ export default function DeviceStaffTab({ deviceId }: DeviceStaffTabProps) {
                         Active
                       </Badge>
                     )}
+                    <Badge className="bg-emerald-100 text-emerald-800 border-emerald-300 font-bold text-xs">
+                      Total Sales: INR {Number(member.total_sales_amount || 0).toFixed(2)}
+                    </Badge>
                   </div>
                   <p className="text-sm text-gray-500">
                     {member.position} · {member.phone}
@@ -384,18 +415,30 @@ export default function DeviceStaffTab({ deviceId }: DeviceStaffTabProps) {
                     </p>
                   )}
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 font-semibold text-xs"
+                    onClick={() => {
+                      setSelectedStaffForProfile(member)
+                      setIsProfileModalOpen(true)
+                    }}
+                  >
+                    <Eye className="mr-1 h-3.5 w-3.5 text-blue-600" />
+                    Profile & Sales
+                  </Button>
                   <Button
                     variant="outline"
                     size="sm"
                     className={
                       member.is_active
-                        ? "border-amber-200 bg-white text-amber-700 hover:bg-amber-50"
-                        : "border-green-200 bg-white text-green-700 hover:bg-green-50"
+                        ? "border-amber-200 bg-white text-amber-700 hover:bg-amber-50 text-xs"
+                        : "border-green-200 bg-white text-green-700 hover:bg-green-50 text-xs"
                     }
                     onClick={() => handleToggleActive(member)}
                   >
-                    <UserCheck className="mr-1 h-4 w-4" />
+                    <UserCheck className="mr-1 h-3.5 w-3.5" />
                     {member.is_active ? "Deactivate" : "Activate"}
                   </Button>
                   <Button
@@ -422,6 +465,8 @@ export default function DeviceStaffTab({ deviceId }: DeviceStaffTabProps) {
           </div>
         )}
       </div>
+      </div>
+    )}
 
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent className={`${ADMIN_DIALOG_SCROLL_CLASS} sm:max-w-2xl`}>
@@ -621,6 +666,20 @@ export default function DeviceStaffTab({ deviceId }: DeviceStaffTabProps) {
           </div>
         </DialogContent>
       </Dialog>
+
+      {selectedStaffForProfile && (
+        <StaffProfileModal
+          isOpen={isProfileModalOpen}
+          onClose={() => {
+            setIsProfileModalOpen(false)
+            setSelectedStaffForProfile(null)
+          }}
+          staffMember={selectedStaffForProfile}
+          deviceId={deviceId}
+          allStaffList={staff}
+          onOwnershipChanged={() => loadStaff()}
+        />
+      )}
     </div>
   )
 }

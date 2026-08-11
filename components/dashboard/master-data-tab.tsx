@@ -10,8 +10,13 @@ import {
   Search,
   Trash2,
   Truck,
-  Package,
+  Flame,
+  Users,
+  Eye,
 } from "lucide-react"
+import TrendingInlineView from "@/components/products/trending-inline-view"
+import StaffManagementView from "@/components/admin/staff-management-view"
+import { CourierProfileModal } from "@/components/master-data/courier-profile-modal"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -51,9 +56,11 @@ interface MasterDataTabProps {
   userId: number
 }
 
-const CATEGORY_ICONS: Record<string, typeof Truck> = {
+const CATEGORY_ICONS: Record<string, any> = {
   courier: Truck,
-  packaging: Package,
+  manual_category: Database,
+  trending: Flame,
+  staff: Users,
 }
 
 const EMPTY_FORM: MasterDataInput = {
@@ -84,6 +91,15 @@ export default function MasterDataTab({ userId }: MasterDataTabProps) {
   const [editingItem, setEditingItem] = useState<MasterDataItem | null>(null)
   const [deletingItem, setDeletingItem] = useState<MasterDataItem | null>(null)
   const [form, setForm] = useState<MasterDataInput>(EMPTY_FORM)
+
+  // Courier Profile Modal state
+  const [selectedCourierIdForProfile, setSelectedCourierIdForProfile] = useState<number | null>(null)
+  const [isCourierProfileOpen, setIsCourierProfileOpen] = useState(false)
+
+  const handleOpenCourierProfile = (courierId: number) => {
+    setSelectedCourierIdForProfile(courierId)
+    setIsCourierProfileOpen(true)
+  }
 
   const fetchItems = useCallback(async () => {
     if (!deviceId) return
@@ -148,23 +164,27 @@ export default function MasterDataTab({ userId }: MasterDataTabProps) {
   }
 
   const handleSave = async () => {
-    if (!deviceId || !form.name.trim()) {
-      notifyError(toast, "Name is required")
-      return
-    }
-
+    if (!deviceId) return
     setIsSaving(true)
     try {
-      const result = editingItem
-        ? await updateMasterDataItem(editingItem.id, deviceId, form)
-        : await createMasterDataItem(deviceId, userId, form)
-
-      if (result.success) {
-        notifySuccess(toast, editingItem ? "Master data updated" : "Master data created")
-        setIsDialogOpen(false)
-        fetchItems()
+      if (editingItem) {
+        const result = await updateMasterDataItem(editingItem.id, deviceId, form)
+        if (result.success) {
+          notifySuccess(toast, "Master data updated")
+          setIsDialogOpen(false)
+          fetchItems()
+        } else {
+          notifyError(toast, result.message || "Failed to update master data")
+        }
       } else {
-        notifyError(toast, result.message || "Failed to save master data")
+        const result = await createMasterDataItem(deviceId, userId, form)
+        if (result.success) {
+          notifySuccess(toast, "Master data created")
+          setIsDialogOpen(false)
+          fetchItems()
+        } else {
+          notifyError(toast, result.message || "Failed to create master data")
+        }
       }
     } catch {
       notifyError(toast, "Failed to save master data")
@@ -174,8 +194,7 @@ export default function MasterDataTab({ userId }: MasterDataTabProps) {
   }
 
   const confirmDelete = async () => {
-    if (!deviceId || !deletingItem) return
-
+    if (!deletingItem || !deviceId) return
     setIsSaving(true)
     try {
       const result = await deleteMasterDataItem(deletingItem.id, deviceId)
@@ -236,7 +255,9 @@ export default function MasterDataTab({ userId }: MasterDataTabProps) {
                   <Icon className="mt-0.5 h-4 w-4 shrink-0" />
                   <span className="min-w-0">
                     <span className="block text-sm font-medium">{category.label}</span>
-                    <span className="block text-[11px] opacity-70">{count} item{count === 1 ? "" : "s"}</span>
+                    {category.id !== "trending" && category.id !== "staff" && (
+                      <span className="block text-[11px] opacity-70">{count} item{count === 1 ? "" : "s"}</span>
+                    )}
                   </span>
                 </button>
               )
@@ -245,144 +266,175 @@ export default function MasterDataTab({ userId }: MasterDataTabProps) {
         </div>
 
         <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-          <div className="flex flex-col gap-3 border-b border-slate-200 bg-[#F1F4F9] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-2">
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white text-violet-700 shadow-sm">
-                <ActiveIcon className="h-4 w-4" />
-              </div>
-              <div>
-                <h2 className="text-sm font-semibold text-slate-900">{activeMeta?.label}</h2>
-                <p className="text-xs text-slate-500">{activeMeta?.description}</p>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="relative">
-                <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
-                <Input
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="Search..."
-                  className="h-8 w-44 border-slate-200 bg-white pl-8 text-xs"
-                />
-              </div>
-              <Button size="sm" className="h-8" onClick={openCreateDialog}>
-                <Plus className="mr-1.5 h-3.5 w-3.5" />
-                Add
-              </Button>
-            </div>
-          </div>
-
-          {loading ? (
-            <div className="flex items-center justify-center py-16 text-sm text-slate-500">
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Loading master data...
-            </div>
-          ) : filteredItems.length === 0 ? (
-            <div className="px-6 py-16 text-center">
-              <p className="text-sm font-medium text-slate-800">No {activeMeta?.label.toLowerCase()} yet</p>
-              <p className="mt-1 text-xs text-slate-500">Add your first entry to use it on sales and shipping.</p>
-              <Button size="sm" className="mt-4" onClick={openCreateDialog}>
-                <Plus className="mr-1.5 h-3.5 w-3.5" />
-                Add {getMasterDataCategoryLabel(activeCategory)}
-              </Button>
-            </div>
+          {activeCategory === "trending" ? (
+            <TrendingInlineView userId={userId} />
+          ) : activeCategory === "staff" ? (
+            <StaffManagementView userId={userId} />
           ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full border-separate border-spacing-0 text-sm">
-                <thead>
-                  <tr className="border-b border-slate-200 bg-[#F1F4F9] text-xs font-semibold uppercase tracking-wide text-slate-600">
-                    <th className="px-4 py-2.5 text-left">Name</th>
-                    {activeCategory === "courier" ? (
-                      <>
-                        <th className="px-4 py-2.5 text-left">Code</th>
-                        <th className="px-4 py-2.5 text-left">Contact</th>
-                        <th className="px-4 py-2.5 text-left">Tracking URL</th>
-                      </>
-                    ) : (
-                      <>
-                        <th className="px-4 py-2.5 text-left">Default cost</th>
-                        <th className="px-4 py-2.5 text-left">Notes</th>
-                      </>
-                    )}
-                    <th className="px-4 py-2.5 text-left">Status</th>
-                    <th className="px-4 py-2.5 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredItems.map((item, index) => (
-                    <tr
-                      key={item.id}
-                      className={cn(
-                        "border-b border-slate-200",
-                        index % 2 === 0 ? "bg-white" : "bg-slate-50/60",
-                      )}
-                    >
-                      <td className="px-4 py-3">
-                        <p className="font-medium text-slate-900">{item.name}</p>
-                        {item.notes && activeCategory === "courier" ? (
-                          <p className="text-[11px] text-slate-500">{item.notes}</p>
-                        ) : null}
-                      </td>
-                      {activeCategory === "courier" ? (
-                        <>
-                          <td className="px-4 py-3 text-slate-700">{item.code || "—"}</td>
-                          <td className="px-4 py-3 text-slate-700">
-                            <div className="space-y-0.5 text-xs">
-                              {item.contact_phone ? <p>{item.contact_phone}</p> : null}
-                              {item.contact_email ? <p>{item.contact_email}</p> : null}
-                              {!item.contact_phone && !item.contact_email ? "—" : null}
-                            </div>
-                          </td>
-                          <td className="max-w-[220px] truncate px-4 py-3 text-xs text-slate-700">
-                            {item.tracking_url_template || "—"}
-                          </td>
-                        </>
-                      ) : (
-                        <>
-                          <td className="px-4 py-3 text-slate-700">
-                            {getPackagingDefaultCost(item.metadata) != null
-                              ? Number(getPackagingDefaultCost(item.metadata)).toFixed(2)
-                              : "—"}
-                          </td>
-                          <td className="px-4 py-3 text-slate-700">{item.notes || "—"}</td>
-                        </>
-                      )}
-                      <td className="px-4 py-3">
-                        <span
+            <>
+              <div className="flex flex-col gap-3 border-b border-slate-200 bg-[#F1F4F9] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white text-violet-700 shadow-sm">
+                    <ActiveIcon className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h2 className="text-sm font-semibold text-slate-900">{activeMeta?.label}</h2>
+                    <p className="text-xs text-slate-500">{activeMeta?.description}</p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+                    <Input
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      placeholder="Search..."
+                      className="h-8 w-44 border-slate-200 bg-white pl-8 text-xs"
+                    />
+                  </div>
+                  <Button size="sm" className="h-8" onClick={openCreateDialog}>
+                    <Plus className="mr-1.5 h-3.5 w-3.5" />
+                    Add
+                  </Button>
+                </div>
+              </div>
+
+              {loading ? (
+                <div className="flex items-center justify-center py-16 text-sm text-slate-500">
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Loading master data...
+                </div>
+              ) : filteredItems.length === 0 ? (
+                <div className="px-6 py-16 text-center">
+                  <p className="text-sm font-medium text-slate-800">No {activeMeta?.label.toLowerCase()} yet</p>
+                  <p className="mt-1 text-xs text-slate-500">Add your first entry to use it on sales and shipping.</p>
+                  <Button size="sm" className="mt-4" onClick={openCreateDialog}>
+                    <Plus className="mr-1.5 h-3.5 w-3.5" />
+                    Add {getMasterDataCategoryLabel(activeCategory)}
+                  </Button>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full border-separate border-spacing-0 text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-200 bg-[#F1F4F9] text-xs font-semibold uppercase tracking-wide text-slate-600">
+                        <th className="px-4 py-2.5 text-left">Name</th>
+                        {activeCategory === "courier" ? (
+                          <>
+                            <th className="px-4 py-2.5 text-left">Code</th>
+                            <th className="px-4 py-2.5 text-left">Contact</th>
+                            <th className="px-4 py-2.5 text-left">Tracking URL</th>
+                          </>
+                        ) : (
+                          <>
+                            <th className="px-4 py-2.5 text-left">Default cost</th>
+                            <th className="px-4 py-2.5 text-left">Notes</th>
+                          </>
+                        )}
+                        <th className="px-4 py-2.5 text-left">Status</th>
+                        <th className="px-4 py-2.5 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredItems.map((item, index) => (
+                        <tr
+                          key={item.id}
                           className={cn(
-                            "inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium",
-                            item.is_active !== false
-                              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                              : "border-slate-200 bg-slate-100 text-slate-600",
+                            "border-b border-slate-200",
+                            index % 2 === 0 ? "bg-white" : "bg-slate-50/60",
                           )}
                         >
-                          {item.is_active !== false ? "Active" : "Inactive"}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex justify-end gap-1">
-                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => openEditDialog(item)}>
-                            <Pencil className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 w-8 p-0 text-red-600 hover:text-red-700"
-                            onClick={() => {
-                              setDeletingItem(item)
-                              setIsDeleteOpen(true)
-                            }}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                          <td className="px-4 py-3">
+                            <p
+                              className={cn(
+                                "font-semibold text-slate-900",
+                                activeCategory === "courier" && "cursor-pointer hover:text-blue-600 hover:underline"
+                              )}
+                              onClick={() => activeCategory === "courier" && handleOpenCourierProfile(item.id)}
+                            >
+                              {item.name}
+                            </p>
+                            {item.contact_phone && activeCategory === "courier" && (
+                              <p className="text-xs text-slate-500 font-normal mt-0.5">{item.contact_phone}</p>
+                            )}
+                            {item.notes && activeCategory === "courier" ? (
+                              <p className="text-[11px] text-slate-400">{item.notes}</p>
+                            ) : null}
+                          </td>
+                          {activeCategory === "courier" ? (
+                            <>
+                              <td className="px-4 py-3 text-slate-700">{item.code || "—"}</td>
+                              <td className="px-4 py-3 text-slate-700">
+                                <div className="space-y-0.5 text-xs">
+                                  {item.contact_phone ? <p>{item.contact_phone}</p> : null}
+                                  {item.contact_email ? <p>{item.contact_email}</p> : null}
+                                  {!item.contact_phone && !item.contact_email ? "—" : null}
+                                </div>
+                              </td>
+                              <td className="max-w-[220px] truncate px-4 py-3 text-xs text-slate-700">
+                                {item.tracking_url_template || "—"}
+                              </td>
+                            </>
+                          ) : (
+                            <>
+                              <td className="px-4 py-3 text-slate-700">
+                                {getPackagingDefaultCost(item.metadata) != null
+                                  ? Number(getPackagingDefaultCost(item.metadata)).toFixed(2)
+                                  : "—"}
+                              </td>
+                              <td className="px-4 py-3 text-slate-700">{item.notes || "—"}</td>
+                            </>
+                          )}
+                          <td className="px-4 py-3">
+                            <span
+                              className={cn(
+                                "inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium",
+                                item.is_active !== false
+                                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                  : "border-slate-200 bg-slate-100 text-slate-600",
+                              )}
+                            >
+                              {item.is_active !== false ? "Active" : "Inactive"}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex justify-end items-center gap-1.5">
+                              {activeCategory === "courier" && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-8 border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 font-semibold text-xs px-2.5"
+                                  onClick={() => handleOpenCourierProfile(item.id)}
+                                  title="View Partner Profile & Earnings"
+                                >
+                                  <Eye className="mr-1 h-4 w-4 text-blue-600" />
+                                  View
+                                </Button>
+                              )}
+                              <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => openEditDialog(item)}>
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0 text-red-600 hover:text-red-700"
+                                onClick={() => {
+                                  setDeletingItem(item)
+                                  setIsDeleteOpen(true)
+                                }}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -462,14 +514,12 @@ export default function MasterDataTab({ userId }: MasterDataTabProps) {
               ) : (
                 <>
                   <div className="space-y-1">
-                    <Label className="text-xs">Default packing cost</Label>
+                    <Label className="text-xs">Default cost</Label>
                     <Input
                       type="number"
-                      min="0"
                       step="0.01"
-                      value={form.defaultCost ?? ""}
+                      value={form.defaultCost || ""}
                       onChange={(e) => setForm((prev) => ({ ...prev, defaultCost: e.target.value }))}
-                      placeholder="Auto-fills expense packing on ship sales"
                     />
                   </div>
                 </>
@@ -480,16 +530,20 @@ export default function MasterDataTab({ userId }: MasterDataTabProps) {
                 <Textarea
                   value={form.notes || ""}
                   onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))}
-                  className="min-h-[80px]"
+                  rows={2}
                 />
               </div>
+            </div>
 
-              <label className="flex items-center gap-2 text-sm text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={form.isActive !== false}
-                  onChange={(e) => setForm((prev) => ({ ...prev, isActive: e.target.checked }))}
-                />
+            <div className="flex items-center space-x-2 border-t pt-3">
+              <input
+                type="checkbox"
+                id="is_active"
+                checked={form.isActive}
+                onChange={(e) => setForm((prev) => ({ ...prev, isActive: e.target.checked }))}
+                className="h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
+              />
+              <label htmlFor="is_active" className="text-xs font-medium text-slate-700">
                 Active
               </label>
             </div>
@@ -509,7 +563,7 @@ export default function MasterDataTab({ userId }: MasterDataTabProps) {
       <AlertDialog open={isDeleteOpen} onOpenChange={setIsDeleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete master data item</AlertDialogTitle>
+            <DialogTitle>Delete master data item</DialogTitle>
             <AlertDialogDescription>
               Delete &quot;{deletingItem?.name}&quot;? Existing sales keep the saved courier name snapshot.
             </AlertDialogDescription>
@@ -521,11 +575,17 @@ export default function MasterDataTab({ userId }: MasterDataTabProps) {
               disabled={isSaving}
               className="bg-red-600 hover:bg-red-700"
             >
-              Delete
+              {isSaving ? "Deleting..." : "Delete"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <CourierProfileModal
+        courierId={selectedCourierIdForProfile}
+        isOpen={isCourierProfileOpen}
+        onClose={() => setIsCourierProfileOpen(false)}
+      />
     </div>
   )
 }

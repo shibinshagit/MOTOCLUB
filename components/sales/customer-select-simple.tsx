@@ -47,7 +47,7 @@ export default function CustomerSelectSimple({
   const [formData, setFormData] = useState({ name: "", phone: "" })
   const [formLoading, setFormLoading] = useState(false)
   const [formErrors, setFormErrors] = useState<{ name?: string; phone?: string }>({})
-  const [countryCode, setCountryCode] = useState("+971")
+  const [countryCode, setCountryCode] = useState("+91")
 
   const containerRef = useRef<HTMLDivElement>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
@@ -101,14 +101,13 @@ export default function CustomerSelectSimple({
     }
   }, [searchTerm, customers, showForm])
 
-  // Focus correct input once showForm or formData changes
+  // Focus correct input once showForm becomes true ONLY
   useEffect(() => {
     if (!showForm) return
 
     const t = setTimeout(() => {
-      if (formData.phone) {
+      if (formData.phone && !formData.name) {
         phoneInputRef.current?.focus()
-        // place cursor at end
         const el = phoneInputRef.current
         if (el) el.selectionStart = el.selectionEnd = el.value.length
       } else {
@@ -119,7 +118,7 @@ export default function CustomerSelectSimple({
     }, 80)
 
     return () => clearTimeout(t)
-  }, [showForm, formData.phone, formData.name])
+  }, [showForm])
 
   // Set selected customer when external value changes
   useEffect(() => {
@@ -138,15 +137,6 @@ export default function CustomerSelectSimple({
           
           // Only attempt to fetch if customers are actually loaded (not initially empty)
           // or if we have a value but no customers array yet, we can try to fetch it.
-          try {
-            const res = await getCustomerById(Number(value))
-            if (res.success && res.data && isMounted) {
-              setSelectedCustomer(res.data)
-              // We could theoretically inject it into `customers`, but setting selectedCustomer is enough for the display
-            }
-          } catch (e) {
-            console.error("Failed to fetch missing customer for select:", e)
-          }
         }
       } else {
         setSelectedCustomer(null)
@@ -168,7 +158,7 @@ export default function CustomerSelectSimple({
         setOpen(false)
         setShowForm(false)
         setFormData({ name: "", phone: "" })
-        setCountryCode("+971")
+        setCountryCode("+91")
         setFormErrors({})
         setSearchTerm("")
       }
@@ -440,8 +430,8 @@ export default function CustomerSelectSimple({
                         className="h-9 w-[100px] rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                         disabled={formLoading}
                       >
-                        <option value="+971">+971 (AE)</option>
                         <option value="+91">+91 (IN)</option>
+                        <option value="+971">+971 (AE)</option>
                         <option value="+1">+1 (US)</option>
                         <option value="+44">+44 (UK)</option>
                         <option value="+966">+966 (SA)</option>

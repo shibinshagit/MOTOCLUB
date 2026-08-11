@@ -6,6 +6,7 @@ import { getAllJobCards } from "@/app/actions/job-card-actions"
 import { deleteSale } from "@/app/actions/sale-actions"
 import { DeliveryStatusSelect } from "@/components/sales/delivery-status-select"
 import { TrackingCell } from "@/components/sales/tracking-cell"
+import { StaffOwnerSelect } from "@/components/sales/staff-owner-select"
 import { useDispatch, useSelector } from "react-redux"
 import { selectDeviceCurrency, selectDeviceId } from "@/store/slices/deviceSlice"
 import { markInventoryStale } from "@/lib/inventory-sync"
@@ -49,6 +50,7 @@ export default function SalesOrdersTab() {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   
   const [selectedSales, setSelectedSales] = useState<number[]>([])
+  const [staffList, setStaffList] = useState<any[]>([])
 
   const toggleSelectSale = (id: number) => {
     setSelectedSales(prev => prev.includes(id) ? prev.filter(sId => sId !== id) : [...prev, id])
@@ -70,6 +72,13 @@ export default function SalesOrdersTab() {
 
   useEffect(() => {
     fetchSales()
+    if (deviceId) {
+      import("@/app/actions/staff-actions").then(({ getDeviceStaff }) => {
+        getDeviceStaff(deviceId).then(res => {
+          if (res.success && res.data) setStaffList(res.data)
+        })
+      })
+    }
   }, [deviceId])
 
   const fetchSales = async () => {
@@ -202,35 +211,39 @@ export default function SalesOrdersTab() {
         />
       )}
 
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
         <div>
-          <h2 className="text-2xl font-bold tracking-tight text-gray-900">Order List</h2>
-          <p className="text-sm text-gray-500">Manage and process all pending orders</p>
+          <h2 className="text-xl font-bold text-slate-800">Order List & Job Cards</h2>
+          <p className="text-xs text-slate-500 mt-0.5">Manage and process all pending orders, assign staff ownership, and update delivery status</p>
         </div>
-        
-        <div className="flex w-full md:w-auto items-center gap-2">
-          <div className="relative w-full md:w-64">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-500" />
+
+        <div className="flex items-center gap-3 w-full sm:w-auto">
+          <div className="relative flex-1 sm:w-72">
+            <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
             <Input
               type="text"
-              placeholder="Search orders..."
-              className="pl-9 h-9 w-full"
+              placeholder="Search by order #, customer, phone..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-9 h-9 text-xs bg-slate-50"
             />
           </div>
-          <Button variant="outline" size="sm" onClick={fetchSales} className="h-9">
+
+          <Button variant="outline" size="sm" onClick={fetchSales} className="h-9 text-xs gap-1.5">
+            <Loader2 className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
             Refresh
           </Button>
-          <Button size="sm" onClick={() => setIsCreateModalOpen(true)} className="h-9 gap-2">
-            <Plus className="h-4 w-4" /> Create Job Card
-          </Button>
+
           {selectedSales.length > 0 && (
             <Button variant="default" size="sm" onClick={handleBatchPrint} className="h-9 bg-indigo-600 hover:bg-indigo-700 text-white gap-2">
               <Printer className="h-4 w-4" />
               Print ({selectedSales.length})
             </Button>
           )}
+
+          <Button size="sm" onClick={() => setIsCreateModalOpen(true)} className="h-9 text-xs gap-2">
+            <Plus className="h-4 w-4" /> Create Job Card
+          </Button>
         </div>
       </div>
 
@@ -247,10 +260,10 @@ export default function SalesOrdersTab() {
       ) : (
         <div className="rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="min-w-full border-separate border-spacing-0 text-sm">
+            <table className="w-full min-w-[1150px] border-separate border-spacing-0 text-sm">
               <thead>
                 <tr className="border-b border-slate-200 bg-[#F1F4F9] text-xs font-semibold uppercase tracking-wide text-slate-600">
-                  <th className="w-12 whitespace-nowrap px-4 py-2.5 text-left">
+                  <th className="w-10 whitespace-nowrap px-3 py-2.5 text-left">
                     <input 
                       type="checkbox" 
                       className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600 cursor-pointer"
@@ -258,19 +271,20 @@ export default function SalesOrdersTab() {
                       onChange={toggleSelectAll}
                     />
                   </th>
-                  <th className="w-12 whitespace-nowrap px-4 py-2.5 text-left"></th>
-                  <th className="whitespace-nowrap px-4 py-2.5 text-left">Order #</th>
-                  <th className="whitespace-nowrap px-4 py-2.5 text-left">Date & Time</th>
-                  <th className="whitespace-nowrap px-4 py-2.5 text-left">Customer</th>
-                  <th className="whitespace-nowrap px-4 py-2.5 text-left">Phone</th>
-                  <th className="whitespace-nowrap px-4 py-2.5 text-left">Tracking ID</th>
-                  <th className="whitespace-nowrap px-4 py-2.5 text-center">Items</th>
-                  <th className="whitespace-nowrap px-4 py-2.5 text-right">Total</th>
-                  <th className="whitespace-nowrap px-4 py-2.5 text-center">Delivery Status</th>
-                  <th className="sticky right-0 z-20 min-w-[7rem] whitespace-nowrap border-l border-slate-200 bg-[#F1F4F9] px-4 py-2.5 text-right shadow-[-8px_0_12px_-8px_rgba(15,23,42,0.12)]">Actions</th>
+                  <th className="w-8 whitespace-nowrap px-2 py-2.5 text-left"></th>
+                  <th className="whitespace-nowrap px-3 py-2.5 text-left">Order #</th>
+                  <th className="whitespace-nowrap px-3 py-2.5 text-left">Date & Time</th>
+                  <th className="whitespace-nowrap px-3 py-2.5 text-left">Customer</th>
+                  <th className="whitespace-nowrap px-3 py-2.5 text-left">Assigned Staff</th>
+                  <th className="whitespace-nowrap px-3 py-2.5 text-left">Phone</th>
+                  <th className="whitespace-nowrap px-3 py-2.5 text-left">Tracking ID</th>
+                  <th className="whitespace-nowrap px-2 py-2.5 text-center">Items</th>
+                  <th className="whitespace-nowrap px-3 py-2.5 text-right">Total</th>
+                  <th className="whitespace-nowrap px-3 py-2.5 text-center">Delivery Status</th>
+                  <th className="whitespace-nowrap px-3 py-2.5 text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y divide-slate-100">
                 {filteredSales.map((sale, index) => {
                   const isExpanded = expandedSaleId === sale.id
                   const isSelected = selectedSales.includes(sale.id)
@@ -280,15 +294,34 @@ export default function SalesOrdersTab() {
                   const dateFormatted = format(saleDate, "dd MMM yyyy")
                   const timeFormatted = format(saleDate, "hh:mm a")
   
-                  const rowBg = index % 2 === 0 ? "bg-white" : "bg-slate-50/60"
-  
+                  const statusLower = (sale.delivery_status || "Pending").toLowerCase()
+                  let rowBg = index % 2 === 0 ? "bg-white" : "bg-slate-50/50"
+
+                  if (statusLower === "pending" || statusLower === "pending delivery") {
+                    rowBg = "bg-amber-50/80 border-l-4 border-l-amber-500 hover:bg-amber-100/80 text-amber-950"
+                  } else if (
+                    statusLower.includes("paid") ||
+                    statusLower.includes("pack") ||
+                    statusLower.includes("sent") ||
+                    statusLower.includes("ship") ||
+                    statusLower.includes("transit") ||
+                    statusLower.includes("out for delivery") ||
+                    statusLower.includes("dispatch")
+                  ) {
+                    rowBg = "bg-blue-50/80 border-l-4 border-l-blue-500 hover:bg-blue-100/80 text-blue-950"
+                  } else if (statusLower.includes("deliver") || statusLower.includes("complete")) {
+                    rowBg = "bg-emerald-50/80 border-l-4 border-l-emerald-500 hover:bg-emerald-100/80 text-emerald-950"
+                  } else if (statusLower.includes("cancel") || statusLower.includes("return")) {
+                    rowBg = "bg-rose-50/70 border-l-4 border-l-rose-400 hover:bg-rose-100/70 text-rose-950"
+                  }
+
                   return (
                     <div key={sale.id} className="contents">
                       <tr 
-                        className={`group cursor-pointer border-b border-slate-200 transition-colors hover:bg-violet-50/50 ${rowBg} ${isSelected ? 'bg-indigo-50/50' : ''}`}
+                        className={`group cursor-pointer border-b border-slate-200 transition-colors ${rowBg} ${isSelected ? 'bg-indigo-50/50' : ''}`}
                         onClick={() => toggleExpand(sale.id)}
                       >
-                        <td className="whitespace-nowrap px-4 py-2.5 text-center" onClick={(e) => e.stopPropagation()}>
+                        <td className="whitespace-nowrap px-3 py-2.5 text-center" onClick={(e) => e.stopPropagation()}>
                           <input 
                             type="checkbox" 
                             className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600 cursor-pointer"
@@ -296,57 +329,50 @@ export default function SalesOrdersTab() {
                             onChange={() => toggleSelectSale(sale.id)}
                           />
                         </td>
-                        <td className="whitespace-nowrap px-4 py-2.5 text-center" onClick={(e) => e.stopPropagation()}>
+                        <td className="whitespace-nowrap px-2 py-2.5 text-center" onClick={(e) => e.stopPropagation()}>
                           <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:text-slate-600" onClick={() => toggleExpand(sale.id)}>
                             {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                           </Button>
                         </td>
-                        <td className="whitespace-nowrap px-4 py-2.5 font-medium text-slate-700">
+                        <td className="whitespace-nowrap px-3 py-2.5 font-medium text-slate-700">
                           <div className="flex flex-col gap-0.5">
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-1.5 font-bold text-blue-700">
                               <span>#{sale.id}</span>
-                              {(sale.source === 'ECOMMERCE' || sale.external_order_id) && (
-                                <span className="inline-flex items-center rounded bg-purple-100 px-1.5 py-0.5 text-[10px] font-bold text-purple-800 border border-purple-200">
-                                  ECOM
-                                </span>
-                              )}
                             </div>
-                            {sale.external_order_id && (
-                              <span className="text-[11px] font-mono font-semibold text-purple-700">
-                                {sale.external_order_id}
-                              </span>
-                            )}
                           </div>
                         </td>
-                        <td className="whitespace-nowrap px-4 py-2.5">
+                        <td className="whitespace-nowrap px-3 py-2.5">
                           <div className="flex flex-col">
-                            <span className="font-medium text-slate-800">{dateFormatted}</span>
-                            <span className="text-xs text-slate-500">{timeFormatted}</span>
+                            <span className="font-medium text-slate-800 text-xs">{dateFormatted}</span>
+                            <span className="text-[11px] text-slate-500">{timeFormatted}</span>
                           </div>
                         </td>
-                        <td className="max-w-[180px] truncate px-4 py-2.5 font-medium text-slate-700">{sale.customer_name || "N/A"}</td>
-                        <td className="whitespace-nowrap px-4 py-2.5 text-slate-500">{sale.customer_phone ? formatPhoneNumber(sale.customer_phone) : "N/A"}</td>
-                        <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-slate-600">
-                          <div className="flex flex-col gap-0.5">
-                            <TrackingCell 
-                              saleId={sale.id}
-                              deviceId={deviceId || 0}
-                              trackingId={sale.tracking_id}
-                              deliveryStatus={sale.delivery_status}
-                              onUpdate={fetchSales}
-                            />
-                            {sale.courier_service_name && (
-                              <span className="text-[10px] font-sans font-medium text-violet-600 bg-violet-50 px-1.5 py-0.5 rounded w-fit">
-                                {sale.courier_service_name}
-                              </span>
-                            )}
-                          </div>
+                        <td className="max-w-[140px] truncate px-3 py-2.5 font-medium text-slate-800">{sale.customer_name || "N/A"}</td>
+                        <td className="whitespace-nowrap px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
+                          <StaffOwnerSelect
+                            saleId={sale.id}
+                            deviceId={deviceId || 0}
+                            currentStaffId={sale.staff_id}
+                            currentStaffName={sale.staff_name}
+                            staffList={staffList}
+                            onUpdate={fetchSales}
+                          />
                         </td>
-                        <td className="whitespace-nowrap px-4 py-2.5 text-center font-medium text-slate-700">{itemQuantity}</td>
-                        <td className="whitespace-nowrap px-4 py-2.5 text-right font-bold text-slate-800">
+                        <td className="whitespace-nowrap px-3 py-2.5 text-slate-500 text-xs">{sale.customer_phone ? formatPhoneNumber(sale.customer_phone) : "N/A"}</td>
+                        <td className="whitespace-nowrap px-3 py-2.5 font-mono text-xs text-slate-600">
+                          <TrackingCell 
+                            saleId={sale.id}
+                            deviceId={deviceId || 0}
+                            trackingId={sale.tracking_id}
+                            deliveryStatus={sale.delivery_status}
+                            onUpdate={fetchSales}
+                          />
+                        </td>
+                        <td className="whitespace-nowrap px-2 py-2.5 text-center font-medium text-slate-700">{itemQuantity}</td>
+                        <td className="whitespace-nowrap px-3 py-2.5 text-right font-bold text-slate-900">
                           {currency} {Number(sale.total_amount).toFixed(2)}
                         </td>
-                        <td className="whitespace-nowrap px-4 py-2.5 text-center" onClick={(e) => e.stopPropagation()}>
+                        <td className="whitespace-nowrap px-3 py-2.5 text-center" onClick={(e) => e.stopPropagation()}>
                           <DeliveryStatusSelect 
                             saleId={sale.id}
                             deviceId={deviceId || 0}
@@ -362,7 +388,7 @@ export default function SalesOrdersTab() {
                           />
                         </td>
                         <td 
-                          className={`sticky right-0 z-10 min-w-[12rem] whitespace-nowrap border-l border-slate-200 px-4 py-2.5 text-right shadow-[-8px_0_12px_-8px_rgba(15,23,42,0.12)] group-hover:bg-violet-50/50 ${rowBg}`} 
+                          className="whitespace-nowrap px-3 py-2.5 text-right" 
                           onClick={(e) => e.stopPropagation()}
                         >
                           <div className="flex items-center justify-end gap-1">

@@ -48,12 +48,19 @@ function normalizeRestrictedValuesForUpdate(
 // Schema is managed by `npm run migrate`
 export async function getDeviceStaff(deviceId: number) {
   try {
-
-
     const staff = await sql`
-      SELECT * FROM staff 
-      WHERE device_id = ${deviceId}
-      ORDER BY is_active DESC, name ASC
+      SELECT s.*,
+             COALESCE(
+               (SELECT SUM(total_amount) FROM sales WHERE staff_id = s.id AND status != 'Cancelled'),
+               0
+             ) as total_sales_amount,
+             COALESCE(
+               (SELECT COUNT(*) FROM sales WHERE staff_id = s.id AND status != 'Cancelled'),
+               0
+             ) as total_orders_count
+      FROM staff s
+      WHERE s.device_id = ${deviceId}
+      ORDER BY s.is_active DESC, s.name ASC
     `
 
     return { success: true, data: staff }
@@ -673,11 +680,10 @@ export async function getStaffDashboardStats(deviceId: number) {
     const [
       totalOrdersResult,
       totalSalesResult,
-      manualIncomeResult,
-      manualExpensesResult,
-      totalCOGSResult,
+      todaysSalesResult,
       todaysActivityResult,
-      pendingCostsResult
+      pendingCostsResult,
+      staffNameResult
     ] = await Promise.all([
       // 1. Total Orders
       sql`
@@ -693,66 +699,51 @@ export async function getStaffDashboardStats(deviceId: number) {
         WHERE device_id = ${deviceId} AND staff_id = ${session.staffId} AND status != 'Cancelled'
       `,
       
-      // 3. Manual Income
+      // 3. Today's Sale Amount
       sql`
-        SELECT COALESCE(SUM(amount), 0) as total
-        FROM financial_transactions
-        WHERE transaction_type = 'income' AND device_id = ${deviceId} AND staff_id = ${session.staffId}
+        SELECT COALESCE(SUM(total_amount), 0) as total
+        FROM sales
+        WHERE device_id = ${deviceId} AND staff_id = ${session.staffId} AND DATE(sale_date) = ${today} AND status != 'Cancelled'
       `,
       
-      // 4. Manual Expenses
-      sql`
-        SELECT COALESCE(SUM(amount), 0) as total
-        FROM financial_transactions
-        WHERE transaction_type = 'expense' AND device_id = ${deviceId} AND staff_id = ${session.staffId}
-      `,
-      
-      // 5. Total COGS
-      sql`
-        SELECT COALESCE(SUM(si.quantity * p.wholesale_price), 0) as total_cogs
-        FROM sale_items si
-        JOIN sales s ON si.sale_id = s.id
-        JOIN products p ON si.product_id = p.id
-        WHERE s.device_id = ${deviceId} AND s.staff_id = ${session.staffId} AND s.status != 'Cancelled'
-      `,
-      
-      // 6. Today's Activity
+      // 4. Today's Activity
       sql`
         SELECT COUNT(*) as total
         FROM sales
         WHERE device_id = ${deviceId} AND staff_id = ${session.staffId} AND DATE(sale_date) = ${today} AND status != 'Cancelled'
       `,
 
-      // 7. Pending Costs (Pending Payables/Expenses)
+      // 5. Pending Costs (Pending Payables/Expenses)
       sql`
         SELECT 
           (SELECT COUNT(*) FROM purchases WHERE status != 'Paid' AND status != 'Cancelled' AND device_id = ${deviceId} AND staff_id = ${session.staffId})
           +
           (SELECT COUNT(*) FROM financial_transactions WHERE transaction_type = 'expense' AND status = 'Pending' AND device_id = ${deviceId} AND staff_id = ${session.staffId})
         as total
+      `,
+
+      // 6. Staff Name
+      sql`
+        SELECT name FROM staff WHERE id = ${session.staffId} LIMIT 1
       `
     ]);
 
     const totalOrders = Number(totalOrdersResult[0]?.total) || 0;
     const totalSales = Number(totalSalesResult[0]?.total) || 0;
-    const manualIncome = Number(manualIncomeResult[0]?.total) || 0;
-    const manualExpenses = Number(manualExpensesResult[0]?.total) || 0;
-    const totalCOGS = Number(totalCOGSResult[0]?.total_cogs) || 0;
+    const todaysSales = Number(todaysSalesResult[0]?.total) || 0;
     const todaysActivity = Number(todaysActivityResult[0]?.total) || 0;
     const pendingCosts = Number(pendingCostsResult[0]?.total) || 0;
-
-    const grossProfit = totalSales - totalCOGS;
-    const netManualProfit = manualIncome - manualExpenses;
-    const totalProfit = grossProfit + netManualProfit;
+    const staffName = staffNameResult[0]?.name || session.staffName || session.deviceName || "";
 
     return {
       success: true,
       data: {
         totalOrders,
         totalSaleAmount: totalSales,
-        totalProfit,
+        todaysSales,
         todaysActivity,
-        pendingCosts
+        pendingCosts,
+        staffName
       }
     };
 

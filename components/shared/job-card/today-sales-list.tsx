@@ -224,12 +224,31 @@ export function TodaySalesList({ onOpenCreateModal }: { onOpenCreateModal?: () =
                 const dateFormatted = format(saleDate, "dd MMM yyyy")
                 const timeFormatted = format(saleDate, "hh:mm a")
 
-                const rowBg = index % 2 === 0 ? "bg-white" : "bg-slate-50/60"
+                const statusLower = (sale.delivery_status || "Pending").toLowerCase()
+                let rowBg = index % 2 === 0 ? "bg-white" : "bg-slate-50/60"
+
+                if (statusLower === "pending" || statusLower === "pending delivery") {
+                  rowBg = "bg-amber-50/80 border-l-4 border-l-amber-500 hover:bg-amber-100/80 text-amber-950"
+                } else if (
+                  statusLower.includes("paid") ||
+                  statusLower.includes("pack") ||
+                  statusLower.includes("sent") ||
+                  statusLower.includes("ship") ||
+                  statusLower.includes("transit") ||
+                  statusLower.includes("out for delivery") ||
+                  statusLower.includes("dispatch")
+                ) {
+                  rowBg = "bg-blue-50/80 border-l-4 border-l-blue-500 hover:bg-blue-100/80 text-blue-950"
+                } else if (statusLower.includes("deliver") || statusLower.includes("complete")) {
+                  rowBg = "bg-emerald-50/80 border-l-4 border-l-emerald-500 hover:bg-emerald-100/80 text-emerald-950"
+                } else if (statusLower.includes("cancel") || statusLower.includes("return")) {
+                  rowBg = "bg-rose-50/70 border-l-4 border-l-rose-400 hover:bg-rose-100/70 text-rose-950"
+                }
 
                 return (
                   <div key={sale.id} className="contents">
                     <tr 
-                      className={`group cursor-pointer border-b border-slate-100 transition-colors hover:bg-slate-50/80 bg-white ${isSelected ? 'bg-indigo-50/30' : ''}`}
+                      className={`group cursor-pointer border-b border-slate-100 transition-colors ${rowBg} ${isSelected ? 'bg-indigo-50/30' : ''}`}
                       onClick={() => toggleExpand(sale.id)}
                     >
                       <td className="whitespace-nowrap px-4 py-4 text-left" onClick={(e) => e.stopPropagation()}>

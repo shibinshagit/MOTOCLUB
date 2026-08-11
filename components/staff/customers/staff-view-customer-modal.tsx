@@ -5,17 +5,38 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { format } from "date-fns"
-import { User, Mail, Phone, MapPin, Calendar, ShoppingBag, Car, FileText, Share2, ClipboardList, Wallet } from "lucide-react"
+import { User, Mail, Phone, MapPin, Calendar, ShoppingBag, Car, FileText, Share2, ClipboardList, Wallet, Copy, Check, ShoppingCart } from "lucide-react"
+import { useState } from "react"
+import { useToast } from "@/components/ui/use-toast"
+import { notifySuccess } from "@/lib/notifications"
 
 interface StaffViewCustomerModalProps {
   isOpen: boolean
   onClose: () => void
   customer: any
   currency?: string
+  onCreateJobCard?: (customer: any) => void
 }
 
-export default function StaffViewCustomerModal({ isOpen, onClose, customer, currency = "AED" }: StaffViewCustomerModalProps) {
+export default function StaffViewCustomerModal({
+  isOpen,
+  onClose,
+  customer,
+  currency = "AED",
+  onCreateJobCard,
+}: StaffViewCustomerModalProps) {
+  const { toast } = useToast()
+  const [copied, setCopied] = useState(false)
+
   if (!customer) return null
+
+  const handleCopyPhone = () => {
+    if (!customer.phone) return
+    navigator.clipboard.writeText(customer.phone)
+    setCopied(true)
+    notifySuccess(toast, `Phone number ${customer.phone} copied to clipboard!`)
+    setTimeout(() => setCopied(false), 2000)
+  }
 
   const getCustomerType = (orderCount: number) => {
     if (orderCount >= 20) return { label: "VIP Customer", color: "bg-purple-100 text-purple-800 border-purple-200" }
@@ -80,9 +101,22 @@ export default function StaffViewCustomerModal({ isOpen, onClose, customer, curr
             <div className="space-y-3">
               <div className="flex items-start gap-3">
                 <Phone className="h-4 w-4 text-slate-400 mt-1" />
-                <div>
+                <div className="flex-1">
                   <p className="text-xs text-slate-500 font-medium">Phone Number</p>
-                  <p className="text-sm font-medium text-slate-900">{customer.phone || "Not provided"}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-medium text-slate-900">{customer.phone || "Not provided"}</p>
+                    {customer.phone && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleCopyPhone}
+                        className="h-6 px-2 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                      >
+                        {copied ? <Check className="h-3 w-3 text-emerald-600 mr-1" /> : <Copy className="h-3 w-3 mr-1" />}
+                        {copied ? "Copied" : "Copy"}
+                      </Button>
+                    )}
+                  </div>
                 </div>
               </div>
               <div className="flex items-start gap-3">
@@ -169,7 +203,18 @@ export default function StaffViewCustomerModal({ isOpen, onClose, customer, curr
           </div>
         </div>
 
-        <DialogFooter className="mt-6">
+        <DialogFooter className="mt-6 flex flex-col sm:flex-row gap-2 justify-between">
+          {onCreateJobCard && (
+            <Button
+              onClick={() => {
+                onClose()
+                onCreateJobCard(customer)
+              }}
+              className="bg-blue-600 hover:bg-blue-700 text-white gap-2 font-semibold"
+            >
+              <ShoppingCart className="h-4 w-4" /> Create Job Card For Customer
+            </Button>
+          )}
           <Button onClick={onClose} variant="outline" className="w-full sm:w-auto">
             Close
           </Button>

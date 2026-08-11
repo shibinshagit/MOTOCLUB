@@ -8,6 +8,7 @@ const SECRET_KEY = new TextEncoder().encode(
 
 export interface StaffSessionPayload extends JWTPayload {
   staffId: number
+  staffName?: string
   companyId: number | null
   deviceId: number
   deviceName?: string

@@ -45,6 +45,8 @@ type ColumnKey =
 
 type ColumnFilters = Record<ColumnKey, ExcelColumnFilterValue>
 
+import { matchProductSemantic } from "@/lib/product-search"
+
 function buildInitialFilters(products: any[], getters: Record<ColumnKey, (p: any) => string>): ColumnFilters {
   const filters = {} as ColumnFilters
   ;(Object.keys(getters) as ColumnKey[]).forEach((key) => {
@@ -54,16 +56,7 @@ function buildInitialFilters(products: any[], getters: Record<ColumnKey, (p: any
 }
 
 function productMatchesSearch(product: any, searchTerm: string): boolean {
-  if (!searchTerm.trim()) return true
-  const query = searchTerm.toLowerCase()
-  return (
-    product.name?.toLowerCase().includes(query) ||
-    product.category?.toLowerCase().includes(query) ||
-    product.company_name?.toLowerCase().includes(query) ||
-    product.barcode?.toLowerCase().includes(query) ||
-    product.shelf?.toLowerCase().includes(query) ||
-    String(product.id).includes(query)
-  )
+  return matchProductSemantic(product, searchTerm)
 }
 
 interface ProductsExcelTableProps {

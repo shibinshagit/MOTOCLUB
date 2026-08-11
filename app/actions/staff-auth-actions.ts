@@ -89,6 +89,7 @@ export async function staffLogin(formData: FormData) {
     // Set secure JWT session
     await setStaffSessionCookie({
       staffId: staff.staff_id,
+      staffName: staff.staff_name,
       companyId: staff.company_id,
       deviceId: staff.device_id,
       deviceName: staff.device_name,

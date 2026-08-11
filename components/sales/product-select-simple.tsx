@@ -14,6 +14,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { useSelector } from "react-redux"
 import { selectDeviceId } from "@/store/slices/deviceSlice"
+import { matchProductSemantic } from "@/lib/product-search"
 
 interface ProductSelectSimpleProps {
   id?: string
@@ -176,11 +177,7 @@ function ProductSelectSimple({
 
         if (broadResult.success && broadResult.data.length > 0) {
           const filteredProducts = broadResult.data.filter((product: any) => {
-            return (
-              normalize(String(product.name)).includes(searchNorm) ||
-              normalize(String(product.company_name)).includes(searchNorm) ||
-              (product.barcode && normalize(String(product.barcode)).includes(searchNorm))
-            )
+            return matchProductSemantic(product, searchTerm)
           })
 
           result = {

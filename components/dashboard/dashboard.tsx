@@ -21,6 +21,7 @@ import {
   Flame,
   Database,
   CalendarDays,
+  FileText,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/components/ui/use-toast"
@@ -48,6 +49,7 @@ import PlatformTab from "./platform-tab"
 import MasterDataTab from "./master-data-tab"
 import AttendanceTab from "./attendance-tab"
 import SalesOrdersTab from "./sales-orders-tab"
+import PayrollRequestsTab from "@/components/admin/payroll-requests-tab"
 import StaffAuthModal from "../staff/staff-auth-modal"
 import { BrandLogo } from "@/components/brand-logo"
 
@@ -64,7 +66,7 @@ import { getDeviceProfile } from "@/app/actions/auth-actions"
 import { activateStaff, clearStaff, selectActiveStaff, setStaff } from "@/store/slices/staffSlice"
 import { getStaffForAuthentication } from "@/app/actions/staff-actions"
 
-type TabType = "sale" | "sales" | "sales-orders" | "purchase" | "product" | "trending" | "customer" | "transfer" | "accounting" | "supplier" | "platform" | "master" | "attendance"
+type TabType = "sale" | "sales" | "sales-orders" | "purchase" | "product" | "trending" | "customer" | "transfer" | "accounting" | "supplier" | "platform" | "master" | "attendance" | "requests"
 
 const DEFAULT_CONTENT_TAB: TabType = "sale"
 
@@ -100,16 +102,16 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const resolveTab = (param: TabType | "stock" | "home" | null): TabType => {
     if (param === "stock") return "product"
     if (param === "sales") return "sale"
-    if (param === "home") return "trending"
+    if (param === "home") return "sales-orders"
     if (
       param &&
-      ["sale", "sales", "sales-orders", "purchase", "product", "trending", "customer", "transfer", "accounting", "supplier", "platform", "master", "attendance"].includes(
+      ["sale", "sales", "sales-orders", "purchase", "product", "trending", "customer", "transfer", "accounting", "supplier", "platform", "master", "attendance", "requests"].includes(
         param,
       )
     ) {
       return param
     }
-    return "trending"
+    return "sales-orders"
   }
   const initialTab = resolveTab(tabParam)
 
@@ -455,6 +457,8 @@ export function Dashboard({ onLogout }: DashboardProps) {
           return <TransferTab userId={device?.id ?? 0} />
         case "accounting":
           return <AccountingTab userId={device?.id ?? 0} companyId={companyId} deviceId={deviceId || 0} />
+        case "requests":
+          return <PayrollRequestsTab deviceId={deviceId || 0} initialSubTab="requests" />
         case "platform":
           return <PlatformTab userId={device?.id ?? 0} />
         case "master":
@@ -470,10 +474,9 @@ export function Dashboard({ onLogout }: DashboardProps) {
 
   // Navigation items configuration
   const navItems = [
-    { id: "trending", icon: <Flame className="h-4 w-4" />, label: "Trending" },
-    { id: "purchase", icon: <Receipt className="h-4 w-4" />, label: "Purchase" },
-    { id: "sale", icon: <Plus className="h-5 w-5" />, label: "Sales" },
     { id: "sales-orders", icon: <Receipt className="h-4 w-4" />, label: "Order List" },
+    { id: "sale", icon: <Plus className="h-5 w-5" />, label: "Sales" },
+    { id: "purchase", icon: <Receipt className="h-4 w-4" />, label: "Purchase" },
     { id: "customer", icon: <User className="h-4 w-4" />, label: "Customers" },
     { id: "attendance", icon: <CalendarDays className="h-4 w-4" />, label: "Attendance" },
     { id: "supplier", icon: <Truck className="h-4 w-4" />, label: "Suppliers" },
@@ -483,7 +486,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
   ]
 
   // Primary tabs for bottom navigation (most used)
-  const primaryTabs = ["trending", "sale", "purchase"]
+  const primaryTabs = ["sales-orders", "sale", "purchase"]
   const secondaryTabs = ["customer", "attendance", "supplier", "transfer", "platform", "master"]
 
   return (
@@ -540,6 +543,19 @@ export function Dashboard({ onLogout }: DashboardProps) {
 
           {/* Desktop Controls */}
           <div className="hidden sm:flex items-center space-x-2">
+            <Button
+              onClick={() => handleTabChange("requests")}
+              variant="ghost"
+              size="sm"
+              className={cn(
+                "h-9 px-3 rounded-full hover:bg-purple-50 text-purple-700 font-semibold text-xs flex items-center gap-1.5",
+                activeTab === "requests" && "bg-purple-100",
+              )}
+              title="Staff Requests"
+            >
+              <FileText className="h-4 w-4" />
+              <span className="hidden md:inline">Requests</span>
+            </Button>
             <Button
               onClick={handleInventoryToggle}
               variant="ghost"

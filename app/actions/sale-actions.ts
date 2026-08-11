@@ -2,7 +2,7 @@
 
 import { addDays, parseISO, format } from "date-fns"
 import { sql, getLastError, resetConnectionState, executeWithRetry } from "@/lib/db"
-import { revalidatePath } from "next/cache"
+import { revalidatePath, unstable_noStore as noStore } from "next/cache"
 import { recordSaleTransaction, recordSaleAdjustment, deleteSaleTransaction, syncSaleShippingTransactions } from "./simplified-accounting"
 import { filterSalesForStaff } from "@/lib/staff-restrictions-server"
 import { normalizeSaleShippingInput } from "@/lib/sale-shipping"
@@ -2275,5 +2275,39 @@ export async function deleteSale(saleId: number, deviceId?: number) {
       success: false,
       message: `Database error: ${error instanceof Error ? error.message : getLastError()?.message || "Unknown error"}. Please try again later.`,
     }
+  }
+}
+
+export async function reassignSaleOwnership(saleId: number, deviceId: number, newStaffId: number | null) {
+  noStore()
+  try {
+    if (!saleId || !deviceId) {
+      return { success: false, message: "Sale ID and Device ID are required" }
+    }
+
+    await sql`
+      UPDATE sales
+      SET staff_id = ${newStaffId || null}
+      WHERE id = ${saleId} AND device_id = ${deviceId}
+    `
+
+    try {
+      await sql`
+        UPDATE job_cards
+        SET staff_id = ${newStaffId || null}
+        WHERE sale_id = ${saleId} AND device_id = ${deviceId}
+      `
+    } catch (err) {
+      // Ignored if linked job_card not present
+    }
+
+    try {
+      revalidatePath("/dashboard")
+    } catch (e) {}
+
+    return { success: true, message: "Ownership reassigned successfully" }
+  } catch (error: any) {
+    console.error("reassignSaleOwnership error:", error)
+    return { success: false, message: error.message || "Failed to reassign ownership" }
   }
 }

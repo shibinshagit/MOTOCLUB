@@ -411,7 +411,6 @@ export async function getTodayJobCards(monthStr?: string, searchTerm?: string) {
           AND s.sale_date < (${startDate}::date + interval '1 month')
           AND (s.status != 'Cancelled' OR s.delivery_status = 'Returned')
           AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%')
-          AND (s.delivery_status IS NULL OR s.delivery_status != 'Delivered')
           AND (
             LOWER(COALESCE(c.name, s.customer_name_override)) LIKE ${searchPattern}
             OR LOWER(COALESCE(c.phone, s.customer_phone_override)) LIKE ${searchPattern}
@@ -432,7 +431,6 @@ export async function getTodayJobCards(monthStr?: string, searchTerm?: string) {
           AND s.sale_date < (${startDate}::date + interval '1 month')
           AND (s.status != 'Cancelled' OR s.delivery_status = 'Returned')
           AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%')
-          AND (s.delivery_status IS NULL OR s.delivery_status != 'Delivered')
         ORDER BY s.created_at DESC
       `
     } else if (!startDate && searchPattern) {
@@ -447,7 +445,6 @@ export async function getTodayJobCards(monthStr?: string, searchTerm?: string) {
           AND s.sale_date < date_trunc('month', CURRENT_DATE) + interval '1 month'
           AND (s.status != 'Cancelled' OR s.delivery_status = 'Returned')
           AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%')
-          AND (s.delivery_status IS NULL OR s.delivery_status != 'Delivered')
           AND (
             LOWER(COALESCE(c.name, s.customer_name_override)) LIKE ${searchPattern}
             OR LOWER(COALESCE(c.phone, s.customer_phone_override)) LIKE ${searchPattern}
@@ -468,7 +465,6 @@ export async function getTodayJobCards(monthStr?: string, searchTerm?: string) {
           AND s.sale_date < date_trunc('month', CURRENT_DATE) + interval '1 month'
           AND (s.status != 'Cancelled' OR s.delivery_status = 'Returned')
           AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%')
-          AND (s.delivery_status IS NULL OR s.delivery_status != 'Delivered')
         ORDER BY s.created_at DESC
       `
     }

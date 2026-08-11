@@ -28,8 +28,10 @@ import {
   Building,
   TrendingUp,
   ArrowUpCircle,
+  FileText,
   Loader2,
   Wallet,
+  Banknote,
 } from "lucide-react"
 import { useAppSelector, useAppDispatch } from "@/store/hooks"
 import { useStaffRestrictions } from "@/hooks/use-staff-restrictions"
@@ -71,6 +73,7 @@ import EditManualTransactionModal from "../manual/EditManualTransactionModal"
 import ManualCategorySelect from "../manual/manual-category-select"
 import ViewSupplierPaymentModal from "../suppliers/View-supplier-payment-model"
 import EditSupplierPaymentModal from "../suppliers/View-suplier-payment-edit"
+import PayrollRequestsTab from "@/components/admin/payroll-requests-tab"
 
 interface AccountingTabProps {
   userId: number
@@ -2290,9 +2293,17 @@ const renderTransactionList = (
       <div className="rounded-xl border border-border bg-card">
         <Tabs defaultValue="transactions" value={activeTab} onValueChange={setActiveTab} className="w-full">
           <div className="px-4 pt-4">
-            <TabsList className="grid w-full grid-cols-2 md:grid-cols-5 rounded-lg bg-muted p-1">
+            <TabsList className="grid w-full grid-cols-2 md:grid-cols-7 rounded-lg bg-muted p-1">
               <TabsTrigger value="transactions" className="rounded-md">
                 Transactions
+              </TabsTrigger>
+              <TabsTrigger value="requests" className="rounded-md flex items-center justify-center gap-1 font-semibold text-purple-700">
+                <FileText className="h-3.5 w-3.5" />
+                Staff Requests
+              </TabsTrigger>
+              <TabsTrigger value="payroll" className="rounded-md flex items-center justify-center gap-1 font-semibold text-blue-700">
+                <Banknote className="h-3.5 w-3.5" />
+                Salary & Payroll
               </TabsTrigger>
               <TabsTrigger value="petty-cash" className="rounded-md">
                 Petty cash
@@ -2308,6 +2319,14 @@ const renderTransactionList = (
               </TabsTrigger>
             </TabsList>
           </div>
+
+          <TabsContent value="requests" className="p-4">
+            <PayrollRequestsTab deviceId={deviceId} currency={currency} initialSubTab="requests" />
+          </TabsContent>
+
+          <TabsContent value="payroll" className="p-4">
+            <PayrollRequestsTab deviceId={deviceId} currency={currency} initialSubTab="payroll" />
+          </TabsContent>
 
           <TabsContent value="transactions" className="p-4">
             {renderTransactionList(

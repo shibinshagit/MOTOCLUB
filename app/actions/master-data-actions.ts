@@ -1,7 +1,7 @@
 "use server"
 
 import { sql } from "@/lib/db"
-import { revalidatePath } from "next/cache"
+import { revalidatePath, unstable_noStore as noStore } from "next/cache"
 import type { MasterDataCategory, MasterDataInput, MasterDataItem } from "@/lib/master-data"
 import { getPackagingDefaultCost } from "@/lib/master-data"
 import {
@@ -55,17 +55,27 @@ export async function getMasterDataItems(deviceId: number, category?: MasterData
   try {
     const rows = category
       ? await sql`
-          SELECT *
-          FROM master_data
-          WHERE device_id = ${deviceId}
-            AND category = ${category}
-          ORDER BY sort_order ASC, name ASC
+          SELECT md.*,
+                 COALESCE(
+                   NULLIF(md.contact_phone, ''),
+                   (SELECT phone FROM staff WHERE linked_partner_id = md.id AND phone IS NOT NULL AND phone != '' LIMIT 1),
+                   (SELECT phone FROM staff WHERE role = 'partner' AND LOWER(name) = LOWER(md.name) AND phone IS NOT NULL AND phone != '' LIMIT 1)
+                 ) as contact_phone
+          FROM master_data md
+          WHERE md.device_id = ${deviceId}
+            AND md.category = ${category}
+          ORDER BY md.sort_order ASC, md.name ASC
         `
       : await sql`
-          SELECT *
-          FROM master_data
-          WHERE device_id = ${deviceId}
-          ORDER BY category ASC, sort_order ASC, name ASC
+          SELECT md.*,
+                 COALESCE(
+                   NULLIF(md.contact_phone, ''),
+                   (SELECT phone FROM staff WHERE linked_partner_id = md.id AND phone IS NOT NULL AND phone != '' LIMIT 1),
+                   (SELECT phone FROM staff WHERE role = 'partner' AND LOWER(name) = LOWER(md.name) AND phone IS NOT NULL AND phone != '' LIMIT 1)
+                 ) as contact_phone
+          FROM master_data md
+          WHERE md.device_id = ${deviceId}
+          ORDER BY md.category ASC, md.sort_order ASC, md.name ASC
         `
 
     return {
@@ -307,4 +317,54 @@ export async function getManualEntryCategoryByName(deviceId: number, categoryNam
 
   if (rows.length === 0) return null
   return mapMasterDataRow(rows[0] as Record<string, unknown>)
+}
+
+export async function getCourierProfileDetails(courierId: number) {
+  noStore()
+  try {
+    const courierQuery = await sql`
+      SELECT md.*,
+             COALESCE(
+               NULLIF(md.contact_phone, ''),
+               (SELECT phone FROM staff WHERE linked_partner_id = md.id AND phone IS NOT NULL AND phone != '' LIMIT 1),
+               (SELECT phone FROM staff WHERE role = 'partner' AND LOWER(name) = LOWER(md.name) AND phone IS NOT NULL AND phone != '' LIMIT 1)
+             ) as contact_phone
+      FROM master_data md
+      WHERE md.id = ${courierId}
+      LIMIT 1
+    `
+    if (courierQuery.length === 0) {
+      return { success: false, message: "Courier partner not found" }
+    }
+    const courier = mapMasterDataRow(courierQuery[0] as Record<string, unknown>)
+
+    const sales = await sql`
+      SELECT s.id, s.tracking_id, s.total_amount, s.delivery_status, s.status, s.created_at, s.expense_courier, s.courier_paid_extra, COALESCE(c.name, s.customer_name_override) as customer_name, COALESCE(c.phone, s.customer_phone_override) as customer_phone
+      FROM sales s
+      LEFT JOIN customers c ON s.customer_id = c.id
+      WHERE s.courier_partner_id = ${courierId}
+         OR s.courier_service_id = ${courierId}
+         OR LOWER(s.courier_service_name) = LOWER(${courier.name})
+      ORDER BY s.created_at DESC
+      LIMIT 100
+    `
+
+    const totalOrders = sales.length
+    const totalEarnings = sales.reduce((sum: number, s: any) => sum + (Number(s.expense_courier || s.courier_paid_extra || s.total_amount || 0)), 0)
+    const totalRevenue = sales.reduce((sum: number, s: any) => sum + Number(s.total_amount || 0), 0)
+
+    return {
+      success: true,
+      data: {
+        courier,
+        totalOrders,
+        totalEarnings,
+        totalRevenue,
+        recentOrders: sales
+      }
+    }
+  } catch (error: any) {
+    console.error("getCourierProfileDetails error:", error)
+    return { success: false, message: error.message || "Failed to fetch courier details" }
+  }
 }

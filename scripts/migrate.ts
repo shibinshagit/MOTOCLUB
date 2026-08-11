@@ -770,6 +770,16 @@ async function upgradeLegacyColumns() {
     ["customers.state", () => sql`ALTER TABLE customers ADD COLUMN IF NOT EXISTS state VARCHAR(255)`],
     ["sales.shipping_district", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS shipping_district VARCHAR(255)`],
     ["sales.shipping_state", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS shipping_state VARCHAR(255)`],
+    ["sales.source", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS source VARCHAR(50) DEFAULT 'POS'`],
+    ["sales.external_order_id", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS external_order_id VARCHAR(100)`],
+    ["sales.ecommerce_customer_id", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS ecommerce_customer_id VARCHAR(100)`],
+    ["sales.sync_status", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS sync_status VARCHAR(50) DEFAULT 'SYNCED'`],
+    ["sales.synced_at", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS synced_at TIMESTAMP DEFAULT NOW()`],
+    ["sales.sync_attempts", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS sync_attempts INTEGER DEFAULT 1`],
+    ["sales.last_sync_error", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS last_sync_error TEXT`],
+    ["orders.sync_status", () => sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS sync_status VARCHAR(50) DEFAULT 'PENDING'`],
+    ["orders.synced_at", () => sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS synced_at TIMESTAMP`],
+    ["orders.synced_sale_id", () => sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS synced_sale_id INTEGER`],
   ]
 
   for (const [label, fn] of columns) {
@@ -975,6 +985,7 @@ async function createIndexes() {
     ["idx_product_device_stock", () => sql`CREATE INDEX IF NOT EXISTS idx_product_device_stock ON product_device_stock(device_id, product_id)`],
     ["idx_product_share_links_token", () => sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_product_share_links_token ON product_share_links(token)`],
     ["idx_product_share_links_product", () => sql`CREATE INDEX IF NOT EXISTS idx_product_share_links_product ON product_share_links(product_id, device_id)`],
+    ["idx_sales_ecommerce_external_id", () => sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_ecommerce_external_id ON sales(external_order_id, source) WHERE source = 'ECOMMERCE'`],
   ]
 
   for (const [label, fn] of indexes) {

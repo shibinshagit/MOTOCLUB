@@ -71,12 +71,10 @@ export function StaffSalesChart({ deviceId, currency = "INR", onSummaryUpdate }:
           totalOrders += orderCount
 
           return {
-            date: day,
+            date: dayString,
             dayStr: format(day, "d EEE"), // e.g., "3 Fri"
             salesAmount,
             orderCount,
-            profit: salesAmount, // Mocked as full amount since staff have no expenses
-            expense: 0 // Staff have no expenses in this view
           }
         })
 
@@ -115,18 +113,18 @@ export function StaffSalesChart({ deviceId, currency = "INR", onSummaryUpdate }:
   }
 
   // Custom tooltip
-  const CustomTooltip = ({ active, payload, label }: any) => {
+  const CustomTooltip = ({ active, payload }: any) => {
     if (active && payload && payload.length) {
       const data = payload[0].payload
       return (
         <div className="bg-white p-3 border border-gray-100 shadow-xl rounded-xl text-sm min-w-[120px]">
           <p className="font-semibold text-gray-900 mb-2">{data.dayStr}</p>
           <div className="flex flex-col gap-1">
-            <p className="text-red-500 font-medium text-[13px]">
-              Expense : {data.expense}
+            <p className="text-blue-600 font-semibold text-[13px]">
+              Sales : {formatCurrency(data.salesAmount)}
             </p>
-            <p className="text-emerald-500 font-medium text-[13px]">
-              Profit : {data.profit}
+            <p className="text-slate-500 text-xs">
+              Orders : {data.orderCount}
             </p>
           </div>
         </div>
@@ -141,10 +139,10 @@ export function StaffSalesChart({ deviceId, currency = "INR", onSummaryUpdate }:
     <Card className="w-full border-0 shadow-sm rounded-xl overflow-hidden">
       <CardHeader className="flex flex-col sm:flex-row items-center justify-between pb-6 gap-4 bg-white">
         <div className="flex items-center gap-2">
-          <div className="p-2 bg-indigo-50 rounded-lg">
-            <TrendingUp className="h-5 w-5 text-indigo-600" />
+          <div className="p-2 bg-blue-50 rounded-lg">
+            <TrendingUp className="h-5 w-5 text-blue-600" />
           </div>
-          <CardTitle className="text-lg font-bold text-slate-800">Earnings Trend</CardTitle>
+          <CardTitle className="text-lg font-bold text-slate-800">Sales Trend</CardTitle>
         </div>
         <div className="flex items-center gap-4">
           <div className="flex items-center bg-gray-100 rounded-md p-1">
@@ -200,8 +198,7 @@ export function StaffSalesChart({ deviceId, currency = "INR", onSummaryUpdate }:
                 <RechartsBarChart data={data} margin={{ top: 20, right: 20, left: 0, bottom: 0 }} barGap={2}>
                   <CartesianGrid strokeDasharray="3 3" vertical={true} stroke="#f1f5f9" />
                   <XAxis 
-                    dataKey="date" 
-                    tickFormatter={(val) => format(val, 'd EEE')}
+                    dataKey="dayStr" 
                     axisLine={{ stroke: '#e2e8f0' }}
                     tickLine={false}
                     tick={{ fill: '#64748b', fontSize: 10, fontWeight: 500 }}
@@ -225,15 +222,13 @@ export function StaffSalesChart({ deviceId, currency = "INR", onSummaryUpdate }:
                     iconSize={8}
                     wrapperStyle={{ paddingBottom: '20px', fontSize: '12px', fontWeight: 500, color: '#475569' }}
                   />
-                  <Bar dataKey="profit" name="Profit" fill="#34d399" radius={[4, 4, 0, 0]} maxBarSize={40} />
-                  <Bar dataKey="expense" name="Expense" fill="#f87171" radius={[4, 4, 0, 0]} maxBarSize={40} />
+                  <Bar dataKey="salesAmount" name="Sales Amount" fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={40} />
                 </RechartsBarChart>
               ) : (
                 <RechartsLineChart data={data} margin={{ top: 20, right: 20, left: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={true} stroke="#f1f5f9" />
                   <XAxis 
-                    dataKey="date" 
-                    tickFormatter={(val) => format(val, 'd EEE')}
+                    dataKey="dayStr" 
                     axisLine={{ stroke: '#e2e8f0' }}
                     tickLine={false}
                     tick={{ fill: '#64748b', fontSize: 10, fontWeight: 500 }}
@@ -259,21 +254,12 @@ export function StaffSalesChart({ deviceId, currency = "INR", onSummaryUpdate }:
                   />
                   <Line 
                     type="monotone" 
-                    dataKey="profit" 
-                    name="Profit"
-                    stroke="#34d399" 
+                    dataKey="salesAmount" 
+                    name="Sales Amount"
+                    stroke="#3b82f6" 
                     strokeWidth={3}
                     dot={{ r: 3, strokeWidth: 2, fill: "#fff" }}
-                    activeDot={{ r: 6, strokeWidth: 0, fill: "#10b981" }}
-                  />
-                  <Line 
-                    type="monotone" 
-                    dataKey="expense" 
-                    name="Expense"
-                    stroke="#f87171" 
-                    strokeWidth={3}
-                    dot={{ r: 3, strokeWidth: 2, fill: "#fff" }}
-                    activeDot={{ r: 6, strokeWidth: 0, fill: "#ef4444" }}
+                    activeDot={{ r: 6, strokeWidth: 0, fill: "#2563eb" }}
                   />
                 </RechartsLineChart>
               )}
