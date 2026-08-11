@@ -505,10 +505,19 @@ export async function getTodayJobCards(monthStr?: string, searchTerm?: string) {
   }
 }
 
+function isEcomAllowedDevice(deviceId?: number): boolean {
+  if (!deviceId) return true
+  const allowed = process.env.ECOMMERCE_DEVICE_IDS
+    ? process.env.ECOMMERCE_DEVICE_IDS.split(",").map((id) => Number(id.trim()))
+    : [1, 4] // 1: Development Mode, 4: Online Moto Cart / motocart warehouse
+  return allowed.includes(Number(deviceId))
+}
+
 export async function getAllJobCards(deviceId?: number) {
   noStore()
   try {
     let sales: any[] = []
+    const allowEcom = isEcomAllowedDevice(deviceId)
 
     if (deviceId && deviceId > 0) {
       sales = await sql`
@@ -523,6 +532,7 @@ export async function getAllJobCards(deviceId?: number) {
         LEFT JOIN customers c ON s.customer_id = c.id
         LEFT JOIN devices d ON s.device_id = d.id
         WHERE s.device_id = ${deviceId}
+          AND (${allowEcom} OR s.source IS NULL OR s.source != 'ECOMMERCE')
           AND (s.status != 'Cancelled' OR s.delivery_status = 'Returned')
           AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%')
         ORDER BY s.created_at DESC

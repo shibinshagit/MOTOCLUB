@@ -301,7 +301,23 @@ export default function SalesOrdersTab() {
                             {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                           </Button>
                         </td>
-                        <td className="whitespace-nowrap px-4 py-2.5 font-medium text-slate-700">#{sale.id}</td>
+                        <td className="whitespace-nowrap px-4 py-2.5 font-medium text-slate-700">
+                          <div className="flex flex-col gap-0.5">
+                            <div className="flex items-center gap-1.5">
+                              <span>#{sale.id}</span>
+                              {(sale.source === 'ECOMMERCE' || sale.external_order_id) && (
+                                <span className="inline-flex items-center rounded bg-purple-100 px-1.5 py-0.5 text-[10px] font-bold text-purple-800 border border-purple-200">
+                                  ECOM
+                                </span>
+                              )}
+                            </div>
+                            {sale.external_order_id && (
+                              <span className="text-[11px] font-mono font-semibold text-purple-700">
+                                {sale.external_order_id}
+                              </span>
+                            )}
+                          </div>
+                        </td>
                         <td className="whitespace-nowrap px-4 py-2.5">
                           <div className="flex flex-col">
                             <span className="font-medium text-slate-800">{dateFormatted}</span>

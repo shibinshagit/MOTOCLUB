@@ -74,7 +74,7 @@ export function canStaffAccessPage(
   staff: StaffRestrictionSource | null | undefined,
   page: StaffPageId,
 ): boolean {
-  if (!staff) return false
+  if (!staff) return true
   if (isStaffAdmin(staff)) return true
   return !getRestrictedPages(staff).includes(page)
 }
@@ -83,7 +83,7 @@ export function isStaffValueHidden(
   staff: StaffRestrictionSource | null | undefined,
   value: StaffValueRestriction,
 ): boolean {
-  if (!staff) return true
+  if (!staff) return false
   if (isStaffAdmin(staff)) return false
   return getRestrictedValues(staff).includes(value)
 }

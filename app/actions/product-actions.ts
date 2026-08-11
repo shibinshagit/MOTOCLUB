@@ -601,21 +601,25 @@ REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
       const deviceStocks = await sql`
         SELECT 
           p.id AS product_id,
-          (
-            COALESCE((
+          CASE 
+            WHEN EXISTS (
+              SELECT 1 FROM product_batch_device_stock pbds
+              JOIN product_batches pb ON pb.id = pbds.batch_id
+              JOIN product_variants pv ON pv.id = pb.product_variant_id
+              WHERE pv.product_id = p.id AND pbds.device_id = ${userId}
+            ) THEN COALESCE((
               SELECT SUM(pbds.stock)
               FROM product_batch_device_stock pbds
               JOIN product_batches pb ON pb.id = pbds.batch_id
               JOIN product_variants pv ON pv.id = pb.product_variant_id
               WHERE pv.product_id = p.id AND pbds.device_id = ${userId}
             ), 0)
-            +
-            COALESCE((
+            ELSE COALESCE((
               SELECT SUM(pds.stock)
               FROM product_device_stock pds
               WHERE pds.product_id = p.id AND pds.device_id = ${userId}
             ), 0)
-          ) AS stock
+          END AS stock
         FROM products p
         WHERE p.created_by IN (
           SELECT d2.id
@@ -629,8 +633,16 @@ REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
       const companyDeviceStocks = await sql`
         SELECT 
           p.id AS product_id,
-          (
-            COALESCE((
+          CASE 
+            WHEN EXISTS (
+              SELECT 1 FROM product_batch_device_stock pbds
+              JOIN product_batches pb ON pb.id = pbds.batch_id
+              JOIN product_variants pv ON pv.id = pb.product_variant_id
+              JOIN devices d ON d.id = pbds.device_id
+              WHERE pv.product_id = p.id AND d.company_id = (
+                SELECT company_id FROM devices WHERE id = ${userId}
+              )
+            ) THEN COALESCE((
               SELECT SUM(pbds.stock)
               FROM product_batch_device_stock pbds
               JOIN product_batches pb ON pb.id = pbds.batch_id
@@ -640,8 +652,7 @@ REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
                 SELECT company_id FROM devices WHERE id = ${userId}
               )
             ), 0)
-            +
-            COALESCE((
+            ELSE COALESCE((
               SELECT SUM(pds.stock)
               FROM product_device_stock pds
               JOIN devices d ON d.id = pds.device_id
@@ -649,7 +660,7 @@ REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
                 SELECT company_id FROM devices WHERE id = ${userId}
               )
             ), 0)
-          ) AS total_stock
+          END AS total_stock
         FROM products p
         WHERE p.created_by IN (
           SELECT d2.id

@@ -117,7 +117,7 @@ function shippingFieldsChanged(original: any, shipping: ReturnType<typeof normal
 }
 
 // Helper function to safely update product stock with proper validation
-async function updateProductStock(
+export async function updateProductStock(
   productId: number,
   variantId: number | null,
   batchId: number | null,
@@ -138,17 +138,15 @@ async function updateProductStock(
 
     const product = productCheck[0]
 
-    if (!product.has_variants) {
-      const devStock = await sql`SELECT id, stock FROM product_device_stock WHERE product_id = ${productId} AND device_id = ${deviceId} LIMIT 1`
-      const currentLegacyStock = devStock.length > 0 ? Number(devStock[0].stock || 0) : 0
-      const nextLegacyStock = operation === "subtract" ? currentLegacyStock - quantityChange : currentLegacyStock + quantityChange
-      
-      if (devStock.length > 0) {
-        await sql`UPDATE product_device_stock SET stock = ${nextLegacyStock}, updated_at = NOW() WHERE id = ${devStock[0].id}`
-      } else {
-        await sql`INSERT INTO product_device_stock (product_id, device_id, stock) VALUES (${productId}, ${deviceId}, ${nextLegacyStock})`
-      }
-      return { success: true, message: "Legacy stock updated" }
+    // Always update product_device_stock
+    const devStock = await sql`SELECT id, stock FROM product_device_stock WHERE product_id = ${productId} AND device_id = ${deviceId} LIMIT 1`
+    const currentLegacyStock = devStock.length > 0 ? Number(devStock[0].stock || 0) : 0
+    const nextLegacyStock = operation === "subtract" ? currentLegacyStock - quantityChange : currentLegacyStock + quantityChange
+    
+    if (devStock.length > 0) {
+      await sql`UPDATE product_device_stock SET stock = ${nextLegacyStock}, updated_at = NOW() WHERE id = ${devStock[0].id}`
+    } else {
+      await sql`INSERT INTO product_device_stock (product_id, device_id, stock, updated_at) VALUES (${productId}, ${deviceId}, ${nextLegacyStock}, NOW())`
     }
 
     let resolvedVariantId = variantId
@@ -158,81 +156,66 @@ async function updateProductStock(
       `
       if (defaultVariant.length > 0) {
         resolvedVariantId = defaultVariant[0].id
-      } else {
-        return { success: false, message: "No product variants configured" }
       }
     }
 
-    if (batchId) {
-      // 1. Update batch stock
-      const batchStockRows = await sql`
-        SELECT stock FROM product_batch_device_stock
-        WHERE batch_id = ${batchId} AND device_id = ${deviceId}
-        LIMIT 1
-      `
-      const currentBatchStock = batchStockRows.length > 0 ? Number(batchStockRows[0].stock || 0) : 0
-      let nextBatchStock = operation === "subtract" ? currentBatchStock - quantityChange : currentBatchStock + quantityChange
-      nextBatchStock = Math.max(0, nextBatchStock)
-
-      await sql`
-        INSERT INTO product_batch_device_stock (batch_id, device_id, stock, updated_at)
-        VALUES (${batchId}, ${deviceId}, ${nextBatchStock}, NOW())
-        ON CONFLICT (batch_id, device_id)
-        DO UPDATE SET stock = ${nextBatchStock}, updated_at = NOW()
-      `
-
-      // remaining_quantity is a derived database value synchronized by the
-      // product_batch_device_stock trigger. Never mutate it here.
-
-      // 2. Aggregate variant stock from batches
-      const totalStockRows = await sql`
-        SELECT COALESCE(SUM(stock), 0) as total_stock
-        FROM product_batch_device_stock pbds
-        JOIN product_batches pb ON pbds.batch_id = pb.id
-        WHERE pb.product_variant_id = ${resolvedVariantId} AND pbds.device_id = ${deviceId}
-      `
-      const nextVariantStock = Number(totalStockRows[0]?.total_stock || 0)
-      
-      // 3. Update variant stock in product_device_stock
-      /* Legacy product_device_stock insert removed */
-    } else if (operation === "subtract") {
-      let remaining = quantityChange
-      const availableBatches = await sql`
-        SELECT pbds.batch_id, pbds.stock
-        FROM product_batch_device_stock pbds
-        JOIN product_batches pb ON pb.id = pbds.batch_id
-        WHERE pb.product_variant_id = ${resolvedVariantId} 
-          AND pbds.device_id = ${deviceId}
-          AND pbds.stock > 0
-        ORDER BY pb.created_at ASC
-      `
-      for (const batch of availableBatches) {
-        if (remaining <= 0) break
-        const take = Math.min(remaining, Number(batch.stock))
-        const nextStock = Number(batch.stock) - take
-        remaining -= take
+    if (resolvedVariantId) {
+      if (batchId) {
+        // 1. Update batch stock
+        const batchStockRows = await sql`
+          SELECT stock FROM product_batch_device_stock
+          WHERE batch_id = ${batchId} AND device_id = ${deviceId}
+          LIMIT 1
+        `
+        const currentBatchStock = batchStockRows.length > 0 ? Number(batchStockRows[0].stock || 0) : 0
+        let nextBatchStock = operation === "subtract" ? currentBatchStock - quantityChange : currentBatchStock + quantityChange
+        nextBatchStock = Math.max(0, nextBatchStock)
 
         await sql`
-          UPDATE product_batch_device_stock
-          SET stock = ${nextStock}, updated_at = NOW()
-          WHERE batch_id = ${batch.batch_id} AND device_id = ${deviceId}
+          INSERT INTO product_batch_device_stock (batch_id, device_id, stock, updated_at)
+          VALUES (${batchId}, ${deviceId}, ${nextBatchStock}, NOW())
+          ON CONFLICT (batch_id, device_id)
+          DO UPDATE SET stock = ${nextBatchStock}, updated_at = NOW()
+        `
+      } else if (operation === "subtract") {
+        let remaining = quantityChange
+        const availableBatches = await sql`
+          SELECT pbds.batch_id, pbds.stock
+          FROM product_batch_device_stock pbds
+          JOIN product_batches pb ON pb.id = pbds.batch_id
+          WHERE pb.product_variant_id = ${resolvedVariantId} 
+            AND pbds.device_id = ${deviceId}
+            AND pbds.stock > 0
+          ORDER BY pb.created_at ASC
+        `
+        for (const batch of availableBatches) {
+          if (remaining <= 0) break
+          const take = Math.min(remaining, Number(batch.stock))
+          const nextStock = Number(batch.stock) - take
+          remaining -= take
+
+          await sql`
+            UPDATE product_batch_device_stock
+            SET stock = ${nextStock}, updated_at = NOW()
+            WHERE batch_id = ${batch.batch_id} AND device_id = ${deviceId}
+          `
+        }
+      } else if (operation === "add") {
+        // For returns without a specific batch, create an adjustment batch
+        const adjBatchNo = `RET-${productId}-${Date.now().toString().slice(-6)}`
+        const adjBatch = await sql`
+          INSERT INTO product_batches (
+            product_id, product_variant_id, batch_no, cost_price, selling_price, quantity_purchased, remaining_quantity, status
+          ) VALUES (
+            ${productId}, ${resolvedVariantId}, ${adjBatchNo}, 0, 0, ${quantityChange}, ${quantityChange}, 'active'
+          ) RETURNING id
+        `
+        const adjBatchId = adjBatch[0].id
+        await sql`
+          INSERT INTO product_batch_device_stock (batch_id, device_id, stock, updated_at)
+          VALUES (${adjBatchId}, ${deviceId}, ${quantityChange}, NOW())
         `
       }
-    } else if (operation === "add") {
-      // For returns without a specific batch, create an adjustment batch
-      const adjBatchNo = `RET-${productId}-${Date.now().toString().slice(-6)}`
-      const adjBatch = await sql`
-        INSERT INTO product_batches (
-          product_id, product_variant_id, batch_no, cost_price, selling_price, quantity_purchased, remaining_quantity, status
-        ) VALUES (
-          ${productId}, ${resolvedVariantId}, ${adjBatchNo}, 0, 0, ${quantityChange}, ${quantityChange}, 'active'
-        ) RETURNING id
-      `
-      const adjBatchId = adjBatch[0].id
-      await sql`
-        INSERT INTO product_batch_device_stock (batch_id, device_id, stock, updated_at)
-        VALUES (${adjBatchId}, ${deviceId}, ${quantityChange}, NOW())
-      `
     }
 
     // Log stock history
@@ -371,14 +354,22 @@ function getExclusiveEndDate(dateTo: string): string {
   return format(addDays(parseISO(dateTo), 1), "yyyy-MM-dd")
 }
 
+function isEcomAllowedDevice(deviceId: number): boolean {
+  const allowed = process.env.ECOMMERCE_DEVICE_IDS
+    ? process.env.ECOMMERCE_DEVICE_IDS.split(",").map((id) => Number(id.trim()))
+    : [1, 4] // 1: Development Mode, 4: Online Moto Cart / motocart warehouse
+  return allowed.includes(Number(deviceId))
+}
+
 async function queryDeviceSales(deviceId: number, options: GetUserSalesOptions = {}) {
   const { limit, searchTerm, dateFrom, dateTo } = options
   const searchPattern = searchTerm?.trim() ? `%${searchTerm.trim().toLowerCase()}%` : null
   const endExclusive = dateTo ? getExclusiveEndDate(dateTo) : null
+  const allowEcom = isEcomAllowedDevice(deviceId)
 
   if (dateFrom && endExclusive && !searchPattern && !limit) {
     return sql`
-      SELECT s.*, c.name as customer_name, st.name as staff_name,
+      SELECT s.*, COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name, st.name as staff_name,
       COALESCE(
         (SELECT SUM(si.quantity * COALESCE(si.cost, si.wholesale_price, 0))
          FROM sale_items si 
@@ -387,7 +378,8 @@ async function queryDeviceSales(deviceId: number, options: GetUserSalesOptions =
       FROM sales s
       LEFT JOIN customers c ON s.customer_id = c.id
       LEFT JOIN staff st ON s.staff_id = st.id
-      WHERE s.device_id = ${deviceId}
+      WHERE (s.device_id = ${deviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
+        AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
         AND s.sale_date >= ${dateFrom}
         AND s.sale_date < ${endExclusive}
       ORDER BY s.sale_date DESC, s.id DESC
@@ -396,7 +388,7 @@ async function queryDeviceSales(deviceId: number, options: GetUserSalesOptions =
 
   if (dateFrom && endExclusive && searchPattern && limit) {
     return sql`
-      SELECT s.*, c.name as customer_name, st.name as staff_name,
+      SELECT s.*, COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name, st.name as staff_name,
       COALESCE(
         (SELECT SUM(si.quantity * COALESCE(si.cost, si.wholesale_price, 0))
          FROM sale_items si 
@@ -405,7 +397,8 @@ async function queryDeviceSales(deviceId: number, options: GetUserSalesOptions =
       FROM sales s
       LEFT JOIN customers c ON s.customer_id = c.id
       LEFT JOIN staff st ON s.staff_id = st.id
-      WHERE s.device_id = ${deviceId}
+      WHERE (s.device_id = ${deviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
+        AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
         AND s.sale_date >= ${dateFrom}
         AND s.sale_date < ${endExclusive}
         AND (
@@ -421,7 +414,7 @@ async function queryDeviceSales(deviceId: number, options: GetUserSalesOptions =
 
   if (dateFrom && endExclusive && searchPattern) {
     return sql`
-      SELECT s.*, c.name as customer_name, st.name as staff_name,
+      SELECT s.*, COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name, st.name as staff_name,
       COALESCE(
         (SELECT SUM(si.quantity * COALESCE(si.cost, si.wholesale_price, 0))
          FROM sale_items si 
@@ -430,7 +423,8 @@ async function queryDeviceSales(deviceId: number, options: GetUserSalesOptions =
       FROM sales s
       LEFT JOIN customers c ON s.customer_id = c.id
       LEFT JOIN staff st ON s.staff_id = st.id
-      WHERE s.device_id = ${deviceId}
+      WHERE (s.device_id = ${deviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
+        AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
         AND s.sale_date >= ${dateFrom}
         AND s.sale_date < ${endExclusive}
         AND (
@@ -445,7 +439,7 @@ async function queryDeviceSales(deviceId: number, options: GetUserSalesOptions =
 
   if (dateFrom && endExclusive && limit) {
     return sql`
-      SELECT s.*, c.name as customer_name, st.name as staff_name,
+      SELECT s.*, COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name, st.name as staff_name,
       COALESCE(
         (SELECT SUM(si.quantity * COALESCE(si.cost, si.wholesale_price, 0))
          FROM sale_items si 
@@ -454,7 +448,8 @@ async function queryDeviceSales(deviceId: number, options: GetUserSalesOptions =
       FROM sales s
       LEFT JOIN customers c ON s.customer_id = c.id
       LEFT JOIN staff st ON s.staff_id = st.id
-      WHERE s.device_id = ${deviceId}
+      WHERE (s.device_id = ${deviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
+        AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
         AND s.sale_date >= ${dateFrom}
         AND s.sale_date < ${endExclusive}
       ORDER BY s.sale_date DESC, s.id DESC
@@ -464,7 +459,7 @@ async function queryDeviceSales(deviceId: number, options: GetUserSalesOptions =
 
   if (searchPattern && limit) {
     return sql`
-      SELECT s.*, c.name as customer_name, st.name as staff_name,
+      SELECT s.*, COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name, st.name as staff_name,
       COALESCE(
         (SELECT SUM(si.quantity * COALESCE(si.cost, si.wholesale_price, 0))
          FROM sale_items si 
@@ -473,7 +468,8 @@ async function queryDeviceSales(deviceId: number, options: GetUserSalesOptions =
       FROM sales s
       LEFT JOIN customers c ON s.customer_id = c.id
       LEFT JOIN staff st ON s.staff_id = st.id
-      WHERE s.device_id = ${deviceId}
+      WHERE (s.device_id = ${deviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
+        AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
         AND (
           LOWER(c.name) LIKE ${searchPattern}
           OR CAST(s.id AS TEXT) LIKE ${searchPattern}
@@ -487,7 +483,7 @@ async function queryDeviceSales(deviceId: number, options: GetUserSalesOptions =
 
   if (searchPattern) {
     return sql`
-      SELECT s.*, c.name as customer_name, st.name as staff_name,
+      SELECT s.*, COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name, st.name as staff_name,
       COALESCE(
         (SELECT SUM(si.quantity * COALESCE(si.cost, si.wholesale_price, 0))
          FROM sale_items si 
@@ -496,7 +492,8 @@ async function queryDeviceSales(deviceId: number, options: GetUserSalesOptions =
       FROM sales s
       LEFT JOIN customers c ON s.customer_id = c.id
       LEFT JOIN staff st ON s.staff_id = st.id
-      WHERE s.device_id = ${deviceId}
+      WHERE (s.device_id = ${deviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
+        AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
         AND (
           LOWER(c.name) LIKE ${searchPattern}
           OR CAST(s.id AS TEXT) LIKE ${searchPattern}
@@ -509,7 +506,7 @@ async function queryDeviceSales(deviceId: number, options: GetUserSalesOptions =
 
   if (limit) {
     return sql`
-      SELECT s.*, c.name as customer_name, st.name as staff_name,
+      SELECT s.*, COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name, st.name as staff_name,
       COALESCE(
         (SELECT SUM(si.quantity * COALESCE(si.cost, si.wholesale_price, 0))
          FROM sale_items si 
@@ -518,14 +515,15 @@ async function queryDeviceSales(deviceId: number, options: GetUserSalesOptions =
       FROM sales s
       LEFT JOIN customers c ON s.customer_id = c.id
       LEFT JOIN staff st ON s.staff_id = st.id
-      WHERE s.device_id = ${deviceId}
+      WHERE (s.device_id = ${deviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
+        AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
       ORDER BY s.sale_date DESC, s.id DESC
       LIMIT ${limit}
     `
   }
 
   return sql`
-    SELECT s.*, c.name as customer_name, st.name as staff_name,
+    SELECT s.*, COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name, st.name as staff_name,
     COALESCE(
       (SELECT SUM(si.quantity * COALESCE(si.cost, si.wholesale_price, 0))
        FROM sale_items si 
@@ -534,7 +532,8 @@ async function queryDeviceSales(deviceId: number, options: GetUserSalesOptions =
     FROM sales s
     LEFT JOIN customers c ON s.customer_id = c.id
     LEFT JOIN staff st ON s.staff_id = st.id
-    WHERE s.device_id = ${deviceId}
+    WHERE (s.device_id = ${deviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
+      AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
     ORDER BY s.sale_date DESC, s.id DESC
   `
 }
@@ -547,6 +546,15 @@ export async function getUserSales(deviceId: number, options: GetUserSalesOption
   resetConnectionState()
 
   try {
+    if (isEcomAllowedDevice(deviceId)) {
+      try {
+        const { autoSyncPendingEcommerceOrders } = await import("./ecommerce-sync-actions")
+        await autoSyncPendingEcommerceOrders()
+      } catch (ecomErr) {
+        console.error("Auto-sync pending ecommerce orders error:", ecomErr)
+      }
+    }
+
     const sales = await executeWithRetry(async () => queryDeviceSales(deviceId, options))
 
     return { success: true, data: await filterSalesForStaff(sales, deviceId) }
@@ -573,10 +581,10 @@ export async function getSaleDetails(saleId: number) {
       return await sql`
         SELECT 
           s.*,
-          c.name as customer_name,
-          c.phone as customer_phone,
+          COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name,
+          COALESCE(NULLIF(s.customer_phone_override, ''), c.phone) as customer_phone,
           c.email as customer_email,
-          c.address as customer_address,
+          COALESCE(NULLIF(s.shipping_address, ''), c.address) as customer_address,
           st.name as staff_name,
           md.tracking_url_template as tracking_url_template
         FROM sales s
@@ -1814,7 +1822,7 @@ export async function updateSaleDeliveryStatus(
     const isAdmin = !staffSession || staffSession.role === "admin"
 
     const rows = await sql`
-      SELECT delivery_status, status, fulfillment_type, shipped_at, delivered_at, payment_status, tracking_id, sale_type, staff_id
+      SELECT delivery_status, status, fulfillment_type, shipped_at, delivered_at, payment_status, tracking_id, sale_type, source, external_order_id, staff_id
       FROM sales
       WHERE id = ${saleId}
         AND device_id = ${deviceId}
@@ -1839,9 +1847,10 @@ export async function updateSaleDeliveryStatus(
     const originalStatus = rows[0].status || "Completed"
     const paymentStatus = rows[0].payment_status || "Pending"
     const isJobCard = rows[0].sale_type === 'job_card'
+    const isEcommerce = rows[0].source === 'ECOMMERCE' || rows[0].external_order_id != null
 
     const isPaid = paymentStatus.toLowerCase() === "paid" || paymentStatus.toLowerCase() === "completed"
-    if (!isJobCard && !isPaid) {
+    if (!isJobCard && !isEcommerce && !isPaid) {
       return { success: false as const, message: "Delivery process cannot begin until payment is completed." }
     }
 
@@ -2086,6 +2095,17 @@ export async function updateSaleDeliveryStatus(
         }
         throw err;
       }
+    }
+
+    try {
+      await sql`
+        UPDATE orders
+        SET status = ${deliveryStatus.toLowerCase()},
+            updated_at = NOW()
+        WHERE synced_sale_id = ${saleId}
+      `
+    } catch (syncErr) {
+      console.error("Error syncing status back to orders table:", syncErr)
     }
 
     revalidatePath("/dashboard")

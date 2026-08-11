@@ -17,8 +17,8 @@ export function useStaffRestrictions() {
   return useMemo(
     () => ({
       activeStaff,
-      isAdmin: isStaffAdmin(activeStaff),
-      requiresStaffLogin: !activeStaff,
+      isAdmin: !activeStaff || isStaffAdmin(activeStaff),
+      requiresStaffLogin: false,
       hideCogs: isStaffValueHidden(activeStaff, "cogs"),
       hideStockCount: isStaffValueHidden(activeStaff, "stock_count"),
       canAccessPage: (page: StaffPageId) => canStaffAccessPage(activeStaff, page),
