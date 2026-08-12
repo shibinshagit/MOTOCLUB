@@ -49,415 +49,134 @@ function truncateText(text: string, maxLength: number): string {
   return text.substring(0, maxLength - 3) + "..."
 }
 
-// Print barcode sticker with quantity control and BarTender export options
-export function printBarcodeSticker(product: any, currency = "AED") {
-  if (!product) return
+// Print barcode sticker directly using a hidden iframe without opening a new browser tab/window
+export function printBarcodeSticker(product: any, currency = "AED", initialCopies = 1) {
+  if (!product || typeof window === "undefined") return
 
-  const productCode = product.id ? product.id.toString().padStart(4, "0") : "0000"
-  const price = typeof product.price === "number" ? product.price.toFixed(2) : (Number.parseFloat(product.price || "0") || 0).toFixed(2)
+  const productCode = product.code || (product.id ? product.id.toString().padStart(4, "0") : "0000")
+  const price = typeof product.price === "number" ? product.price.toFixed(2) : (Number.parseFloat(String(product.price || "0")) || 0).toFixed(2)
 
-  let barcodeValue = product.barcode || ""
+  let barcodeValue = product.barcode || product.code || (product.id ? String(product.id) : "")
   if (!barcodeValue || !validateEAN13(barcodeValue)) {
     barcodeValue = generateEAN13()
   }
 
-  const wholesalePrice = typeof product.wholesale_price === "number" ? product.wholesale_price : Number.parseFloat(product.wholesale_price || "0") || 0
-  const encodedWholesalePrice = encodeNumberAsLetters(Math.round(wholesalePrice))
+  const wholesalePrice = typeof product.wholesale_price === "number" ? product.wholesale_price : Number.parseFloat(String(product.wholesale_price || "0")) || 0
+  const encodedWholesalePrice = wholesalePrice > 0 ? encodeNumberAsLetters(Math.round(wholesalePrice)) : ""
 
-  // Truncate long names
-  const companyName = truncateText(product.company_name || "Company", 20)
-  const productName = truncateText(product.name || "Product", 15) // Max 15 chars for product name
+  const categoryOrCompany = product.company_name || product.category_name || product.category || product.brand || "Company"
+  const companyName = truncateText(String(categoryOrCompany), 20)
+  const productName = truncateText(product.name || "Product", 20)
 
-  const printWindow = window.open("", "_blank")
-  if (!printWindow) {
-    alert("Please allow pop-ups to print price tags")
-    return
+  // Remove existing print iframe if present
+  const existingFrame = document.getElementById("direct-sticker-print-iframe")
+  if (existingFrame) {
+    existingFrame.remove()
   }
 
-  printWindow.document.write(`
+  // Create an invisible print iframe
+  const iframe = document.createElement("iframe")
+  iframe.id = "direct-sticker-print-iframe"
+  iframe.style.position = "fixed"
+  iframe.style.right = "0"
+  iframe.style.bottom = "0"
+  iframe.style.width = "0px"
+  iframe.style.height = "0px"
+  iframe.style.border = "0px"
+  iframe.style.visibility = "hidden"
+  document.body.appendChild(iframe)
+
+  const doc = iframe.contentWindow?.document
+  if (!doc) return
+
+  let stickerRows = ""
+  for (let i = 0; i < initialCopies; i++) {
+    if (i % 2 === 0) stickerRows += '<div class="sticker-row">'
+
+    const barcodeId = `barcode_${i}`
+    stickerRows += `
+      <div class="sticker">
+        <div class="header-row">
+          <div class="company-name">${companyName}</div>
+          ${encodedWholesalePrice ? `<div class="encoded-price">${encodedWholesalePrice}</div>` : ""}
+        </div>
+        <div class="product-info">
+          <div class="product-name">${productName}</div>
+          <div class="product-code">#${productCode}</div>
+        </div>
+        <div class="barcode-box">
+          <svg class="barcode" id="${barcodeId}"></svg>
+        </div>
+        <div class="barcode-number">${barcodeValue}</div>
+        <div class="price-container">${currency} ${price}</div>
+      </div>
+    `
+
+    if (i % 2 === 1 || i === initialCopies - 1) stickerRows += '</div>'
+  }
+
+  doc.open()
+  doc.write(`
     <!DOCTYPE html>
     <html>
     <head>
-      <title>Tag Studio - ${productName} (#${productCode})</title>
+      <title>Print Label</title>
       <style>
         @page { size: 80mm auto; margin: 0; }
-        body { font-family: system-ui, -apple-system, sans-serif; width: 80mm; padding: 4mm; background: #f8fafc; color: #0f172a; }
-        
-        .controls {
-          position: fixed; top: 12px; right: 12px;
-          background: #ffffff; padding: 16px; border-radius: 12px;
-          box-shadow: 0 10px 25px -5px rgba(0,0,0,0.15), 0 8px 10px -6px rgba(0,0,0,0.08);
-          z-index: 1000; width: 280px; font-family: system-ui, -apple-system, sans-serif;
-          border: 1px solid #e2e8f0; display: flex; flex-direction: column; gap: 10px;
-        }
-        
-        .controls-header { font-size: 14px; font-weight: 700; color: #0f172a; text-align: center; border-b: 1px solid #f1f5f9; padding-bottom: 6px; }
-        .controls-section { font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 4px; margin-bottom: 2px; }
-
-        .quantity-control { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 4px 0; }
-        .quantity-btn { width: 34px; height: 34px; border: 1px solid #cbd5e1; background: #f8fafc; color: #0f172a; font-size: 20px; font-weight: bold; border-radius: 6px; cursor: pointer; transition: all 0.15s; }
-        .quantity-btn:hover { background: #e2e8f0; }
-        .quantity-btn:disabled { opacity: 0.3; cursor: not-allowed; }
-        .quantity-display { font-size: 18px; font-weight: bold; min-width: 44px; text-align: center; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; }
-
-        .btn {
-          display: flex; align-items: center; justify-content: center; gap: 6px;
-          padding: 8px 12px; border-radius: 6px; font-size: 12px; font-weight: 600;
-          cursor: pointer; transition: all 0.15s; width: 100%; border: none; text-align: center;
-        }
-        .btn-print { background: #16a34a; color: #ffffff; font-weight: 700; }
-        .btn-print:hover { background: #15803d; }
-
-        .btn-copy-image { background: #059669; color: #ffffff; font-weight: 700; }
-        .btn-copy-image:hover { background: #047857; }
-
-        .btn-download-png { background: #0f172a; color: #ffffff; }
-        .btn-download-png:hover { background: #1e293b; }
-
-        .btn-csv { background: #f59e0b; color: #ffffff; }
-        .btn-csv:hover { background: #d97706; }
-
-        .btn-btw { background: #2563eb; color: #ffffff; }
-        .btn-btw:hover { background: #1d4ed8; }
-
-        .btn-outline { background: #ffffff; color: #334155; border: 1px solid #cbd5e1; font-size: 11px; }
-        .btn-outline:hover { background: #f1f5f9; border-color: #94a3b8; }
-
-        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; width: 100%; }
-
-        .toast {
-          position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
-          background: #0f172a; color: #ffffff; padding: 10px 18px; border-radius: 8px;
-          font-size: 12px; font-weight: 600; box-shadow: 0 10px 20px rgba(0,0,0,0.2);
-          z-index: 9999; display: none; opacity: 0; transition: opacity 0.25s ease-in-out;
-        }
-
-        .sticker-row { display: flex; gap: 4mm; margin-bottom: 4mm; }
+        body { font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 2mm; background: white; color: #0f172a; }
+        .sticker-row { display: flex; gap: 4mm; margin-bottom: 4mm; page-break-inside: avoid; }
         .sticker {
-          width: 38mm; height: 24mm;
-          border: 2px solid #000000; border-radius: 1.5mm;
+          width: 34mm; height: 23mm;
+          border: 1px solid #000; border-radius: 2mm;
           padding: 1mm; display: flex; flex-direction: column;
-          justify-content: space-between; background: #ffffff; color: #000000;
-          position: relative; box-sizing: border-box; font-family: Arial, Helvetica, sans-serif;
+          justify-content: space-between; background: white; box-sizing: border-box;
+          position: relative;
         }
-        .company-name { font-size: 8.5pt; font-weight: 900; color: #000000; text-align: center; margin-bottom: 0.5mm; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-transform: uppercase; letter-spacing: 0.3px; }
-        .encoded-price { position: absolute; top: 1mm; right: 1mm; font-size: 7pt; font-weight: 900; color: #000000; font-family: monospace; }
-        .product-info { display: flex; justify-content: space-between; font-size: 9pt; font-weight: 900; color: #000000; padding: 0 0.5mm; margin-bottom: 0.5mm; }
-        .product-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 22mm; font-weight: 900; color: #000000; }
-        .product-code { white-space: nowrap; font-family: monospace; font-weight: 900; color: #000000; }
-        .barcode { width: 36mm; height: 11mm; display: flex; align-items: center; justify-content: center; }
-        .barcode svg { width: 100% !important; height: 100% !important; max-width: 36mm !important; }
-        .barcode-number { font-size: 8.5pt; text-align: center; font-weight: 900; color: #000000; font-family: monospace; letter-spacing: 0.5px; margin: 0.5mm 0; }
-        .price-container { text-align: center; font-size: 11.5pt; font-weight: 900; color: #000000; font-family: monospace; }
-
-        @media print {
-          * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color: #000000 !important; font-weight: 900 !important; }
-          body { background: white; padding: 0; margin: 0; }
-          .no-print { display: none !important; }
-          .sticker { border: 2px solid #000000 !important; color: #000000 !important; background: #ffffff !important; }
-        }
+        .header-row { display: flex; justify-content: space-between; align-items: center; }
+        .company-name { font-size: 6.5pt; font-weight: bold; line-height: 1.2; overflow: visible; text-transform: uppercase; }
+        .encoded-price { font-size: 5.5pt; font-weight: bold; font-family: monospace; color: #475569; }
+        .product-info { display: flex; justify-content: space-between; font-size: 7.5pt; font-weight: bold; margin-top: 0.5mm; }
+        .product-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 20mm; }
+        .product-code { font-family: monospace; }
+        .barcode-box { width: 100%; height: 9mm; display: flex; align-items: center; justify-content: center; margin: 0.5mm 0; }
+        .barcode { width: 100% !important; height: 100% !important; max-width: 32mm !important; }
+        .barcode-number { font-size: 6.5pt; text-align: center; font-weight: bold; font-family: monospace; letter-spacing: 0.5px; margin-bottom: 0.5mm; }
+        .price-container { text-align: right; font-size: 8.5pt; font-weight: bold; font-family: monospace; }
       </style>
       <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
     </head>
     <body>
-      <div id="toastNotification" class="toast"></div>
-
-      <!-- Controls Panel -->
-      <div class="controls no-print">
-        <div class="controls-header">BarTender Tag Studio</div>
-        
-        <div class="quantity-control">
-          <button class="quantity-btn" id="decreaseBtn" onclick="updateQuantity(-1)">−</button>
-          <div class="quantity-display" id="quantityDisplay">1</div>
-          <button class="quantity-btn" onclick="updateQuantity(1)">+</button>
-        </div>
-        <div style="text-align: center; font-size: 11px; color: #64748b;">
-          <span id="rowsInfo">1 sticker</span>
-        </div>
-
-        <button class="btn btn-print" onclick="window.print()">
-          🖨️ Print Stickers
-        </button>
-
-        <div class="controls-section">BarTender Designer Options</div>
-
-        <button class="btn btn-copy-image" onclick="copyWholeTagImage()">
-          📋 Copy Whole Tag (Image)
-        </button>
-        <div style="font-size: 10px; color: #64748b; margin-top: -4px; line-height: 1.2;">
-          *Click copy & press Ctrl+V directly in BarTender Designer
-        </div>
-
-        <div class="grid-2">
-          <button class="btn btn-download-png" onclick="downloadTagImage()">
-            💾 Tag PNG
-          </button>
-          <button class="btn btn-csv" onclick="downloadBarTenderCSV()">
-            📊 CSV Data
-          </button>
-        </div>
-
-        <button class="btn btn-btw" onclick="downloadBTWTemplate()">
-          🏷️ Download .BTW Template
-        </button>
-
-        <div class="controls-section">Quick Copy Text</div>
-        <div class="grid-2">
-          <button class="btn btn-outline" onclick="copyBarcode()">
-            Barcode
-          </button>
-          <button class="btn btn-outline" onclick="copyTabRow()">
-            Tabbed Row
-          </button>
-        </div>
-      </div>
-      
-      <div id="stickerContainer"></div>
-
-      <!-- Canvas for image generation -->
-      <canvas id="exportCanvas" style="display:none;"></canvas>
-
+      ${stickerRows}
       <script>
-        let currentQuantity = 1;
-        const productData = {
-          companyName: "${companyName.replace(/"/g, '\\"')}",
-          encodedPrice: "${encodedWholesalePrice}",
-          productName: "${productName.replace(/"/g, '\\"')}",
-          productCode: "${productCode}",
-          barcodeValue: "${barcodeValue}",
-          currency: "${currency}",
-          price: "${price}"
-        };
-
-        function showToast(message) {
-          const toast = document.getElementById('toastNotification');
-          if (!toast) return;
-          toast.textContent = message;
-          toast.style.display = 'block';
-          setTimeout(() => { toast.style.opacity = '1'; }, 10);
-          setTimeout(() => {
-            toast.style.opacity = '0';
-            setTimeout(() => { toast.style.display = 'none'; }, 300);
-          }, 3200);
-        }
-
-        function updateQuantity(change) {
-          currentQuantity = Math.max(1, currentQuantity + change);
-          document.getElementById('quantityDisplay').textContent = currentQuantity;
-          document.getElementById('decreaseBtn').disabled = currentQuantity <= 1;
-          
-          const rows = Math.ceil(currentQuantity / 2);
-          const stickerText = currentQuantity === 1 ? '1 sticker' : currentQuantity + ' stickers';
-          const rowText = rows === 1 ? '1 row' : rows + ' rows';
-          document.getElementById('rowsInfo').textContent = stickerText + ' (' + rowText + ')';
-          
-          renderStickers();
-        }
-        
-        function renderStickers() {
-          const container = document.getElementById('stickerContainer');
-          let html = '';
-          
-          for (let i = 0; i < currentQuantity; i++) {
-            if (i % 2 === 0) html += '<div class="sticker-row">';
-            
-            html += '<div class="sticker">' +
-              '<div class="company-name">' + productData.companyName + '</div>' +
-              (productData.encodedPrice ? '<div class="encoded-price">' + productData.encodedPrice + '</div>' : '') +
-              '<div class="product-info">' +
-                '<div class="product-name">' + productData.productName + '</div>' +
-                '<div class="product-code">#' + productData.productCode + '</div>' +
-              '</div>' +
-              '<svg class="barcode" id="barcode' + i + '"></svg>' +
-              '<div class="barcode-number">' + productData.barcodeValue + '</div>' +
-              '<div class="price-container">' + productData.currency + ' ' + productData.price + '</div>' +
-            '</div>';
-            
-            if (i % 2 === 1 || i === currentQuantity - 1) html += '</div>';
-          }
-          
-          container.innerHTML = html;
-          
-          for (let i = 0; i < currentQuantity; i++) {
-            JsBarcode("#barcode" + i, productData.barcodeValue, {
-              format: "EAN13", width: 2.8, height: 48, displayValue: false, margin: 0, flat: true, lineColor: "#000000"
-            });
-          }
-
-          drawExportCanvas();
-        }
-
-        function drawExportCanvas() {
-          const canvas = document.getElementById('exportCanvas');
-          if (!canvas) return;
-          const ctx = canvas.getContext('2d');
-          const dpr = 4;
-          const width = 440;
-          const height = 220;
-
-          canvas.width = width * dpr;
-          canvas.height = height * dpr;
-
-          ctx.save();
-          ctx.scale(dpr, dpr);
-          ctx.imageSmoothingEnabled = false;
-
-          ctx.fillStyle = '#ffffff';
-          ctx.fillRect(0, 0, width, height);
-
-          ctx.strokeStyle = '#000000';
-          ctx.lineWidth = 3.5;
-          ctx.beginPath();
-          if (ctx.roundRect) {
-            ctx.roundRect(3, 3, width - 6, height - 6, 8);
-          } else {
-            ctx.rect(3, 3, width - 6, height - 6);
-          }
-          ctx.stroke();
-
-          ctx.fillStyle = '#000000';
-          ctx.font = '900 24px Arial, Helvetica, sans-serif';
-          ctx.fillText(productData.companyName.toUpperCase(), 14, 30);
-
-          if (productData.encodedPrice) {
-            ctx.fillStyle = '#000000';
-            ctx.font = '900 18px monospace';
-            const costWidth = ctx.measureText(productData.encodedPrice).width;
-            ctx.fillText(productData.encodedPrice, width - 14 - costWidth, 30);
-          }
-
-          ctx.strokeStyle = '#000000';
-          ctx.lineWidth = 2.5;
-          ctx.beginPath();
-          ctx.moveTo(14, 40);
-          ctx.lineTo(width - 14, 40);
-          ctx.stroke();
-
-          ctx.fillStyle = '#000000';
-          ctx.font = '900 24px Arial, Helvetica, sans-serif';
-          const nameTruncated = productData.productName.length > 20 ? productData.productName.substring(0, 18) + '...' : productData.productName;
-          ctx.fillText(nameTruncated, 14, 66);
-
-          ctx.fillStyle = '#000000';
-          ctx.font = '900 20px monospace';
-          const codeText = '#' + productData.productCode;
-          const codeWidth = ctx.measureText(codeText).width;
-          ctx.fillText(codeText, width - 14 - codeWidth, 66);
-
-          if (productData.barcodeValue) {
-            try {
-              const tempCanvas = document.createElement('canvas');
-              JsBarcode(tempCanvas, productData.barcodeValue, {
-                format: "CODE128", width: 3.2, height: 64, displayValue: false, margin: 0, lineColor: "#000000"
+        function runPrint() {
+          try {
+            for (var i = 0; i < ${initialCopies}; i++) {
+              JsBarcode("#barcode_" + i, "${barcodeValue}", {
+                format: "CODE128", width: 1.8, height: 35, displayValue: false, margin: 0, flat: true
               });
-              const bcWidth = Math.min(width - 28, tempCanvas.width / 2);
-              const bcHeight = 64;
-              const bcX = (width - bcWidth) / 2;
-              ctx.drawImage(tempCanvas, bcX, 74, bcWidth, bcHeight);
-
-              ctx.fillStyle = '#000000';
-              ctx.font = '900 19px monospace';
-              const numWidth = ctx.measureText(productData.barcodeValue).width;
-              ctx.fillText(productData.barcodeValue, (width - numWidth) / 2, 156);
+            }
+          } catch(e) {
+            console.error(e);
+          }
+          setTimeout(function() {
+            try {
+              window.focus();
+              window.print();
             } catch(e) {
               console.error(e);
             }
-          }
-
-          ctx.strokeStyle = '#000000';
-          ctx.lineWidth = 2.5;
-          ctx.beginPath();
-          ctx.moveTo(14, 166);
-          ctx.lineTo(width - 14, 166);
-          ctx.stroke();
-
-          ctx.fillStyle = '#000000';
-          ctx.font = '900 19px Arial, Helvetica, sans-serif';
-          ctx.fillText('PRICE', 14, 198);
-
-          ctx.fillStyle = '#000000';
-          ctx.font = '900 28px monospace';
-          const priceStr = productData.currency + ' ' + productData.price;
-          const priceWidth = ctx.measureText(priceStr).width;
-          ctx.fillText(priceStr, width - 14 - priceWidth, 200);
-
-          ctx.restore();
+          }, 200);
         }
-
-        async function copyWholeTagImage() {
-          const canvas = document.getElementById('exportCanvas');
-          if (!canvas) return;
-          try {
-            canvas.toBlob(async function(blob) {
-              if (!blob) {
-                showToast('❌ Could not create image blob');
-                return;
-              }
-              try {
-                await navigator.clipboard.write([
-                  new ClipboardItem({ 'image/png': blob })
-                ]);
-                showToast('📋 Copied Tag Image! Press Ctrl+V in BarTender Designer.');
-              } catch(err) {
-                downloadTagImage();
-                showToast('⚠️ Clipboard restricted. Downloaded Tag PNG instead!');
-              }
-            }, 'image/png');
-          } catch(e) {
-            showToast('Error: ' + e.message);
-          }
+        if (typeof JsBarcode !== 'undefined') {
+          runPrint();
+        } else {
+          window.onload = runPrint;
         }
-
-        function downloadTagImage() {
-          const canvas = document.getElementById('exportCanvas');
-          if (!canvas) return;
-          const link = document.createElement('a');
-          link.download = 'Tag_' + productData.productCode + '_' + (productData.barcodeValue || 'label') + '.png';
-          link.href = canvas.toDataURL('image/png');
-          link.click();
-          showToast('💾 Downloaded Tag PNG!');
-        }
-
-        function downloadBarTenderCSV() {
-          const csvContent = "Company,ProductName,ProductCode,Barcode,Price,CostCode\\n" +
-            \`"\${productData.companyName.replace(/"/g, '""')}","\${productData.productName.replace(/"/g, '""')}","\${productData.productCode}","\${productData.barcodeValue}","\${productData.currency} \${productData.price}","\${productData.encodedPrice}"\\n\`;
-          const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-          const link = document.createElement('a');
-          link.download = 'Tag_' + productData.productCode + '_BarTenderData.csv';
-          link.href = URL.createObjectURL(blob);
-          link.click();
-          showToast('📊 Downloaded BarTender Data CSV!');
-        }
-
-        function downloadBTWTemplate() {
-          const link = document.createElement('a');
-          link.download = 'bartendertemplate.btw';
-          link.href = '/templates/bartendertemplate.btw';
-          link.click();
-          showToast('🏷️ Downloaded BarTender .BTW Template!');
-        }
-
-        function copyBarcode() {
-          navigator.clipboard.writeText(productData.barcodeValue).then(() => {
-            showToast('📋 Copied Barcode: ' + productData.barcodeValue);
-          });
-        }
-
-        function copyTabRow() {
-          const row = productData.productName + '\\t' + productData.productCode + '\\t' + productData.barcodeValue + '\\t' + productData.currency + ' ' + productData.price + '\\t' + productData.encodedPrice;
-          navigator.clipboard.writeText(row).then(() => {
-            showToast('📋 Copied Tabbed Data Row!');
-          });
-        }
-        
-        renderStickers();
-        document.getElementById('decreaseBtn').disabled = true;
       </script>
     </body>
     </html>
   `)
-
-  printWindow.document.close()
+  doc.close()
 }
 
 // Print multiple stickers (at most 2 per row)
@@ -538,11 +257,10 @@ export function printMultipleBarcodeStickers(products: any[], copies = 1, curren
         JsBarcode("#${barcodeId}", "${barcodeValue}", {
           format: "EAN13",
           width: 2.8,
-          height: 48,
+          height: 50,
           displayValue: false,
           margin: 0,
-          flat: true,
-          lineColor: "#000000"
+          flat: true
         });
       `
     }
@@ -559,7 +277,7 @@ export function printMultipleBarcodeStickers(products: any[], copies = 1, curren
       <title>Tag Studio Batch - ${totalStickers} stickers</title>
       <style>
         @page { size: 80mm auto; margin: 0; }
-        body { font-family: Arial, Helvetica, sans-serif; width: 80mm; padding: 4mm; background: #f8fafc; color: #000000; }
+        body { font-family: system-ui, -apple-system, sans-serif; width: 80mm; padding: 4mm; background: #f8fafc; color: #0f172a; }
         .controls {
           position: fixed; top: 12px; right: 12px;
           background: #ffffff; padding: 16px; border-radius: 12px;
@@ -601,28 +319,21 @@ export function printMultipleBarcodeStickers(products: any[], copies = 1, curren
 
         .sticker-row { display: flex; gap: 4mm; margin-bottom: 4mm; }
         .sticker {
-          width: 38mm; height: 24mm;
-          border: 2px solid #000000; border-radius: 1.5mm;
-          padding: 1mm; display: flex; flex-direction: column;
-          justify-content: space-between; background: #ffffff; color: #000000;
-          position: relative; box-sizing: border-box; font-family: Arial, Helvetica, sans-serif;
+          width: 32mm; height: 22mm;
+          border: 1px solid #000; border-radius: 2mm;
+          padding: 0.5mm 0.5mm 1mm 0.5mm; display: flex; flex-direction: column;
+          justify-content: space-between; background: white;
+          position: relative;
         }
-        .company-name { font-size: 8.5pt; font-weight: 900; color: #000000; text-align: center; margin-bottom: 0.5mm; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-transform: uppercase; letter-spacing: 0.3px; }
-        .encoded-price { position: absolute; top: 1mm; right: 1mm; font-size: 7pt; font-weight: 900; color: #000000; font-family: monospace; }
-        .product-info { display: flex; justify-content: space-between; font-size: 9pt; font-weight: 900; color: #000000; padding: 0 0.5mm; margin-bottom: 0.5mm; }
-        .product-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 22mm; font-weight: 900; color: #000000; }
-        .product-code { white-space: nowrap; font-family: monospace; font-weight: 900; color: #000000; }
-        .barcode { width: 36mm; height: 11mm; display: flex; align-items: center; justify-content: center; }
-        .barcode svg { width: 100% !important; height: 100% !important; max-width: 36mm !important; }
-        .barcode-number { font-size: 8.5pt; text-align: center; font-weight: 900; color: #000000; font-family: monospace; letter-spacing: 0.5px; margin: 0.5mm 0; }
-        .price-container { text-align: center; font-size: 11.5pt; font-weight: 900; color: #000000; font-family: monospace; }
-
-        @media print {
-          * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color: #000000 !important; font-weight: 900 !important; }
-          body { background: white; padding: 0; margin: 0; }
-          .no-print { display: none !important; }
-          .sticker { border: 2px solid #000000 !important; color: #000000 !important; background: #ffffff !important; }
-        }
+        .company-name { font-size: 6.5pt; font-weight: bold; text-align: center; margin-bottom: 0.5mm; line-height: 1.2; overflow: visible; padding-top: 0.2mm; }
+        .encoded-price { position: absolute; top: 0.5mm; right: 0.5mm; font-size: 4pt; }
+        .product-info { display: flex; justify-content: space-between; font-size: 7pt; font-weight: bold; padding: 0 0.5mm; margin-bottom: 0.5mm; }
+        .product-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 18mm; }
+        .product-code { white-space: nowrap; }
+        .barcode { width: 31mm; height: 10mm; display: block; }
+        .barcode-number { font-size: 6pt; text-align: center; font-weight: bold; letter-spacing: 0.5px; margin: 0.5mm 0; }
+        .price-container { text-align: center; font-size: 9pt; font-weight: bold; }
+        @media print { body { background: white; padding: 0; } .no-print { display: none !important; } }
       </style>
       <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
     </head>
@@ -692,95 +403,94 @@ export function printMultipleBarcodeStickers(products: any[], copies = 1, curren
           const canvas = document.getElementById('exportCanvas');
           if (!canvas) return;
           const ctx = canvas.getContext('2d');
-          const dpr = 4;
-          const width = 440;
-          const height = 220;
+          const dpr = 3;
+          const width = 330;
+          const height = 150;
 
           canvas.width = width * dpr;
           canvas.height = height * dpr;
 
           ctx.save();
           ctx.scale(dpr, dpr);
-          ctx.imageSmoothingEnabled = false;
 
           ctx.fillStyle = '#ffffff';
           ctx.fillRect(0, 0, width, height);
 
-          ctx.strokeStyle = '#000000';
-          ctx.lineWidth = 3.5;
+          ctx.strokeStyle = '#0f172a';
+          ctx.lineWidth = 2;
           ctx.beginPath();
           if (ctx.roundRect) {
-            ctx.roundRect(3, 3, width - 6, height - 6, 8);
+            ctx.roundRect(4, 4, width - 8, height - 8, 6);
           } else {
-            ctx.rect(3, 3, width - 6, height - 6);
+            ctx.rect(4, 4, width - 8, height - 8);
           }
           ctx.stroke();
 
-          ctx.fillStyle = '#000000';
-          ctx.font = '900 24px Arial, Helvetica, sans-serif';
-          ctx.fillText(firstProductData.companyName.toUpperCase(), 14, 30);
+          ctx.fillStyle = '#0f172a';
+          ctx.font = 'bold 13px sans-serif';
+          ctx.fillText(firstProductData.companyName.toUpperCase(), 12, 22);
 
           if (firstProductData.encodedPrice) {
-            ctx.fillStyle = '#000000';
-            ctx.font = '900 18px monospace';
+            ctx.fillStyle = '#475569';
+            ctx.font = 'bold 10px monospace';
             const costWidth = ctx.measureText(firstProductData.encodedPrice).width;
-            ctx.fillText(firstProductData.encodedPrice, width - 14 - costWidth, 30);
+            ctx.fillText(firstProductData.encodedPrice, width - 14 - costWidth, 22);
           }
 
-          ctx.strokeStyle = '#000000';
-          ctx.lineWidth = 2.5;
+          ctx.strokeStyle = '#e2e8f0';
+          ctx.lineWidth = 1;
           ctx.beginPath();
-          ctx.moveTo(14, 40);
-          ctx.lineTo(width - 14, 40);
+          ctx.moveTo(12, 28);
+          ctx.lineTo(width - 12, 28);
           ctx.stroke();
 
-          ctx.fillStyle = '#000000';
-          ctx.font = '900 24px Arial, Helvetica, sans-serif';
-          const nameTruncated = firstProductData.productName.length > 20 ? firstProductData.productName.substring(0, 18) + '...' : firstProductData.productName;
-          ctx.fillText(nameTruncated, 14, 66);
+          ctx.fillStyle = '#0f172a';
+          ctx.font = 'bold 13px sans-serif';
+          const nameTruncated = firstProductData.productName.length > 22 ? firstProductData.productName.substring(0, 20) + '...' : firstProductData.productName;
+          ctx.fillText(nameTruncated, 12, 45);
 
-          ctx.fillStyle = '#000000';
-          ctx.font = '900 20px monospace';
+          ctx.fillStyle = '#334155';
+          ctx.font = 'bold 12px monospace';
           const codeText = '#' + firstProductData.productCode;
           const codeWidth = ctx.measureText(codeText).width;
-          ctx.fillText(codeText, width - 14 - codeWidth, 66);
+          ctx.fillText(codeText, width - 12 - codeWidth, 45);
 
           if (firstProductData.barcodeValue) {
             try {
               const tempCanvas = document.createElement('canvas');
               JsBarcode(tempCanvas, firstProductData.barcodeValue, {
-                format: "CODE128", width: 3.2, height: 64, displayValue: false, margin: 0, lineColor: "#000000"
+                format: "CODE128", width: 1.8, height: 42, displayValue: false, margin: 0
               });
-              const bcWidth = Math.min(width - 28, tempCanvas.width / 2);
-              const bcHeight = 64;
+              const bcWidth = tempCanvas.width / 2;
+              const bcHeight = tempCanvas.height / 2;
               const bcX = (width - bcWidth) / 2;
-              ctx.drawImage(tempCanvas, bcX, 74, bcWidth, bcHeight);
+              ctx.drawImage(tempCanvas, bcX, 52, bcWidth, bcHeight);
 
-              ctx.fillStyle = '#000000';
-              ctx.font = '900 19px monospace';
+              ctx.fillStyle = '#1e293b';
+              ctx.font = 'bold 11px monospace';
               const numWidth = ctx.measureText(firstProductData.barcodeValue).width;
-              ctx.fillText(firstProductData.barcodeValue, (width - numWidth) / 2, 156);
+              ctx.fillText(firstProductData.barcodeValue, (width - numWidth) / 2, 108);
             } catch(e) {
               console.error(e);
             }
           }
 
-          ctx.strokeStyle = '#000000';
-          ctx.lineWidth = 2.5;
+          ctx.strokeStyle = '#e2e8f0';
+          ctx.lineWidth = 1;
           ctx.beginPath();
-          ctx.moveTo(14, 166);
-          ctx.lineTo(width - 14, 166);
+          ctx.moveTo(12, 116);
+          ctx.lineTo(width - 12, 116);
           ctx.stroke();
 
-          ctx.fillStyle = '#000000';
-          ctx.font = '900 19px Arial, Helvetica, sans-serif';
-          ctx.fillText('PRICE', 14, 198);
+          ctx.fillStyle = '#64748b';
+          ctx.font = 'bold 10px sans-serif';
+          ctx.fillText('PRICE', 12, 134);
 
-          ctx.fillStyle = '#000000';
-          ctx.font = '900 28px monospace';
+          ctx.fillStyle = '#0f172a';
+          ctx.font = 'bold 15px monospace';
           const priceStr = firstProductData.currency + ' ' + firstProductData.price;
           const priceWidth = ctx.measureText(priceStr).width;
-          ctx.fillText(priceStr, width - 14 - priceWidth, 200);
+          ctx.fillText(priceStr, width - 12 - priceWidth, 135);
 
           ctx.restore();
         }
