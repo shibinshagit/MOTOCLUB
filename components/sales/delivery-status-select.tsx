@@ -98,58 +98,58 @@ export function DeliveryStatusSelect({
 
   const handleUpdateStatusWithTracking = async (newTrackingId: string) => {
     const previousStatus = status
-    setIsTrackingModalOpen(false) // Close input modal immediately so UI never freezes
+    setIsTrackingModalOpen(false) // Close input modal immediately
     setStatus("Shipping") // Optimistic instant update
+
+    // INSTANTLY open the WhatsApp notification modal with new tracking ID (0ms delay!)
+    setShippingWhatsappData({
+      newTrackingId,
+      customerName: customerName || "Customer",
+      customerPhone: customerPhone || "",
+      shippingAddress: "",
+      totalAmount: 0,
+      products: [{ productName: "Order Item" }],
+    })
+
     setLoading(true)
     try {
       const res = await updateSaleDeliveryStatus(saleId, deviceId || 0, "Shipping", newTrackingId)
       if (res.success) {
         toast({ title: "Success", description: "Delivery status updated to Shipping." })
 
-        // Fetch sale details to show WhatsApp notification modal with new tracking ID
-        try {
-          const saleRes = await getSaleDetails(saleId)
-          if (saleRes.success && saleRes.data) {
-            const saleData = saleRes.data.sale
-            const itemsData = saleRes.data.items || []
-            const prodList = itemsData.map((item: any) => ({
-              productName: item.product_name || item.name || "Product",
-            }))
+        // Fetch full sale items asynchronously to enrich the modal payload
+        getSaleDetails(saleId)
+          .then((saleRes) => {
+            if (saleRes.success && saleRes.data) {
+              const saleData = saleRes.data.sale
+              const itemsData = saleRes.data.items || []
+              const prodList = itemsData.map((item: any) => ({
+                productName: item.product_name || item.name || "Product",
+              }))
 
-            setShippingWhatsappData({
-              newTrackingId,
-              customerName: saleData.customer_name || customerName || "Customer",
-              customerPhone: saleData.customer_phone || customerPhone || "",
-              shippingAddress: saleData.customer_address || "",
-              totalAmount: Number(saleData.total_amount || 0),
-              products: prodList.length > 0 ? prodList : [{ productName: "Order Item" }],
-            })
-          } else {
-            setShippingWhatsappData({
-              newTrackingId,
-              customerName: customerName || "Customer",
-              customerPhone: customerPhone || "",
-              shippingAddress: "",
-              totalAmount: 0,
-              products: [{ productName: "Order Item" }],
-            })
-          }
-        } catch {
-          setShippingWhatsappData({
-            newTrackingId,
-            customerName: customerName || "Customer",
-            customerPhone: customerPhone || "",
-            shippingAddress: "",
-            totalAmount: 0,
-            products: [{ productName: "Order Item" }],
+              setShippingWhatsappData((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      customerName: saleData.customer_name || prev.customerName,
+                      customerPhone: saleData.customer_phone || prev.customerPhone,
+                      shippingAddress: saleData.customer_address || prev.shippingAddress,
+                      totalAmount: Number(saleData.total_amount || prev.totalAmount),
+                      products: prodList.length > 0 ? prodList : prev.products,
+                    }
+                  : null
+              )
+            }
           })
-        }
+          .catch(() => {})
       } else {
         setStatus(previousStatus)
+        setShippingWhatsappData(null)
         toast({ title: "Error", description: res.message || "Failed to update tracking ID.", variant: "destructive" })
       }
     } catch (err: any) {
       setStatus(previousStatus)
+      setShippingWhatsappData(null)
       toast({ title: "Error", description: err.message || "An error occurred", variant: "destructive" })
     } finally {
       setLoading(false)

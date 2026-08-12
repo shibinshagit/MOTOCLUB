@@ -16,6 +16,7 @@ import { useToast } from "@/components/ui/use-toast"
 import { notifyError, notifySuccess } from "@/lib/notifications"
 import { cn } from "@/lib/utils"
 import { parseProductLinks } from "@/lib/product-links"
+import { TagPreviewModal } from "@/components/products/tag-preview-modal"
 
 interface ProductDetailBaseProps {
   onClose: () => void
@@ -133,6 +134,7 @@ export function ProductDetailPanel({
   const [printCopies, setPrintCopies] = useState(1)
   const [showPrintOptions, setShowPrintOptions] = useState(false)
   const [isPrinting, setIsPrinting] = useState(false)
+  const [isTagPreviewOpen, setIsTagPreviewOpen] = useState(false)
   const [currency, setCurrency] = useState(currencyProp || "AED") // Use prop or default to AED
   const { toast } = useToast()
 
@@ -334,36 +336,12 @@ export function ProductDetailPanel({
     }
   }
 
-  const handlePrintLabel = async (copies = 1) => {
-    if (!product || isPrinting) return
-
-    setIsPrinting(true)
-    try {
-      const productCode = product.code || (product.id ? String(product.id).padStart(4, "0") : "0000")
-      const priceValue = typeof product.price === "number" ? product.price : (Number.parseFloat(product.price || "0") || 0)
-
-      const payload = {
-        productId: product.id,
-        productCode,
-        productName: product.name || "Product",
-        price: priceValue,
-        batchNumber: product.batch_number || product.batchNumber || undefined,
-        quantity: copies,
-        barcode: product.barcode || undefined,
-      }
-
-      const result = await sendPrintJobToBarTender(payload)
-
-      if (result.success) {
-        notifySuccess(toast, result.message || "Print job sent to BarTender")
-        setShowPrintOptions(false)
-      } else {
-        notifyError(toast, result.error || "Failed to send print job to BarTender")
-      }
-    } catch (err: any) {
-      notifyError(toast, err.message || "Failed to send print job to BarTender")
-    } finally {
-      setIsPrinting(false)
+  const handlePrintLabel = (copies = 1) => {
+    if (!product) return
+    if (copies > 1) {
+      printMultipleBarcodeStickers([product], copies, currency)
+    } else {
+      printBarcodeSticker(product, currency)
     }
   }
 
@@ -414,29 +392,18 @@ export function ProductDetailPanel({
           type="number"
           min="1"
           max="100"
-          disabled={isPrinting}
           value={printCopies}
           onChange={(e) => setPrintCopies(Number.parseInt(e.target.value) || 1)}
           className="h-8 w-20 border-slate-200 bg-white text-xs"
         />
       </div>
-      <Button size="sm" onClick={() => handlePrintLabel(printCopies)} disabled={isPrinting} className="h-8 px-3 text-xs">
-        {isPrinting ? (
-          <>
-            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-            Sending to BarTender...
-          </>
-        ) : (
-          <>
-            <Printer className="mr-1.5 h-3.5 w-3.5" />
-            Print {printCopies}
-          </>
-        )}
+      <Button size="sm" onClick={() => handlePrintLabel(printCopies)} className="h-8 px-3 text-xs">
+        <Printer className="mr-1.5 h-3.5 w-3.5" />
+        Print {printCopies}
       </Button>
       <Button
         variant="outline"
         size="sm"
-        disabled={isPrinting}
         onClick={() => setShowPrintOptions(false)}
         className="h-8 border-slate-200 bg-white px-3 text-xs"
       >
@@ -445,23 +412,13 @@ export function ProductDetailPanel({
     </>
   ) : (
     <>
-      <Button size="sm" onClick={() => handlePrintLabel(1)} disabled={isPrinting} className="h-8 px-3 text-xs">
-        {isPrinting ? (
-          <>
-            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-            Sending to BarTender...
-          </>
-        ) : (
-          <>
-            <Printer className="mr-1.5 h-3.5 w-3.5" />
-            Print tag
-          </>
-        )}
+      <Button size="sm" onClick={() => handlePrintLabel(1)} className="h-8 px-3 text-xs">
+        <Printer className="mr-1.5 h-3.5 w-3.5" />
+        Print tag
       </Button>
       <Button
         variant="outline"
         size="sm"
-        disabled={isPrinting}
         onClick={() => setShowPrintOptions(true)}
         className="h-8 border-slate-200 bg-white px-3 text-xs"
       >
