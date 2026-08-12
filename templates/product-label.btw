@@ -1,0 +1,12 @@
+<%-- BarTender Label Template Placeholder --%>
+<%-- 
+  BarTender Template: product-label.btw
+  Dimensions: 32mm x 22mm (or standard label dimensions)
+  
+  Required Named Data Sources (SubStrings):
+  - ProductName: Text field for the product name
+  - ProductCode: Text field for the product ID / code (e.g. #0001)
+  - Price: Text field for the price
+  - BatchNumber: Text field for the batch number
+  - Barcode: Barcode object (EAN-13 / Code 128) bound to the barcode value
+--%>

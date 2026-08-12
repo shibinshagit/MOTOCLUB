@@ -326,3 +326,45 @@ export function printMultipleBarcodeStickers(products: any[], copies = 1, curren
   printWindow.document.close()
 }
 
+export interface BarTenderPrintPayload {
+  productId: string | number
+  productCode: string
+  productName: string
+  price?: number | string
+  batchNumber?: string
+  quantity: number
+  barcode?: string
+}
+
+/**
+ * Sends a label print job directly to the BarTender API backend.
+ */
+export async function sendPrintJobToBarTender(payload: BarTenderPrintPayload): Promise<{ success: boolean; message?: string; error?: string }> {
+  try {
+    const res = await fetch("/api/print/label", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    })
+
+    const data = await res.json()
+    if (!res.ok || !data.success) {
+      return {
+        success: false,
+        error: data.error || `Printing failed with HTTP status ${res.status}`,
+      }
+    }
+
+    return {
+      success: true,
+      message: data.message || "Print job sent to BarTender",
+    }
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err.message || "Network error while sending print job to BarTender API.",
+    }
+  }
+}
