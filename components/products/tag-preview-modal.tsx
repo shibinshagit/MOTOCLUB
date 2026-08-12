@@ -57,126 +57,147 @@ export function TagPreviewModal({
   const encodedCost = wholesalePrice > 0 ? encodeNumberAsLetters(Math.round(wholesalePrice)) : ""
 
   // Render barcode and visual tag on HTML Canvas for high-quality preview & image clipboard copying
+  // Render barcode and visual tag on HTML Canvas for high-quality preview & image clipboard copying
   useEffect(() => {
     if (!isOpen || !product) return
 
+    let isSubscribed = true
+
     const drawCanvas = async () => {
+      if (!isSubscribed) return
       const canvas = canvasRef.current
       if (!canvas) return
 
       const ctx = canvas.getContext("2d")
       if (!ctx) return
 
-      const dpr = 2 // 2x Retina sharpness
-      const width = 330
-      const height = 150
+      try {
+        const dpr = 2 // 2x Retina sharpness
+        const width = 330
+        const height = 150
 
-      canvas.width = width * dpr
-      canvas.height = height * dpr
+        canvas.width = width * dpr
+        canvas.height = height * dpr
 
-      ctx.save()
-      ctx.scale(dpr, dpr)
+        ctx.save()
+        ctx.scale(dpr, dpr)
 
-      // Background
-      ctx.fillStyle = "#ffffff"
-      ctx.fillRect(0, 0, width, height)
+        // Background
+        ctx.fillStyle = "#ffffff"
+        ctx.fillRect(0, 0, width, height)
 
-      // Outer Rounded Border
-      ctx.strokeStyle = "#0f172a"
-      ctx.lineWidth = 2
-      ctx.beginPath()
-      ctx.roundRect(4, 4, width - 8, height - 8, 6)
-      ctx.stroke()
+        // Outer Rounded Border (With safe fallback)
+        ctx.strokeStyle = "#0f172a"
+        ctx.lineWidth = 2
+        ctx.beginPath()
+        if (typeof ctx.roundRect === "function") {
+          ctx.roundRect(4, 4, width - 8, height - 8, 6)
+        } else {
+          ctx.rect(4, 4, width - 8, height - 8)
+        }
+        ctx.stroke()
 
-      // Header: Company Logo & Encoded Cost Code
-      ctx.fillStyle = "#0f172a"
-      ctx.font = "bold 13px sans-serif"
-      ctx.fillText(companyShort.toUpperCase(), 12, 22)
+        // Header: Company Logo & Encoded Cost Code
+        ctx.fillStyle = "#0f172a"
+        ctx.font = "bold 13px sans-serif"
+        ctx.fillText(companyShort.toUpperCase(), 12, 22)
 
-      if (encodedCost) {
-        ctx.fillStyle = "#475569"
-        ctx.font = "bold 10px monospace"
-        const textWidth = ctx.measureText(encodedCost).width
-        ctx.fillText(encodedCost, width - 14 - textWidth, 22)
-      }
+        if (encodedCost) {
+          ctx.fillStyle = "#475569"
+          ctx.font = "bold 10px monospace"
+          const textWidth = ctx.measureText(encodedCost).width
+          ctx.fillText(encodedCost, width - 14 - textWidth, 22)
+        }
 
-      // Divider line 1
-      ctx.strokeStyle = "#e2e8f0"
-      ctx.lineWidth = 1
-      ctx.beginPath()
-      ctx.moveTo(12, 28)
-      ctx.lineTo(width - 12, 28)
-      ctx.stroke()
+        // Divider line 1
+        ctx.strokeStyle = "#e2e8f0"
+        ctx.lineWidth = 1
+        ctx.beginPath()
+        ctx.moveTo(12, 28)
+        ctx.lineTo(width - 12, 28)
+        ctx.stroke()
 
-      // Product Name & Code
-      ctx.fillStyle = "#0f172a"
-      ctx.font = "bold 13px sans-serif"
-      const truncatedName = productName.length > 22 ? productName.substring(0, 20) + "..." : productName
-      ctx.fillText(truncatedName, 12, 45)
+        // Product Name & Code
+        ctx.fillStyle = "#0f172a"
+        ctx.font = "bold 13px sans-serif"
+        const truncatedName = productName.length > 22 ? productName.substring(0, 20) + "..." : productName
+        ctx.fillText(truncatedName, 12, 45)
 
-      ctx.fillStyle = "#334155"
-      ctx.font = "bold 12px monospace"
-      const codeText = `#${productCode}`
-      const codeWidth = ctx.measureText(codeText).width
-      ctx.fillText(codeText, width - 12 - codeWidth, 45)
+        ctx.fillStyle = "#334155"
+        ctx.font = "bold 12px monospace"
+        const codeText = `#${productCode}`
+        const codeWidth = ctx.measureText(codeText).width
+        ctx.fillText(codeText, width - 12 - codeWidth, 45)
 
-      // Render Barcode Lines using JsBarcode onto a temporary canvas
-      if (barcodeValue && typeof window !== "undefined") {
-        try {
-          const JsBarcode = (await import("jsbarcode")).default
-          const tempCanvas = document.createElement("canvas")
-          
-          JsBarcode(tempCanvas, barcodeValue, {
-            format: "CODE128",
-            width: 1.8,
-            height: 42,
-            displayValue: false,
-            margin: 0,
-          })
+        // Render Barcode Lines using JsBarcode onto a temporary canvas
+        if (barcodeValue && typeof window !== "undefined") {
+          try {
+            const JsBarcode = (await import("jsbarcode")).default
+            const tempCanvas = document.createElement("canvas")
+            
+            JsBarcode(tempCanvas, barcodeValue, {
+              format: "CODE128",
+              width: 1.8,
+              height: 42,
+              displayValue: false,
+              margin: 0,
+            })
 
-          const bcWidth = tempCanvas.width / dpr
-          const bcHeight = tempCanvas.height / dpr
-          const bcX = (width - bcWidth) / 2
-          ctx.drawImage(tempCanvas, bcX, 52, bcWidth, bcHeight)
+            const bcWidth = tempCanvas.width / 2
+            const bcHeight = tempCanvas.height / 2
+            const bcX = (width - bcWidth) / 2
+            ctx.drawImage(tempCanvas, bcX, 52, bcWidth, bcHeight)
 
-          // Barcode Text Below Barcode Lines
-          ctx.fillStyle = "#1e293b"
-          ctx.font = "bold 11px monospace"
-          const bcTextWidth = ctx.measureText(barcodeValue).width
-          ctx.fillText(barcodeValue, (width - bcTextWidth) / 2, 108)
-        } catch (e) {
+            // Barcode Text Below Barcode Lines
+            ctx.fillStyle = "#1e293b"
+            ctx.font = "bold 11px monospace"
+            const bcTextWidth = ctx.measureText(barcodeValue).width
+            ctx.fillText(barcodeValue, (width - bcTextWidth) / 2, 108)
+          } catch (e) {
+            console.error("Barcode draw error:", e)
+            ctx.fillStyle = "#d97706"
+            ctx.font = "italic 11px sans-serif"
+            ctx.fillText("Barcode unavailable", 12, 85)
+          }
+        } else {
           ctx.fillStyle = "#d97706"
           ctx.font = "italic 11px sans-serif"
           ctx.fillText("Barcode unavailable", 12, 85)
         }
-      } else {
-        ctx.fillStyle = "#d97706"
-        ctx.font = "italic 11px sans-serif"
-        ctx.fillText("Barcode unavailable", 12, 85)
+
+        // Divider line 2
+        ctx.strokeStyle = "#e2e8f0"
+        ctx.lineWidth = 1
+        ctx.beginPath()
+        ctx.moveTo(12, 116)
+        ctx.lineTo(width - 12, 116)
+        ctx.stroke()
+
+        // Price Footer
+        ctx.fillStyle = "#64748b"
+        ctx.font = "bold 10px sans-serif"
+        ctx.fillText("PRICE", 12, 134)
+
+        ctx.fillStyle = "#0f172a"
+        ctx.font = "bold 15px monospace"
+        const priceWidth = ctx.measureText(priceDisplay).width
+        ctx.fillText(priceDisplay, width - 12 - priceWidth, 135)
+
+        ctx.restore()
+      } catch (err) {
+        console.error("Canvas draw exception:", err)
       }
-
-      // Divider line 2
-      ctx.strokeStyle = "#e2e8f0"
-      ctx.lineWidth = 1
-      ctx.beginPath()
-      ctx.moveTo(12, 116)
-      ctx.lineTo(width - 12, 116)
-      ctx.stroke()
-
-      // Price Footer
-      ctx.fillStyle = "#64748b"
-      ctx.font = "bold 10px sans-serif"
-      ctx.fillText("PRICE", 12, 134)
-
-      ctx.fillStyle = "#0f172a"
-      ctx.font = "bold 15px monospace"
-      const priceWidth = ctx.measureText(priceDisplay).width
-      ctx.fillText(priceDisplay, width - 12 - priceWidth, 135)
-
-      ctx.restore()
     }
 
     drawCanvas()
+    const timer1 = setTimeout(drawCanvas, 50)
+    const timer2 = setTimeout(drawCanvas, 200)
+
+    return () => {
+      isSubscribed = false
+      clearTimeout(timer1)
+      clearTimeout(timer2)
+    }
   }, [isOpen, product, barcodeValue, companyShort, encodedCost, productName, productCode, priceDisplay])
 
   if (!product) return null
@@ -264,6 +285,33 @@ Price: ${priceDisplay}
 Cost Code: ${encodedCost || "N/A"}`
 
     copyToClipboard(text, "Full Text Tag")
+  }
+
+  // Download BarTender Data CSV
+  const handleDownloadCSV = () => {
+    const headers = "Company,ProductName,ProductCode,Barcode,Price,CostCode\n"
+    const row = `"${companyShort.replace(/"/g, '""')}","${productName.replace(/"/g, '""')}","${productCode}","${barcodeValue}","${priceDisplay}","${encodedCost}"\n`
+    const blob = new Blob([headers + row], { type: "text/csv;charset=utf-8;" })
+    const link = document.createElement("a")
+    link.download = `Tag_${productCode}_BarTenderData.csv`
+    link.href = URL.createObjectURL(blob)
+    link.click()
+    toast({
+      title: "Downloaded CSV Data",
+      description: `Saved Tag_${productCode}_BarTenderData.csv for BarTender Database Connection.`,
+    })
+  }
+
+  // Download BarTender .BTW Template
+  const handleDownloadBTW = () => {
+    const link = document.createElement("a")
+    link.download = `bartendertemplate.btw`
+    link.href = "/templates/bartendertemplate.btw"
+    link.click()
+    toast({
+      title: "Downloaded BTW Template",
+      description: `Saved bartendertemplate.btw to your PC. Open with BarTender Designer.`,
+    })
   }
 
   return (
@@ -375,45 +423,7 @@ Cost Code: ${encodedCost || "N/A"}`
           )}
         </div>
 
-        <DialogFooter className="flex flex-col gap-2 sm:flex-col pt-2 border-t border-slate-100">
-          <div className="grid grid-cols-2 gap-2 w-full">
-            <Button
-              onClick={handleCopyTabRow}
-              variant="secondary"
-              className="w-full bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-medium h-9 border border-slate-200"
-            >
-              {copiedField === "Tab-Separated Row" ? (
-                <>
-                  <Check className="mr-1.5 h-4 w-4" />
-                  Copied Row!
-                </>
-              ) : (
-                <>
-                  <FileSpreadsheet className="mr-1.5 h-4 w-4" />
-                  Copy Row (Tabbed)
-                </>
-              )}
-            </Button>
-
-            <Button
-              onClick={handleCopyFullText}
-              variant="outline"
-              className="w-full text-slate-700 text-xs font-medium h-9 border border-slate-200"
-            >
-              {copiedField === "Full Text Tag" ? (
-                <>
-                  <Check className="mr-1.5 h-4 w-4" />
-                  Copied Text!
-                </>
-              ) : (
-                <>
-                  <Copy className="mr-1.5 h-4 w-4" />
-                  Copy Text Block
-                </>
-              )}
-            </Button>
-          </div>
-
+        <DialogFooter className="pt-2 border-t border-slate-100">
           <Button
             onClick={onClose}
             variant="outline"

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { Button } from "@/components/ui/button"
 import { format } from "date-fns"
-import { Loader2, Printer, Copy, Settings, ChevronLeft, Link2 } from "lucide-react"
+import { Loader2, Printer, Copy, Settings, ChevronLeft, Link2, Barcode } from "lucide-react"
 import { getProductStockHistory, getProductStockByDevice } from "@/app/actions/product-actions"
 import { printBarcodeSticker, printMultipleBarcodeStickers, encodeNumberAsLetters, sendPrintJobToBarTender } from "@/lib/barcode-utils"
 import { Label } from "@/components/ui/label"
@@ -336,15 +336,6 @@ export function ProductDetailPanel({
     }
   }
 
-  const handlePrintLabel = (copies = 1) => {
-    if (!product) return
-    if (copies > 1) {
-      printMultipleBarcodeStickers([product], copies, currency)
-    } else {
-      printBarcodeSticker(product, currency)
-    }
-  }
-
   const formatMoney = (amount: number | string) => {
     const num = typeof amount === "string" ? Number.parseFloat(amount) : amount
     if (Number.isNaN(num)) return `${currency} 0.00`
@@ -397,7 +388,14 @@ export function ProductDetailPanel({
           className="h-8 w-20 border-slate-200 bg-white text-xs"
         />
       </div>
-      <Button size="sm" onClick={() => handlePrintLabel(printCopies)} className="h-8 px-3 text-xs">
+      <Button
+        size="sm"
+        onClick={() => {
+          setIsTagPreviewOpen(true)
+          setShowPrintOptions(false)
+        }}
+        className="h-8 px-3 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+      >
         <Printer className="mr-1.5 h-3.5 w-3.5" />
         Print {printCopies}
       </Button>
@@ -412,9 +410,13 @@ export function ProductDetailPanel({
     </>
   ) : (
     <>
-      <Button size="sm" onClick={() => handlePrintLabel(1)} className="h-8 px-3 text-xs">
+      <Button
+        size="sm"
+        onClick={() => setIsTagPreviewOpen(true)}
+        className="h-8 px-3 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-sm"
+      >
         <Printer className="mr-1.5 h-3.5 w-3.5" />
-        Print tag
+        Print Tag
       </Button>
       <Button
         variant="outline"
@@ -872,6 +874,13 @@ export function ProductDetailPanel({
         >
           {detailBody}
         </div>
+        <TagPreviewModal
+          isOpen={isTagPreviewOpen}
+          onClose={() => setIsTagPreviewOpen(false)}
+          product={product}
+          copies={printCopies}
+          currency={currency}
+        />
       </div>
     )
 }
