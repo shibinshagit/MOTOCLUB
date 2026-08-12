@@ -337,9 +337,32 @@ export interface BarTenderPrintPayload {
 }
 
 /**
- * Sends a label print job directly to the BarTender API backend.
+ * Sends a label print job directly to the BarTender API backend
+ * or local print agent running on the client's machine.
  */
 export async function sendPrintJobToBarTender(payload: BarTenderPrintPayload): Promise<{ success: boolean; message?: string; error?: string }> {
+  // 1. Try direct local print agent first (running on staff's Windows PC at http://localhost:9100/print)
+  const agentUrl = process.env.NEXT_PUBLIC_BARTENDER_PRINT_AGENT_URL || "http://localhost:9100/print"
+  try {
+    const agentRes = await fetch(agentUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+    if (agentRes.ok) {
+      const agentData = await agentRes.json()
+      if (agentData.success) {
+        return {
+          success: true,
+          message: agentData.message || "Print job sent to BarTender via Local Agent",
+        }
+      }
+    }
+  } catch {
+    // Local agent not running or unreachable on localhost, fallback to server API route
+  }
+
+  // 2. Fallback to Next.js server API route (/api/print/label)
   try {
     const res = await fetch("/api/print/label", {
       method: "POST",

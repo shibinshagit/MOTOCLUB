@@ -1813,8 +1813,8 @@ export async function updateSaleDeliveryStatus(
   deliveryStatus: string,
   trackingId?: string
 ) {
-  if (!saleId || !deviceId) {
-    return { success: false as const, message: "Sale ID and device ID are required" }
+  if (!saleId) {
+    return { success: false as const, message: "Sale ID is required" }
   }
 
   try {
@@ -1822,10 +1822,9 @@ export async function updateSaleDeliveryStatus(
     const isAdmin = !staffSession || staffSession.role === "admin"
 
     const rows = await sql`
-      SELECT delivery_status, status, fulfillment_type, shipped_at, delivered_at, payment_status, tracking_id, sale_type, source, external_order_id, staff_id
+      SELECT delivery_status, status, fulfillment_type, shipped_at, delivered_at, payment_status, tracking_id, sale_type, source, external_order_id, staff_id, device_id
       FROM sales
       WHERE id = ${saleId}
-        AND device_id = ${deviceId}
       LIMIT 1
     `
 
@@ -1849,37 +1848,10 @@ export async function updateSaleDeliveryStatus(
     const isJobCard = rows[0].sale_type === 'job_card'
     const isEcommerce = rows[0].source === 'ECOMMERCE' || rows[0].external_order_id != null
 
-    const isPaid = paymentStatus.toLowerCase() === "paid" || paymentStatus.toLowerCase() === "completed"
-    if (!isJobCard && !isEcommerce && !isPaid) {
-      return { success: false as const, message: "Delivery process cannot begin until payment is completed." }
-    }
+    const allowedStatuses = ["Pending", "Paid", "Packed", "Sent", "Shipping", "Delivered", "Returned", "Failed"]
 
-    const baseTransitions: Record<string, string[]> = {
-      "Pending": [], // No manual exits allowed
-      "Paid": ["Packed"],
-      "Packed": ["Sent"],
-      "Sent": ["Shipping"],
-      "Shipping": ["Delivered"],
-      "Delivered": [],
-      "Returned": [],
-      "Failed": []
-    }
-
-    let validTransitions = baseTransitions[originalDeliveryStatus] || []
-
-    if (isAdmin) {
-      const adminAllowed = ["Paid", "Packed", "Sent", "Shipping", "Delivered", "Returned", "Failed"]
-      if (adminAllowed.includes(originalDeliveryStatus)) {
-        validTransitions = adminAllowed.filter(s => s !== originalDeliveryStatus)
-      }
-    }
-
-    if (deliveryStatus === "Paid") {
-      return { success: false as const, message: "Delivery Status 'Paid' can only be assigned automatically when payment is completed." }
-    }
-
-    if (deliveryStatus !== originalDeliveryStatus && !validTransitions.includes(deliveryStatus)) {
-      return { success: false as const, message: `Cannot move delivery status from ${originalDeliveryStatus} to ${deliveryStatus}. Invalid transition.` }
+    if (!allowedStatuses.includes(deliveryStatus)) {
+      return { success: false as const, message: `Invalid delivery status: ${deliveryStatus}` }
     }
 
     const wasCancelled = originalStatus.toLowerCase() === "cancelled"
@@ -2070,7 +2042,6 @@ export async function updateSaleDeliveryStatus(
                 tracking_id = ${newTrackingId},
                 updated_at = NOW()
             WHERE id = ${saleId}
-              AND device_id = ${deviceId}
           `
         } else {
           // No tracking ID supplied — only fill if currently null (preserves existing)
@@ -2082,7 +2053,6 @@ export async function updateSaleDeliveryStatus(
                 tracking_id = COALESCE(tracking_id, ${newTrackingId}),
                 updated_at = NOW()
             WHERE id = ${saleId}
-              AND device_id = ${deviceId}
           `
         }
         updateSuccess = true;

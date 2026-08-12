@@ -20,11 +20,42 @@ type StockMoveItemInput = {
 }
 
 
+async function getOrCreateDefaultVariant(productId: number): Promise<number> {
+  const existing = (await sql`
+    SELECT id FROM product_variants WHERE product_id = ${productId} ORDER BY id ASC LIMIT 1
+  `) as any[]
+  if (existing.length > 0) {
+    return Number(existing[0].id)
+  }
+
+  // Auto-create default variant for legacy or variant-less product
+  const productRows = (await sql`
+    SELECT * FROM products WHERE id = ${productId}
+  `) as any[]
+  const p = productRows.length > 0 ? productRows[0] : {}
+  const price = Number(p.price || p.wholesale_price || 0)
+  const costPrice = Number(p.cost_price || p.wholesale_price || price)
+  const wholesalePrice = Number(p.wholesale_price || price)
+  const msp = Number(p.msp || price)
+  const mrp = Number(p.mrp || price)
+  const minStock = Number(p.minimum_stock || p.min_stock || 0)
+
+  console.log(`[Transfer] Auto-creating default variant for legacy product ${productId}`)
+  const createdVariant = (await sql`
+    INSERT INTO product_variants (
+      product_id, name, cost_price, wholesale_price, price, msp, mrp, minimum_stock, status
+    ) VALUES (
+      ${productId}, 'Default', ${costPrice}, ${wholesalePrice}, ${price},
+      ${msp}, ${mrp}, ${minStock}, 'active'
+    ) RETURNING id
+  `) as any[]
+  return Number(createdVariant[0].id)
+}
+
 async function resolveTransferAllocations(productId: number, variantId: number | null, batchId: number | null, deviceId: number, quantity: number) {
   let resolvedVariantId = variantId
   if (!resolvedVariantId) {
-    const defaultVariant = await sql`SELECT id FROM product_variants WHERE product_id = ${productId} ORDER BY id ASC LIMIT 1`
-    if (defaultVariant.length > 0) resolvedVariantId = defaultVariant[0].id
+    resolvedVariantId = await getOrCreateDefaultVariant(productId)
   }
 
   let allocations: {batchId: number | null, qty: number}[] = []
@@ -179,14 +210,7 @@ async function moveStockBetweenDevices(
 
   let resolvedVariantId = variantId
   if (!resolvedVariantId) {
-    const defaultVariant = await sql`
-      SELECT id FROM product_variants WHERE product_id = ${productId} ORDER BY id ASC LIMIT 1
-    `
-    if (defaultVariant.length > 0) {
-      resolvedVariantId = defaultVariant[0].id
-    } else {
-      throw new Error(`No product variant found for product ID ${productId}`)
-    }
+    resolvedVariantId = await getOrCreateDefaultVariant(productId)
   }
 
   let effectiveBatchId = batchId

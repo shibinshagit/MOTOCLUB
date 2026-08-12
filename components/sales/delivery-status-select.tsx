@@ -1,12 +1,13 @@
 "use client"
 
-import { useState } from "react"
-import { updateSaleDeliveryStatus } from "@/app/actions/sale-actions"
+import { useState, useEffect } from "react"
+import { updateSaleDeliveryStatus, getSaleDetails } from "@/app/actions/sale-actions"
 import { useToast } from "@/components/ui/use-toast"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { TrackingDetailsModal } from "./tracking-details-modal"
 import { AlertTriangle, RotateCcw, Package } from "lucide-react"
+import { JobCardWhatsappConfirmation } from "@/components/shared/job-card/job-card-whatsapp-confirmation"
 
 const VALID_TRANSITIONS: Record<string, string[]> = {
   "Pending": [], // No manual exits allowed
@@ -47,10 +48,25 @@ export function DeliveryStatusSelect({
   const { toast } = useToast()
   const [loading, setLoading] = useState(false)
   const [status, setStatus] = useState(currentStatus || "Pending")
+
+  // Keep internal status state in sync when parent prop updates
+  useEffect(() => {
+    setStatus(currentStatus || "Pending")
+  }, [currentStatus])
   
   // WhatsApp Notification State
   const [whatsappStep, setWhatsappStep] = useState<"none" | "prepare" | "confirm">("none")
   
+  // Shipping WhatsApp Notification State
+  const [shippingWhatsappData, setShippingWhatsappData] = useState<{
+    newTrackingId: string
+    customerName: string
+    customerPhone: string
+    shippingAddress: string
+    totalAmount: number
+    products: { productName: string }[]
+  } | null>(null)
+
   // Tracking Modal State
   const [isTrackingModalOpen, setIsTrackingModalOpen] = useState(false)
 
@@ -58,41 +74,85 @@ export function DeliveryStatusSelect({
   const [returnConfirmOpen, setReturnConfirmOpen] = useState(false)
 
   const handleUpdateStatus = async (newStatus: string) => {
+    const previousStatus = status
+    setStatus(newStatus) // Optimistic instant update
     setLoading(true)
     try {
       const res = await updateSaleDeliveryStatus(saleId, deviceId, newStatus)
       if (res.success) {
-        setStatus(newStatus)
         toast({ title: "Success", description: res.message || `Delivery status updated to ${newStatus}.` })
         if (onStatusChange) {
           onStatusChange(newStatus)
         }
       } else {
+        setStatus(previousStatus) // Revert on error
         toast({ title: "Error", description: res.message, variant: "destructive" })
       }
     } catch (err: any) {
+      setStatus(previousStatus) // Revert on error
       toast({ title: "Error", description: "An error occurred", variant: "destructive" })
     } finally {
       setLoading(false)
     }
   }
 
-  const handleUpdateStatusWithTracking = async (trackingId: string) => {
+  const handleUpdateStatusWithTracking = async (newTrackingId: string) => {
+    const previousStatus = status
+    setIsTrackingModalOpen(false) // Close input modal immediately so UI never freezes
+    setStatus("Shipping") // Optimistic instant update
     setLoading(true)
     try {
-      const res = await updateSaleDeliveryStatus(saleId, deviceId, "Shipping", trackingId)
+      const res = await updateSaleDeliveryStatus(saleId, deviceId || 0, "Shipping", newTrackingId)
       if (res.success) {
-        setStatus("Shipping")
-        toast({ title: "Success", description: "Delivery status and tracking updated." })
-        if (onStatusChange) {
-          onStatusChange("Shipping")
+        toast({ title: "Success", description: "Delivery status updated to Shipping." })
+
+        // Fetch sale details to show WhatsApp notification modal with new tracking ID
+        try {
+          const saleRes = await getSaleDetails(saleId)
+          if (saleRes.success && saleRes.data) {
+            const saleData = saleRes.data.sale
+            const itemsData = saleRes.data.items || []
+            const prodList = itemsData.map((item: any) => ({
+              productName: item.product_name || item.name || "Product",
+            }))
+
+            setShippingWhatsappData({
+              newTrackingId,
+              customerName: saleData.customer_name || customerName || "Customer",
+              customerPhone: saleData.customer_phone || customerPhone || "",
+              shippingAddress: saleData.customer_address || "",
+              totalAmount: Number(saleData.total_amount || 0),
+              products: prodList.length > 0 ? prodList : [{ productName: "Order Item" }],
+            })
+          } else {
+            setShippingWhatsappData({
+              newTrackingId,
+              customerName: customerName || "Customer",
+              customerPhone: customerPhone || "",
+              shippingAddress: "",
+              totalAmount: 0,
+              products: [{ productName: "Order Item" }],
+            })
+          }
+        } catch {
+          setShippingWhatsappData({
+            newTrackingId,
+            customerName: customerName || "Customer",
+            customerPhone: customerPhone || "",
+            shippingAddress: "",
+            totalAmount: 0,
+            products: [{ productName: "Order Item" }],
+          })
         }
       } else {
-        throw new Error(res.message)
+        setStatus(previousStatus)
+        toast({ title: "Error", description: res.message || "Failed to update tracking ID.", variant: "destructive" })
       }
+    } catch (err: any) {
+      setStatus(previousStatus)
+      toast({ title: "Error", description: err.message || "An error occurred", variant: "destructive" })
     } finally {
       setLoading(false)
-      setIsTrackingModalOpen(false)
     }
   }
 
@@ -105,14 +165,9 @@ export function DeliveryStatusSelect({
       return // Show confirmation dialog first
     }
 
-    if (newStatus === "Sent") {
-      setWhatsappStep("prepare")
-      return // Halt the update until confirmation
-    }
-
     if (newStatus === "Shipping") {
       setIsTrackingModalOpen(true)
-      return // Halt the update until tracking is provided/saved
+      return // Halt update until tracking ID is entered
     }
 
     await handleUpdateStatus(newStatus)
@@ -157,20 +212,11 @@ export function DeliveryStatusSelect({
     }
   }
 
-  // Only show the current status and valid next statuses
-  let availableOptions = [currentStatus]
-  
-  const allowedStatuses = ["Paid", "Packed", "Sent", "Shipping", "Delivered", "Returned", "Failed"]
-  if (allowedStatuses.includes(currentStatus)) {
-    availableOptions = [...allowedStatuses]
-  } else {
-    availableOptions = [currentStatus, ...(VALID_TRANSITIONS[currentStatus] || [])]
-  }
+  // Enable all standard delivery status options for full flexibility
+  const ALL_STATUS_OPTIONS = ["Pending", "Paid", "Packed", "Sent", "Shipping", "Delivered", "Returned", "Failed"]
+  const uniqueOptions = Array.from(new Set([status, currentStatus, ...ALL_STATUS_OPTIONS])).filter(Boolean)
 
-  // Deduplicate in case currentStatus is somehow in the valid transitions
-  const uniqueOptions = Array.from(new Set(availableOptions))
-
-  const isDropdownDisabled = loading || uniqueOptions.length <= 1
+  const isDropdownDisabled = loading
 
   return (
     <>
@@ -308,6 +354,31 @@ export function DeliveryStatusSelect({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Shipping WhatsApp Notification Dialog with New Tracking ID */}
+      {shippingWhatsappData && (
+        <Dialog open={true} onOpenChange={(open) => !open && setShippingWhatsappData(null)}>
+          <DialogContent className="sm:max-w-lg p-0" onClick={(e) => e.stopPropagation()}>
+            <JobCardWhatsappConfirmation
+              isShipping={true}
+              saleId={saleId}
+              trackingId={shippingWhatsappData.newTrackingId}
+              deviceId={deviceId || 0}
+              customerName={shippingWhatsappData.customerName}
+              customerPhone={shippingWhatsappData.customerPhone}
+              shippingAddress={shippingWhatsappData.shippingAddress}
+              products={shippingWhatsappData.products}
+              totalAmount={shippingWhatsappData.totalAmount}
+              onComplete={() => {
+                setShippingWhatsappData(null)
+                if (onStatusChange) {
+                  onStatusChange("Shipping")
+                }
+              }}
+            />
+          </DialogContent>
+        </Dialog>
+      )}
     </>
   )
 }

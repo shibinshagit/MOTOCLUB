@@ -9,6 +9,7 @@ import { useSelector } from "react-redux"
 import { selectDeviceName } from "@/store/slices/deviceSlice"
 
 interface JobCardWhatsappConfirmationProps {
+  isShipping?: boolean
   saleId: number
   trackingId: string
   deviceId: number
@@ -21,6 +22,7 @@ interface JobCardWhatsappConfirmationProps {
 }
 
 export function JobCardWhatsappConfirmation({
+  isShipping = false,
   saleId,
   trackingId,
   deviceId,
@@ -37,20 +39,39 @@ export function JobCardWhatsappConfirmation({
 
   const productsList = products.map((p, i) => `${i + 1}. ${p.productName}`).join(",\n")
 
-  const whatsappText = `Dear ${customerName},
+  const whatsappText = isShipping
+    ? `Dear ${customerName},
+
+Great news! Your order with ${deviceName} has been shipped! 🚚📦
+
+📦 Shipping Details:
+• Order ID: #${saleId}
+• Tracking ID: ${trackingId}
+• Product(s): 
+${productsList}
+• Total Amount: ₹${totalAmount}
+
+📍 Shipping Address:
+${shippingAddress || "As provided"}
+
+⏱️ You can track your shipment using the tracking ID provided above.
+Thank you for shopping with us!
+
+— ${deviceName}🚗✨`
+    : `Dear ${customerName},
 
 Thank you for your order with ${deviceName}🙏
 We’re happy to confirm that your order has been successfully placed.
 
 📦 Order Details:
-• Order ID: ${trackingId}
+• Order ID: #${saleId}
 • Product(s): 
 ${productsList}
 • Total Amount: ₹${totalAmount}
 • Payment Status: Paid
 
 📍 Shipping Address:
-${shippingAddress}
+${shippingAddress || "As provided"}
 
 ⏱️ Your order is being processed and will be dispatched soon.
 We’ll share the tracking details once it’s shipped.
@@ -63,6 +84,10 @@ Thank you for choosing us!
   const handleSendWhatsapp = () => {
     // Strip non-numeric from phone for the wa.me link
     const phoneNum = customerPhone.replace(/\D/g, "")
+    if (!phoneNum) {
+      toast({ title: "Warning", description: "Customer does not have a valid phone number.", variant: "destructive" })
+      return
+    }
     const encodedText = encodeURIComponent(whatsappText)
     window.open(`https://wa.me/${phoneNum}?text=${encodedText}`, "_blank")
   }
@@ -91,9 +116,13 @@ Thank you for choosing us!
       </div>
       
       <div className="space-y-2 text-center">
-        <h2 className="text-xl font-bold tracking-tight">Sale Updated Successfully</h2>
+        <h2 className="text-xl font-bold tracking-tight">
+          {isShipping ? "Order Shipped Successfully" : "Sale Updated Successfully"}
+        </h2>
         <p className="text-muted-foreground text-sm">
-          Send the receipt to the customer via WhatsApp and mark the order as Paid.
+          {isShipping
+            ? "Send the shipping receipt and tracking details to the customer via WhatsApp."
+            : "Send the receipt to the customer via WhatsApp and mark the order as Paid."}
         </p>
       </div>
 
@@ -104,11 +133,11 @@ Thank you for choosing us!
       <div className="w-full max-w-md flex flex-col gap-3 pt-4">
         <Button 
           onClick={handleSendWhatsapp} 
-          className="w-full bg-[#25D366] hover:bg-[#128C7E] text-white" 
+          className="w-full bg-[#25D366] hover:bg-[#128C7E] text-white font-medium" 
           size="lg"
         >
           <MessageCircle className="mr-2 h-5 w-5" />
-          Send WhatsApp Receipt
+          {isShipping ? "Send WhatsApp Tracking Update" : "Send WhatsApp Receipt"}
         </Button>
         <Button 
           onClick={onComplete} 

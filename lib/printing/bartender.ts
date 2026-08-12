@@ -24,7 +24,10 @@ export interface PrintResult {
 
 /**
  * Centralized BarTender printing service.
- * Handles local BarTender COM/CLI printing and remote Print Agent relays.
+ * Supports:
+ *  1. Mock Mode (for local development without BarTender installed)
+ *  2. Local Print Agent Relay (for cloud/Vercel deployments sending jobs to client Windows PC)
+ *  3. Local Windows COM / CLI BarTender execution
  */
 export async function printLabelWithBarTender(params: PrintLabelParams): Promise<PrintResult> {
   const { productId, productCode, productName, price, batchNumber, quantity, barcode } = params
@@ -37,7 +40,29 @@ export async function printLabelWithBarTender(params: PrintLabelParams): Promise
     }
   }
 
-  // 2. Check if a local print agent URL is configured (e.g. for cloud deployments)
+  // 2. Mock Mode (for development testing on machines without BarTender installed)
+  const isMockMode =
+    process.env.BARTENDER_MOCK_MODE === "true" ||
+    process.env.NEXT_PUBLIC_BARTENDER_MOCK_MODE === "true"
+
+  if (isMockMode) {
+    console.log(`[BarTender Mock Mode] Simulating print job:`, {
+      productId,
+      productCode,
+      productName,
+      price,
+      batchNumber,
+      quantity,
+      barcode,
+    })
+
+    return {
+      success: true,
+      message: `Print job sent to BarTender (Mock Mode - ${quantity} ${quantity === 1 ? "label" : "labels"})`,
+    }
+  }
+
+  // 3. Local Print Agent Relay (for cloud deployments sending print jobs to client PC)
   const agentUrl = process.env.BARTENDER_PRINT_AGENT_URL
   if (agentUrl) {
     try {
@@ -65,7 +90,19 @@ export async function printLabelWithBarTender(params: PrintLabelParams): Promise
     }
   }
 
-  // 3. Validate label template path
+  // 4. Check if running on cloud server (Vercel/Linux) without Print Agent or Mock Mode configured
+  const isVercel = Boolean(process.env.VERCEL || process.env.NEXT_PUBLIC_VERCEL_ENV)
+  const isWindows = process.platform === "win32"
+
+  if (isVercel || (!isWindows && !agentUrl)) {
+    return {
+      success: false,
+      error:
+        "BarTender runs on a local Windows PC. For cloud deployments (Vercel), configure BARTENDER_PRINT_AGENT_URL in environment variables to point to the client PC's print agent (e.g. http://<client-ip>:9100/print), or set BARTENDER_MOCK_MODE=true for testing.",
+    }
+  }
+
+  // 5. Validate label template path for local Windows execution
   const configuredTemplatePath = process.env.BARTENDER_TEMPLATE_PATH || path.join("templates", "bartendertemplate.btw")
   const templatePath = path.isAbsolute(configuredTemplatePath)
     ? configuredTemplatePath
@@ -83,7 +120,7 @@ export async function printLabelWithBarTender(params: PrintLabelParams): Promise
   const formattedPrice = price !== undefined && price !== null ? String(price) : ""
   const barcodeValue = barcode || productCode || String(productId)
 
-  // 4. Create temporary PowerShell script file for clean execution & error formatting
+  // 6. Create temporary PowerShell script file for clean execution & error formatting
   const tempPsScriptPath = path.join(
     os.tmpdir(),
     `bt_print_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.ps1`
@@ -165,7 +202,7 @@ if ($exeCandidates.Count -gt 0) {
     }
 }
 
-Write-Error "BarTender is not installed or BarTender COM Automation server is not registered on this system. Please install BarTender (Automation / Enterprise edition) or configure BARTENDER_EXE_PATH in .env."
+Write-Error "BarTender is not installed or BarTender COM Automation server is not registered on this system. Please set BARTENDER_MOCK_MODE=true in .env for development testing, or install BarTender."
 exit 1
 `
 
@@ -212,12 +249,12 @@ function cleanPsError(rawError: string): string {
     .map((l) => l.trim())
     .filter((l) => l.length > 0)
 
-  // Find concise error line
   const errorLine = lines.find(
     (l) =>
       l.includes("BarTender is not installed") ||
       l.includes("BarTender COM error") ||
-      l.includes("BarTender CLI error")
+      l.includes("BarTender CLI error") ||
+      l.includes("BARTENDER_MOCK_MODE")
   )
 
   if (errorLine) {
