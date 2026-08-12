@@ -135,24 +135,26 @@ export function printBarcodeSticker(product: any, currency = "AED") {
         .sticker-row { display: flex; gap: 4mm; margin-bottom: 4mm; }
         .sticker {
           width: 32mm; height: 22mm;
-          border: 1px solid #000; border-radius: 2mm;
-          padding: 0.5mm 0.5mm 1mm 0.5mm; display: flex; flex-direction: column;
-          justify-content: space-between; background: white;
-          position: relative; box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+          border: 2px solid #000000; border-radius: 1.5mm;
+          padding: 0.8mm; display: flex; flex-direction: column;
+          justify-content: space-between; background: #ffffff; color: #000000;
+          position: relative; box-sizing: border-box; font-family: Arial, Helvetica, sans-serif;
         }
-        .company-name { font-size: 6pt; font-weight: bold; text-align: center; margin-bottom: 0.5mm; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .encoded-price { position: absolute; top: 0.5mm; right: 0.5mm; font-size: 4pt; font-weight: bold; }
-        .product-info { display: flex; justify-content: space-between; font-size: 7pt; font-weight: bold; padding: 0 0.5mm; margin-bottom: 0.5mm; }
-        .product-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 18mm; }
-        .product-code { white-space: nowrap; }
-        .barcode { width: 31mm; height: 10mm; display: flex; align-items: center; justify-content: center; }
-        .barcode svg { width: 100% !important; height: 100% !important; max-width: 31mm !important; }
-        .barcode-number { font-size: 6pt; text-align: center; font-weight: bold; letter-spacing: 0.5px; margin: 0.5mm 0; }
-        .price-container { text-align: center; font-size: 9pt; font-weight: bold; }
+        .company-name { font-size: 7.5pt; font-weight: 900; color: #000000; text-align: center; margin-bottom: 0.5mm; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-transform: uppercase; letter-spacing: 0.3px; }
+        .encoded-price { position: absolute; top: 0.5mm; right: 0.8mm; font-size: 6pt; font-weight: 900; color: #000000; font-family: monospace; }
+        .product-info { display: flex; justify-content: space-between; font-size: 8pt; font-weight: 900; color: #000000; padding: 0 0.5mm; margin-bottom: 0.5mm; }
+        .product-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 18mm; font-weight: 900; color: #000000; }
+        .product-code { white-space: nowrap; font-family: monospace; font-weight: 900; color: #000000; }
+        .barcode { width: 30mm; height: 10mm; display: flex; align-items: center; justify-content: center; }
+        .barcode svg { width: 100% !important; height: 100% !important; max-width: 30mm !important; }
+        .barcode-number { font-size: 7.5pt; text-align: center; font-weight: 900; color: #000000; font-family: monospace; letter-spacing: 0.5px; margin: 0.5mm 0; }
+        .price-container { text-align: center; font-size: 10pt; font-weight: 900; color: #000000; font-family: monospace; }
 
         @media print {
-          body { background: white; padding: 0; }
+          * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color: #000000 !important; font-weight: 900 !important; }
+          body { background: white; padding: 0; margin: 0; }
           .no-print { display: none !important; }
+          .sticker { border: 2px solid #000000 !important; color: #000000 !important; background: #ffffff !important; }
         }
       </style>
       <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
@@ -278,7 +280,7 @@ export function printBarcodeSticker(product: any, currency = "AED") {
           
           for (let i = 0; i < currentQuantity; i++) {
             JsBarcode("#barcode" + i, productData.barcodeValue, {
-              format: "EAN13", width: 2.8, height: 50, displayValue: false, margin: 0, flat: true
+              format: "EAN13", width: 2.8, height: 48, displayValue: false, margin: 0, flat: true, lineColor: "#000000"
             });
           }
 
@@ -289,7 +291,7 @@ export function printBarcodeSticker(product: any, currency = "AED") {
           const canvas = document.getElementById('exportCanvas');
           if (!canvas) return;
           const ctx = canvas.getContext('2d');
-          const dpr = 3;
+          const dpr = 4;
           const width = 330;
           const height = 150;
 
@@ -298,12 +300,13 @@ export function printBarcodeSticker(product: any, currency = "AED") {
 
           ctx.save();
           ctx.scale(dpr, dpr);
+          ctx.imageSmoothingEnabled = false;
 
           ctx.fillStyle = '#ffffff';
           ctx.fillRect(0, 0, width, height);
 
-          ctx.strokeStyle = '#0f172a';
-          ctx.lineWidth = 2;
+          ctx.strokeStyle = '#000000';
+          ctx.lineWidth = 2.5;
           ctx.beginPath();
           if (ctx.roundRect) {
             ctx.roundRect(4, 4, width - 8, height - 8, 6);
@@ -312,71 +315,71 @@ export function printBarcodeSticker(product: any, currency = "AED") {
           }
           ctx.stroke();
 
-          ctx.fillStyle = '#0f172a';
-          ctx.font = 'bold 13px sans-serif';
-          ctx.fillText(productData.companyName.toUpperCase(), 12, 22);
+          ctx.fillStyle = '#000000';
+          ctx.font = 'bold 15px Arial, sans-serif';
+          ctx.fillText(productData.companyName.toUpperCase(), 12, 23);
 
           if (productData.encodedPrice) {
-            ctx.fillStyle = '#475569';
-            ctx.font = 'bold 10px monospace';
+            ctx.fillStyle = '#000000';
+            ctx.font = 'bold 12px monospace';
             const costWidth = ctx.measureText(productData.encodedPrice).width;
-            ctx.fillText(productData.encodedPrice, width - 14 - costWidth, 22);
+            ctx.fillText(productData.encodedPrice, width - 14 - costWidth, 23);
           }
 
-          ctx.strokeStyle = '#e2e8f0';
-          ctx.lineWidth = 1;
+          ctx.strokeStyle = '#000000';
+          ctx.lineWidth = 1.5;
           ctx.beginPath();
-          ctx.moveTo(12, 28);
-          ctx.lineTo(width - 12, 28);
+          ctx.moveTo(12, 30);
+          ctx.lineTo(width - 12, 30);
           ctx.stroke();
 
-          ctx.fillStyle = '#0f172a';
-          ctx.font = 'bold 13px sans-serif';
-          const nameTruncated = productData.productName.length > 22 ? productData.productName.substring(0, 20) + '...' : productData.productName;
-          ctx.fillText(nameTruncated, 12, 45);
+          ctx.fillStyle = '#000000';
+          ctx.font = 'bold 15px Arial, sans-serif';
+          const nameTruncated = productData.productName.length > 20 ? productData.productName.substring(0, 18) + '...' : productData.productName;
+          ctx.fillText(nameTruncated, 12, 47);
 
-          ctx.fillStyle = '#334155';
-          ctx.font = 'bold 12px monospace';
+          ctx.fillStyle = '#000000';
+          ctx.font = 'bold 13px monospace';
           const codeText = '#' + productData.productCode;
           const codeWidth = ctx.measureText(codeText).width;
-          ctx.fillText(codeText, width - 12 - codeWidth, 45);
+          ctx.fillText(codeText, width - 12 - codeWidth, 47);
 
           if (productData.barcodeValue) {
             try {
               const tempCanvas = document.createElement('canvas');
               JsBarcode(tempCanvas, productData.barcodeValue, {
-                format: "CODE128", width: 1.8, height: 42, displayValue: false, margin: 0
+                format: "CODE128", width: 2.2, height: 48, displayValue: false, margin: 0, lineColor: "#000000"
               });
-              const bcWidth = tempCanvas.width / 2;
-              const bcHeight = tempCanvas.height / 2;
+              const bcWidth = Math.min(width - 32, tempCanvas.width / 2);
+              const bcHeight = 44;
               const bcX = (width - bcWidth) / 2;
               ctx.drawImage(tempCanvas, bcX, 52, bcWidth, bcHeight);
 
-              ctx.fillStyle = '#1e293b';
-              ctx.font = 'bold 11px monospace';
+              ctx.fillStyle = '#000000';
+              ctx.font = 'bold 13px monospace';
               const numWidth = ctx.measureText(productData.barcodeValue).width;
-              ctx.fillText(productData.barcodeValue, (width - numWidth) / 2, 108);
+              ctx.fillText(productData.barcodeValue, (width - numWidth) / 2, 111);
             } catch(e) {
               console.error(e);
             }
           }
 
-          ctx.strokeStyle = '#e2e8f0';
-          ctx.lineWidth = 1;
+          ctx.strokeStyle = '#000000';
+          ctx.lineWidth = 1.5;
           ctx.beginPath();
-          ctx.moveTo(12, 116);
-          ctx.lineTo(width - 12, 116);
+          ctx.moveTo(12, 118);
+          ctx.lineTo(width - 12, 118);
           ctx.stroke();
 
-          ctx.fillStyle = '#64748b';
-          ctx.font = 'bold 10px sans-serif';
-          ctx.fillText('PRICE', 12, 134);
+          ctx.fillStyle = '#000000';
+          ctx.font = 'bold 12px Arial, sans-serif';
+          ctx.fillText('PRICE', 12, 137);
 
-          ctx.fillStyle = '#0f172a';
-          ctx.font = 'bold 15px monospace';
+          ctx.fillStyle = '#000000';
+          ctx.font = 'bold 17px monospace';
           const priceStr = productData.currency + ' ' + productData.price;
           const priceWidth = ctx.measureText(priceStr).width;
-          ctx.fillText(priceStr, width - 12 - priceWidth, 135);
+          ctx.fillText(priceStr, width - 12 - priceWidth, 137);
 
           ctx.restore();
         }
@@ -535,10 +538,11 @@ export function printMultipleBarcodeStickers(products: any[], copies = 1, curren
         JsBarcode("#${barcodeId}", "${barcodeValue}", {
           format: "EAN13",
           width: 2.8,
-          height: 50,
+          height: 48,
           displayValue: false,
           margin: 0,
-          flat: true
+          flat: true,
+          lineColor: "#000000"
         });
       `
     }
@@ -555,7 +559,7 @@ export function printMultipleBarcodeStickers(products: any[], copies = 1, curren
       <title>Tag Studio Batch - ${totalStickers} stickers</title>
       <style>
         @page { size: 80mm auto; margin: 0; }
-        body { font-family: system-ui, -apple-system, sans-serif; width: 80mm; padding: 4mm; background: #f8fafc; color: #0f172a; }
+        body { font-family: Arial, Helvetica, sans-serif; width: 80mm; padding: 4mm; background: #f8fafc; color: #000000; }
         .controls {
           position: fixed; top: 12px; right: 12px;
           background: #ffffff; padding: 16px; border-radius: 12px;
@@ -598,20 +602,27 @@ export function printMultipleBarcodeStickers(products: any[], copies = 1, curren
         .sticker-row { display: flex; gap: 4mm; margin-bottom: 4mm; }
         .sticker {
           width: 32mm; height: 22mm;
-          border: 1px solid #000; border-radius: 2mm;
-          padding: 0.5mm 0.5mm 1mm 0.5mm; display: flex; flex-direction: column;
-          justify-content: space-between; background: white;
-          position: relative;
+          border: 2px solid #000000; border-radius: 1.5mm;
+          padding: 0.8mm; display: flex; flex-direction: column;
+          justify-content: space-between; background: #ffffff; color: #000000;
+          position: relative; box-sizing: border-box; font-family: Arial, Helvetica, sans-serif;
         }
-        .company-name { font-size: 6pt; font-weight: bold; text-align: center; margin-bottom: 0.5mm; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .encoded-price { position: absolute; top: 0.5mm; right: 0.5mm; font-size: 4pt; }
-        .product-info { display: flex; justify-content: space-between; font-size: 7pt; font-weight: bold; padding: 0 0.5mm; margin-bottom: 0.5mm; }
-        .product-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 18mm; }
-        .product-code { white-space: nowrap; }
-        .barcode { width: 31mm; height: 10mm; display: block; }
-        .barcode-number { font-size: 6pt; text-align: center; font-weight: bold; letter-spacing: 0.5px; margin: 0.5mm 0; }
-        .price-container { text-align: center; font-size: 9pt; font-weight: bold; }
-        @media print { body { background: white; padding: 0; } .no-print { display: none !important; } }
+        .company-name { font-size: 7.5pt; font-weight: 900; color: #000000; text-align: center; margin-bottom: 0.5mm; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-transform: uppercase; letter-spacing: 0.3px; }
+        .encoded-price { position: absolute; top: 0.5mm; right: 0.8mm; font-size: 6pt; font-weight: 900; color: #000000; font-family: monospace; }
+        .product-info { display: flex; justify-content: space-between; font-size: 8pt; font-weight: 900; color: #000000; padding: 0 0.5mm; margin-bottom: 0.5mm; }
+        .product-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 18mm; font-weight: 900; color: #000000; }
+        .product-code { white-space: nowrap; font-family: monospace; font-weight: 900; color: #000000; }
+        .barcode { width: 30mm; height: 10mm; display: flex; align-items: center; justify-content: center; }
+        .barcode svg { width: 100% !important; height: 100% !important; max-width: 30mm !important; }
+        .barcode-number { font-size: 7.5pt; text-align: center; font-weight: 900; color: #000000; font-family: monospace; letter-spacing: 0.5px; margin: 0.5mm 0; }
+        .price-container { text-align: center; font-size: 10pt; font-weight: 900; color: #000000; font-family: monospace; }
+
+        @media print {
+          * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color: #000000 !important; font-weight: 900 !important; }
+          body { background: white; padding: 0; margin: 0; }
+          .no-print { display: none !important; }
+          .sticker { border: 2px solid #000000 !important; color: #000000 !important; background: #ffffff !important; }
+        }
       </style>
       <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
     </head>
@@ -681,7 +692,7 @@ export function printMultipleBarcodeStickers(products: any[], copies = 1, curren
           const canvas = document.getElementById('exportCanvas');
           if (!canvas) return;
           const ctx = canvas.getContext('2d');
-          const dpr = 3;
+          const dpr = 4;
           const width = 330;
           const height = 150;
 
@@ -690,12 +701,13 @@ export function printMultipleBarcodeStickers(products: any[], copies = 1, curren
 
           ctx.save();
           ctx.scale(dpr, dpr);
+          ctx.imageSmoothingEnabled = false;
 
           ctx.fillStyle = '#ffffff';
           ctx.fillRect(0, 0, width, height);
 
-          ctx.strokeStyle = '#0f172a';
-          ctx.lineWidth = 2;
+          ctx.strokeStyle = '#000000';
+          ctx.lineWidth = 2.5;
           ctx.beginPath();
           if (ctx.roundRect) {
             ctx.roundRect(4, 4, width - 8, height - 8, 6);
@@ -704,71 +716,71 @@ export function printMultipleBarcodeStickers(products: any[], copies = 1, curren
           }
           ctx.stroke();
 
-          ctx.fillStyle = '#0f172a';
-          ctx.font = 'bold 13px sans-serif';
-          ctx.fillText(firstProductData.companyName.toUpperCase(), 12, 22);
+          ctx.fillStyle = '#000000';
+          ctx.font = 'bold 15px Arial, sans-serif';
+          ctx.fillText(firstProductData.companyName.toUpperCase(), 12, 23);
 
           if (firstProductData.encodedPrice) {
-            ctx.fillStyle = '#475569';
-            ctx.font = 'bold 10px monospace';
+            ctx.fillStyle = '#000000';
+            ctx.font = 'bold 12px monospace';
             const costWidth = ctx.measureText(firstProductData.encodedPrice).width;
-            ctx.fillText(firstProductData.encodedPrice, width - 14 - costWidth, 22);
+            ctx.fillText(firstProductData.encodedPrice, width - 14 - costWidth, 23);
           }
 
-          ctx.strokeStyle = '#e2e8f0';
-          ctx.lineWidth = 1;
+          ctx.strokeStyle = '#000000';
+          ctx.lineWidth = 1.5;
           ctx.beginPath();
-          ctx.moveTo(12, 28);
-          ctx.lineTo(width - 12, 28);
+          ctx.moveTo(12, 30);
+          ctx.lineTo(width - 12, 30);
           ctx.stroke();
 
-          ctx.fillStyle = '#0f172a';
-          ctx.font = 'bold 13px sans-serif';
-          const nameTruncated = firstProductData.productName.length > 22 ? firstProductData.productName.substring(0, 20) + '...' : firstProductData.productName;
-          ctx.fillText(nameTruncated, 12, 45);
+          ctx.fillStyle = '#000000';
+          ctx.font = 'bold 15px Arial, sans-serif';
+          const nameTruncated = firstProductData.productName.length > 20 ? firstProductData.productName.substring(0, 18) + '...' : firstProductData.productName;
+          ctx.fillText(nameTruncated, 12, 47);
 
-          ctx.fillStyle = '#334155';
-          ctx.font = 'bold 12px monospace';
+          ctx.fillStyle = '#000000';
+          ctx.font = 'bold 13px monospace';
           const codeText = '#' + firstProductData.productCode;
           const codeWidth = ctx.measureText(codeText).width;
-          ctx.fillText(codeText, width - 12 - codeWidth, 45);
+          ctx.fillText(codeText, width - 12 - codeWidth, 47);
 
           if (firstProductData.barcodeValue) {
             try {
               const tempCanvas = document.createElement('canvas');
               JsBarcode(tempCanvas, firstProductData.barcodeValue, {
-                format: "CODE128", width: 1.8, height: 42, displayValue: false, margin: 0
+                format: "CODE128", width: 2.2, height: 48, displayValue: false, margin: 0, lineColor: "#000000"
               });
-              const bcWidth = tempCanvas.width / 2;
-              const bcHeight = tempCanvas.height / 2;
+              const bcWidth = Math.min(width - 32, tempCanvas.width / 2);
+              const bcHeight = 44;
               const bcX = (width - bcWidth) / 2;
               ctx.drawImage(tempCanvas, bcX, 52, bcWidth, bcHeight);
 
-              ctx.fillStyle = '#1e293b';
-              ctx.font = 'bold 11px monospace';
+              ctx.fillStyle = '#000000';
+              ctx.font = 'bold 13px monospace';
               const numWidth = ctx.measureText(firstProductData.barcodeValue).width;
-              ctx.fillText(firstProductData.barcodeValue, (width - numWidth) / 2, 108);
+              ctx.fillText(firstProductData.barcodeValue, (width - numWidth) / 2, 111);
             } catch(e) {
               console.error(e);
             }
           }
 
-          ctx.strokeStyle = '#e2e8f0';
-          ctx.lineWidth = 1;
+          ctx.strokeStyle = '#000000';
+          ctx.lineWidth = 1.5;
           ctx.beginPath();
-          ctx.moveTo(12, 116);
-          ctx.lineTo(width - 12, 116);
+          ctx.moveTo(12, 118);
+          ctx.lineTo(width - 12, 118);
           ctx.stroke();
 
-          ctx.fillStyle = '#64748b';
-          ctx.font = 'bold 10px sans-serif';
-          ctx.fillText('PRICE', 12, 134);
+          ctx.fillStyle = '#000000';
+          ctx.font = 'bold 12px Arial, sans-serif';
+          ctx.fillText('PRICE', 12, 137);
 
-          ctx.fillStyle = '#0f172a';
-          ctx.font = 'bold 15px monospace';
+          ctx.fillStyle = '#000000';
+          ctx.font = 'bold 17px monospace';
           const priceStr = firstProductData.currency + ' ' + firstProductData.price;
           const priceWidth = ctx.measureText(priceStr).width;
-          ctx.fillText(priceStr, width - 12 - priceWidth, 135);
+          ctx.fillText(priceStr, width - 12 - priceWidth, 137);
 
           ctx.restore();
         }

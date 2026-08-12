@@ -72,7 +72,7 @@ export function TagPreviewModal({
       if (!ctx) return
 
       try {
-        const dpr = 2 // 2x Retina sharpness
+        const dpr = 4 // 4x High-DPI sharpness for crystal clear printing & copying
         const width = 330
         const height = 150
 
@@ -81,14 +81,15 @@ export function TagPreviewModal({
 
         ctx.save()
         ctx.scale(dpr, dpr)
+        ctx.imageSmoothingEnabled = false
 
-        // Background
+        // Background (Pure White)
         ctx.fillStyle = "#ffffff"
         ctx.fillRect(0, 0, width, height)
 
-        // Outer Rounded Border (With safe fallback)
-        ctx.strokeStyle = "#0f172a"
-        ctx.lineWidth = 2
+        // Outer Border (Pure Black, Crisp)
+        ctx.strokeStyle = "#000000"
+        ctx.lineWidth = 2.5
         ctx.beginPath()
         if (typeof ctx.roundRect === "function") {
           ctx.roundRect(4, 4, width - 8, height - 8, 6)
@@ -97,39 +98,40 @@ export function TagPreviewModal({
         }
         ctx.stroke()
 
-        // Header: Company Logo & Encoded Cost Code
-        ctx.fillStyle = "#0f172a"
-        ctx.font = "bold 13px sans-serif"
-        ctx.fillText(companyShort.toUpperCase(), 12, 22)
+        // Header: Company Name (Bold Black)
+        ctx.fillStyle = "#000000"
+        ctx.font = "bold 15px Arial, sans-serif"
+        ctx.fillText(companyShort.toUpperCase(), 12, 23)
 
+        // Encoded Cost Code (Bold Black Monospace)
         if (encodedCost) {
-          ctx.fillStyle = "#475569"
-          ctx.font = "bold 10px monospace"
+          ctx.fillStyle = "#000000"
+          ctx.font = "bold 12px monospace"
           const textWidth = ctx.measureText(encodedCost).width
-          ctx.fillText(encodedCost, width - 14 - textWidth, 22)
+          ctx.fillText(encodedCost, width - 14 - textWidth, 23)
         }
 
-        // Divider line 1
-        ctx.strokeStyle = "#e2e8f0"
-        ctx.lineWidth = 1
+        // Divider line 1 (Pure Black)
+        ctx.strokeStyle = "#000000"
+        ctx.lineWidth = 1.5
         ctx.beginPath()
-        ctx.moveTo(12, 28)
-        ctx.lineTo(width - 12, 28)
+        ctx.moveTo(12, 30)
+        ctx.lineTo(width - 12, 30)
         ctx.stroke()
 
-        // Product Name & Code
-        ctx.fillStyle = "#0f172a"
-        ctx.font = "bold 13px sans-serif"
-        const truncatedName = productName.length > 22 ? productName.substring(0, 20) + "..." : productName
-        ctx.fillText(truncatedName, 12, 45)
+        // Product Name & Code (Bold Black)
+        ctx.fillStyle = "#000000"
+        ctx.font = "bold 15px Arial, sans-serif"
+        const truncatedName = productName.length > 20 ? productName.substring(0, 18) + "..." : productName
+        ctx.fillText(truncatedName, 12, 47)
 
-        ctx.fillStyle = "#334155"
-        ctx.font = "bold 12px monospace"
+        ctx.fillStyle = "#000000"
+        ctx.font = "bold 13px monospace"
         const codeText = `#${productCode}`
         const codeWidth = ctx.measureText(codeText).width
-        ctx.fillText(codeText, width - 12 - codeWidth, 45)
+        ctx.fillText(codeText, width - 12 - codeWidth, 47)
 
-        // Render Barcode Lines using JsBarcode onto a temporary canvas
+        // Render Barcode Lines using JsBarcode onto a temporary high-res canvas
         if (barcodeValue && typeof window !== "undefined") {
           try {
             const JsBarcode = (await import("jsbarcode")).default
@@ -137,51 +139,52 @@ export function TagPreviewModal({
             
             JsBarcode(tempCanvas, barcodeValue, {
               format: "CODE128",
-              width: 1.8,
-              height: 42,
+              width: 2.2,
+              height: 48,
               displayValue: false,
               margin: 0,
+              lineColor: "#000000",
             })
 
-            const bcWidth = tempCanvas.width / 2
-            const bcHeight = tempCanvas.height / 2
+            const bcWidth = Math.min(width - 32, tempCanvas.width / 2)
+            const bcHeight = 44
             const bcX = (width - bcWidth) / 2
             ctx.drawImage(tempCanvas, bcX, 52, bcWidth, bcHeight)
 
-            // Barcode Text Below Barcode Lines
-            ctx.fillStyle = "#1e293b"
-            ctx.font = "bold 11px monospace"
+            // Barcode Text Below Barcode Lines (Bold Black Monospace)
+            ctx.fillStyle = "#000000"
+            ctx.font = "bold 13px monospace"
             const bcTextWidth = ctx.measureText(barcodeValue).width
-            ctx.fillText(barcodeValue, (width - bcTextWidth) / 2, 108)
+            ctx.fillText(barcodeValue, (width - bcTextWidth) / 2, 111)
           } catch (e) {
             console.error("Barcode draw error:", e)
-            ctx.fillStyle = "#d97706"
-            ctx.font = "italic 11px sans-serif"
+            ctx.fillStyle = "#000000"
+            ctx.font = "bold 12px sans-serif"
             ctx.fillText("Barcode unavailable", 12, 85)
           }
         } else {
-          ctx.fillStyle = "#d97706"
-          ctx.font = "italic 11px sans-serif"
+          ctx.fillStyle = "#000000"
+          ctx.font = "bold 12px sans-serif"
           ctx.fillText("Barcode unavailable", 12, 85)
         }
 
-        // Divider line 2
-        ctx.strokeStyle = "#e2e8f0"
-        ctx.lineWidth = 1
+        // Divider line 2 (Pure Black)
+        ctx.strokeStyle = "#000000"
+        ctx.lineWidth = 1.5
         ctx.beginPath()
-        ctx.moveTo(12, 116)
-        ctx.lineTo(width - 12, 116)
+        ctx.moveTo(12, 118)
+        ctx.lineTo(width - 12, 118)
         ctx.stroke()
 
-        // Price Footer
-        ctx.fillStyle = "#64748b"
-        ctx.font = "bold 10px sans-serif"
-        ctx.fillText("PRICE", 12, 134)
+        // Price Footer (Bold Black)
+        ctx.fillStyle = "#000000"
+        ctx.font = "bold 12px Arial, sans-serif"
+        ctx.fillText("PRICE", 12, 137)
 
-        ctx.fillStyle = "#0f172a"
-        ctx.font = "bold 15px monospace"
+        ctx.fillStyle = "#000000"
+        ctx.font = "bold 17px monospace"
         const priceWidth = ctx.measureText(priceDisplay).width
-        ctx.fillText(priceDisplay, width - 12 - priceWidth, 135)
+        ctx.fillText(priceDisplay, width - 12 - priceWidth, 137)
 
         ctx.restore()
       } catch (err) {
