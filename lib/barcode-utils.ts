@@ -134,21 +134,21 @@ export function printBarcodeSticker(product: any, currency = "AED") {
 
         .sticker-row { display: flex; gap: 4mm; margin-bottom: 4mm; }
         .sticker {
-          width: 32mm; height: 22mm;
+          width: 38mm; height: 24mm;
           border: 2px solid #000000; border-radius: 1.5mm;
-          padding: 0.8mm; display: flex; flex-direction: column;
+          padding: 1mm; display: flex; flex-direction: column;
           justify-content: space-between; background: #ffffff; color: #000000;
           position: relative; box-sizing: border-box; font-family: Arial, Helvetica, sans-serif;
         }
-        .company-name { font-size: 7.5pt; font-weight: 900; color: #000000; text-align: center; margin-bottom: 0.5mm; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-transform: uppercase; letter-spacing: 0.3px; }
-        .encoded-price { position: absolute; top: 0.5mm; right: 0.8mm; font-size: 6pt; font-weight: 900; color: #000000; font-family: monospace; }
-        .product-info { display: flex; justify-content: space-between; font-size: 8pt; font-weight: 900; color: #000000; padding: 0 0.5mm; margin-bottom: 0.5mm; }
-        .product-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 18mm; font-weight: 900; color: #000000; }
+        .company-name { font-size: 8.5pt; font-weight: 900; color: #000000; text-align: center; margin-bottom: 0.5mm; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-transform: uppercase; letter-spacing: 0.3px; }
+        .encoded-price { position: absolute; top: 1mm; right: 1mm; font-size: 7pt; font-weight: 900; color: #000000; font-family: monospace; }
+        .product-info { display: flex; justify-content: space-between; font-size: 9pt; font-weight: 900; color: #000000; padding: 0 0.5mm; margin-bottom: 0.5mm; }
+        .product-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 22mm; font-weight: 900; color: #000000; }
         .product-code { white-space: nowrap; font-family: monospace; font-weight: 900; color: #000000; }
-        .barcode { width: 30mm; height: 10mm; display: flex; align-items: center; justify-content: center; }
-        .barcode svg { width: 100% !important; height: 100% !important; max-width: 30mm !important; }
-        .barcode-number { font-size: 7.5pt; text-align: center; font-weight: 900; color: #000000; font-family: monospace; letter-spacing: 0.5px; margin: 0.5mm 0; }
-        .price-container { text-align: center; font-size: 10pt; font-weight: 900; color: #000000; font-family: monospace; }
+        .barcode { width: 36mm; height: 11mm; display: flex; align-items: center; justify-content: center; }
+        .barcode svg { width: 100% !important; height: 100% !important; max-width: 36mm !important; }
+        .barcode-number { font-size: 8.5pt; text-align: center; font-weight: 900; color: #000000; font-family: monospace; letter-spacing: 0.5px; margin: 0.5mm 0; }
+        .price-container { text-align: center; font-size: 11.5pt; font-weight: 900; color: #000000; font-family: monospace; }
 
         @media print {
           * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color: #000000 !important; font-weight: 900 !important; }
@@ -292,8 +292,8 @@ export function printBarcodeSticker(product: any, currency = "AED") {
           if (!canvas) return;
           const ctx = canvas.getContext('2d');
           const dpr = 4;
-          const width = 330;
-          const height = 150;
+          const width = 440;
+          const height = 220;
 
           canvas.width = width * dpr;
           canvas.height = height * dpr;
@@ -306,80 +306,80 @@ export function printBarcodeSticker(product: any, currency = "AED") {
           ctx.fillRect(0, 0, width, height);
 
           ctx.strokeStyle = '#000000';
-          ctx.lineWidth = 2.5;
+          ctx.lineWidth = 3.5;
           ctx.beginPath();
           if (ctx.roundRect) {
-            ctx.roundRect(4, 4, width - 8, height - 8, 6);
+            ctx.roundRect(3, 3, width - 6, height - 6, 8);
           } else {
-            ctx.rect(4, 4, width - 8, height - 8);
+            ctx.rect(3, 3, width - 6, height - 6);
           }
           ctx.stroke();
 
           ctx.fillStyle = '#000000';
-          ctx.font = 'bold 15px Arial, sans-serif';
-          ctx.fillText(productData.companyName.toUpperCase(), 12, 23);
+          ctx.font = '900 24px Arial, Helvetica, sans-serif';
+          ctx.fillText(productData.companyName.toUpperCase(), 14, 30);
 
           if (productData.encodedPrice) {
             ctx.fillStyle = '#000000';
-            ctx.font = 'bold 12px monospace';
+            ctx.font = '900 18px monospace';
             const costWidth = ctx.measureText(productData.encodedPrice).width;
-            ctx.fillText(productData.encodedPrice, width - 14 - costWidth, 23);
+            ctx.fillText(productData.encodedPrice, width - 14 - costWidth, 30);
           }
 
           ctx.strokeStyle = '#000000';
-          ctx.lineWidth = 1.5;
+          ctx.lineWidth = 2.5;
           ctx.beginPath();
-          ctx.moveTo(12, 30);
-          ctx.lineTo(width - 12, 30);
+          ctx.moveTo(14, 40);
+          ctx.lineTo(width - 14, 40);
           ctx.stroke();
 
           ctx.fillStyle = '#000000';
-          ctx.font = 'bold 15px Arial, sans-serif';
+          ctx.font = '900 24px Arial, Helvetica, sans-serif';
           const nameTruncated = productData.productName.length > 20 ? productData.productName.substring(0, 18) + '...' : productData.productName;
-          ctx.fillText(nameTruncated, 12, 47);
+          ctx.fillText(nameTruncated, 14, 66);
 
           ctx.fillStyle = '#000000';
-          ctx.font = 'bold 13px monospace';
+          ctx.font = '900 20px monospace';
           const codeText = '#' + productData.productCode;
           const codeWidth = ctx.measureText(codeText).width;
-          ctx.fillText(codeText, width - 12 - codeWidth, 47);
+          ctx.fillText(codeText, width - 14 - codeWidth, 66);
 
           if (productData.barcodeValue) {
             try {
               const tempCanvas = document.createElement('canvas');
               JsBarcode(tempCanvas, productData.barcodeValue, {
-                format: "CODE128", width: 2.2, height: 48, displayValue: false, margin: 0, lineColor: "#000000"
+                format: "CODE128", width: 3.2, height: 64, displayValue: false, margin: 0, lineColor: "#000000"
               });
-              const bcWidth = Math.min(width - 32, tempCanvas.width / 2);
-              const bcHeight = 44;
+              const bcWidth = Math.min(width - 28, tempCanvas.width / 2);
+              const bcHeight = 64;
               const bcX = (width - bcWidth) / 2;
-              ctx.drawImage(tempCanvas, bcX, 52, bcWidth, bcHeight);
+              ctx.drawImage(tempCanvas, bcX, 74, bcWidth, bcHeight);
 
               ctx.fillStyle = '#000000';
-              ctx.font = 'bold 13px monospace';
+              ctx.font = '900 19px monospace';
               const numWidth = ctx.measureText(productData.barcodeValue).width;
-              ctx.fillText(productData.barcodeValue, (width - numWidth) / 2, 111);
+              ctx.fillText(productData.barcodeValue, (width - numWidth) / 2, 156);
             } catch(e) {
               console.error(e);
             }
           }
 
           ctx.strokeStyle = '#000000';
-          ctx.lineWidth = 1.5;
+          ctx.lineWidth = 2.5;
           ctx.beginPath();
-          ctx.moveTo(12, 118);
-          ctx.lineTo(width - 12, 118);
+          ctx.moveTo(14, 166);
+          ctx.lineTo(width - 14, 166);
           ctx.stroke();
 
           ctx.fillStyle = '#000000';
-          ctx.font = 'bold 12px Arial, sans-serif';
-          ctx.fillText('PRICE', 12, 137);
+          ctx.font = '900 19px Arial, Helvetica, sans-serif';
+          ctx.fillText('PRICE', 14, 198);
 
           ctx.fillStyle = '#000000';
-          ctx.font = 'bold 17px monospace';
+          ctx.font = '900 28px monospace';
           const priceStr = productData.currency + ' ' + productData.price;
           const priceWidth = ctx.measureText(priceStr).width;
-          ctx.fillText(priceStr, width - 12 - priceWidth, 137);
+          ctx.fillText(priceStr, width - 14 - priceWidth, 200);
 
           ctx.restore();
         }
@@ -601,21 +601,21 @@ export function printMultipleBarcodeStickers(products: any[], copies = 1, curren
 
         .sticker-row { display: flex; gap: 4mm; margin-bottom: 4mm; }
         .sticker {
-          width: 32mm; height: 22mm;
+          width: 38mm; height: 24mm;
           border: 2px solid #000000; border-radius: 1.5mm;
-          padding: 0.8mm; display: flex; flex-direction: column;
+          padding: 1mm; display: flex; flex-direction: column;
           justify-content: space-between; background: #ffffff; color: #000000;
           position: relative; box-sizing: border-box; font-family: Arial, Helvetica, sans-serif;
         }
-        .company-name { font-size: 7.5pt; font-weight: 900; color: #000000; text-align: center; margin-bottom: 0.5mm; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-transform: uppercase; letter-spacing: 0.3px; }
-        .encoded-price { position: absolute; top: 0.5mm; right: 0.8mm; font-size: 6pt; font-weight: 900; color: #000000; font-family: monospace; }
-        .product-info { display: flex; justify-content: space-between; font-size: 8pt; font-weight: 900; color: #000000; padding: 0 0.5mm; margin-bottom: 0.5mm; }
-        .product-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 18mm; font-weight: 900; color: #000000; }
+        .company-name { font-size: 8.5pt; font-weight: 900; color: #000000; text-align: center; margin-bottom: 0.5mm; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-transform: uppercase; letter-spacing: 0.3px; }
+        .encoded-price { position: absolute; top: 1mm; right: 1mm; font-size: 7pt; font-weight: 900; color: #000000; font-family: monospace; }
+        .product-info { display: flex; justify-content: space-between; font-size: 9pt; font-weight: 900; color: #000000; padding: 0 0.5mm; margin-bottom: 0.5mm; }
+        .product-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 22mm; font-weight: 900; color: #000000; }
         .product-code { white-space: nowrap; font-family: monospace; font-weight: 900; color: #000000; }
-        .barcode { width: 30mm; height: 10mm; display: flex; align-items: center; justify-content: center; }
-        .barcode svg { width: 100% !important; height: 100% !important; max-width: 30mm !important; }
-        .barcode-number { font-size: 7.5pt; text-align: center; font-weight: 900; color: #000000; font-family: monospace; letter-spacing: 0.5px; margin: 0.5mm 0; }
-        .price-container { text-align: center; font-size: 10pt; font-weight: 900; color: #000000; font-family: monospace; }
+        .barcode { width: 36mm; height: 11mm; display: flex; align-items: center; justify-content: center; }
+        .barcode svg { width: 100% !important; height: 100% !important; max-width: 36mm !important; }
+        .barcode-number { font-size: 8.5pt; text-align: center; font-weight: 900; color: #000000; font-family: monospace; letter-spacing: 0.5px; margin: 0.5mm 0; }
+        .price-container { text-align: center; font-size: 11.5pt; font-weight: 900; color: #000000; font-family: monospace; }
 
         @media print {
           * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color: #000000 !important; font-weight: 900 !important; }
@@ -693,8 +693,8 @@ export function printMultipleBarcodeStickers(products: any[], copies = 1, curren
           if (!canvas) return;
           const ctx = canvas.getContext('2d');
           const dpr = 4;
-          const width = 330;
-          const height = 150;
+          const width = 440;
+          const height = 220;
 
           canvas.width = width * dpr;
           canvas.height = height * dpr;
@@ -707,80 +707,80 @@ export function printMultipleBarcodeStickers(products: any[], copies = 1, curren
           ctx.fillRect(0, 0, width, height);
 
           ctx.strokeStyle = '#000000';
-          ctx.lineWidth = 2.5;
+          ctx.lineWidth = 3.5;
           ctx.beginPath();
           if (ctx.roundRect) {
-            ctx.roundRect(4, 4, width - 8, height - 8, 6);
+            ctx.roundRect(3, 3, width - 6, height - 6, 8);
           } else {
-            ctx.rect(4, 4, width - 8, height - 8);
+            ctx.rect(3, 3, width - 6, height - 6);
           }
           ctx.stroke();
 
           ctx.fillStyle = '#000000';
-          ctx.font = 'bold 15px Arial, sans-serif';
-          ctx.fillText(firstProductData.companyName.toUpperCase(), 12, 23);
+          ctx.font = '900 24px Arial, Helvetica, sans-serif';
+          ctx.fillText(firstProductData.companyName.toUpperCase(), 14, 30);
 
           if (firstProductData.encodedPrice) {
             ctx.fillStyle = '#000000';
-            ctx.font = 'bold 12px monospace';
+            ctx.font = '900 18px monospace';
             const costWidth = ctx.measureText(firstProductData.encodedPrice).width;
-            ctx.fillText(firstProductData.encodedPrice, width - 14 - costWidth, 23);
+            ctx.fillText(firstProductData.encodedPrice, width - 14 - costWidth, 30);
           }
 
           ctx.strokeStyle = '#000000';
-          ctx.lineWidth = 1.5;
+          ctx.lineWidth = 2.5;
           ctx.beginPath();
-          ctx.moveTo(12, 30);
-          ctx.lineTo(width - 12, 30);
+          ctx.moveTo(14, 40);
+          ctx.lineTo(width - 14, 40);
           ctx.stroke();
 
           ctx.fillStyle = '#000000';
-          ctx.font = 'bold 15px Arial, sans-serif';
+          ctx.font = '900 24px Arial, Helvetica, sans-serif';
           const nameTruncated = firstProductData.productName.length > 20 ? firstProductData.productName.substring(0, 18) + '...' : firstProductData.productName;
-          ctx.fillText(nameTruncated, 12, 47);
+          ctx.fillText(nameTruncated, 14, 66);
 
           ctx.fillStyle = '#000000';
-          ctx.font = 'bold 13px monospace';
+          ctx.font = '900 20px monospace';
           const codeText = '#' + firstProductData.productCode;
           const codeWidth = ctx.measureText(codeText).width;
-          ctx.fillText(codeText, width - 12 - codeWidth, 47);
+          ctx.fillText(codeText, width - 14 - codeWidth, 66);
 
           if (firstProductData.barcodeValue) {
             try {
               const tempCanvas = document.createElement('canvas');
               JsBarcode(tempCanvas, firstProductData.barcodeValue, {
-                format: "CODE128", width: 2.2, height: 48, displayValue: false, margin: 0, lineColor: "#000000"
+                format: "CODE128", width: 3.2, height: 64, displayValue: false, margin: 0, lineColor: "#000000"
               });
-              const bcWidth = Math.min(width - 32, tempCanvas.width / 2);
-              const bcHeight = 44;
+              const bcWidth = Math.min(width - 28, tempCanvas.width / 2);
+              const bcHeight = 64;
               const bcX = (width - bcWidth) / 2;
-              ctx.drawImage(tempCanvas, bcX, 52, bcWidth, bcHeight);
+              ctx.drawImage(tempCanvas, bcX, 74, bcWidth, bcHeight);
 
               ctx.fillStyle = '#000000';
-              ctx.font = 'bold 13px monospace';
+              ctx.font = '900 19px monospace';
               const numWidth = ctx.measureText(firstProductData.barcodeValue).width;
-              ctx.fillText(firstProductData.barcodeValue, (width - numWidth) / 2, 111);
+              ctx.fillText(firstProductData.barcodeValue, (width - numWidth) / 2, 156);
             } catch(e) {
               console.error(e);
             }
           }
 
           ctx.strokeStyle = '#000000';
-          ctx.lineWidth = 1.5;
+          ctx.lineWidth = 2.5;
           ctx.beginPath();
-          ctx.moveTo(12, 118);
-          ctx.lineTo(width - 12, 118);
+          ctx.moveTo(14, 166);
+          ctx.lineTo(width - 14, 166);
           ctx.stroke();
 
           ctx.fillStyle = '#000000';
-          ctx.font = 'bold 12px Arial, sans-serif';
-          ctx.fillText('PRICE', 12, 137);
+          ctx.font = '900 19px Arial, Helvetica, sans-serif';
+          ctx.fillText('PRICE', 14, 198);
 
           ctx.fillStyle = '#000000';
-          ctx.font = 'bold 17px monospace';
+          ctx.font = '900 28px monospace';
           const priceStr = firstProductData.currency + ' ' + firstProductData.price;
           const priceWidth = ctx.measureText(priceStr).width;
-          ctx.fillText(priceStr, width - 12 - priceWidth, 137);
+          ctx.fillText(priceStr, width - 14 - priceWidth, 200);
 
           ctx.restore();
         }
