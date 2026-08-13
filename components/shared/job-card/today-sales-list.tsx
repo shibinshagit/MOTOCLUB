@@ -341,10 +341,10 @@ export function TodaySalesList({ onOpenCreateModal }: { onOpenCreateModal?: () =
                               </h4>
                               
                                 <div className="space-y-3 text-sm text-slate-600">
-                                  {sale.job_card_number && (
+                                  {sale.tracking_id && (
                                     <div className="mb-4 bg-slate-50 p-3 rounded-lg border border-slate-100">
-                                      <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 block mb-1">Job Card #</span>
-                                      <p className="font-mono text-slate-800 text-sm font-bold">{sale.job_card_number}</p>
+                                      <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 block mb-1">Tracking ID</span>
+                                      <p className="font-mono text-slate-800 text-sm font-bold text-blue-700">{sale.tracking_id}</p>
                                     </div>
                                   )}
                                   <div>

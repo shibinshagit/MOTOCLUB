@@ -566,16 +566,19 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     setTotalAmount(finalTotal)
   }, [products, discountAmount, shipping.fulfillmentType, shipping.courierPaidExtra, originalSaleStatus, shipping.trackingId])
 
-  // Auto-calculate received amount based on paymentStatus and paymentMethod
+  // Auto-calculate received amount and balance amount based on paymentStatus and paymentMethod
   useEffect(() => {
     if (paymentStatus === "Paid" || paymentStatus === "Completed") {
       setReceivedAmount(totalAmount)
-    } else if (paymentStatus === "Cancelled") {
+      setBalanceAmount(0)
+    } else if (paymentStatus === "Cancelled" || paymentStatus === "Pending") {
       setReceivedAmount(0)
-    } else if (paymentStatus === "Pending") {
-      setReceivedAmount(0)
+      setBalanceAmount(totalAmount)
+    } else if (paymentStatus === "Credit") {
+      const currentReceived = paymentMethod === "COD" ? advanceAmount : receivedAmount
+      setBalanceAmount(Math.max(0, totalAmount - currentReceived))
     }
-  }, [paymentStatus, paymentMethod, totalAmount])
+  }, [paymentStatus, paymentMethod, totalAmount, advanceAmount, receivedAmount])
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat("en-US", {
@@ -1166,13 +1169,18 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
         })
 
         let parsedReceivedAmount = Number(sale.received_amount) || 0
-        if (!sale.received_amount && (sale.payment_status === "Paid" || sale.payment_status === "Completed" || sale.status === "Completed")) {
-          // Fallback for very old records that didn't store received_amount properly
+        let parsedBalanceAmount = Number(sale.balance_amount) || 0
+        
+        const isPaidStatus = sale.payment_status === "Paid" || sale.payment_status === "Completed" || sale.status === "Completed"
+        if (isPaidStatus) {
           parsedReceivedAmount = Number(sale.total_amount)
+          parsedBalanceAmount = 0
+        } else if (!sale.received_amount && sale.payment_status !== "Credit") {
+          parsedReceivedAmount = 0
+          parsedBalanceAmount = Number(sale.total_amount)
         }
         
         const parsedAdvanceAmount = Number(sale.advance_amount) || 0
-        const parsedBalanceAmount = Number(sale.balance_amount) || 0
         const mappedShipping = mapSaleShippingFromRecord(sale)
 
         const finalProducts = productRows.length > 0 ? productRows : [createEmptyProductRow()]
@@ -1295,6 +1303,14 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     try {
       if (isEditMode && editingSaleId) {
         // Update existing sale
+        const effectiveReceived = (paymentStatus === "Paid" || paymentStatus === "Completed")
+          ? totalAmount
+          : (paymentMethod === "COD" ? advanceAmount : receivedAmount)
+
+        const effectiveBalance = (paymentStatus === "Paid" || paymentStatus === "Completed")
+          ? 0
+          : Math.max(0, totalAmount - effectiveReceived)
+
         const saleData = {
           id: editingSaleId,
           customerId: customerId || null,
@@ -1307,65 +1323,62 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
           status: status,
           originalStatus: originalSaleStatus,
           discount: discountAmount,
-          receivedAmount: receivedAmount,
+          receivedAmount: effectiveReceived,
           advanceAmount: advanceAmount,
-          balanceAmount: balanceAmount,
+          balanceAmount: effectiveBalance,
           staffId: finalStaffId,
           ...shipping,
         }
 
-        const result = await updateSale(saleData)
+        const addressParts = [
+          shipping.shippingStreet,
+          shipping.shippingLandmark,
+          shipping.shippingCity,
+          shipping.shippingPincode
+        ].filter(Boolean)
+        const finalAddress = shipping.shippingAddress || addressParts.join(", ")
 
-        if (result.success) {
-          markInventoryStale(dispatch)
-          setFormAlert({
-            type: "success",
-            message: "Sale updated successfully",
-          })
-          toast({
-            title: "Success",
-            description: "Sale updated successfully",
-          })
+        // Show modal INSTANTLY (0ms delay) so update works in background
+        setWhatsappModalData({
+          saleId: editingSaleId,
+          trackingId: shipping.trackingId || "",
+          customerName: customerName || "",
+          customerPhone: customerPhone || "",
+          shippingAddress: finalAddress,
+          products: products.filter(p => p.productId !== null),
+          totalAmount: Number(totalAmount)
+        })
 
-          setTimeout(() => {
-            const isJobCard = result.data?.sale_type === "job_card" || (result.data?.tracking_id || "").startsWith("JC-")
-            const origDelivery = result.data?.original_delivery_status || "Pending"
-            const wasPendingDelivery = origDelivery.toLowerCase() === "pending"
-            
-            if (isJobCard && wasPendingDelivery) {
-              const addressParts = [
-                shipping.shippingStreet,
-                shipping.shippingLandmark,
-                shipping.shippingCity,
-                shipping.shippingPincode
-              ].filter(Boolean)
-              
-              const finalAddress = shipping.shippingAddress || addressParts.join(", ")
-              
-              setWhatsappModalData({
-                saleId: editingSaleId,
-                trackingId: result.data?.tracking_id || "",
-                customerName: customerName || "",
-                customerPhone: customerPhone || "",
-                shippingAddress: finalAddress,
-                products: products.filter(p => p.productId !== null),
-                totalAmount: Number(totalAmount)
-              })
-            } else {
-              finalizeDraftAfterSave()
+        // Run updateSale in the background
+        updateSale(saleData).then((result) => {
+          setIsSubmitting(false)
+          if (result.success) {
+            markInventoryStale(dispatch)
+            toast({
+              title: "Success",
+              description: "Sale updated successfully",
+            })
+            if (result.data?.tracking_id) {
+              setWhatsappModalData((prev) => prev ? { ...prev, trackingId: result.data.tracking_id } : null)
             }
-          }, 1500)
-        } else {
-          setFormAlert({
-            type: "error",
-            message: result.message || "Failed to update the sale",
-          })
+          } else {
+            toast({
+              title: "Error",
+              description: result.message || "Failed to update the sale",
+              variant: "destructive",
+            })
+          }
+        }).catch((err) => {
+          setIsSubmitting(false)
+          console.error("Error updating sale:", err)
           toast({
             title: "Error",
-            description: result.message || "Failed to update the sale",
+            description: "An error occurred while updating the sale",
             variant: "destructive",
           })
-        }
+        })
+
+        return
       } else {
         // Add new sale
         const saleData = {
@@ -2498,16 +2511,25 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                       min="0"
                                       max={totalAmount}
                                       step="0.01"
-                                      value={paymentMethod === "COD" ? advanceAmount : receivedAmount}
+                                      value={paymentMethod === "COD" ? advanceAmount : (paymentStatus === "Paid" || paymentStatus === "Completed" ? totalAmount : receivedAmount)}
                                       onChange={(e) => {
                                         const val = Number.parseFloat(e.target.value) || 0
                                         if (paymentMethod === "COD") {
                                           setAdvanceAmount(val)
                                           setReceivedAmount(val)
-                                          setBalanceAmount(totalAmount - val)
+                                          const newBal = Math.max(0, totalAmount - val)
+                                          setBalanceAmount(newBal)
                                         } else {
                                           setReceivedAmount(val)
-                                          setBalanceAmount(totalAmount - val)
+                                          const newBal = Math.max(0, totalAmount - val)
+                                          setBalanceAmount(newBal)
+                                          if (val >= totalAmount && totalAmount > 0) {
+                                            setPaymentStatus("Paid")
+                                          } else if (val === 0) {
+                                            setPaymentStatus("Pending")
+                                          } else {
+                                            setPaymentStatus("Credit")
+                                          }
                                         }
                                       }}
                                       className="h-8 text-xs bg-white border-gray-300 text-gray-900"
@@ -2522,7 +2544,20 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                     <select
                                       className="flex h-8 w-full items-center justify-between rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-900"
                                       value={paymentStatus}
-                                      onChange={(e) => setPaymentStatus(e.target.value)}
+                                      onChange={(e) => {
+                                        const newStatus = e.target.value
+                                        setPaymentStatus(newStatus)
+                                        if (newStatus === "Paid" || newStatus === "Completed") {
+                                          setReceivedAmount(totalAmount)
+                                          setBalanceAmount(0)
+                                        } else if (newStatus === "Pending") {
+                                          setReceivedAmount(0)
+                                          setBalanceAmount(totalAmount)
+                                        } else if (newStatus === "Credit") {
+                                          const currentRec = paymentMethod === "COD" ? advanceAmount : receivedAmount
+                                          setBalanceAmount(Math.max(0, totalAmount - currentRec))
+                                        }
+                                      }}
                                     >
                                       <option value="Paid">Paid</option>
                                       <option value="Pending">Pending</option>
@@ -2531,12 +2566,19 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                   </div>
                                 </div>
 
-                                <div className="flex justify-between items-center bg-gray-50 p-2 rounded-md border border-gray-200">
-                                  <span className="text-xs font-medium text-gray-700">Balance Amount:</span>
-                                  <span className={`text-xs font-bold ${balanceAmount > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                                    {deviceCurrencyState} {balanceAmount.toFixed(2)}
-                                  </span>
-                                </div>
+                                {(() => {
+                                  const displayBalance = (paymentStatus === "Paid" || paymentStatus === "Completed")
+                                    ? 0
+                                    : Math.max(0, totalAmount - (paymentMethod === "COD" ? advanceAmount : receivedAmount))
+                                  return (
+                                    <div className="flex justify-between items-center bg-gray-50 p-2 rounded-md border border-gray-200">
+                                      <span className="text-xs font-medium text-gray-700">Balance Amount:</span>
+                                      <span className={`text-xs font-bold ${displayBalance > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                                        {deviceCurrencyState} {displayBalance.toFixed(2)}
+                                      </span>
+                                    </div>
+                                  )
+                                })()}
                               </div>
 
                                 <SaleShippingSection
