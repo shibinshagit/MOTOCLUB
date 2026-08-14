@@ -18,11 +18,16 @@ export async function getPartnerSales(partnerId: number) {
         s.shipping_address,
         s.expense_courier,
         s.weight_kg,
-        c.name as customer_name,
-        c.phone as customer_phone
+        s.courier_service_name,
+        COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name,
+        COALESCE(NULLIF(s.customer_phone_override, ''), c.phone) as customer_phone
       FROM sales s
       LEFT JOIN customers c ON s.customer_id = c.id
-      WHERE s.courier_partner_id = (SELECT linked_partner_id FROM staff WHERE id = ${partnerId})
+      WHERE (
+        s.courier_partner_id = ${partnerId}
+        OR s.courier_partner_id = (SELECT linked_partner_id FROM staff WHERE id = ${partnerId} AND linked_partner_id IS NOT NULL)
+        OR (s.courier_service_id IS NOT NULL AND s.courier_service_id = (SELECT linked_partner_id FROM staff WHERE id = ${partnerId} AND linked_partner_id IS NOT NULL))
+      )
       ORDER BY s.created_at DESC
     `
 
@@ -96,23 +101,35 @@ export async function getPartnerDashboardStats(partnerId: number) {
       SELECT 
         COUNT(*) as total_orders,
         COUNT(*) FILTER (WHERE delivery_status IN ('Pending', 'Paid', 'Packed', 'Shipped', 'In transit')) as active_orders
-      FROM sales
-      WHERE courier_partner_id = (SELECT linked_partner_id FROM staff WHERE id = ${partnerId})
+      FROM sales s
+      WHERE (
+        s.courier_partner_id = ${partnerId}
+        OR s.courier_partner_id = (SELECT linked_partner_id FROM staff WHERE id = ${partnerId} AND linked_partner_id IS NOT NULL)
+        OR (s.courier_service_id IS NOT NULL AND s.courier_service_id = (SELECT linked_partner_id FROM staff WHERE id = ${partnerId} AND linked_partner_id IS NOT NULL))
+      )
     `
     
     // Total Earnings (sum of expense_courier)
     const earningsResult = await sql`
       SELECT SUM(COALESCE(expense_courier, 0)) as total_earnings
-      FROM sales
-      WHERE courier_partner_id = (SELECT linked_partner_id FROM staff WHERE id = ${partnerId})
+      FROM sales s
+      WHERE (
+        s.courier_partner_id = ${partnerId}
+        OR s.courier_partner_id = (SELECT linked_partner_id FROM staff WHERE id = ${partnerId} AND linked_partner_id IS NOT NULL)
+        OR (s.courier_service_id IS NOT NULL AND s.courier_service_id = (SELECT linked_partner_id FROM staff WHERE id = ${partnerId} AND linked_partner_id IS NOT NULL))
+      )
     `
     
     // Today's Activity (orders updated today or assigned today)
     const activityResult = await sql`
       SELECT COUNT(*) as today_activity
-      FROM sales
-      WHERE courier_partner_id = (SELECT linked_partner_id FROM staff WHERE id = ${partnerId})
-      AND (DATE(created_at) = ${today} OR DATE(updated_at) = ${today})
+      FROM sales s
+      WHERE (
+        s.courier_partner_id = ${partnerId}
+        OR s.courier_partner_id = (SELECT linked_partner_id FROM staff WHERE id = ${partnerId} AND linked_partner_id IS NOT NULL)
+        OR (s.courier_service_id IS NOT NULL AND s.courier_service_id = (SELECT linked_partner_id FROM staff WHERE id = ${partnerId} AND linked_partner_id IS NOT NULL))
+      )
+      AND (DATE(s.created_at) = ${today} OR DATE(s.updated_at) = ${today})
     `
 
     return {
@@ -149,8 +166,12 @@ export async function getPartnerSalesAnalytics(partnerId: number, monthStr: stri
         TO_CHAR(sale_date, 'YYYY-MM-DD') as date,
         SUM(COALESCE(expense_courier, 0)) as earnings_amount,
         COUNT(*) as order_count
-      FROM sales
-      WHERE courier_partner_id = (SELECT linked_partner_id FROM staff WHERE id = ${partnerId})
+      FROM sales s
+      WHERE (
+        s.courier_partner_id = ${partnerId}
+        OR s.courier_partner_id = (SELECT linked_partner_id FROM staff WHERE id = ${partnerId} AND linked_partner_id IS NOT NULL)
+        OR (s.courier_service_id IS NOT NULL AND s.courier_service_id = (SELECT linked_partner_id FROM staff WHERE id = ${partnerId} AND linked_partner_id IS NOT NULL))
+      )
         AND sale_date >= ${startDate}::date
         AND sale_date < ${endDate}::date
       GROUP BY TO_CHAR(sale_date, 'YYYY-MM-DD')

@@ -146,13 +146,20 @@ export default function DeviceStaffTab({ deviceId }: DeviceStaffTabProps) {
       if (!result.success) {
         throw new Error(result.message || "Failed to fetch staff")
       }
-      setStaff(result.data as StaffMember[])
+      const staffList = (result.data || []) as StaffMember[]
+      setStaff(staffList)
 
-      // Also fetch courier partners
+      // Also fetch courier services
       const { getMasterDataItems } = await import("@/app/actions/master-data-actions")
       const partnersResult = await getMasterDataItems(deviceId, "courier")
       if (partnersResult.success) {
-        setPartners(partnersResult.data.map((p: any) => ({ id: p.id, name: p.name })))
+        const staffPartnerNames = new Set(
+          staffList.filter((s) => s.role === "partner").map((s) => s.name.toLowerCase().trim()),
+        )
+        const courierServicesOnly = (partnersResult.data || []).filter(
+          (p: any) => !staffPartnerNames.has(String(p.name || "").toLowerCase().trim()),
+        )
+        setPartners(courierServicesOnly.map((p: any) => ({ id: p.id, name: p.name })))
       }
     } catch (error) {
       notifyError(toast, error instanceof Error ? error.message : "Failed to load staff")
@@ -195,10 +202,10 @@ export default function DeviceStaffTab({ deviceId }: DeviceStaffTabProps) {
       name: member.name || "",
       phone: member.phone || "",
       email: member.email || "",
-      role: member.role === "admin" ? "admin" : "staff",
+      role: member.role === "partner" ? "partner" : member.role === "admin" ? "admin" : "staff",
       restrictedPages: parseStringArray<StaffPageId>(member.restricted_pages),
       restrictedValues:
-        member.role === "admin"
+        (member.role === "admin" || member.role === "partner")
           ? []
           : parseStringArray<StaffValueRestriction>(member.restricted_values),
       position: member.position || "",
@@ -280,17 +287,18 @@ export default function DeviceStaffTab({ deviceId }: DeviceStaffTabProps) {
         linkedPartnerId: form.linkedPartnerId ? Number(form.linkedPartnerId) : null,
       }
 
-      // Handle auto-create partner
-      const partnerName = form.newPartnerName.trim() || form.name.trim()
-      if (form.role === "partner" && !form.linkedPartnerId && partnerName) {
+      // Handle auto-create new courier service if specified
+      const newCourierServiceName = form.newPartnerName.trim()
+      if (form.role === "partner" && !form.linkedPartnerId && newCourierServiceName) {
         const { createMasterDataItem } = await import("@/app/actions/master-data-actions")
         const newPartnerResult = await createMasterDataItem(deviceId, deviceId, {
           category: "courier",
-          name: partnerName,
+          name: newCourierServiceName,
           isActive: true
         })
         if (newPartnerResult.success && newPartnerResult.data) {
           payload.linkedPartnerId = newPartnerResult.data.id
+          setPartners((prev) => [...prev, { id: newPartnerResult.data.id, name: newPartnerResult.data.name }])
         }
       }
 
@@ -579,20 +587,20 @@ export default function DeviceStaffTab({ deviceId }: DeviceStaffTabProps) {
             <div className="mt-4 space-y-4 rounded-lg border border-gray-200 bg-purple-50/50 p-4">
               <div>
                 <h4 className="text-sm font-medium text-gray-900 flex items-center gap-2">
-                  Link to Service (Partner)
+                  Link to Courier Service
                 </h4>
                 <p className="mt-1 text-xs text-gray-500 mb-4">
-                  Select an existing courier partner service to link this login to. Leave empty to auto-create a new one based on the Name above.
+                  Select an existing courier service to link this login to, or enter a new courier service name below.
                 </p>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <Label className={ADMIN_DIALOG_LABEL_CLASS}>Existing Partner Service</Label>
+                    <Label className={ADMIN_DIALOG_LABEL_CLASS}>Existing Courier Service</Label>
                     <select
                       value={form.linkedPartnerId}
                       onChange={(e) => setForm(prev => ({ ...prev, linkedPartnerId: e.target.value, newPartnerName: "" }))}
                       className={`mt-1 h-10 w-full rounded-md border px-3 text-sm ${ADMIN_DIALOG_INPUT_CLASS}`}
                     >
-                      <option value="">-- Create New --</option>
+                      <option value="">-- None --</option>
                       {partners.map(p => (
                         <option key={p.id} value={p.id}>{p.name}</option>
                       ))}
@@ -600,11 +608,11 @@ export default function DeviceStaffTab({ deviceId }: DeviceStaffTabProps) {
                   </div>
                   {!form.linkedPartnerId && (
                     <div>
-                      <Label className={ADMIN_DIALOG_LABEL_CLASS}>New Partner Name</Label>
+                      <Label className={ADMIN_DIALOG_LABEL_CLASS}>New Courier Service Name</Label>
                       <Input
                         value={form.newPartnerName}
                         onChange={(e) => setForm(prev => ({ ...prev, newPartnerName: e.target.value }))}
-                        placeholder={form.name || "Enter new partner name"}
+                        placeholder="Enter new courier service name"
                         className={`mt-1 ${ADMIN_DIALOG_INPUT_CLASS}`}
                       />
                     </div>

@@ -40,8 +40,8 @@ export default function SaleShippingSection({
   customerPhone = "",
 }: SaleShippingSectionProps) {
   const shipping = { ...DEFAULT_SALE_SHIPPING, ...value }
-  const [courierPartners, setCourierPartners] = useState<MasterDataItem[]>([])
-  const [allServices, setAllServices] = useState<any[]>([])
+  const [courierPartners, setCourierPartners] = useState<{ id: number; name: string; linked_partner_id?: number | null; tracking_url_template?: string | null }[]>([])
+  const [courierServices, setCourierServices] = useState<{ id: number; name: string }[]>([])
   const [packagingTypes, setPackagingTypes] = useState<MasterDataItem[]>([])
   
   const [isCreatingService, setIsCreatingService] = useState(false)
@@ -52,30 +52,72 @@ export default function SaleShippingSection({
     console.log("[SaleShippingSection] Mounted with deviceId:", deviceId)
     if (!deviceId) return
 
-    Promise.all([
-      getMasterDataItems(deviceId, "courier"), 
-      getMasterDataItems(deviceId, "packaging"),
-      getDeviceServices(deviceId)
-    ]).then(
-      ([courierResult, packagingResult, servicesResult]) => {
-        console.log("[SaleShippingSection] Courier Result:", courierResult)
-        if (courierResult.success) {
-          setCourierPartners((courierResult.data || []).filter((item: any) => item.is_active !== false))
-        }
-        if (packagingResult.success) {
-          setPackagingTypes((packagingResult.data || []).filter((item: any) => item.is_active !== false))
-        }
-        if (servicesResult.success) {
-          setAllServices(servicesResult.data || [])
-        }
-      },
-    )
-  }, [deviceId])
+    let isMounted = true
 
-  const availableServices = useMemo(() => {
-    if (!shipping.courierPartnerId) return []
-    return allServices.filter(s => s.partner_id === shipping.courierPartnerId)
-  }, [allServices, shipping.courierPartnerId])
+    const loadData = async () => {
+      try {
+        const { getDeviceStaff } = await import("@/app/actions/staff-actions")
+        const { getMasterDataItems } = await import("@/app/actions/master-data-actions")
+        const { getDeviceServices } = await import("@/app/actions/service-actions")
+
+        const [staffResult, courierMasterResult, packagingResult, servicesResult] = await Promise.all([
+          getDeviceStaff(deviceId),
+          getMasterDataItems(deviceId, "courier"),
+          getMasterDataItems(deviceId, "packaging"),
+          getDeviceServices(deviceId),
+        ])
+
+        if (!isMounted) return
+
+        // 1. COURIER PARTNERS: Get active staff members with role = 'partner'
+        let partners: { id: number; name: string; linked_partner_id?: number | null; tracking_url_template?: string | null }[] = []
+        if (staffResult.success && Array.isArray(staffResult.data)) {
+          partners = staffResult.data
+            .filter((s: any) => s.role === "partner" && s.is_active !== false)
+            .map((s: any) => ({
+              id: s.id,
+              name: s.name,
+              linked_partner_id: s.linked_partner_id,
+            }))
+        }
+        setCourierPartners(partners)
+
+        // 2. COURIER SERVICES: Get master data courier items (excluding partner staff names) + services table items
+        const staffNames = new Set(partners.map((p) => p.name.toLowerCase().trim()))
+        const servicesList: { id: number; name: string }[] = []
+
+        if (courierMasterResult.success && Array.isArray(courierMasterResult.data)) {
+          courierMasterResult.data.forEach((item: any) => {
+            if (item.is_active !== false && item.name && !staffNames.has(String(item.name).toLowerCase().trim())) {
+              servicesList.push({ id: item.id, name: item.name })
+            }
+          })
+        }
+
+        if (servicesResult.success && Array.isArray(servicesResult.data)) {
+          servicesResult.data.forEach((s: any) => {
+            if (s.name && !servicesList.some((existing) => existing.name.toLowerCase() === s.name.toLowerCase())) {
+              servicesList.push({ id: s.id, name: s.name })
+            }
+          })
+        }
+
+        setCourierServices(servicesList)
+
+        if (packagingResult.success && Array.isArray(packagingResult.data)) {
+          setPackagingTypes(packagingResult.data.filter((item: any) => item.is_active !== false))
+        }
+      } catch (error) {
+        console.error("[SaleShippingSection] Error fetching shipping data:", error)
+      }
+    }
+
+    loadData()
+
+    return () => {
+      isMounted = false
+    }
+  }, [deviceId])
 
   const selectedCourierPartner = useMemo(
     () => courierPartners.find((courier) => courier.id === shipping.courierPartnerId) || null,
@@ -106,31 +148,45 @@ export default function SaleShippingSection({
     })
   }
 
-  const handleCourierPartnerChange = (partnerId: string) => {
-    if (!partnerId) {
+  const handleCourierPartnerChange = (partnerIdStr: string) => {
+    if (!partnerIdStr) {
       patch({ courierPartnerId: null, courierServiceId: null, courierServiceName: "" })
       return
     }
-    const partner = courierPartners.find((item) => String(item.id) === partnerId)
+    const partnerId = Number(partnerIdStr)
+    const partner = courierPartners.find((item) => item.id === partnerId)
+
+    let autoServiceId = shipping.courierServiceId
+    let autoServiceName = shipping.courierServiceName
+
+    if (partner?.linked_partner_id) {
+      const linkedService = courierServices.find((s) => s.id === partner.linked_partner_id)
+      if (linkedService) {
+        autoServiceId = linkedService.id
+        autoServiceName = linkedService.name
+      }
+    }
+
     patch({
       courierPartnerId: partner?.id || null,
-      courierServiceId: null,
-      courierServiceName: "",
+      courierServiceId: autoServiceId,
+      courierServiceName: autoServiceName,
       fulfillmentType: "ship",
     })
   }
 
-  const handleCourierServiceChange = (serviceId: string) => {
-    if (serviceId === "create_new") {
+  const handleCourierServiceChange = (serviceIdStr: string) => {
+    if (serviceIdStr === "create_new") {
       setIsCreatingService(true)
       return
     }
-    if (!serviceId) {
+    if (!serviceIdStr) {
       patch({ courierServiceId: null, courierServiceName: "" })
       return
     }
 
-    const service = availableServices.find((item) => String(item.id) === serviceId)
+    const serviceId = Number(serviceIdStr)
+    const service = courierServices.find((item) => item.id === serviceId)
     patch({
       courierServiceId: service?.id || null,
       courierServiceName: service?.name || "",
@@ -138,18 +194,17 @@ export default function SaleShippingSection({
   }
 
   const handleCreateService = async () => {
-    if (!deviceId || !shipping.courierPartnerId || !newServiceName.trim()) return
+    if (!deviceId || !newServiceName.trim()) return
     try {
-      const result = await addService({
+      const { createMasterDataItem } = await import("@/app/actions/master-data-actions")
+      const result = await createMasterDataItem(deviceId, deviceId, {
+        category: "courier",
         name: newServiceName.trim(),
-        price: Number(newServicePrice) || 0,
-        deviceId,
-        userId: deviceId, // fallback
-        partnerId: shipping.courierPartnerId,
+        isActive: true,
       })
       if (result.success && result.data) {
-        const newService = { ...result.data, partner_id: shipping.courierPartnerId }
-        setAllServices(prev => [...prev, newService])
+        const newService = { id: result.data.id, name: result.data.name }
+        setCourierServices((prev) => [...prev, newService])
         patch({
           courierServiceId: newService.id,
           courierServiceName: newService.name,
@@ -238,16 +293,15 @@ export default function SaleShippingSection({
                     <select
                       value={shipping.courierServiceId ? String(shipping.courierServiceId) : ""}
                       onChange={(e) => handleCourierServiceChange(e.target.value)}
-                      disabled={!shipping.courierPartnerId}
-                      className="flex h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm font-bold text-slate-900 disabled:opacity-50"
+                      className="flex h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm font-bold text-slate-900"
                     >
                       <option value="" className="font-normal">Select service</option>
-                      {availableServices.map((service) => (
+                      {courierServices.map((service) => (
                         <option key={service.id} value={service.id}>
                           {service.name}
                         </option>
                       ))}
-                      {shipping.courierPartnerId && <option value="create_new">+ Create New Courier Service</option>}
+                      <option value="create_new">+ Create New Courier Service</option>
                     </select>
                   )}
                 </div>
@@ -390,16 +444,15 @@ export default function SaleShippingSection({
                 <select
                   value={shipping.courierServiceId ? String(shipping.courierServiceId) : ""}
                   onChange={(e) => handleCourierServiceChange(e.target.value)}
-                  disabled={!shipping.courierPartnerId}
-                  className="flex h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-900 disabled:opacity-50"
+                  className="flex h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-900"
                 >
                   <option value="">Select service</option>
-                  {availableServices.map((service) => (
+                  {courierServices.map((service) => (
                     <option key={service.id} value={service.id}>
                       {service.name}
                     </option>
                   ))}
-                  {shipping.courierPartnerId && <option value="create_new">+ Create New Courier Service</option>}
+                  <option value="create_new">+ Create New Courier Service</option>
                 </select>
               )}
             </div>

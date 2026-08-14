@@ -277,9 +277,14 @@ export function TodaySalesList({ onOpenCreateModal }: { onOpenCreateModal?: () =
                       </td>
                       <td className="whitespace-nowrap px-4 py-4">
                         <div className="flex flex-col items-start gap-1">
-                          <span className="text-sm text-slate-600 font-medium">
-                            {sale.tracking_id}
+                          <span className="text-sm font-mono text-slate-600 font-medium">
+                            {sale.tracking_id || "—"}
                           </span>
+                          {sale.courier_service_name && (
+                            <span className="text-xs font-sans font-bold text-blue-600">
+                              {sale.courier_service_name}
+                            </span>
+                          )}
                           <span className="text-[10px] font-bold text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded-full">
                             #{sale.id}
                           </span>
@@ -341,10 +346,20 @@ export function TodaySalesList({ onOpenCreateModal }: { onOpenCreateModal?: () =
                               </h4>
                               
                                 <div className="space-y-3 text-sm text-slate-600">
-                                  {sale.tracking_id && (
-                                    <div className="mb-4 bg-slate-50 p-3 rounded-lg border border-slate-100">
-                                      <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 block mb-1">Tracking ID</span>
-                                      <p className="font-mono text-slate-800 text-sm font-bold text-blue-700">{sale.tracking_id}</p>
+                                  {(sale.tracking_id || sale.courier_service_name) && (
+                                    <div className="mb-4 bg-slate-50 p-3 rounded-lg border border-slate-100 space-y-2">
+                                      {sale.courier_service_name && (
+                                        <div>
+                                          <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 block mb-0.5">Courier Service</span>
+                                          <p className="font-sans text-blue-600 text-sm font-bold">{sale.courier_service_name}</p>
+                                        </div>
+                                      )}
+                                      {sale.tracking_id && (
+                                        <div>
+                                          <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 block mb-0.5">Tracking ID</span>
+                                          <p className="font-mono text-blue-700 text-sm font-bold">{sale.tracking_id}</p>
+                                        </div>
+                                      )}
                                     </div>
                                   )}
                                   <div>

@@ -141,6 +141,7 @@ export default function SalesOrdersTab() {
     const term = searchTerm.toLowerCase()
     return (
       sale.tracking_id?.toLowerCase().includes(term) ||
+      sale.courier_service_name?.toLowerCase().includes(term) ||
       sale.customer_name?.toLowerCase().includes(term) ||
       sale.customer_phone?.toLowerCase().includes(term) ||
       sale.id?.toString().includes(term)
@@ -367,6 +368,11 @@ export default function SalesOrdersTab() {
                             deliveryStatus={sale.delivery_status}
                             onUpdate={fetchSales}
                           />
+                          {sale.courier_service_name && (
+                            <span className="block font-sans text-xs font-bold text-blue-600 mt-0.5">
+                              {sale.courier_service_name}
+                            </span>
+                          )}
                         </td>
                         <td className="whitespace-nowrap px-2 py-2.5 text-center font-medium text-slate-700">{itemQuantity}</td>
                         <td className="whitespace-nowrap px-3 py-2.5 text-right font-bold text-slate-900">
@@ -424,10 +430,20 @@ export default function SalesOrdersTab() {
                                 </h4>
                                 
                                 <div className="space-y-3 text-sm text-slate-600">
-                                  {sale.tracking_id && (
-                                    <div className="mb-4 bg-slate-50 p-3 rounded-lg border border-slate-100">
-                                      <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 block mb-1">Tracking ID</span>
-                                      <p className="font-mono text-slate-800 text-sm font-bold text-blue-700">{sale.tracking_id}</p>
+                                  {(sale.tracking_id || sale.courier_service_name) && (
+                                    <div className="mb-4 bg-slate-50 p-3 rounded-lg border border-slate-100 space-y-2">
+                                      {sale.courier_service_name && (
+                                        <div>
+                                          <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 block mb-0.5">Courier Service</span>
+                                          <p className="font-sans text-blue-600 text-sm font-bold">{sale.courier_service_name}</p>
+                                        </div>
+                                      )}
+                                      {sale.tracking_id && (
+                                        <div>
+                                          <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 block mb-0.5">Tracking ID</span>
+                                          <p className="font-mono text-blue-700 text-sm font-bold">{sale.tracking_id}</p>
+                                        </div>
+                                      )}
                                     </div>
                                   )}
                                   <div>
