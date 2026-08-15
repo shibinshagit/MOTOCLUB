@@ -7,6 +7,7 @@ import { markJobCardPaid } from "@/app/actions/job-card-actions"
 import { useToast } from "@/components/ui/use-toast"
 import { useSelector } from "react-redux"
 import { selectDeviceName } from "@/store/slices/deviceSlice"
+import { getPublicTrackingUrl } from "@/lib/shipping/tracking-url"
 
 interface JobCardWhatsappConfirmationProps {
   isShipping?: boolean
@@ -42,8 +43,7 @@ export function JobCardWhatsappConfirmation({
   const productsList = products.map((p, i) => `${i + 1}. ${p.productName}`).join(",\n")
 
   const tokenToUse = trackingToken || trackingId
-  const originStr = typeof window !== "undefined" && window.location?.origin ? window.location.origin : ""
-  const trackingUrl = tokenToUse ? `${originStr}/track/${encodeURIComponent(tokenToUse)}` : ""
+  const trackingUrl = getPublicTrackingUrl(tokenToUse) || ""
 
   const trackingLinkSection = trackingUrl
     ? `\n\nTrack your shipment:\n${trackingUrl}`

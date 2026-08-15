@@ -18,6 +18,7 @@ import { DeliveryStatusSelect } from "@/components/sales/delivery-status-select"
 import { TrackingCell } from "@/components/sales/tracking-cell"
 import { format } from "date-fns"
 import { formatPhoneNumber, parseSaleDateTime } from "@/lib/utils"
+import { getPublicTrackingUrl } from "@/lib/shipping/tracking-url"
 
 export function TodaySalesList({ onOpenCreateModal }: { onOpenCreateModal?: () => void }) {
   const currency = useSelector(selectDeviceCurrency)
@@ -92,8 +93,9 @@ export function TodaySalesList({ onOpenCreateModal }: { onOpenCreateModal?: () =
     if (phone.length === 10 && phone.startsWith("0")) phone = "971" + phone.substring(1)
     
     const tokenOrId = sale.tracking_token || sale.tracking_id
-    const trackingLink = tokenOrId && typeof window !== "undefined" && window.location?.origin
-      ? `\n\nTrack your shipment:\n${window.location.origin}/track/${encodeURIComponent(tokenOrId)}`
+    const trackingUrl = getPublicTrackingUrl(tokenOrId)
+    const trackingLink = trackingUrl
+      ? `\n\nTrack your shipment:\n${trackingUrl}`
       : ""
 
     const message = `Hello ${sale.customer_name || 'Customer'},\n\nYour Job Card has been created.\nOrder Number: #${sale.id}\nTracking ID: ${sale.tracking_id || 'N/A'}${trackingLink}\n\nThank you for choosing our service!`
