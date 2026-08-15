@@ -106,7 +106,7 @@ function ProductsExcelTable({
       name: (p: any) => p.name || "",
       company: (p: any) => p.company_name || "No Company",
       category: (p: any) => p.category || "Uncategorized",
-      retail: (p: any) => formatMoney(p.price),
+      retail: (p: any) => formatMoney(p.price || p.mrp || p.msp || 0),
       cost: (p: any) => formatMoney(p.wholesale_price || 0),
       stock: (p: any) => String(Number(p.stock || 0)),
       other: (p: any) => String(Number(p.other_devices_stock || 0)),

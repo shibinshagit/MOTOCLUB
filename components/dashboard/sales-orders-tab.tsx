@@ -339,7 +339,41 @@ export default function SalesOrdersTab() {
                           <div className="flex flex-col gap-0.5">
                             <div className="flex items-center gap-1.5 font-bold text-blue-700">
                               <span>#{sale.id}</span>
+                              {sale.source === "ECOMMERCE" && (
+                                <Badge variant="outline" className="text-[10px] px-1 py-0 bg-indigo-50 text-indigo-700 border-indigo-200 font-semibold">
+                                  ECOMMERCE
+                                </Badge>
+                              )}
                             </div>
+                            {sale.return_status && (
+                              <div className="mt-0.5">
+                                {sale.return_status === "pending" && (
+                                  <Badge className="bg-amber-100 text-amber-800 border-amber-300 text-[10px] px-1.5 py-0">
+                                    Return: Pending Review
+                                  </Badge>
+                                )}
+                                {sale.return_status === "approved" && (
+                                  <Badge className="bg-emerald-100 text-emerald-800 border-emerald-300 text-[10px] px-1.5 py-0">
+                                    Return: Approved
+                                  </Badge>
+                                )}
+                                {sale.return_status === "rejected" && (
+                                  <Badge className="bg-rose-100 text-rose-800 border-rose-300 text-[10px] px-1.5 py-0">
+                                    Return: Rejected
+                                  </Badge>
+                                )}
+                                {sale.return_status === "received" && (
+                                  <Badge className="bg-blue-100 text-blue-800 border-blue-300 text-[10px] px-1.5 py-0">
+                                    Return: Received
+                                  </Badge>
+                                )}
+                                {sale.return_status === "completed" && (
+                                  <Badge className="bg-purple-100 text-purple-800 border-purple-300 text-[10px] px-1.5 py-0">
+                                    Return: Completed
+                                  </Badge>
+                                )}
+                              </div>
+                            )}
                           </div>
                         </td>
                         <td className="whitespace-nowrap px-3 py-2.5">

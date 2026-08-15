@@ -189,14 +189,14 @@ export default function StaffViewProductModal({
   return (
     <>
       <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-        <DialogContent className="max-w-4xl p-0 overflow-hidden bg-slate-50 flex flex-col max-h-[90vh]">
-          <DialogHeader className="px-6 py-4 border-b bg-white shrink-0">
+        <DialogContent className="w-[95vw] sm:max-w-4xl p-0 overflow-hidden bg-slate-50 flex flex-col max-h-[92vh]">
+          <DialogHeader className="px-4 sm:px-6 py-4 border-b bg-white shrink-0">
             <DialogTitle className="text-lg font-semibold text-slate-800">
               {product.name}
             </DialogTitle>
           </DialogHeader>
 
-          <div className="flex-1 overflow-y-auto p-6">
+          <div className="flex-1 overflow-y-auto p-3 sm:p-6">
             <div className="space-y-6">
               
               <div className={cn("grid grid-cols-2 gap-2", msp > 0 ? "md:grid-cols-3" : "md:grid-cols-2")}>

@@ -7,28 +7,46 @@ import { sql } from "@/lib/db"
 export async function getDeviceProductStock(productId: number, deviceId: number): Promise<number> {
   const rows = await sql`
     SELECT 
-      (
-        COALESCE((
+      CASE 
+        WHEN EXISTS (
+          SELECT 1 FROM product_batch_device_stock pbds
+          JOIN product_batches pb ON pb.id = pbds.batch_id
+          JOIN product_variants pv ON pv.id = pb.product_variant_id
+          WHERE pv.product_id = ${productId} AND pbds.device_id = ${deviceId}
+        ) THEN COALESCE((
           SELECT SUM(pbds.stock)
           FROM product_batch_device_stock pbds
           JOIN product_batches pb ON pb.id = pbds.batch_id
           JOIN product_variants pv ON pv.id = pb.product_variant_id
           WHERE pv.product_id = ${productId} AND pbds.device_id = ${deviceId}
         ), 0)
-        +
-        COALESCE((
+        ELSE COALESCE((
           SELECT SUM(pds.stock)
           FROM product_device_stock pds
           WHERE pds.product_id = ${productId} AND pds.device_id = ${deviceId}
         ), 0)
-      ) as stock
+      END as stock
   `
-  return Number(rows[0]?.stock || 0)
+  return Math.max(0, Number(rows[0]?.stock || 0))
+}
+
+/**
+ * Gets the stock for a specific variant on a device.
+ */
+export async function getDeviceVariantStock(variantId: number, deviceId: number): Promise<number> {
+  const rows = await sql`
+    SELECT COALESCE(SUM(pbds.stock), 0) as stock
+    FROM product_batch_device_stock pbds
+    JOIN product_batches pb ON pb.id = pbds.batch_id
+    WHERE pb.product_variant_id = ${variantId} AND pbds.device_id = ${deviceId}
+  `
+  return Math.max(0, Number(rows[0]?.stock || 0))
 }
 
 /**
  * Adjusts the stock of a product, automatically routing the update 
  * to either the legacy table or the variant batch tables.
+ * Stock values are bounded at 0 to prevent negative stock counts.
  */
 export async function adjustDeviceProductStock(
   productId: number,
@@ -72,15 +90,18 @@ export async function adjustDeviceProductStock(
     `
 
     if (batchStock.length > 0) {
+      const currentVal = Number(batchStock[0].stock || 0)
+      const newVal = Math.max(0, currentVal + quantityChange)
       await query`
         UPDATE product_batch_device_stock
-        SET stock = stock + ${quantityChange}, updated_at = CURRENT_TIMESTAMP
+        SET stock = ${newVal}, updated_at = CURRENT_TIMESTAMP
         WHERE id = ${batchStock[0].id}
       `
     } else {
+      const newVal = Math.max(0, quantityChange)
       await query`
         INSERT INTO product_batch_device_stock (batch_id, device_id, stock)
-        VALUES (${effectiveBatchId}, ${deviceId}, ${quantityChange})
+        VALUES (${effectiveBatchId}, ${deviceId}, ${newVal})
       `
     }
   } else {
@@ -92,17 +113,19 @@ export async function adjustDeviceProductStock(
     `
 
     if (legacyStock.length > 0) {
+      const currentVal = Number(legacyStock[0].stock || 0)
+      const newVal = Math.max(0, currentVal + quantityChange)
       await query`
         UPDATE product_device_stock
-        SET stock = stock + ${quantityChange}, updated_at = CURRENT_TIMESTAMP
+        SET stock = ${newVal}, updated_at = CURRENT_TIMESTAMP
         WHERE id = ${legacyStock[0].id}
       `
     } else {
+      const newVal = Math.max(0, quantityChange)
       await query`
         INSERT INTO product_device_stock (product_id, device_id, stock)
-        VALUES (${productId}, ${deviceId}, ${quantityChange})
+        VALUES (${productId}, ${deviceId}, ${newVal})
       `
     }
   }
 }
-

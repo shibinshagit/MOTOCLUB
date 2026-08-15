@@ -212,19 +212,19 @@ export default function StaffDashboard() {
 
       {/* Main Content Area */}
       <div className="flex flex-col flex-1 w-full md:pl-64 pt-16 md:pt-0">
-        <main className="flex-1 overflow-y-auto bg-gray-50 p-6">
+        <main className="flex-1 overflow-y-auto bg-gray-50 p-3 sm:p-6">
           <div className="max-w-7xl mx-auto">
             {activeTab === "home" && (
               <div className="space-y-6">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                  <h1 className="text-2xl font-semibold text-gray-900">
+                  <h1 className="text-xl sm:text-2xl font-semibold text-gray-900">
                     Welcome{userName ? `, ${userName}` : ''} to Staff Portal
                   </h1>
-                  <Button onClick={() => setIsJobCardModalOpen(true)} className="whitespace-nowrap">
+                  <Button onClick={() => setIsJobCardModalOpen(true)} className="w-full sm:w-auto whitespace-nowrap">
                     <Plus className="mr-2 h-4 w-4" /> Create Job Card
                   </Button>
                 </div>
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
                   {/* Total Orders */}
                   <div className="bg-gradient-to-br from-[#2979ff] to-[#1565c0] p-4 rounded-xl shadow-md border-0 flex flex-col justify-between text-white relative overflow-hidden group">
                     <div className="absolute -right-4 -top-4 opacity-20 transform group-hover:scale-110 transition-transform duration-300">
@@ -235,7 +235,7 @@ export default function StaffDashboard() {
                         <p className="text-[11px] font-bold uppercase tracking-wider text-blue-100">Total Orders</p>
                         <Package className="h-5 w-5 text-blue-200" />
                       </div>
-                      <h3 className="mt-2 text-3xl font-extrabold">{dashboardStats?.totalOrders || 0}</h3>
+                      <h3 className="mt-2 text-2xl sm:text-3xl font-extrabold truncate">{dashboardStats?.totalOrders || 0}</h3>
                       <p className="mt-2 text-[11px] font-medium text-blue-100">All time entries</p>
                     </div>
                   </div>
@@ -249,7 +249,7 @@ export default function StaffDashboard() {
                         <p className="text-[11px] font-bold uppercase tracking-wider text-pink-100">Total Sale Amount</p>
                         <Banknote className="h-5 w-5 text-pink-200" />
                       </div>
-                      <h3 className="mt-2 text-3xl font-extrabold truncate">
+                      <h3 className="mt-2 text-2xl sm:text-3xl font-extrabold truncate" title={new Intl.NumberFormat("en-US", { style: "currency", currency: device?.currency || "INR", maximumFractionDigits: 0 }).format(dashboardStats?.totalSaleAmount || 0)}>
                         {new Intl.NumberFormat("en-US", { style: "currency", currency: device?.currency || "INR", maximumFractionDigits: 0 }).format(dashboardStats?.totalSaleAmount || 0).replace(/^[a-zA-Z]+/, (match) => match + " ")}
                       </h3>
                       <p className="mt-2 text-[11px] font-medium text-pink-100">Sum of Total Paid</p>
@@ -265,7 +265,7 @@ export default function StaffDashboard() {
                         <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-100">Today's Sale</p>
                         <TrendingUp className="h-5 w-5 text-emerald-200" />
                       </div>
-                      <h3 className="mt-2 text-3xl font-extrabold truncate">
+                      <h3 className="mt-2 text-2xl sm:text-3xl font-extrabold truncate" title={new Intl.NumberFormat("en-US", { style: "currency", currency: device?.currency || "INR", maximumFractionDigits: 0 }).format(dashboardStats?.todaysSales || 0)}>
                         {new Intl.NumberFormat("en-US", { style: "currency", currency: device?.currency || "INR", maximumFractionDigits: 0 }).format(dashboardStats?.todaysSales || 0).replace(/^[a-zA-Z]+/, (match) => match + " ")}
                       </h3>
                       <p className="mt-2 text-[11px] font-medium text-emerald-100">Today's total sales</p>
@@ -281,7 +281,7 @@ export default function StaffDashboard() {
                         <p className="text-[11px] font-bold uppercase tracking-wider text-violet-100">Today's Activity</p>
                         <CalendarIcon className="h-5 w-5 text-violet-200" />
                       </div>
-                      <h3 className="mt-2 text-3xl font-extrabold">{dashboardStats?.todaysActivity || 0}</h3>
+                      <h3 className="mt-2 text-2xl sm:text-3xl font-extrabold truncate">{dashboardStats?.todaysActivity || 0}</h3>
                       <p className="mt-2 text-[11px] font-medium text-violet-100">Orders processing</p>
                     </div>
                   </div>
@@ -295,7 +295,7 @@ export default function StaffDashboard() {
                         <p className="text-[11px] font-bold uppercase tracking-wider text-orange-100">Pending Costs</p>
                         <AlertTriangle className="h-5 w-5 text-orange-200" />
                       </div>
-                      <h3 className="mt-2 text-3xl font-extrabold">{dashboardStats?.pendingCosts || 0}</h3>
+                      <h3 className="mt-2 text-2xl sm:text-3xl font-extrabold truncate">{dashboardStats?.pendingCosts || 0}</h3>
                       <p className="mt-2 text-[11px] font-medium text-orange-100">Needs attention</p>
                     </div>
                   </div>
@@ -333,7 +333,7 @@ export default function StaffDashboard() {
             )}
 
             {activeTab === "inventory" && (
-              <div className="h-[calc(100vh-2rem)] md:h-[calc(100vh-3rem)] -mx-6 -mt-6">
+              <div className="h-[calc(100vh-2rem)] md:h-[calc(100vh-3rem)] -mx-3 -mt-3 sm:-mx-6 sm:-mt-6">
                 <StaffInventoryTab />
               </div>
             )}

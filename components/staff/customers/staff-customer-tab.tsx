@@ -191,8 +191,8 @@ export function StaffCustomerTab({
         </form>
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-        <div className="overflow-x-auto">
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden w-full">
+        <div className="overflow-x-auto w-full">
           <table className="w-full text-sm text-left">
             <thead className="text-xs text-slate-500 uppercase bg-slate-50/80 border-b border-slate-200">
               <tr>

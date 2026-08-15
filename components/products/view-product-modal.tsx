@@ -444,16 +444,16 @@ export function ProductDetailPanel({
 
   const detailBody = (
     <>
-      <div className={cn("grid grid-cols-2 gap-2", msp > 0 ? "md:grid-cols-4" : "md:grid-cols-3")}>
-            <SummaryCard label="MRP" value={formatMoney(product.price || 0)} tone="violet" />
+      <div className={cn("grid grid-cols-2 gap-2", (product.msp || msp) > 0 ? "md:grid-cols-4" : "md:grid-cols-3")}>
+            <SummaryCard label="MRP" value={formatMoney(product.mrp || product.price || 0)} tone="violet" />
             {!hideCogs ? <SummaryCard label="Cost" value={costDisplay()} tone="slate" /> : null}
             {!hideStockCount ? (
               <SummaryCard label="Stock" value={stockDisplay()} tone="emerald" />
             ) : (
               <SummaryCard label="Stock" value="—" tone="slate" />
             )}
-            {msp > 0 ? (
-              <SummaryCard label="MSP" value={formatMoney(msp)} tone="blue" />
+            {(product.msp || msp) > 0 ? (
+              <SummaryCard label="MSP" value={formatMoney(product.msp || msp)} tone="blue" />
             ) : null}
           </div>
 

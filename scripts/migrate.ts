@@ -666,6 +666,111 @@ async function createTables() {
       )
     `
   })
+
+  await run("return_requests", async () => {
+    await sql`
+      CREATE TABLE IF NOT EXISTS return_requests (
+        id SERIAL PRIMARY KEY,
+        ecommerce_return_request_id VARCHAR(255) UNIQUE NOT NULL,
+        order_id INTEGER,
+        order_number VARCHAR(255),
+        user_id TEXT,
+        customer_name VARCHAR(255),
+        customer_email VARCHAR(255),
+        customer_phone VARCHAR(255),
+        customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL,
+        sale_id INTEGER REFERENCES sales(id) ON DELETE SET NULL,
+        status VARCHAR(50) NOT NULL DEFAULT 'pending',
+        reason TEXT,
+        notes TEXT,
+        images JSONB DEFAULT '[]'::jsonb,
+        items JSONB DEFAULT '[]'::jsonb,
+        accounting_sync_status VARCHAR(50) DEFAULT 'pending',
+        requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        reviewed_at TIMESTAMP,
+        reviewed_by INTEGER REFERENCES staff(id) ON DELETE SET NULL,
+        rejection_reason TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `
+  })
+
+  await run("return_request_items", async () => {
+    await sql`
+      CREATE TABLE IF NOT EXISTS return_request_items (
+        id SERIAL PRIMARY KEY,
+        return_request_id INTEGER NOT NULL REFERENCES return_requests(id) ON DELETE CASCADE,
+        order_item_id INTEGER,
+        product_id INTEGER REFERENCES products(id) ON DELETE SET NULL,
+        product_variant_id INTEGER REFERENCES product_variants(id) ON DELETE SET NULL,
+        product_name VARCHAR(255),
+        quantity INTEGER NOT NULL DEFAULT 1,
+        price DECIMAL(12,2) DEFAULT 0,
+        reason TEXT,
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `
+  })
+
+  await run("ecommerce_return_requests", async () => {
+    await sql`
+      CREATE TABLE IF NOT EXISTS ecommerce_return_requests (
+        id SERIAL PRIMARY KEY,
+        ecommerce_return_request_id VARCHAR(255) UNIQUE NOT NULL,
+        ecommerce_order_id VARCHAR(255) NOT NULL,
+        sale_id INTEGER REFERENCES sales(id) ON DELETE SET NULL,
+        customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL,
+        status VARCHAR(50) NOT NULL DEFAULT 'pending',
+        reason TEXT,
+        notes TEXT,
+        images JSONB DEFAULT '[]'::jsonb,
+        requested_at TIMESTAMP,
+        synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        reviewed_at TIMESTAMP,
+        reviewed_by INTEGER REFERENCES staff(id) ON DELETE SET NULL,
+        rejection_reason TEXT,
+        sync_status VARCHAR(50) DEFAULT 'synced',
+        sync_error TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `
+  })
+
+  await run("ecommerce_return_request_items", async () => {
+    await sql`
+      CREATE TABLE IF NOT EXISTS ecommerce_return_request_items (
+        id SERIAL PRIMARY KEY,
+        return_request_id INTEGER NOT NULL REFERENCES ecommerce_return_requests(id) ON DELETE CASCADE,
+        sale_item_id INTEGER REFERENCES sale_items(id) ON DELETE SET NULL,
+        product_id INTEGER REFERENCES products(id),
+        product_variant_id INTEGER REFERENCES product_variants(id),
+        quantity INTEGER NOT NULL,
+        reason TEXT,
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `
+  })
+
+  await run("ecommerce_return_audit_logs", async () => {
+    await sql`
+      CREATE TABLE IF NOT EXISTS ecommerce_return_audit_logs (
+        id SERIAL PRIMARY KEY,
+        return_request_id INTEGER NOT NULL REFERENCES ecommerce_return_requests(id) ON DELETE CASCADE,
+        previous_status VARCHAR(50),
+        new_status VARCHAR(50) NOT NULL,
+        action_by INTEGER REFERENCES staff(id) ON DELETE SET NULL,
+        action_by_name VARCHAR(255),
+        rejection_reason TEXT,
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `
+  })
 }
 
 async function upgradeLegacyColumns() {
@@ -677,6 +782,16 @@ async function upgradeLegacyColumns() {
     ["devices.logo_url", () => sql`ALTER TABLE devices ADD COLUMN IF NOT EXISTS logo_url TEXT`],
     ["products.image_urls", () => sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS image_urls JSONB DEFAULT '[]'`],
     ["products.video_url", () => sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS video_url TEXT`],
+    ["return_requests.images", () => sql`ALTER TABLE return_requests ADD COLUMN IF NOT EXISTS images JSONB DEFAULT '[]'::jsonb`],
+    ["return_requests.items", () => sql`ALTER TABLE return_requests ADD COLUMN IF NOT EXISTS items JSONB DEFAULT '[]'::jsonb`],
+    ["return_requests.customer_id", () => sql`ALTER TABLE return_requests ADD COLUMN IF NOT EXISTS customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL`],
+    ["return_requests.sale_id", () => sql`ALTER TABLE return_requests ADD COLUMN IF NOT EXISTS sale_id INTEGER REFERENCES sales(id) ON DELETE SET NULL`],
+    ["return_requests.requested_at", () => sql`ALTER TABLE return_requests ADD COLUMN IF NOT EXISTS requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`],
+    ["return_requests.reviewed_at", () => sql`ALTER TABLE return_requests ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMP`],
+    ["return_requests.reviewed_by", () => sql`ALTER TABLE return_requests ADD COLUMN IF NOT EXISTS reviewed_by INTEGER REFERENCES staff(id) ON DELETE SET NULL`],
+    ["return_requests.rejection_reason", () => sql`ALTER TABLE return_requests ADD COLUMN IF NOT EXISTS rejection_reason TEXT`],
+    ["return_requests.stock_restored", () => sql`ALTER TABLE return_requests ADD COLUMN IF NOT EXISTS stock_restored BOOLEAN DEFAULT false`],
+    ["return_request_items.sale_item_id", () => sql`ALTER TABLE return_request_items ADD COLUMN IF NOT EXISTS sale_item_id INTEGER REFERENCES sale_items(id) ON DELETE SET NULL`],
     ["products.amazon_status", () => sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS amazon_status VARCHAR(20) DEFAULT 'not_listed'`],
     ["products.flipkart_status", () => sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS flipkart_status VARCHAR(20) DEFAULT 'not_listed'`],
     ["products.meesho_status", () => sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS meesho_status VARCHAR(20) DEFAULT 'not_listed'`],
@@ -777,6 +892,7 @@ async function upgradeLegacyColumns() {
     ["sales.synced_at", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS synced_at TIMESTAMP DEFAULT NOW()`],
     ["sales.sync_attempts", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS sync_attempts INTEGER DEFAULT 1`],
     ["sales.last_sync_error", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS last_sync_error TEXT`],
+    ["sales.tracking_token", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS tracking_token VARCHAR(255)`],
     ["orders.sync_status", () => sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS sync_status VARCHAR(50) DEFAULT 'PENDING'`],
     ["orders.synced_at", () => sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS synced_at TIMESTAMP`],
     ["orders.synced_sale_id", () => sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS synced_sale_id INTEGER`],
@@ -961,6 +1077,10 @@ async function dropLegacyTables() {
     ["accounts_payable", () => sql`DROP TABLE IF EXISTS accounts_payable CASCADE`],
     ["income_categories", () => sql`DROP TABLE IF EXISTS income_categories CASCADE`],
     ["stock_history", () => sql`DROP TABLE IF EXISTS stock_history CASCADE`],
+    ["return_request_images", () => sql`DROP TABLE IF EXISTS return_request_images CASCADE`],
+    ["ecommerce_return_requests", () => sql`DROP TABLE IF EXISTS ecommerce_return_requests CASCADE`],
+    ["ecommerce_return_request_items", () => sql`DROP TABLE IF EXISTS ecommerce_return_request_items CASCADE`],
+    ["ecommerce_return_audit_logs", () => sql`DROP TABLE IF EXISTS ecommerce_return_audit_logs CASCADE`],
   ]
 
   for (const [label, fn] of legacyTables) {

@@ -282,7 +282,7 @@ export default function StaffProfileTab() {
 
     const days = []
     for (let i = 0; i < firstDay; i++) {
-      days.push(<div key={`empty-${i}`} className="h-14 bg-slate-50/50 border border-slate-100 rounded-lg"></div>)
+      days.push(<div key={`empty-${i}`} className="h-10 sm:h-14 bg-slate-50/50 border border-slate-100 rounded-lg"></div>)
     }
 
     for (let i = 1; i <= daysInMonth; i++) {
@@ -300,16 +300,16 @@ export default function StaffProfileTab() {
       if (record) {
         if (record.status === "Present" || (record.check_in && !record.status)) {
           bgClass = "bg-emerald-50/90 border-emerald-300 hover:bg-emerald-100 text-emerald-900"
-          statusDot = <span className="h-2 w-2 rounded-full bg-emerald-500"></span>
+          statusDot = <span className="h-1.5 w-1.5 sm:h-2 sm:w-2 rounded-full bg-emerald-500"></span>
         } else if (record.status === "Absent") {
           bgClass = "bg-rose-50/90 border-rose-300 hover:bg-rose-100 text-rose-900"
-          statusDot = <span className="h-2 w-2 rounded-full bg-rose-500"></span>
+          statusDot = <span className="h-1.5 w-1.5 sm:h-2 sm:w-2 rounded-full bg-rose-500"></span>
         } else if (record.status === "Half Day") {
           bgClass = "bg-blue-50/90 border-blue-300 hover:bg-blue-100 text-blue-900"
-          statusDot = <span className="h-2 w-2 rounded-full bg-blue-500"></span>
+          statusDot = <span className="h-1.5 w-1.5 sm:h-2 sm:w-2 rounded-full bg-blue-500"></span>
         } else if (record.status === "Leave") {
           bgClass = "bg-purple-50/90 border-purple-300 hover:bg-purple-100 text-purple-900"
-          statusDot = <span className="h-2 w-2 rounded-full bg-purple-500"></span>
+          statusDot = <span className="h-1.5 w-1.5 sm:h-2 sm:w-2 rounded-full bg-purple-500"></span>
         }
       }
 
@@ -317,20 +317,20 @@ export default function StaffProfileTab() {
         <div
           key={i}
           onClick={() => handleDayClick(dateStr, record)}
-          className={`h-14 p-1.5 border rounded-lg flex flex-col justify-between cursor-pointer transition-all ${bgClass} ${
+          className={`h-10 sm:h-14 p-1 sm:p-1.5 border rounded-lg flex flex-col justify-between cursor-pointer transition-all ${bgClass} ${
             isToday ? "ring-2 ring-blue-600 ring-offset-1 font-bold shadow-sm" : ""
           }`}
           title={record?.remarks ? `Note: ${record.remarks}` : "Click to view/add note"}
         >
-          <div className="flex justify-between items-center text-xs">
+          <div className="flex justify-between items-center text-[10px] sm:text-xs">
             <span className={isToday ? "text-blue-700 font-bold" : "text-slate-700 font-semibold"}>{i}</span>
-            <div className="flex items-center gap-1">
-              {record?.remarks && <FileText className="h-3 w-3 text-amber-600" />}
+            <div className="flex items-center gap-0.5 sm:gap-1">
+              {record?.remarks && <FileText className="h-2.5 w-2.5 sm:h-3 sm:w-3 text-amber-600" />}
               {statusDot}
             </div>
           </div>
 
-          <div className="text-[10px] text-slate-500 truncate font-mono">
+          <div className="text-[8px] sm:text-[10px] text-slate-500 truncate font-mono">
             {record?.check_in ? formatTime(record.check_in) : ""}
           </div>
         </div>
@@ -339,14 +339,14 @@ export default function StaffProfileTab() {
 
     return (
       <div className="mt-2">
-        <div className="grid grid-cols-7 gap-1.5 mb-1.5 text-center">
+        <div className="grid grid-cols-7 gap-1 sm:gap-1.5 mb-1 sm:mb-1.5 text-center">
           {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
-            <div key={d} className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+            <div key={d} className="text-[9px] sm:text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
               {d}
             </div>
           ))}
         </div>
-        <div className="grid grid-cols-7 gap-1.5">{days}</div>
+        <div className="grid grid-cols-7 gap-1 sm:gap-1.5">{days}</div>
       </div>
     )
   }

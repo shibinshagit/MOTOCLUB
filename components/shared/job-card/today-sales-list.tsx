@@ -91,7 +91,12 @@ export function TodaySalesList({ onOpenCreateModal }: { onOpenCreateModal?: () =
     if (phone.length === 9) phone = "971" + phone // Add UAE code if it's 9 digits
     if (phone.length === 10 && phone.startsWith("0")) phone = "971" + phone.substring(1)
     
-    const message = `Hello ${sale.customer_name || 'Customer'},\n\nYour Job Card has been created.\nOrder Number: #${sale.id}\nTracking ID: ${sale.tracking_id}\n\nThank you for choosing our service!`
+    const tokenOrId = sale.tracking_token || sale.tracking_id
+    const trackingLink = tokenOrId && typeof window !== "undefined" && window.location?.origin
+      ? `\n\nTrack your shipment:\n${window.location.origin}/track/${encodeURIComponent(tokenOrId)}`
+      : ""
+
+    const message = `Hello ${sale.customer_name || 'Customer'},\n\nYour Job Card has been created.\nOrder Number: #${sale.id}\nTracking ID: ${sale.tracking_id || 'N/A'}${trackingLink}\n\nThank you for choosing our service!`
     const url = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`
     window.open(url, "_blank")
   }
@@ -147,7 +152,7 @@ export function TodaySalesList({ onOpenCreateModal }: { onOpenCreateModal?: () =
           <h2 className="text-xl font-bold tracking-tight text-gray-900">Monthly Sales / Job Cards</h2>
           <p className="text-sm text-gray-500">All pending orders created in the selected month</p>
         </div>
-        <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+        <div className="flex flex-col sm:flex-row flex-wrap sm:flex-nowrap gap-3 w-full sm:w-auto items-stretch sm:items-center">
           <div className="relative w-full sm:w-64">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-500" />
             <Input
@@ -168,31 +173,191 @@ export function TodaySalesList({ onOpenCreateModal }: { onOpenCreateModal?: () =
               </Button>
             )}
           </div>
-          <Input
-            type="month"
-            className="w-full sm:w-auto"
-            value={monthStr}
-            onChange={(e) => setMonthStr(e.target.value)}
-          />
-          <Button variant="outline" size="icon" onClick={fetchSales} title="Refresh">
-            <Layers className="h-4 w-4" />
-          </Button>
-          {selectedSales.length > 0 && (
-            <Button variant="default" onClick={handleBatchPrint} className="bg-indigo-600 hover:bg-indigo-700 text-white gap-2 px-3">
-              <Printer className="h-4 w-4" />
-              Print ({selectedSales.length})
+          <div className="flex gap-2 w-full sm:w-auto">
+            <Input
+              type="month"
+              className="flex-1 sm:w-auto"
+              value={monthStr}
+              onChange={(e) => setMonthStr(e.target.value)}
+            />
+            <Button variant="outline" size="icon" onClick={fetchSales} title="Refresh" className="shrink-0">
+              <Layers className="h-4 w-4" />
             </Button>
-          )}
-          {onOpenCreateModal && (
-            <Button onClick={onOpenCreateModal}>
-              + Create Job Card
-            </Button>
-          )}
+          </div>
+          <div className="flex gap-2 w-full sm:w-auto">
+            {selectedSales.length > 0 && (
+              <Button variant="default" onClick={handleBatchPrint} className="flex-1 sm:flex-none bg-indigo-600 hover:bg-indigo-700 text-white gap-2 px-3">
+                <Printer className="h-4 w-4" />
+                Print ({selectedSales.length})
+              </Button>
+            )}
+            {onOpenCreateModal && (
+              <Button onClick={onOpenCreateModal} className="flex-1 sm:flex-none whitespace-nowrap">
+                + Create Job Card
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 
-      <div className="rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
+      {/* Mobile Card View (Visible on screens < md) */}
+      <div className="md:hidden space-y-3">
+        {loading ? (
+          <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-500">
+            <p className="text-sm">Loading job cards...</p>
+          </div>
+        ) : sales.length === 0 ? (
+          <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-500">
+            <p className="text-sm font-semibold">No sales / job cards found for this month.</p>
+          </div>
+        ) : (
+          sales.map((sale) => {
+            const isExpanded = expandedSaleId === sale.id
+            const isSelected = selectedSales.includes(sale.id)
+            const itemQuantity = sale.items?.reduce((sum: number, i: any) => sum + i.quantity, 0) || 0
+            const saleDate = parseSaleDateTime(sale)
+            const dateFormatted = format(saleDate, "M/d/yyyy")
+
+            return (
+              <div 
+                key={sale.id}
+                className={`bg-white rounded-xl border border-slate-200 p-4 shadow-sm transition-all relative ${
+                  isSelected ? "ring-2 ring-indigo-500 bg-indigo-50/20" : ""
+                }`}
+              >
+                {/* Top Header Row: Checkbox, Date & Status */}
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <div className="flex items-center gap-2">
+                    <input 
+                      type="checkbox" 
+                      className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600 cursor-pointer"
+                      checked={isSelected}
+                      onChange={(e) => {
+                        e.stopPropagation()
+                        toggleSelectSale(sale.id)
+                      }}
+                    />
+                    <span className="text-xs font-medium text-slate-400">
+                      {dateFormatted}
+                    </span>
+                  </div>
+                  <div onClick={(e) => e.stopPropagation()} className="shrink-0">
+                    <DeliveryStatusSelect 
+                      saleId={sale.id}
+                      deviceId={deviceId || 0}
+                      currentStatus={sale.delivery_status || "Pending"}
+                      customerName={sale.customer_name}
+                      customerPhone={sale.customer_phone}
+                      trackingId={sale.tracking_id}
+                      orderNumber={sale.id}
+                      paymentStatus={sale.payment_status}
+                      isJobCard={true}
+                      userRole="staff"
+                      onStatusChange={() => fetchSales()}
+                    />
+                  </div>
+                </div>
+
+                {/* Customer Info */}
+                <div 
+                  className="cursor-pointer"
+                  onClick={() => toggleExpand(sale.id)}
+                >
+                  <h3 className="text-lg font-bold text-slate-900 tracking-tight">
+                    {sale.customer_name || "N/A"}
+                  </h3>
+                  <p className="text-xs text-slate-500 font-medium mt-0.5">
+                    {sale.customer_phone ? formatPhoneNumber(sale.customer_phone) : (sale.tracking_id || `#${sale.id}`)}
+                  </p>
+
+                  {/* Product Badge */}
+                  <div className="mt-3">
+                    <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold bg-purple-50 text-purple-700 border border-purple-100">
+                      {itemQuantity} Products
+                    </span>
+                  </div>
+                </div>
+
+                {/* Bottom Amount & Actions Row */}
+                <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-100">
+                  <div className="font-extrabold text-xl text-slate-900">
+                    {currency} {Number(sale.total_amount).toFixed(0)}
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-9 w-9 rounded-full bg-[#00c853] text-white hover:bg-[#00b000] hover:text-white shadow-sm shrink-0"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleWhatsApp(sale)
+                      }}
+                      title="WhatsApp"
+                    >
+                      <MessageCircle className="h-4 w-4 fill-white text-transparent" />
+                    </Button>
+
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-9 w-9 rounded-full bg-slate-800 text-white hover:bg-slate-900 hover:text-white shadow-sm shrink-0"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handlePrint(sale)
+                      }}
+                      title="Print"
+                    >
+                      <Printer className="h-4 w-4" />
+                    </Button>
+
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-9 w-9 rounded-full bg-blue-600 text-white hover:bg-blue-700 hover:text-white shadow-sm shrink-0"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleEdit(sale)
+                      }}
+                      title="Edit"
+                    >
+                      <Edit className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Expanded Line Items & Address for Mobile */}
+                {isExpanded && (
+                  <div className="mt-4 pt-3 border-t border-slate-200 space-y-3 text-xs">
+                    <div className="bg-slate-50 p-3 rounded-lg space-y-1 text-slate-600">
+                      {sale.tracking_id && <p className="font-mono"><span className="font-semibold text-slate-500">Tracking:</span> {sale.tracking_id}</p>}
+                      {sale.courier_service_name && <p><span className="font-semibold text-slate-500">Courier:</span> {sale.courier_service_name}</p>}
+                      {sale.shipping_street && <p><span className="font-semibold text-slate-500">Address:</span> {sale.shipping_street}, {sale.shipping_city} {sale.shipping_pincode}</p>}
+                    </div>
+                    
+                    <div className="space-y-1.5">
+                      <p className="font-bold text-slate-800">Items:</p>
+                      {sale.items?.map((item: any) => (
+                        <div key={item.id} className="flex justify-between items-center py-1 border-b border-slate-100">
+                          <span className="text-slate-800 font-medium">{item.product_name} x {item.quantity}</span>
+                          <span className="font-bold text-slate-900">{currency} {(Number(item.price) * item.quantity).toFixed(2)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })
+        )}
+      </div>
+
+      {/* Desktop Table View (Visible on screens >= md) */}
+      <div className="hidden md:block rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden w-full">
+        <div className="overflow-x-auto w-full">
           <table className="min-w-full border-separate border-spacing-0 text-sm">
             <thead>
               <tr className="border-b border-t border-slate-200 bg-white text-xs font-bold uppercase tracking-wider text-slate-500">

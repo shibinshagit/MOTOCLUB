@@ -60,6 +60,7 @@ export function DeliveryStatusSelect({
   // Shipping WhatsApp Notification State
   const [shippingWhatsappData, setShippingWhatsappData] = useState<{
     newTrackingId: string
+    trackingToken?: string | null
     customerName: string
     customerPhone: string
     shippingAddress: string
@@ -104,6 +105,7 @@ export function DeliveryStatusSelect({
     // INSTANTLY open the WhatsApp notification modal with new tracking ID (0ms delay!)
     setShippingWhatsappData({
       newTrackingId,
+      trackingToken: newTrackingId,
       customerName: customerName || "Customer",
       customerPhone: customerPhone || "",
       shippingAddress: "",
@@ -116,6 +118,9 @@ export function DeliveryStatusSelect({
       const res = await updateSaleDeliveryStatus(saleId, deviceId || 0, "Shipping", newTrackingId)
       if (res.success) {
         toast({ title: "Success", description: "Delivery status updated to Shipping." })
+
+        const { getOrCreateTrackingToken } = await import("@/app/actions/sale-actions")
+        const tokenRes = await getOrCreateTrackingToken(saleId)
 
         // Fetch full sale items asynchronously to enrich the modal payload
         getSaleDetails(saleId)
@@ -131,6 +136,7 @@ export function DeliveryStatusSelect({
                 prev
                   ? {
                       ...prev,
+                      trackingToken: saleData.tracking_token || tokenRes.trackingToken,
                       customerName: saleData.customer_name || prev.customerName,
                       customerPhone: saleData.customer_phone || prev.customerPhone,
                       shippingAddress: saleData.customer_address || prev.shippingAddress,
@@ -363,6 +369,7 @@ export function DeliveryStatusSelect({
               isShipping={true}
               saleId={saleId}
               trackingId={shippingWhatsappData.newTrackingId}
+              trackingToken={shippingWhatsappData.trackingToken}
               deviceId={deviceId || 0}
               customerName={shippingWhatsappData.customerName}
               customerPhone={shippingWhatsappData.customerPhone}

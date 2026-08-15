@@ -201,6 +201,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
   const [whatsappModalData, setWhatsappModalData] = useState<{
     saleId: number;
     trackingId: string;
+    trackingToken?: string | null;
     customerName: string;
     customerPhone: string;
     shippingAddress: string;
@@ -2852,6 +2853,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
             <JobCardWhatsappConfirmation
               saleId={whatsappModalData.saleId}
               trackingId={whatsappModalData.trackingId}
+              trackingToken={whatsappModalData.trackingToken}
               deviceId={deviceId || 0}
               customerName={whatsappModalData.customerName}
               customerPhone={whatsappModalData.customerPhone}

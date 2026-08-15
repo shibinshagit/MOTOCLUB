@@ -333,7 +333,7 @@ export default function ViewPurchaseModal({
           onInteractOutside={guardPurchaseDialogDismiss}
           onEscapeKeyDown={guardPurchaseDialogDismiss}
           overlayClassName="duration-0 data-[state=open]:animate-none data-[state=closed]:animate-none"
-          className="max-w-5xl gap-0 overflow-hidden border-slate-200 p-0 duration-0 data-[state=open]:animate-none data-[state=closed]:animate-none sm:max-w-5xl [&>button]:top-3 [&>button]:right-3"
+          className="w-[95vw] max-w-[95vw] sm:max-w-5xl gap-0 overflow-hidden border-slate-200 p-0 duration-0 data-[state=open]:animate-none data-[state=closed]:animate-none [&>button]:top-3 [&>button]:right-3"
         >
           <DialogHeader className="space-y-0 border-b border-slate-200 bg-[#F1F4F9] px-4 py-3 text-left">
             <DialogTitle className="sr-only">

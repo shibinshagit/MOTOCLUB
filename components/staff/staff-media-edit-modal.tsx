@@ -189,9 +189,9 @@ export default function StaffMediaEditModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && !isUploadingImage && !isUploadingVideo && !isPending && onClose()}>
-      <DialogContent className="max-w-2xl p-0 overflow-hidden bg-slate-50">
+      <DialogContent className="w-[95vw] sm:max-w-2xl p-0 overflow-hidden bg-slate-50">
         {/* Header */}
-        <DialogHeader className="px-6 py-4 border-b bg-white">
+        <DialogHeader className="px-4 sm:px-6 py-4 border-b bg-white">
           <DialogTitle className="text-base font-bold text-slate-800 flex items-center gap-2">
             <Package className="h-5 w-5 text-indigo-600" />
             Manage Product Media - {product.name}
@@ -202,7 +202,7 @@ export default function StaffMediaEditModal({
         </DialogHeader>
 
         {/* Content Body */}
-        <div className="p-6 space-y-6 max-h-[75vh] overflow-y-auto">
+        <div className="p-4 sm:p-6 space-y-6 max-h-[75vh] overflow-y-auto">
           {/* Photos Section */}
           <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
             <div className="flex items-center justify-between">

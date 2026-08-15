@@ -1855,154 +1855,156 @@ const renderTransactionList = (
   }
 
   return (
-    <div className="space-y-2">
-      <div className="grid grid-cols-12 gap-4 rounded-lg bg-muted/50 px-4 py-2 text-xs font-medium text-muted-foreground">
-        <div className="col-span-3">Description</div>
-        <div className="col-span-1 text-center">Type</div>
-        <div className="col-span-1 text-center">Status</div>
-        <div className="col-span-1 text-right">Total Bill</div>
-        <div className="col-span-1 text-right">Money In/Out</div>
-        <div className="col-span-1 text-right">Remaining</div>
-        {!hideCogs && <div className="col-span-1 text-right">Product Cost</div>}
-        <div className="col-span-1 text-right">Cash Impact</div>
-        <div className="col-span-2 text-right">Date & Time</div>
-      </div>
+    <div className="overflow-x-auto w-full">
+      <div className="min-w-[850px] space-y-2">
+        <div className="grid grid-cols-12 gap-4 rounded-lg bg-muted/50 px-4 py-2 text-xs font-medium text-muted-foreground">
+          <div className="col-span-3">Description</div>
+          <div className="col-span-1 text-center">Type</div>
+          <div className="col-span-1 text-center">Status</div>
+          <div className="col-span-1 text-right">Total Bill</div>
+          <div className="col-span-1 text-right">Money In/Out</div>
+          <div className="col-span-1 text-right">Remaining</div>
+          {!hideCogs && <div className="col-span-1 text-right">Product Cost</div>}
+          <div className="col-span-1 text-right">Cash Impact</div>
+          <div className="col-span-2 text-right">Date & Time</div>
+        </div>
 
-      {transactions.map((transaction) => {
-        const dateTime = formatDateTime(transaction.date)
-        const cashImpact = getCashImpact(transaction)
-        const isPositive = cashImpact > 0
-        const isNegative = cashImpact < 0
-        const remainingAmount = getRemainingAmount(transaction)
-        const moneyFlowInfo = getMoneyFlowInfo(transaction)
-        const enhancedDescription = getEnhancedDescription(transaction)
+        {transactions.map((transaction) => {
+          const dateTime = formatDateTime(transaction.date)
+          const cashImpact = getCashImpact(transaction)
+          const isPositive = cashImpact > 0
+          const isNegative = cashImpact < 0
+          const remainingAmount = getRemainingAmount(transaction)
+          const moneyFlowInfo = getMoneyFlowInfo(transaction)
+          const enhancedDescription = getEnhancedDescription(transaction)
 
-        const isSale = transaction.type === "sale" || transaction.description?.toLowerCase().startsWith("sale")
-        const isPurchase = transaction.type === "purchase" || transaction.description?.toLowerCase().startsWith("purchase")
-        const isManual = transaction.type === "manual" || transaction.reference_type === "manual" || transaction.description?.toLowerCase().includes("manual")
-        const isSupplierPayment = transaction.type === 'supplier_payment' ||
-                                 transaction.description?.toLowerCase().includes('supplier payment')
+          const isSale = transaction.type === "sale" || transaction.description?.toLowerCase().startsWith("sale")
+          const isPurchase = transaction.type === "purchase" || transaction.description?.toLowerCase().startsWith("purchase")
+          const isManual = transaction.type === "manual" || transaction.reference_type === "manual" || transaction.description?.toLowerCase().includes("manual")
+          const isSupplierPayment = transaction.type === 'supplier_payment' ||
+                                   transaction.description?.toLowerCase().includes('supplier payment')
 
-        const handleClick = () => {
-          if (isSale) {
-            const saleId = transaction.sale_id ||
-                          transaction.reference_id ||
-                          extractIdFromDescription(transaction.description) ||
-                          transaction.id
-            setViewSaleId(saleId)
-          } else if (isPurchase) {
-            const purchaseId = transaction.purchase_id ||
-                              transaction.reference_id ||
-                              extractIdFromDescription(transaction.description) ||
-                              transaction.id
-            setViewPurchaseId(purchaseId)
-          } else if (isManual) {
-            setViewManualTransactionId(transaction.id)
-          } else if (isSupplierPayment) {
-            const paymentId = transaction.supplier_payment_id ||
-                             transaction.reference_id ||
-                             transaction.id
-            setViewSupplierPaymentId(paymentId)
-          }
-        }
-
-        return (
-          <div
-            key={transaction.id}
-            className="grid grid-cols-12 gap-4 cursor-pointer items-center rounded-lg border px-4 py-3 transition-colors hover:bg-violet-50"
-            onClick={handleClick}
-            tabIndex={0}
-            role="button"
-            aria-label={
-              isSale ? "View Sale" :
-              isPurchase ? "View Purchase" :
-              isSupplierPayment ? "View Supplier Payment" :
-              "View Transaction"
+          const handleClick = () => {
+            if (isSale) {
+              const saleId = transaction.sale_id ||
+                            transaction.reference_id ||
+                            extractIdFromDescription(transaction.description) ||
+                            transaction.id
+              setViewSaleId(saleId)
+            } else if (isPurchase) {
+              const purchaseId = transaction.purchase_id ||
+                                transaction.reference_id ||
+                                extractIdFromDescription(transaction.description) ||
+                                transaction.id
+              setViewPurchaseId(purchaseId)
+            } else if (isManual) {
+              setViewManualTransactionId(transaction.id)
+            } else if (isSupplierPayment) {
+              const paymentId = transaction.supplier_payment_id ||
+                               transaction.reference_id ||
+                               transaction.id
+              setViewSupplierPaymentId(paymentId)
             }
-          >
-            <div className="col-span-3 flex items-center gap-2">
-              <div className="text-muted-foreground">
-                {getTransactionTypeIcon(transaction.type)}
-              </div>
-              <div className="min-w-0 flex-1">
-                <div
-                  className="break-words text-sm font-medium leading-snug text-foreground"
-                  title={transaction.description || enhancedDescription}
-                >
-                  {enhancedDescription}
+          }
+
+          return (
+            <div
+              key={transaction.id}
+              className="grid grid-cols-12 gap-4 cursor-pointer items-center rounded-lg border px-4 py-3 transition-colors hover:bg-violet-50"
+              onClick={handleClick}
+              tabIndex={0}
+              role="button"
+              aria-label={
+                isSale ? "View Sale" :
+                isPurchase ? "View Purchase" :
+                isSupplierPayment ? "View Supplier Payment" :
+                "View Transaction"
+              }
+            >
+              <div className="col-span-3 flex items-center gap-2">
+                <div className="text-muted-foreground">
+                  {getTransactionTypeIcon(transaction.type)}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div
+                    className="break-words text-sm font-medium leading-snug text-foreground"
+                    title={transaction.description || enhancedDescription}
+                  >
+                    {enhancedDescription}
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <div className="col-span-1 text-center">
-              <Badge variant="outline" className="text-xs capitalize">
-                {transaction.type || "unknown"}
-              </Badge>
-            </div>
-
-            <div className="col-span-1 text-center">
-              {getStatusBadge(transaction.status)}
-            </div>
-
-            <div className="col-span-1 text-right">
-              <div className="text-sm font-medium text-foreground">
-                {currency} {n(transaction.amount).toFixed(2)}
+              <div className="col-span-1 text-center">
+                <Badge variant="outline" className="text-xs capitalize">
+                  {transaction.type || "unknown"}
+                </Badge>
               </div>
-            </div>
 
-            <div className="col-span-1 text-right">
-              {moneyFlowInfo.type !== 'none' ? (
-                <div className={`text-sm font-medium ${moneyFlowInfo.color}`}>
-                  {moneyFlowInfo.type === 'in' ? '+' : '-'}{currency} {moneyFlowInfo.amount.toFixed(2)}
-                  <div className="text-xs">{moneyFlowInfo.text}</div>
+              <div className="col-span-1 text-center">
+                {getStatusBadge(transaction.status)}
+              </div>
+
+              <div className="col-span-1 text-right">
+                <div className="text-sm font-medium text-foreground">
+                  {currency} {n(transaction.amount).toFixed(2)}
                 </div>
-              ) : (
-                <div className="text-sm text-muted-foreground">
-                  {moneyFlowInfo.text}
+              </div>
+
+              <div className="col-span-1 text-right">
+                {moneyFlowInfo.type !== 'none' ? (
+                  <div className={`text-sm font-medium ${moneyFlowInfo.color}`}>
+                    {moneyFlowInfo.type === 'in' ? '+' : '-'}{currency} {moneyFlowInfo.amount.toFixed(2)}
+                    <div className="text-xs">{moneyFlowInfo.text}</div>
+                  </div>
+                ) : (
+                  <div className="text-sm text-muted-foreground">
+                    {moneyFlowInfo.text}
+                  </div>
+                )}
+              </div>
+
+              <div className="col-span-1 text-right">
+                <div className={`text-sm font-medium ${
+                  remainingAmount > 0
+                    ? "text-amber-600"
+                    : "text-muted-foreground/60"
+                }`}>
+                  {remainingAmount > 0 ? `${currency} ${remainingAmount.toFixed(2)}` : 'Paid'}
                 </div>
+              </div>
+
+              {!hideCogs && (
+              <div className="col-span-1 text-right">
+                <div className="text-sm font-medium text-amber-600">
+                  {currency} {n(transaction.cost).toFixed(2)}
+                </div>
+              </div>
               )}
-            </div>
 
-            <div className="col-span-1 text-right">
-              <div className={`text-sm font-medium ${
-                remainingAmount > 0
-                  ? "text-amber-600"
-                  : "text-muted-foreground/60"
-              }`}>
-                {remainingAmount > 0 ? `${currency} ${remainingAmount.toFixed(2)}` : 'Paid'}
+              <div className="col-span-1 text-right">
+                <div className={`text-sm font-bold ${
+                  isPositive
+                    ? "text-emerald-600"
+                    : isNegative
+                      ? "text-rose-600"
+                      : "text-muted-foreground"
+                }`}>
+                  {isPositive ? "+" : isNegative ? "-" : ""}
+                  {currency} {Math.abs(cashImpact).toFixed(2)}
+                </div>
+              </div>
+
+              <div className="col-span-2 text-right">
+                <div className="text-xs text-muted-foreground">
+                  <div>{dateTime.date}</div>
+                  <div>{dateTime.time}</div>
+                </div>
               </div>
             </div>
-
-            {!hideCogs && (
-            <div className="col-span-1 text-right">
-              <div className="text-sm font-medium text-amber-600">
-                {currency} {n(transaction.cost).toFixed(2)}
-              </div>
-            </div>
-            )}
-
-            <div className="col-span-1 text-right">
-              <div className={`text-sm font-bold ${
-                isPositive
-                  ? "text-emerald-600"
-                  : isNegative
-                    ? "text-rose-600"
-                    : "text-muted-foreground"
-              }`}>
-                {isPositive ? "+" : isNegative ? "-" : ""}
-                {currency} {Math.abs(cashImpact).toFixed(2)}
-              </div>
-            </div>
-
-            <div className="col-span-2 text-right">
-              <div className="text-xs text-muted-foreground">
-                <div>{dateTime.date}</div>
-                <div>{dateTime.time}</div>
-              </div>
-            </div>
-          </div>
-        )
-      })}
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -2011,12 +2013,12 @@ const renderTransactionList = (
     <div className="space-y-4">
       {/* Header */}
       <div className="rounded-xl bg-gradient-to-r from-violet-600 to-violet-700 p-4">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <BarChart3 className="h-5 w-5 text-white" />
+            <BarChart3 className="h-5 w-5 text-white shrink-0" />
             <div>
-              <h1 className="text-xl font-bold text-white">Financial Dashboard</h1>
-              <div className="text-sm text-violet-100">
+              <h1 className="text-lg sm:text-xl font-bold text-white">Financial Dashboard</h1>
+              <div className="text-xs sm:text-sm text-violet-100">
                 {format(dateFrom, "yyyy-MM-dd") === format(dateTo, "yyyy-MM-dd")
                   ? `${formatDate(dateFrom)} Transactions`
                   : `${formatDate(dateFrom)} - ${formatDate(dateTo)} Transactions`}
@@ -2028,10 +2030,10 @@ const renderTransactionList = (
           </div>
 
           {/* Opening and Closing Balance in Header */}
-          <div className="flex items-center gap-6">
-            <div className="text-center">
+          <div className="flex items-center justify-between w-full sm:w-auto gap-4 sm:gap-6 border-t border-white/20 sm:border-0 pt-2 sm:pt-0 mt-1 sm:mt-0">
+            <div className="text-left sm:text-center">
               <div className="text-xs text-violet-200">Opening Balance</div>
-              <div className="text-lg font-bold text-white">
+              <div className="text-base sm:text-lg font-bold text-white">
                 {isDataLoading ? (
                   <Skeleton className="h-6 w-24 bg-white/20" />
                 ) : (
@@ -2039,9 +2041,9 @@ const renderTransactionList = (
                 )}
               </div>
             </div>
-            <div className="text-center">
+            <div className="text-right sm:text-center">
               <div className="text-xs text-violet-200">Closing Balance</div>
-              <div className="text-lg font-bold text-white">
+              <div className="text-base sm:text-lg font-bold text-white">
                 {isDataLoading ? (
                   <Skeleton className="h-6 w-24 bg-white/20" />
                 ) : (

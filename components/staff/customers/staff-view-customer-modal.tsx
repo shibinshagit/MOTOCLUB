@@ -67,16 +67,16 @@ export default function StaffViewCustomerModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto bg-slate-50">
+      <DialogContent className="w-[95vw] sm:max-w-3xl max-h-[92vh] overflow-y-auto bg-slate-50 p-4 sm:p-6">
         <DialogHeader className="pb-4">
-          <div className="flex justify-between items-start">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
             <DialogTitle className="text-xl font-bold text-slate-900 flex items-center gap-3">
-              <div className="p-2 bg-blue-100 rounded-lg">
+              <div className="p-2 bg-blue-100 rounded-lg shrink-0">
                 <User className="h-5 w-5 text-blue-600" />
               </div>
               <div>
                 {customer.name}
-                <div className="text-xs font-normal text-slate-500 mt-1 flex items-center gap-2">
+                <div className="text-xs font-normal text-slate-500 mt-1 flex flex-wrap items-center gap-2">
                   ID: {customer.id}
                   <Badge variant="outline" className={customerType.color}>
                     {customerType.label}
@@ -84,7 +84,7 @@ export default function StaffViewCustomerModal({
                 </div>
               </div>
             </DialogTitle>
-            <Button variant="outline" size="sm" onClick={handleShare} className="gap-2 text-slate-600">
+            <Button variant="outline" size="sm" onClick={handleShare} className="gap-2 text-slate-600 w-full sm:w-auto">
               <Share2 className="h-4 w-4" />
               Share Profile
             </Button>

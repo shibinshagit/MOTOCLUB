@@ -24,12 +24,12 @@ function SummaryCard({ title, value, icon, tone }: any) {
     red: "bg-red-50 text-red-600 border-red-100",
   }
   return (
-    <div className={cn("rounded-xl border p-4 flex items-center justify-between", (tones as any)[tone])}>
-      <div>
-        <p className="text-sm font-medium opacity-80 mb-1">{title}</p>
-        <h3 className="text-2xl font-bold">{value}</h3>
+    <div className={cn("rounded-xl border p-3 sm:p-4 flex items-center justify-between min-w-0", (tones as any)[tone])}>
+      <div className="min-w-0 flex-1">
+        <p className="text-xs sm:text-sm font-medium opacity-80 mb-1 truncate">{title}</p>
+        <h3 className="text-xl sm:text-2xl font-bold truncate">{value}</h3>
       </div>
-      <div className="p-3 bg-white/60 rounded-lg">
+      <div className="p-2 sm:p-3 bg-white/60 rounded-lg shrink-0 ml-2">
         {icon}
       </div>
     </div>
@@ -91,14 +91,14 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
   return (
     <div className="flex flex-col h-full bg-[#f8fafc]">
       {/* Header */}
-      <div className="bg-white border-b border-slate-200 px-6 py-5 shrink-0">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="bg-white border-b border-slate-200 px-4 sm:px-6 py-4 sm:py-5 shrink-0">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-xl font-bold text-slate-800">Inventory Management</h1>
-            <p className="text-sm text-slate-500 mt-1">View stock, locations, and manage product photos & videos</p>
+            <h1 className="text-lg sm:text-xl font-bold text-slate-800">Inventory Management</h1>
+            <p className="text-xs sm:text-sm text-slate-500 mt-0.5 sm:mt-1">View stock, locations, and manage product photos & videos</p>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => loadInventory()} disabled={loading}>
+            <Button variant="outline" size="sm" onClick={() => loadInventory()} disabled={loading} className="w-full sm:w-auto">
               <RefreshCw className={cn("h-4 w-4 mr-2", loading && "animate-spin")} />
               Refresh
             </Button>
@@ -107,18 +107,18 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-auto p-6">
+      <div className="flex-1 overflow-auto p-3 sm:p-6">
         
         {/* Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-          <SummaryCard title="Total Products" value={stats.total} icon={<Package className="h-6 w-6" />} tone="blue" />
-          <SummaryCard title="In Stock" value={stats.available} icon={<PackageOpen className="h-6 w-6" />} tone="emerald" />
-          <SummaryCard title="Low Stock" value={stats.low} icon={<AlertTriangle className="h-6 w-6" />} tone="amber" />
-          <SummaryCard title="Out of Stock" value={stats.out} icon={<AlertCircle className="h-6 w-6" />} tone="red" />
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-4 sm:mb-6">
+          <SummaryCard title="Total Products" value={stats.total} icon={<Package className="h-5 w-5 sm:h-6 sm:w-6" />} tone="blue" />
+          <SummaryCard title="In Stock" value={stats.available} icon={<PackageOpen className="h-5 w-5 sm:h-6 sm:w-6" />} tone="emerald" />
+          <SummaryCard title="Low Stock" value={stats.low} icon={<AlertTriangle className="h-5 w-5 sm:h-6 sm:w-6" />} tone="amber" />
+          <SummaryCard title="Out of Stock" value={stats.out} icon={<AlertCircle className="h-5 w-5 sm:h-6 sm:w-6" />} tone="red" />
         </div>
 
         {/* Toolbar */}
-        <div className="bg-white p-4 rounded-t-xl border border-b-0 border-slate-200 flex flex-col sm:flex-row gap-4 justify-between items-center">
+        <div className="bg-white p-3 sm:p-4 rounded-t-xl border border-b-0 border-slate-200 flex flex-col sm:flex-row gap-4 justify-between items-center">
           <div className="relative w-full max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
             <Input 
@@ -130,10 +130,9 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
           </div>
         </div>
 
-
         {/* Table */}
-        <div className="bg-white rounded-b-xl border border-slate-200 shadow-sm overflow-hidden">
-          <div className="overflow-x-auto">
+        <div className="bg-white rounded-b-xl border border-slate-200 shadow-sm overflow-hidden w-full">
+          <div className="overflow-x-auto w-full">
             <table className="w-full text-sm text-left">
               <thead className="bg-[#f8fafc] text-slate-600 border-b border-slate-200">
                 <tr>

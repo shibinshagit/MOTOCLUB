@@ -554,7 +554,7 @@ export function JobCardForm({
               />
             </div>
             
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1">
                 <Label className="text-xs font-medium text-gray-700">Full Name <span className="text-red-500">*</span></Label>
                 <Input 
@@ -696,7 +696,7 @@ export function JobCardForm({
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <Label className="text-xs font-medium text-gray-700 flex items-center gap-1">
                     City
@@ -720,7 +720,7 @@ export function JobCardForm({
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <Label className="text-xs font-medium text-gray-700">District</Label>
                   <Input 
@@ -772,7 +772,8 @@ export function JobCardForm({
         </CardHeader>
         <CardContent className="pt-4 space-y-4">
           
-          <div className="rounded-md border border-gray-200 overflow-hidden">
+          <div className="rounded-md border border-gray-200 overflow-hidden w-full">
+            <div className="overflow-x-auto w-full">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 text-gray-600 font-medium border-b border-gray-200">
                 <tr>
@@ -864,6 +865,7 @@ export function JobCardForm({
               </tbody>
             </table>
           </div>
+        </div>
 
           <Button type="button" variant="outline" onClick={addProductRow} className="w-full border-dashed border-gray-300 hover:border-gray-400 hover:bg-gray-50/50">
             <Plus className="h-4 w-4 mr-2 text-gray-500" /> Add Product Row

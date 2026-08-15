@@ -523,10 +523,15 @@ export async function getAllJobCards(deviceId?: number) {
           COALESCE(c.phone, s.customer_phone_override) as customer_phone,
           d.name as branch_name,
           d.name as device_name,
-          d.logo_url as device_logo
+          d.logo_url as device_logo,
+          err.id as return_id,
+          err.ecommerce_return_request_id as return_request_ext_id,
+          err.status as return_status,
+          err.rejection_reason as return_rejection_reason
         FROM sales s
         LEFT JOIN customers c ON s.customer_id = c.id
         LEFT JOIN devices d ON s.device_id = d.id
+        LEFT JOIN return_requests err ON (err.sale_id = s.id OR (s.external_order_id IS NOT NULL AND (err.order_number = s.external_order_id OR err.order_id = s.id)))
         WHERE s.device_id = ${deviceId}
           AND (${allowEcom} OR s.source IS NULL OR s.source != 'ECOMMERCE')
           AND (s.status != 'Cancelled' OR s.delivery_status = 'Returned')
@@ -541,10 +546,15 @@ export async function getAllJobCards(deviceId?: number) {
           COALESCE(c.phone, s.customer_phone_override) as customer_phone,
           d.name as branch_name,
           d.name as device_name,
-          d.logo_url as device_logo
+          d.logo_url as device_logo,
+          err.id as return_id,
+          err.ecommerce_return_request_id as return_request_ext_id,
+          err.status as return_status,
+          err.rejection_reason as return_rejection_reason
         FROM sales s
         LEFT JOIN customers c ON s.customer_id = c.id
         LEFT JOIN devices d ON s.device_id = d.id
+        LEFT JOIN return_requests err ON (err.sale_id = s.id OR (s.external_order_id IS NOT NULL AND (err.order_number = s.external_order_id OR err.order_id = s.id)))
         WHERE (s.status != 'Cancelled' OR s.delivery_status = 'Returned')
           AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%')
         ORDER BY s.created_at DESC

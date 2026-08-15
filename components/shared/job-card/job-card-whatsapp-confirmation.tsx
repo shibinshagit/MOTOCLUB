@@ -12,6 +12,7 @@ interface JobCardWhatsappConfirmationProps {
   isShipping?: boolean
   saleId: number
   trackingId: string
+  trackingToken?: string | null
   deviceId: number
   customerName: string
   customerPhone: string
@@ -25,6 +26,7 @@ export function JobCardWhatsappConfirmation({
   isShipping = false,
   saleId,
   trackingId,
+  trackingToken,
   deviceId,
   customerName,
   customerPhone,
@@ -38,6 +40,14 @@ export function JobCardWhatsappConfirmation({
   const deviceName = useSelector(selectDeviceName) || "Moto Cart Online"
 
   const productsList = products.map((p, i) => `${i + 1}. ${p.productName}`).join(",\n")
+
+  const tokenToUse = trackingToken || trackingId
+  const originStr = typeof window !== "undefined" && window.location?.origin ? window.location.origin : ""
+  const trackingUrl = tokenToUse ? `${originStr}/track/${encodeURIComponent(tokenToUse)}` : ""
+
+  const trackingLinkSection = trackingUrl
+    ? `\n\nTrack your shipment:\n${trackingUrl}`
+    : ""
 
   const whatsappText = isShipping
     ? `Dear ${customerName},
@@ -57,7 +67,7 @@ ${shippingAddress || "As provided"}
 ⏱️ You can track your shipment using the tracking ID provided above.
 Thank you for shopping with us!
 
-— ${deviceName}🚗✨`
+— ${deviceName}🚗✨${trackingLinkSection}`
     : `Dear ${customerName},
 
 Thank you for your order with ${deviceName}🙏

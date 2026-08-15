@@ -222,7 +222,7 @@ export async function updateProductStock(
     try {
       await sql`
         INSERT INTO product_stock_history (
-          product_id, product_product_variant_id, batch_id, quantity, type, reference_type, notes, created_by, device_id
+          product_id, product_variant_id, batch_id, quantity, type, reference_type, notes, created_by, device_id
         ) VALUES (
           ${productId}, ${resolvedVariantId}, ${batchId || null}, ${quantityChange}, ${operation === "subtract" ? "adjustment" : "adjustment"}, 'sale', 'POS Checkout', ${deviceId}, ${deviceId}
         )
@@ -2279,5 +2279,34 @@ export async function reassignSaleOwnership(saleId: number, deviceId: number, ne
   } catch (error: any) {
     console.error("reassignSaleOwnership error:", error)
     return { success: false, message: error.message || "Failed to reassign ownership" }
+  }
+}
+
+export async function getOrCreateTrackingToken(saleId: number) {
+  noStore()
+  try {
+    if (!saleId) {
+      return { success: false, message: "Sale ID is required", trackingToken: null }
+    }
+
+    const rows = await sql`
+      SELECT id, tracking_token FROM sales WHERE id = ${saleId} LIMIT 1
+    `
+    if (rows.length === 0) {
+      return { success: false, message: "Sale not found", trackingToken: null }
+    }
+
+    if (rows[0].tracking_token) {
+      return { success: true, trackingToken: String(rows[0].tracking_token) }
+    }
+
+    const token = "tr_" + Math.random().toString(36).substring(2, 10) + Date.now().toString(36)
+    await sql`
+      UPDATE sales SET tracking_token = ${token} WHERE id = ${saleId}
+    `
+    return { success: true, trackingToken: token }
+  } catch (error: any) {
+    console.error("getOrCreateTrackingToken error:", error)
+    return { success: false, message: error.message || "Failed to generate tracking token", trackingToken: null }
   }
 }

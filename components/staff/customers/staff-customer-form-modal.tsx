@@ -100,7 +100,7 @@ export default function StaffCustomerFormModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-[500px]">
+      <DialogContent className="w-[95vw] sm:max-w-[500px]">
         <DialogHeader>
           <DialogTitle>{customerToEdit ? "Edit Customer" : "Add New Customer"}</DialogTitle>
         </DialogHeader>
@@ -118,7 +118,7 @@ export default function StaffCustomerFormModal({
             />
           </div>
           
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="phone">Phone Number</Label>
               <Input
@@ -153,11 +153,11 @@ export default function StaffCustomerFormModal({
             />
           </div>
 
-          <DialogFooter className="bg-slate-50 px-6 py-4 border-t border-slate-200 mt-2">
-            <Button type="button" variant="outline" onClick={onClose} disabled={isSubmitting}>
+          <DialogFooter className="bg-slate-50 px-4 sm:px-6 py-4 border-t border-slate-200 mt-2 flex flex-col-reverse sm:flex-row gap-2 sm:gap-2">
+            <Button type="button" variant="outline" onClick={onClose} disabled={isSubmitting} className="w-full sm:w-auto">
               Cancel
             </Button>
-            <Button type="submit" disabled={isSubmitting} className="bg-brand-blue hover:bg-brand-blue/90">
+            <Button type="submit" disabled={isSubmitting} className="w-full sm:w-auto bg-brand-blue hover:bg-brand-blue/90">
               {isSubmitting ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />

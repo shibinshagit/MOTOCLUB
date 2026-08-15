@@ -10,7 +10,7 @@ import {
   resolveStaffSessionContext,
 } from "@/lib/staff-restrictions-server"
 import { parseProductLinksFromFormData, serializeProductLinks } from "@/lib/product-links"
-import { getDeviceProductStock, adjustDeviceProductStock } from "@/lib/inventory-service"
+import { getDeviceProductStock, getDeviceVariantStock, adjustDeviceProductStock } from "@/lib/inventory-service"
 import { revalidatePath } from "next/cache"
 
 // Generate a unique barcode for a product
@@ -763,6 +763,13 @@ REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
         : currentDeviceStock
       const variants = variantsByProductId.get(Number(product.id)) || []
       const defaultVariant = variants[0] || null
+      const costPriceVal = defaultVariant ? (Number(defaultVariant.cost_price ?? defaultVariant.wholesale_price) || 0) : (Number(product.wholesale_price) || 0)
+      const mspPriceVal = defaultVariant ? (Number(defaultVariant.price ?? defaultVariant.msp) || 0) : (Number(product.msp ?? product.price) || 0)
+      const mrpPriceVal = defaultVariant ? (Number(defaultVariant.mrp) || 0) : (Number(product.mrp ?? product.price) || 0)
+
+      const finalMrp = mrpPriceVal > 0 ? mrpPriceVal : (mspPriceVal > 0 ? mspPriceVal : Number(product.price || 0))
+      const finalMsp = mspPriceVal > 0 ? mspPriceVal : finalMrp
+      const finalPrice = finalMrp > 0 ? finalMrp : finalMsp
 
       return {
         ...product,
@@ -773,10 +780,11 @@ REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
         variants,
         // Surface default variant fields at the top level for backward compat
         variant_id: defaultVariant?.id ?? null,
-        cost_price: defaultVariant?.cost_price ?? product.wholesale_price ?? 0,
-        wholesale_price: defaultVariant?.wholesale_price ?? product.wholesale_price ?? 0,
-        msp: defaultVariant?.msp ?? defaultVariant?.price ?? product.price ?? 0,
-        mrp: defaultVariant?.mrp ?? defaultVariant?.msp ?? product.price ?? 0,
+        cost_price: costPriceVal,
+        wholesale_price: costPriceVal,
+        msp: finalMsp,
+        mrp: finalMrp,
+        price: finalPrice,
         shelf: defaultVariant?.shelf ?? product.shelf ?? null,
         barcode: defaultVariant?.barcode ?? null,
         sku: defaultVariant?.sku ?? null,
@@ -1582,8 +1590,8 @@ export async function updateProduct(formData: FormData) {
             
             // Adjust stock if it changed
             try {
-              const oldStock = await getDeviceProductStock(id, stockDeviceId)
-              const newStock = variant.stock !== undefined && variant.stock !== null ? Number(variant.stock) : Number(stock) || 0
+              const oldStock = await getDeviceVariantStock(variant.id, stockDeviceId)
+              const newStock = variant.stock !== undefined && variant.stock !== null ? Math.max(0, Number(variant.stock)) : oldStock
               const delta = newStock - oldStock
               if (delta !== 0) {
                 const batches = await sql`

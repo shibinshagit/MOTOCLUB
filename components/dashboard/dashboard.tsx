@@ -22,6 +22,7 @@ import {
   Database,
   CalendarDays,
   FileText,
+  RotateCcw,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/components/ui/use-toast"
@@ -50,6 +51,7 @@ import MasterDataTab from "./master-data-tab"
 import AttendanceTab from "./attendance-tab"
 import SalesOrdersTab from "./sales-orders-tab"
 import PayrollRequestsTab from "@/components/admin/payroll-requests-tab"
+import ReturnsTab from "./returns-tab"
 import StaffAuthModal from "../staff/staff-auth-modal"
 import { BrandLogo } from "@/components/brand-logo"
 
@@ -66,7 +68,7 @@ import { getDeviceProfile } from "@/app/actions/auth-actions"
 import { activateStaff, clearStaff, selectActiveStaff, setStaff } from "@/store/slices/staffSlice"
 import { getStaffForAuthentication } from "@/app/actions/staff-actions"
 
-type TabType = "sale" | "sales" | "sales-orders" | "purchase" | "product" | "trending" | "customer" | "transfer" | "accounting" | "supplier" | "platform" | "master" | "attendance" | "requests"
+type TabType = "sale" | "sales" | "sales-orders" | "purchase" | "product" | "trending" | "customer" | "transfer" | "accounting" | "supplier" | "platform" | "master" | "attendance" | "requests" | "returns"
 
 const DEFAULT_CONTENT_TAB: TabType = "sale"
 
@@ -105,7 +107,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
     if (param === "home") return "sales-orders"
     if (
       param &&
-      ["sale", "sales", "sales-orders", "purchase", "product", "trending", "customer", "transfer", "accounting", "supplier", "platform", "master", "attendance", "requests"].includes(
+      ["sale", "sales", "sales-orders", "purchase", "product", "trending", "customer", "transfer", "accounting", "supplier", "platform", "master", "attendance", "requests", "returns"].includes(
         param,
       )
     ) {
@@ -459,6 +461,8 @@ export function Dashboard({ onLogout }: DashboardProps) {
           return <AccountingTab userId={device?.id ?? 0} companyId={companyId} deviceId={deviceId || 0} />
         case "requests":
           return <PayrollRequestsTab deviceId={deviceId || 0} initialSubTab="requests" />
+        case "returns":
+          return <ReturnsTab />
         case "platform":
           return <PlatformTab userId={device?.id ?? 0} />
         case "master":
@@ -476,6 +480,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const navItems = [
     { id: "sales-orders", icon: <Receipt className="h-4 w-4" />, label: "Order List" },
     { id: "sale", icon: <Plus className="h-5 w-5" />, label: "Sales" },
+    { id: "returns", icon: <RotateCcw className="h-4 w-4" />, label: "Returns" },
     { id: "purchase", icon: <Receipt className="h-4 w-4" />, label: "Purchase" },
     { id: "customer", icon: <User className="h-4 w-4" />, label: "Customers" },
     { id: "attendance", icon: <CalendarDays className="h-4 w-4" />, label: "Attendance" },
@@ -487,7 +492,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
 
   // Primary tabs for bottom navigation (most used)
   const primaryTabs = ["sales-orders", "sale", "purchase"]
-  const secondaryTabs = ["customer", "attendance", "supplier", "transfer", "platform", "master"]
+  const secondaryTabs = ["returns", "customer", "attendance", "supplier", "transfer", "platform", "master"]
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background">
@@ -501,9 +506,9 @@ export function Dashboard({ onLogout }: DashboardProps) {
       )}
       
       {/* Top Navbar */}
-      <header className="sticky top-0 z-10 flex h-16 items-center justify-between border-b border-border bg-card px-4">
-        <div className="flex items-center flex-1 min-w-0">
-          <div className="relative mr-3 h-8 w-8 sm:h-10 sm:w-10 flex-shrink-0">
+      <header className="sticky top-0 z-10 flex h-16 items-center justify-between border-b border-border bg-card px-2 sm:px-4">
+        <div className="flex items-center flex-1 min-w-0 mr-1 sm:mr-3">
+          <div className="relative mr-2 sm:mr-3 h-8 w-8 sm:h-10 sm:w-10 flex-shrink-0">
             {deviceLogo ? (
               <Image
                 src={deviceLogo}
@@ -518,12 +523,12 @@ export function Dashboard({ onLogout }: DashboardProps) {
             )}
           </div>
           <div className="flex flex-col min-w-0 flex-1">
-            <span className="text-lg sm:text-xl font-bold text-gray-800 truncate">
+            <span className="text-sm sm:text-xl font-bold text-gray-800 truncate max-w-[130px] sm:max-w-none">
               {company?.name || "Company"}
             </span>
             <div className="flex items-center">
-              <div className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse flex-shrink-0"></div>
-              <span className="text-xs text-gray-500 truncate">
+              <div className="w-2 h-2 bg-green-500 rounded-full mr-1.5 sm:mr-2 animate-pulse flex-shrink-0"></div>
+              <span className="text-[10px] sm:text-xs text-gray-500 truncate max-w-[120px] sm:max-w-none">
                 {device?.name || "Device"} - {device?.currency || "AED"}
               </span>
             </div>
@@ -740,7 +745,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
       )}
 
       {/* Main Content */}
-      <main className="flex-1 overflow-y-auto px-4 pt-6 pb-4 sm:pb-20">
+      <main className="flex-1 overflow-y-auto px-2 sm:px-4 pt-3 sm:pt-6 pb-4 sm:pb-20">
         {dbError && (
           <FormAlert
             type="error"

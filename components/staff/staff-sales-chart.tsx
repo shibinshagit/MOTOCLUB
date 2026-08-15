@@ -138,13 +138,15 @@ export function StaffSalesChart({ deviceId, currency = "INR", onSummaryUpdate }:
   return (
     <Card className="w-full border-0 shadow-sm rounded-xl overflow-hidden">
       <CardHeader className="flex flex-col sm:flex-row items-center justify-between pb-6 gap-4 bg-white">
-        <div className="flex items-center gap-2">
-          <div className="p-2 bg-blue-50 rounded-lg">
-            <TrendingUp className="h-5 w-5 text-blue-600" />
+        <div className="flex items-center justify-between w-full sm:w-auto gap-2">
+          <div className="flex items-center gap-2">
+            <div className="p-2 bg-blue-50 rounded-lg">
+              <TrendingUp className="h-5 w-5 text-blue-600" />
+            </div>
+            <CardTitle className="text-lg font-bold text-slate-800">Sales Trend</CardTitle>
           </div>
-          <CardTitle className="text-lg font-bold text-slate-800">Sales Trend</CardTitle>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center justify-center sm:justify-end gap-3 w-full sm:w-auto">
           <div className="flex items-center bg-gray-100 rounded-md p-1">
             <Button
               variant={chartType === "bar" ? "default" : "ghost"}
@@ -169,7 +171,7 @@ export function StaffSalesChart({ deviceId, currency = "INR", onSummaryUpdate }:
             <Button variant="ghost" size="icon" onClick={prevMonth} className="h-6 w-6 rounded-full hover:bg-white hover:shadow-sm">
               <ChevronLeft className="h-3 w-3" />
             </Button>
-            <span className="text-[11px] font-semibold text-slate-600 min-w-[130px] text-center">
+            <span className="text-[11px] font-semibold text-slate-600 min-w-[120px] text-center">
               {format(startOfMonth(currentMonth), "M/d/yyyy")} - {format(endOfMonth(currentMonth), "M/d/yyyy")}
             </span>
             <Button variant="ghost" size="icon" onClick={nextMonth} className="h-6 w-6 rounded-full hover:bg-white hover:shadow-sm">
@@ -178,24 +180,24 @@ export function StaffSalesChart({ deviceId, currency = "INR", onSummaryUpdate }:
           </div>
         </div>
       </CardHeader>
-      <CardContent>
+      <CardContent className="px-2 sm:px-6">
         {isLoading ? (
-          <div className="h-[350px] w-full flex items-center justify-center">
+          <div className="h-[300px] sm:h-[350px] w-full flex items-center justify-center">
             <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
           </div>
         ) : error ? (
-          <div className="h-[350px] w-full flex items-center justify-center text-red-500">
+          <div className="h-[300px] sm:h-[350px] w-full flex items-center justify-center text-red-500">
             {error}
           </div>
         ) : !hasData ? (
-          <div className="h-[350px] w-full flex items-center justify-center text-gray-500">
+          <div className="h-[300px] sm:h-[350px] w-full flex items-center justify-center text-gray-500">
             No orders for this period
           </div>
         ) : (
-          <div className="h-[350px] w-full mt-2">
+          <div className="h-[300px] sm:h-[350px] w-full mt-2">
             <ResponsiveContainer width="100%" height="100%">
               {chartType === "bar" ? (
-                <RechartsBarChart data={data} margin={{ top: 20, right: 20, left: 0, bottom: 0 }} barGap={2}>
+                <RechartsBarChart data={data} margin={{ top: 20, right: 10, left: 0, bottom: 0 }} barGap={2}>
                   <CartesianGrid strokeDasharray="3 3" vertical={true} stroke="#f1f5f9" />
                   <XAxis 
                     dataKey="dayStr" 
@@ -203,16 +205,16 @@ export function StaffSalesChart({ deviceId, currency = "INR", onSummaryUpdate }:
                     tickLine={false}
                     tick={{ fill: '#64748b', fontSize: 10, fontWeight: 500 }}
                     dy={10}
-                    interval={0}
-                    minTickGap={10}
+                    interval="preserveStartEnd"
+                    minTickGap={12}
                   />
                   <YAxis 
                     tickFormatter={(val) => `₹${val}`}
                     axisLine={false}
                     tickLine={false}
-                    tick={{ fill: '#64748b', fontSize: 11, fontWeight: 500 }}
-                    width={60}
-                    dx={-10}
+                    tick={{ fill: '#64748b', fontSize: 10, fontWeight: 500 }}
+                    width={50}
+                    dx={-5}
                   />
                   <Tooltip content={<CustomTooltip />} cursor={{ fill: 'transparent' }} />
                   <Legend 
@@ -225,7 +227,7 @@ export function StaffSalesChart({ deviceId, currency = "INR", onSummaryUpdate }:
                   <Bar dataKey="salesAmount" name="Sales Amount" fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={40} />
                 </RechartsBarChart>
               ) : (
-                <RechartsLineChart data={data} margin={{ top: 20, right: 20, left: 0, bottom: 0 }}>
+                <RechartsLineChart data={data} margin={{ top: 20, right: 10, left: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={true} stroke="#f1f5f9" />
                   <XAxis 
                     dataKey="dayStr" 
@@ -233,16 +235,16 @@ export function StaffSalesChart({ deviceId, currency = "INR", onSummaryUpdate }:
                     tickLine={false}
                     tick={{ fill: '#64748b', fontSize: 10, fontWeight: 500 }}
                     dy={10}
-                    interval={0}
-                    minTickGap={10}
+                    interval="preserveStartEnd"
+                    minTickGap={12}
                   />
                   <YAxis 
                     tickFormatter={(val) => `₹${val}`}
                     axisLine={false}
                     tickLine={false}
-                    tick={{ fill: '#64748b', fontSize: 11, fontWeight: 500 }}
-                    width={60}
-                    dx={-10}
+                    tick={{ fill: '#64748b', fontSize: 10, fontWeight: 500 }}
+                    width={50}
+                    dx={-5}
                   />
                   <Tooltip content={<CustomTooltip />} />
                   <Legend 

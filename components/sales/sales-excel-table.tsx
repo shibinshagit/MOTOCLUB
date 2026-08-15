@@ -284,12 +284,12 @@ export default function SalesExcelTable({
       </div>
 
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-card">
-        <div className="relative flex items-center border-b border-slate-200 bg-[#F1F4F9] px-4 py-2">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-2 border-b border-slate-200 bg-[#F1F4F9] px-3 py-2.5 sm:px-4">
           <span className="text-xs font-medium text-slate-600">
             {displaySales.length} of {sales.length} {sales.length === 1 ? "sale" : "sales"}
           </span>
 
-          <div className="absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center gap-1">
+          <div className="flex items-center gap-1">
             <Button
               variant="outline"
               size="icon"
@@ -299,7 +299,7 @@ export default function SalesExcelTable({
             >
               <ChevronLeft className="h-3.5 w-3.5" />
             </Button>
-            <span className="min-w-[9rem] text-center text-xs font-medium text-foreground">{periodLabel}</span>
+            <span className="min-w-[7rem] sm:min-w-[9rem] text-center text-xs font-medium text-foreground">{periodLabel}</span>
             <Button
               variant="outline"
               size="icon"
