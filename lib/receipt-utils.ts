@@ -92,8 +92,22 @@ export function printSalesReceipt(sale: any, items: any[], currency = "AED", bus
     }
   }
 
+  // Get courier charge / courier paid extra from sale object
+  const courierCharge = Number(
+    sale.courier_paid_extra ??
+    sale.courierPaidExtra ??
+    sale.courier_charge ??
+    sale.shipping_charge ??
+    sale.delivery_fee ??
+    0
+  )
+
   // Calculate final total
-  const finalTotal = subtotal - discount
+  const finalTotal =
+    sale.total_amount !== undefined && sale.total_amount !== null
+      ? Number(sale.total_amount)
+      : subtotal - discount + courierCharge
+
 
   // Get received amount from sale object
   let receivedAmount = 0
@@ -638,6 +652,16 @@ export function printSalesReceipt(sale: any, items: any[], currency = "AED", bus
                 <tr>
                   <td>Discount:</td>
                   <td class="text-right">-${formatCurrency(discount)}</td>
+                </tr>
+                `
+                    : ""
+                }
+                ${
+                  courierCharge > 0
+                    ? `
+                <tr>
+                  <td>Courier Charge:</td>
+                  <td class="text-right">${formatCurrency(courierCharge)}</td>
                 </tr>
                 `
                     : ""
@@ -1282,6 +1306,7 @@ export function printJobCard(sale: any, currency = 'AED', businessInfo: any = {}
   }
   const logoUrl = rawLogo;
   const fromName = sale?.branch_name || sale?.device_name || business.device_name || business.branch_name || business.name || 'Moto Club Online';
+  const staffName = sale?.staff_name || sale?.staffName || sale?.sales_executive || sale?.sales_executive_name || sale?.created_by_name || sale?.staff?.name || sale?.user_name || businessInfo?.staff_name || '';
 
   const itemsText = sale.items?.map((item: any) => {
     return `${item.product_name || 'Item'} ${item.variant_name ? '('+item.variant_name+')' : ''}${item.quantity > 1 ? ` x${item.quantity}` : ''}`
@@ -1308,6 +1333,7 @@ export function printJobCard(sale: any, currency = 'AED', businessInfo: any = {}
         .customer-name { font-size: 35px; font-weight: 900; text-transform: uppercase; margin-bottom: 10px; letter-spacing: 0.5px; }
         .from-section { font-size: 26px; font-weight: 900; margin-top: 18px; }
         .from-title { text-decoration: underline; font-size: 32px; font-weight: 900; margin-bottom: 10px; display: inline-block; }
+        .exec-name { font-size: 20px; font-weight: 400; color: #4b5563; margin-top: 4px; margin-bottom: 4px; }
         .products-text { font-size: 22px; text-align: center; color: #000; margin-top: 25px; margin-bottom: 8px; font-weight: 800; }
         .order-id { font-size: 30px; text-align: center; color: #000; font-weight: 900; }
         p { margin: 6px 0; }
@@ -1330,6 +1356,7 @@ export function printJobCard(sale: any, currency = 'AED', businessInfo: any = {}
       <div class="section from-section">
         <p class="from-title">From,</p>
         <p>${fromName}</p>
+        ${staffName ? `<p class="exec-name">Sales Executive: ${staffName}</p>` : ''}
         <p>Pin:- 676503</p>
         <p>Ph:- 9995442239</p>
       </div>
@@ -1375,6 +1402,7 @@ export function printBatchJobCards(sales: any[], currency = 'AED', businessInfo:
       logoUrl = `${window.location.origin}${logoUrl}`;
     }
     const fromName = sale?.branch_name || sale?.device_name || business.device_name || business.branch_name || business.name || 'Moto Club Online';
+    const staffName = sale?.staff_name || sale?.staffName || sale?.sales_executive || sale?.sales_executive_name || sale?.created_by_name || sale?.staff?.name || sale?.user_name || businessInfo?.staff_name || '';
 
     const itemsText = sale.items?.map((item: any) => {
       return `${item.product_name || 'Item'} ${item.variant_name ? '('+item.variant_name+')' : ''}${item.quantity > 1 ? ` x${item.quantity}` : ''}`
@@ -1402,6 +1430,7 @@ export function printBatchJobCards(sales: any[], currency = 'AED', businessInfo:
         <div class="section from-section">
           <p class="from-title">From,</p>
           <p>${fromName}</p>
+          ${staffName ? `<p class="exec-name">Sales Executive: ${staffName}</p>` : ''}
           <p>Pin:- 676503</p>
           <p>Ph:- 9995442239</p>
         </div>
@@ -1434,6 +1463,7 @@ export function printBatchJobCards(sales: any[], currency = 'AED', businessInfo:
         .customer-name { font-size: 35px; font-weight: 900; text-transform: uppercase; margin-bottom: 10px; letter-spacing: 0.5px; }
         .from-section { font-size: 26px; font-weight: 900; margin-top: 18px; }
         .from-title { text-decoration: underline; font-size: 32px; font-weight: 900; margin-bottom: 10px; display: inline-block; }
+        .exec-name { font-size: 20px; font-weight: 400; color: #4b5563; margin-top: 4px; margin-bottom: 4px; }
         .products-text { font-size: 22px; text-align: center; color: #000; margin-top: 25px; margin-bottom: 8px; font-weight: 800; }
         .order-id { font-size: 30px; text-align: center; color: #000; font-weight: 900; }
         p { margin: 6px 0; }
@@ -1457,3 +1487,4 @@ export function printBatchJobCards(sales: any[], currency = 'AED', businessInfo:
   printWindow.document.write(html);
   printWindow.document.close();
 }
+

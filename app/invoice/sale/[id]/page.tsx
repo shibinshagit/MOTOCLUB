@@ -111,7 +111,19 @@ export default function SaleInvoicePage() {
   // Calculate totals
   const subtotal = items.reduce((sum, item) => sum + Number(item.quantity) * Number(item.price), 0)
   const discount = Number(sale.discount) || 0
-  const finalTotal = subtotal - discount
+  const courierCharge = Number(
+    sale.courier_paid_extra ??
+    sale.courierPaidExtra ??
+    sale.courier_charge ??
+    sale.shipping_charge ??
+    sale.delivery_fee ??
+    0
+  )
+  const finalTotal =
+    sale.total_amount !== undefined && sale.total_amount !== null
+      ? Number(sale.total_amount)
+      : subtotal - discount + courierCharge
+
 
   // Format date and time
   const saleDate = new Date(sale.sale_date)
@@ -278,10 +290,18 @@ export default function SaleInvoicePage() {
                     <td className="py-2">Subtotal:</td>
                     <td className="text-right">{formatCurrency(subtotal)}</td>
                   </tr>
-                  <tr>
-                    <td className="py-2">Discount:</td>
-                    <td className="text-right">{formatCurrency(discount)}</td>
-                  </tr>
+                  {discount > 0 && (
+                    <tr>
+                      <td className="py-2">Discount:</td>
+                      <td className="text-right">-{formatCurrency(discount)}</td>
+                    </tr>
+                  )}
+                  {courierCharge > 0 && (
+                    <tr>
+                      <td className="py-2">Courier Charge:</td>
+                      <td className="text-right">{formatCurrency(courierCharge)}</td>
+                    </tr>
+                  )}
                   <tr>
                     <td className="py-2">VAT (0%):</td>
                     <td className="text-right">{formatCurrency(0)}</td>

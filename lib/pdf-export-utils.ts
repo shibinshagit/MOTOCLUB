@@ -118,7 +118,15 @@ export async function generateDetailedSalePDF(saleData: any) {
     0,
   )
   const discount = Number(saleData.discount) || 0
-  const total = Number(saleData.total_amount) || subtotal - discount
+  const courierCharge = Number(
+    saleData.courier_paid_extra ??
+    saleData.courierPaidExtra ??
+    saleData.courier_charge ??
+    saleData.shipping_charge ??
+    saleData.delivery_fee ??
+    0
+  )
+  const total = Number(saleData.total_amount) || subtotal - discount + courierCharge
 
   // Add financial summary
   y += 12
@@ -132,9 +140,17 @@ export async function generateDetailedSalePDF(saleData: any) {
   doc.text("Subtotal:", 10, y)
   doc.text(`AED ${subtotal.toFixed(2)}`, 50, y)
 
-  y += 6
-  doc.text("Discount:", 10, y)
-  doc.text(`AED ${discount.toFixed(2)}`, 50, y)
+  if (discount > 0) {
+    y += 6
+    doc.text("Discount:", 10, y)
+    doc.text(`AED ${discount.toFixed(2)}`, 50, y)
+  }
+
+  if (courierCharge > 0) {
+    y += 6
+    doc.text("Courier Charge:", 10, y)
+    doc.text(`AED ${courierCharge.toFixed(2)}`, 50, y)
+  }
 
   y += 6
   doc.text("Total Amount:", 10, y)
@@ -872,7 +888,15 @@ export async function exportDetailedSaleToPDF(
     // Calculate totals
     const subtotal = items.reduce((sum, item) => sum + Number(item.price) * Number(item.quantity), 0)
     const discount = Number(sale.discount || 0)
-    const total = Number(sale.total_amount || subtotal - discount)
+    const courierCharge = Number(
+      sale.courier_paid_extra ??
+      sale.courierPaidExtra ??
+      sale.courier_charge ??
+      sale.shipping_charge ??
+      sale.delivery_fee ??
+      0
+    )
+    const total = Number(sale.total_amount || subtotal - discount + courierCharge)
 
     // Add table rows
     items.forEach((item, index) => {
@@ -894,7 +918,8 @@ export async function exportDetailedSaleToPDF(
           
           <div class="totals">
             <p><strong>Subtotal:</strong> ${formatCurrencyOriginal(subtotal, currency)}</p>
-            <p><strong>Discount:</strong> ${formatCurrencyOriginal(discount, currency)}</p>
+            ${discount > 0 ? `<p><strong>Discount:</strong> -${formatCurrencyOriginal(discount, currency)}</p>` : ""}
+            ${courierCharge > 0 ? `<p><strong>Courier Charge:</strong> ${formatCurrencyOriginal(courierCharge, currency)}</p>` : ""}
             <p class="total"><strong>Total Amount:</strong> ${formatCurrencyOriginal(total, currency)}</p>
           </div>
           

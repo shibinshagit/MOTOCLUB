@@ -171,6 +171,11 @@ export function DeliveryStatusSelect({
       return // Show confirmation dialog first
     }
 
+    if (newStatus === "Sent") {
+      setWhatsappStep("prepare")
+      return // Show WhatsApp photos/videos modal before marking as Sent
+    }
+
     if (newStatus === "Shipping") {
       setIsTrackingModalOpen(true)
       return // Halt update until tracking ID is entered
@@ -185,10 +190,13 @@ export function DeliveryStatusSelect({
   }
 
   const handleOpenWhatsApp = () => {
-    // Format phone number to remove non-numeric chars if needed, though simple link works mostly
+    // Format phone number to remove non-numeric chars
     const phone = customerPhone ? customerPhone.replace(/\D/g, '') : ''
     if (phone) {
-      window.open(`https://wa.me/${phone}`, '_blank')
+      const trackingMsg = trackingId ? `\nTracking ID: ${trackingId}` : ''
+      const trackUrl = trackingId ? `\nTrack shipment: https://ims.motoclub.in/track/${encodeURIComponent(trackingId)}` : ''
+      const text = encodeURIComponent(`Hello ${customerName || 'Customer'},\n\nHere are the photos and videos of your order #${orderNumber || saleId}.${trackingMsg}${trackUrl}\n\nThank you for choosing us!`)
+      window.open(`https://wa.me/${phone}?text=${text}`, '_blank')
     } else {
       toast({ title: "Error", description: "Customer does not have a valid phone number.", variant: "destructive" })
     }

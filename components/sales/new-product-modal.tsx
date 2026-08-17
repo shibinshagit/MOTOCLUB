@@ -573,10 +573,16 @@ export default function NewProductModal({
   }, [categorySearchQuery, categories])
 
   useEffect(() => {
-    if (isCategoryDialogOpen && categorySearchInputRef.current) {
-      setTimeout(() => categorySearchInputRef.current?.focus(), 100)
+    if (isCategoryDialogOpen) {
+      if (categories.length === 0 && !isLoadingCategories) {
+        fetchCategories()
+      }
+      if (categorySearchInputRef.current) {
+        setTimeout(() => categorySearchInputRef.current?.focus(), 100)
+      }
     }
-  }, [isCategoryDialogOpen])
+  }, [isCategoryDialogOpen, categories.length, isLoadingCategories])
+
 
   useEffect(() => {
     if (isAddingNewCategory && newCategoryInputRef.current) {

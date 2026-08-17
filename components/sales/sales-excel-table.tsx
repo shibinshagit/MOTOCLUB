@@ -202,6 +202,12 @@ export default function SalesExcelTable({
     0,
   )
 
+  const pendingSalesCount = useMemo(() => {
+    return displaySales.filter(
+      (sale) => getSaleStatusLabel(sale) === "Pending" || sale.status === "Pending" || sale.payment_status === "Pending",
+    ).length
+  }, [displaySales])
+
   const activeFilterCount = hasLoadedSales
     ? (Object.keys(columnFilters) as ColumnKey[]).filter((key) =>
         isColumnFilterActive(columnFilters[key], uniqueValues[key]),
@@ -253,8 +259,10 @@ export default function SalesExcelTable({
 
   const stickyActionHeaderClass =
     "sticky right-0 z-20 min-w-[5.5rem] whitespace-nowrap border-l border-slate-200 bg-[#F1F4F9] px-4 py-2.5 text-right shadow-[-8px_0_12px_-8px_rgba(15,23,42,0.12)]"
-  const stickyActionCellClass = (rowBg: string) =>
-    `sticky right-0 z-10 min-w-[5.5rem] whitespace-nowrap border-l border-slate-200 px-4 py-2.5 text-right shadow-[-8px_0_12px_-8px_rgba(15,23,42,0.12)] group-hover:bg-violet-50/50 ${rowBg}`
+  const stickyActionCellClass = (rowBg: string, isPending: boolean) =>
+    `sticky right-0 z-10 min-w-[5.5rem] whitespace-nowrap border-l border-slate-200 px-4 py-2.5 text-right shadow-[-8px_0_12px_-8px_rgba(15,23,42,0.12)] ${
+      isPending ? "bg-amber-50/90 group-hover:bg-amber-100/90" : `group-hover:bg-violet-50/50 ${rowBg}`
+    }`
 
   return (
     <div className="space-y-3">
@@ -285,9 +293,17 @@ export default function SalesExcelTable({
 
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-card">
         <div className="flex flex-col sm:flex-row items-center justify-between gap-2 border-b border-slate-200 bg-[#F1F4F9] px-3 py-2.5 sm:px-4">
-          <span className="text-xs font-medium text-slate-600">
-            {displaySales.length} of {sales.length} {sales.length === 1 ? "sale" : "sales"}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-slate-600">
+              {displaySales.length} of {sales.length} {sales.length === 1 ? "sale" : "sales"}
+            </span>
+            {pendingSalesCount > 0 && (
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800">
+                <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
+                {pendingSalesCount} Pending {pendingSalesCount === 1 ? "Sale" : "Sales"}
+              </span>
+            )}
+          </div>
 
           <div className="flex items-center gap-1">
             <Button
@@ -378,13 +394,24 @@ export default function SalesExcelTable({
                     ? Number(sale.total_amount || 0)
                     : Number(sale.received_amount || 0)
 
+                  const statusLabel = getSaleStatusLabel(sale)
+                  const isPending = statusLabel === "Pending" || sale.status === "Pending" || sale.payment_status === "Pending"
+
+                  const baseBgClass = isPending
+                    ? "bg-amber-50/90 text-amber-950 hover:bg-amber-100/90"
+                    : index % 2 === 0
+                    ? "bg-white hover:bg-violet-50/50"
+                    : "bg-slate-50/60 hover:bg-violet-50/50"
+
+                  const rowClass = isPending
+                    ? `${baseBgClass} border-l-4 border-l-amber-500`
+                    : baseBgClass
+
                   return (
                     <tr
                       key={sale.id}
                       onClick={() => onViewSale(sale)}
-                      className={`group cursor-pointer border-b border-slate-200 transition-colors hover:bg-violet-50/50 ${
-                        index % 2 === 0 ? "bg-white" : "bg-slate-50/60"
-                      }`}
+                      className={`group cursor-pointer border-b border-slate-200 transition-colors ${rowClass}`}
                     >
                       <td className="whitespace-nowrap px-4 py-2.5 text-xs text-muted-foreground">{index + 1}</td>
                       <td className="whitespace-nowrap px-4 py-2.5 font-semibold text-slate-800">
@@ -445,10 +472,10 @@ export default function SalesExcelTable({
                       <td className="whitespace-nowrap px-4 py-2.5 text-right text-emerald-700">
                         {received > 0 ? formatCurrency(received) : "—"}
                       </td>
-                      <td className="whitespace-nowrap px-4 py-2.5 text-right text-amber-700">
+                      <td className="whitespace-nowrap px-4 py-2.5 text-right text-amber-700 font-semibold">
                         {remaining > 0 ? formatCurrency(remaining) : "—"}
                       </td>
-                      <td className={stickyActionCellClass(index % 2 === 0 ? "bg-white" : "bg-slate-50/60")}>
+                      <td className={stickyActionCellClass(baseBgClass, isPending)}>
                         <button
                           type="button"
                           onClick={(event) => {

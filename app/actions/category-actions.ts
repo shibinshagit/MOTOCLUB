@@ -19,14 +19,10 @@ async function getCompanyIdForDevice(deviceId: number) {
 }
 
 export async function getCategories(userId?: number) {
-  resetConnectionState()
-
   try {
     let categories
 
     if (userId) {
-      const companyId = await getCompanyIdForDevice(userId)
-
       categories = await sql`
         SELECT 
           c.*,
@@ -34,16 +30,12 @@ export async function getCategories(userId?: number) {
         FROM product_categories c
         LEFT JOIN product_categories p ON c.parent_id = p.id
         WHERE (
-          c.company_id = ${companyId}
+          c.company_id = (SELECT company_id FROM devices WHERE id = ${userId} LIMIT 1)
           OR c.company_id IS NULL
+          OR NOT EXISTS (SELECT 1 FROM devices WHERE id = ${userId} AND company_id IS NOT NULL)
         )
         ORDER BY COALESCE(c.parent_id, c.id), c.parent_id NULLS FIRST, c.name ASC
       `
-
-      if (categories.length === 0) {
-        console.log(`No categories found for user ID: ${userId}`)
-        return { success: true, data: [] }
-      }
     } else {
       categories = await sql`
         SELECT 
@@ -55,7 +47,7 @@ export async function getCategories(userId?: number) {
       `
     }
 
-    return { success: true, data: categories }
+    return { success: true, data: categories || [] }
   } catch (error) {
     console.error("Get categories error:", error)
     return {
@@ -65,6 +57,7 @@ export async function getCategories(userId?: number) {
     }
   }
 }
+
 
 export async function createCategory(formData: FormData | { name: string; description?: string; userId?: number; parentId?: number | null }) {
   let name: string

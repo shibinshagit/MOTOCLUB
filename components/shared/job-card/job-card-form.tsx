@@ -17,6 +17,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 
 import CustomerSelectSimple from "@/components/sales/customer-select-simple"
 import ProductSelectSimple from "@/components/sales/product-select-simple"
+import NewProductModal from "@/components/sales/new-product-modal"
 import { formatPhoneNumber } from "@/lib/utils"
 import { VariantSelect } from "./variant-select"
 import { JobCardSuccess } from "./job-card-success"
@@ -50,6 +51,27 @@ export function JobCardForm({
 
   const [isLoading, setIsLoading] = useState(false)
   const [isSuccess, setIsSuccess] = useState(false)
+  const [isNewProductModalOpen, setIsNewProductModalOpen] = useState(false)
+  const [activeRowIdForNewProduct, setActiveRowIdForNewProduct] = useState<string | null>(null)
+
+  const handleProductCreated = (newProduct: any) => {
+    if (newProduct && activeRowIdForNewProduct) {
+      const price = newProduct.mrp || newProduct.price || newProduct.msp || 0
+      const wsPrice = newProduct.wholesale_price || newProduct.cost_price || 0
+      const stock = newProduct.stock ?? 0
+      handleProductSelect(
+        activeRowIdForNewProduct,
+        newProduct.id,
+        newProduct.name,
+        price,
+        wsPrice,
+        stock,
+        newProduct
+      )
+    }
+    setIsNewProductModalOpen(false)
+    setActiveRowIdForNewProduct(null)
+  }
 
   useEffect(() => {
     if (editSaleId) {
@@ -767,8 +789,41 @@ export function JobCardForm({
 
       {/* Products Section */}
       <Card className="shadow-sm border-gray-200">
-        <CardHeader className="border-b bg-gray-50/50 py-4">
+        <CardHeader className="border-b bg-gray-50/50 py-4 flex flex-row items-center justify-between">
           <CardTitle className="text-base font-semibold text-gray-900">Product Line Items</CardTitle>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              const emptyRow = products.find((p) => p.productId === null)
+              if (emptyRow) {
+                setActiveRowIdForNewProduct(emptyRow.id)
+              } else {
+                const newRowId = crypto.randomUUID()
+                setProducts((prev) => [
+                  ...prev,
+                  {
+                    id: newRowId,
+                    productId: null,
+                    productName: "",
+                    productObj: null,
+                    variantId: null,
+                    variantName: "",
+                    quantity: 1,
+                    price: 0,
+                    msp: 0,
+                    costPrice: 0,
+                  },
+                ])
+                setActiveRowIdForNewProduct(newRowId)
+              }
+              setIsNewProductModalOpen(true)
+            }}
+            className="h-8 text-xs font-medium border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
+          >
+            <Plus className="mr-1 h-3.5 w-3.5" /> Add New Product
+          </Button>
         </CardHeader>
         <CardContent className="pt-4 space-y-4">
           
@@ -794,7 +849,10 @@ export function JobCardForm({
                         value={product.productId}
                         initialProductName={product.productName}
                         onChange={(id, name, price, ws, stock, obj) => handleProductSelect(product.id, id, name, price, ws, stock, obj)}
-                        onAddNew={() => {}}
+                        onAddNew={() => {
+                          setActiveRowIdForNewProduct(product.id)
+                          setIsNewProductModalOpen(true)
+                        }}
                         userId={deviceId || 1}
                         usePriceType="retail"
                         hideServiceIcon={true}
@@ -1064,6 +1122,19 @@ export function JobCardForm({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    {/* Add New Product Modal */}
+    <NewProductModal
+      isOpen={isNewProductModalOpen}
+      onClose={() => {
+        setIsNewProductModalOpen(false)
+        setActiveRowIdForNewProduct(null)
+      }}
+      onSuccess={handleProductCreated}
+      userId={deviceId || 1}
+      elevated={true}
+    />
     </>
   )
 }
+
