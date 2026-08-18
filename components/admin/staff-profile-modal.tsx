@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useMemo } from "react"
 import {
   Dialog,
   DialogContent,
@@ -15,6 +15,7 @@ import { useToast } from "@/components/ui/use-toast"
 import { notifyError, notifySuccess } from "@/lib/notifications"
 import { getStaffPurchaseDetails } from "@/app/actions/staff-request-actions"
 import { reassignSaleOwnership } from "@/app/actions/sale-actions"
+import { matchSaleSemantic } from "@/lib/sale-search"
 import {
   User,
   Phone,
@@ -30,6 +31,7 @@ import {
   UserCheck,
   ArrowRightLeft,
   FileText,
+  X,
 } from "lucide-react"
 
 interface StaffProfileModalProps {
@@ -55,6 +57,8 @@ export function StaffProfileModal({
   const [isLoading, setIsLoading] = useState(false)
   const [purchaseData, setPurchaseData] = useState<any>(null)
   const [searchTerm, setSearchTerm] = useState("")
+  const [selectedMonth, setSelectedMonth] = useState("")
+  const [selectedDate, setSelectedDate] = useState("")
   const [reassigningSaleId, setReassigningSaleId] = useState<number | null>(null)
 
   const loadStaffDetails = useCallback(async () => {
@@ -101,12 +105,18 @@ export function StaffProfileModal({
 
   const formatDate = (val: any) => {
     if (!val) return "-"
-    if (val instanceof Date) return isNaN(val.getTime()) ? "-" : val.toLocaleDateString()
-    if (typeof val === "string") {
-      const d = new Date(val)
-      return isNaN(d.getTime()) ? val.split("T")[0] : d.toLocaleDateString()
+    let d: Date | null = null
+    if (val instanceof Date) {
+      d = isNaN(val.getTime()) ? null : val
+    } else if (typeof val === "string") {
+      const parsed = new Date(val)
+      d = isNaN(parsed.getTime()) ? null : parsed
     }
-    return String(val)
+    if (!d) return String(val || "-")
+    const day = String(d.getDate()).padStart(2, "0")
+    const month = String(d.getMonth() + 1).padStart(2, "0")
+    const year = d.getFullYear()
+    return `${day}/${month}/${year}`
   }
 
   const formatCurr = (val: number) => {
@@ -119,17 +129,69 @@ export function StaffProfileModal({
       .replace(/^[a-zA-Z]+/, (match) => match + " ")
   }
 
-  const salesList = purchaseData?.sales || []
-  const filteredSales = salesList.filter((s: any) => {
-    const q = searchTerm.toLowerCase().trim()
-    if (!q) return true
-    return (
-      String(s.id).includes(q) ||
-      (s.customer_name || "").toLowerCase().includes(q) ||
-      (s.customer_phone || "").toLowerCase().includes(q) ||
-      (s.payment_method || "").toLowerCase().includes(q)
-    )
-  })
+  const availableMonths = useMemo(() => {
+    const salesList = purchaseData?.sales || []
+    const monthsSet = new Set<string>()
+
+    const now = new Date()
+    for (let i = 0; i < 12; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+      const yyyyMm = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
+      monthsSet.add(yyyyMm)
+    }
+
+    salesList.forEach((s: any) => {
+      if (s.sale_date) {
+        const dStr = typeof s.sale_date === "string" ? s.sale_date.split("T")[0] : ""
+        if (dStr && dStr.length >= 7) {
+          monthsSet.add(dStr.slice(0, 7))
+        }
+      }
+    })
+
+    return Array.from(monthsSet).sort().reverse()
+  }, [purchaseData?.sales])
+
+  const formatMonthLabel = (yyyyMm: string) => {
+    if (!yyyyMm) return "All Months"
+    const [year, month] = yyyyMm.split("-")
+    const d = new Date(Number(year), Number(month) - 1, 1)
+    return d.toLocaleString("en-US", { month: "long", year: "numeric" })
+  }
+
+  const filteredSales = useMemo(() => {
+    const salesList = purchaseData?.sales || []
+    return salesList.filter((s: any) => {
+      if (searchTerm && !matchSaleSemantic(s, searchTerm)) {
+        return false
+      }
+
+      let saleDateStr = ""
+      if (s.sale_date) {
+        if (typeof s.sale_date === "string") {
+          saleDateStr = s.sale_date.split("T")[0]
+        } else if (s.sale_date instanceof Date) {
+          saleDateStr = s.sale_date.toISOString().split("T")[0]
+        }
+      }
+
+      if (selectedDate && saleDateStr !== selectedDate) {
+        return false
+      }
+
+      if (selectedMonth && !saleDateStr.startsWith(selectedMonth)) {
+        return false
+      }
+
+      return true
+    })
+  }, [purchaseData?.sales, searchTerm, selectedDate, selectedMonth])
+
+  const filteredRevenue = useMemo(() => {
+    return filteredSales.reduce((sum: number, s: any) => sum + Number(s.total_amount || 0), 0)
+  }, [filteredSales])
+
+  const filteredOrdersCount = filteredSales.length
 
   if (!staffMember) return null
 
@@ -158,59 +220,64 @@ export function StaffProfileModal({
                         : "border-blue-300 bg-blue-100 text-blue-800 font-semibold"
                     }
                   >
-                    {staffMember.role === "partner"
-                      ? "Partner"
-                      : staffMember.role === "admin"
-                      ? "Admin"
-                      : "Staff"}
+                    {staffMember.role || "Staff"}
                   </Badge>
-                  {staffMember.is_active ? (
-                    <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">
-                      Active
-                    </Badge>
-                  ) : (
-                    <Badge variant="secondary" className="bg-slate-200 text-slate-700">
-                      Inactive
+                  {staffMember.status && (
+                    <Badge
+                      className={
+                        staffMember.status === "active"
+                          ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-100 font-medium"
+                          : "bg-slate-100 text-slate-700 hover:bg-slate-100 font-medium"
+                      }
+                    >
+                      {staffMember.status}
                     </Badge>
                   )}
                 </div>
-                <p className="text-sm font-medium text-slate-500 mt-1 flex items-center gap-3">
-                  <span className="flex items-center gap-1">
-                    <Briefcase className="h-3.5 w-3.5 text-slate-400" />
-                    {staffMember.position || "Staff"}
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <Phone className="h-3.5 w-3.5 text-slate-400" />
-                    {staffMember.phone || "-"}
-                  </span>
+                <div className="flex flex-wrap items-center gap-4 mt-1 text-xs text-slate-500 font-medium">
+                  {staffMember.position && (
+                    <span className="flex items-center gap-1">
+                      <Briefcase className="h-3.5 w-3.5 text-slate-400" />
+                      {staffMember.position}
+                    </span>
+                  )}
+                  {staffMember.phone && (
+                    <span className="flex items-center gap-1">
+                      <Phone className="h-3.5 w-3.5 text-slate-400" />
+                      {staffMember.phone}
+                    </span>
+                  )}
                   {staffMember.email && (
                     <span className="flex items-center gap-1">
                       <Mail className="h-3.5 w-3.5 text-slate-400" />
                       {staffMember.email}
                     </span>
                   )}
-                </p>
+                </div>
               </div>
             </div>
 
-            <div className="flex items-center gap-2 bg-slate-100 p-2 rounded-lg border text-xs text-slate-700">
-              <div>
-                <p className="text-slate-400 text-[10px] uppercase font-semibold">Base Salary</p>
-                <p className="font-bold text-slate-900">{formatCurr(Number(staffMember.salary || 0))}</p>
-              </div>
-              <div className="h-6 w-px bg-slate-300 mx-1" />
-              <div>
-                <p className="text-slate-400 text-[10px] uppercase font-semibold">Joined On</p>
-                <p className="font-semibold text-slate-800">{formatDate(staffMember.joined_on)}</p>
-              </div>
+            <div className="flex items-center gap-3 self-end sm:self-center">
+              {staffMember.base_salary != null && (
+                <div className="text-right px-3 py-1.5 bg-slate-100 rounded-lg border">
+                  <p className="text-[10px] uppercase font-bold text-slate-500">Base Salary</p>
+                  <p className="font-extrabold text-sm text-slate-900">{formatCurr(staffMember.base_salary)}</p>
+                </div>
+              )}
+              {staffMember.created_at && (
+                <div className="text-right px-3 py-1.5 bg-slate-100 rounded-lg border">
+                  <p className="text-[10px] uppercase font-bold text-slate-500">Joined On</p>
+                  <p className="font-extrabold text-sm text-slate-900">{formatDate(staffMember.created_at)}</p>
+                </div>
+              )}
             </div>
           </div>
         </DialogHeader>
 
-        {/* Scrollable Content */}
+        {/* Scrollable Content Body */}
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
-          {/* Summary Stat Cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          {/* Quick Metrics Grid */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <Card className="bg-gradient-to-br from-emerald-50 to-teal-50 border-emerald-200 shadow-sm">
               <CardContent className="p-3.5">
                 <div className="flex justify-between items-center">
@@ -219,7 +286,7 @@ export function StaffProfileModal({
                       Revenue Handled
                     </p>
                     <h4 className="text-lg font-black text-slate-900 mt-0.5">
-                      {formatCurr(purchaseData?.totalSalesAmount || 0)}
+                      {formatCurr(filteredRevenue)}
                     </h4>
                   </div>
                   <div className="p-2 bg-emerald-100 text-emerald-700 rounded-lg">
@@ -237,7 +304,7 @@ export function StaffProfileModal({
                       Total Orders / Jobcards
                     </p>
                     <h4 className="text-lg font-black text-slate-900 mt-0.5">
-                      {purchaseData?.totalOrdersCount || 0}
+                      {filteredOrdersCount}
                     </h4>
                   </div>
                   <div className="p-2 bg-blue-100 text-blue-700 rounded-lg">
@@ -286,26 +353,134 @@ export function StaffProfileModal({
 
           {/* Individual Sales Table & Reassignment Controls */}
           <Card className="border bg-white shadow-sm overflow-hidden">
-            <div className="p-4 border-b flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-slate-50/50">
-              <div>
-                <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
-                  <FileText className="h-4 w-4 text-blue-600" />
-                  Individual Sales & Job Cards List
-                </h3>
-                <p className="text-xs text-slate-500">
-                  View and change job card / sale ownership to any staff member or admin
-                </p>
+            <div className="p-4 border-b flex flex-col gap-3 bg-slate-50/50">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                <div>
+                  <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                    <FileText className="h-4 w-4 text-blue-600" />
+                    Individual Sales & Job Cards List
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    View and change job card / sale ownership to any staff member or admin
+                  </p>
+                </div>
+
+                <div className="relative w-full sm:w-64">
+                  <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+                  <Input
+                    type="text"
+                    placeholder="Search by Order # or Customer..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="pl-8 h-8 text-xs bg-white"
+                  />
+                </div>
               </div>
 
-              <div className="relative w-full sm:w-64">
-                <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
-                <Input
-                  type="text"
-                  placeholder="Search by Order # or Customer..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-8 h-8 text-xs bg-white"
-                />
+              {/* Month & Date Filtration Controls */}
+              <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-200/80">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 mr-1">
+                  <Calendar className="h-3.5 w-3.5 text-blue-600" />
+                  Filter:
+                </div>
+
+                {/* Month Dropdown */}
+                <div className="flex items-center gap-1">
+                  <label htmlFor="modal-month-select" className="text-[11px] text-slate-500 font-medium hidden sm:inline">
+                    Month:
+                  </label>
+                  <select
+                    id="modal-month-select"
+                    value={selectedMonth}
+                    onChange={(e) => {
+                      setSelectedMonth(e.target.value)
+                      if (e.target.value) setSelectedDate("")
+                    }}
+                    className="h-7 text-xs bg-white border border-slate-300 rounded px-2 font-medium text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer shadow-xs"
+                  >
+                    <option value="">All Months</option>
+                    {availableMonths.map((m) => (
+                      <option key={m} value={m}>
+                        {formatMonthLabel(m)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Date Picker Input */}
+                <div className="flex items-center gap-1">
+                  <label htmlFor="modal-date-select" className="text-[11px] text-slate-500 font-medium hidden sm:inline">
+                    Date:
+                  </label>
+                  <Input
+                    id="modal-date-select"
+                    type="date"
+                    value={selectedDate}
+                    onChange={(e) => {
+                      setSelectedDate(e.target.value)
+                      if (e.target.value) setSelectedMonth("")
+                    }}
+                    className="h-7 w-36 text-xs bg-white px-2 py-0 border-slate-300"
+                  />
+                </div>
+
+                {/* Quick Presets */}
+                <Button
+                  type="button"
+                  variant={!selectedMonth && !selectedDate ? "secondary" : "outline"}
+                  size="sm"
+                  className="h-7 px-2.5 text-xs font-medium"
+                  onClick={() => {
+                    setSelectedMonth("")
+                    setSelectedDate("")
+                  }}
+                >
+                  All
+                </Button>
+
+                <Button
+                  type="button"
+                  variant={selectedMonth === new Date().toISOString().slice(0, 7) && !selectedDate ? "secondary" : "outline"}
+                  size="sm"
+                  className="h-7 px-2.5 text-xs font-medium"
+                  onClick={() => {
+                    setSelectedMonth(new Date().toISOString().slice(0, 7))
+                    setSelectedDate("")
+                  }}
+                >
+                  This Month
+                </Button>
+
+                <Button
+                  type="button"
+                  variant={selectedDate === new Date().toISOString().slice(0, 10) ? "secondary" : "outline"}
+                  size="sm"
+                  className="h-7 px-2.5 text-xs font-medium"
+                  onClick={() => {
+                    setSelectedDate(new Date().toISOString().slice(0, 10))
+                    setSelectedMonth("")
+                  }}
+                >
+                  Today
+                </Button>
+
+                {/* Reset Filters button */}
+                {(selectedMonth || selectedDate || searchTerm) && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 ml-auto"
+                    onClick={() => {
+                      setSelectedMonth("")
+                      setSelectedDate("")
+                      setSearchTerm("")
+                    }}
+                  >
+                    <X className="h-3 w-3 mr-1" />
+                    Reset Filters
+                  </Button>
+                )}
               </div>
             </div>
 

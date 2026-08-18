@@ -1,7 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  outputFileTracingIncludes: {
-    '/api/print/**': ['./templates/**/*'],
+  experimental: {
+    outputFileTracingIncludes: {
+      '/api/print/**': ['./templates/**/*'],
+    },
   },
   images: {
     remotePatterns: [

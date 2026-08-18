@@ -367,9 +367,53 @@ async function queryDeviceSales(deviceId: number, options: GetUserSalesOptions =
   const endExclusive = dateTo ? getExclusiveEndDate(dateTo) : null
   const allowEcom = isEcomAllowedDevice(deviceId)
 
+  const itemsSummarySelect = sql`
+    COALESCE(
+      (SELECT STRING_AGG(COALESCE(p.name, sv.name, si.notes, ''), ', ')
+       FROM sale_items si
+       LEFT JOIN products p ON si.product_id = p.id AND NOT EXISTS (SELECT 1 FROM services s2 WHERE s2.id = si.product_id)
+       LEFT JOIN services sv ON si.product_id = sv.id
+       WHERE si.sale_id = s.id), ''
+    ) as items_summary
+  `
+
+  const searchWhereClause = searchPattern
+    ? sql`
+        AND (
+          LOWER(COALESCE(s.customer_name_override, c.name, '')) LIKE ${searchPattern}
+          OR LOWER(COALESCE(s.customer_phone_override, c.phone, '')) LIKE ${searchPattern}
+          OR LOWER(COALESCE(c.email, '')) LIKE ${searchPattern}
+          OR CAST(s.id AS TEXT) LIKE ${searchPattern}
+          OR LOWER(COALESCE(s.status, '')) LIKE ${searchPattern}
+          OR LOWER(COALESCE(s.payment_status, '')) LIKE ${searchPattern}
+          OR LOWER(COALESCE(s.payment_method, '')) LIKE ${searchPattern}
+          OR LOWER(COALESCE(s.delivery_status, '')) LIKE ${searchPattern}
+          OR LOWER(COALESCE(s.external_order_id, '')) LIKE ${searchPattern}
+          OR LOWER(COALESCE(s.tracking_id, '')) LIKE ${searchPattern}
+          OR LOWER(COALESCE(s.notes, '')) LIKE ${searchPattern}
+          OR LOWER(COALESCE(st.name, '')) LIKE ${searchPattern}
+          OR CAST(s.total_amount AS TEXT) LIKE ${searchPattern}
+          OR EXISTS (
+            SELECT 1 FROM sale_items si
+            LEFT JOIN products p ON si.product_id = p.id
+            LEFT JOIN services sv ON si.product_id = sv.id
+            LEFT JOIN product_variants pv ON si.product_variant_id = pv.id
+            WHERE si.sale_id = s.id
+              AND (
+                LOWER(COALESCE(p.name, '')) LIKE ${searchPattern}
+                OR LOWER(COALESCE(sv.name, '')) LIKE ${searchPattern}
+                OR LOWER(COALESCE(pv.name, '')) LIKE ${searchPattern}
+                OR LOWER(COALESCE(si.notes, '')) LIKE ${searchPattern}
+              )
+          )
+        )
+      `
+    : sql``
+
   if (dateFrom && endExclusive && !searchPattern && !limit) {
     return sql`
       SELECT s.*, COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name, st.name as staff_name,
+      ${itemsSummarySelect},
       COALESCE(
         (SELECT SUM(si.quantity * COALESCE(si.cost, si.wholesale_price, 0))
          FROM sale_items si 
@@ -389,6 +433,7 @@ async function queryDeviceSales(deviceId: number, options: GetUserSalesOptions =
   if (dateFrom && endExclusive && searchPattern && limit) {
     return sql`
       SELECT s.*, COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name, st.name as staff_name,
+      ${itemsSummarySelect},
       COALESCE(
         (SELECT SUM(si.quantity * COALESCE(si.cost, si.wholesale_price, 0))
          FROM sale_items si 
@@ -401,12 +446,7 @@ async function queryDeviceSales(deviceId: number, options: GetUserSalesOptions =
         AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
         AND s.sale_date >= ${dateFrom}
         AND s.sale_date < ${endExclusive}
-        AND (
-          LOWER(c.name) LIKE ${searchPattern}
-          OR CAST(s.id AS TEXT) LIKE ${searchPattern}
-          OR LOWER(s.status) LIKE ${searchPattern}
-          OR CAST(s.total_amount AS TEXT) LIKE ${searchPattern}
-        )
+        ${searchWhereClause}
       ORDER BY s.sale_date DESC, s.id DESC
       LIMIT ${limit}
     `
@@ -415,6 +455,7 @@ async function queryDeviceSales(deviceId: number, options: GetUserSalesOptions =
   if (dateFrom && endExclusive && searchPattern) {
     return sql`
       SELECT s.*, COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name, st.name as staff_name,
+      ${itemsSummarySelect},
       COALESCE(
         (SELECT SUM(si.quantity * COALESCE(si.cost, si.wholesale_price, 0))
          FROM sale_items si 
@@ -427,12 +468,7 @@ async function queryDeviceSales(deviceId: number, options: GetUserSalesOptions =
         AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
         AND s.sale_date >= ${dateFrom}
         AND s.sale_date < ${endExclusive}
-        AND (
-          LOWER(c.name) LIKE ${searchPattern}
-          OR CAST(s.id AS TEXT) LIKE ${searchPattern}
-          OR LOWER(s.status) LIKE ${searchPattern}
-          OR CAST(s.total_amount AS TEXT) LIKE ${searchPattern}
-        )
+        ${searchWhereClause}
       ORDER BY s.sale_date DESC, s.id DESC
     `
   }
@@ -440,6 +476,7 @@ async function queryDeviceSales(deviceId: number, options: GetUserSalesOptions =
   if (dateFrom && endExclusive && limit) {
     return sql`
       SELECT s.*, COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name, st.name as staff_name,
+      ${itemsSummarySelect},
       COALESCE(
         (SELECT SUM(si.quantity * COALESCE(si.cost, si.wholesale_price, 0))
          FROM sale_items si 
@@ -460,6 +497,7 @@ async function queryDeviceSales(deviceId: number, options: GetUserSalesOptions =
   if (searchPattern && limit) {
     return sql`
       SELECT s.*, COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name, st.name as staff_name,
+      ${itemsSummarySelect},
       COALESCE(
         (SELECT SUM(si.quantity * COALESCE(si.cost, si.wholesale_price, 0))
          FROM sale_items si 
@@ -470,12 +508,7 @@ async function queryDeviceSales(deviceId: number, options: GetUserSalesOptions =
       LEFT JOIN staff st ON s.staff_id = st.id
       WHERE (s.device_id = ${deviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
         AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
-        AND (
-          LOWER(c.name) LIKE ${searchPattern}
-          OR CAST(s.id AS TEXT) LIKE ${searchPattern}
-          OR LOWER(s.status) LIKE ${searchPattern}
-          OR CAST(s.total_amount AS TEXT) LIKE ${searchPattern}
-        )
+        ${searchWhereClause}
       ORDER BY s.sale_date DESC, s.id DESC
       LIMIT ${limit}
     `
@@ -484,6 +517,7 @@ async function queryDeviceSales(deviceId: number, options: GetUserSalesOptions =
   if (searchPattern) {
     return sql`
       SELECT s.*, COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name, st.name as staff_name,
+      ${itemsSummarySelect},
       COALESCE(
         (SELECT SUM(si.quantity * COALESCE(si.cost, si.wholesale_price, 0))
          FROM sale_items si 
@@ -494,12 +528,7 @@ async function queryDeviceSales(deviceId: number, options: GetUserSalesOptions =
       LEFT JOIN staff st ON s.staff_id = st.id
       WHERE (s.device_id = ${deviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
         AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
-        AND (
-          LOWER(c.name) LIKE ${searchPattern}
-          OR CAST(s.id AS TEXT) LIKE ${searchPattern}
-          OR LOWER(s.status) LIKE ${searchPattern}
-          OR CAST(s.total_amount AS TEXT) LIKE ${searchPattern}
-        )
+        ${searchWhereClause}
       ORDER BY s.sale_date DESC, s.id DESC
     `
   }
@@ -507,6 +536,7 @@ async function queryDeviceSales(deviceId: number, options: GetUserSalesOptions =
   if (limit) {
     return sql`
       SELECT s.*, COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name, st.name as staff_name,
+      ${itemsSummarySelect},
       COALESCE(
         (SELECT SUM(si.quantity * COALESCE(si.cost, si.wholesale_price, 0))
          FROM sale_items si 
@@ -524,6 +554,7 @@ async function queryDeviceSales(deviceId: number, options: GetUserSalesOptions =
 
   return sql`
     SELECT s.*, COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name, st.name as staff_name,
+    ${itemsSummarySelect},
     COALESCE(
       (SELECT SUM(si.quantity * COALESCE(si.cost, si.wholesale_price, 0))
        FROM sale_items si 

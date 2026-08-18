@@ -32,6 +32,8 @@ import {
   Loader2,
   Wallet,
   Banknote,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react"
 import { useAppSelector, useAppDispatch } from "@/store/hooks"
 import { useStaffRestrictions } from "@/hooks/use-staff-restrictions"
@@ -62,7 +64,19 @@ import {
 import { deletePurchase } from "@/app/actions/purchase-actions"
 import { deleteSale } from "@/app/actions/sale-actions"
 import { SimpleDateInput } from "@/components/ui/date-picker"
-import { format, startOfWeek, subWeeks, parseISO, isValid } from "date-fns"
+import {
+  format,
+  startOfWeek,
+  subWeeks,
+  parseISO,
+  isValid,
+  startOfMonth,
+  endOfMonth,
+  subMonths,
+  addMonths,
+  isSameMonth,
+  isAfter,
+} from "date-fns"
 import React from "react"
 import ViewSaleModal from "@/components/sales/view-sale-modal"
 import ViewPurchaseModal from "@/components/purchases/view-purchase-modal"
@@ -1718,6 +1732,33 @@ const setLastWeek = () => {
   handleDateToChange(todayEnd)
 }
 
+const goToPreviousFinancialMonth = () => {
+  const currentMonth = startOfMonth(dateFrom)
+  const prevMonth = subMonths(currentMonth, 1)
+  const from = startOfMonth(prevMonth)
+  const to = endOfMonth(prevMonth)
+  handleDateFromChange(from)
+  handleDateToChange(to)
+}
+
+const goToNextFinancialMonth = () => {
+  const currentMonth = startOfMonth(dateFrom)
+  const nextMonth = startOfMonth(addMonths(currentMonth, 1))
+  if (isAfter(nextMonth, startOfMonth(new Date()))) return
+  const from = startOfMonth(nextMonth)
+  const to = endOfMonth(nextMonth)
+  handleDateFromChange(from)
+  handleDateToChange(to)
+}
+
+const goToCurrentFinancialMonth = () => {
+  const today = new Date()
+  const from = startOfMonth(today)
+  const to = endOfMonth(today)
+  handleDateFromChange(from)
+  handleDateToChange(to)
+}
+
 // Parse raw adjustment descriptions into short, readable labels
 const formatSaleAdjustmentDescription = (description: string) => {
   const saleId = extractIdFromDescription(description)
@@ -2055,7 +2096,43 @@ const renderTransactionList = (
         </div>
 
         {/* Controls */}
-        <div className="flex flex-wrap gap-2 mt-3">
+        <div className="flex flex-wrap items-center gap-2 mt-3">
+          {/* Month Change Navigator */}
+          <div className="flex items-center gap-1 bg-white/20 rounded-md px-1 py-0.5 border border-white/10">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-white hover:bg-white/20 hover:text-white"
+              onClick={goToPreviousFinancialMonth}
+              aria-label="Previous month"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <span className="min-w-[7rem] text-center text-xs font-semibold text-white px-1">
+              {format(dateFrom, "MMMM yyyy")}
+            </span>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-white hover:bg-white/20 hover:text-white"
+              onClick={goToNextFinancialMonth}
+              disabled={isSameMonth(dateFrom, new Date()) || isAfter(dateFrom, startOfMonth(new Date()))}
+              aria-label="Next month"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+            {!isSameMonth(dateFrom, new Date()) && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs text-white/90 hover:text-white hover:bg-white/20"
+                onClick={goToCurrentFinancialMonth}
+              >
+                This month
+              </Button>
+            )}
+          </div>
+
           <Button
             variant="secondary"
             size="sm"

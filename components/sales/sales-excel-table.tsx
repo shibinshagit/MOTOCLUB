@@ -66,6 +66,9 @@ function DeliveryStatusBadge({ status }: { status: string }) {
   )
 }
 
+import { filterSalesSemantic } from "@/lib/sale-search"
+import { Search, X } from "lucide-react"
+
 type ColumnKey = "saleId" | "status" | "delivery" | "date" | "customer" | "payment" | "total" | "received" | "balance"
 
 type ColumnFilters = Record<ColumnKey, ExcelColumnFilterValue>
@@ -81,6 +84,8 @@ function buildInitialFilters(sales: any[], getters: Record<ColumnKey, (sale: any
 
 interface SalesExcelTableProps {
   sales: any[]
+  searchTerm?: string
+  onSearchTermChange?: (term: string) => void
   periodLabel: string
   isCurrentMonth: boolean
   canGoNextMonth: boolean
@@ -122,6 +127,8 @@ function TableSkeleton() {
 
 export default function SalesExcelTable({
   sales,
+  searchTerm: externalSearchTerm,
+  onSearchTermChange,
   periodLabel,
   isCurrentMonth,
   canGoNextMonth,
@@ -140,6 +147,18 @@ export default function SalesExcelTable({
   deviceId,
   onRefreshSales,
 }: SalesExcelTableProps) {
+  const [internalSearchTerm, setInternalSearchTerm] = useState("")
+
+  const activeSearchTerm = externalSearchTerm !== undefined ? externalSearchTerm : internalSearchTerm
+
+  const handleSearchChange = (val: string) => {
+    if (onSearchTermChange) {
+      onSearchTermChange(val)
+    } else {
+      setInternalSearchTerm(val)
+    }
+  }
+
   const valueGetters = useMemo(
     () => ({
       saleId: (sale: any) => String(sale.id),
@@ -181,12 +200,16 @@ export default function SalesExcelTable({
   const displaySales = useMemo(() => {
     if (!hasLoadedSales) return sales
 
-    return sales.filter((sale) =>
+    // 1. Semantic Search filtering
+    const semanticallyFiltered = filterSalesSemantic(sales, activeSearchTerm)
+
+    // 2. Column filters
+    return semanticallyFiltered.filter((sale) =>
       (Object.keys(valueGetters) as ColumnKey[]).every((key) =>
         passesColumnFilter(valueGetters[key](sale), columnFilters[key], uniqueValues[key]),
       ),
     )
-  }, [sales, columnFilters, uniqueValues, valueGetters, hasLoadedSales])
+  }, [sales, activeSearchTerm, columnFilters, uniqueValues, valueGetters, hasLoadedSales])
 
   const totalSalesAmount = displaySales.reduce((sum, sale) => sum + Number(sale.total_amount || 0), 0)
   const receivedAmountTotal = displaySales.reduce((sum, sale) => {
@@ -333,7 +356,29 @@ export default function SalesExcelTable({
             ) : null}
           </div>
 
-          <div className="ml-auto flex min-h-[28px] items-center gap-2">
+          <div className="w-full sm:w-auto flex min-h-[28px] items-center gap-2">
+            <div className="relative w-full sm:w-72">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                value={activeSearchTerm}
+                onChange={(e) => handleSearchChange(e.target.value)}
+                placeholder="Search sales, customer, product..."
+                aria-label="Global sale search"
+                className="h-7 w-full rounded-md border border-slate-200 bg-white py-1 pl-8 pr-7 text-xs outline-none transition focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+              />
+              {activeSearchTerm ? (
+                <button
+                  type="button"
+                  onClick={() => handleSearchChange("")}
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
+                  aria-label="Clear search"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              ) : null}
+            </div>
+
             {activeFilterCount > 0 ? (
               <>
                 <span className="text-xs font-medium text-violet-700">
@@ -460,8 +505,15 @@ export default function SalesExcelTable({
                       <td className="whitespace-nowrap px-4 py-2.5 text-slate-700">
                         {format(parseSaleDate(sale.sale_date), "yyyy-MM-dd")}
                       </td>
-                      <td className="max-w-[180px] truncate px-4 py-2.5 text-slate-700">
-                        {sale.customer_name || "Walk-in"}
+                      <td className="max-w-[200px] px-4 py-2.5 text-slate-700">
+                        <div className="flex flex-col gap-0.5">
+                          <span className="font-medium text-slate-800 truncate">{sale.customer_name || "Walk-in"}</span>
+                          {sale.items_summary ? (
+                            <span className="text-[11px] text-slate-500 truncate" title={sale.items_summary}>
+                              {sale.items_summary}
+                            </span>
+                          ) : null}
+                        </div>
                       </td>
                       <td className="whitespace-nowrap px-4 py-2.5 text-slate-600">
                         {getPaymentMethodDisplay(sale)}
