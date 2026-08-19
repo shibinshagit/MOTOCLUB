@@ -174,15 +174,16 @@ export async function cleanupProductMediaUrls(urls: string[]) {
   }
 }
 
-const PLATFORM_KEYS = ["amazon", "flipkart", "meesho", "own_ecom"] as const
-type PlatformKey = (typeof PLATFORM_KEYS)[number]
-type PlatformStatus = "not_listed" | "active" | "archived"
+export const PLATFORM_KEYS = ["amazon", "flipkart", "meesho", "own_ecom"] as const
+export type PlatformKey = (typeof PLATFORM_KEYS)[number]
+export type PlatformStatus = "not_listed" | "active" | "archived"
 
-function normalizePlatformStatus(value: unknown): PlatformStatus {
-  const normalized = String(value || "").trim().toLowerCase()
-  if (normalized === "active") return "active"
+function normalizePlatformStatus(value: unknown, defaultStatus: PlatformStatus = "active"): PlatformStatus {
+  if (value === undefined || value === null || String(value).trim() === "") return defaultStatus
+  const normalized = String(value).trim().toLowerCase()
+  if (normalized === "not_listed") return "not_listed"
   if (normalized === "archived") return "archived"
-  return "not_listed"
+  return "active"
 }
 
 function resolveDeviceStock(product: any, stockMap: Map<number, number>) {

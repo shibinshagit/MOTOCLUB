@@ -3,12 +3,12 @@
 import { useMemo, useState, useEffect, type ReactNode } from "react"
 import { Button } from "@/components/ui/button"
 import { format } from "date-fns"
-import { Loader2, Copy, ImageIcon, Film, Plus } from "lucide-react"
+import { Loader2, Copy, ImageIcon, Film, Plus, ExternalLink } from "lucide-react"
 import { Label } from "@/components/ui/label"
 import { useToast } from "@/components/ui/use-toast"
 import { notifyError, notifySuccess } from "@/lib/notifications"
 import { cn } from "@/lib/utils"
-import { parseProductLinks } from "@/lib/product-links"
+import { parseProductLinks, getEcommerceProductUrl } from "@/lib/product-links"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { ShareProductButton } from "@/components/shared/share-product-button"
 import { useAppSelector } from "@/store/hooks"
@@ -220,6 +220,23 @@ export default function StaffViewProductModal({
                   {product.color ? <InfoCell label="Colour" value={product.color} /> : null}
                   {product.size ? <InfoCell label="Size" value={product.size} /> : null}
                   {product.suitable_for ? <InfoCell label="Suitable for" value={product.suitable_for} /> : null}
+                  
+                  <InfoCell
+                    label="E-Commerce Link"
+                    value={
+                      <a
+                        href={getEcommerceProductUrl(product.id)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 break-all text-indigo-600 hover:underline font-medium"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+                        <span>{getEcommerceProductUrl(product.id)}</span>
+                      </a>
+                    }
+                    copyText={getEcommerceProductUrl(product.id)}
+                    className="sm:col-span-2 lg:col-span-4"
+                  />
                   
                   {productLinks.length > 0 && productLinks.map((entry: any, index: number) => (
                     <InfoCell

@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useMemo } from "react"
-import { Package, Search, PackageOpen, AlertTriangle, AlertCircle, RefreshCw, Loader2, ImageIcon } from "lucide-react"
+import { Package, Search, PackageOpen, AlertTriangle, AlertCircle, RefreshCw, Loader2, ImageIcon, ExternalLink } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { getStaffInventory } from "@/app/actions/staff-inventory-actions"
@@ -13,6 +13,7 @@ import { ShareProductButton } from "@/components/shared/share-product-button"
 import { useSelector } from "react-redux"
 import { selectDeviceCurrency, selectDeviceId } from "@/store/slices/deviceSlice"
 import { filterProductsSemantic } from "@/lib/product-search"
+import { getEcommerceProductUrl } from "@/lib/product-links"
 
 interface StaffInventoryTabProps {}
 

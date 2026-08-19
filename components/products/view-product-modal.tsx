@@ -3,11 +3,14 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { Button } from "@/components/ui/button"
 import { format } from "date-fns"
-import { Loader2, Printer, Copy, Settings, ChevronLeft, Link2, Barcode } from "lucide-react"
-import { getProductStockHistory, getProductStockByDevice } from "@/app/actions/product-actions"
+import { Loader2, Printer, Copy, Settings, ChevronLeft, Link2, Barcode, ExternalLink } from "lucide-react"
+import { getProductStockHistory, getProductStockByDevice, updateProductPlatformStatus, type PlatformKey, type PlatformStatus } from "@/app/actions/product-actions"
 import { printBarcodeSticker, printMultipleBarcodeStickers, encodeNumberAsLetters, sendPrintJobToBarTender } from "@/lib/barcode-utils"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
+import { Switch } from "@/components/ui/switch"
+import { useDispatch } from "react-redux"
+import { updateProduct } from "@/store/slices/productSlice"
 
 import { ShareProductButton } from "@/components/shared/share-product-button"
 import { getDeviceCurrency } from "@/app/actions/dashboard-actions"
@@ -15,7 +18,7 @@ import { useStaffRestrictions } from "@/hooks/use-staff-restrictions"
 import { useToast } from "@/components/ui/use-toast"
 import { notifyError, notifySuccess } from "@/lib/notifications"
 import { cn } from "@/lib/utils"
-import { parseProductLinks } from "@/lib/product-links"
+import { parseProductLinks, getEcommerceProductUrl } from "@/lib/product-links"
 import { TagPreviewModal } from "@/components/products/tag-preview-modal"
 
 interface ProductDetailBaseProps {
@@ -138,24 +141,55 @@ export function ProductDetailPanel({
   const [currency, setCurrency] = useState(currencyProp || "AED") // Use prop or default to AED
   const { toast } = useToast()
 
+  const [currentProduct, setCurrentProduct] = useState(product)
+  const [updatingPlatform, setUpdatingPlatform] = useState<string | null>(null)
+  const dispatch = useDispatch()
+
+  useEffect(() => {
+    setCurrentProduct(product)
+  }, [product])
+
+  const handleTogglePlatformStatus = async (platformKey: PlatformKey, currentStatus: string) => {
+    if (!currentProduct?.id) return
+    const nextStatus: PlatformStatus = currentStatus === "active" ? "not_listed" : "active"
+    setUpdatingPlatform(platformKey)
+    try {
+      const res = await updateProductPlatformStatus(currentProduct.id, platformKey, nextStatus, userId)
+      if (res.success && res.data) {
+        setCurrentProduct(res.data)
+        dispatch(updateProduct(res.data))
+        notifySuccess(
+          toast,
+          `Updated ${platformKey === "own_ecom" ? "E-Commerce" : platformKey.toUpperCase()} status to ${nextStatus === "active" ? "Listed" : "Not Listed"}`,
+        )
+      } else {
+        notifyError(toast, res.message || "Failed to update platform status")
+      }
+    } catch (err) {
+      notifyError(toast, "Failed to update platform status")
+    } finally {
+      setUpdatingPlatform(null)
+    }
+  }
+
   // Get encoded wholesale price
   const wholesalePrice =
-    typeof product.wholesale_price === "number"
-      ? product.wholesale_price
-      : Number.parseFloat(product.wholesale_price || "0") || 0
+    typeof currentProduct.wholesale_price === "number"
+      ? currentProduct.wholesale_price
+      : Number.parseFloat(currentProduct.wholesale_price || "0") || 0
 
   const encodedWholesalePrice = encodeNumberAsLetters(Math.round(wholesalePrice))
 
   // Get MSP (Maximum Selling Price)
-  const msp = typeof product.msp === "number" ? product.msp : Number.parseFloat(product.msp || "0") || 0
-  const currentDeviceId = Number(userId || product.created_by || 1)
+  const msp = typeof currentProduct.msp === "number" ? currentProduct.msp : Number.parseFloat(currentProduct.msp || "0") || 0
+  const currentDeviceId = Number(userId || currentProduct.created_by || 1)
   const mediaImageUrls = useMemo(() => {
     let urls: string[] = []
-    if (Array.isArray(product.image_urls)) {
-      urls = product.image_urls.filter((url: unknown) => typeof url === "string" && url.trim().length > 0) as string[]
-    } else if (typeof product.image_urls === "string" && product.image_urls.trim()) {
+    if (Array.isArray(currentProduct.image_urls)) {
+      urls = currentProduct.image_urls.filter((url: unknown) => typeof url === "string" && url.trim().length > 0) as string[]
+    } else if (typeof currentProduct.image_urls === "string" && currentProduct.image_urls.trim()) {
       try {
-        const parsed = JSON.parse(product.image_urls)
+        const parsed = JSON.parse(currentProduct.image_urls)
         if (Array.isArray(parsed)) {
           urls = parsed.filter((url) => typeof url === "string" && url.trim().length > 0)
         }
@@ -163,18 +197,18 @@ export function ProductDetailPanel({
         urls = []
       }
     }
-    if (urls.length === 0 && product.image_url) {
-      urls = [product.image_url]
+    if (urls.length === 0 && currentProduct.image_url) {
+      urls = [currentProduct.image_url]
     }
     return urls.slice(0, 4)
-  }, [product.image_urls, product.image_url])
-  const productLinks = useMemo(() => parseProductLinks(product.link), [product.link])
-  const mediaVideoUrl = typeof product.video_url === "string" && product.video_url.trim() ? product.video_url : null
+  }, [currentProduct.image_urls, currentProduct.image_url])
+  const productLinks = useMemo(() => parseProductLinks(currentProduct.link), [currentProduct.link])
+  const mediaVideoUrl = typeof currentProduct.video_url === "string" && currentProduct.video_url.trim() ? currentProduct.video_url : null
   const platformStatuses = [
-    { key: "amazon", label: "Amazon", status: product.amazon_status || "not_listed" },
-    { key: "flipkart", label: "Flipkart", status: product.flipkart_status || "not_listed" },
-    { key: "meesho", label: "Meesho", status: product.meesho_status || "not_listed" },
-    { key: "own_ecom", label: "Own Ecom", status: product.own_ecom_status || "not_listed" },
+    { key: "amazon", label: "Amazon", status: currentProduct.amazon_status || "not_listed" },
+    { key: "flipkart", label: "Flipkart", status: currentProduct.flipkart_status || "not_listed" },
+    { key: "meesho", label: "Meesho", status: currentProduct.meesho_status || "not_listed" },
+    { key: "own_ecom", label: "Own Ecom", status: currentProduct.own_ecom_status || "active" },
   ]
 
   const getPlatformStatusLabel = (status: string) => {
@@ -480,6 +514,55 @@ export function ProductDetailPanel({
                 label="Updated"
                 value={product.updated_at ? format(new Date(product.updated_at), "yyyy-MM-dd") : "—"}
               />
+              <div className="border-b border-slate-200 px-4 py-3 sm:col-span-2 lg:col-span-4 bg-slate-50/50">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">E-Commerce Store Listing</p>
+                <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <Switch
+                      checked={(currentProduct.own_ecom_status || "active") === "not_listed"}
+                      disabled={updatingPlatform === "own_ecom"}
+                      onCheckedChange={() => handleTogglePlatformStatus("own_ecom", currentProduct.own_ecom_status || "active")}
+                    />
+                    <span
+                      className={cn(
+                        "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium",
+                        (currentProduct.own_ecom_status || "active") === "not_listed"
+                          ? "border-amber-200 bg-amber-50 text-amber-700"
+                          : "border-emerald-200 bg-emerald-50 text-emerald-700",
+                      )}
+                    >
+                      {(currentProduct.own_ecom_status || "active") === "not_listed" ? "○ Unlisted from Store" : "● Listed on Store"}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <a
+                      href={getEcommerceProductUrl(currentProduct.id)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 break-all text-xs font-medium text-brand-blue hover:underline bg-white px-2.5 py-1 rounded border border-slate-200 shadow-xs"
+                    >
+                      <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+                      <span>{getEcommerceProductUrl(currentProduct.id)}</span>
+                    </a>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(getEcommerceProductUrl(currentProduct.id))
+                          toast({ title: "Copied", description: "E-Commerce product link copied to clipboard." })
+                        } catch {
+                          toast({ title: "Copy failed", description: "Could not copy link to clipboard.", variant: "destructive" })
+                        }
+                      }}
+                      className="shrink-0 rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700 border border-slate-200 bg-white"
+                      title="Copy e-commerce link"
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
               {productLinks.length > 0
                 ? productLinks.map((entry, index) => (
                     <InfoCell
@@ -499,8 +582,8 @@ export function ProductDetailPanel({
                     />
                   ))
                 : null}
-              {product.description ? (
-                <InfoCell label="Description" value={product.description} className="sm:col-span-2 lg:col-span-4" />
+              {currentProduct.description ? (
+                <InfoCell label="Description" value={currentProduct.description} className="sm:col-span-2 lg:col-span-4" />
               ) : null}
             </div>
           </PanelSection>
@@ -512,7 +595,7 @@ export function ProductDetailPanel({
                   <div key={`${url}-${index}`} className="overflow-hidden rounded-lg border border-slate-200 bg-white">
                     <img
                       src={url}
-                      alt={`${product.name} ${index + 1}`}
+                      alt={`${currentProduct.name} ${index + 1}`}
                       className="h-24 w-full object-cover"
                     />
                   </div>
@@ -528,16 +611,23 @@ export function ProductDetailPanel({
             </PanelSection>
           )}
 
-          <PanelSection title="Marketplace">
+          <PanelSection title="Marketplace & Store Listing">
             <div className="grid grid-cols-2 gap-px bg-slate-200 md:grid-cols-4">
               {platformStatuses.map((platform) => (
-                <div key={platform.key} className="bg-white px-4 py-3">
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                    {platform.label}
-                  </p>
+                <div key={platform.key} className="bg-white px-4 py-3 flex flex-col justify-between">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                      {platform.label}
+                    </p>
+                    <Switch
+                      checked={platform.status === "active"}
+                      disabled={updatingPlatform === platform.key}
+                      onCheckedChange={() => handleTogglePlatformStatus(platform.key as PlatformKey, platform.status)}
+                    />
+                  </div>
                   <span
                     className={cn(
-                      "mt-1 inline-flex rounded-full border px-2.5 py-0.5 text-xs font-medium",
+                      "mt-1 inline-flex w-fit rounded-full border px-2.5 py-0.5 text-xs font-medium",
                       platform.status === "active"
                         ? "border-emerald-200 bg-emerald-50 text-emerald-700"
                         : platform.status === "archived"

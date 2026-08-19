@@ -24,7 +24,55 @@ function buildMetadata(input: MasterDataInput, existing?: Record<string, unknown
     return existing || null
   }
 
+  if (input.category === "ecommerce_banner") {
+    const rawImages = input.images ?? (existing?.images as any[]) ?? []
+    const images = rawImages
+      .map((img: any) => {
+        if (typeof img === "string") return { url: img }
+        return {
+          url: String(img?.url || ""),
+          title: img?.title ? String(img.title) : undefined,
+          subtitle: img?.subtitle ? String(img.subtitle) : undefined,
+          productId: img?.productId ? Number(img.productId) : undefined,
+        }
+      })
+      .filter((img: any) => Boolean(img.url))
+
+    const primaryImageUrl = input.imageUrl || images[0]?.url || (existing?.imageUrl as string) || (existing?.image_url as string) || ""
+
+    if (images.length === 0 && primaryImageUrl) {
+      images.push({ url: primaryImageUrl })
+    }
+
+    return {
+      ...(existing || {}),
+      imageUrl: primaryImageUrl,
+      images,
+      selectedProductIds: input.selectedProductIds ?? (existing?.selectedProductIds as number[]) ?? [],
+      bannerType: input.bannerType ?? (existing?.bannerType as string) ?? "custom",
+      subtitle: input.subtitle ?? (existing?.subtitle as string) ?? "",
+      ctaText: input.ctaText ?? (existing?.ctaText as string) ?? (existing?.cta_text as string) ?? "Shop Now",
+      ctaUrl: input.ctaUrl ?? (existing?.ctaUrl as string) ?? (existing?.cta_url as string) ?? "",
+      badgeText: input.badgeText ?? (existing?.badgeText as string) ?? (existing?.badge_text as string) ?? "",
+      themeColor: input.themeColor ?? (existing?.themeColor as string) ?? (existing?.theme_color as string) ?? "violet",
+    }
+  }
+
   return existing || null
+}
+
+
+function parseMetadata(meta: unknown): Record<string, unknown> | null {
+  if (!meta) return null
+  if (typeof meta === "object") return meta as Record<string, unknown>
+  if (typeof meta === "string") {
+    try {
+      return JSON.parse(meta)
+    } catch {
+      return null
+    }
+  }
+  return null
 }
 
 function mapMasterDataRow(row: Record<string, unknown>): MasterDataItem {
@@ -39,7 +87,7 @@ function mapMasterDataRow(row: Record<string, unknown>): MasterDataItem {
     website: (row.website as string) || null,
     tracking_url_template: (row.tracking_url_template as string) || null,
     notes: (row.notes as string) || null,
-    metadata: (row.metadata as Record<string, unknown>) || null,
+    metadata: parseMetadata(row.metadata),
     is_active: row.is_active !== false,
     sort_order: Number(row.sort_order) || 0,
     created_at: row.created_at ? String(row.created_at) : undefined,
@@ -142,7 +190,7 @@ export async function createMasterDataItem(deviceId: number, userId: number, inp
         ${input.website?.trim() || null},
         ${input.trackingUrlTemplate?.trim() || null},
         ${input.notes?.trim() || null},
-        ${metadata ? `${JSON.stringify(metadata)}::jsonb` : null},
+        ${metadata ? JSON.stringify(metadata) : null}::jsonb,
         ${input.isActive !== false},
         ${input.sortOrder || 0},
         ${userId}
@@ -171,22 +219,7 @@ export async function updateMasterDataItem(
   }
 
   try {
-    const existingRows = await sql`
-      SELECT metadata
-      FROM master_data
-      WHERE id = ${id}
-        AND device_id = ${deviceId}
-      LIMIT 1
-    `
-
-    if (existingRows.length === 0) {
-      return { success: false as const, message: "Master data item not found" }
-    }
-
-    const metadata = buildMetadata(
-      input,
-      (existingRows[0].metadata as Record<string, unknown>) || null,
-    )
+    const metadata = buildMetadata(input)
 
     const rows = await sql`
       UPDATE master_data
@@ -199,7 +232,7 @@ export async function updateMasterDataItem(
         website = ${input.website?.trim() || null},
         tracking_url_template = ${input.trackingUrlTemplate?.trim() || null},
         notes = ${input.notes?.trim() || null},
-        metadata = ${metadata ? `${JSON.stringify(metadata)}::jsonb` : null},
+        metadata = ${metadata ? JSON.stringify(metadata) : null}::jsonb,
         is_active = ${input.isActive !== false},
         sort_order = ${input.sortOrder || 0},
         updated_at = NOW()
@@ -368,3 +401,30 @@ export async function getCourierProfileDetails(courierId: number) {
     return { success: false, message: error.message || "Failed to fetch courier details" }
   }
 }
+
+export async function getPublicEcommerceBanners(deviceId?: number) {
+  noStore()
+  try {
+    const rows = deviceId
+      ? await sql`
+          SELECT *
+          FROM master_data
+          WHERE category = 'ecommerce_banner' AND is_active = true AND device_id = ${deviceId}
+          ORDER BY sort_order ASC, id DESC
+        `
+      : await sql`
+          SELECT *
+          FROM master_data
+          WHERE category = 'ecommerce_banner' AND is_active = true
+          ORDER BY sort_order ASC, id DESC
+        `
+    return {
+      success: true as const,
+      data: rows.map((row: Record<string, unknown>) => mapMasterDataRow(row)),
+    }
+  } catch (error) {
+    console.error("getPublicEcommerceBanners error:", error)
+    return { success: false as const, message: "Failed to load public e-commerce banners", data: [] as MasterDataItem[] }
+  }
+}
+

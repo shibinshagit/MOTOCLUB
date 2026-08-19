@@ -77,3 +77,11 @@ export function migrateStoredProductLink(raw: unknown): string {
   const links = parseProductLinks(raw)
   return serializeProductLinks(links)
 }
+
+export const DEFAULT_ECOM_DOMAIN = process.env.NEXT_PUBLIC_ECOM_URL || "https://www.motoclub.in"
+
+export function getEcommerceProductUrl(productId: number | string): string {
+  const baseUrl = DEFAULT_ECOM_DOMAIN.replace(/\/+$/, "")
+  return `${baseUrl}/product/${productId}`
+}
+

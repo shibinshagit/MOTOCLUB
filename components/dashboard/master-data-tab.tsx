@@ -13,9 +13,11 @@ import {
   Flame,
   Users,
   Eye,
+  Sparkles,
 } from "lucide-react"
 import TrendingInlineView from "@/components/products/trending-inline-view"
 import StaffManagementView from "@/components/admin/staff-management-view"
+import EcommerceBannerManagement from "@/components/master-data/ecommerce-banner-management"
 import { CourierProfileModal } from "@/components/master-data/courier-profile-modal"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -61,7 +63,9 @@ const CATEGORY_ICONS: Record<string, any> = {
   manual_category: Database,
   trending: Flame,
   staff: Users,
+  ecommerce_banner: Sparkles,
 }
+
 
 const EMPTY_FORM: MasterDataInput = {
   category: "courier",
@@ -78,7 +82,7 @@ const EMPTY_FORM: MasterDataInput = {
 }
 
 export default function MasterDataTab({ userId }: MasterDataTabProps) {
-  const deviceId = useSelector(selectDeviceId)
+  const deviceId = useSelector(selectDeviceId) || 1
   const { toast } = useToast()
 
   const [activeCategory, setActiveCategory] = useState<MasterDataCategory>("courier")
@@ -270,7 +274,10 @@ export default function MasterDataTab({ userId }: MasterDataTabProps) {
             <TrendingInlineView userId={userId} />
           ) : activeCategory === "staff" ? (
             <StaffManagementView userId={userId} />
+          ) : activeCategory === "ecommerce_banner" ? (
+            <EcommerceBannerManagement items={items} deviceId={deviceId} userId={userId} onRefresh={fetchItems} />
           ) : (
+
             <>
               <div className="flex flex-col gap-3 border-b border-slate-200 bg-[#F1F4F9] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-2">

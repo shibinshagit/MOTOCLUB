@@ -260,7 +260,7 @@ export default function NewProductModal({
     amazon: "not_listed",
     flipkart: "not_listed",
     meesho: "not_listed",
-    own_ecom: "not_listed",
+    own_ecom: "active",
   })
   const [trending, setTrending] = useState(false)
   

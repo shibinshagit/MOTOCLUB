@@ -231,6 +231,7 @@ function ProductsExcelTable({
               <th className={stickyActionHeaderClass}>Action</th>
             </tr>
           </thead>
+
           <tbody className={columnFilterOpen ? "pointer-events-none" : undefined}>
             {isLoading && !hasLoaded ? (
               <tr>

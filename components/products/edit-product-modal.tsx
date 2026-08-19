@@ -405,7 +405,7 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
         amazon: product.amazon_status || "not_listed",
         flipkart: product.flipkart_status || "not_listed",
         meesho: product.meesho_status || "not_listed",
-        own_ecom: product.own_ecom_status || "not_listed",
+        own_ecom: product.own_ecom_status || "active",
       })
       setTrending(Boolean(product.trending))
 
