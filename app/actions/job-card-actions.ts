@@ -535,7 +535,13 @@ export async function getAllJobCards(deviceId?: number) {
         WHERE s.device_id = ${deviceId}
           AND (${allowEcom} OR s.source IS NULL OR s.source != 'ECOMMERCE')
           AND (s.status != 'Cancelled' OR s.delivery_status = 'Returned')
-          AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%')
+          AND (
+            s.sale_type = 'job_card' 
+            OR s.fulfillment_type = 'ship' 
+            OR s.tracking_id LIKE 'JC-%' 
+            OR s.tracking_id LIKE 'DOD-%'
+            OR (s.tracking_id IS NOT NULL AND s.tracking_id != '')
+          )
         ORDER BY s.created_at DESC
       `
     } else {
@@ -556,7 +562,13 @@ export async function getAllJobCards(deviceId?: number) {
         LEFT JOIN devices d ON s.device_id = d.id
         LEFT JOIN return_requests err ON (err.sale_id = s.id OR (s.external_order_id IS NOT NULL AND (err.order_number = s.external_order_id OR err.order_id = s.id)))
         WHERE (s.status != 'Cancelled' OR s.delivery_status = 'Returned')
-          AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%')
+          AND (
+            s.sale_type = 'job_card' 
+            OR s.fulfillment_type = 'ship' 
+            OR s.tracking_id LIKE 'JC-%' 
+            OR s.tracking_id LIKE 'DOD-%'
+            OR (s.tracking_id IS NOT NULL AND s.tracking_id != '')
+          )
         ORDER BY s.created_at DESC
         LIMIT 200
       `

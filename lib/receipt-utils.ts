@@ -1284,16 +1284,19 @@ export function printPurchaseReceipt(purchase: any, items: any[], currency = "AE
     </body>
     </html>
   `)
-
-  printWindow.document.close()
 }
 
 // Print Job Card
 export function printJobCard(sale: any, currency = 'AED', businessInfo: any = {}) {
   if (typeof window === 'undefined') return;
-  const printWindow = window.open('', '_blank', 'width=800,height=900');
-  if (!printWindow) { alert('Please allow pop-ups'); return; }
-  
+
+  const landmark = sale.shipping_landmark || sale.landmark || sale.shippingLandmark;
+  const addressLines = [
+    sale.shipping_street || sale.shipping_address,
+    landmark ? `Landmark: ${landmark}` : null,
+    [sale.shipping_city, sale.shipping_district, sale.shipping_state].filter(Boolean).join(', ')
+  ].filter(Boolean);
+
   const business = {
     name: getCachedPlatformName(),
     logo: getDefaultDeviceLogoUrl() || "",
@@ -1311,11 +1314,6 @@ export function printJobCard(sale: any, currency = 'AED', businessInfo: any = {}
   const itemsText = sale.items?.map((item: any) => {
     return `${item.product_name || 'Item'} ${item.variant_name ? '('+item.variant_name+')' : ''}${item.quantity > 1 ? ` x${item.quantity}` : ''}`
   }).join(', ') || '';
-
-  const addressLines = [
-    sale.shipping_street,
-    [sale.shipping_city, sale.shipping_district, sale.shipping_state].filter(Boolean).join(', ')
-  ].filter(Boolean);
 
   const html = `
     <!DOCTYPE html>
@@ -1369,22 +1367,56 @@ export function printJobCard(sale: any, currency = 'AED', businessInfo: any = {}
       <div class="order-id">
         Order ID: ${sale.id}
       </div>
-      
-      <script>
-        window.onload = () => { window.print(); }
-      </script>
     </body>
     </html>
   `;
   
-  printWindow.document.write(html);
-  printWindow.document.close();
+  setTimeout(() => {
+    try {
+      let iframe = document.getElementById('job-card-print-iframe') as HTMLIFrameElement;
+      if (!iframe) {
+        iframe = document.createElement('iframe');
+        iframe.id = 'job-card-print-iframe';
+        iframe.style.position = 'fixed';
+        iframe.style.right = '0';
+        iframe.style.bottom = '0';
+        iframe.style.width = '0';
+        iframe.style.height = '0';
+        iframe.style.border = '0';
+        iframe.style.visibility = 'hidden';
+        document.body.appendChild(iframe);
+      }
+
+      const doc = iframe.contentWindow?.document || iframe.contentDocument;
+      if (doc) {
+        doc.open();
+        doc.write(html);
+        doc.close();
+
+        setTimeout(() => {
+          iframe.contentWindow?.focus();
+          iframe.contentWindow?.print();
+        }, 200);
+        return;
+      }
+    } catch (e) {
+      console.warn("Iframe print fallback to window.open", e);
+    }
+
+    const printWindow = window.open('', '_blank', 'width=800,height=900');
+    if (printWindow) {
+      printWindow.document.write(html);
+      printWindow.document.close();
+      setTimeout(() => {
+        printWindow.focus();
+        printWindow.print();
+      }, 250);
+    }
+  }, 50);
 }
 
 export function printBatchJobCards(sales: any[], currency = 'AED', businessInfo: any = {}) {
   if (typeof window === 'undefined' || !sales || sales.length === 0) return;
-  const printWindow = window.open('', '_blank', 'width=800,height=900');
-  if (!printWindow) { alert('Please allow pop-ups'); return; }
   
   const business = {
     name: getCachedPlatformName(),
@@ -1408,8 +1440,10 @@ export function printBatchJobCards(sales: any[], currency = 'AED', businessInfo:
       return `${item.product_name || 'Item'} ${item.variant_name ? '('+item.variant_name+')' : ''}${item.quantity > 1 ? ` x${item.quantity}` : ''}`
     }).join(', ') || '';
 
+    const landmark = sale.shipping_landmark || sale.landmark || sale.shippingLandmark;
     const addressLines = [
-      sale.shipping_street,
+      sale.shipping_street || sale.shipping_address,
+      landmark ? `Landmark: ${landmark}` : null,
       [sale.shipping_city, sale.shipping_district, sale.shipping_state].filter(Boolean).join(', ')
     ].filter(Boolean);
 
@@ -1477,14 +1511,51 @@ export function printBatchJobCards(sales: any[], currency = 'AED', businessInfo:
     </head>
     <body>
       ${pagesHtml}
-      <script>
-        window.onload = () => { window.print(); }
-      </script>
     </body>
     </html>
   `;
-  
-  printWindow.document.write(html);
-  printWindow.document.close();
+
+  setTimeout(() => {
+    try {
+      let iframe = document.getElementById('job-card-batch-print-iframe') as HTMLIFrameElement;
+      if (!iframe) {
+        iframe = document.createElement('iframe');
+        iframe.id = 'job-card-batch-print-iframe';
+        iframe.style.position = 'fixed';
+        iframe.style.right = '0';
+        iframe.style.bottom = '0';
+        iframe.style.width = '0';
+        iframe.style.height = '0';
+        iframe.style.border = '0';
+        iframe.style.visibility = 'hidden';
+        document.body.appendChild(iframe);
+      }
+
+      const doc = iframe.contentWindow?.document || iframe.contentDocument;
+      if (doc) {
+        doc.open();
+        doc.write(html);
+        doc.close();
+
+        setTimeout(() => {
+          iframe.contentWindow?.focus();
+          iframe.contentWindow?.print();
+        }, 200);
+        return;
+      }
+    } catch (e) {
+      console.warn("Iframe print fallback to window.open", e);
+    }
+
+    const printWindow = window.open('', '_blank', 'width=800,height=900');
+    if (printWindow) {
+      printWindow.document.write(html);
+      printWindow.document.close();
+      setTimeout(() => {
+        printWindow.focus();
+        printWindow.print();
+      }, 250);
+    }
+  }, 50);
 }
 

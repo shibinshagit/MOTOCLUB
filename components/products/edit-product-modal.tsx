@@ -273,6 +273,7 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
     price: "",
     wholesalePrice: "",
     msp: "",
+    mrp: "",
     stock: "",
     shelf: "",
     barcode: "",
@@ -346,6 +347,7 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
         price: product.price?.toString() || "",
         wholesalePrice: product.wholesale_price?.toString() || "",
         msp: product.msp?.toString() || "",
+        mrp: product.mrp?.toString() || "",
         stock: product.stock?.toString() || "",
         shelf: product.shelf || "",
         barcode: product.barcode || "",
@@ -913,8 +915,8 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
           errors.variants = "At least one variant is required"
         } else {
           variants.forEach((v, idx) => {
-            const cost = Number(v.wholesale_price);
-            const msp = Number(v.price);
+            const cost = Number(v.wholesale_price ?? v.cost_price);
+            const msp = Number(v.price ?? v.msp);
             const mrp = v.mrp !== null && v.mrp !== undefined && v.mrp !== "" ? Number(v.mrp) : null;
             
             if (isNaN(cost) || cost < 0) errors[`variant_${idx}_cost`] = `Cost Price is required`;
@@ -952,6 +954,7 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
       submitFormData.append("price", formData.price)
       submitFormData.append("wholesale_price", formData.wholesalePrice)
       submitFormData.append("msp", formData.msp)
+      submitFormData.append("mrp", formData.mrp)
       submitFormData.append("stock", formData.stock)
       submitFormData.append("shelf", formData.shelf)
       submitFormData.append("barcode", formData.barcode)
@@ -1303,10 +1306,11 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
                             type="number"
                             min="0"
                             step="0.01"
-                            value={v.price !== null && v.price !== undefined ? v.price : ""}
+                            value={v.price !== null && v.price !== undefined ? v.price : (v.msp !== null && v.msp !== undefined ? v.msp : "")}
                             onChange={(e) => {
                               const newVariants = [...variants]
-                              newVariants[idx] = { ...newVariants[idx], price: e.target.value === "" ? null : Number(e.target.value) }
+                              const val = e.target.value === "" ? null : Number(e.target.value)
+                              newVariants[idx] = { ...newVariants[idx], price: val, msp: val }
                               setVariants(newVariants)
                             }}
                             placeholder="Selling Price"

@@ -252,6 +252,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
   const [manualPaymentMethod, setManualPaymentMethod] = useState("Cash")
   const [manualDate, setManualDate] = useState<Date>(new Date())
   const [isAddingManual, setIsAddingManual] = useState(false)
+  const [selectedPettyCashCategory, setSelectedPettyCashCategory] = useState<string>("all")
 
   const device = useAppSelector(selectDevice)
   const company = useAppSelector(selectCompany)
@@ -865,7 +866,32 @@ const filteredTransactions =
     return matchesType
   }) || []
 
-const pettyCashTransactions =
+const getManualCategoryName = (t: any): string => {
+  if (!t) return "General"
+  const directCategory =
+    t.category ||
+    t.category_name ||
+    t.categoryName ||
+    t.manual_category_name ||
+    t.manualCategoryName
+  if (typeof directCategory === "string" && directCategory.trim()) {
+    return directCategory.trim()
+  }
+  const desc = t.description || ""
+  if (typeof desc === "string" && desc.trim()) {
+    const cleaned = desc
+      .replace(/^Manual Entry:\s*/i, "")
+      .replace(/^Manual Entry\s*-\s*/i, "")
+      .trim()
+    const parts = cleaned.split("-").map((p: string) => p.trim())
+    if (parts.length > 1 && parts[0]) {
+      return parts[0]
+    }
+  }
+  return "General"
+}
+
+const allPettyCashTransactions =
   financialData?.transactions?.filter((transaction) => {
     if (!transaction) return false
     const typeLower = transaction.type?.toLowerCase()
@@ -873,6 +899,15 @@ const pettyCashTransactions =
     if (typeLower !== "manual" && refTypeLower !== "manual") return false
     return matchesSearchAndDateRange(transaction)
   }) || []
+
+const pettyCashCategories = Array.from(
+  new Set(allPettyCashTransactions.map((t) => getManualCategoryName(t)).filter(Boolean))
+).sort()
+
+const pettyCashTransactions =
+  selectedPettyCashCategory === "all"
+    ? allPettyCashTransactions
+    : allPettyCashTransactions.filter((t) => getManualCategoryName(t) === selectedPettyCashCategory)
 
 
 const isDataLoading = isLoading && !financialData
@@ -2415,7 +2450,43 @@ const renderTransactionList = (
           </TabsContent>
 
           <TabsContent value="petty-cash" className="p-4">
-            <div className="mb-4 flex flex-wrap items-center justify-end gap-3">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-muted/40 p-3">
+              <div className="flex items-center gap-2">
+                <Filter className="h-4 w-4 text-purple-600" />
+                <span className="text-xs font-semibold text-foreground">Filter Category:</span>
+                <Select
+                  value={selectedPettyCashCategory}
+                  onValueChange={setSelectedPettyCashCategory}
+                >
+                  <SelectTrigger className="h-8 w-[230px] bg-background text-xs">
+                    <SelectValue placeholder="All Categories" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Categories ({allPettyCashTransactions.length})</SelectItem>
+                    {pettyCashCategories.map((cat) => {
+                      const count = allPettyCashTransactions.filter(
+                        (t) => getManualCategoryName(t) === cat
+                      ).length
+                      return (
+                        <SelectItem key={cat} value={cat}>
+                          {cat} ({count})
+                        </SelectItem>
+                      )
+                    })}
+                  </SelectContent>
+                </Select>
+                {selectedPettyCashCategory !== "all" && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setSelectedPettyCashCategory("all")}
+                    className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    Clear
+                  </Button>
+                )}
+              </div>
+
               <Button size="sm" onClick={() => setIsManualDialogOpen(true)}>
                 <Plus className="h-4 w-4 mr-2" />
                 Add Entry

@@ -2,7 +2,6 @@ import "server-only"
 
 import { neonConfig } from "@neondatabase/serverless"
 
-neonConfig.fetchConnectionCache = true
 ;(neonConfig as unknown as Record<string, unknown>).fetchTimeout = 30000
 neonConfig.webSocketConstructor = undefined
 ;(neonConfig as unknown as Record<string, unknown>).pipelineFetch = false

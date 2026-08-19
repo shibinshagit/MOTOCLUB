@@ -182,10 +182,10 @@ export async function recordSaleTransaction(saleData: {
   paymentMethod: string
   deviceId: number
   userId: number
-  customerId?: number
-  saleDate: Date
-  /** Product revenue only (excludes courier charge collected). Used for Completed sale credits. */
+  customerId?: number | null
+  saleDate?: Date
   productCreditAmount?: number
+  payments?: Array<{ paymentMethod: string; amount: number; referenceNumber?: string; notes?: string }>
 }) {
   try {
     console.log("Recording sale transaction with data:", {
@@ -197,6 +197,7 @@ export async function recordSaleTransaction(saleData: {
       deviceId: saleData.deviceId,
       userId: saleData.userId,
       saleDate: saleData.saleDate,
+      paymentsCount: saleData.payments?.length || 0
     })
 
     // Validate required fields
@@ -209,7 +210,13 @@ export async function recordSaleTransaction(saleData: {
       return { success: false, error: "Missing required fields: saleId, deviceId, or userId" }
     }
 
-    // FIXED: Calculate accounting values based on sale status - PROPER partial credit sale handling
+    // Clear existing financial_transactions for this sale to avoid duplicate ledger entries
+    await sql`
+      DELETE FROM financial_transactions
+      WHERE transaction_type = 'sale' AND reference_type = 'sale' AND reference_id = ${saleData.saleId}
+    `
+
+    // Calculate accounting values based on sale status
     let debitAmount = 0
     let creditAmount = 0
     let costAmount = 0
@@ -228,14 +235,12 @@ export async function recordSaleTransaction(saleData: {
     let receivedAmountForRecord = productReceived
 
     if (saleData.status === "Cancelled") {
-      // Cancelled sales: debit = received amount (refund), credit = 0, NO COGS
       debitAmount = Number(saleData.receivedAmount) || 0
       creditAmount = 0
       costAmount = 0
       receivedAmountForRecord = 0
       description = `Sale #${saleData.saleId} - Cancelled - ${saleData.paymentMethod || "Cash"} - Customer: ${saleData.customerId ? `ID ${saleData.customerId}` : "Walk-in"}`
     } else if (saleData.status === "Credit") {
-      // FIXED: Credit sales - cash impact = product portion received - proportional COGS
       creditAmount = productReceived
       debitAmount = 0
 
@@ -243,42 +248,76 @@ export async function recordSaleTransaction(saleData: {
         const paymentRatio = productReceived / productBillAmount
         costAmount = (Number(saleData.cogsAmount) || 0) * paymentRatio
       } else {
-        costAmount = 0 // No COGS impact if no payment received
+        costAmount = 0
       }
-      
+
       description = `Sale #${saleData.saleId} - Credit - ${saleData.paymentMethod || "Cash"} - Customer: ${saleData.customerId ? `ID ${saleData.customerId}` : "Walk-in"} - Received: ${receivedAmountForRecord}`
-      
-      console.log(`Credit sale recorded: Partial payment ${receivedAmountForRecord}, COGS: ${costAmount}`)
     } else {
-      // Completed sales: credit = product revenue (courier charge posted separately)
       creditAmount = hasShippingSplit ? productCredit : receivedAmount
       debitAmount = 0
       costAmount = Number(saleData.cogsAmount) || 0
       description = `Sale #${saleData.saleId} - Completed - ${saleData.paymentMethod || "Cash"} - Customer: ${saleData.customerId ? `ID ${saleData.customerId}` : "Walk-in"}`
     }
 
-    // Record the transaction with all details
-    const result = await sql`
-      INSERT INTO financial_transactions (
-        transaction_type, reference_type, reference_id,
-        amount, received_amount, cost_amount, debit_amount, credit_amount,
-        status, payment_method, description, device_id, company_id, created_by, transaction_date
-      ) VALUES (
-        'sale', 'sale', ${saleData.saleId},
-        ${productBillAmount}, ${receivedAmountForRecord}, ${costAmount}, ${debitAmount}, ${creditAmount},
-        ${saleData.status}, ${saleData.paymentMethod || "Cash"}, ${description}, 
-        ${saleData.deviceId}, 1, ${saleData.userId}, ${saleData.saleDate}
-      ) RETURNING id
-    `
+    const activePayments = Array.isArray(saleData.payments)
+      ? saleData.payments.filter((p) => Number(p.amount) > 0)
+      : []
 
-    console.log(`Sale transaction recorded successfully: ID ${result[0]?.id}`, {
+    let lastInsertedId: number | undefined
+
+    if (activePayments.length > 1) {
+      // Create separate ledger entry for each payment method in split payment
+      const totalSplitPaid = activePayments.reduce((s, p) => s + (Number(p.amount) || 0), 0)
+
+      for (const p of activePayments) {
+        const pAmt = Number(p.amount) || 0
+        const ratio = totalSplitPaid > 0 ? pAmt / totalSplitPaid : 1 / activePayments.length
+        const pCreditAmount = creditAmount * ratio
+        const pCostAmount = costAmount * ratio
+        const pDebitAmount = debitAmount * ratio
+        const pReceived = receivedAmountForRecord * ratio
+        const refStr = p.referenceNumber ? ` (Ref: ${p.referenceNumber})` : ""
+        const pDesc = `Sale #${saleData.saleId} - ${saleData.status} - ${p.paymentMethod}${refStr} - Customer: ${saleData.customerId ? `ID ${saleData.customerId}` : "Walk-in"}`
+
+        const res = await sql`
+          INSERT INTO financial_transactions (
+            transaction_type, reference_type, reference_id,
+            amount, received_amount, cost_amount, debit_amount, credit_amount,
+            status, payment_method, description, device_id, company_id, created_by, transaction_date
+          ) VALUES (
+            'sale', 'sale', ${saleData.saleId},
+            ${(productBillAmount * ratio).toFixed(2)}, ${pReceived.toFixed(2)}, ${pCostAmount.toFixed(2)}, ${pDebitAmount.toFixed(2)}, ${pCreditAmount.toFixed(2)},
+            ${saleData.status}, ${p.paymentMethod || "Cash"}, ${pDesc}, 
+            ${saleData.deviceId}, 1, ${saleData.userId}, ${saleData.saleDate}
+          ) RETURNING id
+        `
+        lastInsertedId = res[0]?.id
+      }
+    } else {
+      const pm = activePayments[0]?.paymentMethod || saleData.paymentMethod || "Cash"
+      const res = await sql`
+        INSERT INTO financial_transactions (
+          transaction_type, reference_type, reference_id,
+          amount, received_amount, cost_amount, debit_amount, credit_amount,
+          status, payment_method, description, device_id, company_id, created_by, transaction_date
+        ) VALUES (
+          'sale', 'sale', ${saleData.saleId},
+          ${productBillAmount}, ${receivedAmountForRecord}, ${costAmount}, ${debitAmount}, ${creditAmount},
+          ${saleData.status}, ${pm}, ${description}, 
+          ${saleData.deviceId}, 1, ${saleData.userId}, ${saleData.saleDate}
+        ) RETURNING id
+      `
+      lastInsertedId = res[0]?.id
+    }
+
+    console.log(`Sale transaction recorded successfully: ID ${lastInsertedId}`, {
       status: saleData.status,
       creditAmount,
       receivedAmount: receivedAmountForRecord,
       totalAmount: saleData.totalAmount,
       costAmount
     })
-    return { success: true, transactionId: result[0]?.id }
+    return { success: true, transactionId: lastInsertedId }
   } catch (error) {
     console.error("Error recording sale transaction:", error)
     console.error("Error details:", {
@@ -525,9 +564,15 @@ export async function recordPurchaseTransaction(purchaseData: {
   deviceId: number
   userId: number
   purchaseDate: Date
+  payments?: Array<{ paymentMethod: string; amount: number; referenceNumber?: string; notes?: string }>
 }, query: any = sql) {
   try {
-    // Ensure table exists
+    // Clear existing financial_transactions for this purchase to avoid duplicate ledger entries
+    await query`
+      DELETE FROM financial_transactions
+      WHERE transaction_type = 'purchase' AND reference_type = 'purchase' AND reference_id = ${purchaseData.purchaseId}
+    `
+
     const totalAmount = Number(purchaseData.totalAmount) || 0
     const receivedAmount = Number(purchaseData.receivedAmount) || 0
     const status = purchaseData.status?.toLowerCase()
@@ -536,54 +581,62 @@ export async function recordPurchaseTransaction(purchaseData: {
     let creditAmount = 0
     let description = ""
 
-    // FIXED: Different handling for credit vs completed purchases
     if (status === "credit") {
-      // For credit purchases: debit = 0, credit = 0 (no cash impact until payment)
-      // Only record the outstanding amount as a liability
       debitAmount = 0
       creditAmount = 0
       description = `Purchase #${purchaseData.purchaseId} - Credit - ${purchaseData.paymentMethod} - Supplier: ${purchaseData.supplierName} - Outstanding: ${purchaseData.outstandingAmount}`
     } else {
-      // For completed purchases: debit = received amount (money paid out), credit = 0
       debitAmount = receivedAmount
       creditAmount = 0
       description = `Purchase #${purchaseData.purchaseId} - ${purchaseData.status} - ${purchaseData.paymentMethod} - Supplier: ${purchaseData.supplierName}`
     }
 
-    const costAmount = 0 // Purchases don't have COGS
+    const costAmount = 0
 
-    console.log("Recording purchase transaction:", {
-      purchaseId: purchaseData.purchaseId,
-      status,
-      totalAmount,
-      receivedAmount,
-      debitAmount,
-      creditAmount,
-      description
-    })
+    const activePayments = Array.isArray(purchaseData.payments)
+      ? purchaseData.payments.filter((p) => Number(p.amount) > 0)
+      : []
 
-    // Insert the main purchase transaction
-    const result = await query`
-      INSERT INTO financial_transactions (
-        transaction_type, reference_type, reference_id,
-        amount, received_amount, cost_amount, debit_amount, credit_amount,
-        status, payment_method, description, device_id, company_id, created_by, transaction_date
-      ) VALUES (
-        'purchase', 'purchase', ${purchaseData.purchaseId},
-        ${totalAmount}, ${receivedAmount}, ${costAmount}, ${debitAmount}, ${creditAmount},
-        ${purchaseData.status}, ${purchaseData.paymentMethod}, ${description}, 
-        ${purchaseData.deviceId}, 1, ${purchaseData.userId}, ${purchaseData.purchaseDate}
-      ) RETURNING id
-    `
+    let lastInsertedId: number | undefined
 
-    console.log(`Purchase transaction recorded: ID ${result[0]?.id}`, {
-      status: purchaseData.status,
-      debitAmount,
-      creditAmount,
-      totalAmount,
-      receivedAmount
-    })
-    return { success: true, transactionId: result[0]?.id }
+    if (activePayments.length > 1) {
+      for (const p of activePayments) {
+        const pAmt = Number(p.amount) || 0
+        const refStr = p.referenceNumber ? ` (Ref: ${p.referenceNumber})` : ""
+        const pDesc = `Purchase #${purchaseData.purchaseId} - ${purchaseData.status} - ${p.paymentMethod}${refStr} - Supplier: ${purchaseData.supplierName}`
+
+        const res = await query`
+          INSERT INTO financial_transactions (
+            transaction_type, reference_type, reference_id,
+            amount, received_amount, cost_amount, debit_amount, credit_amount,
+            status, payment_method, description, device_id, company_id, created_by, transaction_date
+          ) VALUES (
+            'purchase', 'purchase', ${purchaseData.purchaseId},
+            ${totalAmount}, ${pAmt}, ${costAmount}, ${pAmt}, 0,
+            ${purchaseData.status}, ${p.paymentMethod}, ${pDesc}, 
+            ${purchaseData.deviceId}, 1, ${purchaseData.userId}, ${purchaseData.purchaseDate}
+          ) RETURNING id
+        `
+        lastInsertedId = res[0]?.id
+      }
+    } else {
+      const pm = activePayments[0]?.paymentMethod || purchaseData.paymentMethod || "Cash"
+      const result = await query`
+        INSERT INTO financial_transactions (
+          transaction_type, reference_type, reference_id,
+          amount, received_amount, cost_amount, debit_amount, credit_amount,
+          status, payment_method, description, device_id, company_id, created_by, transaction_date
+        ) VALUES (
+          'purchase', 'purchase', ${purchaseData.purchaseId},
+          ${totalAmount}, ${receivedAmount}, ${costAmount}, ${debitAmount}, ${creditAmount},
+          ${purchaseData.status}, ${pm}, ${description}, 
+          ${purchaseData.deviceId}, 1, ${purchaseData.userId}, ${purchaseData.purchaseDate}
+        ) RETURNING id
+      `
+      lastInsertedId = result[0]?.id
+    }
+
+    return { success: true, transactionId: lastInsertedId }
   } catch (error) {
     console.error("Error recording purchase transaction:", error)
     return { success: false, error: error instanceof Error ? error.message : "Unknown error" }

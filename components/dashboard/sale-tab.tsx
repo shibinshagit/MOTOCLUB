@@ -37,6 +37,8 @@ import { markInventoryStale } from "@/lib/inventory-sync"
 import ViewSaleModal from "@/components/sales/view-sale-modal"
 import SalesExcelTable from "@/components/sales/sales-excel-table"
 import { SalesViewFlip, type SalesViewMode } from "@/components/sales/sales-view-flip"
+import { SplitPaymentInput } from "@/components/shared/split-payment-input"
+import { PaymentRecordInput } from "@/types/payment"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useSelector, useDispatch } from "react-redux"
 import { selectDeviceId, selectDeviceCurrency } from "@/store/slices/deviceSlice"
@@ -222,6 +224,8 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
   const [status, setStatus] = useState<string>("Completed")
   const [paymentStatus, setPaymentStatus] = useState<string>("Paid")
   const [paymentMethod, setPaymentMethod] = useState<string>("Cash")
+  const [payments, setPayments] = useState<PaymentRecordInput[]>([])
+  const [isPaymentValid, setIsPaymentValid] = useState<boolean>(true)
   const [products, setProducts] = useState<ProductRow[]>([
     {
       id: crypto.randomUUID(),
@@ -1320,6 +1324,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
           items: validItems,
           paymentStatus: paymentStatus,
           paymentMethod: paymentMethod,
+          payments: payments,
           saleDate: date?.toISOString() || new Date().toISOString(),
           status: status,
           originalStatus: originalSaleStatus,
@@ -1391,6 +1396,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
           status: status,
           paymentStatus: paymentStatus,
           paymentMethod: paymentMethod,
+          payments: payments,
           saleDate: date?.toISOString() || new Date().toISOString(),
           notes: notes,
           discount: discountAmount,
@@ -1589,6 +1595,9 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
 
   // Get payment method display value
   const getPaymentMethodDisplay = (sale: any) => {
+    if (Array.isArray(sale.payments) && sale.payments.length > 1) {
+      return sale.payments.map((p: any) => `${p.paymentMethod} (₹${Number(p.amount).toLocaleString()})`).join(" + ")
+    }
     if (sale.payment_method === undefined || sale.payment_method === null) {
       return "Cash"
     }
@@ -2479,107 +2488,24 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                               </div>
 
                               {/* Payment Section */}
-                              <div className="space-y-3 pt-3 border-t border-gray-200 mt-3">
-                                <h3 className="text-sm font-semibold text-gray-900 flex items-center">
-                                  <CreditCard className="h-4 w-4 mr-2 text-blue-500" />
-                                  Payment Details
-                                </h3>
-                                
-                                <div className="space-y-1">
-                                  <Label className="text-xs font-medium text-gray-900">
-                                    Payment Method
-                                  </Label>
-                                  <select
-                                    className="flex h-8 w-full items-center justify-between rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-900"
-                                    value={paymentMethod}
-                                    onChange={(e) => setPaymentMethod(e.target.value)}
-                                  >
-                                    <option value="Cash">Cash</option>
-                                    <option value="Card">Card</option>
-                                    <option value="Bank Transfer">Bank Transfer</option>
-                                    <option value="UPI">UPI</option>
-                                    <option value="COD">Cash on Delivery (COD)</option>
-                                  </select>
-                                </div>
-
-                                <div className="flex flex-col sm:flex-row gap-2">
-                                  <div className="flex flex-col space-y-1 flex-1">
-                                    <Label className="text-xs font-medium text-gray-900">
-                                      {paymentMethod === "COD" ? "Advance Amount Collected" : "Amount Paid"}
-                                    </Label>
-                                    <Input
-                                      type="number"
-                                      min="0"
-                                      max={totalAmount}
-                                      step="0.01"
-                                      value={paymentMethod === "COD" ? advanceAmount : (paymentStatus === "Paid" || paymentStatus === "Completed" ? totalAmount : receivedAmount)}
-                                      onChange={(e) => {
-                                        const val = Number.parseFloat(e.target.value) || 0
-                                        if (paymentMethod === "COD") {
-                                          setAdvanceAmount(val)
-                                          setReceivedAmount(val)
-                                          const newBal = Math.max(0, totalAmount - val)
-                                          setBalanceAmount(newBal)
-                                        } else {
-                                          setReceivedAmount(val)
-                                          const newBal = Math.max(0, totalAmount - val)
-                                          setBalanceAmount(newBal)
-                                          if (val >= totalAmount && totalAmount > 0) {
-                                            setPaymentStatus("Paid")
-                                          } else if (val === 0) {
-                                            setPaymentStatus("Pending")
-                                          } else {
-                                            setPaymentStatus("Credit")
-                                          }
-                                        }
-                                      }}
-                                      className="h-8 text-xs bg-white border-gray-300 text-gray-900"
-                                      placeholder="0.00"
-                                    />
-                                  </div>
-
-                                  <div className="flex flex-col space-y-1 flex-1">
-                                    <Label className="text-xs font-medium text-gray-900">
-                                      Payment Status
-                                    </Label>
-                                    <select
-                                      className="flex h-8 w-full items-center justify-between rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-900"
-                                      value={paymentStatus}
-                                      onChange={(e) => {
-                                        const newStatus = e.target.value
-                                        setPaymentStatus(newStatus)
-                                        if (newStatus === "Paid" || newStatus === "Completed") {
-                                          setReceivedAmount(totalAmount)
-                                          setBalanceAmount(0)
-                                        } else if (newStatus === "Pending") {
-                                          setReceivedAmount(0)
-                                          setBalanceAmount(totalAmount)
-                                        } else if (newStatus === "Credit") {
-                                          const currentRec = paymentMethod === "COD" ? advanceAmount : receivedAmount
-                                          setBalanceAmount(Math.max(0, totalAmount - currentRec))
-                                        }
-                                      }}
-                                    >
-                                      <option value="Paid">Paid</option>
-                                      <option value="Pending">Pending</option>
-                                      <option value="Credit">Credit</option>
-                                    </select>
-                                  </div>
-                                </div>
-
-                                {(() => {
-                                  const displayBalance = (paymentStatus === "Paid" || paymentStatus === "Completed")
-                                    ? 0
-                                    : Math.max(0, totalAmount - (paymentMethod === "COD" ? advanceAmount : receivedAmount))
-                                  return (
-                                    <div className="flex justify-between items-center bg-gray-50 p-2 rounded-md border border-gray-200">
-                                      <span className="text-xs font-medium text-gray-700">Balance Amount:</span>
-                                      <span className={`text-xs font-bold ${displayBalance > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                                        {deviceCurrencyState} {displayBalance.toFixed(2)}
-                                      </span>
-                                    </div>
-                                  )
-                                })()}
+                              <div className="pt-3 border-t border-gray-200 mt-3">
+                                <SplitPaymentInput
+                                  totalAmount={totalAmount}
+                                  payments={payments}
+                                  onChange={(updatedPayments, isValid) => {
+                                    setPayments(updatedPayments)
+                                    setIsPaymentValid(isValid)
+                                    const sumPaid = updatedPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0)
+                                    setReceivedAmount(sumPaid)
+                                    setBalanceAmount(Math.max(0, totalAmount - sumPaid))
+                                    if (updatedPayments.length > 0) {
+                                      setPaymentMethod(updatedPayments[0].paymentMethod || "Cash")
+                                    }
+                                  }}
+                                  paymentStatus={paymentStatus}
+                                  onPaymentStatusChange={(newStatus) => setPaymentStatus(newStatus)}
+                                  currencySymbol={deviceCurrencyState}
+                                />
                               </div>
 
                                 <SaleShippingSection

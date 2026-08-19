@@ -90,6 +90,46 @@ export async function getUserPurchases(
 
   try {
     const purchases = await queryDevicePurchases(deviceId, options)
+
+    if (Array.isArray(purchases) && purchases.length > 0) {
+      const purchaseIds = purchases.map((p: any) => p.id)
+      try {
+        const tpRows = await sql`
+          SELECT id, purchase_id, payment_method, amount, reference_number, notes
+          FROM transaction_payments
+          WHERE purchase_id = ANY(${purchaseIds})
+          ORDER BY id ASC
+        `
+        const tpMap = new Map<number, any[]>()
+        for (const row of tpRows) {
+          const list = tpMap.get(row.purchase_id) || []
+          list.push({
+            id: row.id,
+            paymentMethod: row.payment_method,
+            amount: Number(row.amount) || 0,
+            referenceNumber: row.reference_number || undefined,
+            notes: row.notes || undefined,
+          })
+          tpMap.set(row.purchase_id, list)
+        }
+        for (const p of purchases) {
+          const plist = tpMap.get(p.id)
+          if (plist && plist.length > 0) {
+            p.payments = plist
+          } else {
+            p.payments = [
+              {
+                paymentMethod: p.payment_method || "Cash",
+                amount: Number(p.received_amount) || 0,
+              },
+            ]
+          }
+        }
+      } catch (e) {
+        console.warn("Could not query transaction_payments for purchases:", e)
+      }
+    }
+
     return { success: true, data: purchases }
   } catch (error) {
     console.error("Get device purchases error:", error)
@@ -126,10 +166,35 @@ export async function getPurchaseDetails(purchaseId: number) {
       return { success: false, message: "Purchase not found" }
     }
 
+    const paymentsResult = await sql`
+      SELECT id, payment_method, amount, reference_number, notes
+      FROM transaction_payments
+      WHERE purchase_id = ${purchaseId}
+      ORDER BY id ASC
+    `
+
+    const paymentsList = paymentsResult.map((p: any) => ({
+      id: p.id,
+      paymentMethod: p.payment_method,
+      amount: Number(p.amount) || 0,
+      referenceNumber: p.reference_number || undefined,
+      notes: p.notes || undefined,
+    }))
+
+    const purchaseData = {
+      ...purchase[0],
+      payments: paymentsList.length > 0 ? paymentsList : [
+        {
+          paymentMethod: purchase[0].payment_method || "Cash",
+          amount: Number(purchase[0].received_amount) || 0,
+        }
+      ],
+    }
+
     return {
       success: true,
       data: {
-        purchase: purchase[0],
+        purchase: purchaseData,
         items: purchaseItems,
       },
     }
@@ -149,6 +214,17 @@ export async function createPurchase(formData: FormData) {
   const deviceId = Number.parseInt(formData.get("device_id") as string)
   const purchaseDate = (formData.get("purchase_date") as string) || new Date().toISOString()
   const receivedAmount = Number.parseFloat(formData.get("received_amount") as string) || 0
+
+  // Parse optional payments array from JSON string
+  const paymentsJson = formData.get("payments") as string
+  let paymentsList: any[] = []
+  if (paymentsJson) {
+    try {
+      paymentsList = JSON.parse(paymentsJson).filter((p: any) => Number(p.amount) > 0)
+    } catch (e) {
+      console.warn("Invalid payments JSON in createPurchase:", e)
+    }
+  }
 
   // Parse items from JSON string
   const itemsJson = formData.get("items") as string
@@ -184,8 +260,16 @@ export async function createPurchase(formData: FormData) {
     return { success: false, message: "Supplier, total amount, at least one item, user ID, and device ID are required" }
   }
 
-  // Validate received amount
-  if (receivedAmount > totalAmount) {
+  let finalReceivedAmount = receivedAmount
+  if (paymentsList.length > 0) {
+    finalReceivedAmount = paymentsList.reduce((s, p) => s + (Number(p.amount) || 0), 0)
+  } else if (status.toLowerCase() === "paid") {
+    finalReceivedAmount = totalAmount
+  } else if (status.toLowerCase() === "cancelled") {
+    finalReceivedAmount = 0
+  }
+
+  if (finalReceivedAmount > totalAmount) {
     return { success: false, message: "Received amount cannot be greater than total amount" }
   }
 
@@ -194,15 +278,14 @@ export async function createPurchase(formData: FormData) {
 
   try {
     const result = await sql.begin(async (tx: any) => {
-      // Calculate final received amount based on status
-      let finalReceivedAmount = receivedAmount
-      if (status.toLowerCase() === "paid") {
-        finalReceivedAmount = totalAmount // Full payment
-      } else if (status.toLowerCase() === "cancelled") {
-        finalReceivedAmount = 0 // No payment
-      }
-
       console.log("Creating purchase with received amount:", finalReceivedAmount)
+
+      const primaryPaymentMethod =
+        paymentsList.length === 1
+          ? paymentsList[0].paymentMethod
+          : paymentsList.length > 1
+          ? paymentsList.map((p) => p.paymentMethod).join(" + ")
+          : paymentMethod || "Cash"
 
       // Create the purchase
       const purchaseResult = await tx`
@@ -211,7 +294,7 @@ export async function createPurchase(formData: FormData) {
           created_by, device_id, purchase_date, received_amount
         )
         VALUES (
-          ${supplier}, ${totalAmount}, ${status}, ${paymentMethod}, ${purchaseStatus}, 
+          ${supplier}, ${totalAmount}, ${status}, ${primaryPaymentMethod}, ${purchaseStatus}, 
           ${userId}, ${deviceId}, ${purchaseDate}, ${finalReceivedAmount}
         )
         RETURNING *
@@ -224,6 +307,26 @@ export async function createPurchase(formData: FormData) {
       const purchaseId = purchaseResult[0].id
       const isDelivered = purchaseStatus.toLowerCase() === "delivered"
       const isCancelled = status.toLowerCase() === "cancelled"
+
+      if (paymentsList.length > 0) {
+        for (const p of paymentsList) {
+          await tx`
+            INSERT INTO transaction_payments (
+              purchase_id, payment_method, amount, reference_number, notes, payment_date
+            ) VALUES (
+              ${purchaseId}, ${p.paymentMethod || "Cash"}, ${Number(p.amount) || 0}, ${p.referenceNumber || null}, ${p.notes || null}, ${purchaseDate}
+            )
+          `
+        }
+      } else if (finalReceivedAmount > 0) {
+        await tx`
+          INSERT INTO transaction_payments (
+            purchase_id, payment_method, amount, payment_date
+          ) VALUES (
+            ${purchaseId}, ${primaryPaymentMethod}, ${finalReceivedAmount}, ${purchaseDate}
+          )
+        `
+      }
 
       // Add purchase items and handle stock...
       let itemIndex = 0;
@@ -239,23 +342,23 @@ export async function createPurchase(formData: FormData) {
           if (defaultVariant.length > 0) {
             variantId = defaultVariant[0].id;
           } else {
-            console.log(`[Purchase] Auto-creating default variant for product ${item.product_id}`);
-            const autoVariant = await tx`
-              INSERT INTO product_variants (
-                product_id, name, cost_price, wholesale_price, price, msp, mrp, minimum_stock, status
-              ) VALUES (
-                ${item.product_id}, 'Default', ${item.price}, ${item.price}, ${item.price},
-                ${item.price}, ${item.price}, 0, 'active'
-              ) RETURNING id
+            const productInfo = await tx`
+              SELECT price, wholesale_price, msp, barcode FROM products WHERE id = ${item.product_id}
             `;
-            variantId = autoVariant[0].id;
+            const fallbackPrice = productInfo.length > 0 ? Number(productInfo[0].price) || 0 : item.price;
+            const newVar = await tx`
+              INSERT INTO product_variants (product_id, name, price, wholesale_price, msp, barcode)
+              VALUES (${item.product_id}, 'Default Variant', ${fallbackPrice}, ${productInfo[0]?.wholesale_price || 0}, ${productInfo[0]?.msp || 0}, ${productInfo[0]?.barcode || null})
+              RETURNING id
+            `;
+            variantId = newVar[0].id;
           }
         }
 
         // Every purchase MUST create a NEW BATCH — never reuse or merge.
         let batchId: number | null = null;
         if (isDelivered && !isCancelled) {
-          const batchNo = `PUR-${purchaseId || 0}-${item.product_id}-${itemIndex}-${Date.now().toString().slice(-4)}`;
+          const batchNo = `BATCH-PUR-${purchaseId}-${itemIndex}-${Date.now()}`;
           const newBatch = await tx`
             INSERT INTO product_batches (
               product_id, product_variant_id, batch_no, cost_price, selling_price,
@@ -305,11 +408,12 @@ export async function createPurchase(formData: FormData) {
         receivedAmount: finalReceivedAmount,
         outstandingAmount: totalAmount - finalReceivedAmount,
         status,
-        paymentMethod: paymentMethod || "Cash",
+        paymentMethod: primaryPaymentMethod,
         supplierName: supplier,
         deviceId,
         userId,
         purchaseDate: new Date(purchaseDate),
+        payments: paymentsList.length > 0 ? paymentsList : undefined,
       }, tx)
 
       return { success: true, message: "Purchase added successfully", data: purchaseResult[0] }
@@ -398,7 +502,7 @@ export async function markPurchaseDelivered(purchaseId: number, deviceId: number
             product_id, product_variant_id, batch_id, quantity, type, reference_id, reference_type, notes, created_by, device_id
           ) VALUES (
             ${item.product_id}, ${item.product_variant_id}, ${batchId}, ${quantity}, 'purchase', ${purchaseId}, 'purchase',
-            ${`Stock received from purchase #${purchaseId} - ${purchase.supplier}`}, ${purchase.created_by}, ${deviceId}
+            ${"Stock received from purchase #" + purchaseId + " - " + purchase.supplier}, ${purchase.created_by}, ${deviceId}
           )
         `
       }
@@ -436,6 +540,24 @@ export async function updatePurchase(formData: FormData) {
   const userId = Number.parseInt(formData.get("user_id") as string)
   const deviceId = Number.parseInt(formData.get("device_id") as string)
   const receivedAmount = Number.parseFloat(formData.get("received_amount") as string) || 0
+
+  // Parse optional payments array from JSON string
+  const paymentsJson = formData.get("payments") as string
+  let paymentsList: any[] = []
+  if (paymentsJson) {
+    try {
+      paymentsList = JSON.parse(paymentsJson).filter((p: any) => Number(p.amount) > 0)
+    } catch (e) {
+      console.warn("Invalid payments JSON in updatePurchase:", e)
+    }
+  }
+
+  const primaryPaymentMethod =
+    paymentsList.length === 1
+      ? paymentsList[0].paymentMethod
+      : paymentsList.length > 1
+      ? paymentsList.map((p) => p.paymentMethod).join(" + ")
+      : paymentMethod || "Cash"
 
   // Parse items from JSON string
   const itemsJson = formData.get("items") as string
@@ -613,9 +735,7 @@ export async function updatePurchase(formData: FormData) {
       let itemIndex = 0;
       for (let item of items) {
         itemIndex++;
-        // Resolve variant: use provided variant_id, or fetch the default variant.
-        // If no variant exists (legacy product), auto-create one so purchase never fails.
-        let variantId = item.variant_id;
+        let variantId = item.variant_id || null;
         if (!variantId) {
           const defaultVariant = await tx`
             SELECT id FROM product_variants WHERE product_id = ${item.product_id} ORDER BY id ASC LIMIT 1
@@ -623,23 +743,22 @@ export async function updatePurchase(formData: FormData) {
           if (defaultVariant.length > 0) {
             variantId = defaultVariant[0].id;
           } else {
-            console.log(`[Purchase] Auto-creating default variant for product ${item.product_id}`);
-            const autoVariant = await tx`
-              INSERT INTO product_variants (
-                product_id, name, cost_price, wholesale_price, price, msp, mrp, minimum_stock, status
-              ) VALUES (
-                ${item.product_id}, 'Default', ${item.price}, ${item.price}, ${item.price},
-                ${item.price}, ${item.price}, 0, 'active'
-              ) RETURNING id
+            const productInfo = await tx`
+              SELECT price, wholesale_price, msp, barcode FROM products WHERE id = ${item.product_id}
             `;
-            variantId = autoVariant[0].id;
+            const fallbackPrice = productInfo.length > 0 ? Number(productInfo[0].price) || 0 : item.price;
+            const newVar = await tx`
+              INSERT INTO product_variants (product_id, name, price, wholesale_price, msp, barcode)
+              VALUES (${item.product_id}, 'Default Variant', ${fallbackPrice}, ${productInfo[0]?.wholesale_price || 0}, ${productInfo[0]?.msp || 0}, ${productInfo[0]?.barcode || null})
+              RETURNING id
+            `;
+            variantId = newVar[0].id;
           }
         }
 
-        // Every purchase MUST create a NEW BATCH — never reuse or merge.
-        let batchId: number | null = null;
+        let batchId = item.batch_id || null;
         if (shouldAddStock) {
-          const batchNo = `PUR-${purchaseId || 0}-${item.product_id}-${itemIndex}-${Date.now().toString().slice(-4)}`;
+          const batchNo = `BATCH-PUR-${purchaseId}-${itemIndex}-${Date.now()}`;
           const newBatch = await tx`
             INSERT INTO product_batches (
               product_id, product_variant_id, batch_no, cost_price, selling_price,
@@ -650,40 +769,41 @@ export async function updatePurchase(formData: FormData) {
             ) RETURNING id
           `;
           batchId = newBatch[0].id;
+          await adjustDeviceProductStock(item.product_id, variantId, batchId, deviceId, Number(item.quantity), tx)
         }
         item.variant_id = variantId;
         item.batch_id = batchId;
 
+        const pVariantId = item.variant_id || null
+        const pBatchId = item.batch_id || null
+        const pQty = Number(item.quantity) || 0
+        const pPrice = Number(item.price) || 0
+        const pTaxPct = Number(item.tax_percentage) || 0
+        const pTaxAmt = Number(item.tax_amount) || 0
+        const pLineTotal = Number(item.line_total) || 0
+
         await tx`
-          INSERT INTO purchase_items (purchase_id, product_id, product_variant_id, batch_id, quantity, price, tax_percentage, tax_amount, line_total)
-          VALUES (${purchaseId}, ${item.product_id}, ${item.variant_id || null}, ${item.batch_id || null}, ${item.quantity}, ${item.price}, ${item.tax_percentage}, ${item.tax_amount}, ${item.line_total})
+          INSERT INTO purchase_items (
+            purchase_id, product_id, product_variant_id, batch_id, quantity, price, tax_percentage, tax_amount, line_total
+          ) VALUES (
+            ${purchaseId}, ${item.product_id}, ${pVariantId}, ${pBatchId}, ${pQty}, ${pPrice}, ${pTaxPct}, ${pTaxAmt}, ${pLineTotal}
+          )
         `
       }
 
-      // Get previous values for adjustment tracking
-      const previousValues = {
-        totalAmount: Number(currentPurchase[0].total_amount) || 0,
-        receivedAmount: Number(currentPurchase[0].received_amount) || 0,
-        status: currentPurchase[0].status,
-      }
-
-      const newValues = {
+      await recordPurchaseTransaction({
+        purchaseId,
         totalAmount,
         receivedAmount: finalReceivedAmount,
+        outstandingAmount: totalAmount - finalReceivedAmount,
         status,
-      }
-
-      // Record purchase adjustment in simplified accounting system
-      await recordPurchaseAdjustment({
-        purchaseId,
-        changeType: status.toLowerCase() === "cancelled" ? "cancel" : "edit",
-        previousValues,
-        newValues,
+        paymentMethod: primaryPaymentMethod,
+        supplierName: supplier,
         deviceId,
         userId,
-        description: `Purchase #${purchaseId} updated - ${supplier}`,
-        adjustmentDate: new Date(),
-      })
+        purchaseDate: new Date(purchaseDate),
+        payments: paymentsList.length > 0 ? paymentsList : undefined,
+      }, tx)
 
       return { success: true, message: "Purchase updated successfully", data: purchaseResult[0] }
     })
@@ -732,45 +852,7 @@ export async function deletePurchase(purchaseId: number, deviceId: number) {
       if (wasStockAdded) {
         console.log("Removing stock for deleted purchase items:", items)
         for (let item of items) {
-        // Resolve variant: use provided variant_id, or fetch the default variant.
-        // If no variant exists (legacy product), auto-create one so purchase never fails.
-        let variantId = item.variant_id;
-        if (!variantId) {
-          const defaultVariant = await tx`
-            SELECT id FROM product_variants WHERE product_id = ${item.product_id} ORDER BY id ASC LIMIT 1
-          `;
-          if (defaultVariant.length > 0) {
-            variantId = defaultVariant[0].id;
-          } else {
-            console.log(`[Purchase] Auto-creating default variant for product ${item.product_id}`);
-            const autoVariant = await tx`
-              INSERT INTO product_variants (
-                product_id, name, cost_price, wholesale_price, price, msp, mrp, minimum_stock, status
-              ) VALUES (
-                ${item.product_id}, 'Default', ${item.price}, ${item.price}, ${item.price},
-                ${item.price}, ${item.price}, 0, 'active'
-              ) RETURNING id
-            `;
-            variantId = autoVariant[0].id;
-          }
-        }
-
-        // Every purchase MUST create a NEW BATCH — never reuse or merge.
-        const batchNo = `PUR-${purchaseId || 0}-${item.product_id}-${Date.now().toString().slice(-4)}`;
-        const newBatch = await tx`
-          INSERT INTO product_batches (
-            product_id, product_variant_id, batch_no, cost_price, selling_price,
-            quantity_purchased, remaining_quantity, status, purchase_id
-          ) VALUES (
-            ${item.product_id}, ${variantId}, ${batchNo}, ${item.price}, ${item.price},
-            ${item.quantity}, ${item.quantity}, 'active', ${purchaseId}
-          ) RETURNING id
-        `;
-        let batchId = newBatch[0].id;
-        item.variant_id = variantId;
-        item.batch_id = batchId;
-
-          await adjustDeviceProductStock(item.product_id, (item as any).variant_id || null, (item as any).batch_id || null, deviceId, -Number(item.quantity))
+          await adjustDeviceProductStock(item.product_id, (item as any).variant_id || null, (item as any).batch_id || null, deviceId, -Number(item.quantity), tx)
 
           // Record negative adjustment
           try {
@@ -788,10 +870,10 @@ export async function deletePurchase(purchaseId: number, deviceId: number) {
               VALUES (
                 ${item.product_id},
                 ${-item.quantity},
-                'adjustment',                 -- was 'purchase_deletion'
+                'adjustment',
                 ${purchaseId},
                 'purchase',
-                ${`Stock removed due to purchase #${purchaseId} deletion`},
+                ${"Stock removed due to purchase #" + purchaseId + " deletion"},
                 ${purchase.created_by},
                 ${deviceId}
               )

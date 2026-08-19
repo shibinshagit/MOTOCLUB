@@ -426,7 +426,7 @@ async function queryDeviceSales(deviceId: number, options: GetUserSalesOptions =
         AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
         AND s.sale_date >= ${dateFrom}
         AND s.sale_date < ${endExclusive}
-      ORDER BY s.sale_date DESC, s.id DESC
+      ORDER BY s.id DESC
     `
   }
 
@@ -447,7 +447,7 @@ async function queryDeviceSales(deviceId: number, options: GetUserSalesOptions =
         AND s.sale_date >= ${dateFrom}
         AND s.sale_date < ${endExclusive}
         ${searchWhereClause}
-      ORDER BY s.sale_date DESC, s.id DESC
+      ORDER BY s.id DESC
       LIMIT ${limit}
     `
   }
@@ -469,7 +469,7 @@ async function queryDeviceSales(deviceId: number, options: GetUserSalesOptions =
         AND s.sale_date >= ${dateFrom}
         AND s.sale_date < ${endExclusive}
         ${searchWhereClause}
-      ORDER BY s.sale_date DESC, s.id DESC
+      ORDER BY s.id DESC
     `
   }
 
@@ -489,7 +489,7 @@ async function queryDeviceSales(deviceId: number, options: GetUserSalesOptions =
         AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
         AND s.sale_date >= ${dateFrom}
         AND s.sale_date < ${endExclusive}
-      ORDER BY s.sale_date DESC, s.id DESC
+      ORDER BY s.id DESC
       LIMIT ${limit}
     `
   }
@@ -509,7 +509,7 @@ async function queryDeviceSales(deviceId: number, options: GetUserSalesOptions =
       WHERE (s.device_id = ${deviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
         AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
         ${searchWhereClause}
-      ORDER BY s.sale_date DESC, s.id DESC
+      ORDER BY s.id DESC
       LIMIT ${limit}
     `
   }
@@ -529,7 +529,7 @@ async function queryDeviceSales(deviceId: number, options: GetUserSalesOptions =
       WHERE (s.device_id = ${deviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
         AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
         ${searchWhereClause}
-      ORDER BY s.sale_date DESC, s.id DESC
+      ORDER BY s.id DESC
     `
   }
 
@@ -547,7 +547,7 @@ async function queryDeviceSales(deviceId: number, options: GetUserSalesOptions =
       LEFT JOIN staff st ON s.staff_id = st.id
       WHERE (s.device_id = ${deviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
         AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
-      ORDER BY s.sale_date DESC, s.id DESC
+      ORDER BY s.id DESC
       LIMIT ${limit}
     `
   }
@@ -565,7 +565,7 @@ async function queryDeviceSales(deviceId: number, options: GetUserSalesOptions =
     LEFT JOIN staff st ON s.staff_id = st.id
     WHERE (s.device_id = ${deviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
       AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
-    ORDER BY s.sale_date DESC, s.id DESC
+    ORDER BY s.id DESC
   `
 }
 
@@ -587,6 +587,45 @@ export async function getUserSales(deviceId: number, options: GetUserSalesOption
     }
 
     const sales = await executeWithRetry(async () => queryDeviceSales(deviceId, options))
+
+    if (Array.isArray(sales) && sales.length > 0) {
+      const saleIds = sales.map((s: any) => s.id)
+      try {
+        const tpRows = await sql`
+          SELECT id, sale_id, payment_method, amount, reference_number, notes
+          FROM transaction_payments
+          WHERE sale_id = ANY(${saleIds})
+          ORDER BY id ASC
+        `
+        const tpMap = new Map<number, any[]>()
+        for (const row of tpRows) {
+          const list = tpMap.get(row.sale_id) || []
+          list.push({
+            id: row.id,
+            paymentMethod: row.payment_method,
+            amount: Number(row.amount) || 0,
+            referenceNumber: row.reference_number || undefined,
+            notes: row.notes || undefined,
+          })
+          tpMap.set(row.sale_id, list)
+        }
+        for (const sale of sales) {
+          const plist = tpMap.get(sale.id)
+          if (plist && plist.length > 0) {
+            sale.payments = plist
+          } else {
+            sale.payments = [
+              {
+                paymentMethod: sale.payment_method || "Cash",
+                amount: Number(sale.received_amount) || 0,
+              },
+            ]
+          }
+        }
+      } catch (e) {
+        console.warn("Could not query transaction_payments for sales:", e)
+      }
+    }
 
     return { success: true, data: await filterSalesForStaff(sales, deviceId) }
   } catch (error) {
@@ -630,7 +669,6 @@ export async function getSaleDetails(saleId: number) {
       return { success: false, message: "Sale not found" }
     }
 
-    // Enhanced items query to properly distinguish between products and services and include actual costs
     const stockDeviceId = Number(saleResult[0].device_id || saleResult[0].created_by || 0)
     const itemsResult = await executeWithRetry(async () => {
       return await sql`
@@ -682,7 +720,6 @@ export async function getSaleDetails(saleId: number) {
       `
     })
 
-    // Attach allocations to items
     for (const item of itemsResult) {
       item.allocations = allocationsResult
         .filter((a: any) => a.sale_item_id === item.id)
@@ -695,7 +732,23 @@ export async function getSaleDetails(saleId: number) {
         }))
     }
 
-    // Calculate subtotal from items
+    const paymentsResult = await executeWithRetry(async () => {
+      return await sql`
+        SELECT id, payment_method, amount, reference_number, notes, payment_date
+        FROM transaction_payments
+        WHERE sale_id = ${saleId}
+        ORDER BY id ASC
+      `
+    })
+
+    const paymentsList = paymentsResult.map((p: any) => ({
+      id: p.id,
+      paymentMethod: p.payment_method,
+      amount: Number(p.amount) || 0,
+      referenceNumber: p.reference_number || undefined,
+      notes: p.notes || undefined,
+    }))
+
     const subtotal = itemsResult.reduce((sum: number, item: any) => sum + Number(item.quantity) * Number(item.price), 0)
 
     const discountValue =
@@ -703,17 +756,21 @@ export async function getSaleDetails(saleId: number) {
         ? Number(saleResult[0].discount)
         : Math.max(0, subtotal - Number(saleResult[0].total_amount))
 
-    // Calculate outstanding amount
     const totalAmount = Number(saleResult[0].total_amount)
     const receivedAmount = Number(saleResult[0].received_amount || 0)
     const outstandingAmount = totalAmount - receivedAmount
 
-    // Add calculated values to sale data
     const saleData = {
       ...saleResult[0],
       discount: discountValue,
       subtotal: subtotal,
       outstanding_amount: outstandingAmount,
+      payments: paymentsList.length > 0 ? paymentsList : [
+        {
+          paymentMethod: saleResult[0].payment_method || "Cash",
+          amount: receivedAmount,
+        }
+      ],
     }
 
     console.log("Sale details fetched successfully:", {
@@ -765,13 +822,11 @@ export async function addSale(saleData: any) {
 
     let advanceAmount = 0
     let receivedAmount = Number(saleData.receivedAmount) || 0
+    if (Array.isArray(saleData.payments) && saleData.payments.length > 0) {
+      receivedAmount = saleData.payments.reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0)
+    }
     let balanceAmount = 0
     let newPaymentStatus = saleData.paymentStatus || "Pending"
-
-    // If Credit, validate customer
-    if (newPaymentStatus.toLowerCase() === "credit" && !saleData.customerId) {
-      return { success: false, message: "Please select a customer for a credit sale." }
-    }
 
     if (newPaymentMethod.toUpperCase() === "COD") {
       advanceAmount = Number(saleData.advanceAmount) || 0
@@ -779,17 +834,24 @@ export async function addSale(saleData: any) {
     }
 
     receivedAmount = Math.min(receivedAmount, total)
-    balanceAmount = total - receivedAmount
+    balanceAmount = Math.max(0, total - receivedAmount)
 
-    // 1. Ensure Payment Status and amounts are consistent
-    if (newPaymentStatus.toLowerCase() === "paid" || receivedAmount >= total) {
-      if (newOrderStatus.toLowerCase() !== "cancelled") {
+    // 1. Ensure Payment Status and amounts are consistent based on total vs received
+    if (newOrderStatus.toLowerCase() !== "cancelled") {
+      if (total > 0 && receivedAmount >= total) {
         newPaymentStatus = "Paid"
         receivedAmount = total
         balanceAmount = 0
+      } else if (receivedAmount > 0 && receivedAmount < total) {
+        newPaymentStatus = "Credit"
+      } else if (receivedAmount === 0) {
+        newPaymentStatus = saleData.paymentStatus === "Credit" ? "Credit" : "Pending"
       }
-    } else if (newPaymentStatus.toLowerCase() !== "credit") {
-      newPaymentStatus = "Pending"
+    }
+
+    // If Credit, validate customer
+    if (newPaymentStatus.toLowerCase() === "credit" && !saleData.customerId) {
+      return { success: false, message: "Please select a customer for a credit sale." }
     }
 
     // 2. Automatically derive Sales Status from actual payment state
@@ -837,7 +899,7 @@ export async function addSale(saleData: any) {
         ${discountAmount},
         ${receivedAmount},
         ${saleData.staffId || null},
-        ${saleData.saleType || "product"},
+        ${saleData.saleType || (shipping.fulfillment_type === "ship" || shipping.tracking_id ? "job_card" : "product")},
         ${shipping.fulfillment_type},
         ${shipping.delivery_status},
         ${shipping.courier_partner_id},
@@ -1185,6 +1247,9 @@ function calculateSaleChanges(
   
   let advanceAmount = 0
   let newReceivedAmount = Number(newData.receivedAmount) || 0
+  if (Array.isArray(newData.payments) && newData.payments.length > 0) {
+    newReceivedAmount = newData.payments.reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0)
+  }
   let balanceAmount = 0
 
   if (newPaymentMethod.toUpperCase() === "COD") {
@@ -1198,6 +1263,21 @@ function calculateSaleChanges(
 
   newReceivedAmount = Math.min(newReceivedAmount, newTotal)
   balanceAmount = Math.max(0, newTotal - newReceivedAmount)
+
+  if (newOrderStatus.toLowerCase() !== "cancelled") {
+    if (newTotal > 0 && newReceivedAmount >= newTotal) {
+      newPaymentStatus = "Paid"
+      newOrderStatus = "Completed"
+      newReceivedAmount = newTotal
+      balanceAmount = 0
+    } else if (newReceivedAmount > 0 && newReceivedAmount < newTotal) {
+      newPaymentStatus = "Credit"
+      newOrderStatus = "Credit"
+    } else if (newReceivedAmount === 0) {
+      newPaymentStatus = newData.paymentStatus === "Credit" ? "Credit" : "Pending"
+      newOrderStatus = newData.paymentStatus === "Credit" ? "Credit" : "Pending"
+    }
+  }
 
   // Preserve tracking ID if not provided in update but exists in DB
   if (shipping && !shipping.tracking_id && original.tracking_id) {

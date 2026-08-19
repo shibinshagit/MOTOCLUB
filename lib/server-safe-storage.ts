@@ -27,6 +27,14 @@ function createStorageShim(): Storage {
   } as Storage
 }
 
-if (typeof window === "undefined" && (globalThis as any).localStorage === undefined) {
-  ;(globalThis as any).localStorage = createStorageShim()
+if (typeof window === "undefined") {
+  try {
+    Object.defineProperty(globalThis, "localStorage", {
+      value: createStorageShim(),
+      writable: true,
+      configurable: true,
+    })
+  } catch {
+    // Ignore if already defined
+  }
 }

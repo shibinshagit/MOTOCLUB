@@ -771,6 +771,23 @@ async function createTables() {
       )
     `
   })
+
+  await run("transaction_payments", async () => {
+    await sql`
+      CREATE TABLE IF NOT EXISTS transaction_payments (
+        id SERIAL PRIMARY KEY,
+        sale_id INTEGER REFERENCES sales(id) ON DELETE CASCADE,
+        purchase_id INTEGER REFERENCES purchases(id) ON DELETE CASCADE,
+        payment_method VARCHAR(50) NOT NULL,
+        amount DECIMAL(12,2) NOT NULL,
+        reference_number VARCHAR(255),
+        payment_date TIMESTAMP DEFAULT NOW(),
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `
+  })
 }
 
 async function upgradeLegacyColumns() {
@@ -1105,12 +1122,41 @@ async function createIndexes() {
     ["idx_product_device_stock", () => sql`CREATE INDEX IF NOT EXISTS idx_product_device_stock ON product_device_stock(device_id, product_id)`],
     ["idx_product_share_links_token", () => sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_product_share_links_token ON product_share_links(token)`],
     ["idx_product_share_links_product", () => sql`CREATE INDEX IF NOT EXISTS idx_product_share_links_product ON product_share_links(product_id, device_id)`],
-    ["idx_sales_ecommerce_external_id", () => sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_ecommerce_external_id ON sales(external_order_id, source) WHERE source = 'ECOMMERCE'`],
+    ["idx_tp_sale_id", () => sql`CREATE INDEX IF NOT EXISTS idx_tp_sale_id ON transaction_payments(sale_id)`],
+    ["idx_tp_purchase_id", () => sql`CREATE INDEX IF NOT EXISTS idx_tp_purchase_id ON transaction_payments(purchase_id)`],
   ]
 
   for (const [label, fn] of indexes) {
     await runSafe(label, fn)
   }
+}
+
+async function backfillTransactionPayments() {
+  console.log("\n── Backfilling transaction_payments from legacy sales & purchases ──\n")
+
+  await runSafe("backfill sales transaction payments", async () => {
+    await sql`
+      INSERT INTO transaction_payments (sale_id, payment_method, amount, payment_date)
+      SELECT s.id, COALESCE(NULLIF(s.payment_method, ''), 'Cash'), s.received_amount, COALESCE(s.sale_date, NOW())
+      FROM sales s
+      WHERE s.received_amount > 0
+        AND NOT EXISTS (
+          SELECT 1 FROM transaction_payments tp WHERE tp.sale_id = s.id
+        )
+    `
+  })
+
+  await runSafe("backfill purchases transaction payments", async () => {
+    await sql`
+      INSERT INTO transaction_payments (purchase_id, payment_method, amount, payment_date)
+      SELECT p.id, COALESCE(NULLIF(p.payment_method, ''), 'Cash'), p.received_amount, COALESCE(p.purchase_date, NOW())
+      FROM purchases p
+      WHERE p.received_amount > 0
+        AND NOT EXISTS (
+          SELECT 1 FROM transaction_payments tp WHERE tp.purchase_id = p.id
+        )
+    `
+  })
 }
 
 async function createInventoryLedgerTrigger() {
@@ -1188,6 +1234,7 @@ async function migrate() {
     await migrateManualEntryCategories()
     await dropLegacyTables()
     await createIndexes()
+    await backfillTransactionPayments()
     await createInventoryLedgerTrigger()
     await seedAdmin()
   } catch {

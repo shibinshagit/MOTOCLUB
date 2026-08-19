@@ -232,6 +232,9 @@ export default function ViewSaleModal({
   }
 
   const getPaymentMethodDisplay = (paymentMethod: any) => {
+    if (saleData && Array.isArray(saleData.payments) && saleData.payments.length > 1) {
+      return saleData.payments.map((p: any) => `${p.paymentMethod} (${formatCurrency(p.amount)})`).join(" + ")
+    }
     if (!paymentMethod) return "Cash"
     return paymentMethod
   }
@@ -548,6 +551,27 @@ export default function ViewSaleModal({
                   ) : null}
                 </div>
               </div>
+
+              {Array.isArray(saleData.payments) && saleData.payments.length > 0 ? (
+                <div className="overflow-hidden rounded-xl border border-slate-200 bg-card mb-4">
+                  <div className="border-b border-slate-200 bg-[#F1F4F9] px-4 py-2 flex justify-between items-center">
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-600">Payment Breakdown</h3>
+                    <span className="text-xs text-slate-500 font-medium">{saleData.payments.length} payment method{saleData.payments.length > 1 ? "s" : ""}</span>
+                  </div>
+                  <div className="p-3 divide-y divide-slate-100">
+                    {saleData.payments.map((p: any, idx: number) => (
+                      <div key={idx} className="flex justify-between items-center py-1.5 text-xs">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-slate-800">{p.paymentMethod}</span>
+                          {p.referenceNumber ? <span className="text-slate-400 font-mono text-[11px]">(Ref: {p.referenceNumber})</span> : null}
+                          {p.notes ? <span className="text-slate-400 italic text-[11px]">- {p.notes}</span> : null}
+                        </div>
+                        <span className="font-semibold text-slate-900">{formatCurrency(p.amount)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
 
               <div className="overflow-hidden rounded-xl border border-slate-200 bg-card">
                 <div className="flex items-center justify-between border-b border-slate-200 bg-[#F1F4F9] px-4 py-2">

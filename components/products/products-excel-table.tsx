@@ -106,7 +106,7 @@ function ProductsExcelTable({
       name: (p: any) => p.name || "",
       company: (p: any) => p.company_name || "No Company",
       category: (p: any) => p.category || "Uncategorized",
-      retail: (p: any) => formatMoney(p.price || p.mrp || p.msp || 0),
+      retail: (p: any) => formatMoney(p.mrp || p.price || p.msp || 0),
       cost: (p: any) => formatMoney(p.wholesale_price || 0),
       stock: (p: any) => String(Number(p.stock || 0)),
       other: (p: any) => String(Number(p.other_devices_stock || 0)),
@@ -270,7 +270,7 @@ function ProductsExcelTable({
                       {product.category || "Uncategorized"}
                     </td>
                     <td className="whitespace-nowrap px-4 py-2.5 align-top text-right font-medium text-slate-800">
-                      {formatMoney(product.msp ?? product.price)}
+                      {formatMoney(product.mrp || product.price || product.msp || 0)}
                     </td>
                     {!hideCogs && (
                       <td className="whitespace-nowrap px-4 py-2.5 align-top text-right text-slate-600">

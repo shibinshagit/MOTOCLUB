@@ -17,10 +17,18 @@ import { DeliveryStatusSelect } from "@/components/sales/delivery-status-select"
 import { parseSaleDate } from "@/lib/utils"
 
 function getSaleStatusLabel(sale: any): string {
-  if (sale.status === "Cancelled") return "Cancelled";
+  if (sale.status === "Cancelled" || sale.payment_status?.toLowerCase() === "cancelled") return "Cancelled";
+
+  const total = Number(sale.total_amount) || 0;
+  const received = Number(sale.received_amount) || 0;
   const pStatus = sale.payment_status?.toLowerCase();
-  if (pStatus === "paid" || pStatus === "completed") return "Completed";
-  if (pStatus === "credit" || pStatus === "partial") return "Credit";
+
+  if (pStatus === "paid" || pStatus === "completed" || (total > 0 && received >= total)) {
+    return "Completed";
+  }
+  if (pStatus === "credit" || pStatus === "partial" || (received > 0 && received < total)) {
+    return "Credit";
+  }
   return "Pending";
 }
 
@@ -29,7 +37,14 @@ function SaleStatusBadge({ status }: { status: string }) {
     Completed: "bg-emerald-50 text-emerald-700 border-emerald-200",
     Credit: "bg-amber-50 text-amber-700 border-amber-200",
     Cancelled: "bg-rose-50 text-rose-700 border-rose-200",
-    Pending: "bg-amber-50 text-amber-700 border-amber-200",
+    Pending: "bg-slate-50 text-slate-700 border-slate-200",
+  }
+
+  const labelMap: Record<string, string> = {
+    Completed: "Paid",
+    Credit: "Partially Paid",
+    Pending: "Pending",
+    Cancelled: "Cancelled",
   }
 
   return (
@@ -38,7 +53,7 @@ function SaleStatusBadge({ status }: { status: string }) {
         styles[status] || "border-border bg-muted text-muted-foreground"
       }`}
     >
-      {status}
+      {labelMap[status] || status}
     </span>
   )
 }
@@ -203,12 +218,14 @@ export default function SalesExcelTable({
     // 1. Semantic Search filtering
     const semanticallyFiltered = filterSalesSemantic(sales, activeSearchTerm)
 
-    // 2. Column filters
-    return semanticallyFiltered.filter((sale) =>
-      (Object.keys(valueGetters) as ColumnKey[]).every((key) =>
-        passesColumnFilter(valueGetters[key](sale), columnFilters[key], uniqueValues[key]),
-      ),
-    )
+    // 2. Column filters and sort by Sale ID descending (newest first)
+    return semanticallyFiltered
+      .filter((sale) =>
+        (Object.keys(valueGetters) as ColumnKey[]).every((key) =>
+          passesColumnFilter(valueGetters[key](sale), columnFilters[key], uniqueValues[key]),
+        ),
+      )
+      .sort((a, b) => Number(b.id) - Number(a.id))
   }, [sales, activeSearchTerm, columnFilters, uniqueValues, valueGetters, hasLoadedSales])
 
   const totalSalesAmount = displaySales.reduce((sum, sale) => sum + Number(sale.total_amount || 0), 0)
@@ -463,12 +480,22 @@ export default function SalesExcelTable({
                         <div className="flex flex-col gap-0.5">
                           <div className="flex items-center gap-1.5">
                             <span>#{sale.id}</span>
+                            {(sale.sale_type === 'job_card' || sale.fulfillment_type === 'ship') && (
+                              <span className="inline-flex items-center rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold text-blue-800 border border-blue-200">
+                                JOB CARD
+                              </span>
+                            )}
                             {(sale.source === 'ECOMMERCE' || sale.external_order_id) && (
                               <span className="inline-flex items-center rounded bg-purple-100 px-1.5 py-0.5 text-[10px] font-bold text-purple-800 border border-purple-200">
                                 ECOM
                               </span>
                             )}
                           </div>
+                          {sale.tracking_id && (
+                            <span className="text-[11px] font-mono font-semibold text-blue-700">
+                              {sale.tracking_id}
+                            </span>
+                          )}
                           {sale.external_order_id && (
                             <span className="text-[11px] font-mono font-semibold text-purple-700">
                               {sale.external_order_id}

@@ -764,12 +764,12 @@ REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
       const variants = variantsByProductId.get(Number(product.id)) || []
       const defaultVariant = variants[0] || null
       const costPriceVal = defaultVariant ? (Number(defaultVariant.cost_price ?? defaultVariant.wholesale_price) || 0) : (Number(product.wholesale_price) || 0)
-      const mspPriceVal = defaultVariant ? (Number(defaultVariant.price ?? defaultVariant.msp) || 0) : (Number(product.msp ?? product.price) || 0)
-      const mrpPriceVal = defaultVariant ? (Number(defaultVariant.mrp) || 0) : (Number(product.mrp ?? product.price) || 0)
+      const mspPriceVal = defaultVariant ? (Number(defaultVariant.msp ?? defaultVariant.price) || 0) : (Number(product.msp ?? product.price) || 0)
+      const mrpPriceVal = defaultVariant ? (Number(defaultVariant.mrp) || 0) : (Number(product.mrp) || 0)
 
-      const finalMrp = mrpPriceVal > 0 ? mrpPriceVal : (mspPriceVal > 0 ? mspPriceVal : Number(product.price || 0))
-      const finalMsp = mspPriceVal > 0 ? mspPriceVal : finalMrp
-      const finalPrice = finalMrp > 0 ? finalMrp : finalMsp
+      const finalMrp = mrpPriceVal > 0 ? mrpPriceVal : (Number(product.mrp) || 0)
+      const finalMsp = mspPriceVal > 0 ? mspPriceVal : (Number(product.msp ?? product.price) || 0)
+      const finalPrice = finalMsp > 0 ? finalMsp : finalMrp
 
       return {
         ...product,
@@ -1006,6 +1006,7 @@ export async function createProduct(formData: FormData) {
   const price = Number.parseFloat(formData.get("price") as string)
   const wholesalePrice = Number.parseFloat(formData.get("wholesale_price") as string) || 0
   const msp = Number.parseFloat(formData.get("msp") as string) || 0
+  const mrp = Number.parseFloat(formData.get("mrp") as string) || 0
   const stock = Number.parseInt(formData.get("stock") as string) || 0
   const shelf = formData.get("shelf") as string
   const userId = formData.get("user_id") ? Number.parseInt(formData.get("user_id") as string) : undefined
@@ -1047,7 +1048,7 @@ export async function createProduct(formData: FormData) {
           shelf: String(variant.shelf || "").trim() || null,
           costPrice,
           mspPrice,
-          mrp: variant.mrp === null || variant.mrp === undefined || variant.mrp === "" ? mspPrice : Number(variant.mrp) || 0,
+          mrp: variant.mrp !== null && variant.mrp !== undefined && variant.mrp !== "" ? Number(variant.mrp) || 0 : (mrp || 0),
           openingStock: Math.max(0, Number.parseInt(variant.stock, 10) || 0),
           minimumStock: Math.max(0, Number.parseInt(variant.minimum_stock, 10) || 0),
           batchNumber: String(variant.batch_number || "AUTO_GENERATE").trim(),
@@ -1060,7 +1061,7 @@ export async function createProduct(formData: FormData) {
         shelf: shelf || null,
         costPrice: wholesalePrice || 0,
         mspPrice: msp || price || 0,
-        mrp: msp || price || 0,
+        mrp: mrp || 0,
         openingStock: stock,
         minimumStock: 0,
         batchNumber: "AUTO_GENERATE",
@@ -1322,6 +1323,7 @@ export async function updateProduct(formData: FormData) {
   const price = Number.parseFloat(formData.get("price") as string)
   const wholesalePrice = Number.parseFloat(formData.get("wholesale_price") as string) || 0
   const msp = Number.parseFloat(formData.get("msp") as string) || 0
+  const mrp = Number.parseFloat(formData.get("mrp") as string) || 0
   const stock = Number.parseInt(formData.get("stock") as string) || 0
   const shelf = formData.get("shelf") as string
   const barcode = formData.get("barcode") as string
@@ -1705,7 +1707,7 @@ export async function updateProduct(formData: FormData) {
                 ) VALUES (
                   ${id}, ${name}, ${""}, ${barcode || ""},
                   ${wholesalePrice || 0}, ${wholesalePrice || 0}, ${msp || price || 0},
-                  ${msp || price || 0}, 0, 0, ${shelf || ""}, 'active'
+                  ${msp || price || 0}, ${mrp || 0}, 0, ${shelf || ""}, 'active'
                 ) RETURNING id
               `
               variantId = insertedVariant[0].id
@@ -1810,7 +1812,7 @@ export async function updateProduct(formData: FormData) {
           updatedProduct.msp = defaultVariant.msp ?? defaultVariant.price ?? updatedProduct.price ?? 0
           updatedProduct.wholesale_price = defaultVariant.wholesale_price ?? updatedProduct.wholesale_price ?? 0
           updatedProduct.cost_price = defaultVariant.cost_price ?? updatedProduct.wholesale_price ?? 0
-          updatedProduct.mrp = defaultVariant.mrp ?? defaultVariant.msp ?? updatedProduct.price ?? 0
+          updatedProduct.mrp = defaultVariant.mrp ?? 0
           updatedProduct.variant_id = defaultVariant.id
           updatedProduct.barcode = defaultVariant.barcode ?? null
         }
