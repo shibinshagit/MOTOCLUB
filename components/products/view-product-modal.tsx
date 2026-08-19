@@ -378,8 +378,8 @@ export function ProductDetailPanel({
 
   const stockDisplay = () => {
     if (privacyMode) return "***"
-    const stock = Number(product.stock) || 0
-    if (stock === 0) return "Out of stock"
+    const stock = Math.max(0, Number(product.stock) || 0)
+    if (stock <= 0) return "Out of stock"
     if (stock < 5) return `${stock} · Low`
     return `${stock} · In stock`
   }

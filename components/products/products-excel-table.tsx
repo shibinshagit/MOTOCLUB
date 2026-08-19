@@ -12,7 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 
 function StatusBadge({ stock }: { stock: number }) {
-  if (stock === 0) {
+  if (stock <= 0) {
     return (
       <span className="inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-2.5 py-0.5 text-xs font-medium text-rose-700">
         OOS
@@ -108,11 +108,11 @@ function ProductsExcelTable({
       category: (p: any) => p.category || "Uncategorized",
       retail: (p: any) => formatMoney(p.mrp || p.price || p.msp || 0),
       cost: (p: any) => formatMoney(p.wholesale_price || 0),
-      stock: (p: any) => String(Number(p.stock || 0)),
-      other: (p: any) => String(Number(p.other_devices_stock || 0)),
+      stock: (p: any) => String(Math.max(0, Number(p.stock || 0))),
+      other: (p: any) => String(Math.max(0, Number(p.other_devices_stock || 0))),
       status: (p: any) => {
-        const stock = Number(p.stock || 0)
-        if (stock === 0) return "OOS"
+        const stock = Math.max(0, Number(p.stock || 0))
+        if (stock <= 0) return "OOS"
         if (stock <= 5) return "LOW"
         return "OK"
       },
@@ -247,7 +247,7 @@ function ProductsExcelTable({
               </tr>
             ) : (
               displayProducts.map((product, index) => {
-                const stock = Number(product.stock || 0)
+                const stock = Math.max(0, Number(product.stock || 0))
                 return (
                   <tr
                     key={product.id}

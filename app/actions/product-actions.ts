@@ -174,7 +174,7 @@ export async function cleanupProductMediaUrls(urls: string[]) {
   }
 }
 
-export const PLATFORM_KEYS = ["amazon", "flipkart", "meesho", "own_ecom"] as const
+const PLATFORM_KEYS = ["amazon", "flipkart", "meesho", "own_ecom"] as const
 export type PlatformKey = (typeof PLATFORM_KEYS)[number]
 export type PlatformStatus = "not_listed" | "active" | "archived"
 
@@ -188,7 +188,7 @@ function normalizePlatformStatus(value: unknown, defaultStatus: PlatformStatus =
 
 function resolveDeviceStock(product: any, stockMap: Map<number, number>) {
   if (stockMap.has(product.id)) {
-    return Number(stockMap.get(product.id) || 0)
+    return Math.max(0, Number(stockMap.get(product.id) || 0))
   }
 
   return 0
@@ -739,6 +739,7 @@ REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
           if (!batchesByVariantId.has(vid)) batchesByVariantId.set(vid, [])
           batchesByVariantId.get(vid)!.push({
             ...b,
+            created_at: b.created_at ? (b.created_at instanceof Date ? b.created_at.toISOString() : String(b.created_at)) : null,
             stock: Number(b.stock)
           })
         }
@@ -760,7 +761,7 @@ REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
     const mappedProducts = products.map((product: any) => {
       const currentDeviceStock = userId ? resolveDeviceStock(product, stockMap) : 0
       const companyTotalStock = userId
-        ? Number(companyTotalStockMap.get(product.id) ?? currentDeviceStock)
+        ? Math.max(0, Number(companyTotalStockMap.get(product.id) ?? currentDeviceStock))
         : currentDeviceStock
       const variants = variantsByProductId.get(Number(product.id)) || []
       const defaultVariant = variants[0] || null
@@ -774,6 +775,8 @@ REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
 
       return {
         ...product,
+        created_at: product.created_at ? (product.created_at instanceof Date ? product.created_at.toISOString() : String(product.created_at)) : null,
+        updated_at: product.updated_at ? (product.updated_at instanceof Date ? product.updated_at.toISOString() : String(product.updated_at)) : null,
         stock: currentDeviceStock,
         company_total_stock: companyTotalStock,
         other_devices_stock: Math.max(0, companyTotalStock - currentDeviceStock),

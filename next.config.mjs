@@ -4,6 +4,9 @@ const nextConfig = {
     outputFileTracingIncludes: {
       '/api/print/**': ['./templates/**/*'],
     },
+    serverActions: {
+      bodySizeLimit: '10mb',
+    },
   },
   images: {
     remotePatterns: [

@@ -76,9 +76,14 @@ export async function filterProductsForStaff<T extends Record<string, unknown>>(
   deviceId?: number,
 ): Promise<T[]> {
   if (!deviceId || products.length === 0) return products
-  const staff = await resolveStaffSessionContext(deviceId)
-  if (!staff) return products
-  return products.map((product) => filterProductForStaff(product, staff))
+  try {
+    const staff = await resolveStaffSessionContext(deviceId)
+    if (!staff) return products
+    return products.map((product) => filterProductForStaff(product, staff))
+  } catch (error) {
+    console.error("Error in filterProductsForStaff:", error)
+    return products
+  }
 }
 
 export function filterSaleForStaff<T extends Record<string, unknown>>(sale: T, staff: StaffSessionContext | null): T {
