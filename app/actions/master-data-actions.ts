@@ -102,18 +102,30 @@ export async function getMasterDataItems(deviceId: number, category?: MasterData
 
   try {
     const rows = category
-      ? await sql`
-          SELECT md.*,
-                 COALESCE(
-                   NULLIF(md.contact_phone, ''),
-                   (SELECT phone FROM staff WHERE linked_partner_id = md.id AND phone IS NOT NULL AND phone != '' LIMIT 1),
-                   (SELECT phone FROM staff WHERE role = 'partner' AND LOWER(name) = LOWER(md.name) AND phone IS NOT NULL AND phone != '' LIMIT 1)
-                 ) as contact_phone
-          FROM master_data md
-          WHERE md.device_id = ${deviceId}
-            AND md.category = ${category}
-          ORDER BY md.sort_order ASC, md.name ASC
-        `
+      ? category === "ecommerce_banner"
+        ? await sql`
+            SELECT md.*,
+                   COALESCE(
+                     NULLIF(md.contact_phone, ''),
+                     (SELECT phone FROM staff WHERE linked_partner_id = md.id AND phone IS NOT NULL AND phone != '' LIMIT 1),
+                     (SELECT phone FROM staff WHERE role = 'partner' AND LOWER(name) = LOWER(md.name) AND phone IS NOT NULL AND phone != '' LIMIT 1)
+                   ) as contact_phone
+            FROM master_data md
+            WHERE md.category = 'ecommerce_banner'
+            ORDER BY md.sort_order ASC, md.name ASC
+          `
+        : await sql`
+            SELECT md.*,
+                   COALESCE(
+                     NULLIF(md.contact_phone, ''),
+                     (SELECT phone FROM staff WHERE linked_partner_id = md.id AND phone IS NOT NULL AND phone != '' LIMIT 1),
+                     (SELECT phone FROM staff WHERE role = 'partner' AND LOWER(name) = LOWER(md.name) AND phone IS NOT NULL AND phone != '' LIMIT 1)
+                   ) as contact_phone
+            FROM master_data md
+            WHERE md.device_id = ${deviceId}
+              AND md.category = ${category}
+            ORDER BY md.sort_order ASC, md.name ASC
+          `
       : await sql`
           SELECT md.*,
                  COALESCE(
@@ -122,7 +134,7 @@ export async function getMasterDataItems(deviceId: number, category?: MasterData
                    (SELECT phone FROM staff WHERE role = 'partner' AND LOWER(name) = LOWER(md.name) AND phone IS NOT NULL AND phone != '' LIMIT 1)
                  ) as contact_phone
           FROM master_data md
-          WHERE md.device_id = ${deviceId}
+          WHERE md.device_id = ${deviceId} OR md.category = 'ecommerce_banner'
           ORDER BY md.category ASC, md.sort_order ASC, md.name ASC
         `
 
@@ -237,7 +249,7 @@ export async function updateMasterDataItem(
         sort_order = ${input.sortOrder || 0},
         updated_at = NOW()
       WHERE id = ${id}
-        AND device_id = ${deviceId}
+        AND (device_id = ${deviceId} OR category = 'ecommerce_banner')
       RETURNING *
     `
 
@@ -262,7 +274,7 @@ export async function deleteMasterDataItem(id: number, deviceId: number) {
     const rows = await sql`
       DELETE FROM master_data
       WHERE id = ${id}
-        AND device_id = ${deviceId}
+        AND (device_id = ${deviceId} OR category = 'ecommerce_banner')
       RETURNING id
     `
 
