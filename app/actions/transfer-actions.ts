@@ -413,7 +413,7 @@ export async function getTransferFormData(userId: number, fromDeviceId?: number)
       const productIds = products.map((p) => p.id)
       
       const variants = await sql`
-        SELECT pv.*, COALESCE(pbds_agg.stock, 0) as stock
+        SELECT pv.*, pv.name AS variant_name, COALESCE(pbds_agg.stock, 0) as stock
         FROM product_variants pv
         LEFT JOIN (
           SELECT pb.product_variant_id, SUM(pbds.stock) as stock
@@ -422,7 +422,7 @@ export async function getTransferFormData(userId: number, fromDeviceId?: number)
           WHERE pbds.device_id = ${sourceDeviceId}
           GROUP BY pb.product_variant_id
         ) pbds_agg ON pv.id = pbds_agg.product_variant_id
-        WHERE pv.product_id = ANY(${productIds})
+        WHERE pv.product_id = ANY(${productIds}) AND pv.status = 'active'
         ORDER BY pv.id ASC
       `
       

@@ -689,6 +689,7 @@ REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
           pv.id,
           pv.product_id,
           pv.name,
+          pv.name AS variant_name,
           pv.sku,
           pv.barcode,
           pv.cost_price,
@@ -706,7 +707,7 @@ REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
             WHERE pb.product_variant_id = pv.id AND pbds.device_id = ${deviceStockId}
           ), 0) AS stock
         FROM product_variants pv
-        WHERE pv.product_id = ANY(${productIds})
+        WHERE pv.product_id = ANY(${productIds}) AND pv.status = 'active'
         ORDER BY pv.id ASC
       `
       
@@ -1576,6 +1577,42 @@ export async function updateProduct(formData: FormData) {
     }
 
     if (result.length > 0) {
+      // Clean up removed variants (delete or soft-delete them)
+      try {
+        const submittedVariantIds = productVariants.map((v: any) => v.id).filter(Boolean)
+        if (submittedVariantIds.length > 0) {
+          try {
+            await sql`
+              DELETE FROM product_variants
+              WHERE product_id = ${id}
+                AND id <> ALL(${submittedVariantIds})
+            `
+          } catch (delErr) {
+            await sql`
+              UPDATE product_variants
+              SET status = 'inactive', updated_at = NOW()
+              WHERE product_id = ${id}
+                AND id <> ALL(${submittedVariantIds})
+            `
+          }
+        } else {
+          try {
+            await sql`
+              DELETE FROM product_variants
+              WHERE product_id = ${id}
+            `
+          } catch (delErr) {
+            await sql`
+              UPDATE product_variants
+              SET status = 'inactive', updated_at = NOW()
+              WHERE product_id = ${id}
+            `
+          }
+        }
+      } catch (cleanupErr) {
+        console.error("Error cleaning up removed variants:", cleanupErr)
+      }
+
       if (productVariants.length > 0) {
         for (const variant of productVariants) {
           if (variant.id) {
@@ -1783,6 +1820,7 @@ export async function updateProduct(formData: FormData) {
             pv.id,
             pv.product_id,
             pv.name,
+            pv.name AS variant_name,
             pv.sku,
             pv.barcode,
             pv.cost_price,
@@ -1800,7 +1838,7 @@ export async function updateProduct(formData: FormData) {
               WHERE pb.product_variant_id = pv.id AND pbds.device_id = ${fetchStockDeviceId}
             ), 0) AS stock
           FROM product_variants pv
-          WHERE pv.product_id = ${id}
+          WHERE pv.product_id = ${id} AND pv.status = 'active'
           ORDER BY pv.id ASC
         `
         

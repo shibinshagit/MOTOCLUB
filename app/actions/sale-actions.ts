@@ -116,6 +116,36 @@ function shippingFieldsChanged(original: any, shipping: ReturnType<typeof normal
   )
 }
 
+export async function isSaleStockDeducted(
+  status: string | null | undefined,
+  deliveryStatus: string | null | undefined,
+  fulfillmentType: string | null | undefined
+): Promise<boolean> {
+  const normStatus = String(status || "").toLowerCase()
+  if (normStatus === "cancelled") return false
+
+  const normDelivery = String(deliveryStatus || "").toLowerCase()
+  if (normDelivery === "returned" || normDelivery === "cancelled" || normDelivery === "failed") return false
+
+  const normFulfillment = String(fulfillmentType || "").toLowerCase()
+
+  // Counter sales or pickup sales (normal in-store POS sales) ALWAYS deduct stock upon sale creation unless cancelled
+  if (normFulfillment === "counter" || normFulfillment === "pickup" || normFulfillment === "") {
+    return true
+  }
+
+  // Shipping sales deduct stock when paid, completed, credit, or when delivery status is beyond pending
+  const nonDeductedShippingStatuses = ["pending"]
+  if (normFulfillment === "ship") {
+    if (["completed", "paid", "credit"].includes(normStatus)) {
+      return true
+    }
+    return !nonDeductedShippingStatuses.includes(normDelivery)
+  }
+
+  return true
+}
+
 // Helper function to safely update product stock with proper validation
 export async function updateProductStock(
   productId: number,
@@ -138,10 +168,36 @@ export async function updateProductStock(
 
     const product = productCheck[0]
 
-    // Always update product_device_stock
+    const delta = operation === "subtract" ? -Math.abs(quantityChange) : Math.abs(quantityChange)
+
+    let resolvedVariantId = variantId
+    if (resolvedVariantId) {
+      // Validate that the variant exists, belongs to this product, and is active
+      const variantCheck = await sql`
+        SELECT id FROM product_variants 
+        WHERE id = ${resolvedVariantId} AND product_id = ${productId} AND status = 'active'
+        LIMIT 1
+      `
+      if (variantCheck.length === 0) {
+        resolvedVariantId = null
+      }
+    }
+
+    if (!resolvedVariantId) {
+      const defaultVariant = await sql`
+        SELECT id FROM product_variants 
+        WHERE product_id = ${productId} AND status = 'active'
+        ORDER BY id ASC LIMIT 1
+      `
+      if (defaultVariant.length > 0) {
+        resolvedVariantId = defaultVariant[0].id
+      }
+    }
+
+    // 1. Always update product_device_stock (legacy/device stock)
     const devStock = await sql`SELECT id, stock FROM product_device_stock WHERE product_id = ${productId} AND device_id = ${deviceId} LIMIT 1`
     const currentLegacyStock = devStock.length > 0 ? Number(devStock[0].stock || 0) : 0
-    const nextLegacyStock = operation === "subtract" ? currentLegacyStock - quantityChange : currentLegacyStock + quantityChange
+    const nextLegacyStock = Math.max(0, currentLegacyStock + delta)
     
     if (devStock.length > 0) {
       await sql`UPDATE product_device_stock SET stock = ${nextLegacyStock}, updated_at = NOW() WHERE id = ${devStock[0].id}`
@@ -149,72 +205,181 @@ export async function updateProductStock(
       await sql`INSERT INTO product_device_stock (product_id, device_id, stock, updated_at) VALUES (${productId}, ${deviceId}, ${nextLegacyStock}, NOW())`
     }
 
-    let resolvedVariantId = variantId
-    if (!resolvedVariantId) {
-      const defaultVariant = await sql`
-        SELECT id FROM product_variants WHERE product_id = ${productId} ORDER BY id ASC LIMIT 1
-      `
-      if (defaultVariant.length > 0) {
-        resolvedVariantId = defaultVariant[0].id
-      }
-    }
-
+    // 2. Update product_batch_device_stock (batch stock)
     if (resolvedVariantId) {
       if (batchId) {
-        // 1. Update batch stock
+        // Specific batch provided
         const batchStockRows = await sql`
-          SELECT stock FROM product_batch_device_stock
+          SELECT id, stock FROM product_batch_device_stock
           WHERE batch_id = ${batchId} AND device_id = ${deviceId}
           LIMIT 1
         `
-        const currentBatchStock = batchStockRows.length > 0 ? Number(batchStockRows[0].stock || 0) : 0
-        let nextBatchStock = operation === "subtract" ? currentBatchStock - quantityChange : currentBatchStock + quantityChange
-        nextBatchStock = Math.max(0, nextBatchStock)
+        let currentBatchStock = 0
+        if (batchStockRows.length > 0) {
+          currentBatchStock = Number(batchStockRows[0].stock || 0)
+        } else {
+          const pbRows = await sql`SELECT remaining_quantity FROM product_batches WHERE id = ${batchId} LIMIT 1`
+          currentBatchStock = pbRows.length > 0 ? Number(pbRows[0].remaining_quantity || 0) : currentLegacyStock
+        }
 
-        await sql`
-          INSERT INTO product_batch_device_stock (batch_id, device_id, stock, updated_at)
-          VALUES (${batchId}, ${deviceId}, ${nextBatchStock}, NOW())
-          ON CONFLICT (batch_id, device_id)
-          DO UPDATE SET stock = ${nextBatchStock}, updated_at = NOW()
-        `
-      } else if (operation === "subtract") {
-        let remaining = quantityChange
-        const availableBatches = await sql`
-          SELECT pbds.batch_id, pbds.stock
-          FROM product_batch_device_stock pbds
-          JOIN product_batches pb ON pb.id = pbds.batch_id
-          WHERE pb.product_variant_id = ${resolvedVariantId} 
-            AND pbds.device_id = ${deviceId}
-            AND pbds.stock > 0
-          ORDER BY pb.created_at ASC
-        `
-        for (const batch of availableBatches) {
-          if (remaining <= 0) break
-          const take = Math.min(remaining, Number(batch.stock))
-          const nextStock = Number(batch.stock) - take
-          remaining -= take
+        const nextBatchStock = Math.max(0, currentBatchStock + delta)
 
+        if (batchStockRows.length > 0) {
           await sql`
-            UPDATE product_batch_device_stock
-            SET stock = ${nextStock}, updated_at = NOW()
-            WHERE batch_id = ${batch.batch_id} AND device_id = ${deviceId}
+            UPDATE product_batch_device_stock 
+            SET stock = ${nextBatchStock}, updated_at = NOW()
+            WHERE id = ${batchStockRows[0].id}
+          `
+        } else {
+          await sql`
+            INSERT INTO product_batch_device_stock (batch_id, device_id, stock, updated_at)
+            VALUES (${batchId}, ${deviceId}, ${nextBatchStock}, NOW())
           `
         }
-      } else if (operation === "add") {
-        // For returns without a specific batch, create an adjustment batch
-        const adjBatchNo = `RET-${productId}-${Date.now().toString().slice(-6)}`
-        const adjBatch = await sql`
-          INSERT INTO product_batches (
-            product_id, product_variant_id, batch_no, cost_price, selling_price, quantity_purchased, remaining_quantity, status
-          ) VALUES (
-            ${productId}, ${resolvedVariantId}, ${adjBatchNo}, 0, 0, ${quantityChange}, ${quantityChange}, 'active'
-          ) RETURNING id
+      } else if (delta < 0) {
+        // Subtracting stock without a specific batch: deduct FIFO from product's batches
+        let remainingToDeduct = Math.abs(delta)
+        const availableBatches = await sql`
+          SELECT pb.id as batch_id, COALESCE(pbds.stock, pb.remaining_quantity, 0) as stock, pbds.id as pbds_id
+          FROM product_batches pb
+          LEFT JOIN product_batch_device_stock pbds ON pbds.batch_id = pb.id AND pbds.device_id = ${deviceId}
+          WHERE pb.product_id = ${productId} AND pb.product_variant_id = ${resolvedVariantId}
+            AND COALESCE(pbds.stock, pb.remaining_quantity, 0) > 0
+          ORDER BY pb.created_at ASC
         `
-        const adjBatchId = adjBatch[0].id
-        await sql`
-          INSERT INTO product_batch_device_stock (batch_id, device_id, stock, updated_at)
-          VALUES (${adjBatchId}, ${deviceId}, ${quantityChange}, NOW())
+
+        for (const batch of availableBatches) {
+          if (remainingToDeduct <= 0) break
+          const currentStock = Number(batch.stock || 0)
+          const take = Math.min(remainingToDeduct, currentStock)
+          const nextStock = Math.max(0, currentStock - take)
+          remainingToDeduct -= take
+
+          if (batch.pbds_id) {
+            await sql`
+              UPDATE product_batch_device_stock
+              SET stock = ${nextStock}, updated_at = NOW()
+              WHERE id = ${batch.pbds_id}
+            `
+          } else {
+            await sql`
+              INSERT INTO product_batch_device_stock (batch_id, device_id, stock, updated_at)
+              VALUES (${batch.batch_id}, ${deviceId}, ${nextStock}, NOW())
+            `
+          }
+        }
+
+        if (remainingToDeduct > 0 || availableBatches.length === 0) {
+          const defaultBatches = await sql`
+            SELECT pb.id as batch_id, COALESCE(pbds.stock, pb.remaining_quantity, 0) as stock, pbds.id as pbds_id
+            FROM product_batches pb
+            LEFT JOIN product_batch_device_stock pbds ON pbds.batch_id = pb.id AND pbds.device_id = ${deviceId}
+            WHERE pb.product_id = ${productId} AND pb.product_variant_id = ${resolvedVariantId}
+            ORDER BY pb.created_at ASC LIMIT 1
+          `
+          if (defaultBatches.length > 0) {
+            const defBatchId = defaultBatches[0].batch_id
+            const currentStock = Number(defaultBatches[0].stock || 0)
+            const nextStock = Math.max(0, currentStock - remainingToDeduct)
+            
+            if (defaultBatches[0].pbds_id) {
+              await sql`
+                UPDATE product_batch_device_stock
+                SET stock = ${nextStock}, updated_at = NOW()
+                WHERE id = ${defaultBatches[0].pbds_id}
+              `
+            } else {
+              await sql`
+                INSERT INTO product_batch_device_stock (batch_id, device_id, stock, updated_at)
+                VALUES (${defBatchId}, ${deviceId}, ${nextStock}, NOW())
+              `
+            }
+          } else {
+            const newBatchNo = `DEF-${productId}-${Date.now().toString().slice(-6)}`
+            const newB = await sql`
+              INSERT INTO product_batches (
+                product_id, product_variant_id, batch_no, cost_price, selling_price, quantity_purchased, remaining_quantity, status
+              ) VALUES (
+                ${productId}, ${resolvedVariantId}, ${newBatchNo}, 0, 0, ${nextLegacyStock}, ${nextLegacyStock}, 'active'
+              ) RETURNING id
+            `
+            const defBatchId = newB[0].id
+            
+            // Check if a pbds record somehow exists (preventing race condition)
+            const existingPbds = await sql`
+              SELECT id FROM product_batch_device_stock
+              WHERE batch_id = ${defBatchId} AND device_id = ${deviceId}
+              LIMIT 1
+            `
+            if (existingPbds.length > 0) {
+              await sql`
+                UPDATE product_batch_device_stock
+                SET stock = ${nextLegacyStock}, updated_at = NOW()
+                WHERE id = ${existingPbds[0].id}
+              `
+            } else {
+              await sql`
+                INSERT INTO product_batch_device_stock (batch_id, device_id, stock, updated_at)
+                VALUES (${defBatchId}, ${deviceId}, ${nextLegacyStock}, NOW())
+              `
+            }
+          }
+        }
+      } else if (delta > 0) {
+        // Adding stock without a batch (returns / adjustments / sale edit restore)
+        const availableBatches = await sql`
+          SELECT pb.id as batch_id, COALESCE(pbds.stock, pb.remaining_quantity, 0) as stock, pbds.id as pbds_id
+          FROM product_batches pb
+          LEFT JOIN product_batch_device_stock pbds ON pbds.batch_id = pb.id AND pbds.device_id = ${deviceId}
+          WHERE pb.product_id = ${productId} AND pb.product_variant_id = ${resolvedVariantId}
+          ORDER BY pb.created_at DESC LIMIT 1
         `
+        if (availableBatches.length > 0) {
+          const bId = availableBatches[0].batch_id
+          const currentStock = Number(availableBatches[0].stock || 0)
+          const nextStock = currentStock + delta
+          
+          if (availableBatches[0].pbds_id) {
+            await sql`
+              UPDATE product_batch_device_stock
+              SET stock = ${nextStock}, updated_at = NOW()
+              WHERE id = ${availableBatches[0].pbds_id}
+            `
+          } else {
+            await sql`
+              INSERT INTO product_batch_device_stock (batch_id, device_id, stock, updated_at)
+              VALUES (${bId}, ${deviceId}, ${nextStock}, NOW())
+            `
+          }
+        } else {
+          const adjBatchNo = `RET-${productId}-${Date.now().toString().slice(-6)}`
+          const adjBatch = await sql`
+            INSERT INTO product_batches (
+              product_id, product_variant_id, batch_no, cost_price, selling_price, quantity_purchased, remaining_quantity, status
+            ) VALUES (
+              ${productId}, ${resolvedVariantId}, ${adjBatchNo}, 0, 0, ${delta}, ${delta}, 'active'
+            ) RETURNING id
+          `
+          const adjBatchId = adjBatch[0].id
+          
+          const existingPbds = await sql`
+            SELECT id FROM product_batch_device_stock
+            WHERE batch_id = ${adjBatchId} AND device_id = ${deviceId}
+            LIMIT 1
+          `
+          if (existingPbds.length > 0) {
+            await sql`
+              UPDATE product_batch_device_stock
+              SET stock = ${nextLegacyStock}, updated_at = NOW()
+              WHERE id = ${existingPbds[0].id}
+            `
+          } else {
+            await sql`
+              INSERT INTO product_batch_device_stock (batch_id, device_id, stock, updated_at)
+              VALUES (${adjBatchId}, ${deviceId}, ${nextLegacyStock}, NOW())
+            `
+          }
+        }
       }
     }
 
@@ -245,7 +410,7 @@ async function createStockHistoryEntry(
   batchId: number | null,
   changeType: string,
   quantity: number,
-  referenceId: number,
+  referenceId: number | null,
   referenceType: string,
   deviceId: number,
   notes?: string,
@@ -584,6 +749,21 @@ export async function getUserSales(deviceId: number, options: GetUserSalesOption
       } catch (ecomErr) {
         console.error("Auto-sync pending ecommerce orders error:", ecomErr)
       }
+    }
+
+    try {
+      await sql`
+        UPDATE sales s
+        SET delivery_status = 'Returned',
+            status = 'Cancelled',
+            updated_at = NOW()
+        FROM return_requests rr
+        WHERE (rr.sale_id = s.id OR (s.external_order_id IS NOT NULL AND (rr.order_number = s.external_order_id OR rr.order_id = s.id)))
+          AND LOWER(rr.status) IN ('approved', 'completed', 'received', 'returned')
+          AND (s.delivery_status IS NULL OR s.delivery_status != 'Returned' OR s.status != 'Cancelled')
+      `
+    } catch (retSyncErr) {
+      console.warn("Auto-sync return requests status to sales warning:", retSyncErr)
     }
 
     const sales = await executeWithRetry(async () => queryDeviceSales(deviceId, options))
@@ -1079,11 +1259,23 @@ export async function addSale(saleData: any) {
             `
           }
 
-          const isNowDeducted = ["shipped", "delivered"].includes(String(shipping.delivery_status || "").toLowerCase())
+          const isNowDeducted = await isSaleStockDeducted(saleData.status || newOrderStatus, shipping.delivery_status, shipping.fulfillment_type)
 
           if (saleData.status !== "Cancelled" && !isService && isNowDeducted) {
             const stockResult = await updateProductStock(item.productId, variantId, alloc.batchId, alloc.quantity, "subtract", saleData.deviceId)
-            if (!stockResult.success) {
+            if (stockResult.success) {
+              await createStockHistoryEntry(
+                item.productId,
+                variantId,
+                alloc.batchId,
+                "sale_deducted",
+                -alloc.quantity,
+                saleId,
+                "sale",
+                saleData.deviceId,
+                `Sale #${saleId} created - stock deducted`
+              )
+            } else {
               console.warn(`Stock update warning for product ${itemName}:`, stockResult.message)
             }
           }
@@ -1585,8 +1777,8 @@ export async function updateSale(saleData: any) {
 
       const wasCancelled = changes.originalStatus.toLowerCase() === "cancelled"
       const isNowCancelled = changes.newStatus.toLowerCase() === "cancelled"
-      const wasDeducted = ["shipped", "delivered"].includes(String(original.delivery_status || "").toLowerCase()) && !wasCancelled
-      const isNowDeducted = ["shipped", "delivered"].includes(String(shipping.delivery_status || "").toLowerCase()) && !isNowCancelled
+      const wasDeducted = await isSaleStockDeducted(original.status, original.delivery_status, original.fulfillment_type)
+      const isNowDeducted = await isSaleStockDeducted(changes.newStatus, shipping.delivery_status, shipping.fulfillment_type)
 
       console.log("Status change analysis:", {
         wasDeducted,
@@ -1966,11 +2158,12 @@ export async function updateSaleDeliveryStatus(
     }
 
     const wasCancelled = originalStatus.toLowerCase() === "cancelled"
+    const originalFulfillmentType = rows[0].fulfillment_type
     
-    // Determine if stock was previously deducted (Shipping or Delivered states deduct stock)
-    const wasStockDeducted = ["shipping", "delivered"].includes(String(originalDeliveryStatus).toLowerCase()) && !wasCancelled
+    // Determine if stock was previously deducted
+    const wasStockDeducted = await isSaleStockDeducted(originalStatus, originalDeliveryStatus, originalFulfillmentType)
     // Determine if stock should be deducted after this transition
-    const shouldDeductStock = ["shipping", "delivered"].includes(String(deliveryStatus).toLowerCase()) && !wasCancelled
+    const shouldDeductStock = await isSaleStockDeducted(originalStatus, deliveryStatus, originalFulfillmentType)
 
     const isReturned = deliveryStatus.toLowerCase() === "returned"
 
@@ -2264,8 +2457,7 @@ export async function deleteSale(saleId: number, deviceId?: number) {
       const status = String(sale.status || "")
       const statusLower = status.toLowerCase()
       const isCancelled = statusLower === "cancelled"
-      const shouldRestoreStock =
-        !isCancelled && (statusLower === "completed" || statusLower === "credit" || statusLower === "delivered")
+      const shouldRestoreStock = await isSaleStockDeducted(sale.status, sale.delivery_status, sale.fulfillment_type)
 
       const saleItems = await sql`
         SELECT product_id, product_variant_id, batch_id, quantity

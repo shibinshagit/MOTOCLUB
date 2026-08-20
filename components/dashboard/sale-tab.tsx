@@ -674,9 +674,9 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
         const updatedProduct = { ...product, ...updates }
 
         if (
-          updates.quantity !== undefined &&
           !hideStockCount &&
           updatedProduct.stock !== undefined &&
+          (updates.quantity !== undefined || updates.stock !== undefined) &&
           updatedProduct.quantity > updatedProduct.stock
         ) {
           updatedProduct.quantity = updatedProduct.stock
@@ -1287,6 +1287,29 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
       return
     }
 
+    // Validate stock counts
+    if (!hideStockCount) {
+      for (const p of products) {
+        if (p.productId !== null && !p.isService) {
+          const stock = p.stock ?? 0
+          if (stock <= 0) {
+            setFormAlert({
+              type: "error",
+              message: `Cannot complete sale. ${p.productName}${p.variantName ? ` (${p.variantName})` : ""} is out of stock.`,
+            })
+            return
+          }
+          if (p.quantity > stock) {
+            setFormAlert({
+              type: "error",
+              message: `Cannot complete sale. Only ${stock} units available for ${p.productName}${p.variantName ? ` (${p.variantName})` : ""}.`,
+            })
+            return
+          }
+        }
+      }
+    }
+
     if (paymentStatus === "Credit" && receivedAmount > totalAmount) {
       setFormAlert({
         type: "error",
@@ -1604,9 +1627,15 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     return sale.payment_method || "Cash"
   }
 
-  // Calculate remaining amount based on total and received, for all payment methods
   const getRemainingAmount = (sale: any) => {
-    if (sale.payment_status === "Paid" || sale.payment_status === "Completed") {
+    if (
+      sale.status === "Cancelled" ||
+      sale.payment_status === "Cancelled" ||
+      sale.payment_status === "Paid" ||
+      sale.payment_status === "Completed" ||
+      sale.delivery_status === "Returned" ||
+      sale.delivery_status?.toLowerCase() === "returned"
+    ) {
       return 0
     }
     
@@ -1874,6 +1903,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                               updateProductRow(product.id, {
                                 productVariantId: v.id,
                                 variantName: v.name,
+                                stock: v.stock !== undefined ? Number(v.stock) : product.stock,
                                 batchId: null,
                                 batchNumber: null,
                                 price: newPrice,
@@ -1888,7 +1918,9 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                         >
                           <option value="" disabled>Select Variant</option>
                           {product.variants.map((v: any) => (
-                            <option key={v.id} value={v.id}>{v.name}</option>
+                            <option key={v.id} value={v.id}>
+                              {v.name} {!hideStockCount && `(Stock: ${v.stock ?? 0})`}
+                            </option>
                           ))}
                         </select>
                       )}
@@ -2124,6 +2156,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                               updateProductRow(product.id, {
                                 productVariantId: v.id,
                                 variantName: v.name,
+                                stock: v.stock !== undefined ? Number(v.stock) : product.stock,
                                 batchId: null,
                                 batchNumber: null,
                                 price: newPrice,
@@ -2138,7 +2171,9 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                         >
                           <option value="" disabled>Select Variant</option>
                           {product.variants.map((v: any) => (
-                            <option key={v.id} value={v.id}>{v.name}</option>
+                            <option key={v.id} value={v.id}>
+                              {v.name} {!hideStockCount && `(Stock: ${v.stock ?? 0})`}
+                            </option>
                           ))}
                         </select>
                       )}

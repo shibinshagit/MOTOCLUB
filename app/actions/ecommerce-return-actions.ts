@@ -70,6 +70,8 @@ export async function restoreStockForReturnRequest(returnId: number, deviceId: n
       WHERE id = ${returnId}
     `
 
+    await syncSaleStatusForReturnRequest(returnId, deviceId)
+
     return {
       success: true,
       message: `Stock successfully restored for ${restoredCount} product(s).`,
@@ -77,6 +79,44 @@ export async function restoreStockForReturnRequest(returnId: number, deviceId: n
   } catch (err: any) {
     console.error("restoreStockForReturnRequest Error:", err)
     return { success: false, message: err.message || "Failed to restore stock" }
+  }
+}
+
+export async function syncSaleStatusForReturnRequest(returnRequestId: number, deviceId: number = 1) {
+  try {
+    const reqRows = await sql`
+      SELECT id, sale_id, order_number, status FROM return_requests WHERE id = ${returnRequestId} LIMIT 1
+    `
+    if (reqRows.length === 0) return
+
+    const req = reqRows[0]
+    const status = String(req.status || "").toLowerCase()
+
+    if (["approved", "completed", "received", "returned"].includes(status)) {
+      let saleId = req.sale_id
+      if (!saleId && req.order_number) {
+        const sRows = await sql`
+          SELECT id FROM sales 
+          WHERE external_order_id = ${req.order_number} 
+             OR id::text = ${req.order_number} 
+             OR tracking_id = ${req.order_number}
+          LIMIT 1
+        `
+        if (sRows.length > 0) saleId = sRows[0].id
+      }
+
+      if (saleId) {
+        await sql`
+          UPDATE sales
+          SET delivery_status = 'Returned',
+              status = 'Cancelled',
+              updated_at = NOW()
+          WHERE id = ${saleId}
+        `
+      }
+    }
+  } catch (err) {
+    console.error("syncSaleStatusForReturnRequest Error:", err)
   }
 }
 
@@ -631,6 +671,8 @@ export async function approveReturnRequest(id: number, deviceId: number = 1) {
       reviewedBy: "Accounting Admin",
     })
 
+    await syncSaleStatusForReturnRequest(id, deviceId)
+
     try {
       revalidatePath("/admin/dashboard")
       revalidatePath("/staff/dashboard")
@@ -761,6 +803,8 @@ export async function updateReturnRequestStatus(
       reviewedAt: new Date().toISOString(),
       reviewedBy: "Accounting Admin",
     })
+
+    await syncSaleStatusForReturnRequest(id, deviceId)
 
     try {
       revalidatePath("/admin/dashboard")

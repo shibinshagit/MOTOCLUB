@@ -17,7 +17,14 @@ import { DeliveryStatusSelect } from "@/components/sales/delivery-status-select"
 import { parseSaleDate } from "@/lib/utils"
 
 function getSaleStatusLabel(sale: any): string {
-  if (sale.status === "Cancelled" || sale.payment_status?.toLowerCase() === "cancelled") return "Cancelled";
+  if (
+    sale.status === "Cancelled" ||
+    sale.payment_status?.toLowerCase() === "cancelled" ||
+    sale.delivery_status === "Returned" ||
+    sale.delivery_status?.toLowerCase() === "returned"
+  ) {
+    return "Cancelled";
+  }
 
   const total = Number(sale.total_amount) || 0;
   const received = Number(sale.received_amount) || 0;
@@ -82,7 +89,7 @@ function DeliveryStatusBadge({ status }: { status: string }) {
 }
 
 import { filterSalesSemantic } from "@/lib/sale-search"
-import { Search, X } from "lucide-react"
+import { Search, X, RotateCcw } from "lucide-react"
 
 type ColumnKey = "saleId" | "status" | "delivery" | "date" | "customer" | "payment" | "total" | "received" | "balance"
 
@@ -184,6 +191,12 @@ export default function SalesExcelTable({
       payment: (sale: any) => getPaymentMethodDisplay(sale),
       total: (sale: any) => formatCurrency(Number(sale.total_amount)),
       received: (sale: any) => {
+        const isCancelledOrReturned =
+          sale.status === "Cancelled" ||
+          sale.payment_status?.toLowerCase() === "cancelled" ||
+          sale.delivery_status === "Returned" ||
+          sale.delivery_status?.toLowerCase() === "returned"
+        if (isCancelledOrReturned) return "—"
         const received = (sale.payment_status === "Paid" || sale.payment_status === "Completed")
           ? Number(sale.total_amount || 0)
           : Number(sale.received_amount || 0)
@@ -230,6 +243,12 @@ export default function SalesExcelTable({
 
   const totalSalesAmount = displaySales.reduce((sum, sale) => sum + Number(sale.total_amount || 0), 0)
   const receivedAmountTotal = displaySales.reduce((sum, sale) => {
+    const isCancelledOrReturned =
+      sale.status === "Cancelled" ||
+      sale.payment_status?.toLowerCase() === "cancelled" ||
+      sale.delivery_status === "Returned" ||
+      sale.delivery_status?.toLowerCase() === "returned"
+    if (isCancelledOrReturned) return sum
     const received = (sale.payment_status === "Paid" || sale.payment_status === "Completed")
       ? Number(sale.total_amount || 0)
       : Number(sale.received_amount || 0)
@@ -243,9 +262,14 @@ export default function SalesExcelTable({
   )
 
   const pendingSalesCount = useMemo(() => {
-    return displaySales.filter(
-      (sale) => getSaleStatusLabel(sale) === "Pending" || sale.status === "Pending" || sale.payment_status === "Pending",
-    ).length
+    return displaySales.filter((sale) => {
+      const isCancelledOrReturned =
+        sale.status === "Cancelled" ||
+        sale.payment_status?.toLowerCase() === "cancelled" ||
+        sale.delivery_status === "Returned" ||
+        sale.delivery_status?.toLowerCase() === "returned"
+      return !isCancelledOrReturned && (getSaleStatusLabel(sale) === "Pending" || sale.status === "Pending" || sale.payment_status === "Pending")
+    }).length
   }, [displaySales])
 
   const activeFilterCount = hasLoadedSales
@@ -396,6 +420,20 @@ export default function SalesExcelTable({
               ) : null}
             </div>
 
+            {onRefreshSales && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 gap-1 px-2.5 text-xs font-medium bg-white hover:bg-slate-50 border-slate-200 shrink-0 text-slate-700 hover:text-slate-900"
+                onClick={onRefreshSales}
+                disabled={isLoading}
+                title="Refresh sales list"
+              >
+                <RotateCcw className={`h-3.5 w-3.5 ${isLoading ? "animate-spin" : ""}`} />
+                <span className="hidden sm:inline">Refresh</span>
+              </Button>
+            )}
+
             {activeFilterCount > 0 ? (
               <>
                 <span className="text-xs font-medium text-violet-700">
@@ -457,7 +495,13 @@ export default function SalesExcelTable({
                     : Number(sale.received_amount || 0)
 
                   const statusLabel = getSaleStatusLabel(sale)
-                  const isPending = statusLabel === "Pending" || sale.status === "Pending" || sale.payment_status === "Pending"
+                  const isCancelledOrReturned =
+                    sale.status === "Cancelled" ||
+                    sale.payment_status?.toLowerCase() === "cancelled" ||
+                    sale.delivery_status === "Returned" ||
+                    sale.delivery_status?.toLowerCase() === "returned"
+
+                  const isPending = !isCancelledOrReturned && (statusLabel === "Pending" || sale.status === "Pending" || sale.payment_status === "Pending")
 
                   const baseBgClass = isPending
                     ? "bg-amber-50/90 text-amber-950 hover:bg-amber-100/90"
@@ -468,6 +512,8 @@ export default function SalesExcelTable({
                   const rowClass = isPending
                     ? `${baseBgClass} border-l-4 border-l-amber-500`
                     : baseBgClass
+
+                  const isJobCardSale = sale.sale_type === 'job_card' || String(sale.tracking_id || "").startsWith("JC-")
 
                   return (
                     <tr
@@ -480,7 +526,7 @@ export default function SalesExcelTable({
                         <div className="flex flex-col gap-0.5">
                           <div className="flex items-center gap-1.5">
                             <span>#{sale.id}</span>
-                            {(sale.sale_type === 'job_card' || sale.fulfillment_type === 'ship') && (
+                            {isJobCardSale && (
                               <span className="inline-flex items-center rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold text-blue-800 border border-blue-200">
                                 JOB CARD
                               </span>
@@ -519,7 +565,7 @@ export default function SalesExcelTable({
                             trackingId={sale.tracking_id}
                             orderNumber={sale.id}
                             paymentStatus={sale.payment_status}
-                            isJobCard={sale.sale_type === "job_card" || sale.fulfillment_type === "ship"}
+                            isJobCard={isJobCardSale}
                             userRole="admin"
                             onStatusChange={() => {
                               if (onRefreshSales) {

@@ -7,6 +7,15 @@ export interface EcommerceOrderItemInput {
   productId: number
   variantId?: number | null
   productName?: string
+  variantName?: string | null
+  variant_name?: string | null
+  name?: string | null
+  sku?: string | null
+  variantSku?: string | null
+  variant_sku?: string | null
+  color?: string | null
+  storageCapacity?: string | null
+  storage_capacity?: string | null
   quantity: number
   price: number
 }
@@ -124,6 +133,10 @@ export async function syncEcommerceOrder(
       orderItems = payload.items.map((i) => ({
         menu_item_id: i.productId,
         variant_id: i.variantId,
+        variant_name: i.variantName || i.variant_name || i.name || null,
+        sku: i.sku || i.variantSku || i.variant_sku || null,
+        color: i.color || null,
+        storage_capacity: i.storageCapacity || i.storage_capacity || null,
         quantity: i.quantity,
         unit_price: i.price,
       }))
@@ -256,8 +269,7 @@ export async function syncEcommerceOrder(
 
     for (const item of orderItems) {
       const productId = Number(item.menu_item_id || item.product_id)
-      const variantId = item.variant_id && Number(item.variant_id) !== productId ? Number(item.variant_id) : null
-
+      
       const prodRows = await sql`
         SELECT id, price, wholesale_price, name FROM products WHERE id = ${productId}
       `
@@ -273,6 +285,65 @@ export async function syncEcommerceOrder(
         }
       }
 
+      let resolvedVariantId: number | null = null
+
+      // 1. Try matching by incoming variant_id if it exists in the ERP product_variants table
+      const incomingVariantId = item.variant_id && Number(item.variant_id) !== productId ? Number(item.variant_id) : null
+      if (incomingVariantId) {
+        const checkVar = await sql`
+          SELECT id FROM product_variants 
+          WHERE id = ${incomingVariantId} AND product_id = ${productId} AND status = 'active'
+          LIMIT 1
+        `
+        if (checkVar.length > 0) {
+          resolvedVariantId = checkVar[0].id
+        }
+      }
+
+      // 2. Try matching by SKU
+      const skuVal = item.sku || item.variant_sku
+      if (!resolvedVariantId && skuVal) {
+        const cleanSku = String(skuVal).trim()
+        const checkVar = await sql`
+          SELECT id FROM product_variants 
+          WHERE product_id = ${productId} 
+            AND sku = ${cleanSku}
+            AND status = 'active'
+          LIMIT 1
+        `
+        if (checkVar.length > 0) {
+          resolvedVariantId = checkVar[0].id
+        }
+      }
+
+      // 3. Try matching by variant_name (case-insensitive)
+      const varName = item.variant_name || item.color || item.storage_capacity
+      if (!resolvedVariantId && varName) {
+        const cleanName = String(varName).trim().toLowerCase()
+        const checkVar = await sql`
+          SELECT id FROM product_variants 
+          WHERE product_id = ${productId} 
+            AND LOWER(name) = ${cleanName}
+            AND status = 'active'
+          LIMIT 1
+        `
+        if (checkVar.length > 0) {
+          resolvedVariantId = checkVar[0].id
+        }
+      }
+
+      // 4. Fallback: If product has variants but we couldn't match one, pick the first active variant
+      if (!resolvedVariantId) {
+        const defaultVar = await sql`
+          SELECT id FROM product_variants 
+          WHERE product_id = ${productId} AND status = 'active'
+          ORDER BY id ASC LIMIT 1
+        `
+        if (defaultVar.length > 0) {
+          resolvedVariantId = defaultVar[0].id
+        }
+      }
+
       const prod = prodRows[0]
       const price = Number(item.unit_price || item.price || prod.price) || 0
       const quantity = Number(item.quantity) || 1
@@ -281,7 +352,7 @@ export async function syncEcommerceOrder(
       totalCost += costPrice * quantity
       processedItems.push({
         productId,
-        variantId,
+        variantId: resolvedVariantId,
         quantity,
         price,
         cost: costPrice,

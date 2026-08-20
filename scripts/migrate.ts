@@ -648,8 +648,28 @@ async function createTables() {
         batch_id INTEGER NOT NULL REFERENCES product_batches(id) ON DELETE CASCADE,
         device_id INTEGER NOT NULL,
         stock INTEGER DEFAULT 0 NOT NULL,
-        updated_at TIMESTAMP DEFAULT NOW()
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(batch_id, device_id)
       )
+    `
+  })
+
+  // Ensure the unique constraint exists on the live table (idempotent migration)
+  await runSafe("product_batch_device_stock_unique_constraint", async () => {
+    await sql`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+          WHERE conname = 'product_batch_device_stock_batch_id_device_id_key'
+            AND conrelid = 'product_batch_device_stock'::regclass
+        ) THEN
+          ALTER TABLE product_batch_device_stock
+          ADD CONSTRAINT product_batch_device_stock_batch_id_device_id_key
+          UNIQUE (batch_id, device_id);
+        END IF;
+      END;
+      $$
     `
   })
 
@@ -1122,6 +1142,7 @@ async function createIndexes() {
     ["idx_stock_transfers_from", () => sql`CREATE INDEX IF NOT EXISTS idx_stock_transfers_from ON stock_transfers(from_device_id)`],
     ["idx_stock_transfers_to", () => sql`CREATE INDEX IF NOT EXISTS idx_stock_transfers_to ON stock_transfers(to_device_id)`],
     ["idx_product_device_stock", () => sql`CREATE INDEX IF NOT EXISTS idx_product_device_stock ON product_device_stock(device_id, product_id)`],
+    ["idx_product_batch_device_stock", () => sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_product_batch_device_stock_batch_device ON product_batch_device_stock(batch_id, device_id)`],
     ["idx_product_share_links_token", () => sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_product_share_links_token ON product_share_links(token)`],
     ["idx_product_share_links_product", () => sql`CREATE INDEX IF NOT EXISTS idx_product_share_links_product ON product_share_links(product_id, device_id)`],
     ["idx_tp_sale_id", () => sql`CREATE INDEX IF NOT EXISTS idx_tp_sale_id ON transaction_payments(sale_id)`],
