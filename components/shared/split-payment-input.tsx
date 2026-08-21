@@ -113,24 +113,6 @@ export function SplitPaymentInput({
 
   const isValid = excessAmount === 0 && !hasNegativeAmount
 
-  // Auto update payment status based on total paid vs total amount
-  useEffect(() => {
-    if (!onPaymentStatusChange) return
-
-    let calculatedStatus = "Pending"
-    if (totalAmount > 0 && totalPaid >= totalAmount) {
-      calculatedStatus = "Paid"
-    } else if (totalPaid > 0 && totalPaid < totalAmount) {
-      calculatedStatus = "Credit"
-    } else {
-      calculatedStatus = "Pending"
-    }
-
-    if (paymentStatus !== calculatedStatus) {
-      onPaymentStatusChange(calculatedStatus)
-    }
-  }, [totalAmount, totalPaid, onPaymentStatusChange, paymentStatus])
-
   const handleRowChange = (
     rowId: string,
     field: keyof PaymentRecordInput,

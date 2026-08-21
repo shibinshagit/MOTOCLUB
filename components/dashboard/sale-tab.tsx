@@ -91,6 +91,7 @@ interface ProductRow {
   total: number
   notes?: string
   originalItemId?: number
+  originalQuantity?: number
   isService?: boolean
   serviceId?: number
   productVariantId?: number | null
@@ -133,6 +134,7 @@ interface SaleDraftSnapshot {
   notes: string
   shipping: SaleShippingInput
   products: ProductRow[]
+  payments?: PaymentRecordInput[]
   isEditMode: boolean
   editingSaleId: number | null
   originalSaleStatus: string
@@ -357,6 +359,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
       notes: "",
       shipping: { fulfillmentType: "pickup" },
       products: [createEmptyProductRow()],
+      payments: [],
       isEditMode: false,
       editingSaleId: null,
       originalSaleStatus: "",
@@ -429,6 +432,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     setProducts(
       Array.isArray(activeDraft.products) && activeDraft.products.length > 0 ? activeDraft.products : [createEmptyProductRow()],
     )
+    setPayments(activeDraft.payments || [])
     setIsEditMode(Boolean(activeDraft.isEditMode))
     setEditingSaleId(activeDraft.editingSaleId || null)
     setOriginalSaleStatus(activeDraft.originalSaleStatus || "")
@@ -474,6 +478,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                 notes,
                 shipping,
                 products,
+                payments,
                 isEditMode,
                 editingSaleId,
                 originalSaleStatus,
@@ -498,10 +503,13 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     paymentStatus,
     paymentMethod,
     receivedAmount,
+    advanceAmount,
+    balanceAmount,
     discountAmount,
     notes,
     shipping,
     products,
+    payments,
     isEditMode,
     editingSaleId,
     originalSaleStatus,
@@ -672,23 +680,24 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     setProducts(prev => prev.map((product) => {
       if (product.id === id) {
         const updatedProduct = { ...product, ...updates }
+        const effectiveStock = (updatedProduct.stock ?? 0) + (isEditMode ? (updatedProduct.originalQuantity ?? 0) : 0)
 
         if (
           !hideStockCount &&
           updatedProduct.stock !== undefined &&
           (updates.quantity !== undefined || updates.stock !== undefined) &&
-          updatedProduct.quantity > updatedProduct.stock
+          updatedProduct.quantity > effectiveStock
         ) {
-          updatedProduct.quantity = updatedProduct.stock
+          updatedProduct.quantity = effectiveStock
           setBarcodeAlert(
-            updatedProduct.stock <= 0
+            effectiveStock <= 0
               ? {
                   type: "error",
                   message: `${updatedProduct.productName || "Selected product"} is out of stock`,
                 }
               : {
                   type: "warning",
-                  message: `Only ${updatedProduct.stock} units available for ${updatedProduct.productName}`,
+                  message: `Only ${effectiveStock} units available for ${updatedProduct.productName}`,
                 },
           )
         }
@@ -702,14 +711,18 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
       }
       return product
     }))
-  }, [hideStockCount])
+  }, [hideStockCount, isEditMode])
 
-  const isProductOutOfStock = (product: ProductRow) =>
-    Boolean(!hideStockCount && product.productId && !product.isService && (product.stock ?? 0) <= 0)
+  const isProductOutOfStock = (product: ProductRow) => {
+    if (hideStockCount || !product.productId || product.isService) return false
+    const effectiveStock = (product.stock ?? 0) + (isEditMode ? (product.originalQuantity ?? 0) : 0)
+    return effectiveStock <= 0
+  }
 
   const handleQuantityInputChange = useCallback((product: ProductRow, rawValue: string) => {
     const parsed = Number.parseInt(rawValue, 10)
     const requestedQuantity = Number.isFinite(parsed) ? parsed : 0
+    const effectiveStock = (product.stock ?? 0) + (isEditMode ? (product.originalQuantity ?? 0) : 0)
 
     if (isProductOutOfStock(product)) {
       setBarcodeAlert({
@@ -721,12 +734,12 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     }
 
     const safeRequested = Math.max(requestedQuantity, 1)
-    if (!hideStockCount && !product.isService && product.stock !== undefined && safeRequested > product.stock) {
+    if (!hideStockCount && !product.isService && product.stock !== undefined && safeRequested > effectiveStock) {
       setBarcodeAlert({
         type: "warning",
-        message: `Only ${product.stock} units available for ${product.productName}`,
+        message: `Only ${effectiveStock} units available for ${product.productName}`,
       })
-      updateProductRow(product.id, { quantity: product.stock })
+      updateProductRow(product.id, { quantity: effectiveStock })
       return
     }
 
@@ -773,7 +786,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
       cost: updatedCost,
       total: updatedPrice * safeRequested
     })
-  }, [hideStockCount, updateProductRow, deviceId])
+  }, [hideStockCount, updateProductRow, deviceId, isEditMode])
 
   const handleProductSelect = (
     id: string,
@@ -979,16 +992,17 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
           const updatedProducts = [...products]
           const product = updatedProducts[existingProductIndex]
           const newQuantity = product.quantity + 1
+          const effectiveStock = (result.data.stock || 0) + (isEditMode ? (product.originalQuantity ?? 0) : 0)
 
-          if (result.data.stock !== undefined && newQuantity > result.data.stock) {
+          if (result.data.stock !== undefined && newQuantity > effectiveStock) {
             setBarcodeAlert({
               type: "warning",
-              message: `Only ${result.data.stock} units available for ${result.data.name}`,
+              message: `Only ${effectiveStock} units available for ${result.data.name}`,
             })
             updatedProducts[existingProductIndex] = {
               ...product,
-              quantity: result.data.stock,
-              total: result.data.stock * (Number(result.data.price) || 0),
+              quantity: effectiveStock,
+              total: effectiveStock * (Number(result.data.price) || 0),
             }
           } else {
             updatedProducts[existingProductIndex] = {
@@ -1075,6 +1089,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     setPaymentStatus("Paid")
     setPaymentMethod("Cash")
     setProducts(resetProducts)
+    setPayments([])
     setDiscountAmount(0)
     setReceivedAmount(0)
     setNotes("")
@@ -1111,6 +1126,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                 notes: "",
                 shipping: { fulfillmentType: "pickup" },
                 products: resetProducts,
+                payments: [],
                 isEditMode: false,
                 editingSaleId: null,
                 originalSaleStatus: "",
@@ -1161,6 +1177,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
             stock: isService ? 999 : item.stock || 0,
             total: item.quantity * item.price,
             originalItemId: item.id,
+            originalQuantity: item.quantity,
             notes: item.notes || "",
             isService: isService,
             serviceId: isService ? item.product_id : undefined,
@@ -1208,6 +1225,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                   paymentMethod: resolvedPaymentMethod,
                   discountAmount: Number(sale.discount) || 0,
                   products: finalProducts,
+                  payments: sale.payments || [],
                   receivedAmount: parsedReceivedAmount,
                   advanceAmount: parsedAdvanceAmount,
                   balanceAmount: parsedBalanceAmount,
@@ -1291,18 +1309,18 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     if (!hideStockCount) {
       for (const p of products) {
         if (p.productId !== null && !p.isService) {
-          const stock = p.stock ?? 0
-          if (stock <= 0) {
+          const effectiveStock = (p.stock ?? 0) + (isEditMode ? (p.originalQuantity ?? 0) : 0)
+          if (effectiveStock <= 0) {
             setFormAlert({
               type: "error",
               message: `Cannot complete sale. ${p.productName}${p.variantName ? ` (${p.variantName})` : ""} is out of stock.`,
             })
             return
           }
-          if (p.quantity > stock) {
+          if (p.quantity > effectiveStock) {
             setFormAlert({
               type: "error",
-              message: `Cannot complete sale. Only ${stock} units available for ${p.productName}${p.variantName ? ` (${p.variantName})` : ""}.`,
+              message: `Cannot complete sale. Only ${effectiveStock} units available for ${p.productName}${p.variantName ? ` (${p.variantName})` : ""}.`,
             })
             return
           }
