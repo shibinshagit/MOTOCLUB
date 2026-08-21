@@ -32,6 +32,8 @@ interface TagPreviewModalProps {
     code?: string
     barcode?: string
     price?: number | string
+    mrp?: number | string
+    msp?: number | string
     wholesale_price?: number | string
     company_name?: string
     batch_number?: string
@@ -66,7 +68,8 @@ export function TagPreviewModal({
   const productCode = product?.code || (product?.id ? String(product.id).padStart(4, "0") : "0000")
   const barcodeValue = product?.barcode || (product?.code ? String(product.code) : product?.id ? String(product.id) : "")
   
-  const rawPrice = typeof product?.price === "number" ? product.price : Number.parseFloat(String(product?.price || "0")) || 0
+  const rawPrice = (typeof product?.mrp === "number" ? product.mrp : Number.parseFloat(String(product?.mrp || "")) || 0) || 
+                   (typeof product?.price === "number" ? product.price : Number.parseFloat(String(product?.price || "")) || 0)
   const formattedPrice = isNaN(rawPrice) || rawPrice <= 0 ? "0.00" : rawPrice.toFixed(2)
   const priceDisplay = `${currency} ${formattedPrice}`
 

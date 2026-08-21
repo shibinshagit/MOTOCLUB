@@ -54,7 +54,9 @@ export function printBarcodeSticker(product: any, currency = "AED", initialCopie
   if (!product || typeof window === "undefined") return
 
   const productCode = product.code || (product.id ? product.id.toString().padStart(4, "0") : "0000")
-  const price = typeof product.price === "number" ? product.price.toFixed(2) : (Number.parseFloat(String(product.price || "0")) || 0).toFixed(2)
+  const rawPrice = (typeof product.mrp === "number" ? product.mrp : Number.parseFloat(String(product.mrp || "")) || 0) || 
+                   (typeof product.price === "number" ? product.price : Number.parseFloat(String(product.price || "")) || 0)
+  const price = rawPrice.toFixed(2)
 
   let barcodeValue = product.barcode || product.code || (product.id ? String(product.id) : "")
   if (!barcodeValue || !validateEAN13(barcodeValue)) {
@@ -196,7 +198,9 @@ export function printMultipleBarcodeStickers(products: any[], copies = 1, curren
   
   const firstProduct = products[0]
   const firstCode = firstProduct.id ? firstProduct.id.toString().padStart(4, "0") : "0000"
-  const firstPrice = typeof firstProduct.price === "number" ? firstProduct.price.toFixed(2) : (Number.parseFloat(firstProduct.price || "0") || 0).toFixed(2)
+  const rawFirstPrice = (typeof firstProduct.mrp === "number" ? firstProduct.mrp : Number.parseFloat(String(firstProduct.mrp || "")) || 0) || 
+                        (typeof firstProduct.price === "number" ? firstProduct.price : Number.parseFloat(String(firstProduct.price || "")) || 0)
+  const firstPrice = rawFirstPrice.toFixed(2)
   let firstBarcode = firstProduct.barcode || ""
   if (!firstBarcode || !validateEAN13(firstBarcode)) {
     firstBarcode = generateEAN13()
@@ -211,7 +215,9 @@ export function printMultipleBarcodeStickers(products: any[], copies = 1, curren
 
   products.forEach((product) => {
     const productCode = product.id ? product.id.toString().padStart(4, "0") : "0000"
-    const price = typeof product.price === "number" ? product.price.toFixed(2) : (Number.parseFloat(product.price || "0") || 0).toFixed(2)
+    const rawPrice = (typeof product.mrp === "number" ? product.mrp : Number.parseFloat(String(product.mrp || "")) || 0) || 
+                     (typeof product.price === "number" ? product.price : Number.parseFloat(String(product.price || "")) || 0)
+    const price = rawPrice.toFixed(2)
 
     let barcodeValue = product.barcode || ""
     if (!barcodeValue || !validateEAN13(barcodeValue)) {
@@ -547,6 +553,8 @@ export interface BarTenderPrintPayload {
   productCode: string
   productName: string
   price?: number | string
+  mrp?: number | string
+  msp?: number | string
   batchNumber?: string
   quantity: number
   barcode?: string
