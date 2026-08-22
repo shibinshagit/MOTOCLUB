@@ -9,12 +9,22 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Plus, Edit, Monitor, Search, Loader2, AlertCircle } from "lucide-react"
+import { Plus, Edit, Monitor, Search, Loader2, AlertCircle, Trash2 } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 import { notifyError, notifySuccess, notifyWarning } from "@/lib/notifications"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { FormAlert } from "@/components/ui/form-alert"
-import { getDevicesByCompany, createDevice, updateDevice } from "@/app/actions/admin-actions"
+import { getDevicesByCompany, createDevice, updateDevice, deleteDevice } from "@/app/actions/admin-actions"
 import ImageUploadField from "@/components/admin/image-upload-field"
 import { compressBrandingLogoForUpload, formatBytes } from "@/lib/media-upload-utils"
 import {
@@ -44,6 +54,7 @@ export default function DevicesTab({ companyId }: DevicesTabProps) {
   const [isLoading, setIsLoading] = useState(true)
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -191,6 +202,30 @@ export default function DevicesTab({ companyId }: DevicesTabProps) {
     }
   }
 
+  const handleDeleteDevice = async () => {
+    if (!selectedDevice) return
+
+    setFormError(null)
+    setIsSubmitting(true)
+
+    try {
+      const result = await deleteDevice(selectedDevice.id)
+
+      if (result.success) {
+        notifySuccess(toast, "Device deleted successfully")
+        setIsDeleteDialogOpen(false)
+        setSelectedDevice(null)
+        fetchDevices()
+      } else {
+        notifyError(toast, result.message || "Failed to delete device")
+      }
+    } catch (error) {
+      notifyError(toast, "An unexpected error occurred")
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
   const formatDate = (dateString?: string) => {
     if (!dateString) return "N/A"
     return new Date(dateString).toLocaleDateString()
@@ -306,6 +341,17 @@ export default function DevicesTab({ companyId }: DevicesTabProps) {
                             className="text-gray-500 hover:bg-gray-100 hover:text-gray-900"
                           >
                             <Edit className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => {
+                              setSelectedDevice(device)
+                              setIsDeleteDialogOpen(true)
+                            }}
+                            className="text-red-500 hover:bg-red-50 hover:text-red-600"
+                          >
+                            <Trash2 className="h-4 w-4" />
                           </Button>
                         </div>
                       </td>
@@ -535,6 +581,31 @@ export default function DevicesTab({ companyId }: DevicesTabProps) {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Delete Device Confirmation Dialog */}
+      <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Device</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete &quot;{selectedDevice?.name}&quot;? This action cannot be undone and will permanently delete this device terminal, including all associated sales, products, staff, and stock records.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isSubmitting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault()
+                handleDeleteDevice()
+              }}
+              disabled={isSubmitting}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              {isSubmitting ? "Deleting..." : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

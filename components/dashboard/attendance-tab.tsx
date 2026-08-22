@@ -37,10 +37,20 @@ export default function AttendanceTab() {
   const device = useAppSelector(selectDevice)
   const activeStaff = useAppSelector(selectActiveStaff)
   
+  // Helper to format local date as YYYY-MM-DD
+  const getLocalDateString = (date: Date = new Date()) => {
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, "0")
+    const day = String(date.getDate()).padStart(2, "0")
+    return `${year}-${month}-${day}`
+  }
+
   // Filters
   const [dateRange, setDateRange] = useState("Today")
-  const [customStartDate, setCustomStartDate] = useState(new Date().toISOString().split("T")[0])
-  const [customEndDate, setCustomEndDate] = useState(new Date().toISOString().split("T")[0])
+  const [customStartDate, setCustomStartDate] = useState(getLocalDateString())
+  const [customEndDate, setCustomEndDate] = useState(getLocalDateString())
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth().toString())
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear().toString())
   const [searchTerm, setSearchTerm] = useState("")
   const [statusFilter, setStatusFilter] = useState("All")
   
@@ -84,13 +94,18 @@ export default function AttendanceTab() {
     } else if (dateRange === "This Month") {
       start = new Date(today.getFullYear(), today.getMonth(), 1)
       end = new Date(today.getFullYear(), today.getMonth() + 1, 0)
+    } else if (dateRange === "Specific Month") {
+      const year = parseInt(selectedYear)
+      const month = parseInt(selectedMonth)
+      start = new Date(year, month, 1)
+      end = new Date(year, month + 1, 0)
     } else if (dateRange === "Custom Date") {
       return { start: customStartDate, end: customEndDate }
     }
     
     return {
-      start: start.toISOString().split("T")[0],
-      end: end.toISOString().split("T")[0]
+      start: getLocalDateString(start),
+      end: getLocalDateString(end)
     }
   }
 
@@ -115,7 +130,7 @@ export default function AttendanceTab() {
 
   useEffect(() => {
     fetchAttendance()
-  }, [device?.id, dateRange, customStartDate, customEndDate, statusFilter, activeStaff?.id])
+  }, [device?.id, dateRange, customStartDate, customEndDate, selectedMonth, selectedYear, statusFilter, activeStaff?.id])
 
   const handleEditClick = (record: AttendanceRecord) => {
     setEditingRecord(record)
@@ -190,6 +205,16 @@ export default function AttendanceTab() {
   
   const formatDate = (val: Date | string | null) => {
     if (!val) return "-"
+    if (typeof val === "string" && val.includes("-")) {
+      const parts = val.split("-")
+      if (parts.length === 3) {
+        const year = parseInt(parts[0])
+        const monthIndex = parseInt(parts[1]) - 1
+        const day = parseInt(parts[2])
+        const dateObj = new Date(year, monthIndex, day)
+        return dateObj.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })
+      }
+    }
     return new Date(val).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })
   }
 
@@ -251,9 +276,50 @@ export default function AttendanceTab() {
               <SelectItem value="Yesterday">Yesterday</SelectItem>
               <SelectItem value="This Week">This Week</SelectItem>
               <SelectItem value="This Month">This Month</SelectItem>
+              <SelectItem value="Specific Month">Specific Month</SelectItem>
               <SelectItem value="Custom Date">Custom Date</SelectItem>
             </SelectContent>
           </Select>
+          
+          {dateRange === "Specific Month" && (
+            <div className="flex items-center gap-2">
+              <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+                <SelectTrigger className="w-[120px]">
+                  <SelectValue placeholder="Month" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="0">January</SelectItem>
+                  <SelectItem value="1">February</SelectItem>
+                  <SelectItem value="2">March</SelectItem>
+                  <SelectItem value="3">April</SelectItem>
+                  <SelectItem value="4">May</SelectItem>
+                  <SelectItem value="5">June</SelectItem>
+                  <SelectItem value="6">July</SelectItem>
+                  <SelectItem value="7">August</SelectItem>
+                  <SelectItem value="8">September</SelectItem>
+                  <SelectItem value="9">October</SelectItem>
+                  <SelectItem value="10">November</SelectItem>
+                  <SelectItem value="11">December</SelectItem>
+                </SelectContent>
+              </Select>
+              
+              <Select value={selectedYear} onValueChange={setSelectedYear}>
+                <SelectTrigger className="w-[100px]">
+                  <SelectValue placeholder="Year" />
+                </SelectTrigger>
+                <SelectContent>
+                  {Array.from({ length: new Date().getFullYear() - 2024 + 1 }, (_, i) => {
+                    const year = new Date().getFullYear() - i
+                    return (
+                      <SelectItem key={year} value={year.toString()}>
+                        {year}
+                      </SelectItem>
+                    )
+                  })}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           
           {dateRange === "Custom Date" && (
             <div className="flex items-center gap-2">
@@ -324,6 +390,9 @@ export default function AttendanceTab() {
                 <thead className="text-xs text-gray-700 uppercase bg-gray-50 print:bg-white print:border-b">
                   <tr>
                     <th className="px-4 py-3 font-medium">Photo</th>
+                    {dateRange !== "Today" && (
+                      <th className="px-4 py-3 font-medium">Date</th>
+                    )}
                     <th className="px-4 py-3 font-medium">Staff Name</th>
                     <th className="px-4 py-3 font-medium">Phone</th>
                     <th className="px-4 py-3 font-medium">Branch</th>
@@ -343,6 +412,9 @@ export default function AttendanceTab() {
                           <UserCircle className="h-6 w-6" />
                         </div>
                       </td>
+                      {dateRange !== "Today" && (
+                        <td className="px-4 py-3 font-medium whitespace-nowrap">{formatDate(record.date)}</td>
+                      )}
                       <td className="px-4 py-3 font-medium">{record.staff_name}</td>
                       <td className="px-4 py-3 text-gray-600">{record.staff_phone}</td>
                       <td className="px-4 py-3 text-gray-600">{(record as any).branch_name}</td>

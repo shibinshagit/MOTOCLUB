@@ -702,14 +702,25 @@ export async function updateDevice(formData: FormData) {
 export async function deleteDevice(id: number) {
   await requireAdmin()
   try {
-        // Begin a transaction to ensure data integrity
+    // Get device logo before deletion so we can clean up blob storage
+    let logoUrl: string | null = null
+    try {
+      const deviceRes = await sql`SELECT logo_url FROM devices WHERE id = ${id}`
+      if (deviceRes.length > 0) {
+        logoUrl = deviceRes[0].logo_url
+      }
+    } catch (error) {
+      console.log("Could not retrieve device logo_url before delete:", error)
+    }
+
+    // Begin a transaction to ensure data integrity
     // await sql`BEGIN`
 
     try {
       // Delete related data first
       // Delete financial transactions
       try {
-        await sql`DELETE FROM financial_transactions WHERE created_by = ${id}`
+        await sql`DELETE FROM financial_transactions WHERE created_by = ${id} OR device_id = ${id}`
       } catch (error) {
         console.log("No financial_transactions table or no records to delete")
       }
@@ -718,7 +729,7 @@ export async function deleteDevice(id: number) {
       try {
         await sql`
           DELETE FROM sale_items 
-          WHERE sale_id IN (SELECT id FROM sales WHERE created_by = ${id})
+          WHERE sale_id IN (SELECT id FROM sales WHERE created_by = ${id} OR device_id = ${id})
         `
       } catch (error) {
         console.log("No sale_items table or no records to delete")
@@ -726,14 +737,24 @@ export async function deleteDevice(id: number) {
 
       // Delete sales
       try {
-        await sql`DELETE FROM sales WHERE created_by = ${id}`
+        await sql`DELETE FROM sales WHERE created_by = ${id} OR device_id = ${id}`
       } catch (error) {
         console.log("No sales table or no records to delete")
       }
 
+      // Delete purchase items
+      try {
+        await sql`
+          DELETE FROM purchase_items 
+          WHERE purchase_id IN (SELECT id FROM purchases WHERE created_by = ${id} OR device_id = ${id})
+        `
+      } catch (error) {
+        console.log("No purchase_items table or no records to delete")
+      }
+
       // Delete purchases
       try {
-        await sql`DELETE FROM purchases WHERE created_by = ${id}`
+        await sql`DELETE FROM purchases WHERE created_by = ${id} OR device_id = ${id}`
       } catch (error) {
         console.log("No purchases table or no records to delete")
       }
@@ -759,8 +780,76 @@ export async function deleteDevice(id: number) {
         console.log("No product_categories table or no records to delete")
       }
 
+      // Delete staff attendance
+      try {
+        await sql`DELETE FROM staff_attendance WHERE device_id = ${id}`
+      } catch (error) {
+        console.log("No staff_attendance table or no records to delete")
+      }
+
+      // Delete staff
+      try {
+        await sql`DELETE FROM staff WHERE device_id = ${id}`
+      } catch (error) {
+        console.log("No staff table or no records to delete")
+      }
+
+      // Delete product device stock
+      try {
+        await sql`DELETE FROM product_device_stock WHERE device_id = ${id}`
+      } catch (error) {
+        console.log("No product_device_stock table or no records to delete")
+      }
+
+      // Delete product batch device stock
+      try {
+        await sql`DELETE FROM product_batch_device_stock WHERE device_id = ${id}`
+      } catch (error) {
+        console.log("No product_batch_device_stock table or no records to delete")
+      }
+
+      // Delete services
+      try {
+        await sql`DELETE FROM services WHERE device_id = ${id}`
+      } catch (error) {
+        console.log("No services table or no records to delete")
+      }
+
+      // Delete product share links
+      try {
+        await sql`DELETE FROM product_share_links WHERE device_id = ${id}`
+      } catch (error) {
+        console.log("No product_share_links table or no records to delete")
+      }
+
+      // Delete petty cash
+      try {
+        await sql`DELETE FROM petty_cash WHERE device_id = ${id}`
+      } catch (error) {
+        console.log("No petty_cash table or no records to delete")
+      }
+
+      // Delete expense categories
+      try {
+        await sql`DELETE FROM expense_categories WHERE device_id = ${id}`
+      } catch (error) {
+        console.log("No expense_categories table or no records to delete")
+      }
+
+      // Delete budgets
+      try {
+        await sql`DELETE FROM budgets WHERE device_id = ${id}`
+      } catch (error) {
+        console.log("No budgets table or no records to delete")
+      }
+
       // Finally delete the device
       await sql`DELETE FROM devices WHERE id = ${id}`
+
+      // Clean up Vercel blob storage logo if any
+      if (logoUrl) {
+        await deleteManagedBlob(logoUrl)
+      }
 
       // Commit the transaction
       // await sql`COMMIT`
