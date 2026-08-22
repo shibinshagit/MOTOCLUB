@@ -108,6 +108,7 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
 
   const [receivedAmount, setReceivedAmount] = useState(0)
   const [advanceAmount, setAdvanceAmount] = useState(0)
+  const [paymentStatus, setPaymentStatus] = useState<string>("Paid")
 
   // Shipping state
   const [shipping, setShipping] = useState<SaleShippingInput>(DEFAULT_SALE_SHIPPING)
@@ -185,6 +186,7 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
           setDiscountAmount(Number(sale.discount) || 0)
           setReceivedAmount(Number(sale.received_amount) || 0)
           setAdvanceAmount(Number(sale.advance_amount) || 0)
+          setPaymentStatus(sale.payment_status || "Paid")
           setStatus(sale.status || "Completed")
           setOriginalStatus(sale.status || "Completed")
           setSaleDeviceId(sale.device_id || null)
@@ -314,12 +316,18 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
   }, [products, discountAmount, taxRate, shipping])
 
 
-  // Validate received amount when total or status changes
+  // Auto-calculate received amount based on paymentStatus
   useEffect(() => {
-    if (status === "Credit" && receivedAmount > totalAmount) {
+    if (paymentStatus === "Paid") {
       setReceivedAmount(totalAmount)
+    } else if (paymentStatus === "Pending") {
+      setReceivedAmount(0)
+    } else if (paymentStatus === "Credit") {
+      if (receivedAmount > totalAmount) {
+        setReceivedAmount(totalAmount)
+      }
     }
-  }, [totalAmount, status])
+  }, [paymentStatus, totalAmount])
 
   // Add a new product row
   const addProductRow = () => {
@@ -738,13 +746,8 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
       // Use the actual received amount entered by the user
       let finalReceivedAmount = receivedAmount
 
-      // Determine payment status strictly based on amounts
-      let newPaymentStatus = "Pending"
-      if (finalReceivedAmount >= totalAmount && totalAmount > 0) {
-        newPaymentStatus = "Paid"
-      } else if (finalReceivedAmount > 0) {
-        newPaymentStatus = "Credit"
-      }
+      // Determine payment status strictly based on selected paymentStatus
+      let newPaymentStatus = paymentStatus
 
       // Prepare the sale data with payment method
       const saleData = {
@@ -1130,7 +1133,31 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
                             </div>
                           </div>
 
-
+                          <div className="space-y-1">
+                            <Label className="text-sm font-medium text-gray-700 flex items-center">
+                              Payment Status
+                            </Label>
+                            <Select
+                              value={paymentStatus}
+                              onValueChange={(val) => {
+                                setPaymentStatus(val)
+                                if (val === "Paid") {
+                                  setReceivedAmount(totalAmount)
+                                } else if (val === "Pending") {
+                                  setReceivedAmount(0)
+                                }
+                              }}
+                            >
+                              <SelectTrigger className="h-9 bg-white border-gray-300 text-gray-900 text-xs">
+                                <SelectValue placeholder="Select payment status" />
+                              </SelectTrigger>
+                              <SelectContent className="bg-white border-gray-200">
+                                <SelectItem value="Paid">Paid</SelectItem>
+                                <SelectItem value="Credit">Credit / Partial</SelectItem>
+                                <SelectItem value="Pending">Pending</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
 
                           <div className="space-y-1">
                             <Label htmlFor="date" className="text-sm font-medium text-gray-700">
@@ -1179,7 +1206,18 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
                             max={totalAmount}
                             step="0.01"
                             value={receivedAmount}
-                            onChange={(e) => setReceivedAmount(Number.parseFloat(e.target.value) || 0)}
+                            disabled={paymentStatus === "Pending" || paymentStatus === "Paid"}
+                            onChange={(e) => {
+                              const val = Number.parseFloat(e.target.value) || 0
+                              setReceivedAmount(val)
+                              if (val >= totalAmount && totalAmount > 0) {
+                                setPaymentStatus("Paid")
+                              } else if (val > 0) {
+                                setPaymentStatus("Credit")
+                              } else {
+                                setPaymentStatus("Pending")
+                              }
+                            }}
                             className="h-9 bg-white border-gray-300 text-gray-900"
                             placeholder="0.00"
                           />

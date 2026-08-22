@@ -26,9 +26,13 @@ function getSaleStatusLabel(sale: any): string {
     return "Cancelled";
   }
 
+  const pStatus = sale.payment_status?.toLowerCase();
+  if (pStatus === "pending") {
+    return "Pending";
+  }
+
   const total = Number(sale.total_amount) || 0;
   const received = Number(sale.received_amount) || 0;
-  const pStatus = sale.payment_status?.toLowerCase();
 
   if (pStatus === "paid" || pStatus === "completed" || (total > 0 && received >= total)) {
     return "Completed";

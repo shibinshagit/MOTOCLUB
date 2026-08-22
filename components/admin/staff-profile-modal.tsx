@@ -526,7 +526,10 @@ export function StaffProfileModal({
                         <td className="p-3 font-bold text-slate-900">{formatCurr(Number(sale.total_amount || 0))}</td>
                         <td className="p-3 text-slate-700 font-medium">{sale.payment_method || "Cash"}</td>
                         <td className="p-3">
-                          {sale.payment_status === "Paid" || sale.status === "Completed" ? (
+                          {(sale.payment_status === "Paid" ||
+                            sale.payment_status === "Completed" ||
+                            (!sale.payment_status && (sale.status === "Completed" || sale.status === "completed"))) &&
+                          sale.payment_status?.toLowerCase() !== "pending" ? (
                             <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100 text-[10px]">
                               Paid
                             </Badge>

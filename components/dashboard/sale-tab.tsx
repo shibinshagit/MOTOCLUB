@@ -1193,11 +1193,15 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
         let parsedReceivedAmount = Number(sale.received_amount) || 0
         let parsedBalanceAmount = Number(sale.balance_amount) || 0
         
-        const isPaidStatus = sale.payment_status === "Paid" || sale.payment_status === "Completed" || sale.status === "Completed"
+        const isPaidStatus =
+          (sale.payment_status === "Paid" ||
+            sale.payment_status === "Completed" ||
+            (!sale.payment_status && (sale.status === "Completed" || sale.status === "completed"))) &&
+          sale.payment_status?.toLowerCase() !== "pending"
         if (isPaidStatus) {
           parsedReceivedAmount = Number(sale.total_amount)
           parsedBalanceAmount = 0
-        } else if (!sale.received_amount && sale.payment_status !== "Credit") {
+        } else if (!sale.received_amount && sale.payment_status?.toLowerCase() !== "credit" && sale.payment_status?.toLowerCase() !== "partial") {
           parsedReceivedAmount = 0
           parsedBalanceAmount = Number(sale.total_amount)
         }

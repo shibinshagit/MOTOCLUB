@@ -95,6 +95,35 @@ export function SplitPaymentInput({
     }
   }, [payments])
 
+  const isPendingOrCancelled = paymentStatus === "Pending" || paymentStatus === "Cancelled"
+
+  useEffect(() => {
+    if (paymentStatus === "Pending" || paymentStatus === "Cancelled") {
+      const allZero = rows.every((r) => Number(r.amount) === 0)
+      if (!allZero) {
+        const updated = rows.map((r) => ({ ...r, amount: 0 }))
+        setRows(updated)
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        notifyParent(updated)
+      }
+    } else if (paymentStatus === "Paid" || paymentStatus === "Completed") {
+      const totalPaidVal = rows.reduce((sum, r) => sum + (Number(r.amount) || 0), 0)
+      if (totalPaidVal !== totalAmount && totalAmount > 0) {
+        const updated = [
+          {
+            rowId: rows[0]?.rowId || `row-0-${Date.now()}`,
+            paymentMethod: rows[0]?.paymentMethod || "Cash",
+            amount: totalAmount,
+            referenceNumber: rows[0]?.referenceNumber || "",
+          },
+        ]
+        setRows(updated)
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        notifyParent(updated)
+      }
+    }
+  }, [paymentStatus, totalAmount])
+
   const totalPaid = React.useMemo(() => {
     return rows.reduce((sum, r) => sum + (Number(r.amount) || 0), 0)
   }, [rows])
@@ -206,7 +235,7 @@ export function SplitPaymentInput({
                 Method #{index + 1}
               </Label>
               <select
-                disabled={disabled}
+                disabled={disabled || isPendingOrCancelled}
                 className="flex h-8 w-full items-center justify-between rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-900 focus:outline-none focus:ring-1 focus:ring-slate-400 disabled:opacity-50"
                 value={row.paymentMethod}
                 onChange={(e) =>
@@ -227,7 +256,7 @@ export function SplitPaymentInput({
               </Label>
               <div className="relative">
                 <Input
-                  disabled={disabled}
+                  disabled={disabled || isPendingOrCancelled}
                   type="number"
                   min="0"
                   step="0.01"
@@ -247,7 +276,7 @@ export function SplitPaymentInput({
                 Reference No. (Optional)
               </Label>
               <Input
-                disabled={disabled}
+                disabled={disabled || isPendingOrCancelled}
                 type="text"
                 placeholder="Ref / Transaction ID"
                 value={row.referenceNumber || ""}
@@ -258,7 +287,7 @@ export function SplitPaymentInput({
               />
             </div>
 
-            {rows.length > 1 && !disabled && (
+            {rows.length > 1 && !disabled && !isPendingOrCancelled && (
               <Button
                 type="button"
                 variant="ghost"
@@ -274,7 +303,7 @@ export function SplitPaymentInput({
         ))}
       </div>
 
-      {!disabled && (
+      {!disabled && !isPendingOrCancelled && (
         <Button
           type="button"
           variant="outline"

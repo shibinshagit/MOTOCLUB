@@ -80,6 +80,8 @@ export function matchSaleSemantic(sale: any, query: string): boolean {
 
   if (rawStatus === "cancelled" || rawStatus === "canceled") {
     corpusParts.push("cancelled", "canceled", "void", "refunded")
+  } else if (rawPaymentStatus === "pending") {
+    corpusParts.push("pending", "unpaid", "due", "outstanding", "balance", "owing")
   } else if (rawPaymentStatus === "paid" || rawPaymentStatus === "completed" || (totalAmt > 0 && balanceAmt <= 0)) {
     corpusParts.push("paid", "completed", "cleared", "full paid", "settled", "paid in full", "no balance")
   } else if (rawPaymentStatus === "credit" || rawPaymentStatus === "partial" || balanceAmt > 0) {
