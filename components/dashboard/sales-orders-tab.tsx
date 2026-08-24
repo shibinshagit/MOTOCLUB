@@ -15,7 +15,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ChevronDown, ChevronUp, MapPin, Phone, User, Calendar, Layers, Printer, Edit, Trash2, Search, PlayCircle, Eye, Plus, Loader2 } from "lucide-react"
-import { formatPhoneNumber, parseSaleDateTime } from "@/lib/utils"
+import { formatPhoneNumber, parseSaleDateTime, parseSaleDate } from "@/lib/utils"
 import { useToast } from "@/components/ui/use-toast"
 import {
   AlertDialog,
@@ -85,7 +85,10 @@ export default function SalesOrdersTab() {
     setLoading(true)
     const res = await getAllJobCards(deviceId || 0)
     if (res.success && res.data) {
-      setSales(res.data)
+      const sorted = [...res.data].sort((a, b) => {
+        return parseSaleDateTime(b).getTime() - parseSaleDateTime(a).getTime()
+      })
+      setSales(sorted)
     }
     setLoading(false)
   }
@@ -291,9 +294,8 @@ export default function SalesOrdersTab() {
                   const isSelected = selectedSales.includes(sale.id)
                   const itemQuantity = sale.items?.reduce((sum: number, i: any) => sum + i.quantity, 0) || 0
                   
-                  const saleDate = parseSaleDateTime(sale)
+                  const saleDate = parseSaleDate(sale.sale_date)
                   const dateFormatted = format(saleDate, "dd MMM yyyy")
-                  const timeFormatted = format(saleDate, "hh:mm a")
   
                   const statusLower = (sale.delivery_status || "Pending").toLowerCase()
                   let rowBg = index % 2 === 0 ? "bg-white" : "bg-slate-50/50"
@@ -377,10 +379,7 @@ export default function SalesOrdersTab() {
                           </div>
                         </td>
                         <td className="whitespace-nowrap px-3 py-2.5">
-                          <div className="flex flex-col">
-                            <span className="font-medium text-slate-800 text-xs">{dateFormatted}</span>
-                            <span className="text-[11px] text-slate-500">{timeFormatted}</span>
-                          </div>
+                          <span className="font-medium text-slate-800 text-xs">{dateFormatted}</span>
                         </td>
                         <td className="max-w-[140px] truncate px-3 py-2.5 font-medium text-slate-800">{sale.customer_name || "N/A"}</td>
                         <td className="whitespace-nowrap px-3 py-2.5" onClick={(e) => e.stopPropagation()}>

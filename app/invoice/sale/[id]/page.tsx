@@ -8,6 +8,9 @@ import { Button } from "@/components/ui/button"
 import { printSalesReceipt } from "@/lib/receipt-utils"
 import { BrandLogo } from "@/components/brand-logo"
 import { useBranding } from "@/components/branding-provider"
+import { useSelector } from "react-redux"
+import { selectDeviceCurrency } from "@/store/slices/deviceSlice"
+import { parseSaleDateTime } from "@/lib/utils"
 
 export default function SaleInvoicePage() {
   const params = useParams()
@@ -19,7 +22,8 @@ export default function SaleInvoicePage() {
   const [items, setItems] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [currency] = useState<string>("AED")
+  const deviceCurrency = useSelector(selectDeviceCurrency)
+  const currency = deviceCurrency || "AED"
   const companyInfo = useMemo(
     () => ({
       name: platformName,
@@ -126,7 +130,7 @@ export default function SaleInvoicePage() {
 
 
   // Format date and time
-  const saleDate = new Date(sale.sale_date)
+  const saleDate = parseSaleDateTime(sale)
   const formattedDate = saleDate
     .toLocaleDateString("en-GB", {
       day: "2-digit",

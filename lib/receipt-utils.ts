@@ -1,6 +1,7 @@
 "use client"
 
 import { getCachedPlatformName, getDefaultDeviceLogoUrl } from "@/lib/platform-branding"
+import { parseSaleDateTime, parseSaleDate } from "@/lib/utils"
 
 // Function to get company info from the DOM
 const getCompanyInfoFromDOM = (): { name: string; address: string; phone: string } => {
@@ -21,6 +22,19 @@ const getCompanyInfoFromDOM = (): { name: string; address: string; phone: string
 // Enhanced function to print a sales receipt - works for both new sales and reprints
 export function printSalesReceipt(sale: any, items: any[], currency = "AED", businessInfo: any = {}, autoprint = true) {
   if (!sale || !items.length) return
+
+  let displayCurrency = currency
+  if (!displayCurrency || displayCurrency === "AED") {
+    try {
+      const { store } = require("@/store/store")
+      const state = store.getState()
+      if (state?.device?.currency) {
+        displayCurrency = state.device.currency
+      }
+    } catch (e) {
+      console.warn("Could not retrieve currency from store:", e)
+    }
+  }
 
   // Check if we're in a browser environment
   if (typeof window === "undefined" || typeof document === "undefined") {
@@ -59,7 +73,7 @@ export function printSalesReceipt(sale: any, items: any[], currency = "AED", bus
   }
 
   // Format date and time
-  const saleDate = new Date(sale.sale_date)
+  const saleDate = parseSaleDateTime(sale)
   const formattedDate = saleDate
     .toLocaleDateString("en-GB", {
       day: "2-digit",
@@ -134,7 +148,7 @@ export function printSalesReceipt(sale: any, items: any[], currency = "AED", bus
   const formatCurrency = (amount: number | string | null | undefined) => {
     const parsed = typeof amount === "string" ? Number.parseFloat(amount) : typeof amount === "number" ? amount : 0
     const validAmount = Number.isFinite(parsed) ? parsed : 0
-    return `${currency} ${validAmount.toFixed(2)}`
+    return `${displayCurrency} ${validAmount.toFixed(2)}`
   }
 
   // Create receipt content with ultra-compact professional design
@@ -733,6 +747,19 @@ export function printSalesReceipt(sale: any, items: any[], currency = "AED", bus
 export function printPurchaseReceipt(purchase: any, items: any[], currency = "AED", businessInfo: any = {}) {
   if (!purchase || !items.length) return
 
+  let displayCurrency = currency
+  if (!displayCurrency || displayCurrency === "AED") {
+    try {
+      const { store } = require("@/store/store")
+      const state = store.getState()
+      if (state?.device?.currency) {
+        displayCurrency = state.device.currency
+      }
+    } catch (e) {
+      console.warn("Could not retrieve currency from store:", e)
+    }
+  }
+
   // Check if we're in a browser environment
   if (typeof window === "undefined" || typeof document === "undefined") {
     console.warn("Cannot print receipt: Not in browser environment")
@@ -766,11 +793,11 @@ export function printPurchaseReceipt(purchase: any, items: any[], currency = "AE
   const formatCurrency = (amount: number | string | null | undefined) => {
     const parsed = typeof amount === "string" ? Number.parseFloat(amount) : typeof amount === "number" ? amount : 0
     const validAmount = Number.isFinite(parsed) ? parsed : 0
-    return `${currency} ${validAmount.toFixed(2)}`
+    return `${displayCurrency} ${validAmount.toFixed(2)}`
   }
 
   // Format date and time
-  const purchaseDate = new Date(purchase.purchase_date)
+  const purchaseDate = parseSaleDate(purchase.purchase_date)
   const formattedDate = purchaseDate
     .toLocaleDateString("en-GB", {
       day: "2-digit",

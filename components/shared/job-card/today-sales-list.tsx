@@ -73,7 +73,10 @@ export function TodaySalesList({ onOpenCreateModal }: { onOpenCreateModal?: () =
     setLoading(true)
     const res = await getTodayJobCards(monthStr, debouncedSearch)
     if (res.success && res.data) {
-      setSales(res.data)
+      const sorted = [...res.data].sort((a, b) => {
+        return parseSaleDateTime(b).getTime() - parseSaleDateTime(a).getTime()
+      })
+      setSales(sorted)
     }
     setLoading(false)
   }

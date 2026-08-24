@@ -60,53 +60,103 @@ export function formatPhoneNumber(phone: string | null | undefined): string {
 
 export function parseSaleDate(dateInput: any): Date {
   if (!dateInput) return new Date()
-  if (dateInput instanceof Date) return dateInput
-  const str = String(dateInput).trim()
-  const match = str.match(/^(\d{4})-(\d{2})-(\d{2})/)
-  if (match) {
-    const [, y, m, d] = match
-    return new Date(Number(y), Number(m) - 1, Number(d))
+  
+  let dt = dateInput
+  if (typeof dt === "string") {
+    const trimmed = dt.trim()
+    const match = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/)
+    if (match) {
+      const [, y, m, d] = match
+      return new Date(Number(y), Number(m) - 1, Number(d))
+    }
+    dt = new Date(trimmed)
   }
-  const parsed = new Date(str)
-  return isNaN(parsed.getTime()) ? new Date() : parsed
+  
+  if (dt instanceof Date && !isNaN(dt.getTime())) {
+    const isUtcMidnight = 
+      dt.getUTCHours() === 0 &&
+      dt.getUTCMinutes() === 0 &&
+      dt.getUTCSeconds() === 0 &&
+      dt.getUTCMilliseconds() === 0
+
+    if (isUtcMidnight) {
+      return new Date(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate())
+    } else {
+      return new Date(dt.getFullYear(), dt.getMonth(), dt.getDate())
+    }
+  }
+  
+  return new Date()
 }
 
 export function parseSaleDateTime(sale: any): Date {
-  const rawDate = sale?.sale_date || sale?.created_at
-  if (!rawDate) return new Date()
+  const saleDateVal = sale?.sale_date || sale?.created_at
+  const createdAtVal = sale?.created_at
 
-  if (typeof rawDate === "string" && rawDate.includes("-")) {
-    const parts = rawDate.split("T")
-    const dateParts = parts[0].split("-")
-    if (dateParts.length === 3) {
-      const year = parseInt(dateParts[0], 10)
-      const month = parseInt(dateParts[1], 10) - 1
-      const day = parseInt(dateParts[2], 10)
+  if (!saleDateVal) return new Date()
+
+  let saleDate = saleDateVal
+  if (typeof saleDate === "string") {
+    const trimmed = saleDate.trim()
+    const match = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/)
+    if (match) {
+      const [, y, m, d] = match
+      const year = Number(y)
+      const month = Number(m) - 1
+      const day = Number(d)
+      
+      let hours = 0
+      let minutes = 0
+      let seconds = 0
+      
+      const timeSource = (trimmed.includes("T") && !trimmed.split("T")[1].startsWith("00:00:00"))
+        ? saleDate
+        : createdAtVal
+
+      if (timeSource) {
+        const tsDate = new Date(timeSource)
+        if (!isNaN(tsDate.getTime())) {
+          hours = tsDate.getHours()
+          minutes = tsDate.getMinutes()
+          seconds = tsDate.getSeconds()
+        }
+      }
+      return new Date(year, month, day, hours, minutes, seconds)
+    }
+    saleDate = new Date(trimmed)
+  }
+
+  if (saleDate instanceof Date && !isNaN(saleDate.getTime())) {
+    const isUtcMidnight = 
+      saleDate.getUTCHours() === 0 &&
+      saleDate.getUTCMinutes() === 0 &&
+      saleDate.getUTCSeconds() === 0 &&
+      saleDate.getUTCMilliseconds() === 0
+
+    if (isUtcMidnight) {
+      const year = saleDate.getUTCFullYear()
+      const month = saleDate.getUTCMonth()
+      const day = saleDate.getUTCDate()
 
       let hours = 0
       let minutes = 0
       let seconds = 0
 
-      const timeSource = (parts.length > 1 && !parts[1].startsWith("00:00:00"))
-        ? rawDate
-        : sale?.created_at
-
-      if (timeSource && typeof timeSource === "string" && timeSource.includes("T")) {
-        const timePart = timeSource.split("T")[1]
-        const timeSubParts = timePart.split(":")
-        if (timeSubParts.length >= 2) {
-          hours = parseInt(timeSubParts[0], 10)
-          minutes = parseInt(timeSubParts[1], 10)
-          seconds = parseInt(timeSubParts[2] || "0", 10)
+      if (createdAtVal) {
+        const createdAt = new Date(createdAtVal)
+        if (!isNaN(createdAt.getTime())) {
+          hours = createdAt.getHours()
+          minutes = createdAt.getMinutes()
+          seconds = createdAt.getSeconds()
         }
       }
 
-      const d = new Date(year, month, day, hours, minutes, seconds)
-      if (!isNaN(d.getTime())) return d
+      return new Date(year, month, day, hours, minutes, seconds)
     }
+
+    return saleDate
   }
 
-  const d = new Date(rawDate)
-  return isNaN(d.getTime()) ? new Date() : d
+  return new Date()
 }
 

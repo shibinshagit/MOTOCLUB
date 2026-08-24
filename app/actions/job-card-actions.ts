@@ -417,7 +417,7 @@ export async function getTodayJobCards(monthStr?: string, searchTerm?: string) {
             OR LOWER(s.tracking_id) LIKE ${searchPattern}
             OR CAST(s.id AS TEXT) LIKE ${searchPattern}
           )
-        ORDER BY s.created_at DESC
+        ORDER BY COALESCE(s.sale_date, s.created_at) DESC, s.id DESC
       `
     } else if (startDate && !searchPattern) {
       sales = await sql`
@@ -431,7 +431,7 @@ export async function getTodayJobCards(monthStr?: string, searchTerm?: string) {
           AND s.sale_date < (${startDate}::date + interval '1 month')
           AND (s.status != 'Cancelled' OR s.delivery_status = 'Returned')
           AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%')
-        ORDER BY s.created_at DESC
+        ORDER BY COALESCE(s.sale_date, s.created_at) DESC, s.id DESC
       `
     } else if (!startDate && searchPattern) {
       sales = await sql`
@@ -451,7 +451,7 @@ export async function getTodayJobCards(monthStr?: string, searchTerm?: string) {
             OR LOWER(s.tracking_id) LIKE ${searchPattern}
             OR CAST(s.id AS TEXT) LIKE ${searchPattern}
           )
-        ORDER BY s.created_at DESC
+        ORDER BY COALESCE(s.sale_date, s.created_at) DESC, s.id DESC
       `
     } else {
       sales = await sql`
@@ -465,7 +465,7 @@ export async function getTodayJobCards(monthStr?: string, searchTerm?: string) {
           AND s.sale_date < date_trunc('month', CURRENT_DATE) + interval '1 month'
           AND (s.status != 'Cancelled' OR s.delivery_status = 'Returned')
           AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%')
-        ORDER BY s.created_at DESC
+        ORDER BY COALESCE(s.sale_date, s.created_at) DESC, s.id DESC
       `
     }
 
@@ -542,7 +542,7 @@ export async function getAllJobCards(deviceId?: number) {
             OR s.tracking_id LIKE 'DOD-%'
             OR (s.tracking_id IS NOT NULL AND s.tracking_id != '')
           )
-        ORDER BY s.created_at DESC
+        ORDER BY COALESCE(s.sale_date, s.created_at) DESC, s.id DESC
       `
     } else {
       sales = await sql`
@@ -569,7 +569,7 @@ export async function getAllJobCards(deviceId?: number) {
             OR s.tracking_id LIKE 'DOD-%'
             OR (s.tracking_id IS NOT NULL AND s.tracking_id != '')
           )
-        ORDER BY s.created_at DESC
+        ORDER BY COALESCE(s.sale_date, s.created_at) DESC, s.id DESC
         LIMIT 200
       `
     }

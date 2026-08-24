@@ -965,10 +965,10 @@ export async function getSaleDetails(saleId: number) {
 
     return {
       success: true,
-      data: {
+      data: JSON.parse(JSON.stringify({
         sale: saleData,
         items: itemsResult,
-      },
+      })),
     }
   } catch (error) {
     console.error("Get sale details error:", error)

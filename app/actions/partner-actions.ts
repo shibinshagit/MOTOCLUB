@@ -28,7 +28,7 @@ export async function getPartnerSales(partnerId: number) {
         OR s.courier_partner_id = (SELECT linked_partner_id FROM staff WHERE id = ${partnerId} AND linked_partner_id IS NOT NULL)
         OR (s.courier_service_id IS NOT NULL AND s.courier_service_id = (SELECT linked_partner_id FROM staff WHERE id = ${partnerId} AND linked_partner_id IS NOT NULL))
       )
-      ORDER BY s.created_at DESC
+      ORDER BY COALESCE(s.sale_date, s.created_at) DESC, s.id DESC
     `
 
     return {
