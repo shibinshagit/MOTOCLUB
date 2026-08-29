@@ -509,9 +509,9 @@ export default function DeviceStaffTab({ deviceId }: DeviceStaffTabProps) {
                   setForm((prev) => ({
                     ...prev,
                     role,
-                    restrictedPages: (role === "admin" || role === "partner") ? [] : prev.restrictedPages,
+                    restrictedPages: (role === "partner") ? [] : prev.restrictedPages,
                     restrictedValues:
-                      (role === "admin" || role === "partner")
+                      (role === "partner")
                         ? []
                         : prev.restrictedValues.length > 0 || editingStaff
                           ? prev.restrictedValues
@@ -622,7 +622,7 @@ export default function DeviceStaffTab({ deviceId }: DeviceStaffTabProps) {
             </div>
           )}
 
-          {form.role === "staff" && (
+          {(form.role === "staff" || form.role === "admin") && (
             <div className="mt-4 space-y-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
               <div>
                 <h4 className="text-sm font-medium text-gray-900">Page restrictions</h4>

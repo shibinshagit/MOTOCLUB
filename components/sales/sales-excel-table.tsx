@@ -507,15 +507,53 @@ export default function SalesExcelTable({
 
                   const isPending = !isCancelledOrReturned && (statusLabel === "Pending" || sale.status === "Pending" || sale.payment_status === "Pending")
 
-                  const baseBgClass = isPending
-                    ? "bg-amber-50/90 text-amber-950 hover:bg-amber-100/90"
-                    : index % 2 === 0
-                    ? "bg-white hover:bg-violet-50/50"
-                    : "bg-slate-50/60 hover:bg-violet-50/50"
+                  const deliveryStatusLower = (sale.delivery_status || "").toLowerCase()
+                  let statusClass = "pending"
+                  if (isCancelledOrReturned) {
+                    statusClass = "cancel"
+                  } else if (isPending) {
+                    statusClass = "pending"
+                  } else if (
+                    deliveryStatusLower.includes("deliver") ||
+                    deliveryStatusLower.includes("complete") ||
+                    sale.payment_status === "Paid" ||
+                    sale.payment_status === "Completed"
+                  ) {
+                    statusClass = "deliver"
+                  } else if (
+                    deliveryStatusLower.includes("paid") ||
+                    deliveryStatusLower.includes("pack") ||
+                    deliveryStatusLower.includes("sent") ||
+                    deliveryStatusLower.includes("ship") ||
+                    deliveryStatusLower.includes("transit") ||
+                    deliveryStatusLower.includes("out for delivery") ||
+                    deliveryStatusLower.includes("dispatch")
+                  ) {
+                    statusClass = "ship"
+                  } else {
+                    statusClass = "deliver"
+                  }
 
-                  const rowClass = isPending
-                    ? `${baseBgClass} border-l-4 border-l-amber-500`
-                    : baseBgClass
+                  let baseBgClass = index % 2 === 0
+                    ? "bg-white hover:bg-violet-50/50 text-slate-800"
+                    : "bg-slate-50/60 hover:bg-violet-50/50 text-slate-800"
+                  let borderLeftClass = ""
+
+                  if (statusClass === "pending") {
+                    baseBgClass = "bg-amber-100/80 text-amber-950 hover:bg-amber-200/80 font-medium"
+                    borderLeftClass = "border-l-4 border-l-amber-500"
+                  } else if (statusClass === "ship") {
+                    baseBgClass = "bg-blue-100/80 text-blue-950 hover:bg-blue-200/80 font-medium"
+                    borderLeftClass = "border-l-4 border-l-blue-500"
+                  } else if (statusClass === "deliver") {
+                    baseBgClass = "bg-emerald-100/80 text-emerald-950 hover:bg-emerald-200/80 font-medium"
+                    borderLeftClass = "border-l-4 border-l-emerald-500"
+                  } else if (statusClass === "cancel") {
+                    baseBgClass = "bg-rose-100/80 text-rose-950 hover:bg-rose-200/80 font-medium"
+                    borderLeftClass = "border-l-4 border-l-rose-500"
+                  }
+
+                  const rowClass = `${baseBgClass} ${borderLeftClass}`
 
                   const isJobCardSale = sale.sale_type === 'job_card' || String(sale.tracking_id || "").startsWith("JC-")
 

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, type ReactNode } from "react"
+import React, { useState, useEffect, type ReactNode } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -171,14 +171,12 @@ export default function ViewPurchaseModal({
   }, [isOpen, purchaseId])
 
   const calculateTotals = () => {
-    if (!purchaseData) return { subtotal: 0, total: 0, paid: 0, remaining: 0 }
+    if (!purchaseData) return { subtotal: 0, total: 0, paid: 0, remaining: 0, courierCharge: 0 }
 
     let subtotal = 0
     if (purchaseItems.length > 0) {
       subtotal = purchaseItems.reduce((sum: number, item: any) => {
-        const price = Number.parseFloat(item.price) || 0
-        const quantity = Number.parseInt(item.quantity) || 0
-        return sum + price * quantity
+        return sum + (Number(item.line_total) || ((Number.parseFloat(item.price) || 0) * (Number.parseInt(item.quantity) || 0)))
       }, 0)
     }
 
@@ -192,10 +190,25 @@ export default function ViewPurchaseModal({
     }
     const remaining = Math.max(0, total - paid)
 
-    return { subtotal, total, paid, remaining }
+    let courierCharge = Number(purchaseData.courier_charge) || 0
+    if (courierCharge === 0) {
+      const lineTotalsSum = purchaseItems.reduce((sum: number, item: any) => {
+        const qty = Number(item.quantity) || 0
+        const prc = Number(item.price) || 0
+        const taxPct = Number(item.tax_percentage) || 0
+        const lineTax = qty * prc * (taxPct / 100)
+        return sum + (qty * prc) + lineTax
+      }, 0)
+      const diff = total - lineTotalsSum
+      if (diff > 0.01) {
+        courierCharge = diff
+      }
+    }
+
+    return { subtotal, total, paid, remaining, courierCharge }
   }
 
-  const { subtotal, total, paid, remaining } = calculateTotals()
+  const { subtotal, total, paid, remaining, courierCharge } = calculateTotals()
 
   const getDisplayValue = (value: any, fallback = "—") => {
     if (value === null || value === undefined || value === "") return fallback
@@ -219,7 +232,11 @@ export default function ViewPurchaseModal({
 
   const handlePrint = () => {
     if (purchaseData && purchaseItems.length > 0) {
-      printPurchaseReceipt(purchaseData, purchaseItems, deviceCurrency)
+      const pDataWithCourier = {
+        ...purchaseData,
+        courier_charge: courierCharge,
+      }
+      printPurchaseReceipt(pDataWithCourier, purchaseItems, deviceCurrency)
     } else {
       notifyError(toast, "Cannot print receipt - purchase data not loaded")
     }
@@ -490,11 +507,12 @@ export default function ViewPurchaseModal({
                       <tbody>
                         {purchaseItems.map((item: any, index: number) => {
                           const lineTotal =
-                            (Number.parseFloat(item.price) || 0) * (Number.parseInt(item.quantity) || 0)
+                            Number(item.line_total) ||
+                            ((Number.parseFloat(item.price) || 0) * (Number.parseInt(item.quantity) || 0))
 
                           return (
+                            <React.Fragment key={item.id ?? index}>
                             <tr
-                              key={item.id ?? index}
                               onClick={() => handleItemRowClick(item)}
                               className={`cursor-pointer border-b border-slate-200 transition-colors hover:bg-violet-50/50 ${
                                 index % 2 === 0 ? "bg-white" : "bg-slate-50/60"
@@ -535,19 +553,56 @@ export default function ViewPurchaseModal({
                                 {formatCurrency(lineTotal)}
                               </td>
                             </tr>
+                            {Number(item.courier_charge) > 0 && (
+                              <tr className="bg-purple-50/40 text-purple-900 text-xs">
+                                <td className="px-4 py-1 text-muted-foreground"></td>
+                                <td colSpan={5} className="px-4 py-1">
+                                  <div className="flex gap-4 items-center">
+                                    <span>Original Total: {formatCurrency(lineTotal)}</span>
+                                    <span>Courier Portion: +{formatCurrency(Number(item.courier_charge))}</span>
+                                    <span className="font-semibold">Final Cost: {formatCurrency(lineTotal + Number(item.courier_charge))}</span>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                            </React.Fragment>
                           )
                         })}
                       </tbody>
                       <tfoot>
                         <tr className="border-t border-slate-200 bg-[#F1F4F9]">
                           <td
-                            colSpan={4}
-                            className="px-4 py-2.5 text-right text-xs font-semibold uppercase text-slate-600"
+                            colSpan={5}
+                            className="px-4 py-2 text-right text-xs font-semibold uppercase text-slate-600"
                           >
                             Subtotal
                           </td>
-                          <td className="whitespace-nowrap px-4 py-2.5 text-right text-sm font-semibold text-slate-900">
+                          <td className="whitespace-nowrap px-4 py-2 text-right text-sm font-semibold text-slate-900">
                             {formatCurrency(subtotal)}
+                          </td>
+                        </tr>
+                        {purchaseData && courierCharge > 0 && (
+                          <tr className="border-t border-slate-100 bg-[#F1F4F9]">
+                            <td
+                              colSpan={5}
+                              className="px-4 py-2 text-right text-xs font-semibold uppercase text-purple-700"
+                            >
+                              Courier Charge
+                            </td>
+                            <td className="whitespace-nowrap px-4 py-2 text-right text-sm font-semibold text-purple-700">
+                              +{formatCurrency(courierCharge)}
+                            </td>
+                          </tr>
+                        )}
+                        <tr className="border-t border-slate-200 bg-[#F1F4F9]">
+                          <td
+                            colSpan={5}
+                            className="px-4 py-2.5 text-right text-xs font-bold uppercase text-slate-700"
+                          >
+                            Grand Total
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-2.5 text-right text-sm font-bold text-slate-900">
+                            {formatCurrency(total)}
                           </td>
                         </tr>
                       </tfoot>

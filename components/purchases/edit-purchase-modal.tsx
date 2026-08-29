@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Plus, Trash2, Loader2, CreditCard, Banknote, Globe, X } from "lucide-react"
 import { getPurchaseDetails, updatePurchase } from "@/app/actions/purchase-actions"
-import { getDeviceCurrency } from "@/app/actions/dashboard-actions"
+import { getDeviceCurrency, getDeviceDefaultCourierPct } from "@/app/actions/dashboard-actions"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { FormAlert } from "@/components/ui/form-alert"
 import { useToast } from "@/components/ui/use-toast"
@@ -19,6 +19,7 @@ import SupplierAutocomplete from "./supplier-autocomplete"
 import { DatePickerField } from "@/components/ui/date-picker-field"
 import { useDispatch } from "react-redux"
 import { addProduct } from "@/store/slices/productSlice"
+import { allocatePurchaseCourierCharge, calculatePurchaseCourierCharge } from "@/lib/purchase-courier"
 
 interface EditPurchaseModalProps {
   isOpen: boolean
@@ -33,6 +34,8 @@ interface EditPurchaseModalProps {
 interface ProductRow {
   id: string
   productId: number | null
+  variantId?: number | null
+  batchId?: number | null
   productName: string
   quantity: number
   quantityInput?: string
@@ -75,13 +78,49 @@ export default function EditPurchaseModal({
   const [paymentMethod, setPaymentMethod] = useState<string>("Cash")
   const [receivedAmount, setReceivedAmount] = useState<number>(0)
   const [products, setProducts] = useState<ProductRow[]>([])
+  
   const [discountAmount, setDiscountAmount] = useState(0)
+  const [courierChargePercentage, setCourierChargePercentage] = useState<number>(0)
+  const [courierChargePercentageInput, setCourierChargePercentageInput] = useState<string>("")
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [customCourierCharge, setCustomCourierCharge] = useState<number | null>(null)
+  const [isEditingCourier, setIsEditingCourier] = useState(false)
+  const [courierInputVal, setCourierInputVal] = useState("")
   
   // Calculate totals synchronously during render to avoid double-renders and blinking inputs
   const subtotal = useMemo(() => products.reduce((sum, product) => sum + (product.quantity * product.price), 0), [products])
   const taxAmount = useMemo(() => products.reduce((sum, product) => sum + product.taxAmount, 0), [products])
-  const totalAmount = useMemo(() => Number(subtotal) + Number(taxAmount) - Number(discountAmount), [subtotal, taxAmount, discountAmount])
+  const autoCourierCharge = useMemo(
+    () => calculatePurchaseCourierCharge(subtotal, courierChargePercentage),
+    [subtotal, courierChargePercentage]
+  )
+  const courierCharge = customCourierCharge !== null ? customCourierCharge : autoCourierCharge
+  const totalAmount = useMemo(() => Number(subtotal) + Number(taxAmount) - Number(discountAmount) + Number(courierCharge), [subtotal, taxAmount, discountAmount, courierCharge])
+
+  const purchaseItemsWithAllocations = useMemo(() => {
+    const courierAllocations = allocatePurchaseCourierCharge(products, courierCharge)
+    return products.map((item, idx) => {
+      const allocation = courierAllocations[idx]
+      return {
+        ...item,
+        allocationPercentage: allocation.allocationPercentage,
+        allocatedCourier: allocation.courierCharge,
+        finalCost: item.lineTotal + allocation.courierCharge,
+      }
+    })
+  }, [products, courierCharge, subtotal, courierChargePercentage])
+
+  const allocationMap = useMemo(() => {
+    const map = new Map<string, { allocationPercentage: number; allocatedCourier: number; finalCost: number }>()
+    purchaseItemsWithAllocations.forEach(item => {
+      map.set(item.id, {
+        allocationPercentage: item.allocationPercentage,
+        allocatedCourier: item.allocatedCourier,
+        finalCost: item.finalCost,
+      })
+    })
+    return map
+  }, [purchaseItemsWithAllocations])
 
   const [formAlert, setFormAlert] = useState<{ type: "success" | "error"; message: string } | null>(null)
   const [activeProductRowId, setActiveProductRowId] = useState<string | null>(null)
@@ -97,6 +136,11 @@ export default function EditPurchaseModal({
     setReceivedAmount(0)
     setProducts([])
     setDiscountAmount(0)
+    setCourierChargePercentage(0)
+    setCourierChargePercentageInput("")
+    setCustomCourierCharge(null)
+    setIsEditingCourier(false)
+    setCourierInputVal("")
     setFormAlert(null)
     setActiveProductRowId(null)
     setError(null)
@@ -114,9 +158,10 @@ export default function EditPurchaseModal({
     setError(null)
 
     try {
-      const [currencyResult, purchaseResult] = await Promise.allSettled([
-        getDeviceCurrency(userId),
-        getPurchaseDetails(purchaseId)
+      const [currencyResult, purchaseResult, courierRateResult] = await Promise.allSettled([
+        getDeviceCurrency(deviceId),
+        getPurchaseDetails(purchaseId),
+        getDeviceDefaultCourierPct(deviceId),
       ])
 
       if (currencyResult.status === 'fulfilled') {
@@ -138,7 +183,13 @@ export default function EditPurchaseModal({
 
       setDate(new Date(purchase.purchase_date))
       setSupplier(purchase.supplier || "")
-      setDiscountAmount(Number(purchase.discount_amount) || 0)
+      setCourierChargePercentage(courierRateResult.status === "fulfilled" ? courierRateResult.value : 0)
+
+      const lineTotalsBeforeDiscount = items.reduce(
+        (sum: number, item: any) => sum + Number(item.line_total ?? (item.quantity * item.price)),
+        0,
+      )
+      setDiscountAmount(Math.max(0, lineTotalsBeforeDiscount + Number(purchase.courier_charge || 0) - Number(purchase.total_amount || 0)))
 
       const statusMap: Record<string, string> = {
         "Pending": "Credit",
@@ -154,6 +205,8 @@ export default function EditPurchaseModal({
       const productRows = items.map((item: any) => ({
         id: crypto.randomUUID(),
         productId: item.product_id,
+        variantId: item.product_variant_id,
+        batchId: item.batch_id,
         productName: item.product_name,
         quantity: item.quantity,
         price: item.price,
@@ -167,6 +220,16 @@ export default function EditPurchaseModal({
 
       setProducts(productRows)
 
+      const initialSubtotal = productRows.reduce((sum: number, product: any) => sum + product.total, 0)
+      const calculatedPct = courierRateResult.status === "fulfilled" ? courierRateResult.value : 0
+      const calculatedAutoCourier = calculatePurchaseCourierCharge(initialSubtotal, calculatedPct)
+      const savedCourier = Number(purchase.courier_charge) || 0
+      if (Math.abs(savedCourier - calculatedAutoCourier) > 0.01) {
+        setCustomCourierCharge(savedCourier)
+      } else {
+        setCustomCourierCharge(null)
+      }
+
     } catch (error) {
       console.error("Error fetching purchase details:", error)
       const errorMessage = error instanceof Error ? error.message : "An error occurred while loading purchase details"
@@ -176,7 +239,7 @@ export default function EditPurchaseModal({
       setIsLoading(false)
       isLoadingRef.current = false
     }
-  }, [purchaseId, isOpen, userId, toast])
+  }, [purchaseId, isOpen, deviceId, toast])
 
   useEffect(() => {
     if (isOpen && purchaseId) {
@@ -351,22 +414,22 @@ export default function EditPurchaseModal({
       formData.append("device_id", deviceId.toString())
       formData.append("received_amount", finalReceivedAmount.toString())
 
-      const items = products.map(p => {
-        const taxPercentage = p.taxPercentage || 0
-        const taxAmount = p.quantity * p.price * (taxPercentage / 100)
-        const lineTotal = (p.quantity * p.price) + taxAmount
-        return {
-          id: p.originalItemId,
-          product_id: p.productId,
-          quantity: p.quantity,
-          price: p.price,
-          tax_percentage: taxPercentage,
-          tax_amount: taxAmount,
-          line_total: lineTotal,
-        }
-      })
+      const items = purchaseItemsWithAllocations.map(p => ({
+        id: p.originalItemId,
+        product_id: p.productId,
+        variant_id: p.variantId || null,
+        batch_id: p.batchId || null,
+        quantity: p.quantity,
+        price: p.price,
+        tax_percentage: p.taxPercentage || 0,
+        tax_amount: p.taxAmount || 0,
+        line_total: p.lineTotal,
+        courier_charge: p.allocatedCourier,
+      }))
 
       formData.append("items", JSON.stringify(items))
+      formData.append("courier_charge", courierCharge.toString())
+      formData.append("courier_charge_percentage", courierChargePercentage.toString())
 
       const result = await updatePurchase(formData)
 
@@ -559,6 +622,70 @@ export default function EditPurchaseModal({
                             {localCurrency} {subtotal.toFixed(2)}
                           </span>
                         </div>
+                        <div className="flex justify-between items-center text-sm">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-gray-600 font-medium">Courier Charge:</span>
+                              {!isEditingCourier && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setCourierInputVal(courierCharge.toFixed(2))
+                                    setIsEditingCourier(true)
+                                  }}
+                                  className="text-xs text-blue-600 hover:text-blue-800 underline font-medium focus:outline-none"
+                                >
+                                  Edit
+                                </button>
+                              )}
+                            </div>
+                            {subtotal > 0 && courierChargePercentage > 0 && (
+                              <p className="text-[10px] text-gray-400 mt-0.5">
+                                {courierChargePercentage}% of {localCurrency}{subtotal.toFixed(2)} · distributed to {purchaseItemsWithAllocations.length} item(s)
+                              </p>
+                            )}
+                          </div>
+                          {isEditingCourier ? (
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-gray-900 text-xs font-semibold mr-0.5">{localCurrency}</span>
+                              <Input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={courierInputVal}
+                                onChange={(e) => setCourierInputVal(e.target.value)}
+                                className="w-20 h-7 text-xs text-center bg-white border-gray-300 text-gray-900 focus:ring-1 focus:ring-blue-500"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const parsed = parseFloat(courierInputVal)
+                                  if (!isNaN(parsed) && parsed >= 0) {
+                                    setCustomCourierCharge(parsed)
+                                  }
+                                  setIsEditingCourier(false)
+                                }}
+                                className="text-xs px-1.5 py-0.5 text-white bg-blue-600 hover:bg-blue-700 rounded font-medium focus:outline-none"
+                              >
+                                Save
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setCustomCourierCharge(null)
+                                  setIsEditingCourier(false)
+                                }}
+                                className="text-xs px-1.5 py-0.5 text-gray-600 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 rounded font-medium focus:outline-none"
+                              >
+                                Reset
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-gray-900">
+                              {localCurrency} {courierCharge.toFixed(2)}
+                            </span>
+                          )}
+                        </div>
                         <div className="flex justify-between items-center">
                           <span className="text-gray-600">Discount:</span>
                           <Input
@@ -567,7 +694,7 @@ export default function EditPurchaseModal({
                             step="0.01"
                             value={discountAmount}
                             onChange={(e) => setDiscountAmount(Number.parseFloat(e.target.value) || 0)}
-                            className="w-16 h-7 text-xs text-center bg-white border-gray-300"
+                            className="w-16 h-7 text-xs text-center bg-white border-gray-300 text-gray-900"
                           />
                         </div>
                         <div className="flex justify-between font-bold text-blue-600 border-t border-gray-200 pt-2">
@@ -623,6 +750,7 @@ export default function EditPurchaseModal({
                     </div>
 
                     {products.map((product, index) => (
+                      <div key={product.id}>
                       <div
                         key={product.id}
                         className={`grid grid-cols-[38fr_9fr_16fr_9fr_11fr_12fr_5fr] gap-2 p-2 items-center border-b border-gray-200 ${
@@ -700,6 +828,18 @@ export default function EditPurchaseModal({
                             <Trash2 className="h-4 w-4 text-red-500" />
                           </Button>
                         </div>
+                      </div>
+                      {allocationMap.has(product.id) && (
+                        <div className="grid grid-cols-[38fr_62fr] gap-2 px-2 py-1 text-xs bg-purple-50 text-purple-900 border-b border-gray-200">
+                          <div></div>
+                          <div className="flex gap-4 items-center">
+                            <span>Original: {localCurrency} {product.lineTotal.toFixed(2)}</span>
+                            <span>Allocation: {allocationMap.get(product.id)!.allocationPercentage.toFixed(2)}%</span>
+                            <span>Courier: {localCurrency} {allocationMap.get(product.id)!.allocatedCourier.toFixed(2)}</span>
+                            <span className="font-semibold">Final Cost: {localCurrency} {allocationMap.get(product.id)!.finalCost.toFixed(2)}</span>
+                          </div>
+                        </div>
+                      )}
                       </div>
                     ))}
                   </div>

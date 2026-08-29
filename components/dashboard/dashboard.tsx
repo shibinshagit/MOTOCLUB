@@ -1,6 +1,6 @@
 import { useRouter, useSearchParams } from "next/navigation"
 import Image from "next/image"
-import React, { useState, useEffect, useCallback, useRef } from "react"
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import {
   Plus,
   Receipt,
@@ -54,6 +54,8 @@ import PayrollRequestsTab from "@/components/admin/payroll-requests-tab"
 import ReturnsTab from "./returns-tab"
 import StaffAuthModal from "../staff/staff-auth-modal"
 import { BrandLogo } from "@/components/brand-logo"
+import { useStaffRestrictions } from "@/hooks/use-staff-restrictions"
+import { type StaffPageId } from "@/lib/staff-restrictions"
 
 import { useAppSelector, useAppDispatch } from "@/store/hooks"
 import {
@@ -139,6 +141,58 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const [staffAuthOpen, setStaffAuthOpen] = useState(false)
   const [isRestoringStaffSession, setIsRestoringStaffSession] = useState(false)
   
+  const { canAccessPage } = useStaffRestrictions()
+
+  const canAccessTab = useCallback(
+    (tabId: string): boolean => {
+      if (!device) return false
+
+      // 1. Device level check (Super Admin restrictions)
+      const isAdminSession = !activeStaff || activeStaff.role === "admin"
+      const deviceAllowedPagesStr = isAdminSession
+        ? device.admin_pages ?? "sales-orders,sale,returns,purchase,product,customer,supplier,transfer,platform,master,accounting,attendance,requests,trending"
+        : device.staff_pages ?? "sales-orders,sale,returns,purchase,product,customer,supplier,transfer,attendance,trending"
+
+      const deviceAllowedPages = deviceAllowedPagesStr.split(",").map((p: string) => p.trim())
+
+      let mappedTabId = tabId
+      if (tabId === "sales") mappedTabId = "sale"
+      if (tabId === "stock") mappedTabId = "product"
+
+      if (!deviceAllowedPages.includes(mappedTabId)) {
+        return false
+      }
+
+      // 2. Staff level check (Device Admin restrictions)
+      return canAccessPage(mappedTabId as StaffPageId)
+    },
+    [device, activeStaff, canAccessPage],
+  )
+
+  // Navigation items configuration
+  const navItems = [
+    { id: "sales-orders", icon: <Receipt className="h-4 w-4" />, label: "Order List" },
+    { id: "sale", icon: <Plus className="h-5 w-5" />, label: "Sales" },
+    { id: "returns", icon: <RotateCcw className="h-4 w-4" />, label: "Returns" },
+    { id: "purchase", icon: <Receipt className="h-4 w-4" />, label: "Purchase" },
+    { id: "customer", icon: <User className="h-4 w-4" />, label: "Customers" },
+    { id: "attendance", icon: <CalendarDays className="h-4 w-4" />, label: "Attendance" },
+    { id: "supplier", icon: <Truck className="h-4 w-4" />, label: "Suppliers" },
+    { id: "transfer", icon: <ArrowRightLeft className="h-4 w-4" />, label: "Transfers" },
+    { id: "requests", icon: <FileText className="h-4 w-4" />, label: "Requests" },
+    { id: "platform", icon: <Store className="h-4 w-4" />, label: "Platforms" },
+    { id: "master", icon: <Database className="h-4 w-4" />, label: "Master Data" },
+  ]
+
+  // Primary tabs for bottom navigation (most used)
+  const primaryTabs = ["sales-orders", "sale", "purchase"]
+  const secondaryTabs = ["returns", "customer", "attendance", "supplier", "transfer", "platform", "master", "requests"]
+
+  // Filtered navigation items based on permission
+  const allowedNavItems = useMemo(() => navItems.filter((item: any) => canAccessTab(item.id)), [canAccessTab])
+  const allowedPrimaryTabs = useMemo(() => primaryTabs.filter((tabId: string) => canAccessTab(tabId)), [canAccessTab])
+  const allowedSecondaryTabs = useMemo(() => secondaryTabs.filter((tabId: string) => canAccessTab(tabId)), [canAccessTab])
+
   const router = useRouter()
   const { toast } = useToast()
   const getStaffSessionKey = useCallback((deviceId?: number | null) => {
@@ -182,6 +236,8 @@ export function Dashboard({ onLogout }: DashboardProps) {
           name: result.data.name,
           currency: result.data.currency,
           logo_url: result.data.logo_url,
+          staff_pages: result.data.staff_pages,
+          admin_pages: result.data.admin_pages,
           company: result.data.company,
         }),
       )
@@ -265,6 +321,18 @@ export function Dashboard({ onLogout }: DashboardProps) {
     setLastContentTab(tab)
     setActiveTab(tab)
   }, [tabParam])
+
+  // Enforce page restrictions: redirect if active tab is restricted
+  useEffect(() => {
+    if (mounted && !canAccessTab(activeTab)) {
+      const fallbackTab = (["sales-orders", "sale", "purchase", "returns", "customer", "attendance", "supplier", "transfer", "platform", "master"] as TabType[]).find(
+        (tabId) => canAccessTab(tabId),
+      )
+      if (fallbackTab) {
+        setActiveTab(fallbackTab)
+      }
+    }
+  }, [activeStaff, activeTab, canAccessTab, mounted])
 
   const salesViewParam = searchParams.get("salesView")
   const salesNavView = salesViewParam === "entry" ? "entry" : "list"
@@ -417,6 +485,9 @@ export function Dashboard({ onLogout }: DashboardProps) {
   // Render the appropriate tab content with error handling
   const renderTabContent = () => {
     try {
+      if (!canAccessTab(activeTab)) {
+        return <ErrorTab name={activeTab} error="Access restricted by administrator" />
+      }
       const deviceId = device?.id
       const companyId = company?.id || 1
       const contentTab = activeTab === "product" || activeTab === "trending" ? lastContentTab : activeTab
@@ -476,23 +547,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
     }
   }
 
-  // Navigation items configuration
-  const navItems = [
-    { id: "sales-orders", icon: <Receipt className="h-4 w-4" />, label: "Order List" },
-    { id: "sale", icon: <Plus className="h-5 w-5" />, label: "Sales" },
-    { id: "returns", icon: <RotateCcw className="h-4 w-4" />, label: "Returns" },
-    { id: "purchase", icon: <Receipt className="h-4 w-4" />, label: "Purchase" },
-    { id: "customer", icon: <User className="h-4 w-4" />, label: "Customers" },
-    { id: "attendance", icon: <CalendarDays className="h-4 w-4" />, label: "Attendance" },
-    { id: "supplier", icon: <Truck className="h-4 w-4" />, label: "Suppliers" },
-    { id: "transfer", icon: <ArrowRightLeft className="h-4 w-4" />, label: "Transfers" },
-    { id: "platform", icon: <Store className="h-4 w-4" />, label: "Platforms" },
-    { id: "master", icon: <Database className="h-4 w-4" />, label: "Master Data" },
-  ]
 
-  // Primary tabs for bottom navigation (most used)
-  const primaryTabs = ["sales-orders", "sale", "purchase"]
-  const secondaryTabs = ["returns", "customer", "attendance", "supplier", "transfer", "platform", "master"]
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background">
@@ -544,44 +599,39 @@ export function Dashboard({ onLogout }: DashboardProps) {
             className="sm:hidden flex items-center gap-2"
           >
             {isMobileMenuOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
-          </Button>
-
-          {/* Desktop Controls */}
+          </Button>          {/* Desktop Controls */}
           <div className="hidden sm:flex items-center space-x-2">
-            <Button
-              onClick={() => handleTabChange("requests")}
-              variant="ghost"
-              size="sm"
-              className={cn(
-                "h-9 px-3 rounded-full hover:bg-purple-50 text-purple-700 font-semibold text-xs flex items-center gap-1.5",
-                activeTab === "requests" && "bg-purple-100",
-              )}
-              title="Staff Requests"
-            >
-              <FileText className="h-4 w-4" />
-              <span className="hidden md:inline">Requests</span>
-            </Button>
-            <Button
-              onClick={handleInventoryToggle}
-              variant="ghost"
-              size="sm"
-              className={cn(
-                "h-9 w-9 rounded-full p-0 hover:bg-violet-50 text-violet-700 hover:text-violet-800",
-                activeTab === "product" && "bg-violet-100",
-              )}
-              title="Inventory"
-            >
-              <Package className="h-4 w-4" />
-            </Button>
-            <Button
-              onClick={() => handleTabChange("accounting")}
-              variant="ghost"
-              size="sm"
-              className="h-9 w-9 rounded-full p-0 hover:bg-emerald-50 text-emerald-700 hover:text-emerald-800"
-              title="Accounting"
-            >
-              <Landmark className="h-4 w-4" />
-            </Button>
+
+            {canAccessTab("product") && (
+              <Button
+                onClick={handleInventoryToggle}
+                variant="ghost"
+                size="sm"
+                className={cn(
+                  "h-9 w-9 rounded-full p-0 hover:bg-violet-50 text-violet-700 hover:text-violet-800",
+                  activeTab === "product" && "bg-violet-100",
+                )}
+                title="Inventory"
+              >
+                <Package className="h-5 w-5" />
+              </Button>
+            )}
+
+            {canAccessTab("accounting") && (
+              <Button
+                onClick={() => handleTabChange("accounting")}
+                variant="ghost"
+                size="sm"
+                className={cn(
+                  "h-9 px-3 rounded-full hover:bg-emerald-50 text-emerald-700 font-semibold text-xs flex items-center gap-1.5",
+                  activeTab === "accounting" && "bg-emerald-100",
+                )}
+                title="Accounting"
+              >
+                <Landmark className="h-4 w-4" />
+                <span className="hidden md:inline">Accounting</span>
+              </Button>
+            )}
             <Button
               onClick={handleLogout}
               variant="ghost"
@@ -635,27 +685,31 @@ export function Dashboard({ onLogout }: DashboardProps) {
 
           {/* Mobile Controls */}
           <div className="flex sm:hidden items-center space-x-2">
-            <Button
-              onClick={handleInventoryToggle}
-              variant="ghost"
-              size="sm"
-              className={cn(
-                "h-9 w-9 rounded-full p-0 hover:bg-violet-50 text-violet-700",
-                activeTab === "product" && "bg-violet-100",
-              )}
-              title="Inventory"
-            >
-              <Package className="h-5 w-5" />
-            </Button>
-            <Button
-              onClick={() => handleTabChange("accounting")}
-              variant="ghost"
-              size="sm"
-              className="h-9 w-9 rounded-full p-0 hover:bg-emerald-50 text-emerald-700"
-              title="Accounting"
-            >
-              <Landmark className="h-5 w-5" />
-            </Button>
+            {canAccessTab("product") && (
+              <Button
+                onClick={handleInventoryToggle}
+                variant="ghost"
+                size="sm"
+                className={cn(
+                  "h-9 w-9 rounded-full p-0 hover:bg-violet-50 text-violet-700",
+                  activeTab === "product" && "bg-violet-100",
+                )}
+                title="Inventory"
+              >
+                <Package className="h-5 w-5" />
+              </Button>
+            )}
+            {canAccessTab("accounting") && (
+              <Button
+                onClick={() => handleTabChange("accounting")}
+                variant="ghost"
+                size="sm"
+                className="h-9 w-9 rounded-full p-0 hover:bg-emerald-50 text-emerald-700"
+                title="Accounting"
+              >
+                <Landmark className="h-5 w-5" />
+              </Button>
+            )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -768,7 +822,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
               : 'translate-y-full opacity-0 pointer-events-none'
           }`}>
             <div className="safe-area-inset-bottom grid h-14 grid-cols-5 border-b border-border">
-              {secondaryTabs.map((tabId) => {
+              {allowedSecondaryTabs.map((tabId: string) => {
                 const item = navItems.find(nav => nav.id === tabId)
                 if (!item) return null
                 
@@ -789,7 +843,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
           {/* Primary tabs */}
           <div className="border-t border-border bg-card pb-safe">
             <div className="grid grid-cols-4 h-16">
-              {primaryTabs.map((tabId) => {
+              {allowedPrimaryTabs.map((tabId: string) => {
                 if (tabId === "purchase") {
                   return (
                     <PurchaseNavSegment
@@ -856,7 +910,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
       {/* Desktop Navigation */}
       <nav className="hidden sm:block sticky bottom-0">
         <div className="flex h-16 items-center justify-around border-t border-border bg-card">
-          {navItems.map((item) => {
+          {allowedNavItems.map((item: any) => {
             if (item.id === "purchase") {
               return (
                 <PurchaseNavSegment

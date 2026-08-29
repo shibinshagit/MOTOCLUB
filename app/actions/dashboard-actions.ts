@@ -40,6 +40,41 @@ export async function getDeviceCurrency(deviceId: number) {
   }
 }
 
+// Get the device's default courier charge percentage (0 = no courier charge)
+export async function getDeviceDefaultCourierPct(deviceId: number): Promise<number> {
+  try {
+    if (typeof deviceId !== "number" || isNaN(deviceId)) return 0
+    const result = await sql`
+      SELECT default_courier_charge_pct FROM devices WHERE id = ${deviceId}
+    `
+    if (result && result.length > 0 && result[0]?.default_courier_charge_pct != null) {
+      return Number(result[0].default_courier_charge_pct) || 0
+    }
+    return 0
+  } catch {
+    return 0
+  }
+}
+
+// Update the device's default courier charge percentage (called from settings UI)
+export async function updateDeviceDefaultCourierPct(deviceId: number, pct: number) {
+  try {
+    if (typeof deviceId !== "number" || isNaN(deviceId)) {
+      return { success: false, message: "Invalid device ID" }
+    }
+    const clampedPct = Math.max(0, Math.min(100, Number(pct) || 0))
+    await sql`
+      UPDATE devices
+      SET default_courier_charge_pct = ${clampedPct}, updated_at = NOW()
+      WHERE id = ${deviceId}
+    `
+    return { success: true, message: "Default courier charge updated" }
+  } catch (error) {
+    console.error("updateDeviceDefaultCourierPct error:", error)
+    return { success: false, message: "Failed to update default courier charge" }
+  }
+}
+
 export async function getUserDashboardSummary(userId: number, deviceId: number) {
   if (!userId || !deviceId) {
     return {

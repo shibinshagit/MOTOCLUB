@@ -214,6 +214,8 @@ export async function createPurchase(formData: FormData) {
   const deviceId = Number.parseInt(formData.get("device_id") as string)
   const purchaseDate = (formData.get("purchase_date") as string) || new Date().toISOString()
   const receivedAmount = Number.parseFloat(formData.get("received_amount") as string) || 0
+  const courierCharge = Number.parseFloat(formData.get("courier_charge") as string) || 0
+  const courierChargePercentage = Number.parseFloat(formData.get("courier_charge_percentage") as string) || 0
 
   // Parse optional payments array from JSON string
   const paymentsJson = formData.get("payments") as string
@@ -291,11 +293,13 @@ export async function createPurchase(formData: FormData) {
       const purchaseResult = await tx`
         INSERT INTO purchases (
           supplier, total_amount, status, payment_method, purchase_status, 
-          created_by, device_id, purchase_date, received_amount
+          created_by, device_id, purchase_date, received_amount,
+          courier_charge, courier_charge_percentage
         )
         VALUES (
           ${supplier}, ${totalAmount}, ${status}, ${primaryPaymentMethod}, ${purchaseStatus}, 
-          ${userId}, ${deviceId}, ${purchaseDate}, ${finalReceivedAmount}
+          ${userId}, ${deviceId}, ${purchaseDate}, ${finalReceivedAmount},
+          ${courierCharge}, ${courierChargePercentage}
         )
         RETURNING *
       `
@@ -540,6 +544,8 @@ export async function updatePurchase(formData: FormData) {
   const userId = Number.parseInt(formData.get("user_id") as string)
   const deviceId = Number.parseInt(formData.get("device_id") as string)
   const receivedAmount = Number.parseFloat(formData.get("received_amount") as string) || 0
+  const courierCharge = Number.parseFloat(formData.get("courier_charge") as string) || 0
+  const courierChargePercentage = Number.parseFloat(formData.get("courier_charge_percentage") as string) || 0
 
   // Parse optional payments array from JSON string
   const paymentsJson = formData.get("payments") as string
@@ -636,7 +642,9 @@ export async function updatePurchase(formData: FormData) {
         SET supplier = ${supplier}, total_amount = ${totalAmount}, 
             status = ${status}, purchase_date = ${purchaseDate},
             purchase_status = ${purchaseStatus}, payment_method = ${paymentMethod},
-            received_amount = ${finalReceivedAmount}
+            received_amount = ${finalReceivedAmount},
+            courier_charge = ${courierCharge},
+            courier_charge_percentage = ${courierChargePercentage}
         WHERE id = ${purchaseId} AND device_id = ${deviceId}
         RETURNING *
       `

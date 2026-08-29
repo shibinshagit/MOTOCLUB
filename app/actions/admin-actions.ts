@@ -311,7 +311,7 @@ export async function getDevices(companyId?: number) {
         let query
     if (companyId) {
       query = sql`
-        SELECT d.id, d.name, d.email, d.company_id, c.name as company_name, d.currency, d.logo_url, d.created_at, d.updated_at
+        SELECT d.id, d.name, d.email, d.company_id, c.name as company_name, d.currency, d.logo_url, d.staff_pages, d.admin_pages, d.created_at, d.updated_at
         FROM devices d
         JOIN companies c ON d.company_id = c.id
         WHERE d.company_id = ${companyId}
@@ -319,7 +319,7 @@ export async function getDevices(companyId?: number) {
       `
     } else {
       query = sql`
-        SELECT d.id, d.name, d.email, d.company_id, c.name as company_name, d.currency, d.logo_url, d.created_at, d.updated_at
+        SELECT d.id, d.name, d.email, d.company_id, c.name as company_name, d.currency, d.logo_url, d.staff_pages, d.admin_pages, d.created_at, d.updated_at
         FROM devices d
         JOIN companies c ON d.company_id = c.id
         ORDER BY d.name
@@ -521,6 +521,8 @@ export async function createDevice(formData: FormData) {
     const password = formData.get("password") as string
     const company_id = Number.parseInt(formData.get("company_id") as string)
     const currency = (formData.get("currency") as string) || "QAR"
+    const staff_pages = (formData.getAll("staff_pages") as string[]).join(",")
+    const admin_pages = (formData.getAll("admin_pages") as string[]).join(",")
 
     // Check if company exists
     const companyCheck = await sql`
@@ -540,9 +542,9 @@ export async function createDevice(formData: FormData) {
 
     // Create a device with the currency column
     const result = await sql`
-      INSERT INTO devices (name, email, password_hash, company_id, currency, created_at, updated_at)
-      VALUES (${name}, ${email}, ${password_hash}, ${company_id}, ${currency}, NOW(), NOW())
-      RETURNING id, name, email, company_id, currency, logo_url, created_at, updated_at
+      INSERT INTO devices (name, email, password_hash, company_id, currency, staff_pages, admin_pages, created_at, updated_at)
+      VALUES (${name}, ${email}, ${password_hash}, ${company_id}, ${currency}, ${staff_pages || null}, ${admin_pages || null}, NOW(), NOW())
+      RETURNING id, name, email, company_id, currency, logo_url, staff_pages, admin_pages, created_at, updated_at
     `
 
     let deviceRecord = result[0]
@@ -554,7 +556,7 @@ export async function createDevice(formData: FormData) {
           UPDATE devices
           SET logo_url = ${logoUrl}, updated_at = NOW()
           WHERE id = ${deviceRecord.id}
-          RETURNING id, name, email, company_id, currency, logo_url, created_at, updated_at
+          RETURNING id, name, email, company_id, currency, logo_url, staff_pages, admin_pages, created_at, updated_at
         `
         deviceRecord = updated[0]
       }
@@ -613,6 +615,8 @@ export async function updateDevice(formData: FormData) {
     const password = formData.get("password") as string
     const company_id = Number.parseInt(formData.get("company_id") as string)
     const currency = (formData.get("currency") as string) || "QAR"
+    const staff_pages = (formData.getAll("staff_pages") as string[]).join(",")
+    const admin_pages = (formData.getAll("admin_pages") as string[]).join(",")
 
     // Check if company exists
     const companyCheck = await sql`
@@ -655,9 +659,11 @@ export async function updateDevice(formData: FormData) {
           company_id = ${company_id},
           currency = ${currency},
           logo_url = ${logoUrl},
+          staff_pages = ${staff_pages || null},
+          admin_pages = ${admin_pages || null},
           updated_at = NOW()
         WHERE id = ${id}
-        RETURNING id, name, email, company_id, currency, logo_url, updated_at
+        RETURNING id, name, email, company_id, currency, logo_url, staff_pages, admin_pages, updated_at
       `
     } else {
       result = await sql`
@@ -668,9 +674,11 @@ export async function updateDevice(formData: FormData) {
           company_id = ${company_id},
           currency = ${currency},
           logo_url = ${logoUrl},
+          staff_pages = ${staff_pages || null},
+          admin_pages = ${admin_pages || null},
           updated_at = NOW()
         WHERE id = ${id}
-        RETURNING id, name, email, company_id, currency, logo_url, updated_at
+        RETURNING id, name, email, company_id, currency, logo_url, staff_pages, admin_pages, updated_at
       `
     }
 

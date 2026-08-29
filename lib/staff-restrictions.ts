@@ -2,6 +2,7 @@ export type StaffPageId =
   | "trending"
   | "sale"
   | "sales"
+  | "sales-orders"
   | "purchase"
   | "product"
   | "customer"
@@ -10,13 +11,16 @@ export type StaffPageId =
   | "platform"
   | "master"
   | "accounting"
+  | "attendance"
+  | "returns"
+  | "requests"
 
 export type StaffValueRestriction = "cogs" | "stock_count"
 
 export const STAFF_PAGE_OPTIONS: { id: StaffPageId; label: string }[] = [
-  { id: "trending", label: "Trending" },
+  { id: "sales-orders", label: "Order List" },
   { id: "sale", label: "New Sale" },
-  { id: "sales", label: "Sales" },
+  { id: "returns", label: "Returns" },
   { id: "purchase", label: "Purchase" },
   { id: "product", label: "Inventory" },
   { id: "customer", label: "Customers" },
@@ -25,6 +29,9 @@ export const STAFF_PAGE_OPTIONS: { id: StaffPageId; label: string }[] = [
   { id: "platform", label: "Platforms" },
   { id: "master", label: "Master Data" },
   { id: "accounting", label: "Accounting" },
+  { id: "attendance", label: "Attendance" },
+  { id: "requests", label: "Staff Requests" },
+  { id: "trending", label: "Trending" },
 ]
 
 export const STAFF_VALUE_OPTIONS: { id: StaffValueRestriction; label: string }[] = [
@@ -66,7 +73,7 @@ export function getRestrictedPages(staff: StaffRestrictionSource | null | undefi
 }
 
 export function getRestrictedValues(staff: StaffRestrictionSource | null | undefined): StaffValueRestriction[] {
-  if (!staff || isStaffAdmin(staff)) return []
+  if (!staff) return []
   return parseStringArray<StaffValueRestriction>(staff?.restricted_values)
 }
 
@@ -75,7 +82,6 @@ export function canStaffAccessPage(
   page: StaffPageId,
 ): boolean {
   if (!staff) return true
-  if (isStaffAdmin(staff)) return true
   return !getRestrictedPages(staff).includes(page)
 }
 
@@ -84,7 +90,6 @@ export function isStaffValueHidden(
   value: StaffValueRestriction,
 ): boolean {
   if (!staff) return false
-  if (isStaffAdmin(staff)) return false
   return getRestrictedValues(staff).includes(value)
 }
 

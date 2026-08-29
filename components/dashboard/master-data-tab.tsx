@@ -52,6 +52,7 @@ import {
 } from "@/app/actions/master-data-actions"
 import { useSelector } from "react-redux"
 import { selectDeviceId } from "@/store/slices/deviceSlice"
+import { getDeviceDefaultCourierPct, updateDeviceDefaultCourierPct } from "@/app/actions/dashboard-actions"
 import { cn } from "@/lib/utils"
 
 interface MasterDataTabProps {
@@ -99,6 +100,33 @@ export default function MasterDataTab({ userId }: MasterDataTabProps) {
   // Courier Profile Modal state
   const [selectedCourierIdForProfile, setSelectedCourierIdForProfile] = useState<number | null>(null)
   const [isCourierProfileOpen, setIsCourierProfileOpen] = useState(false)
+  const [defaultCourierPct, setDefaultCourierPct] = useState<number>(0)
+  const [isSavingPct, setIsSavingPct] = useState(false)
+
+  useEffect(() => {
+    if (deviceId) {
+      getDeviceDefaultCourierPct(deviceId).then((pct) => {
+        setDefaultCourierPct(pct)
+      })
+    }
+  }, [deviceId])
+
+  const handleSaveDefaultCourierPct = async () => {
+    if (!deviceId) return
+    setIsSavingPct(true)
+    try {
+      const result = await updateDeviceDefaultCourierPct(deviceId, defaultCourierPct)
+      if (result.success) {
+        notifySuccess(toast, "Default courier charge percentage updated successfully")
+      } else {
+        notifyError(toast, result.message || "Failed to update default courier charge")
+      }
+    } catch {
+      notifyError(toast, "Failed to update default courier charge")
+    } finally {
+      setIsSavingPct(false)
+    }
+  }
 
   const handleOpenCourierProfile = (courierId: number) => {
     setSelectedCourierIdForProfile(courierId)
@@ -306,6 +334,30 @@ export default function MasterDataTab({ userId }: MasterDataTabProps) {
                   </Button>
                 </div>
               </div>
+
+              {activeCategory === "courier" && (
+                <div className="bg-violet-50/50 border-b border-slate-200 px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div className="flex flex-col">
+                    <span className="text-xs font-semibold text-slate-800">Default Purchase Courier Charge Percentage</span>
+                    <span className="text-[11px] text-slate-500">Automatically calculates the purchase courier charge based on this rate when creating purchases.</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="0.1"
+                      value={defaultCourierPct}
+                      onChange={(e) => setDefaultCourierPct(Number.parseFloat(e.target.value) || 0)}
+                      className="h-8 w-20 border-slate-200 bg-white text-xs text-right"
+                    />
+                    <span className="text-xs text-slate-600 font-semibold">%</span>
+                    <Button size="sm" className="h-8 bg-violet-600 hover:bg-violet-700 text-white" onClick={handleSaveDefaultCourierPct} disabled={isSavingPct}>
+                      {isSavingPct ? "Saving..." : "Save Rate"}
+                    </Button>
+                  </div>
+                </div>
+              )}
 
               {loading ? (
                 <div className="flex items-center justify-center py-16 text-sm text-slate-500">

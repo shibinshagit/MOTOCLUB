@@ -816,6 +816,21 @@ export function printPurchaseReceipt(purchase: any, items: any[], currency = "AE
   const subtotal = items.reduce((sum, item) => sum + Number(item.quantity) * Number(item.price), 0)
   const totalAmount = Number(purchase.total_amount) || subtotal
 
+  let courierCharge = Math.max(0, Number(purchase.courier_charge) || 0)
+  if (courierCharge === 0) {
+    const lineTotalsSum = items.reduce((sum, item) => {
+      const qty = Number(item.quantity) || 0
+      const prc = Number(item.price) || 0
+      const taxPct = Number(item.tax_percentage) || 0
+      const lineTax = qty * prc * (taxPct / 100)
+      return sum + (qty * prc) + lineTax
+    }, 0)
+    const diff = totalAmount - lineTotalsSum
+    if (diff > 0.01) {
+      courierCharge = diff
+    }
+  }
+
   // Calculate payment amounts
   const paidAmount = purchase.received_amount || 0
   const remainingAmount = Math.max(0, totalAmount - paidAmount)
@@ -1248,6 +1263,15 @@ export function printPurchaseReceipt(purchase: any, items: any[], currency = "AE
                   <td>VAT (0%):</td>
                   <td class="text-right">${formatCurrency(0)}</td>
                 </tr>
+                ${
+                  courierCharge > 0
+                    ? `
+                <tr>
+                  <td>Courier Charge:</td>
+                  <td class="text-right">${formatCurrency(courierCharge)}</td>
+                </tr>`
+                    : ""
+                }
                 <tr class="total-row">
                   <td><strong>Total:</strong></td>
                   <td class="text-right"><strong>${formatCurrency(totalAmount)}</strong></td>

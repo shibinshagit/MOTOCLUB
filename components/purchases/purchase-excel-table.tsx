@@ -346,6 +346,7 @@ export default function PurchaseExcelTable({
                 {headerCell("status", "Payment")}
                 {headerCell("date", "Date")}
                 {headerCell("supplier", "Supplier")}
+                <th className="min-w-[13rem] whitespace-nowrap px-4 py-2.5 text-left">Products</th>
                 {headerCell("payment", "Method")}
                 {headerCell("total", "Total", "right")}
                 {headerCell("paid", "Paid", "right")}
@@ -357,19 +358,19 @@ export default function PurchaseExcelTable({
             <tbody>
               {isLoading && !hasLoadedPurchases ? (
                 <tr>
-                  <td colSpan={11}>
+                  <td colSpan={12}>
                     <TableSkeleton />
                   </td>
                 </tr>
               ) : error ? (
                 <tr>
-                  <td colSpan={11} className="px-4 py-8 text-center text-sm text-rose-600">
+                  <td colSpan={12} className="px-4 py-8 text-center text-sm text-rose-600">
                     {error}
                   </td>
                 </tr>
               ) : displayPurchases.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="px-4 py-12 text-center text-sm text-muted-foreground">
+                  <td colSpan={12} className="px-4 py-12 text-center text-sm text-muted-foreground">
                     {purchases.length === 0
                       ? `No purchases found for ${periodLabel}`
                       : "No purchases match the current column filters"}
@@ -399,6 +400,9 @@ export default function PurchaseExcelTable({
                       </td>
                       <td className="max-w-[180px] truncate px-4 py-2.5 text-slate-700">
                         {purchase.supplier || "—"}
+                      </td>
+                      <td className="max-w-[300px] truncate px-4 py-2.5 text-slate-700" title={purchase.items_summary || undefined}>
+                        {purchase.items_summary || "—"}
                       </td>
                       <td className="whitespace-nowrap px-4 py-2.5 text-slate-600">
                         {getPaymentMethodDisplay(purchase)}

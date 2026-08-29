@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Plus, Trash2, Loader2, CreditCard, Banknote, Globe, X, ChevronDown } from "lucide-react"
 import { createPurchase } from "@/app/actions/purchase-actions"
-import { getDeviceCurrency } from "@/app/actions/dashboard-actions"
+import { getDeviceCurrency, getDeviceDefaultCourierPct } from "@/app/actions/dashboard-actions"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { FormAlert } from "@/components/ui/form-alert"
 import { useToast } from "@/components/ui/use-toast"
@@ -19,6 +19,7 @@ import SupplierAutocomplete from "./supplier-autocomplete"
 import { DatePickerField } from "@/components/ui/date-picker-field"
 import { useDispatch } from "react-redux"
 import { addProduct } from "@/store/slices/productSlice"
+import { allocatePurchaseCourierCharge, calculatePurchaseCourierCharge } from "@/lib/purchase-courier"
 
 interface NewPurchaseModalProps {
   isOpen: boolean
@@ -97,12 +98,92 @@ export default function NewPurchaseModal({
   ])
   
   const [discountAmount, setDiscountAmount] = useState(0)
+  const [courierChargePercentage, setCourierChargePercentage] = useState<number>(0)
+  const [isCourierRateLoading, setIsCourierRateLoading] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [customCourierCharge, setCustomCourierCharge] = useState<number | null>(null)
+  const [isEditingCourier, setIsEditingCourier] = useState(false)
+  const [courierInputVal, setCourierInputVal] = useState("")
 
   // Calculate totals synchronously during render to avoid double-renders and blinking inputs
-  const subtotal = useMemo(() => products.reduce((sum, product) => sum + (product.quantity * product.price), 0), [products])
+  const subtotal = useMemo(() => products.reduce((sum, product) => sum + product.total, 0), [products])
   const taxAmount = useMemo(() => products.reduce((sum, product) => sum + product.taxAmount, 0), [products])
-  const totalAmount = useMemo(() => Number(subtotal) + Number(taxAmount) - Number(discountAmount), [subtotal, taxAmount, discountAmount])
+  const autoCourierCharge = useMemo(
+    () => calculatePurchaseCourierCharge(subtotal, courierChargePercentage),
+    [subtotal, courierChargePercentage]
+  )
+  const courierCharge = customCourierCharge !== null ? customCourierCharge : autoCourierCharge
+  const totalAmount = useMemo(() => Number(subtotal) + Number(taxAmount) - Number(discountAmount) + Number(courierCharge), [subtotal, taxAmount, discountAmount, courierCharge])
+
+  interface AllocationItem {
+    key: string
+    product_id: number
+    variant_id: number | null
+    quantity: number
+    price: number
+    tax_percentage: number
+    tax_amount: number
+    line_total: number
+  }
+
+  const purchaseItemsWithAllocations = useMemo(() => {
+    const items: AllocationItem[] = products.flatMap((p) => {
+      if (!p.productId) return []
+      if (p.variants.length > 1) {
+        return p.variants.filter(v => v.quantity > 0).map(v => {
+          const taxPercentage = v.taxPercentage || 0
+          const taxAmount = v.quantity * v.price * (taxPercentage / 100)
+          const lineTotal = (v.quantity * v.price) + taxAmount
+          return {
+            key: `${p.id}-${v.id}`,
+            product_id: p.productId as number,
+            variant_id: v.id as number | null,
+            quantity: v.quantity,
+            price: v.price,
+            tax_percentage: taxPercentage,
+            tax_amount: taxAmount,
+            line_total: lineTotal,
+          }
+        })
+      }
+      const taxPercentage = p.taxPercentage || 0
+      const taxAmount = p.quantity * p.price * (taxPercentage / 100)
+      const lineTotal = (p.quantity * p.price) + taxAmount
+      return p.quantity > 0 ? [{
+        key: p.id,
+        product_id: p.productId as number,
+        variant_id: (p.variants[0]?.id || null) as number | null,
+        quantity: p.quantity,
+        price: p.price,
+        tax_percentage: taxPercentage,
+        tax_amount: taxAmount,
+        line_total: lineTotal,
+      }] : []
+    })
+
+    const courierAllocations = allocatePurchaseCourierCharge(items, courierCharge)
+    return items.map((item: AllocationItem, idx: number) => {
+      const allocation = courierAllocations[idx]
+      return {
+        ...item,
+        allocationPercentage: allocation.allocationPercentage,
+        allocatedCourier: allocation.courierCharge,
+        finalCost: item.line_total + allocation.courierCharge,
+      }
+    })
+  }, [products, courierCharge, subtotal, courierChargePercentage])
+
+  const allocationMap = useMemo(() => {
+    const map = new Map<string, { allocationPercentage: number; allocatedCourier: number; finalCost: number }>()
+    purchaseItemsWithAllocations.forEach(item => {
+      map.set(item.key, {
+        allocationPercentage: item.allocationPercentage,
+        allocatedCourier: item.allocatedCourier,
+        finalCost: item.finalCost,
+      })
+    })
+    return map
+  }, [purchaseItemsWithAllocations])
 
   const [formAlert, setFormAlert] = useState<{ type: "success" | "error"; message: string } | null>(null)
   const [activeProductRowId, setActiveProductRowId] = useState<string | null>(null)
@@ -114,20 +195,32 @@ export default function NewPurchaseModal({
 
   // Get device currency when modal opens
   useEffect(() => {
-    const fetchCurrency = async () => {
+    const fetchCurrencyAndCourier = async () => {
       if (!isOpen) return
 
       try {
-        const deviceCurrency = await getDeviceCurrency(userId)
+        const deviceCurrency = await getDeviceCurrency(deviceId)
         setLocalCurrency(deviceCurrency)
       } catch (err) {
         console.error("Error fetching currency:", err)
         setLocalCurrency("QAR") // Fallback
       }
+
+      if (deviceId) {
+        setIsCourierRateLoading(true)
+        try {
+          const pct = await getDeviceDefaultCourierPct(deviceId)
+          setCourierChargePercentage(pct)
+        } catch (err) {
+          console.error("Error fetching default courier percentage:", err)
+        } finally {
+          setIsCourierRateLoading(false)
+        }
+      }
     }
 
-    fetchCurrency()
-  }, [isOpen, userId])
+    fetchCurrencyAndCourier()
+  }, [isOpen, deviceId])
 
   // Reset form when modal closes
   useEffect(() => {
@@ -156,8 +249,13 @@ export default function NewPurchaseModal({
       
       
       setDiscountAmount(0)
+      setCourierChargePercentage(0)
+      setIsCourierRateLoading(false)
       setFormAlert(null)
       setActiveProductRowId(null)
+      setCustomCourierCharge(null)
+      setIsEditingCourier(false)
+      setCourierInputVal("")
     }
   }, [isOpen])
 
@@ -350,23 +448,16 @@ export default function NewPurchaseModal({
       return
     }
 
-    const purchaseItems = products.flatMap((p) => {
-      if (!p.productId) return []
-      // Multi-variant products submit one item per entered variant. Default-only
-      // products intentionally retain the old product-row quantity and cost fields.
-      if (p.variants.length > 1) {
-        return p.variants.filter(v => v.quantity > 0).map(v => {
-          const taxPercentage = v.taxPercentage || 0
-          const taxAmount = v.quantity * v.price * (taxPercentage / 100)
-          const lineTotal = (v.quantity * v.price) + taxAmount
-          return { product_id: p.productId, variant_id: v.id, quantity: v.quantity, price: v.price, tax_percentage: taxPercentage, tax_amount: taxAmount, line_total: lineTotal }
-        })
-      }
-      const taxPercentage = p.taxPercentage || 0
-      const taxAmount = p.quantity * p.price * (taxPercentage / 100)
-      const lineTotal = (p.quantity * p.price) + taxAmount
-      return p.quantity > 0 ? [{ product_id: p.productId, variant_id: p.variants[0]?.id, quantity: p.quantity, price: p.price, tax_percentage: taxPercentage, tax_amount: taxAmount, line_total: lineTotal }] : []
-    })
+    const purchaseItems = purchaseItemsWithAllocations.map(item => ({
+      product_id: item.product_id,
+      variant_id: item.variant_id,
+      quantity: item.quantity,
+      price: item.price,
+      tax_percentage: item.tax_percentage,
+      tax_amount: item.tax_amount,
+      line_total: item.line_total,
+      courier_charge: item.allocatedCourier,
+    }))
 
     if (purchaseItems.length === 0) {
       setFormAlert({
@@ -410,6 +501,8 @@ export default function NewPurchaseModal({
 
       // Prepare items
       formData.append("items", JSON.stringify(purchaseItems))
+      formData.append("courier_charge", courierCharge.toString())
+      formData.append("courier_charge_percentage", courierChargePercentage.toString())
 
       // Submit form
       const result = await createPurchase(formData)
@@ -642,6 +735,7 @@ export default function NewPurchaseModal({
                 {products.map((product, index) => (
                   <div key={product.id}>
                   {product.variants.length <= 1 && (
+                  <>
                   <div
                     key={product.id}
                     className={`grid grid-cols-[38fr_9fr_16fr_9fr_11fr_12fr_5fr] gap-2 p-2 items-center border-b border-gray-200 ${
@@ -720,6 +814,18 @@ export default function NewPurchaseModal({
                       </Button>
                     </div>
                   </div>
+                  {allocationMap.has(product.id) && (
+                    <div className="grid grid-cols-[38fr_62fr] gap-2 px-2 py-1 text-xs bg-purple-50 text-purple-900 border-b border-gray-200">
+                      <div></div>
+                      <div className="flex gap-4 items-center">
+                        <span>Original: {localCurrency} {product.lineTotal.toFixed(2)}</span>
+                        <span>Allocation: {allocationMap.get(product.id)!.allocationPercentage.toFixed(2)}%</span>
+                        <span>Courier: {localCurrency} {allocationMap.get(product.id)!.allocatedCourier.toFixed(2)}</span>
+                        <span className="font-semibold">Final Cost: {localCurrency} {allocationMap.get(product.id)!.finalCost.toFixed(2)}</span>
+                      </div>
+                    </div>
+                  )}
+                  </>
                   )}
                   {product.variants.length > 1 && (
                     <div className="mx-2 mb-3 overflow-hidden rounded-lg border border-emerald-200 bg-white shadow-sm">
@@ -738,7 +844,8 @@ export default function NewPurchaseModal({
                         <div className="min-w-0">MRP</div>
                       </div>
                       {product.variants.map(variant => (
-                        <div key={variant.id} className="grid grid-cols-[28fr_8fr_14fr_8fr_10fr_12fr_10fr_10fr] gap-2 items-center border-b border-gray-100 px-3 py-2 last:border-b-0">
+                        <div key={variant.id}>
+                        <div className="grid grid-cols-[28fr_8fr_14fr_8fr_10fr_12fr_10fr_10fr] gap-2 items-center border-b border-gray-100 px-3 py-2 last:border-b-0">
                           <div className="min-w-0"><p className="truncate text-sm font-medium text-gray-900">{variant.name}</p><p className="truncate text-[11px] text-gray-500">Stock: {variant.stock || 0}{variant.shelf ? ` · ${variant.shelf}` : ""}{variant.barcode ? ` · ${variant.barcode}` : ""}</p></div>
                           <div className="min-w-0">
                             <Input type="number" min="0" className="h-8 border-slate-300 w-full" value={variant.quantityInput !== undefined ? variant.quantityInput : (variant.quantity || "")} placeholder="0" onChange={e => updateVariant(product.id, variant.id, { quantityInput: e.target.value, quantity: Math.max(0, Number.parseInt(e.target.value) || 0) })} />
@@ -759,6 +866,18 @@ export default function NewPurchaseModal({
                           <div className="min-w-0 text-xs font-medium text-gray-900 truncate">{localCurrency} {variant.lineTotal.toFixed(2)}</div>
                           <div className="min-w-0 rounded bg-gray-50 px-1 py-2 text-xs text-gray-600 truncate">{variant.msp ?? "–"}</div>
                           <div className="min-w-0 rounded bg-gray-50 px-1 py-2 text-xs text-gray-600 truncate">{variant.mrp ?? "–"}</div>
+                        </div>
+                        {variant.quantity > 0 && allocationMap.has(`${product.id}-${variant.id}`) && (
+                          <div className="grid grid-cols-[28fr_72fr] gap-2 px-3 py-1 text-[11px] bg-purple-50 text-purple-900 border-b border-gray-100 border-t border-t-slate-50">
+                            <div></div>
+                            <div className="flex gap-4 items-center">
+                              <span>Original: {localCurrency} {((variant.quantity * variant.price) + (variant.quantity * variant.price * ((variant.taxPercentage || 0) / 100))).toFixed(2)}</span>
+                              <span>Allocation: {allocationMap.get(`${product.id}-${variant.id}`)!.allocationPercentage.toFixed(2)}%</span>
+                              <span>Courier: {localCurrency} {allocationMap.get(`${product.id}-${variant.id}`)!.allocatedCourier.toFixed(2)}</span>
+                              <span className="font-semibold">Final Cost: {localCurrency} {allocationMap.get(`${product.id}-${variant.id}`)!.finalCost.toFixed(2)}</span>
+                            </div>
+                          </div>
+                        )}
                         </div>
                       ))}
                     </div>

@@ -5,6 +5,8 @@ interface DeviceState {
   name: string | null
   currency: string
   logo_url: string | null
+  staff_pages: string | null
+  admin_pages: string | null
   company: {
     id: number | null
     name: string | null
@@ -25,6 +27,8 @@ const initialState: DeviceState = {
   name: null,
   currency: "AED",
   logo_url: null,
+  staff_pages: null,
+  admin_pages: null,
   company: null,
   user: null,
   isLoading: false,
@@ -54,6 +58,8 @@ function normalizeStoredState(raw: Partial<DeviceState> & { company?: { logo_url
     name: raw.name ?? null,
     currency: raw.currency ?? "AED",
     logo_url: logoUrl,
+    staff_pages: raw.staff_pages ?? null,
+    admin_pages: raw.admin_pages ?? null,
     company,
     user: raw.user ?? null,
     isLoading: raw.isLoading ?? false,
@@ -99,7 +105,7 @@ const deviceSlice = createSlice({
     setDeviceData: (
       state,
       action: PayloadAction<{
-        device: { id: number; name: string; currency: string; logo_url?: string | null }
+        device: { id: number; name: string; currency: string; logo_url?: string | null; staff_pages?: string | null; admin_pages?: string | null }
         company: { id: number; name: string }
         user: { id: number; name: string; email: string; token: string; role?: string | null }
       }>,
@@ -108,6 +114,8 @@ const deviceSlice = createSlice({
       state.name = action.payload.device.name
       state.currency = action.payload.device.currency
       state.logo_url = action.payload.device.logo_url ?? null
+      state.staff_pages = action.payload.device.staff_pages ?? null
+      state.admin_pages = action.payload.device.admin_pages ?? null
       state.company = action.payload.company
       state.user = {
         id: action.payload.user.id,
@@ -124,6 +132,8 @@ const deviceSlice = createSlice({
       state.name = null
       state.currency = "AED"
       state.logo_url = null
+      state.staff_pages = null
+      state.admin_pages = null
       state.company = null
       state.user = null
       state.isLoading = false
@@ -151,6 +161,8 @@ const deviceSlice = createSlice({
       state.name = storedState.name
       state.currency = storedState.currency
       state.logo_url = storedState.logo_url
+      state.staff_pages = storedState.staff_pages
+      state.admin_pages = storedState.admin_pages
       state.company = storedState.company
       state.user = storedState.user
       state.isLoading = storedState.isLoading
@@ -162,12 +174,16 @@ const deviceSlice = createSlice({
         name?: string
         currency?: string
         logo_url?: string | null
+        staff_pages?: string | null
+        admin_pages?: string | null
         company?: { id: number | null; name: string | null }
       }>,
     ) => {
       if (action.payload.name !== undefined) state.name = action.payload.name
       if (action.payload.currency !== undefined) state.currency = action.payload.currency
       if (action.payload.logo_url !== undefined) state.logo_url = action.payload.logo_url
+      if (action.payload.staff_pages !== undefined) state.staff_pages = action.payload.staff_pages
+      if (action.payload.admin_pages !== undefined) state.admin_pages = action.payload.admin_pages
       if (action.payload.company !== undefined) state.company = action.payload.company
       saveStateToStorage(state)
     },

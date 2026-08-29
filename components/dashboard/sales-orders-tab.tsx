@@ -298,10 +298,10 @@ export default function SalesOrdersTab() {
                   const dateFormatted = format(saleDate, "dd MMM yyyy")
   
                   const statusLower = (sale.delivery_status || "Pending").toLowerCase()
-                  let rowBg = index % 2 === 0 ? "bg-white" : "bg-slate-50/50"
+                  let rowBg = index % 2 === 0 ? "bg-white text-slate-800" : "bg-slate-50/50 text-slate-800"
 
                   if (statusLower === "pending" || statusLower === "pending delivery") {
-                    rowBg = "bg-amber-50/80 border-l-4 border-l-amber-500 hover:bg-amber-100/80 text-amber-950"
+                    rowBg = "bg-amber-100/80 border-l-4 border-l-amber-500 hover:bg-amber-200/80 text-amber-950 font-medium"
                   } else if (
                     statusLower.includes("paid") ||
                     statusLower.includes("pack") ||
@@ -311,11 +311,11 @@ export default function SalesOrdersTab() {
                     statusLower.includes("out for delivery") ||
                     statusLower.includes("dispatch")
                   ) {
-                    rowBg = "bg-blue-50/80 border-l-4 border-l-blue-500 hover:bg-blue-100/80 text-blue-950"
+                    rowBg = "bg-blue-100/80 border-l-4 border-l-blue-500 hover:bg-blue-200/80 text-blue-950 font-medium"
                   } else if (statusLower.includes("deliver") || statusLower.includes("complete")) {
-                    rowBg = "bg-emerald-50/80 border-l-4 border-l-emerald-500 hover:bg-emerald-100/80 text-emerald-950"
+                    rowBg = "bg-emerald-100/80 border-l-4 border-l-emerald-500 hover:bg-emerald-200/80 text-emerald-950 font-medium"
                   } else if (statusLower.includes("cancel") || statusLower.includes("return")) {
-                    rowBg = "bg-rose-50/70 border-l-4 border-l-rose-400 hover:bg-rose-100/70 text-rose-950"
+                    rowBg = "bg-rose-100/80 border-l-4 border-l-rose-500 hover:bg-rose-200/80 text-rose-950 font-medium"
                   }
 
                   return (

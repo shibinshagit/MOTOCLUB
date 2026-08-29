@@ -30,6 +30,8 @@ import {
 } from "@/app/actions/purchase-actions"
 import { useToast } from "@/components/ui/use-toast"
 import { notifyError, notifySuccess } from "@/lib/notifications"
+import { getDeviceDefaultCourierPct } from "@/app/actions/dashboard-actions"
+import { allocatePurchaseCourierCharge, calculatePurchaseCourierCharge } from "@/lib/purchase-courier"
 import ViewPurchaseModal from "@/components/purchases/view-purchase-modal"
 import PurchaseExcelTable from "@/components/purchases/purchase-excel-table"
 import { PurchaseViewFlip, type PurchaseViewMode } from "@/components/purchases/purchase-view-flip"
@@ -103,6 +105,11 @@ interface PurchaseVariantEntry {
   quantityInput?: string
   priceInput?: string
   taxPercentageInput?: string
+  originalItemId?: number | null
+  batch_id?: number | null
+  batch_number?: string | null
+  mfg_date?: string | null
+  expiry_date?: string | null
 }
 
 type TaxablePurchaseLine = Pick<PurchaseVariantEntry, "quantity" | "price" | "taxPercentage">
@@ -186,6 +193,11 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
   const [paymentMethod, setPaymentMethod] = useState<string>("Cash")
   const [receivedAmount, setReceivedAmount] = useState<number>(0)
   const [discountAmount, setDiscountAmount] = useState<number>(0)
+  const [courierChargePercentage, setCourierChargePercentage] = useState<number>(0)
+  const [courierChargePercentageInput, setCourierChargePercentageInput] = useState<string>("")
+  const [customCourierCharge, setCustomCourierCharge] = useState<number | null>(null)
+  const [isEditingCourier, setIsEditingCourier] = useState(false)
+  const [courierInputVal, setCourierInputVal] = useState("")
   const [products, setProducts] = useState<ProductRow[]>([
     {
       id: crypto.randomUUID(),
@@ -294,6 +306,9 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
       activeDeviceIdRef.current = deviceId
       setPurchasesListLoaded(false)
       setPurchases([])
+      getDeviceDefaultCourierPct(deviceId).then((pct) => {
+        setCourierChargePercentage(pct)
+      })
     }
   }, [deviceId])
 
@@ -342,6 +357,9 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
     setIsEditMode(Boolean(activeDraft.isEditMode))
     setEditingPurchaseId(activeDraft.editingPurchaseId || null)
     setFormAlert(null)
+    setCustomCourierCharge(null)
+    setIsEditingCourier(false)
+    setCourierInputVal("")
 
     setTimeout(() => {
       draftSwitchingRef.current = false
@@ -411,10 +429,89 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
     return products.reduce((sum, product) => sum + (Number(product.total) || 0), 0)
   }, [products])
 
+  const autoCourierCharge = useMemo(
+    () => calculatePurchaseCourierCharge(subtotal, courierChargePercentage),
+    [subtotal, courierChargePercentage]
+  )
+  const courierCharge = customCourierCharge !== null ? customCourierCharge : autoCourierCharge
+
   const totalAmount = useMemo(() => {
     const lineTaxTotal = products.reduce((sum, product) => sum + (Number(product.taxAmount) || 0), 0)
-    return Math.max(0, Number(subtotal) + lineTaxTotal - Number(discountAmount))
-  }, [products, subtotal, discountAmount])
+    return Math.max(0, Number(subtotal) + lineTaxTotal - Number(discountAmount) + Number(courierCharge))
+  }, [products, subtotal, discountAmount, courierCharge])
+
+  const purchaseItemsWithAllocations = useMemo(() => {
+    const items = products.flatMap((product): any[] => {
+      if (!product.productId) return []
+      if ((product.variantEntries?.length || 0) > 1) {
+        return product.variantEntries!
+          .filter(variant => variant.quantity > 0)
+          .map(variant => {
+            const taxPercentage = variant.taxPercentage || 0
+            const taxAmount = variant.quantity * variant.price * (taxPercentage / 100)
+            const lineTotal = (variant.quantity * variant.price) + taxAmount
+            return {
+              key: `${product.id}-${variant.id}`,
+              originalItemId: variant.originalItemId || null,
+              product_id: product.productId!,
+              variant_id: variant.id,
+              quantity: variant.quantity,
+              price: variant.price,
+              tax_percentage: taxPercentage,
+              tax_amount: taxAmount,
+              line_total: lineTotal,
+              batch_id: variant.batch_id || null,
+              batch_number: variant.batch_number || null,
+              mfg_date: variant.mfg_date || null,
+              expiry_date: variant.expiry_date || null,
+            }
+          })
+      }
+      const taxPercentage = product.taxPercentage || 0
+      const taxAmount = product.quantity * product.price * (taxPercentage / 100)
+      const lineTotal = (product.quantity * product.price) + taxAmount
+      return product.quantity > 0
+        ? [{
+            key: product.id,
+            originalItemId: product.originalItemId || null,
+            product_id: product.productId,
+            variant_id: product.variantEntries?.[0]?.id || product.variant_id || null,
+            quantity: product.quantity,
+            price: product.price,
+            tax_percentage: taxPercentage,
+            tax_amount: taxAmount,
+            line_total: lineTotal,
+            batch_id: product.batch_id || null,
+            batch_number: product.batch_number || null,
+            mfg_date: product.mfg_date || null,
+            expiry_date: product.expiry_date || null,
+          }]
+        : []
+    })
+
+    const courierAllocations = allocatePurchaseCourierCharge(items, courierCharge)
+    return items.map((item, idx) => {
+      const allocation = courierAllocations[idx]
+      return {
+        ...item,
+        allocationPercentage: allocation.allocationPercentage,
+        allocatedCourier: allocation.courierCharge,
+        finalCost: item.line_total + allocation.courierCharge,
+      }
+    })
+  }, [products, courierCharge, subtotal, courierChargePercentage])
+
+  const allocationMap = useMemo(() => {
+    const map = new Map<string, { allocationPercentage: number; allocatedCourier: number; finalCost: number }>()
+    purchaseItemsWithAllocations.forEach(item => {
+      map.set(item.key, {
+        allocationPercentage: item.allocationPercentage,
+        allocatedCourier: item.allocatedCourier,
+        finalCost: item.finalCost,
+      })
+    })
+    return map
+  }, [purchaseItemsWithAllocations])
 
   useEffect(() => {
     if (status === "Paid") {
@@ -518,6 +615,20 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
         }
         return entry
       })
+      return {
+        ...row,
+        variantEntries,
+        total: variantEntries.reduce((sum, entry) => sum + entry.total, 0),
+        taxAmount: variantEntries.reduce((sum, entry) => sum + entry.taxAmount, 0),
+        lineTotal: variantEntries.reduce((sum, entry) => sum + entry.lineTotal, 0),
+      }
+    }))
+  }
+
+  const removeVariantEntry = (rowId: string, variantId: number) => {
+    setProducts(current => current.map(row => {
+      if (row.id !== rowId) return row
+      const variantEntries = (row.variantEntries || []).filter(entry => entry.id !== variantId)
       return {
         ...row,
         variantEntries,
@@ -678,6 +789,9 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
     setEditingPurchaseId(null)
     setPendingEditPurchaseId(null)
     setPendingEditDraftId("")
+    setCustomCourierCharge(null)
+    setIsEditingCourier(false)
+    setCourierInputVal("")
 
     if (activeView === "entry" && activeDraftId) {
       setPurchaseDrafts((prev) =>
@@ -727,7 +841,21 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
           (sum: number, item: any) => sum + Number(item.line_total ?? (item.quantity * item.price)),
           0,
         )
-        setDiscountAmount(Math.max(0, lineTotalsBeforeDiscount - Number(purchase.total_amount || 0)))
+        const sub = items.reduce((sum: number, item: any) => sum + (item.quantity * item.price), 0)
+        let pct = Number(purchase.courier_charge_percentage) || 0
+        if (pct === 0 && Number(purchase.courier_charge) > 0 && sub > 0) {
+          pct = Number(((Number(purchase.courier_charge) / sub) * 100).toFixed(2))
+        }
+        setCourierChargePercentage(pct)
+        setDiscountAmount(Math.max(0, lineTotalsBeforeDiscount + Number(purchase.courier_charge || 0) - Number(purchase.total_amount || 0)))
+
+        const calculatedAutoCourier = calculatePurchaseCourierCharge(sub, pct)
+        const savedCourier = Number(purchase.courier_charge) || 0
+        if (Math.abs(savedCourier - calculatedAutoCourier) > 0.01) {
+          setCustomCourierCharge(savedCourier)
+        } else {
+          setCustomCourierCharge(null)
+        }
 
         const productRows = items.map((item: any) => ({
           id: crypto.randomUUID(),
@@ -803,38 +931,21 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
       return
     }
 
-    const items: any[] = products.flatMap((product): any[] => {
-      if (!product.productId) return []
-      if ((product.variantEntries?.length || 0) > 1) {
-        return product.variantEntries!
-          .filter(variant => variant.quantity > 0)
-          .map(variant => ({
-            product_id: product.productId!,
-            variant_id: variant.id,
-            quantity: variant.quantity,
-            price: variant.price,
-            tax_percentage: variant.taxPercentage,
-            tax_amount: variant.taxAmount,
-            line_total: variant.lineTotal,
-          }))
-      }
-      return product.quantity > 0
-        ? [{
-            ...(product.originalItemId ? { id: product.originalItemId } : {}),
-            product_id: product.productId,
-            quantity: product.quantity,
-            price: product.price,
-            variant_id: product.variantEntries?.[0]?.id || product.variant_id || null,
-            batch_id: product.batch_id || null,
-            batch_number: product.batch_number || null,
-            mfg_date: product.mfg_date || null,
-            expiry_date: product.expiry_date || null,
-            tax_percentage: product.taxPercentage,
-            tax_amount: product.taxAmount,
-            line_total: product.lineTotal,
-          }]
-        : []
-    })
+    const items = purchaseItemsWithAllocations.map(item => ({
+      id: item.originalItemId || undefined,
+      product_id: item.product_id,
+      variant_id: item.variant_id,
+      quantity: item.quantity,
+      price: item.price,
+      tax_percentage: item.tax_percentage,
+      tax_amount: item.tax_amount,
+      line_total: item.line_total,
+      courier_charge: item.allocatedCourier,
+      batch_id: item.batch_id || null,
+      batch_number: item.batch_number || null,
+      mfg_date: item.mfg_date || null,
+      expiry_date: item.expiry_date || null,
+    }))
     if (items.length === 0) {
       setFormAlert({
         type: "error",
@@ -878,6 +989,8 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
       formData.append("received_amount", finalReceivedAmount.toString())
 
       formData.append("items", JSON.stringify(items))
+      formData.append("courier_charge", courierCharge.toString())
+      formData.append("courier_charge_percentage", courierChargePercentage.toString())
 
       const result =
         isEditMode && editingPurchaseId ? await updatePurchase(formData) : await createPurchase(formData)
@@ -1110,36 +1223,61 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
         <div className="flex items-center gap-2 border-b border-emerald-100 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-900">
           <ChevronsUpDown className="h-4 w-4" /> Variants ({variants.length})
         </div>
-        <div className="grid grid-cols-[43fr_9fr_16fr_9fr_11fr_12fr] gap-2 border-b border-gray-100 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-600">
-          <div className="min-w-0">Variant</div><div className="min-w-0">Qty</div><div className="min-w-0">Cost Price</div><div className="min-w-0">Tax %</div><div className="min-w-0">Tax Amount</div><div className="min-w-0">Line Total</div>
+        <div className="grid grid-cols-[38fr_9fr_16fr_9fr_11fr_12fr_5fr] gap-2 border-b border-gray-100 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-600">
+          <div className="min-w-0">Variant</div><div className="min-w-0">Qty</div><div className="min-w-0">Cost Price</div><div className="min-w-0">Tax %</div><div className="min-w-0">Tax Amount</div><div className="min-w-0">Line Total</div><div className="min-w-0 text-center">Action</div>
         </div>
         {variants.map(variant => {
           // Older saved drafts predate per-line tax fields. Recalculate here
           // rather than assuming those optional persisted values exist.
           const amounts = calculatePurchaseLine(variant)
+          const key = `${product.id}-${variant.id}`
 
           return (
-          <div key={variant.id} className="grid grid-cols-[43fr_9fr_16fr_9fr_11fr_12fr] gap-2 items-center border-b border-gray-100 px-3 py-2 last:border-b-0">
-            <div className="min-w-0">
-              <p className="truncate text-sm font-medium text-gray-900">{variant.name}</p>
-              <p className="truncate text-[11px] text-gray-500">Stock: {variant.stock || 0}{variant.sku ? ` · SKU: ${variant.sku}` : ""}{variant.barcode ? ` · ${variant.barcode}` : ""}{variant.shelf ? ` · Shelf: ${variant.shelf}` : ""}</p>
-            </div>
-            <div className="min-w-0">
-              <Input type="number" min="0" className="h-8 border-slate-300 w-full" value={variant.quantityInput !== undefined ? variant.quantityInput : (variant.quantity || "")} placeholder="0" onChange={event => updateVariantEntry(product.id, variant.id, { quantityInput: event.target.value, quantity: Math.max(0, Number.parseInt(event.target.value, 10) || 0) })} />
-            </div>
-            <div className="min-w-0">
-              <Input type="number" min="0" step="0.01" className="h-8 border-slate-300 w-full" value={variant.priceInput !== undefined ? variant.priceInput : (variant.price || 0)} placeholder="0.00" onChange={event => updateVariantEntry(product.id, variant.id, { priceInput: event.target.value, price: Number.parseFloat(event.target.value) || 0 })} />
-            </div>
-            <div className="min-w-0">
-              <Input type="number" min="0" max="100" step="0.01" className="h-8 border-slate-300 w-full" value={variant.taxPercentageInput !== undefined ? variant.taxPercentageInput : (variant.taxPercentage || 0)} onChange={event => {
-                const val = event.target.value
-                const numVal = Number.parseFloat(val) || 0
-                updateVariantEntry(product.id, variant.id, { taxPercentageInput: val, taxPercentage: Math.max(0, Math.min(100, numVal)) })
-              }} />
-            </div>
-            <div className="min-w-0 text-xs text-gray-700 truncate">{currency} {amounts.taxAmount.toFixed(2)}</div>
-            <div className="min-w-0 font-medium text-xs text-gray-900 truncate">{currency} {amounts.lineTotal.toFixed(2)}</div>
-          </div>
+            <React.Fragment key={variant.id}>
+              <div className="grid grid-cols-[38fr_9fr_16fr_9fr_11fr_12fr_5fr] gap-2 items-center border-b border-gray-100 px-3 py-2 last:border-b-0">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-gray-900">{variant.name}</p>
+                  <p className="truncate text-[11px] text-gray-500">Stock: {variant.stock || 0}{variant.sku ? ` · SKU: ${variant.sku}` : ""}{variant.barcode ? ` · ${variant.barcode}` : ""}{variant.shelf ? ` · Shelf: ${variant.shelf}` : ""}</p>
+                </div>
+                <div className="min-w-0">
+                  <Input type="number" min="0" className="h-8 border-slate-300 w-full" value={variant.quantityInput !== undefined ? variant.quantityInput : (variant.quantity || "")} placeholder="0" onChange={event => updateVariantEntry(product.id, variant.id, { quantityInput: event.target.value, quantity: Math.max(0, Number.parseInt(event.target.value, 10) || 0) })} />
+                </div>
+                <div className="min-w-0">
+                  <Input type="number" min="0" step="0.01" className="h-8 border-slate-300 w-full" value={variant.priceInput !== undefined ? variant.priceInput : (variant.price || 0)} placeholder="0.00" onChange={event => updateVariantEntry(product.id, variant.id, { priceInput: event.target.value, price: Number.parseFloat(event.target.value) || 0 })} />
+                </div>
+                <div className="min-w-0">
+                  <Input type="number" min="0" max="100" step="0.01" className="h-8 border-slate-300 w-full" value={variant.taxPercentageInput !== undefined ? variant.taxPercentageInput : (variant.taxPercentage || 0)} onChange={event => {
+                    const val = event.target.value
+                    const numVal = Number.parseFloat(val) || 0
+                    updateVariantEntry(product.id, variant.id, { taxPercentageInput: val, taxPercentage: Math.max(0, Math.min(100, numVal)) })
+                  }} />
+                </div>
+                <div className="min-w-0 text-xs text-gray-700 truncate">{currency} {amounts.taxAmount.toFixed(2)}</div>
+                <div className="min-w-0 font-medium text-xs text-gray-900 truncate">{currency} {amounts.lineTotal.toFixed(2)}</div>
+                <div className="min-w-0 flex justify-center">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => removeVariantEntry(product.id, variant.id)}
+                    className="h-6 w-6 p-0 text-gray-400 hover:text-red-500"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </Button>
+                </div>
+              </div>
+              {variant.quantity > 0 && allocationMap.has(key) && courierCharge > 0 && (
+                <div className="grid grid-cols-[38fr_62fr] gap-2 px-3 py-1 text-[11px] bg-purple-50 text-purple-900 border-b border-gray-100 border-t border-t-slate-50">
+                  <div></div>
+                  <div className="flex gap-4 items-center">
+                    <span>Original: {currency} {amounts.lineTotal.toFixed(2)}</span>
+                    <span>Allocation: {allocationMap.get(key)!.allocationPercentage.toFixed(2)}%</span>
+                    <span>Courier: {currency} {allocationMap.get(key)!.allocatedCourier.toFixed(2)}</span>
+                    <span className="font-semibold">Final Cost: {currency} {allocationMap.get(key)!.finalCost.toFixed(2)}</span>
+                  </div>
+                </div>
+              )}
+            </React.Fragment>
           )
         })}
       </div>
@@ -1257,6 +1395,17 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
         </Button>
       </div>
     </div>
+    {(!product.variantEntries || product.variantEntries.length <= 1) && allocationMap.has(product.id) && courierCharge > 0 && (
+      <div className="grid grid-cols-[38fr_62fr] gap-2 px-2 py-1 text-xs bg-purple-50 text-purple-900 border-b border-gray-200">
+        <div></div>
+        <div className="flex gap-4 items-center">
+          <span>Share: <span className="font-semibold">{allocationMap.get(product.id)!.allocationPercentage.toFixed(2)}%</span></span>
+          <span>of {currency} {product.lineTotal.toFixed(2)}</span>
+          <span className="text-purple-700">→ Courier: +{currency} {allocationMap.get(product.id)!.allocatedCourier.toFixed(2)}</span>
+          <span className="font-semibold text-purple-900">Final: {currency} {allocationMap.get(product.id)!.finalCost.toFixed(2)}</span>
+        </div>
+      </div>
+    )}
     {renderVariantEntries(product)}
     </React.Fragment>
   )
@@ -1365,6 +1514,12 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
           Remove
         </Button>
       </div>
+      {(!product.variantEntries || product.variantEntries.length <= 1) && allocationMap.has(product.id) && courierCharge > 0 && (
+        <div className="flex items-center justify-between mt-2 pt-2 border-t border-dashed border-gray-200 text-xs text-purple-900 bg-purple-50 p-2 rounded">
+          <span>Courier Portion:</span>
+          <span>+{currency} {allocationMap.get(product.id)!.allocatedCourier.toFixed(2)}</span>
+        </div>
+      )}
     </div>
     {renderVariantEntries(product)}
     </React.Fragment>
@@ -1610,6 +1765,70 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
                           <span className="text-sm text-gray-900">
                             {currency} {subtotal.toFixed(2)}
                           </span>
+                        </div>
+                        <div className="flex justify-between items-center py-1 border-t border-gray-200 text-sm">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium text-xs text-gray-900">Courier Charge:</span>
+                              {!isEditingCourier && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setCourierInputVal(courierCharge.toFixed(2))
+                                    setIsEditingCourier(true)
+                                  }}
+                                  className="text-[11px] text-blue-600 hover:text-blue-800 underline font-medium focus:outline-none"
+                                >
+                                  Edit
+                                </button>
+                              )}
+                            </div>
+                            {subtotal > 0 && courierChargePercentage > 0 && (
+                              <p className="text-[10px] text-gray-400 mt-0.5">
+                                {courierChargePercentage}% of {currency}{subtotal.toFixed(2)} · distributed to {purchaseItemsWithAllocations.length} item(s)
+                              </p>
+                            )}
+                          </div>
+                          {isEditingCourier ? (
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-gray-900 text-xs font-semibold mr-0.5">{currency}</span>
+                              <Input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={courierInputVal}
+                                onChange={(e) => setCourierInputVal(e.target.value)}
+                                className="w-20 h-7 text-xs text-center bg-white border-gray-300 text-gray-900 focus:ring-1 focus:ring-blue-500"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const parsed = parseFloat(courierInputVal)
+                                  if (!isNaN(parsed) && parsed >= 0) {
+                                    setCustomCourierCharge(parsed)
+                                  }
+                                  setIsEditingCourier(false)
+                                }}
+                                className="text-xs px-1.5 py-0.5 text-white bg-blue-600 hover:bg-blue-700 rounded font-medium focus:outline-none"
+                              >
+                                Save
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setCustomCourierCharge(null)
+                                  setIsEditingCourier(false)
+                                }}
+                                className="text-xs px-1.5 py-0.5 text-gray-600 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 rounded font-medium focus:outline-none"
+                              >
+                                Reset
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-sm text-gray-900">
+                              {currency} {courierCharge.toFixed(2)}
+                            </span>
+                          )}
                         </div>
                         <div className="flex justify-between items-center py-1 border-t border-gray-200">
                           <span className="font-medium text-xs text-gray-900">Discount:</span>

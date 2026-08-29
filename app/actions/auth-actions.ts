@@ -50,6 +50,8 @@ export async function login(formData: FormData) {
           d.name, 
           d.currency,
           d.logo_url as device_logo,
+          d.staff_pages,
+          d.admin_pages,
           c.id as company_id,
           c.name as company_name
         FROM devices d
@@ -81,6 +83,8 @@ export async function login(formData: FormData) {
             name: deviceInfo.name || user.name,
             currency: deviceInfo.currency || "AED",
             logo_url: deviceLogo,
+            staff_pages: deviceInfo.staff_pages || null,
+            admin_pages: deviceInfo.admin_pages || null,
           },
           company: {
             id: deviceInfo.company_id,
@@ -295,6 +299,8 @@ export async function getDeviceProfile(deviceId: number) {
         d.name,
         d.currency,
         d.logo_url,
+        d.staff_pages,
+        d.admin_pages,
         c.id as company_id,
         c.name as company_name
       FROM devices d
@@ -315,6 +321,8 @@ export async function getDeviceProfile(deviceId: number) {
         name: row.name as string,
         currency: (row.currency as string) || "AED",
         logo_url: (row.logo_url as string | null)?.trim() || null,
+        staff_pages: (row.staff_pages as string | null) || null,
+        admin_pages: (row.admin_pages as string | null) || null,
         company: {
           id: row.company_id as number | null,
           name: (row.company_name as string | null) || null,

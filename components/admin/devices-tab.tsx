@@ -43,6 +43,8 @@ type Device = {
   created_at?: string
   currency?: string
   logo_url?: string | null
+  staff_pages?: string | null
+  admin_pages?: string | null
 }
 
 interface DevicesTabProps {
@@ -444,6 +446,80 @@ export default function DevicesTab({ companyId }: DevicesTabProps) {
                 setRemoveLogo(true)
               }}
             />
+
+            <div className="space-y-3 border-t pt-4">
+              <h4 className="text-sm font-semibold text-gray-900">Page Visibility Settings</h4>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label className="text-xs font-bold text-gray-700 block mb-2">Visible to Staff</Label>
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto border p-2.5 rounded-md bg-gray-50/50">
+                    {[
+                      { id: "sales-orders", label: "Order List" },
+                      { id: "sale", label: "New Sale" },
+                      { id: "returns", label: "Returns" },
+                      { id: "purchase", label: "Purchase" },
+                      { id: "product", label: "Inventory" },
+                      { id: "customer", label: "Customers" },
+                      { id: "supplier", label: "Suppliers" },
+                      { id: "transfer", label: "Transfers" },
+                      { id: "platform", label: "Platforms" },
+                      { id: "master", label: "Master Data" },
+                      { id: "accounting", label: "Accounting" },
+                      { id: "attendance", label: "Attendance" },
+                      { id: "requests", label: "Staff Requests" },
+                      { id: "trending", label: "Trending" },
+                    ].map((page) => {
+                      const isDefaultChecked = ["sales-orders", "sale", "returns", "purchase", "product", "customer", "supplier", "transfer", "attendance", "trending"].includes(page.id);
+                      return (
+                        <label key={page.id} className="flex items-center space-x-2 text-sm text-gray-800 cursor-pointer hover:text-gray-900">
+                          <input
+                            type="checkbox"
+                            name="staff_pages"
+                            value={page.id}
+                            defaultChecked={isDefaultChecked}
+                            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                          />
+                          <span>{page.label}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                </div>
+                
+                <div>
+                  <Label className="text-xs font-bold text-gray-700 block mb-2">Visible to Admin</Label>
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto border p-2.5 rounded-md bg-gray-50/50">
+                    {[
+                      { id: "sales-orders", label: "Order List" },
+                      { id: "sale", label: "New Sale" },
+                      { id: "returns", label: "Returns" },
+                      { id: "purchase", label: "Purchase" },
+                      { id: "product", label: "Inventory" },
+                      { id: "customer", label: "Customers" },
+                      { id: "supplier", label: "Suppliers" },
+                      { id: "transfer", label: "Transfers" },
+                      { id: "platform", label: "Platforms" },
+                      { id: "master", label: "Master Data" },
+                      { id: "accounting", label: "Accounting" },
+                      { id: "attendance", label: "Attendance" },
+                      { id: "requests", label: "Staff Requests" },
+                      { id: "trending", label: "Trending" },
+                    ].map((page) => (
+                      <label key={page.id} className="flex items-center space-x-2 text-sm text-gray-800 cursor-pointer hover:text-gray-900">
+                        <input
+                          type="checkbox"
+                          name="admin_pages"
+                          value={page.id}
+                          defaultChecked={true}
+                          className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                        />
+                        <span>{page.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
             <div className="flex justify-end space-x-2 pt-4">
               <Button
                 type="button"
@@ -485,7 +561,7 @@ export default function DevicesTab({ companyId }: DevicesTabProps) {
             <DialogDescription className={ADMIN_DIALOG_MUTED_CLASS}>Update device account details.</DialogDescription>
           </DialogHeader>
           {selectedDevice && (
-            <form onSubmit={handleUpdateDevice} className="space-y-4">
+            <form key={selectedDevice.id} onSubmit={handleUpdateDevice} className="space-y-4">
               {formError && <FormAlert type="error" message={formError} />}
               <div className="space-y-2">
                 <Label htmlFor="edit-name" className={ADMIN_DIALOG_LABEL_CLASS}>
@@ -554,6 +630,89 @@ export default function DevicesTab({ companyId }: DevicesTabProps) {
                   setRemoveLogo(true)
                 }}
               />
+
+              <div className="space-y-3 border-t pt-4">
+                <h4 className="text-sm font-semibold text-gray-900">Page Visibility Settings</h4>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label className="text-xs font-bold text-gray-700 block mb-2">Visible to Staff</Label>
+                    <div className="space-y-1.5 max-h-48 overflow-y-auto border p-2.5 rounded-md bg-gray-50/50">
+                      {[
+                        { id: "sales-orders", label: "Order List" },
+                        { id: "sale", label: "New Sale" },
+                        { id: "returns", label: "Returns" },
+                        { id: "purchase", label: "Purchase" },
+                        { id: "product", label: "Inventory" },
+                        { id: "customer", label: "Customers" },
+                        { id: "supplier", label: "Suppliers" },
+                        { id: "transfer", label: "Transfers" },
+                        { id: "platform", label: "Platforms" },
+                        { id: "master", label: "Master Data" },
+                        { id: "accounting", label: "Accounting" },
+                        { id: "attendance", label: "Attendance" },
+                        { id: "requests", label: "Staff Requests" },
+                        { id: "trending", label: "Trending" },
+                      ].map((page) => {
+                        const isChecked = (selectedDevice.staff_pages ?? "sales-orders,sale,returns,purchase,product,customer,supplier,transfer,attendance,trending")
+                          .split(",")
+                          .map(s => s.trim())
+                          .includes(page.id);
+                        return (
+                          <label key={page.id} className="flex items-center space-x-2 text-sm text-gray-800 cursor-pointer hover:text-gray-900">
+                            <input
+                              type="checkbox"
+                              name="staff_pages"
+                              value={page.id}
+                              defaultChecked={isChecked}
+                              className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                            />
+                            <span>{page.label}</span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <Label className="text-xs font-bold text-gray-700 block mb-2">Visible to Admin</Label>
+                    <div className="space-y-1.5 max-h-48 overflow-y-auto border p-2.5 rounded-md bg-gray-50/50">
+                      {[
+                        { id: "sales-orders", label: "Order List" },
+                        { id: "sale", label: "New Sale" },
+                        { id: "returns", label: "Returns" },
+                        { id: "purchase", label: "Purchase" },
+                        { id: "product", label: "Inventory" },
+                        { id: "customer", label: "Customers" },
+                        { id: "supplier", label: "Suppliers" },
+                        { id: "transfer", label: "Transfers" },
+                        { id: "platform", label: "Platforms" },
+                        { id: "master", label: "Master Data" },
+                        { id: "accounting", label: "Accounting" },
+                        { id: "attendance", label: "Attendance" },
+                        { id: "requests", label: "Staff Requests" },
+                        { id: "trending", label: "Trending" },
+                      ].map((page) => {
+                        const isChecked = (selectedDevice.admin_pages ?? "sales-orders,sale,returns,purchase,product,customer,supplier,transfer,platform,master,accounting,attendance,requests,trending")
+                          .split(",")
+                          .map(s => s.trim())
+                          .includes(page.id);
+                        return (
+                          <label key={page.id} className="flex items-center space-x-2 text-sm text-gray-800 cursor-pointer hover:text-gray-900">
+                            <input
+                              type="checkbox"
+                              name="admin_pages"
+                              value={page.id}
+                              defaultChecked={isChecked}
+                              className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                            />
+                            <span>{page.label}</span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </div>
               <div className="flex justify-end space-x-2 pt-4">
                 <Button
                   type="button"
