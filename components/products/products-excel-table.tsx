@@ -280,7 +280,7 @@ function ProductsExcelTable({
                           <span className="col-start-1 row-start-1 opacity-0 group-hover/cost:opacity-100">{formatMoney(product.wholesale_price || 0)}</span>
                         </span>
                       </td>
-                    )}
+                    )}v
                     {!hideStockCount && (
                       <>
                         <td className="whitespace-nowrap px-4 py-2.5 align-top text-right text-slate-800">{stock}</td>

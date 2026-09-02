@@ -123,7 +123,14 @@ export function JobCardForm({
       setShippingNotes(sale.shipping_notes || "")
       setCourierPaidExtra(sale.courier_paid_extra > 0 ? sale.courier_paid_extra : "")
       setOriginalDeliveryStatus(sale.delivery_status || "Pending")
-      
+      if (sale.customer_id) {
+        getCustomerAddresses(sale.customer_id).then((addrRes) => {
+          if (addrRes.success && addrRes.data && addrRes.data.length > 0) {
+            setCustomerAddresses(addrRes.data)
+          }
+        })
+      }
+
       if (items && items.length > 0) {
         setProducts(items.map((item: any) => ({
           id: crypto.randomUUID(),
@@ -592,8 +599,23 @@ export function JobCardForm({
                   <Phone className="h-3 w-3 text-gray-400" /> Contact Number
                 </Label>
                 <Input 
-                  value={formatPhoneNumber(customerPhone)} 
-                  onChange={(e) => setCustomerPhone(e.target.value)} 
+                  value={customerPhone} 
+                  onChange={(e) => {
+                    const val = e.target.value
+                    setCustomerPhone(val)
+                    if (!shippingPhone || shippingPhone === customerPhone) {
+                      setShippingPhone(val)
+                    }
+                  }} 
+                  onBlur={() => {
+                    if (customerPhone) {
+                      const formatted = formatPhoneNumber(customerPhone)
+                      setCustomerPhone(formatted)
+                      if (!shippingPhone || shippingPhone === customerPhone) {
+                        setShippingPhone(formatted)
+                      }
+                    }
+                  }}
                   placeholder="e.g. +971 50 1234567"
                 />
               </div>
@@ -691,8 +713,23 @@ export function JobCardForm({
                 <Phone className="h-3 w-3 text-gray-400" /> Contact Number <span className="text-red-500">*</span>
               </Label>
               <Input 
-                value={formatPhoneNumber(shippingPhone)} 
-                onChange={(e) => setShippingPhone(e.target.value)} 
+                value={shippingPhone} 
+                onChange={(e) => {
+                  const val = e.target.value
+                  setShippingPhone(val)
+                  if (!customerPhone || customerPhone === shippingPhone) {
+                    setCustomerPhone(val)
+                  }
+                }} 
+                onBlur={() => {
+                  if (shippingPhone) {
+                    const formatted = formatPhoneNumber(shippingPhone)
+                    setShippingPhone(formatted)
+                    if (!customerPhone || customerPhone === shippingPhone) {
+                      setCustomerPhone(formatted)
+                    }
+                  }
+                }}
                 placeholder="e.g. +971 50 1234567"
                 required
               />

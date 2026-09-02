@@ -6,6 +6,7 @@ import { getAllJobCards } from "@/app/actions/job-card-actions"
 import { deleteSale } from "@/app/actions/sale-actions"
 import { DeliveryStatusSelect } from "@/components/sales/delivery-status-select"
 import { TrackingCell } from "@/components/sales/tracking-cell"
+import { PhoneCell } from "@/components/sales/phone-cell"
 import { StaffOwnerSelect } from "@/components/sales/staff-owner-select"
 import { useDispatch, useSelector } from "react-redux"
 import { selectDeviceCurrency, selectDeviceId } from "@/store/slices/deviceSlice"
@@ -392,7 +393,14 @@ export default function SalesOrdersTab() {
                             onUpdate={fetchSales}
                           />
                         </td>
-                        <td className="whitespace-nowrap px-3 py-2.5 text-slate-500 text-xs">{sale.customer_phone ? formatPhoneNumber(sale.customer_phone) : "N/A"}</td>
+                        <td className="whitespace-nowrap px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
+                          <PhoneCell
+                            saleId={sale.id}
+                            phone={sale.customer_phone}
+                            deviceId={deviceId || 0}
+                            onUpdate={fetchSales}
+                          />
+                        </td>
                         <td className="whitespace-nowrap px-3 py-2.5 font-mono text-xs text-slate-600">
                           <TrackingCell 
                             saleId={sale.id}

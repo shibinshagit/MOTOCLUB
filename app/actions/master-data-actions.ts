@@ -384,7 +384,7 @@ export async function getCourierProfileDetails(courierId: number) {
     const courier = mapMasterDataRow(courierQuery[0] as Record<string, unknown>)
 
     const sales = await sql`
-      SELECT s.id, s.tracking_id, s.total_amount, s.delivery_status, s.status, s.created_at, s.expense_courier, s.courier_paid_extra, COALESCE(c.name, s.customer_name_override) as customer_name, COALESCE(c.phone, s.customer_phone_override) as customer_phone
+      SELECT s.id, s.tracking_id, s.total_amount, s.delivery_status, s.status, s.created_at, s.expense_courier, s.courier_paid_extra, COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name, COALESCE(NULLIF(s.customer_phone_override, ''), c.phone) as customer_phone
       FROM sales s
       LEFT JOIN customers c ON s.customer_id = c.id
       WHERE s.courier_partner_id = ${courierId}
