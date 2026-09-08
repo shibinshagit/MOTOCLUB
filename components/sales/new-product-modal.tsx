@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -11,6 +11,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { useToast } from "@/components/ui/use-toast"
 import { notifyError, notifySuccess, notifyWarning } from "@/lib/notifications"
 import { useConfirm } from "@/hooks/use-confirm"
+import { useFormDraft } from "@/hooks/use-form-draft"
+import { DraftIndicator } from "@/components/shared/draft-indicator"
 import { cleanupProductMediaUrls, createProduct } from "@/app/actions/product-actions"
 import { getCategories, createCategory, updateCategory, deleteCategory } from "@/app/actions/category-actions"
 import { Check, ChevronRight, Loader2, Plus, Search, Tag, X, ImageIcon, Link2, Trash2, Film, Pencil } from "lucide-react"
@@ -267,6 +269,72 @@ export default function NewProductModal({
   const [isBatchManaged, setIsBatchManaged] = useState(false)
   const [variants, setVariants] = useState<any[]>([{ variant_name: "", sku: "", barcode: "", shelf: "", wholesale_price: null, price: null, mrp: null, stock: 0, minimum_stock: 0, batch_number: "AUTO_GENERATE" }])
 
+  const productDraftData = useMemo(() => ({
+    formData,
+    attributes,
+    productLinks,
+    platformStatus,
+    trending,
+    isBatchManaged,
+    variants,
+    uploadedImageUrls,
+    uploadedVideoUrl,
+  }), [
+    formData,
+    attributes,
+    productLinks,
+    platformStatus,
+    trending,
+    isBatchManaged,
+    variants,
+    uploadedImageUrls,
+    uploadedVideoUrl,
+  ])
+
+  const hasMeaningfulProductData = useCallback((d: typeof productDraftData) => {
+    if (!d) return false
+    if (d.formData?.name?.trim()) return true
+    if (d.formData?.companyName?.trim()) return true
+    if (d.formData?.description?.trim()) return true
+    if (d.formData?.category?.trim()) return true
+    if (d.formData?.barcode && d.formData.barcode !== initialBarcode) return true
+    if (d.formData?.color?.trim()) return true
+    if (d.formData?.size?.trim()) return true
+    if (d.formData?.suitableFor?.trim()) return true
+    if (Array.isArray(d.attributes) && d.attributes.length > 0) return true
+    if (Array.isArray(d.productLinks) && d.productLinks.length > 0) return true
+    if (Array.isArray(d.uploadedImageUrls) && d.uploadedImageUrls.length > 0) return true
+    if (d.uploadedVideoUrl) return true
+    if (Array.isArray(d.variants)) {
+      const hasVariant = d.variants.some(
+        (v) =>
+          (v.variant_name && v.variant_name.trim() !== "") ||
+          (v.sku && v.sku.trim() !== "") ||
+          v.price ||
+          v.wholesale_price ||
+          v.mrp ||
+          (v.stock && Number(v.stock) > 0)
+      )
+      if (hasVariant) return true
+    }
+    return false
+  }, [initialBarcode])
+
+  const {
+    getDraft: getProductDraft,
+    clearDraft: clearProductDraft,
+    hasDraft: hasProductDraft,
+    status: productDraftStatus,
+    lastSaved: productLastSaved,
+    markHydrated: markProductHydrated,
+  } = useFormDraft({
+    formId: "product-create",
+    userId,
+    data: productDraftData,
+    enabled: isOpen,
+    hasMeaningfulData: hasMeaningfulProductData,
+  })
+
   const [categories, setCategories] = useState<Category[]>([])
   const [filteredCategories, setFilteredCategories] = useState<Category[]>([])
   const [isLoadingCategories, setIsLoadingCategories] = useState(false)
@@ -336,14 +404,17 @@ export default function NewProductModal({
     setUploadedVideoUrl(null)
   }
 
-  const handleAttemptClose = async () => {
-    if (hasPendingDraftMedia) {
+  const handleCancelDiscard = async () => {
+    if (hasProductDraft || hasMeaningfulProductData(productDraftData) || hasPendingDraftMedia) {
       const shouldDiscard = await confirm({
-        description: "Are you sure? Unsaved media will be removed from cloud storage.",
+        title: "Discard this unfinished form?",
+        description: "You have unsaved changes. Discarding will clear the saved product draft.",
         destructive: true,
         confirmLabel: "Discard",
+        cancelLabel: "Continue Editing",
       })
       if (!shouldDiscard) return
+      clearProductDraft()
       await cleanupUploadedDraftMedia()
       clearSelectedMedia()
     }
@@ -487,38 +558,86 @@ export default function NewProductModal({
     }
   }
 
+  const hasInitializedOpenRef = useRef(false)
+
   useEffect(() => {
-    if (!isOpen) return
+    if (!isOpen) {
+      hasInitializedOpenRef.current = false
+      return
+    }
+    if (hasInitializedOpenRef.current) return
+    hasInitializedOpenRef.current = true
+
     const initializeForm = async () => {
       imagePreviews.forEach((url) => URL.revokeObjectURL(url))
       if (videoPreview) URL.revokeObjectURL(videoPreview)
-      setFormData({
-        name: "", companyName: "", category: "", categoryId: null,
-        description: "", price: "", wholesalePrice: "", msp: "",
-        stock: "", shelf: "", barcode: initialBarcode, color: "", size: "",
-        suitableFor: "",
-        initialBatchNumber: "AUTO_GENERATE",
-        initialMfgDate: "",
-        initialExpDate: "",
-      })
-      setAttributes([])
-      setProductLinks([])
-      setPlatformStatus({
-        amazon: "not_listed",
-        flipkart: "not_listed",
-        meesho: "not_listed",
-        own_ecom: "not_listed",
-      })
-      setTrending(false)
-      setSelectedCategory(null)
-      setSelectedImages([])
-      setImagePreviews([])
-      setUploadedImageUrls([])
-      setSelectedVideo(null)
-      setVideoPreview(null)
-      setUploadedVideoUrl(null)
-      setError(null)
-      setFieldErrors({})
+
+      const draft = getProductDraft()
+      if (draft && hasMeaningfulProductData(draft)) {
+        setFormData(draft.formData || {
+          name: "", companyName: "", category: "", categoryId: null,
+          description: "", price: "", wholesalePrice: "", msp: "",
+          stock: "", shelf: "", barcode: initialBarcode, color: "", size: "",
+          suitableFor: "",
+          initialBatchNumber: "AUTO_GENERATE",
+          initialMfgDate: "",
+          initialExpDate: "",
+        })
+        setAttributes(Array.isArray(draft.attributes) ? draft.attributes : [])
+        setProductLinks(Array.isArray(draft.productLinks) ? draft.productLinks : [])
+        setPlatformStatus(draft.platformStatus || {
+          amazon: "not_listed",
+          flipkart: "not_listed",
+          meesho: "not_listed",
+          own_ecom: "not_listed",
+        })
+        setTrending(Boolean(draft.trending))
+        setIsBatchManaged(Boolean(draft.isBatchManaged))
+        if (Array.isArray(draft.variants) && draft.variants.length > 0) {
+          setVariants(draft.variants)
+        }
+        setUploadedImageUrls(Array.isArray(draft.uploadedImageUrls) ? draft.uploadedImageUrls : [])
+        setUploadedVideoUrl(draft.uploadedVideoUrl || null)
+        setSelectedImages([])
+        setImagePreviews([])
+        setSelectedVideo(null)
+        setVideoPreview(null)
+        setError(null)
+        setFieldErrors({})
+        markProductHydrated()
+      } else {
+        setFormData({
+          name: "", companyName: "", category: "", categoryId: null,
+          description: "", price: "", wholesalePrice: "", msp: "",
+          stock: "", shelf: "", barcode: initialBarcode, color: "", size: "",
+          suitableFor: "",
+          initialBatchNumber: "AUTO_GENERATE",
+          initialMfgDate: "",
+          initialExpDate: "",
+        })
+        setAttributes([])
+        setProductLinks([])
+        setPlatformStatus({
+          amazon: "not_listed",
+          flipkart: "not_listed",
+          meesho: "not_listed",
+          own_ecom: "not_listed",
+        })
+        setTrending(false)
+        setIsBatchManaged(false)
+        setVariants([{ variant_name: "", sku: "", barcode: "", shelf: "", wholesale_price: null, price: null, mrp: null, stock: 0, minimum_stock: 0, batch_number: "AUTO_GENERATE" }])
+        setSelectedCategory(null)
+        setSelectedImages([])
+        setImagePreviews([])
+        setUploadedImageUrls([])
+        setSelectedVideo(null)
+        setVideoPreview(null)
+        setUploadedVideoUrl(null)
+        setError(null)
+        setFieldErrors({})
+        markProductHydrated()
+      }
+
       fetchCategories()
       try {
         const deviceCurrency = await getDeviceCurrency(userId || 1)
@@ -528,7 +647,7 @@ export default function NewProductModal({
       }
     }
     initializeForm()
-  }, [isOpen, userId, initialBarcode])
+  }, [isOpen, userId, initialBarcode, getProductDraft, hasMeaningfulProductData, markProductHydrated])
 
   useEffect(() => {
     return () => {
@@ -890,6 +1009,7 @@ export default function NewProductModal({
 
       if (result?.success) {
         notifySuccess(toast, "Product created successfully" )
+        clearProductDraft()
         setUploadedImageUrls([])
         setUploadedVideoUrl(null)
         if (onSuccess) onSuccess(result.data)
@@ -927,7 +1047,7 @@ export default function NewProductModal({
           if (!open && shouldIgnoreParentDialogClose(isCategoryDialogOpen, closingCategoryDialogRef.current)) {
             return
           }
-          if (!open) void handleAttemptClose()
+          if (!open) onClose()
         }}
       >
         <DialogContent
@@ -942,12 +1062,12 @@ export default function NewProductModal({
         >
           <DialogHeader className="space-y-0 border-b border-slate-200 bg-[#F1F4F9] px-4 py-3 text-left">
             <DialogTitle className="sr-only">Add new product</DialogTitle>
-            <div className="flex flex-wrap items-center gap-2 pr-10">
+            <div className="flex flex-wrap items-center gap-3 pr-10">
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => void handleAttemptClose()}
+                onClick={() => void handleCancelDiscard()}
                 className="h-8 border-slate-200 bg-white px-3 text-xs"
               >
                 Cancel
@@ -968,6 +1088,11 @@ export default function NewProductModal({
                   "Create Product"
                 )}
               </Button>
+              <DraftIndicator
+                status={productDraftStatus}
+                hasDraft={hasProductDraft}
+                lastSaved={productLastSaved}
+              />
             </div>
           </DialogHeader>
 

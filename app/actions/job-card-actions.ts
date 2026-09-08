@@ -2,6 +2,7 @@
 
 import { sql } from "@/lib/db"
 import { revalidatePath, unstable_noStore as noStore } from "next/cache"
+import { format, addDays, parseISO } from "date-fns"
 import { getStaffSession } from "@/lib/staff-session"
 import { addCustomer } from "./customer-actions"
 
@@ -584,11 +585,18 @@ function isEcomAllowedDevice(deviceId?: number): boolean {
   return allowed.includes(Number(deviceId))
 }
 
-export async function getAllJobCards(deviceId?: number) {
+export async function getAllJobCards(
+  deviceId?: number,
+  options?: { dateFrom?: string; dateTo?: string },
+) {
   noStore()
   try {
     let sales: any[] = []
     const allowEcom = isEcomAllowedDevice(deviceId)
+    const dateFrom = options?.dateFrom || null
+    const endExclusive = options?.dateTo
+      ? format(addDays(parseISO(options.dateTo), 1), "yyyy-MM-dd")
+      : null
 
     if (deviceId && deviceId > 0) {
       sales = await sql`
@@ -596,6 +604,7 @@ export async function getAllJobCards(deviceId?: number) {
           s.*,
           COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name,
           COALESCE(NULLIF(s.customer_phone_override, ''), c.phone) as customer_phone,
+          COALESCE(cp.name, md_partner.name, '') as courier_partner_name,
           d.name as branch_name,
           d.name as device_name,
           d.logo_url as device_logo,
@@ -606,6 +615,8 @@ export async function getAllJobCards(deviceId?: number) {
         FROM sales s
         LEFT JOIN customers c ON s.customer_id = c.id
         LEFT JOIN devices d ON s.device_id = d.id
+        LEFT JOIN staff cp ON cp.id = s.courier_partner_id
+        LEFT JOIN master_data md_partner ON md_partner.id = s.courier_partner_id
         LEFT JOIN return_requests err ON (err.sale_id = s.id OR (s.external_order_id IS NOT NULL AND (err.order_number = s.external_order_id OR err.order_id = s.id)))
         WHERE s.device_id = ${deviceId}
           AND (${allowEcom} OR s.source IS NULL OR s.source != 'ECOMMERCE')
@@ -617,6 +628,8 @@ export async function getAllJobCards(deviceId?: number) {
             OR s.tracking_id LIKE 'DOD-%'
             OR (s.tracking_id IS NOT NULL AND s.tracking_id != '')
           )
+          AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
+          AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
         ORDER BY COALESCE(s.sale_date, s.created_at) DESC, s.id DESC
       `
     } else {
@@ -625,6 +638,7 @@ export async function getAllJobCards(deviceId?: number) {
           s.*,
           COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name,
           COALESCE(NULLIF(s.customer_phone_override, ''), c.phone) as customer_phone,
+          COALESCE(cp.name, md_partner.name, '') as courier_partner_name,
           d.name as branch_name,
           d.name as device_name,
           d.logo_url as device_logo,
@@ -635,6 +649,8 @@ export async function getAllJobCards(deviceId?: number) {
         FROM sales s
         LEFT JOIN customers c ON s.customer_id = c.id
         LEFT JOIN devices d ON s.device_id = d.id
+        LEFT JOIN staff cp ON cp.id = s.courier_partner_id
+        LEFT JOIN master_data md_partner ON md_partner.id = s.courier_partner_id
         LEFT JOIN return_requests err ON (err.sale_id = s.id OR (s.external_order_id IS NOT NULL AND (err.order_number = s.external_order_id OR err.order_id = s.id)))
         WHERE (s.status != 'Cancelled' OR s.delivery_status = 'Returned')
           AND (
@@ -644,6 +660,8 @@ export async function getAllJobCards(deviceId?: number) {
             OR s.tracking_id LIKE 'DOD-%'
             OR (s.tracking_id IS NOT NULL AND s.tracking_id != '')
           )
+          AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
+          AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
         ORDER BY COALESCE(s.sale_date, s.created_at) DESC, s.id DESC
         LIMIT 200
       `

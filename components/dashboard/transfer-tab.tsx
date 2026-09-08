@@ -14,9 +14,12 @@ import { Label } from "@/components/ui/label"
 import { notifyError, notifySuccess, notifyWarning } from "@/lib/notifications"
 import { markInventoryStale } from "@/lib/inventory-sync"
 import { useConfirm } from "@/hooks/use-confirm"
+import { useFormDraft } from "@/hooks/use-form-draft"
+import { DraftIndicator } from "@/components/shared/draft-indicator"
 import { Card, CardContent } from "@/components/ui/card"
 import { useDispatch, useSelector } from "react-redux"
 import type { AppDispatch, RootState } from "@/store/store"
+import { selectDateRange } from "@/store/slices/dateRangeSlice"
 import PayWarehouseCreditModal from "@/components/transfers/pay-warehouse-credit-modal"
 import EditWarehousePaymentModal from "@/components/transfers/edit-warehouse-payment-modal"
 import {
@@ -119,6 +122,52 @@ export default function TransferTab({ userId }: TransferTabProps) {
     items: [{ product_id: 0, quantity: 1, unit_cost: 0 }],
   })
 
+  const hasMeaningfulTransferData = useCallback((d: TransferFormData) => {
+    if (!d) return false
+    if (d.toDeviceId && d.toDeviceId !== 0) return true
+    if (d.notes && d.notes.trim() !== "") return true
+    if (d.paymentNotes && d.paymentNotes.trim() !== "") return true
+    if (d.paidAmount && Number(d.paidAmount) > 0) return true
+    if (Array.isArray(d.items)) {
+      const hasItem = d.items.some((it) => it.product_id !== 0)
+      if (hasItem) return true
+    }
+    return false
+  }, [])
+
+  const {
+    getDraft: getTransferDraft,
+    clearDraft: clearTransferDraft,
+    hasDraft: hasTransferDraft,
+    status: transferDraftStatus,
+    lastSaved: transferLastSaved,
+    markHydrated: markTransferHydrated,
+  } = useFormDraft<TransferFormData>({
+    formId: "transfer",
+    userId,
+    data: formData,
+    enabled: isModalOpen && !editingTransferId,
+    hasMeaningfulData: hasMeaningfulTransferData,
+  })
+
+  const handleCancelModal = async () => {
+    if (!editingTransferId && (hasTransferDraft || hasMeaningfulTransferData(formData))) {
+      const shouldDiscard = await confirm({
+        title: "Discard this unfinished transfer?",
+        description: "You have unsaved transfer items. Discarding will clear the saved draft.",
+        confirmLabel: "Discard",
+        cancelLabel: "Continue Editing",
+        destructive: true,
+      })
+      if (!shouldDiscard) return
+      clearTransferDraft()
+      resetForm()
+      setIsModalOpen(false)
+    } else {
+      setIsModalOpen(false)
+    }
+  }
+
   const [devices, setDevices] = useState<Array<{ id: number; name: string }>>([])
   const [products, setProducts] = useState<any[]>([])
   const [categories, setCategories] = useState<Array<{ id: number | null; name: string }>>([])
@@ -215,14 +264,24 @@ export default function TransferTab({ userId }: TransferTabProps) {
     }
   }, [userId, toast])
 
-  const [datePreset, setDatePreset] = useState<string>("all")
-  const [customStart, setCustomStart] = useState<string>("")
-  const [customEnd, setCustomEnd] = useState<string>("")
+  const globalDateRange = useSelector(selectDateRange)
+  const [datePreset, setDatePreset] = useState<string>("custom")
+  const [customStart, setCustomStart] = useState<string>(() => globalDateRange.from || "")
+  const [customEnd, setCustomEnd] = useState<string>(() => globalDateRange.to || "")
   const [fromDeviceFilter, setFromDeviceFilter] = useState<number>(0)
   const [toDeviceFilter, setToDeviceFilter] = useState<number>(0)
   const [dashboardStats, setDashboardStats] = useState({ pendingApprovals: 0, approvedToday: 0, rejectedToday: 0, transferValueToday: 0 })
   const [isSummaryModalOpen, setIsSummaryModalOpen] = useState(false)
   const [viewReasonModal, setViewReasonModal] = useState<{ isOpen: boolean; reason: string; rejectedBy?: string; transferId: number | null }>({ isOpen: false, reason: "", transferId: null })
+
+  // Sync with global date range
+  useEffect(() => {
+    if (globalDateRange.from && globalDateRange.to) {
+      setCustomStart(globalDateRange.from)
+      setCustomEnd(globalDateRange.to)
+      setDatePreset("custom")
+    }
+  }, [globalDateRange.from, globalDateRange.to])
 
   const loadDashboardStats = useCallback(async () => {
     if (!userId) return
@@ -240,13 +299,17 @@ export default function TransferTab({ userId }: TransferTabProps) {
     if (!userId) return
     try {
       setIsLoading(true)
+      const start = customStart || globalDateRange.from
+      const end = customEnd || globalDateRange.to
+      const preset = datePreset || "custom"
+
       const result = await getWarehouseTransfers(
         userId,
         searchTerm,
         statusFilter,
-        datePreset,
-        customStart,
-        customEnd,
+        preset,
+        start,
+        end,
         fromDeviceFilter,
         toDeviceFilter,
       )
@@ -261,7 +324,7 @@ export default function TransferTab({ userId }: TransferTabProps) {
     } finally {
       setIsLoading(false)
     }
-  }, [userId, searchTerm, statusFilter, datePreset, customStart, customEnd, fromDeviceFilter, toDeviceFilter, toast])
+  }, [userId, searchTerm, statusFilter, datePreset, customStart, customEnd, globalDateRange.from, globalDateRange.to, fromDeviceFilter, toDeviceFilter, toast])
 
   const handleExportExcel = () => {
     if (transfers.length === 0) {
@@ -525,13 +588,27 @@ export default function TransferTab({ userId }: TransferTabProps) {
   }
 
   const handleOpenCreate = async () => {
-    resetForm()
-    const sourceId = userId || 0
+    const draft = getTransferDraft()
+    const sourceId = draft?.fromDeviceId && Number(draft.fromDeviceId) > 0 ? Number(draft.fromDeviceId) : (userId || 0)
     setIsModalOpen(true)
     setIsPreparingModal(true)
     try {
       await loadFormData(sourceId)
-      setFormData((prev) => ({ ...prev, fromDeviceId: sourceId }))
+      if (draft && hasMeaningfulTransferData(draft)) {
+        setEditingTransferId(null)
+        setEditOriginal(null)
+        setFormData(draft)
+        const count = Array.isArray(draft.items) && draft.items.length > 0 ? draft.items.length : 1
+        setRowProductSearch(Array(count).fill(""))
+        setRowProductOpen(Array(count).fill(false))
+        setRowSelectedCategory(Array(count).fill("all"))
+        setRowCategoryOpen(Array(count).fill(false))
+        setRowWarnings({})
+      } else {
+        resetForm()
+        setFormData((prev) => ({ ...prev, fromDeviceId: sourceId }))
+      }
+      markTransferHydrated()
     } finally {
       setIsPreparingModal(false)
     }
@@ -917,10 +994,13 @@ export default function TransferTab({ userId }: TransferTabProps) {
 
       markInventoryStale(dispatch)
       notifySuccess(toast, result.message || "Transfer saved" )
+      if (!editingTransferId) {
+        clearTransferDraft()
+      }
       setIsModalOpen(false)
       resetForm()
       await loadTransfers()
-    await loadSettlements()
+      await loadSettlements()
     } finally {
       setIsSaving(false)
     }
@@ -2121,17 +2201,26 @@ export default function TransferTab({ userId }: TransferTabProps) {
               />
             </div>
 
-            <div className="flex justify-end gap-2 pt-2">
-              <div className="mr-auto text-sm font-medium text-gray-700 flex items-center">
-                Transfer Amount: {transferTotalAmount.toFixed(2)}
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t">
+              <div className="text-sm font-medium text-gray-700 flex items-center gap-4">
+                <span>Transfer Amount: {transferTotalAmount.toFixed(2)}</span>
+                {!editingTransferId ? (
+                  <DraftIndicator
+                    status={transferDraftStatus}
+                    hasDraft={hasTransferDraft}
+                    lastSaved={transferLastSaved}
+                  />
+                ) : null}
               </div>
-              <Button variant="outline" onClick={() => setIsModalOpen(false)} disabled={isSaving}>
-                Cancel
-              </Button>
-              <Button onClick={handleSave} disabled={isSaving}>
-                {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
-                {editingTransferId ? "Update Transfer" : "Create Transfer"}
-              </Button>
+              <div className="flex items-center gap-2 ml-auto">
+                <Button variant="outline" onClick={handleCancelModal} disabled={isSaving}>
+                  Cancel
+                </Button>
+                <Button onClick={handleSave} disabled={isSaving}>
+                  {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+                  {editingTransferId ? "Update Transfer" : "Create Transfer"}
+                </Button>
+              </div>
             </div>
           </div>
           )}

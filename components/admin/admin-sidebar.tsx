@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Building2, ChevronLeft, ChevronRight, LayoutGrid } from "lucide-react"
+import { Building2, ChevronLeft, ChevronRight, LayoutGrid, LayoutDashboard } from "lucide-react"
 import { Loader2 } from "lucide-react"
 
 type Company = {
@@ -34,6 +34,7 @@ export default function AdminSidebar({
   const pathname = usePathname()
   const activeCompanyId = getActiveCompanyId(pathname)
   const isCompaniesHome = pathname === "/admin/companies"
+  const isDashboard = pathname === "/admin/dashboard"
   const isDrawer = Boolean(onClose)
   const isCollapsed = isDrawer ? false : collapsed
 
@@ -65,6 +66,17 @@ export default function AdminSidebar({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3">
+        <Link
+          href="/admin/dashboard"
+          onClick={onClose}
+          className={`mb-1.5 flex w-full items-center rounded-lg border border-transparent p-3 text-left transition-colors hover:border-border hover:bg-muted/60 ${
+            isDashboard ? "border-l-2 border-l-primary bg-accent text-accent-foreground" : ""
+          } ${isCollapsed ? "justify-center" : "gap-3"}`}
+        >
+          <LayoutDashboard className={`h-4 w-4 shrink-0 ${isDashboard ? "text-primary" : "text-muted-foreground"}`} />
+          {!isCollapsed && <span className="text-sm font-medium text-gray-900">Dashboard</span>}
+        </Link>
+
         <Link
           href="/admin/companies"
           onClick={onClose}

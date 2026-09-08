@@ -10,12 +10,13 @@ import { PhoneCell } from "@/components/sales/phone-cell"
 import { StaffOwnerSelect } from "@/components/sales/staff-owner-select"
 import { useDispatch, useSelector } from "react-redux"
 import { selectDeviceCurrency, selectDeviceId } from "@/store/slices/deviceSlice"
+import { selectDateRange } from "@/store/slices/dateRangeSlice"
 import { markInventoryStale } from "@/lib/inventory-sync"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { ChevronDown, ChevronUp, MapPin, Phone, User, Calendar, Layers, Printer, Edit, Trash2, Search, PlayCircle, Eye, Plus, Loader2 } from "lucide-react"
+import { ChevronDown, ChevronUp, MapPin, Phone, User, Calendar, Layers, Printer, Edit, Trash2, Search, PlayCircle, Eye, Plus, Loader2, FileText, ExternalLink } from "lucide-react"
 import { formatPhoneNumber, parseSaleDateTime, parseSaleDate } from "@/lib/utils"
 import { useToast } from "@/components/ui/use-toast"
 import {
@@ -28,7 +29,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { printJobCard, printBatchJobCards } from "@/lib/receipt-utils"
+import { printJobCard, printBatchJobCards, printSalesReceipt } from "@/lib/receipt-utils"
+import { generateCourierTrackingUrl, getPublicTrackingUrl } from "@/lib/shipping/tracking-url"
 import { JobCardModal } from "@/components/shared/job-card/job-card-modal"
 import ViewSaleModal from "@/components/sales/view-sale-modal"
 import { format } from "date-fns"
@@ -38,6 +40,7 @@ export default function SalesOrdersTab() {
   const dispatch = useDispatch()
   const currency = useSelector(selectDeviceCurrency)
   const deviceId = useSelector(selectDeviceId)
+  const dateRange = useSelector(selectDateRange)
   const { toast } = useToast()
 
   const [sales, setSales] = useState<any[]>([])
@@ -80,11 +83,14 @@ export default function SalesOrdersTab() {
         })
       })
     }
-  }, [deviceId])
+  }, [deviceId, dateRange.from, dateRange.to])
 
   const fetchSales = async () => {
     setLoading(true)
-    const res = await getAllJobCards(deviceId || 0)
+    const res = await getAllJobCards(deviceId || 0, {
+      dateFrom: dateRange.from,
+      dateTo: dateRange.to,
+    })
     if (res.success && res.data) {
       const sorted = [...res.data].sort((a, b) => {
         return parseSaleDateTime(b).getTime() - parseSaleDateTime(a).getTime()
@@ -100,6 +106,22 @@ export default function SalesOrdersTab() {
 
   const handlePrint = (sale: any) => {
     printJobCard(sale, currency)
+  }
+
+  const handlePrintInvoice = (sale: any) => {
+    if (sale.items && sale.items.length > 0) {
+      printSalesReceipt(sale, sale.items, currency, {}, false)
+    } else {
+      import("@/app/actions/sale-actions").then(({ getSaleDetails }) => {
+        getSaleDetails(sale.id).then((res) => {
+          if (res.success && res.data) {
+            printSalesReceipt(res.data.sale, res.data.items, currency, {}, false)
+          } else {
+            toast({ title: "Error", description: "Failed to load invoice items", variant: "destructive" })
+          }
+        })
+      })
+    }
   }
 
   const handleEdit = (sale: any) => {
@@ -382,7 +404,17 @@ export default function SalesOrdersTab() {
                         <td className="whitespace-nowrap px-3 py-2.5">
                           <span className="font-medium text-slate-800 text-xs">{dateFormatted}</span>
                         </td>
-                        <td className="max-w-[140px] truncate px-3 py-2.5 font-medium text-slate-800">{sale.customer_name || "N/A"}</td>
+                        <td className="max-w-[150px] px-3 py-2.5">
+                          <div className="font-semibold text-slate-800 truncate" title={sale.customer_name || "N/A"}>
+                            {sale.customer_name || "N/A"}
+                          </div>
+                          {sale.courier_partner_name && (
+                            <div className="text-[11px] text-slate-500 font-medium truncate flex items-center gap-1 mt-0.5" title={`Vendor: ${sale.courier_partner_name}`}>
+                              <span className="text-slate-400 font-normal">Vendor:</span>
+                              <span className="text-blue-700 font-medium">{sale.courier_partner_name}</span>
+                            </div>
+                          )}
+                        </td>
                         <td className="whitespace-nowrap px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
                           <StaffOwnerSelect
                             saleId={sale.id}
@@ -407,6 +439,7 @@ export default function SalesOrdersTab() {
                             deviceId={deviceId || 0}
                             trackingId={sale.tracking_id}
                             deliveryStatus={sale.delivery_status}
+                            courierServiceName={sale.courier_service_name}
                             onUpdate={fetchSales}
                           />
                           {sale.courier_service_name && (
@@ -439,19 +472,36 @@ export default function SalesOrdersTab() {
                           onClick={(e) => e.stopPropagation()}
                         >
                           <div className="flex items-center justify-end gap-1">
-                            <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50" onClick={() => handleView(sale)} title="View Details">
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              className="h-7 px-2 text-xs font-medium border-blue-200 text-blue-700 bg-blue-50/50 hover:bg-blue-100/70 hover:text-blue-800 gap-1 shadow-2xs" 
+                              onClick={() => handlePrintInvoice(sale)} 
+                              title="Print Invoice"
+                            >
+                              <FileText className="h-3.5 w-3.5" />
+                              <span>Invoice</span>
+                            </Button>
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              className="h-7 px-2 text-xs font-medium border-slate-200 text-slate-700 bg-slate-50/50 hover:bg-slate-100 hover:text-slate-900 gap-1 shadow-2xs" 
+                              onClick={() => handlePrint(sale)} 
+                              title="Print Delivery Label"
+                            >
+                              <Printer className="h-3.5 w-3.5" />
+                              <span>Label</span>
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-7 w-7 text-blue-600 hover:text-blue-700 hover:bg-blue-50" onClick={() => handleView(sale)} title="View Details">
                               <Eye className="h-4 w-4" />
                             </Button>
-                            <Button variant="ghost" size="icon" className="h-8 w-8 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50" onClick={() => handleOpenInPOS(sale.id)} title="Open in POS">
+                            <Button variant="ghost" size="icon" className="h-7 w-7 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50" onClick={() => handleOpenInPOS(sale.id)} title="Open in POS">
                               <PlayCircle className="h-4 w-4" />
                             </Button>
-                            <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-600 hover:text-slate-700 hover:bg-slate-100" onClick={() => handlePrint(sale)} title="Print">
-                              <Printer className="h-4 w-4" />
-                            </Button>
-                            <Button variant="ghost" size="icon" className="h-8 w-8 text-violet-600 hover:text-violet-700 hover:bg-violet-50" onClick={() => handleEdit(sale)} title="Edit">
+                            <Button variant="ghost" size="icon" className="h-7 w-7 text-violet-600 hover:text-violet-700 hover:bg-violet-50" onClick={() => handleEdit(sale)} title="Edit">
                               <Edit className="h-4 w-4" />
                             </Button>
-                            <Button variant="ghost" size="icon" className="h-8 w-8 text-rose-600 hover:text-rose-700 hover:bg-rose-50" onClick={() => handleDelete(sale.id)} title="Delete Order">
+                            <Button variant="ghost" size="icon" className="h-7 w-7 text-rose-600 hover:text-rose-700 hover:bg-rose-50" onClick={() => handleDelete(sale.id)} title="Delete Order">
                               <Trash2 className="h-4 w-4" />
                             </Button>
                           </div>
@@ -461,11 +511,76 @@ export default function SalesOrdersTab() {
                       {/* Expanded Row */}
                       {isExpanded && (
                         <tr key={`expanded-${sale.id}`} className="bg-slate-50/50 border-b border-slate-200">
-                          <td colSpan={10} className="p-6">
+                          <td colSpan={12} className="p-6">
                             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
                               
                               {/* Summary Card */}
-                              <div className="col-span-1 lg:col-span-1 space-y-6 order-2 lg:order-2">
+                              <div className="col-span-1 lg:col-span-1 space-y-4 order-2 lg:order-2">
+                                {/* Delivery Workflow Card */}
+                                <div className="p-3.5 bg-gradient-to-r from-blue-50/70 to-indigo-50/50 rounded-xl border border-blue-100 space-y-3">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">Delivery Workflow</span>
+                                    <Badge variant="outline" className="text-xs font-semibold bg-blue-100 text-blue-800 border-blue-200">
+                                      {sale.delivery_status || "Pending"}
+                                    </Badge>
+                                  </div>
+
+                                  <div className="grid grid-cols-2 gap-2.5 text-xs">
+                                    <div>
+                                      <span className="text-slate-400 block font-medium">Vendor:</span>
+                                      <span className="font-semibold text-slate-800">{sale.courier_partner_name || "Standard Delivery"}</span>
+                                    </div>
+                                    <div>
+                                      <span className="text-slate-400 block font-medium">Customer:</span>
+                                      <span className="font-semibold text-slate-800">{sale.customer_name || "N/A"}</span>
+                                    </div>
+                                    <div>
+                                      <span className="text-slate-400 block font-medium">Courier Service:</span>
+                                      <span className="font-semibold text-blue-700">{sale.courier_service_name || "—"}</span>
+                                    </div>
+                                    <div>
+                                      <span className="text-slate-400 block font-medium">Tracking ID:</span>
+                                      <span className="font-mono font-bold text-slate-900">{sale.tracking_id || "—"}</span>
+                                    </div>
+                                  </div>
+
+                                  {/* Quick workflow actions */}
+                                  <div className="flex items-center gap-2 pt-2 border-t border-blue-100/80 flex-wrap">
+                                    <Button 
+                                      variant="outline" 
+                                      size="sm" 
+                                      onClick={() => handlePrintInvoice(sale)} 
+                                      className="h-7 text-xs bg-white text-blue-700 border-blue-200 hover:bg-blue-50 gap-1.5 font-medium"
+                                    >
+                                      <FileText className="h-3 w-3" />
+                                      Invoice
+                                    </Button>
+                                    <Button 
+                                      variant="outline" 
+                                      size="sm" 
+                                      onClick={() => handlePrint(sale)} 
+                                      className="h-7 text-xs bg-white text-slate-700 border-slate-200 hover:bg-slate-50 gap-1.5 font-medium"
+                                    >
+                                      <Printer className="h-3 w-3" />
+                                      Delivery Label
+                                    </Button>
+                                    {sale.tracking_id && (() => {
+                                      const tUrl = generateCourierTrackingUrl(sale.courier_service_name, sale.tracking_id) || getPublicTrackingUrl(sale.tracking_id);
+                                      return tUrl ? (
+                                        <Button 
+                                          variant="outline" 
+                                          size="sm" 
+                                          onClick={() => window.open(tUrl, "_blank")} 
+                                          className="h-7 text-xs bg-white text-indigo-700 border-indigo-200 hover:bg-indigo-50 gap-1.5 font-semibold"
+                                        >
+                                          <ExternalLink className="h-3 w-3" />
+                                          Track Shipment
+                                        </Button>
+                                      ) : null;
+                                    })()}
+                                  </div>
+                                </div>
+
                                 <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
                                   <User className="h-4 w-4 text-slate-500" /> Customer Information
                                 </h4>

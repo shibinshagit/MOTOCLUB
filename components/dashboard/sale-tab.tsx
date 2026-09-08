@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
-import { format, subMonths, addMonths, startOfMonth, endOfMonth, isSameMonth, isAfter } from "date-fns"
+import { format, subMonths, addMonths, startOfMonth, endOfMonth, isSameMonth, isAfter, parseISO } from "date-fns"
 import {
   Loader2,
   Plus,
@@ -37,11 +37,12 @@ import { markInventoryStale } from "@/lib/inventory-sync"
 import ViewSaleModal from "@/components/sales/view-sale-modal"
 import SalesExcelTable from "@/components/sales/sales-excel-table"
 import { SalesViewFlip, type SalesViewMode } from "@/components/sales/sales-view-flip"
-import { SplitPaymentInput } from "@/components/shared/split-payment-input"
+import { SplitPaymentInput, isCodMethod } from "@/components/shared/split-payment-input"
 import { PaymentRecordInput } from "@/types/payment"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useSelector, useDispatch } from "react-redux"
 import { selectDeviceId, selectDeviceCurrency } from "@/store/slices/deviceSlice"
+import { selectDateRange } from "@/store/slices/dateRangeSlice"
 import {
   selectSales,
   selectSalesLoading,
@@ -190,6 +191,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
   const isLoading = useSelector(selectSalesLoading)
   const error = useSelector(selectSalesError)
   const currency = useSelector(selectSalesCurrency)
+  const globalDateRange = useSelector(selectDateRange)
 
   const [salesViewMonth, setSalesViewMonth] = useState(() => startOfMonth(new Date()))
   const [salesListLoaded, setSalesListLoaded] = useState(false)
@@ -581,17 +583,22 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
 
   // Auto-calculate received amount and balance amount based on paymentStatus and paymentMethod
   useEffect(() => {
+    const hasCod = isCodMethod(paymentMethod) || (Array.isArray(payments) && payments.some(p => isCodMethod(p.paymentMethod)))
+    if (!isEditMode && hasCod && (paymentStatus === "Paid" || paymentStatus === "Completed")) {
+      setPaymentStatus("Credit")
+      return
+    }
+
     if (paymentStatus === "Paid" || paymentStatus === "Completed") {
       setReceivedAmount(totalAmount)
       setBalanceAmount(0)
     } else if (paymentStatus === "Cancelled" || paymentStatus === "Pending") {
       setReceivedAmount(0)
       setBalanceAmount(totalAmount)
-    } else if (paymentStatus === "Credit") {
-      const currentReceived = paymentMethod === "COD" ? advanceAmount : receivedAmount
-      setBalanceAmount(Math.max(0, totalAmount - currentReceived))
+    } else if (paymentStatus === "Credit" || paymentStatus === "Partial") {
+      setBalanceAmount(Math.max(0, totalAmount - receivedAmount))
     }
-  }, [paymentStatus, paymentMethod, totalAmount, advanceAmount, receivedAmount])
+  }, [paymentStatus, paymentMethod, totalAmount, advanceAmount, receivedAmount, payments, isEditMode])
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat("en-US", {
@@ -605,15 +612,17 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     setSalesViewMonth(startOfMonth(month))
   }, [])
 
-  const fetchSalesForMonth = useCallback(
-    async (month: Date) => {
+  const fetchSalesForRange = useCallback(
+    async (fromDate?: string, toDate?: string) => {
       if (!deviceId) {
         dispatch(setError("Device ID not found"))
         return
       }
 
+      const from = fromDate || globalDateRange.from
+      const to = toDate || globalDateRange.to
+
       const requestId = ++salesFetchRequestRef.current
-      const { from, to } = getMonthRange(month)
 
       dispatch(setLoading(true))
       dispatch(setError(null))
@@ -640,14 +649,14 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
         }
       }
     },
-    [deviceId, dispatch],
+    [deviceId, dispatch, globalDateRange.from, globalDateRange.to],
   )
 
   useEffect(() => {
     if (activeView !== "info" || !deviceId) return
     setSalesListLoaded(false)
-    fetchSalesForMonth(salesViewMonth)
-  }, [activeView, deviceId, salesViewMonth, fetchSalesForMonth])
+    fetchSalesForRange(globalDateRange.from, globalDateRange.to)
+  }, [activeView, deviceId, globalDateRange.from, globalDateRange.to, fetchSalesForRange])
 
     // Add Sale Form Functions
   const addProductRow = useCallback(() => {
@@ -1332,7 +1341,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
       }
     }
 
-    if (paymentStatus === "Credit" && receivedAmount > totalAmount) {
+    if ((paymentStatus === "Credit" || paymentStatus === "Partial") && receivedAmount > totalAmount) {
       setFormAlert({
         type: "error",
         message: "Received amount cannot be greater than total amount",
@@ -1340,7 +1349,8 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
       return
     }
 
-    if (paymentStatus === "Credit" && !customerId) {
+    const hasCodCurrent = isCodMethod(paymentMethod) || (Array.isArray(payments) && payments.some(p => isCodMethod(p.paymentMethod)))
+    if (!hasCodCurrent && (paymentStatus === "Credit" || paymentStatus === "Partial") && !customerId) {
       setFormAlert({
         type: "error",
         message: "Please select a customer for a credit sale.",
@@ -1432,6 +1442,23 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
         return
       } else {
         // Add new sale
+        const hasCodOnCreate =
+          isCodMethod(paymentMethod) ||
+          (Array.isArray(payments) && payments.some((p) => isCodMethod(p.paymentMethod)))
+        const finalPaymentStatus = hasCodOnCreate ? "Credit" : (paymentStatus === "Partial" ? "Credit" : paymentStatus)
+        const totalAlloc = (Array.isArray(payments) && payments.length > 0)
+          ? payments.reduce((s, p) => s + (Number(p.amount) || 0), 0)
+          : (Number(receivedAmount) || 0)
+        const finalReceivedAmount = (Array.isArray(payments) && payments.length > 0)
+          ? payments.reduce((s, p) => {
+              if (hasCodOnCreate && isCodMethod(p.paymentMethod) && totalAmount > 0 && totalAlloc >= totalAmount) {
+                return s
+              }
+              return s + (Number(p.amount) || 0)
+            }, 0)
+          : (hasCodOnCreate ? (totalAmount > 0 && receivedAmount >= totalAmount ? 0 : receivedAmount) : receivedAmount)
+        const finalBalanceAmount = Math.max(0, totalAmount - finalReceivedAmount)
+
         const saleData = {
           customerId: customerId || null,
           staffId: finalStaffId || null,
@@ -1439,15 +1466,15 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
           deviceId: deviceId,
           items: validItems,
           status: status,
-          paymentStatus: paymentStatus,
+          paymentStatus: finalPaymentStatus,
           paymentMethod: paymentMethod,
           payments: payments,
           saleDate: date?.toISOString() || new Date().toISOString(),
           notes: notes,
           discount: discountAmount,
-          receivedAmount: receivedAmount,
-          advanceAmount: advanceAmount,
-          balanceAmount: balanceAmount,
+          receivedAmount: finalReceivedAmount,
+          advanceAmount: hasCodOnCreate ? finalReceivedAmount : advanceAmount,
+          balanceAmount: finalBalanceAmount,
           ...shipping,
         }
 
@@ -1625,7 +1652,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
         markInventoryStale(dispatch)
         notifySuccess(toast, "Sale deleted successfully")
         if (activeView === "info") {
-          fetchSalesForMonth(salesViewMonth)
+          fetchSalesForRange(globalDateRange.from, globalDateRange.to)
         }
       } else {
         notifyError(toast, result.message || "Failed to delete sale")
@@ -1764,7 +1791,20 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     resetAddSaleForm()
   }
 
-  const periodLabel = getMonthRange(salesViewMonth).label
+  const periodLabel = useMemo(() => {
+    if (!globalDateRange?.from || !globalDateRange?.to) return ""
+    try {
+      const fromParsed = parseISO(globalDateRange.from)
+      const toParsed = parseISO(globalDateRange.to)
+      if (globalDateRange.from === globalDateRange.to) {
+        return format(fromParsed, "dd/MM/yyyy")
+      }
+      return `${format(fromParsed, "dd/MM/yyyy")} → ${format(toParsed, "dd/MM/yyyy")}`
+    } catch {
+      return `${globalDateRange.from} → ${globalDateRange.to}`
+    }
+  }, [globalDateRange?.from, globalDateRange?.to])
+
   const isCurrentMonth = isSameMonth(salesViewMonth, new Date())
   const canGoNextMonth = !isCurrentMonth
 
@@ -1796,7 +1836,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
       onViewSale={handleViewSale}
       onEditSale={handleEditSale}
       deviceId={deviceId || 0}
-      onRefreshSales={() => fetchSalesForMonth(salesViewMonth)}
+      onRefreshSales={() => fetchSalesForRange(globalDateRange.from, globalDateRange.to)}
     />
   )
 
@@ -2549,18 +2589,39 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                 <SplitPaymentInput
                                   totalAmount={totalAmount}
                                   payments={payments}
+                                  isEditMode={isEditMode}
                                   onChange={(updatedPayments, isValid) => {
                                     setPayments(updatedPayments)
                                     setIsPaymentValid(isValid)
-                                    const sumPaid = updatedPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0)
+                                    const hasCodInPayments = updatedPayments.some((p) => isCodMethod(p.paymentMethod))
+                                    const totalAlloc = updatedPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0)
+                                    const sumPaid = updatedPayments.reduce((sum, p) => {
+                                      if (!isEditMode && isCodMethod(p.paymentMethod)) {
+                                        if (totalAmount > 0 && totalAlloc >= totalAmount) {
+                                          return sum
+                                        }
+                                        return sum + (Number(p.amount) || 0)
+                                      }
+                                      return sum + (Number(p.amount) || 0)
+                                    }, 0)
                                     setReceivedAmount(sumPaid)
                                     setBalanceAmount(Math.max(0, totalAmount - sumPaid))
                                     if (updatedPayments.length > 0) {
                                       setPaymentMethod(updatedPayments[0].paymentMethod || "Cash")
                                     }
+                                    if (!isEditMode && hasCodInPayments && (paymentStatus === "Paid" || paymentStatus === "Completed")) {
+                                      setPaymentStatus("Credit")
+                                    }
                                   }}
                                   paymentStatus={paymentStatus}
-                                  onPaymentStatusChange={(newStatus) => setPaymentStatus(newStatus)}
+                                  onPaymentStatusChange={(newStatus) => {
+                                    const hasCodInPayments = payments.some((p) => isCodMethod(p.paymentMethod)) || isCodMethod(paymentMethod)
+                                    if (!isEditMode && hasCodInPayments && (newStatus === "Paid" || newStatus === "Completed")) {
+                                      setPaymentStatus("Credit")
+                                    } else {
+                                      setPaymentStatus(newStatus)
+                                    }
+                                  }}
                                   currencySymbol={deviceCurrencyState}
                                 />
                               </div>

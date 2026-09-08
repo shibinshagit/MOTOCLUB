@@ -38,6 +38,7 @@ import {
 import { useAppSelector, useAppDispatch } from "@/store/hooks"
 import { useStaffRestrictions } from "@/hooks/use-staff-restrictions"
 import { selectDevice, selectCompany } from "@/store/slices/deviceSlice"
+import { selectDateRange as selectGlobalDateRange } from "@/store/slices/dateRangeSlice"
 import {
   selectFinancialData,
   selectLastUpdated,
@@ -183,6 +184,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
   const financialData = useAppSelector(selectFinancialData)
   const lastUpdated = useAppSelector(selectLastUpdated)
   const storedDateRange = useAppSelector(selectDateRange)
+  const globalDateRange = useAppSelector(selectGlobalDateRange)
   const isLoading = useAppSelector(selectIsLoading)
   const isBackgroundLoading = useAppSelector(selectIsBackgroundLoading)
   const balances = useAppSelector(selectBalances)
@@ -224,8 +226,12 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
     return null
   }
 
-  // Initialize date range to today
+  // Initialize date range from globalDateRange first, then storedDateRange, then today
   const [dateFrom, setDateFrom] = useState<Date>(() => {
+    if (globalDateRange?.from) {
+      const gFrom = safeParseDateString(globalDateRange.from)
+      if (gFrom) return gFrom
+    }
     if (storedDateRange.dateFrom) {
       const storedFrom = safeParseDateString(storedDateRange.dateFrom)
       if (storedFrom) return storedFrom
@@ -235,12 +241,34 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
   })
 
   const [dateTo, setDateTo] = useState<Date>(() => {
+    if (globalDateRange?.to) {
+      const gTo = safeParseDateString(globalDateRange.to)
+      if (gTo) {
+        const toEnd = new Date(gTo)
+        toEnd.setHours(23, 59, 59, 999)
+        return toEnd
+      }
+    }
     if (storedDateRange.dateTo) {
       const storedTo = safeParseDateString(storedDateRange.dateTo)
       if (storedTo) return storedTo
     }
     return todayEnd
   })
+
+  // Synchronize with global date range changes
+  useEffect(() => {
+    if (globalDateRange?.from && globalDateRange?.to) {
+      const fromParsed = safeParseDateString(globalDateRange.from)
+      const toParsed = safeParseDateString(globalDateRange.to)
+      if (fromParsed && toParsed) {
+        setDateFrom(fromParsed)
+        const toEnd = new Date(toParsed)
+        toEnd.setHours(23, 59, 59, 999)
+        setDateTo(toEnd)
+      }
+    }
+  }, [globalDateRange?.from, globalDateRange?.to])
 
   // Manual transaction dialog states
   const [isManualDialogOpen, setIsManualDialogOpen] = useState(false)
@@ -1530,6 +1558,11 @@ const getRemainingAmount = (transaction: any) => {
 }
 
 const getAmountReceived = () => {
+  // Use backend source-of-truth if available
+  if (balances?.moneyIn !== undefined) {
+    return balances.moneyIn
+  }
+
   if (!filteredTransactions) return 0
   
   let totalReceived = 0
@@ -1569,6 +1602,11 @@ const getTotalReceived = () => {
 
 // FIXED: Get spends (money out) - consistent with getAmountReceived logic
 const getSpends = () => {
+  // Use backend source-of-truth if available
+  if (balances?.moneyOut !== undefined) {
+    return balances.moneyOut
+  }
+
   if (!filteredTransactions) return 0
   
   let totalSpends = 0

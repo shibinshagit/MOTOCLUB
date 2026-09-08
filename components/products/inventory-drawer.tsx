@@ -21,6 +21,8 @@ import NewProductModal from "@/components/sales/new-product-modal"
 import { ProductDetailSlider } from "@/components/products/product-detail-slider"
 import EditProductModal from "@/components/products/edit-product-modal"
 import AdjustStockModal from "@/components/products/adjust-stock-modal"
+import { InventorySearchBox } from "@/components/products/inventory-search-box"
+import { filterProductsSemantic } from "@/lib/product-search"
 import { getProducts, deleteProduct } from "@/app/actions/product-actions"
 import { useToast } from "@/components/ui/use-toast"
 import { notifyError, notifySuccess } from "@/lib/notifications"
@@ -107,16 +109,7 @@ export default function InventoryDrawer({
 
   const searchedProducts = useMemo(() => {
     if (!searchTerm.trim()) return products
-    const query = searchTerm.toLowerCase()
-    return products.filter(
-      (product) =>
-        product.name?.toLowerCase().includes(query) ||
-        product.category?.toLowerCase().includes(query) ||
-        product.company_name?.toLowerCase().includes(query) ||
-        product.barcode?.toLowerCase().includes(query) ||
-        product.shelf?.toLowerCase().includes(query) ||
-        String(product.id).includes(query),
-    )
+    return filterProductsSemantic(products, searchTerm)
   }, [products, searchTerm])
 
   const fetchProducts = useCallback(
@@ -281,23 +274,16 @@ export default function InventoryDrawer({
             </div>
 
             <div className="ml-auto flex flex-wrap items-center gap-2">
-              <div className="relative hidden sm:block">
-                <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
-                <Input
+              <div className="hidden sm:block">
+                <InventorySearchBox
                   value={searchTerm}
-                  onChange={(e) => dispatch(setSearchTerm(e.target.value))}
+                  onChange={(val) => dispatch(setSearchTerm(val))}
+                  onSelectProduct={handleViewProduct}
+                  products={products}
+                  userId={userId}
                   placeholder="Search products..."
-                  className="h-8 w-44 border-slate-200 bg-white pl-8 pr-8 text-xs lg:w-52"
+                  className="w-48 lg:w-56"
                 />
-                {searchTerm ? (
-                  <button
-                    type="button"
-                    onClick={() => dispatch(setSearchTerm(""))}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                ) : null}
               </div>
 
               <Button
@@ -336,24 +322,15 @@ export default function InventoryDrawer({
           </div>
 
           <div className="relative z-10 border-b border-slate-200 bg-white px-4 py-2 sm:hidden">
-            <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
-              <Input
-                value={searchTerm}
-                onChange={(e) => dispatch(setSearchTerm(e.target.value))}
-                placeholder="Search products..."
-                className="h-8 border-slate-200 bg-white pl-8 pr-8 text-xs"
-              />
-              {searchTerm ? (
-                <button
-                  type="button"
-                  onClick={() => dispatch(setSearchTerm(""))}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              ) : null}
-            </div>
+            <InventorySearchBox
+              value={searchTerm}
+              onChange={(val) => dispatch(setSearchTerm(val))}
+              onSelectProduct={handleViewProduct}
+              products={products}
+              userId={userId}
+              placeholder="Search products..."
+              className="w-full"
+            />
           </div>
 
           <div className="relative z-0 min-h-0 flex-1 p-4">

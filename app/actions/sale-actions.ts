@@ -528,209 +528,66 @@ function isEcomAllowedDevice(deviceId: number): boolean {
 
 async function queryDeviceSales(deviceId: number, options: GetUserSalesOptions = {}) {
   const { limit, searchTerm, dateFrom, dateTo } = options
-  const searchPattern = searchTerm?.trim() ? `%${searchTerm.trim().toLowerCase()}%` : null
+  const normalizedSearch = searchTerm?.trim() || null
+  const searchPattern = normalizedSearch ? `%${normalizedSearch.toLowerCase()}%` : null
   const endExclusive = dateTo ? getExclusiveEndDate(dateTo) : null
   const allowEcom = isEcomAllowedDevice(deviceId)
 
-  const itemsSummarySelect = sql`
-    COALESCE(
-      (SELECT STRING_AGG(COALESCE(p.name, sv.name, si.notes, ''), ', ')
-       FROM sale_items si
-       LEFT JOIN products p ON si.product_id = p.id AND NOT EXISTS (SELECT 1 FROM services s2 WHERE s2.id = si.product_id)
-       LEFT JOIN services sv ON si.product_id = sv.id
-       WHERE si.sale_id = s.id), ''
-    ) as items_summary
-  `
-
-  const searchWhereClause = searchPattern
-    ? sql`
-        AND (
-          LOWER(COALESCE(s.customer_name_override, c.name, '')) LIKE ${searchPattern}
-          OR LOWER(COALESCE(s.customer_phone_override, c.phone, '')) LIKE ${searchPattern}
-          OR LOWER(COALESCE(c.email, '')) LIKE ${searchPattern}
-          OR CAST(s.id AS TEXT) LIKE ${searchPattern}
-          OR LOWER(COALESCE(s.status, '')) LIKE ${searchPattern}
-          OR LOWER(COALESCE(s.payment_status, '')) LIKE ${searchPattern}
-          OR LOWER(COALESCE(s.payment_method, '')) LIKE ${searchPattern}
-          OR LOWER(COALESCE(s.delivery_status, '')) LIKE ${searchPattern}
-          OR LOWER(COALESCE(s.external_order_id, '')) LIKE ${searchPattern}
-          OR LOWER(COALESCE(s.tracking_id, '')) LIKE ${searchPattern}
-          OR LOWER(COALESCE(s.notes, '')) LIKE ${searchPattern}
-          OR LOWER(COALESCE(st.name, '')) LIKE ${searchPattern}
-          OR CAST(s.total_amount AS TEXT) LIKE ${searchPattern}
-          OR EXISTS (
-            SELECT 1 FROM sale_items si
-            LEFT JOIN products p ON si.product_id = p.id
-            LEFT JOIN services sv ON si.product_id = sv.id
-            LEFT JOIN product_variants pv ON si.product_variant_id = pv.id
-            WHERE si.sale_id = s.id
-              AND (
-                LOWER(COALESCE(p.name, '')) LIKE ${searchPattern}
-                OR LOWER(COALESCE(sv.name, '')) LIKE ${searchPattern}
-                OR LOWER(COALESCE(pv.name, '')) LIKE ${searchPattern}
-                OR LOWER(COALESCE(si.notes, '')) LIKE ${searchPattern}
-              )
-          )
-        )
-      `
-    : sql``
-
-  if (dateFrom && endExclusive && !searchPattern && !limit) {
-    return sql`
-      SELECT s.*, COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name, st.name as staff_name,
-      ${itemsSummarySelect},
-      COALESCE(
-        (SELECT SUM(si.quantity * COALESCE(si.cost, si.wholesale_price, 0))
-         FROM sale_items si 
-         WHERE si.sale_id = s.id), 0
-      ) as total_cost
-      FROM sales s
-      LEFT JOIN customers c ON s.customer_id = c.id
-      LEFT JOIN staff st ON s.staff_id = st.id
-      WHERE (s.device_id = ${deviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
-        AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
-        AND s.sale_date >= ${dateFrom}
-        AND s.sale_date < ${endExclusive}
-      ORDER BY s.id DESC
-    `
-  }
-
-  if (dateFrom && endExclusive && searchPattern && limit) {
-    return sql`
-      SELECT s.*, COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name, st.name as staff_name,
-      ${itemsSummarySelect},
-      COALESCE(
-        (SELECT SUM(si.quantity * COALESCE(si.cost, si.wholesale_price, 0))
-         FROM sale_items si 
-         WHERE si.sale_id = s.id), 0
-      ) as total_cost
-      FROM sales s
-      LEFT JOIN customers c ON s.customer_id = c.id
-      LEFT JOIN staff st ON s.staff_id = st.id
-      WHERE (s.device_id = ${deviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
-        AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
-        AND s.sale_date >= ${dateFrom}
-        AND s.sale_date < ${endExclusive}
-        ${searchWhereClause}
-      ORDER BY s.id DESC
-      LIMIT ${limit}
-    `
-  }
-
-  if (dateFrom && endExclusive && searchPattern) {
-    return sql`
-      SELECT s.*, COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name, st.name as staff_name,
-      ${itemsSummarySelect},
-      COALESCE(
-        (SELECT SUM(si.quantity * COALESCE(si.cost, si.wholesale_price, 0))
-         FROM sale_items si 
-         WHERE si.sale_id = s.id), 0
-      ) as total_cost
-      FROM sales s
-      LEFT JOIN customers c ON s.customer_id = c.id
-      LEFT JOIN staff st ON s.staff_id = st.id
-      WHERE (s.device_id = ${deviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
-        AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
-        AND s.sale_date >= ${dateFrom}
-        AND s.sale_date < ${endExclusive}
-        ${searchWhereClause}
-      ORDER BY s.id DESC
-    `
-  }
-
-  if (dateFrom && endExclusive && limit) {
-    return sql`
-      SELECT s.*, COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name, st.name as staff_name,
-      ${itemsSummarySelect},
-      COALESCE(
-        (SELECT SUM(si.quantity * COALESCE(si.cost, si.wholesale_price, 0))
-         FROM sale_items si 
-         WHERE si.sale_id = s.id), 0
-      ) as total_cost
-      FROM sales s
-      LEFT JOIN customers c ON s.customer_id = c.id
-      LEFT JOIN staff st ON s.staff_id = st.id
-      WHERE (s.device_id = ${deviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
-        AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
-        AND s.sale_date >= ${dateFrom}
-        AND s.sale_date < ${endExclusive}
-      ORDER BY s.id DESC
-      LIMIT ${limit}
-    `
-  }
-
-  if (searchPattern && limit) {
-    return sql`
-      SELECT s.*, COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name, st.name as staff_name,
-      ${itemsSummarySelect},
-      COALESCE(
-        (SELECT SUM(si.quantity * COALESCE(si.cost, si.wholesale_price, 0))
-         FROM sale_items si 
-         WHERE si.sale_id = s.id), 0
-      ) as total_cost
-      FROM sales s
-      LEFT JOIN customers c ON s.customer_id = c.id
-      LEFT JOIN staff st ON s.staff_id = st.id
-      WHERE (s.device_id = ${deviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
-        AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
-        ${searchWhereClause}
-      ORDER BY s.id DESC
-      LIMIT ${limit}
-    `
-  }
-
-  if (searchPattern) {
-    return sql`
-      SELECT s.*, COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name, st.name as staff_name,
-      ${itemsSummarySelect},
-      COALESCE(
-        (SELECT SUM(si.quantity * COALESCE(si.cost, si.wholesale_price, 0))
-         FROM sale_items si 
-         WHERE si.sale_id = s.id), 0
-      ) as total_cost
-      FROM sales s
-      LEFT JOIN customers c ON s.customer_id = c.id
-      LEFT JOIN staff st ON s.staff_id = st.id
-      WHERE (s.device_id = ${deviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
-        AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
-        ${searchWhereClause}
-      ORDER BY s.id DESC
-    `
-  }
-
-  if (limit) {
-    return sql`
-      SELECT s.*, COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name, st.name as staff_name,
-      ${itemsSummarySelect},
-      COALESCE(
-        (SELECT SUM(si.quantity * COALESCE(si.cost, si.wholesale_price, 0))
-         FROM sale_items si 
-         WHERE si.sale_id = s.id), 0
-      ) as total_cost
-      FROM sales s
-      LEFT JOIN customers c ON s.customer_id = c.id
-      LEFT JOIN staff st ON s.staff_id = st.id
-      WHERE (s.device_id = ${deviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
-        AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
-      ORDER BY s.id DESC
-      LIMIT ${limit}
-    `
-  }
-
   return sql`
-    SELECT s.*, COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name, st.name as staff_name,
-    ${itemsSummarySelect},
-    COALESCE(
-      (SELECT SUM(si.quantity * COALESCE(si.cost, si.wholesale_price, 0))
-       FROM sale_items si 
-       WHERE si.sale_id = s.id), 0
-    ) as total_cost
+    SELECT 
+      s.*, 
+      COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name, 
+      st.name as staff_name,
+      COALESCE(
+        (SELECT STRING_AGG(COALESCE(p.name, sv.name, si.notes, ''), ', ')
+         FROM sale_items si
+         LEFT JOIN products p ON si.product_id = p.id AND NOT EXISTS (SELECT 1 FROM services s2 WHERE s2.id = si.product_id)
+         LEFT JOIN services sv ON si.product_id = sv.id
+         WHERE si.sale_id = s.id), ''
+      ) as items_summary,
+      COALESCE(
+        (SELECT SUM(si.quantity * COALESCE(si.cost, si.wholesale_price, 0))
+         FROM sale_items si 
+         WHERE si.sale_id = s.id), 0
+      ) as total_cost
     FROM sales s
     LEFT JOIN customers c ON s.customer_id = c.id
     LEFT JOIN staff st ON s.staff_id = st.id
     WHERE (s.device_id = ${deviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
       AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
+      AND (${dateFrom}::timestamp IS NULL OR s.sale_date >= ${dateFrom}::timestamp)
+      AND (${endExclusive}::timestamp IS NULL OR s.sale_date < ${endExclusive}::timestamp)
+      AND (
+        ${searchPattern}::text IS NULL
+        OR LOWER(COALESCE(s.customer_name_override, c.name, '')) LIKE ${searchPattern}
+        OR LOWER(COALESCE(s.customer_phone_override, c.phone, '')) LIKE ${searchPattern}
+        OR LOWER(COALESCE(c.email, '')) LIKE ${searchPattern}
+        OR CAST(s.id AS TEXT) LIKE ${searchPattern}
+        OR LOWER(COALESCE(s.status, '')) LIKE ${searchPattern}
+        OR LOWER(COALESCE(s.payment_status, '')) LIKE ${searchPattern}
+        OR LOWER(COALESCE(s.payment_method, '')) LIKE ${searchPattern}
+        OR LOWER(COALESCE(s.delivery_status, '')) LIKE ${searchPattern}
+        OR LOWER(COALESCE(s.external_order_id, '')) LIKE ${searchPattern}
+        OR LOWER(COALESCE(s.tracking_id, '')) LIKE ${searchPattern}
+        OR LOWER(COALESCE(s.shipping_notes, '')) LIKE ${searchPattern}
+        OR LOWER(COALESCE(st.name, '')) LIKE ${searchPattern}
+        OR CAST(s.total_amount AS TEXT) LIKE ${searchPattern}
+        OR EXISTS (
+          SELECT 1 FROM sale_items si
+          LEFT JOIN products p ON si.product_id = p.id
+          LEFT JOIN services sv ON si.product_id = sv.id
+          LEFT JOIN product_variants pv ON si.product_variant_id = pv.id
+          WHERE si.sale_id = s.id
+            AND (
+              LOWER(COALESCE(p.name, '')) LIKE ${searchPattern}
+              OR LOWER(COALESCE(sv.name, '')) LIKE ${searchPattern}
+              OR LOWER(COALESCE(pv.name, '')) LIKE ${searchPattern}
+              OR LOWER(COALESCE(si.notes, '')) LIKE ${searchPattern}
+            )
+        )
+      )
     ORDER BY s.id DESC
+    LIMIT ${limit ?? null}
   `
 }
 
@@ -1000,37 +857,67 @@ export async function addSale(saleData: any) {
     let newOrderStatus = saleData.status || "Completed"
     let newPaymentMethod = saleData.paymentMethod || "Cash"
 
+    const isCod = (m?: string | null) => {
+      const s = (m || "").toUpperCase().trim()
+      return s === "COD" || s === "CASH ON DELIVERY"
+    }
+
+    const hasCodPayment =
+      isCod(newPaymentMethod) ||
+      (Array.isArray(saleData.payments) && saleData.payments.some((p: any) => isCod(p.paymentMethod)))
+
     let advanceAmount = 0
-    let receivedAmount = Number(saleData.receivedAmount) || 0
+    let receivedAmount = 0
+
+    const totalAllocated = Array.isArray(saleData.payments) && saleData.payments.length > 0
+      ? saleData.payments.reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0)
+      : (Number(saleData.receivedAmount) || 0)
+
     if (Array.isArray(saleData.payments) && saleData.payments.length > 0) {
-      receivedAmount = saleData.payments.reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0)
-    }
-    let balanceAmount = 0
-    let newPaymentStatus = saleData.paymentStatus || "Pending"
-
-    if (newPaymentMethod.toUpperCase() === "COD") {
+      receivedAmount = saleData.payments.reduce((s: number, p: any) => {
+        // If COD payment amount fully covers or exceeds total (or totalAllocated >= total), it's uncollected COD
+        if (isCod(p.paymentMethod) && total > 0 && totalAllocated >= total) {
+          return s
+        }
+        // Otherwise (e.g. advance paid on COD like ₹656 out of ₹5,600), it's received money
+        return s + (Number(p.amount) || 0)
+      }, 0)
+    } else if (isCod(newPaymentMethod)) {
       advanceAmount = Number(saleData.advanceAmount) || 0
-      receivedAmount = receivedAmount > advanceAmount ? receivedAmount : advanceAmount
+      const recAmt = Number(saleData.receivedAmount) || 0
+      receivedAmount = recAmt > 0 && recAmt < total ? recAmt : advanceAmount
+    } else {
+      receivedAmount = Number(saleData.receivedAmount) || 0
     }
 
-    receivedAmount = Math.min(receivedAmount, total)
-    balanceAmount = Math.max(0, total - receivedAmount)
+    receivedAmount = Math.min(Math.max(0, receivedAmount), total)
+    if (hasCodPayment) {
+      advanceAmount = receivedAmount
+    }
+    let balanceAmount = Math.max(0, total - receivedAmount)
+    let newPaymentStatus = saleData.paymentStatus || "Pending"
 
     // 1. Ensure Payment Status and amounts are consistent based on total vs received
     if (newOrderStatus.toLowerCase() !== "cancelled") {
-      if (total > 0 && receivedAmount >= total) {
+      if (hasCodPayment) {
+        // COD rule: Payment Status must NEVER be Paid during sale creation.
+        // COD should initially be treated as Credit / Partial (balance due).
+        newPaymentStatus = "Credit"
+      } else if (total > 0 && receivedAmount >= total) {
         newPaymentStatus = "Paid"
         receivedAmount = total
         balanceAmount = 0
       } else if (receivedAmount > 0 && receivedAmount < total) {
         newPaymentStatus = "Credit"
       } else if (receivedAmount === 0) {
-        newPaymentStatus = saleData.paymentStatus === "Credit" ? "Credit" : "Pending"
+        newPaymentStatus = (saleData.paymentStatus === "Credit" || saleData.paymentStatus === "Partial")
+          ? "Credit"
+          : "Pending"
       }
     }
 
-    // If Credit, validate customer
-    if (newPaymentStatus.toLowerCase() === "credit" && !saleData.customerId) {
+    // If Credit, validate customer (skip for COD orders as customer is captured via shipping/address or walk-in)
+    if (!hasCodPayment && (newPaymentStatus.toLowerCase() === "credit" || newPaymentStatus.toLowerCase() === "partial") && !saleData.customerId) {
       return { success: false, message: "Please select a customer for a credit sale." }
     }
 
@@ -1038,7 +925,7 @@ export async function addSale(saleData: any) {
     if (newOrderStatus.toLowerCase() !== "cancelled") {
       if (newPaymentStatus.toLowerCase() === "paid") {
         newOrderStatus = "Completed"
-      } else if (newPaymentStatus.toLowerCase() === "credit") {
+      } else if (newPaymentStatus.toLowerCase() === "credit" || newPaymentStatus.toLowerCase() === "partial") {
         newOrderStatus = "Credit"
       } else {
         newOrderStatus = "Pending"
@@ -1047,10 +934,10 @@ export async function addSale(saleData: any) {
 
     // Delivery Status sync logic (independent from Payment Status "Paid" logic)
     if (newOrderStatus.toLowerCase() !== "cancelled") {
-      const isCodApproved = newPaymentMethod.toUpperCase() === "COD" && receivedAmount > 0;
-      const isStandardApproved = newPaymentStatus.toLowerCase() === "paid" || newPaymentStatus.toLowerCase() === "completed";
+      const isCodApproved = isCod(newPaymentMethod) && receivedAmount > 0;
+      const isStandardApproved = !hasCodPayment && (newPaymentStatus.toLowerCase() === "paid" || newPaymentStatus.toLowerCase() === "completed");
       
-      if (isCodApproved || isStandardApproved) {
+      if (isStandardApproved) {
         if (!shipping.delivery_status || shipping.delivery_status.toLowerCase() === "pending") {
           shipping.delivery_status = "Paid";
         }
@@ -1107,6 +994,31 @@ export async function addSale(saleData: any) {
 
     const sale = saleResult[0]
     saleId = sale.id
+
+    // Save payment records into transaction_payments
+    try {
+      if (Array.isArray(saleData.payments) && saleData.payments.length > 0) {
+        for (const p of saleData.payments) {
+          await sql`
+            INSERT INTO transaction_payments (
+              sale_id, payment_method, amount, reference_number, notes, payment_date
+            ) VALUES (
+              ${saleId}, ${p.paymentMethod || "Cash"}, ${Number(p.amount) || 0}, ${p.referenceNumber || null}, ${p.notes || null}, ${saleData.saleDate || new Date()}
+            )
+          `
+        }
+      } else {
+        await sql`
+          INSERT INTO transaction_payments (
+            sale_id, payment_method, amount, payment_date
+          ) VALUES (
+            ${saleId}, ${newPaymentMethod}, ${hasCodPayment ? total : (receivedAmount > 0 ? receivedAmount : total)}, ${saleData.saleDate || new Date()}
+          )
+        `
+      }
+    } catch (tpErr) {
+      console.warn("Could not insert transaction_payments for sale:", tpErr)
+    }
 
     // Insert sale items individually and update stock with improved validation
     const saleItems = []
@@ -1320,7 +1232,7 @@ export async function addSale(saleData: any) {
 
     // Record simplified accounting transaction with new logic
     try {
-      console.log("Recording accounting transaction for sale:", saleId, "with status:", saleData.paymentStatus)
+      console.log("Recording accounting transaction for sale:", saleId, "with status:", newPaymentStatus)
 
       const accountingResult = await recordSaleTransaction({
         saleId: sale.id,
@@ -1328,13 +1240,14 @@ export async function addSale(saleData: any) {
         cogsAmount,
         receivedAmount,
         outstandingAmount: balanceAmount,
-        status: saleData.paymentStatus || "Completed",
+        status: newPaymentStatus,
         paymentMethod: saleData.paymentMethod || "Cash",
         deviceId: saleData.deviceId,
         userId: saleData.userId,
         customerId: saleData.customerId,
         saleDate: new Date(saleData.saleDate || new Date()),
         productCreditAmount: productTotal,
+        payments: saleData.payments,
       })
 
       console.log("Accounting transaction result:", accountingResult)
@@ -1349,7 +1262,7 @@ export async function addSale(saleData: any) {
         userId: saleData.userId,
         saleDate: new Date(saleData.saleDate || new Date()),
         paymentMethod: saleData.paymentMethod || "Cash",
-        status: saleData.paymentStatus || "Completed",
+        status: newPaymentStatus,
         fulfillmentType: shipping.fulfillment_type,
         courierPaidExtra,
         expenseCourier,
@@ -1435,18 +1348,38 @@ function calculateSaleChanges(
   // Use explicit paymentStatus if provided, otherwise fallback to "Paid"
   let newOrderStatus = newData.status || original.status || "Completed"
   let newPaymentMethod = newData.paymentMethod || original.payment_method || "Cash"
-  let newPaymentStatus = newData.paymentStatus || "Paid"
+  let newPaymentStatus = newData.paymentStatus || original.payment_status || "Paid"
   
-  let advanceAmount = 0
-  let newReceivedAmount = Number(newData.receivedAmount) || 0
-  if (Array.isArray(newData.payments) && newData.payments.length > 0) {
-    newReceivedAmount = newData.payments.reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0)
+  const isCodMethod = (m?: string | null) => {
+    const s = (m || "").toUpperCase().trim()
+    return s === "COD" || s === "CASH ON DELIVERY"
   }
+
+  const hasCodPayment =
+    isCodMethod(newPaymentMethod) ||
+    (Array.isArray(newData.payments) && newData.payments.some((p: any) => isCodMethod(p.paymentMethod)))
+
+  const isMarkedPaid =
+    String(newPaymentStatus || "").toLowerCase() === "paid" ||
+    String(newPaymentStatus || "").toLowerCase() === "completed"
+
+  let advanceAmount = 0
+  let newReceivedAmount = 0
   let balanceAmount = 0
 
-  if (newPaymentMethod.toUpperCase() === "COD") {
+  if (Array.isArray(newData.payments) && newData.payments.length > 0) {
+    newReceivedAmount = newData.payments.reduce((s: number, p: any) => {
+      // Only count COD as received if payment is explicitly marked Paid (e.g. COD collected)
+      if (isCodMethod(p.paymentMethod) && !isMarkedPaid) {
+        return s
+      }
+      return s + (Number(p.amount) || 0)
+    }, 0)
+  } else if (isCodMethod(newPaymentMethod) && !isMarkedPaid) {
     advanceAmount = Number(newData.advanceAmount) || 0
-    newReceivedAmount = newReceivedAmount > advanceAmount ? newReceivedAmount : advanceAmount
+    newReceivedAmount = advanceAmount
+  } else {
+    newReceivedAmount = Number(newData.receivedAmount) || 0
   }
 
   if (newReceivedAmount < 0) {
@@ -1457,7 +1390,7 @@ function calculateSaleChanges(
   balanceAmount = Math.max(0, newTotal - newReceivedAmount)
 
   if (newOrderStatus.toLowerCase() !== "cancelled") {
-    if (newTotal > 0 && newReceivedAmount >= newTotal) {
+    if (isMarkedPaid || (newTotal > 0 && newReceivedAmount >= newTotal && !hasCodPayment)) {
       newPaymentStatus = "Paid"
       newOrderStatus = "Completed"
       newReceivedAmount = newTotal
@@ -1466,8 +1399,10 @@ function calculateSaleChanges(
       newPaymentStatus = "Credit"
       newOrderStatus = "Credit"
     } else if (newReceivedAmount === 0) {
-      newPaymentStatus = newData.paymentStatus === "Credit" ? "Credit" : "Pending"
-      newOrderStatus = newData.paymentStatus === "Credit" ? "Credit" : "Pending"
+      newPaymentStatus = (newData.paymentStatus === "Credit" || newData.paymentStatus === "Partial" || hasCodPayment)
+        ? "Credit"
+        : "Pending"
+      newOrderStatus = (newPaymentStatus === "Credit" || newPaymentStatus === "Partial") ? "Credit" : "Pending"
     }
   }
 
@@ -1491,7 +1426,7 @@ function calculateSaleChanges(
   if (
     newPaymentStatus.toLowerCase() === "paid" ||
     newPaymentStatus.toLowerCase() === "completed" ||
-    newReceivedAmount >= newTotal
+    (newTotal > 0 && newReceivedAmount >= newTotal && !hasCodPayment)
   ) {
     if (newOrderStatus.toLowerCase() !== "cancelled") {
       newPaymentStatus = "Paid"
@@ -1499,7 +1434,7 @@ function calculateSaleChanges(
       outstandingAmount = 0
       balanceAmount = 0
     }
-  } else if (newPaymentStatus.toLowerCase() !== "credit") {
+  } else if (newPaymentStatus.toLowerCase() !== "credit" && newPaymentStatus.toLowerCase() !== "partial") {
     newPaymentStatus = "Pending"
   }
 
@@ -1507,7 +1442,7 @@ function calculateSaleChanges(
   if (newOrderStatus.toLowerCase() !== "cancelled") {
     if (newPaymentStatus.toLowerCase() === "paid") {
       newOrderStatus = "Completed"
-    } else if (newPaymentStatus.toLowerCase() === "credit") {
+    } else if (newPaymentStatus.toLowerCase() === "credit" || newPaymentStatus.toLowerCase() === "partial") {
       newOrderStatus = "Credit"
     } else {
       newOrderStatus = "Pending"
@@ -1516,13 +1451,14 @@ function calculateSaleChanges(
 
   // Delivery Status sync logic (independent from Payment Status "Paid" logic)
   if (newOrderStatus.toLowerCase() !== "cancelled") {
-    if (shipping && (!shipping.delivery_status || shipping.delivery_status.toLowerCase() === "pending")) {
+    const isStandardApproved = !hasCodPayment && (newPaymentStatus.toLowerCase() === "paid" || newPaymentStatus.toLowerCase() === "completed");
+    if (isStandardApproved && shipping && (!shipping.delivery_status || shipping.delivery_status.toLowerCase() === "pending")) {
       shipping.delivery_status = "Paid";
     }
   }
 
   return {
-    dateChanged: new Date(original.sale_date).getTime() !== new Date(newData.saleDate).getTime(),
+    dateChanged: newData.saleDate ? new Date(original.sale_date).getTime() !== new Date(newData.saleDate).getTime() : false,
     statusChanged: original.status !== newOrderStatus || original.payment_status !== newPaymentStatus,
     totalChanged: Number(original.total_amount) !== newTotal,
     discountChanged: originalDiscountAmount !== newDiscountAmount,
@@ -1530,7 +1466,7 @@ function calculateSaleChanges(
     itemsChanged: JSON.stringify(originalItems) !== JSON.stringify(newItems),
 
     originalDate: new Date(original.sale_date),
-    newDate: new Date(newData.saleDate),
+    newDate: newData.saleDate ? new Date(newData.saleDate) : new Date(original.sale_date),
     originalStatus: original.status,
     newStatus: newOrderStatus,
     originalPaymentStatus: original.payment_status,
@@ -1771,6 +1707,24 @@ export async function updateSale(saleData: any) {
       }
 
       await updateSaleRecord(Boolean(saleData.deviceId))
+
+      // Sync transaction_payments if payments provided
+      try {
+        if (Array.isArray(saleData.payments) && saleData.payments.length > 0) {
+          await sql`DELETE FROM transaction_payments WHERE sale_id = ${saleData.id}`
+          for (const p of saleData.payments) {
+            await sql`
+              INSERT INTO transaction_payments (
+                sale_id, payment_method, amount, reference_number, notes, payment_date
+              ) VALUES (
+                ${saleData.id}, ${p.paymentMethod || "Cash"}, ${Number(p.amount) || 0}, ${p.referenceNumber || null}, ${p.notes || null}, ${changes.newDate || new Date()}
+              )
+            `
+          }
+        }
+      } catch (tpUpdateErr) {
+        console.warn("Could not sync transaction_payments on updateSale:", tpUpdateErr)
+      }
 
     // 7. Handle sale items updates with MULTI-BATCH logic
     console.log("Updating sale items with multi-batch stock tracking...")
@@ -2307,69 +2261,26 @@ export async function updateSaleDeliveryStatus(
       }
     }
 
-    // Now update the sales table, with retry for DOD tracking ID allocation
-    // If the caller supplied a tracking ID, always use it (overwrite the old one)
-    let newTrackingId: string | null = trackingId || null;
+    // Now update the sales table
+    // If the caller explicitly supplied a tracking ID, use it (or null if empty string)
+    // If trackingId was omitted (undefined), preserve existing tracking ID
     const existingTrackingId = rows[0].tracking_id;
-    if (!newTrackingId) {
-      newTrackingId = (existingTrackingId && !existingTrackingId.startsWith('JC-')) ? existingTrackingId : null;
-    }
-    let updateSuccess = false;
-    let retries = 5;
+    let targetTrackingId: string | null = existingTrackingId || null;
 
-    while (!updateSuccess && retries > 0) {
-      try {
-        if (deliveryStatus === "Shipping" && !newTrackingId) {
-          const activeIdsResult = await sql`
-            SELECT tracking_id 
-            FROM sales 
-            WHERE device_id = ${deviceId} 
-              AND tracking_id LIKE 'DOD%' 
-              AND (delivery_status IS NULL OR delivery_status NOT IN ('Delivered', 'Returned', 'Failed')) 
-              AND status != 'Cancelled'
-          `;
-          const activeIds = new Set(activeIdsResult.map((r: any) => parseInt(String(r.tracking_id).replace('DOD', ''), 10) || 0));
-          let nextNum = 1;
-          while (activeIds.has(nextNum)) {
-            nextNum++;
-          }
-          newTrackingId = 'DOD' + String(nextNum).padStart(3, '0');
-        }
-
-        if (trackingId) {
-          // User explicitly provided a tracking ID — always overwrite the stored one
-          await sql`
-            UPDATE sales
-            SET delivery_status = ${deliveryStatus},
-                shipped_at = ${shippedAt},
-                delivered_at = ${deliveredAt},
-                tracking_id = ${newTrackingId},
-                updated_at = NOW()
-            WHERE id = ${saleId}
-          `
-        } else {
-          // No tracking ID supplied — only fill if currently null (preserves existing)
-          await sql`
-            UPDATE sales
-            SET delivery_status = ${deliveryStatus},
-                shipped_at = ${shippedAt},
-                delivered_at = ${deliveredAt},
-                tracking_id = COALESCE(tracking_id, ${newTrackingId}),
-                updated_at = NOW()
-            WHERE id = ${saleId}
-          `
-        }
-        updateSuccess = true;
-      } catch (err: any) {
-        if (err.message && (err.message.includes('idx_sales_active_dod_tracking') || err.message.includes('unique constraint'))) {
-          retries--;
-          newTrackingId = null; // reset to try allocation again
-          if (retries === 0) throw new Error("Could not allocate a unique DOD tracking ID. Please try again.");
-          continue;
-        }
-        throw err;
-      }
+    if (trackingId !== undefined) {
+      const clean = trackingId?.trim();
+      targetTrackingId = clean ? clean : null;
     }
+
+    await sql`
+      UPDATE sales
+      SET delivery_status = ${deliveryStatus},
+          shipped_at = ${shippedAt},
+          delivered_at = ${deliveredAt},
+          tracking_id = ${targetTrackingId},
+          updated_at = NOW()
+      WHERE id = ${saleId}
+    `
 
     try {
       await sql`
@@ -2384,7 +2295,7 @@ export async function updateSaleDeliveryStatus(
 
     revalidatePath("/dashboard")
     revalidatePath("/staff/dashboard")
-    return { success: true as const, message: "Delivery status updated", trackingId: newTrackingId }
+    return { success: true as const, message: "Delivery status updated", trackingId: targetTrackingId }
   } catch (error) {
     console.error("updateSaleDeliveryStatus error:", error)
     return {
@@ -2394,15 +2305,20 @@ export async function updateSaleDeliveryStatus(
   }
 }
 
-export async function updateSaleTracking(saleId: number, deviceId: number, trackingId: string) {
-  if (!saleId || !deviceId) {
-    return { success: false as const, message: "Sale ID and device ID are required" }
+export async function updateSaleTracking(
+  saleId: number,
+  deviceId: number,
+  trackingId: string,
+  courierServiceName?: string
+) {
+  if (!saleId) {
+    return { success: false as const, message: "Sale ID is required" }
   }
 
   try {
     const rows = await sql`
-      SELECT id FROM sales
-      WHERE id = ${saleId} AND device_id = ${deviceId}
+      SELECT id, device_id FROM sales
+      WHERE id = ${saleId} AND (${deviceId} = 0 OR device_id = ${deviceId} OR source = 'ECOMMERCE')
       LIMIT 1
     `
 
@@ -2410,15 +2326,29 @@ export async function updateSaleTracking(saleId: number, deviceId: number, track
       return { success: false as const, message: "Sale not found" }
     }
 
-    await sql`
-      UPDATE sales
-      SET tracking_id = ${trackingId},
-          updated_at = NOW()
-      WHERE id = ${saleId}
-        AND device_id = ${deviceId}
-    `
+    const cleanTrackingId = trackingId?.trim() || null
+    const cleanCourierService = courierServiceName?.trim() || null
+
+    if (cleanCourierService) {
+      await sql`
+        UPDATE sales
+        SET tracking_id = ${cleanTrackingId},
+            courier_service_name = ${cleanCourierService},
+            updated_at = NOW()
+        WHERE id = ${saleId}
+      `
+    } else {
+      await sql`
+        UPDATE sales
+        SET tracking_id = ${cleanTrackingId},
+            updated_at = NOW()
+        WHERE id = ${saleId}
+      `
+    }
 
     revalidatePath("/", "layout")
+    revalidatePath("/dashboard")
+    revalidatePath("/staff/dashboard")
 
     return { success: true as const, message: "Tracking information updated" }
   } catch (error) {

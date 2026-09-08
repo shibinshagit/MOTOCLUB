@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { useSelector } from "react-redux"
 import { selectDeviceCurrency, selectDeviceId } from "@/store/slices/deviceSlice"
+import { selectDateRange } from "@/store/slices/dateRangeSlice"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -72,6 +73,7 @@ export default function ReturnsTab() {
   const deviceId = useSelector(selectDeviceId) || 1
   const { toast } = useToast()
 
+  const dateRange = useSelector(selectDateRange)
   const [returns, setReturns] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -104,7 +106,7 @@ export default function ReturnsTab() {
 
   useEffect(() => {
     fetchReturnRequests()
-  }, [statusFilter, dateFilter])
+  }, [statusFilter, dateFilter, dateRange?.from, dateRange?.to])
 
   const fetchReturnRequests = async (isRef = false) => {
     if (isRef) setRefreshing(true)
@@ -114,6 +116,8 @@ export default function ReturnsTab() {
       status: statusFilter,
       search: searchTerm,
       dateFilter: dateFilter,
+      startDate: dateRange?.from,
+      endDate: dateRange?.to,
     })
 
     if (res.success) {

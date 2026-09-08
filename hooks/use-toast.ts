@@ -9,7 +9,7 @@ import type {
 } from "@/components/ui/toast"
 
 const TOAST_LIMIT = 1
-const TOAST_REMOVE_DELAY = 1000000
+const TOAST_REMOVE_DELAY = 1000
 
 type ToasterToast = ToastProps & {
   id: string
@@ -163,6 +163,14 @@ function toast({ ...props }: Toast) {
       },
     },
   })
+
+  // Ensure automatic dismissal even if Radix timer is paused or interrupted (e.g., modal unmount, window blur)
+  const duration = (props as any).duration ?? 3500
+  if (duration !== Infinity && duration > 0) {
+    setTimeout(() => {
+      dismiss()
+    }, duration)
+  }
 
   return {
     id: id,

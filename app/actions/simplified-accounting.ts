@@ -1,6 +1,6 @@
 "use server"
 
-import { format } from "date-fns"
+import { format, addDays, parseISO } from "date-fns"
 import { sql } from "@/lib/db"
 
 // Record supplier payment transaction
@@ -240,7 +240,7 @@ export async function recordSaleTransaction(saleData: {
       costAmount = 0
       receivedAmountForRecord = 0
       description = `Sale #${saleData.saleId} - Cancelled - ${saleData.paymentMethod || "Cash"} - Customer: ${saleData.customerId ? `ID ${saleData.customerId}` : "Walk-in"}`
-    } else if (saleData.status === "Credit") {
+    } else if (saleData.status === "Credit" || saleData.status === "Partial") {
       creditAmount = productReceived
       debitAmount = 0
 
@@ -251,12 +251,17 @@ export async function recordSaleTransaction(saleData: {
         costAmount = 0
       }
 
-      description = `Sale #${saleData.saleId} - Credit - ${saleData.paymentMethod || "Cash"} - Customer: ${saleData.customerId ? `ID ${saleData.customerId}` : "Walk-in"} - Received: ${receivedAmountForRecord}`
+      description = `Sale #${saleData.saleId} - ${saleData.status} - ${saleData.paymentMethod || "Cash"} - Customer: ${saleData.customerId ? `ID ${saleData.customerId}` : "Walk-in"} - Received: ${receivedAmountForRecord}`
     } else {
       creditAmount = hasShippingSplit ? productCredit : receivedAmount
       debitAmount = 0
       costAmount = Number(saleData.cogsAmount) || 0
       description = `Sale #${saleData.saleId} - Completed - ${saleData.paymentMethod || "Cash"} - Customer: ${saleData.customerId ? `ID ${saleData.customerId}` : "Walk-in"}`
+    }
+
+    const isCod = (m?: string | null) => {
+      const s = (m || "").toUpperCase().trim()
+      return s === "COD" || s === "CASH ON DELIVERY"
     }
 
     const activePayments = Array.isArray(saleData.payments)
@@ -268,14 +273,36 @@ export async function recordSaleTransaction(saleData: {
     if (activePayments.length > 1) {
       // Create separate ledger entry for each payment method in split payment
       const totalSplitPaid = activePayments.reduce((s, p) => s + (Number(p.amount) || 0), 0)
+      const nonCodPaidTotal = activePayments
+        .filter((p) => !isCod(p.paymentMethod))
+        .reduce((s, p) => s + (Number(p.amount) || 0), 0)
 
       for (const p of activePayments) {
         const pAmt = Number(p.amount) || 0
+        const isThisCod = isCod(p.paymentMethod)
+
+        let pCreditAmount = 0
+        let pReceived = 0
+        let pCostAmount = 0
+        let pDebitAmount = 0
+
+        if (isThisCod && totalSplitPaid >= totalAmount && (saleData.status === "Partial" || saleData.status === "Credit" || saleData.status === "Pending")) {
+          // COD portion is uncollected during creation: 0 received money
+          pReceived = 0
+          pCreditAmount = 0
+          pCostAmount = 0
+          pDebitAmount = 0
+        } else {
+          const ratio = nonCodPaidTotal > 0 && totalSplitPaid >= totalAmount
+            ? pAmt / nonCodPaidTotal
+            : (totalSplitPaid > 0 ? pAmt / totalSplitPaid : 1 / activePayments.length)
+          pCreditAmount = creditAmount * ratio
+          pCostAmount = costAmount * ratio
+          pDebitAmount = debitAmount * ratio
+          pReceived = receivedAmountForRecord * ratio
+        }
+
         const ratio = totalSplitPaid > 0 ? pAmt / totalSplitPaid : 1 / activePayments.length
-        const pCreditAmount = creditAmount * ratio
-        const pCostAmount = costAmount * ratio
-        const pDebitAmount = debitAmount * ratio
-        const pReceived = receivedAmountForRecord * ratio
         const refStr = p.referenceNumber ? ` (Ref: ${p.referenceNumber})` : ""
         const pDesc = `Sale #${saleData.saleId} - ${saleData.status} - ${p.paymentMethod}${refStr} - Customer: ${saleData.customerId ? `ID ${saleData.customerId}` : "Walk-in"}`
 
@@ -392,8 +419,8 @@ export async function recordSaleAdjustment(adjustmentData: {
         }
       }
 
-      // Special handling for CREDIT SALES - record cash when money is actually received with proportional COGS
-      if (previousStatus === "credit" && receivedDiff > 0) {
+      // Special handling for CREDIT / PARTIAL SALES - record cash when money is actually received with proportional COGS
+      if ((previousStatus === "credit" || previousStatus === "partial") && receivedDiff > 0) {
         // Payment received for credit sale: credit = received amount increase, cost = proportional COGS
         creditAmount += receivedDiff
         const paymentRatio = receivedDiff / newAmount
@@ -472,7 +499,7 @@ export async function recordSaleAdjustment(adjustmentData: {
       if (receivedDiff > 0) {
         const previousStatus = adjustmentData.previousValues.status?.toLowerCase() || ""
         
-        if (previousStatus === "credit") {
+        if (previousStatus === "credit" || previousStatus === "partial") {
           // Credit sale payment: record cash received with proportional COGS
           creditAmount = receivedDiff
           debitAmount = 0
@@ -1368,48 +1395,50 @@ export async function getAccountingBalances(deviceId: number, fromDateStr: strin
 
     console.log("Getting accounting balances for device:", deviceId, "from:", fromDateStr, "to:", closingDateStr)
 
-    // Ensure table exists
+    // Precise exclusive date boundaries:
+    // Opening cutoff: Start of fromDate (00:00:00)
+    // Closing exclusive cutoff: Start of day after closing date (00:00:00)
+    // Ensures: Today's Opening Balance === Yesterday's Closing Balance unconditionally
     const openingCutoff = `${fromDateStr} 00:00:00`
-    const closingCutoff = `${closingDateStr} 23:59:59`
+    const nextDay = addDays(parseISO(closingDateStr), 1)
+    const closingExclusiveCutoff = `${format(nextDay, "yyyy-MM-dd")} 00:00:00`
 
-    console.log("Date strings for balance calculation:", { openingCutoff, closingCutoff })
+    console.log("Date boundaries for balance calculation:", { openingCutoff, closingExclusiveCutoff })
 
-    // FIXED: Calculate CASH BALANCE = Total Money In (credits) - Total Money Out (debits)
-    // Money In: credit_amount (sales income, payments received)
-    // Money Out: debit_amount (purchases, supplier payments, refunds, expenses)
-    
-    // Opening balance: All transactions BEFORE opening date
-    const openingTransactions = await sql`
+    // Single atomic scan to compute opening, period (Money In / Out), and closing balances
+    const balanceResult = await sql`
       SELECT 
-        COALESCE(SUM(credit_amount), 0) as total_credits,
-        COALESCE(SUM(debit_amount), 0) as total_debits
-      FROM financial_transactions 
-      WHERE device_id = ${deviceId} 
-        AND transaction_date < ${openingCutoff}::timestamp
+        COALESCE(SUM(CASE WHEN transaction_date < ${openingCutoff}::timestamp THEN credit_amount ELSE 0 END), 0) as opening_credits,
+        COALESCE(SUM(CASE WHEN transaction_date < ${openingCutoff}::timestamp THEN debit_amount ELSE 0 END), 0) as opening_debits,
+        COALESCE(SUM(CASE WHEN transaction_date >= ${openingCutoff}::timestamp AND transaction_date < ${closingExclusiveCutoff}::timestamp THEN credit_amount ELSE 0 END), 0) as period_credits,
+        COALESCE(SUM(CASE WHEN transaction_date >= ${openingCutoff}::timestamp AND transaction_date < ${closingExclusiveCutoff}::timestamp THEN debit_amount ELSE 0 END), 0) as period_debits,
+        COALESCE(SUM(CASE WHEN transaction_date < ${closingExclusiveCutoff}::timestamp THEN credit_amount ELSE 0 END), 0) as closing_credits,
+        COALESCE(SUM(CASE WHEN transaction_date < ${closingExclusiveCutoff}::timestamp THEN debit_amount ELSE 0 END), 0) as closing_debits
+      FROM financial_transactions
+      WHERE device_id = ${deviceId}
+        AND transaction_date < ${closingExclusiveCutoff}::timestamp
     `
 
-    // Closing balance: All transactions UP TO closing date
-    const closingTransactions = await sql`
-      SELECT 
-        COALESCE(SUM(credit_amount), 0) as total_credits,
-        COALESCE(SUM(debit_amount), 0) as total_debits
-      FROM financial_transactions 
-      WHERE device_id = ${deviceId} 
-        AND transaction_date <= ${closingCutoff}::timestamp
-    `
-
-    const openingCredits = Number(openingTransactions[0]?.total_credits) || 0
-    const openingDebits = Number(openingTransactions[0]?.total_debits) || 0
+    const row = balanceResult[0]
+    const openingCredits = Number(row?.opening_credits) || 0
+    const openingDebits = Number(row?.opening_debits) || 0
     const openingBalance = openingCredits - openingDebits
 
-    const closingCredits = Number(closingTransactions[0]?.total_credits) || 0
-    const closingDebits = Number(closingTransactions[0]?.total_debits) || 0
-    const closingBalance = closingCredits - closingDebits
+    const moneyIn = Number(row?.period_credits) || 0
+    const moneyOut = Number(row?.period_debits) || 0
+
+    const closingCredits = Number(row?.closing_credits) || 0
+    const closingDebits = Number(row?.closing_debits) || 0
+
+    // Reconciled Closing Balance: Opening Balance + Money In - Money Out === closingCredits - closingDebits
+    const closingBalance = openingBalance + moneyIn - moneyOut
 
     console.log("Balance calculation results:", {
       openingCredits,
       openingDebits,
       openingBalance,
+      moneyIn,
+      moneyOut,
       closingCredits,
       closingDebits,
       closingBalance,
@@ -1418,6 +1447,8 @@ export async function getAccountingBalances(deviceId: number, fromDateStr: strin
     return {
       openingBalance,
       closingBalance,
+      moneyIn,
+      moneyOut,
       openingCredits,
       openingDebits,
       closingCredits,
@@ -1430,6 +1461,8 @@ export async function getAccountingBalances(deviceId: number, fromDateStr: strin
     return {
       openingBalance: 0,
       closingBalance: 0,
+      moneyIn: 0,
+      moneyOut: 0,
       openingCredits: 0,
       openingDebits: 0,
       closingCredits: 0,

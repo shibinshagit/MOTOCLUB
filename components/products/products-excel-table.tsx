@@ -45,7 +45,7 @@ type ColumnKey =
 
 type ColumnFilters = Record<ColumnKey, ExcelColumnFilterValue>
 
-import { matchProductSemantic } from "@/lib/product-search"
+import { matchProductSemantic, sortProductsByStockPriority } from "@/lib/product-search"
 
 function buildInitialFilters(products: any[], getters: Record<ColumnKey, (p: any) => string>): ColumnFilters {
   const filters = {} as ColumnFilters
@@ -139,13 +139,14 @@ function ProductsExcelTable({
   }, [products, searchTerm, hasLoaded])
 
   const displayProducts = useMemo(() => {
-    if (!hasLoaded) return products
-    return searchFilteredProducts.filter((p) =>
+    if (!hasLoaded) return sortProductsByStockPriority(products, searchTerm)
+    const filtered = searchFilteredProducts.filter((p) =>
       (Object.keys(valueGetters) as ColumnKey[]).every((key) =>
         passesColumnFilter(valueGetters[key](p), columnFilters[key], uniqueValues[key]),
       ),
     )
-  }, [products, searchFilteredProducts, columnFilters, uniqueValues, valueGetters, hasLoaded])
+    return sortProductsByStockPriority(filtered, searchTerm)
+  }, [products, searchFilteredProducts, columnFilters, uniqueValues, valueGetters, hasLoaded, searchTerm])
 
   const activeFilterCount = hasLoaded
     ? (Object.keys(columnFilters) as ColumnKey[]).filter((key) =>
@@ -242,7 +243,16 @@ function ProductsExcelTable({
             ) : displayProducts.length === 0 ? (
               <tr>
                 <td colSpan={colCount} className="px-4 py-12 text-center text-sm text-muted-foreground">
-                  No products match the current filters
+                  <div className="flex flex-col items-center justify-center gap-1.5">
+                    <span className="font-medium text-slate-700">
+                      {searchTerm ? "No products found" : "No products match the current filters"}
+                    </span>
+                    {searchTerm && (
+                      <span className="text-xs text-slate-400">
+                        Try searching with different keywords, brand, category, or SKU
+                      </span>
+                    )}
+                  </div>
                 </td>
               </tr>
             ) : (
@@ -280,7 +290,7 @@ function ProductsExcelTable({
                           <span className="col-start-1 row-start-1 opacity-0 group-hover/cost:opacity-100">{formatMoney(product.wholesale_price || 0)}</span>
                         </span>
                       </td>
-                    )}v
+                    )}
                     {!hideStockCount && (
                       <>
                         <td className="whitespace-nowrap px-4 py-2.5 align-top text-right text-slate-800">{stock}</td>

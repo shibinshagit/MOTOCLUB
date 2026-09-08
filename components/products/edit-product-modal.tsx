@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -11,6 +11,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { useToast } from "@/components/ui/use-toast"
 import { notifyError, notifySuccess, notifyWarning } from "@/lib/notifications"
 import { useConfirm } from "@/hooks/use-confirm"
+import { useFormDraft } from "@/hooks/use-form-draft"
+import { DraftIndicator } from "@/components/shared/draft-indicator"
 import { cleanupProductMediaUrls, updateProduct } from "@/app/actions/product-actions"
 import { getCategories, createCategory, updateCategory, deleteCategory } from "@/app/actions/category-actions"
 import { Check, ChevronRight, Loader2, Plus, Search, Tag, X, ImageIcon, Link2, Trash2, Film, Pencil } from "lucide-react"
@@ -294,6 +296,44 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
   })
   const [trending, setTrending] = useState(false)
 
+  const productDraftData = useMemo(() => ({
+    formData,
+    isBatchManaged,
+    variants,
+    attributes,
+    productLinks,
+    platformStatus,
+    trending,
+    currentImageUrls,
+    uploadedImageUrls,
+    uploadedVideoUrl,
+  }), [
+    formData,
+    isBatchManaged,
+    variants,
+    attributes,
+    productLinks,
+    platformStatus,
+    trending,
+    currentImageUrls,
+    uploadedImageUrls,
+    uploadedVideoUrl,
+  ])
+
+  const {
+    getDraft: getProductEditDraft,
+    clearDraft: clearProductEditDraft,
+    hasDraft: hasProductEditDraft,
+    status: productEditDraftStatus,
+    lastSaved: productEditLastSaved,
+    markHydrated: markProductEditHydrated,
+  } = useFormDraft({
+    formId: `product-edit-${product?.id || "default"}`,
+    userId,
+    data: productDraftData,
+    enabled: isOpen && !!product,
+  })
+
   const [categories, setCategories] = useState<Category[]>([])
   const [filteredCategories, setFilteredCategories] = useState<Category[]>([])
   const [isLoadingCategories, setIsLoadingCategories] = useState(false)
@@ -335,102 +375,152 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
     }
     return []
   }
+  const hasInitializedProductRef = useRef<number | null>(null)
 
   useEffect(() => {
-    if (isOpen && product) {
-      setFormData({
-        name: product.name || "",
-        companyName: product.company_name || "",
-        category: product.category || "",
-        categoryId: product.category_id ? Number(product.category_id) : null,
-        description: product.description || "",
-        price: product.price?.toString() || "",
-        wholesalePrice: product.wholesale_price?.toString() || "",
-        msp: product.msp?.toString() || "",
-        mrp: product.mrp?.toString() || "",
-        stock: product.stock?.toString() || "",
-        shelf: product.shelf || "",
-        barcode: product.barcode || "",
-        color: product.color || "",
-        size: product.size || "",
-        suitableFor: product.suitable_for || "",
-      })
-      
-      setIsBatchManaged(product.is_batch_managed || false)
-      
-      let initialVariants = product.variants || []
-      if (initialVariants.length === 0) {
-        initialVariants = [{
-          variant_name: "Default Variant",
-          sku: product.sku || "",
-          barcode: product.barcode || "",
-          shelf: product.shelf || "",
-          wholesale_price: product.wholesale_price || 0,
-          price: product.msp || product.price || 0,
-          mrp: product.mrp || 0,
-          stock: product.stock || 0,
-          minimum_stock: 0,
-          batch_number: "AUTO_GENERATE"
-        }]
-      }
-      setVariants(initialVariants)
-      
-      setAttributes(parseAttributes(product.attributes))
-      setProductLinks(parseProductLinks(product.link))
-      let initialImageUrls: string[] = []
-      if (Array.isArray(product.image_urls)) {
-        initialImageUrls = product.image_urls.filter((url) => typeof url === "string" && url.trim().length > 0)
-      } else if (typeof product.image_urls === "string" && product.image_urls.trim()) {
-        try {
-          const parsed = JSON.parse(product.image_urls)
-          if (Array.isArray(parsed)) {
-            initialImageUrls = parsed.filter((url) => typeof url === "string" && url.trim().length > 0)
-          }
-        } catch {
-          initialImageUrls = []
-        }
-      }
-      if (initialImageUrls.length === 0 && product.image_url) {
-        initialImageUrls = [product.image_url]
-      }
-      setCurrentImageUrls(initialImageUrls.slice(0, 4))
-      setSelectedImages([])
-      setImagePreviews([])
-      setUploadedImageUrls([])
-      setSelectedVideo(null)
-      setVideoPreview(null)
-      setUploadedVideoUrl(null)
-      setCurrentVideoUrl(product.video_url || null)
-      setPlatformStatus({
-        amazon: product.amazon_status || "not_listed",
-        flipkart: product.flipkart_status || "not_listed",
-        meesho: product.meesho_status || "not_listed",
-        own_ecom: product.own_ecom_status || "active",
-      })
-      setTrending(Boolean(product.trending))
-
-      if (product.category_id) {
-        const category = categories.find((cat) => cat.id === Number(product.category_id))
-        setSelectedCategory(category || null)
-      } else {
-        setSelectedCategory(null)
-      }
-
-      setError(null)
-      setFieldErrors({})
-      fetchCategories()
-
-      const fetchCurrency = async () => {
-        try {
-          const deviceCurrency = await getDeviceCurrency(userId || 1)
-          setCurrency(deviceCurrency)
-        } catch (err) {
-          console.error("Error fetching currency:", err)
-        }
-      }
-      fetchCurrency()
+    if (!isOpen || !product) {
+      hasInitializedProductRef.current = null
+      return
     }
-  }, [isOpen, product, userId])
+    if (hasInitializedProductRef.current === product.id) return
+    hasInitializedProductRef.current = product.id
+
+    const draft = getProductEditDraft()
+      if (draft) {
+        setFormData(draft.formData || {
+          name: product.name || "",
+          companyName: product.company_name || "",
+          category: product.category || "",
+          categoryId: product.category_id ? Number(product.category_id) : null,
+          description: product.description || "",
+          price: product.price?.toString() || "",
+          wholesalePrice: product.wholesale_price?.toString() || "",
+          msp: product.msp?.toString() || "",
+          mrp: product.mrp?.toString() || "",
+          stock: product.stock?.toString() || "",
+          shelf: product.shelf || "",
+          barcode: product.barcode || "",
+          color: product.color || "",
+          size: product.size || "",
+          suitableFor: product.suitable_for || "",
+        })
+        setIsBatchManaged(Boolean(draft.isBatchManaged))
+        if (Array.isArray(draft.variants) && draft.variants.length > 0) {
+          setVariants(draft.variants)
+        }
+        setAttributes(Array.isArray(draft.attributes) ? draft.attributes : [])
+        setProductLinks(Array.isArray(draft.productLinks) ? draft.productLinks : [])
+        setCurrentImageUrls(Array.isArray(draft.currentImageUrls) ? draft.currentImageUrls : [])
+        setUploadedImageUrls(Array.isArray(draft.uploadedImageUrls) ? draft.uploadedImageUrls : [])
+        setUploadedVideoUrl(draft.uploadedVideoUrl || null)
+        setCurrentVideoUrl(product.video_url || null)
+        setPlatformStatus(draft.platformStatus || {
+          amazon: product.amazon_status || "not_listed",
+          flipkart: product.flipkart_status || "not_listed",
+          meesho: product.meesho_status || "not_listed",
+          own_ecom: product.own_ecom_status || "active",
+        })
+        setTrending(Boolean(draft.trending))
+        setSelectedImages([])
+        setImagePreviews([])
+        setSelectedVideo(null)
+        setVideoPreview(null)
+        setError(null)
+        setFieldErrors({})
+        markProductEditHydrated()
+      } else {
+        setFormData({
+          name: product.name || "",
+          companyName: product.company_name || "",
+          category: product.category || "",
+          categoryId: product.category_id ? Number(product.category_id) : null,
+          description: product.description || "",
+          price: product.price?.toString() || "",
+          wholesalePrice: product.wholesale_price?.toString() || "",
+          msp: product.msp?.toString() || "",
+          mrp: product.mrp?.toString() || "",
+          stock: product.stock?.toString() || "",
+          shelf: product.shelf || "",
+          barcode: product.barcode || "",
+          color: product.color || "",
+          size: product.size || "",
+          suitableFor: product.suitable_for || "",
+        })
+        
+        setIsBatchManaged(product.is_batch_managed || false)
+        
+        let initialVariants = product.variants || []
+        if (initialVariants.length === 0) {
+          initialVariants = [{
+            variant_name: "Default Variant",
+            sku: product.sku || "",
+            barcode: product.barcode || "",
+            shelf: product.shelf || "",
+            wholesale_price: product.wholesale_price || 0,
+            price: product.msp || product.price || 0,
+            mrp: product.mrp || 0,
+            stock: product.stock || 0,
+            minimum_stock: 0,
+            batch_number: "AUTO_GENERATE"
+          }]
+        }
+        setVariants(initialVariants)
+        
+        setAttributes(parseAttributes(product.attributes))
+        setProductLinks(parseProductLinks(product.link))
+        let initialImageUrls: string[] = []
+        if (Array.isArray(product.image_urls)) {
+          initialImageUrls = product.image_urls.filter((url) => typeof url === "string" && url.trim().length > 0)
+        } else if (typeof product.image_urls === "string" && product.image_urls.trim()) {
+          try {
+            const parsed = JSON.parse(product.image_urls)
+            if (Array.isArray(parsed)) {
+              initialImageUrls = parsed.filter((url) => typeof url === "string" && url.trim().length > 0)
+            }
+          } catch {
+            initialImageUrls = []
+          }
+        }
+        if (initialImageUrls.length === 0 && product.image_url) {
+          initialImageUrls = [product.image_url]
+        }
+        setCurrentImageUrls(initialImageUrls.slice(0, 4))
+        setSelectedImages([])
+        setImagePreviews([])
+        setUploadedImageUrls([])
+        setSelectedVideo(null)
+        setVideoPreview(null)
+        setUploadedVideoUrl(null)
+        setCurrentVideoUrl(product.video_url || null)
+        setPlatformStatus({
+          amazon: product.amazon_status || "not_listed",
+          flipkart: product.flipkart_status || "not_listed",
+          meesho: product.meesho_status || "not_listed",
+          own_ecom: product.own_ecom_status || "active",
+        })
+        setTrending(Boolean(product.trending))
+
+        if (product.category_id) {
+          const category = categories.find((cat) => cat.id === Number(product.category_id))
+          setSelectedCategory(category || null)
+        } else {
+          setSelectedCategory(null)
+        }
+
+        setError(null)
+        setFieldErrors({})
+        markProductEditHydrated()
+      }
+
+      fetchCategories()
+      getDeviceCurrency(userId || 1)
+        .then((deviceCurrency) => {
+          if (deviceCurrency) setCurrency(deviceCurrency)
+        })
+        .catch((err) => {
+          console.error("Error fetching currency:", err)
+        })
+  }, [isOpen, product, userId, categories, getProductEditDraft, markProductEditHydrated])
 
   useEffect(() => {
     if (categorySearchQuery.trim() === "") {
@@ -489,14 +579,17 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
     setUploadedVideoUrl(null)
   }
 
-  const handleAttemptClose = async () => {
-    if (hasPendingDraftMedia) {
+  const handleCancelDiscard = async () => {
+    if (hasProductEditDraft || hasPendingDraftMedia) {
       const shouldDiscard = await confirm({
-        description: "Are you sure? Unsaved uploaded media will be removed from cloud storage.",
+        title: "Discard this unfinished form?",
+        description: "You have unsaved changes to this product. Discarding will clear the saved draft.",
         destructive: true,
         confirmLabel: "Discard",
+        cancelLabel: "Continue Editing",
       })
       if (!shouldDiscard) return
+      clearProductEditDraft()
       await cleanupUploadedDraftMedia()
       clearSelectedDraftMedia()
     }
@@ -986,6 +1079,7 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
 
       if (result && result.success) {
         notifySuccess(toast, "Product updated successfully" )
+        clearProductEditDraft()
         setUploadedImageUrls([])
         setUploadedVideoUrl(null)
         if (onSuccess) onSuccess(result.data)
@@ -1028,7 +1122,7 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
           if (!open && shouldIgnoreParentDialogClose(isCategoryDialogOpen, closingCategoryDialogRef.current)) {
             return
           }
-          if (!open) void handleAttemptClose()
+          if (!open) onClose()
         }}
       >
         <DialogContent
@@ -1039,12 +1133,12 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
         >
           <DialogHeader className="space-y-0 border-b border-slate-200 bg-[#F1F4F9] px-4 py-3 text-left">
             <DialogTitle className="sr-only">Edit product</DialogTitle>
-            <div className="flex flex-wrap items-center gap-2 pr-10">
+            <div className="flex flex-wrap items-center gap-3 pr-10">
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => void handleAttemptClose()}
+                onClick={() => void handleCancelDiscard()}
                 className="h-8 border-slate-200 bg-white px-3 text-xs"
               >
                 Cancel
@@ -1065,6 +1159,11 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
                   "Update Product"
                 )}
               </Button>
+              <DraftIndicator
+                status={productEditDraftStatus}
+                hasDraft={hasProductEditDraft}
+                lastSaved={productEditLastSaved}
+              />
             </div>
           </DialogHeader>
 

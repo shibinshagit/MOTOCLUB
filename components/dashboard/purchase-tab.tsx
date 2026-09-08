@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { format, subMonths, addMonths, startOfMonth, endOfMonth, isSameMonth, isAfter } from "date-fns"
+import { format, subMonths, addMonths, startOfMonth, endOfMonth, isSameMonth, isAfter, parseISO } from "date-fns"
 import {
   Loader2,
   Plus,
@@ -43,6 +43,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { FormAlert } from "@/components/ui/form-alert"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useSelector, useDispatch } from "react-redux"
+import { selectDateRange } from "@/store/slices/dateRangeSlice"
 import type { AppDispatch } from "@/store/store"
 import { selectDeviceId, selectDeviceCurrency } from "@/store/slices/deviceSlice"
 import { markInventoryStale } from "@/lib/inventory-sync"
@@ -178,6 +179,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [purchasesListLoaded, setPurchasesListLoaded] = useState(false)
+  const globalDateRange = useSelector(selectDateRange)
   const [purchasesViewMonth, setPurchasesViewMonth] = useState(() => startOfMonth(new Date()))
   const [purchaseSearch, setPurchaseSearch] = useState("")
   const [debouncedPurchaseSearch, setDebouncedPurchaseSearch] = useState("")
@@ -533,15 +535,17 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
     setPurchasesViewMonth(startOfMonth(month))
   }, [])
 
-  const fetchPurchasesForMonth = useCallback(
-    async (month: Date, searchTerm = "") => {
+  const fetchPurchasesForRange = useCallback(
+    async (fromDate?: string, toDate?: string, searchTerm = "") => {
       if (!deviceId) {
         setError("Device ID not found")
-      return
-    }
+        return
+      }
+
+      const from = fromDate || globalDateRange.from
+      const to = toDate || globalDateRange.to
 
       const requestId = ++purchasesFetchRequestRef.current
-      const { from, to } = getMonthRange(month)
 
       setIsLoading(true)
       setError(null)
@@ -552,7 +556,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
 
         if (result.success) {
           setPurchases(result.data.map(serializePurchaseRecord))
-      } else {
+        } else {
           setPurchases([])
           setError(result.message || "Failed to load purchases")
         }
@@ -568,14 +572,14 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
         }
       }
     },
-    [deviceId],
+    [deviceId, globalDateRange.from, globalDateRange.to],
   )
 
   useEffect(() => {
     if (activeView !== "info" || !deviceId) return
     setPurchasesListLoaded(false)
-    fetchPurchasesForMonth(purchasesViewMonth, debouncedPurchaseSearch)
-  }, [activeView, deviceId, purchasesViewMonth, debouncedPurchaseSearch, fetchPurchasesForMonth])
+    fetchPurchasesForRange(globalDateRange.from, globalDateRange.to, debouncedPurchaseSearch)
+  }, [activeView, deviceId, globalDateRange.from, globalDateRange.to, debouncedPurchaseSearch, fetchPurchasesForRange])
 
   const addProductRow = useCallback(() => {
     setProducts((current) => [...current, createEmptyProductRow()])
@@ -1073,7 +1077,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
         setPurchases((prev) => prev.filter((p) => p.id !== purchaseId))
         notifySuccess(toast, "Purchase deleted successfully")
         if (activeView === "info") {
-          fetchPurchasesForMonth(purchasesViewMonth)
+          fetchPurchasesForRange(globalDateRange.from, globalDateRange.to, debouncedPurchaseSearch)
         }
       } else {
         notifyError(toast, result.message || "Failed to delete purchase")
@@ -1174,11 +1178,24 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
       resetAddPurchaseForm()
     }
     if (deviceId) {
-      fetchPurchasesForMonth(purchasesViewMonth)
+      fetchPurchasesForRange(globalDateRange.from, globalDateRange.to, debouncedPurchaseSearch)
     }
   }
 
-  const periodLabel = getMonthRange(purchasesViewMonth).label
+  const periodLabel = useMemo(() => {
+    if (!globalDateRange?.from || !globalDateRange?.to) return ""
+    try {
+      const fromParsed = parseISO(globalDateRange.from)
+      const toParsed = parseISO(globalDateRange.to)
+      if (globalDateRange.from === globalDateRange.to) {
+        return format(fromParsed, "dd/MM/yyyy")
+      }
+      return `${format(fromParsed, "dd/MM/yyyy")} → ${format(toParsed, "dd/MM/yyyy")}`
+    } catch {
+      return `${globalDateRange.from} → ${globalDateRange.to}`
+    }
+  }, [globalDateRange?.from, globalDateRange?.to])
+
   const isCurrentMonth = isSameMonth(purchasesViewMonth, new Date())
   const canGoNextMonth = !isCurrentMonth
 
@@ -1901,7 +1918,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
         onDelete={handleDeletePurchaseFromView}
         onDelivered={() => {
           markInventoryStale(dispatch)
-          fetchPurchasesForMonth(purchasesViewMonth)
+          fetchPurchasesForRange(globalDateRange.from, globalDateRange.to, debouncedPurchaseSearch)
         }}
       />
 

@@ -1138,7 +1138,7 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
                               Payment Status
                             </Label>
                             <Select
-                              value={paymentStatus}
+                              value={paymentStatus === "Credit" || paymentStatus === "Partial" ? "Credit" : (paymentStatus || "Paid")}
                               onValueChange={(val) => {
                                 setPaymentStatus(val)
                                 if (val === "Paid") {

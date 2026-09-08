@@ -10,6 +10,7 @@ import salesReducer from "./slices/salesSlice"
 import customerReducer from "./slices/customerSlice"
 import supplierReducer from "./slices/supplierSlice"
 import staffReducer from "./slices/staffSlice"
+import dateRangeReducer from "./slices/dateRangeSlice"
 
 export const store = configureStore({
   reducer: {
@@ -21,6 +22,7 @@ export const store = configureStore({
     customer: customerReducer,
     supplier: supplierReducer,
     staff: staffReducer,
+    dateRange: dateRangeReducer,
   },
 })
 

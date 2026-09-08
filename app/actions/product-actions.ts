@@ -11,6 +11,7 @@ import {
 } from "@/lib/staff-restrictions-server"
 import { parseProductLinksFromFormData, serializeProductLinks } from "@/lib/product-links"
 import { getDeviceProductStock, getDeviceVariantStock, adjustDeviceProductStock } from "@/lib/inventory-service"
+import { compareProductsByStockPriority } from "@/lib/product-search"
 import { revalidatePath } from "next/cache"
 
 // Generate a unique barcode for a product
@@ -287,10 +288,12 @@ export async function getProducts(
       // caused ProductSelectSimple's post-selection ID refresh to overwrite the
       // selected product with a raw product object whose variants array was empty.
     }
-
     if (!isIdSearch && searchTerm && searchTerm.trim() !== "") {
-      // Normalize search term: lowercase + remove spaces
-      const searchPattern = `%${searchTerm.toLowerCase().replace(/\s+/g, "")}%`
+      // Normalize search term: lowercase + remove spaces + raw lowercase pattern
+      const trimmedSearch = searchTerm.trim()
+      const searchPattern = `%${trimmedSearch.toLowerCase().replace(/\s+/g, "")}%`
+      const rawSearchPattern = `%${trimmedSearch.toLowerCase()}%`
+      const prefixPattern = `${trimmedSearch.toLowerCase()}%`
 
       if (limit) {
         if (userId) {
@@ -310,12 +313,39 @@ export async function getProducts(
               AND p.category_id = ${categoryId}
               AND (
                 REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(LOWER(p.category), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(LOWER(p.company_name), ' ', '') LIKE ${searchPattern} OR
-REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
+                LOWER(p.name) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(p.category, '')), ' ', '') LIKE ${searchPattern} OR
+                LOWER(COALESCE(p.category, '')) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(c.name, '')), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(COALESCE(p.company_name, '')), ' ', '') LIKE ${searchPattern} OR
+                LOWER(COALESCE(p.company_name, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.barcode, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.shelf, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.description, '')) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern} OR
+                EXISTS (
+                  SELECT 1 FROM product_variants pv
+                  WHERE pv.product_id = p.id AND (
+                    LOWER(pv.name) LIKE ${rawSearchPattern} OR
+                    REPLACE(LOWER(pv.name), ' ', '') LIKE ${searchPattern} OR
+                    LOWER(COALESCE(pv.sku, '')) LIKE ${rawSearchPattern} OR
+                    LOWER(COALESCE(pv.barcode, '')) LIKE ${rawSearchPattern} OR
+                    EXISTS (
+                      SELECT 1 FROM product_batches pb
+                      WHERE pb.product_variant_id = pv.id AND LOWER(pb.batch_no) LIKE ${rawSearchPattern}
+                    )
+                  )
+                )
               )
               ORDER BY 
-                CASE WHEN p.id::text = ${searchTerm.trim()} THEN 0 ELSE 1 END,
+                CASE 
+                  WHEN p.id::text = ${trimmedSearch} THEN 0 
+                  WHEN LOWER(p.name) = LOWER(${trimmedSearch}) THEN 1
+                  WHEN LOWER(p.name) LIKE ${prefixPattern} THEN 2
+                  WHEN LOWER(p.name) LIKE ${rawSearchPattern} THEN 3
+                  WHEN LOWER(COALESCE(p.barcode, '')) = LOWER(${trimmedSearch}) THEN 4
+                  ELSE 5 
+                END,
                 p.created_at DESC
               LIMIT ${limit}
             `
@@ -334,12 +364,39 @@ REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
               )
               AND (
                 REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(LOWER(p.category), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(LOWER(p.company_name), ' ', '') LIKE ${searchPattern} OR
-REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
+                LOWER(p.name) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(p.category, '')), ' ', '') LIKE ${searchPattern} OR
+                LOWER(COALESCE(p.category, '')) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(c.name, '')), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(COALESCE(p.company_name, '')), ' ', '') LIKE ${searchPattern} OR
+                LOWER(COALESCE(p.company_name, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.barcode, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.shelf, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.description, '')) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern} OR
+                EXISTS (
+                  SELECT 1 FROM product_variants pv
+                  WHERE pv.product_id = p.id AND (
+                    LOWER(pv.name) LIKE ${rawSearchPattern} OR
+                    REPLACE(LOWER(pv.name), ' ', '') LIKE ${searchPattern} OR
+                    LOWER(COALESCE(pv.sku, '')) LIKE ${rawSearchPattern} OR
+                    LOWER(COALESCE(pv.barcode, '')) LIKE ${rawSearchPattern} OR
+                    EXISTS (
+                      SELECT 1 FROM product_batches pb
+                      WHERE pb.product_variant_id = pv.id AND LOWER(pb.batch_no) LIKE ${rawSearchPattern}
+                    )
+                  )
+                )
               )
               ORDER BY 
-                CASE WHEN p.id::text = ${searchTerm.trim()} THEN 0 ELSE 1 END,
+                CASE 
+                  WHEN p.id::text = ${trimmedSearch} THEN 0 
+                  WHEN LOWER(p.name) = LOWER(${trimmedSearch}) THEN 1
+                  WHEN LOWER(p.name) LIKE ${prefixPattern} THEN 2
+                  WHEN LOWER(p.name) LIKE ${rawSearchPattern} THEN 3
+                  WHEN LOWER(COALESCE(p.barcode, '')) = LOWER(${trimmedSearch}) THEN 4
+                  ELSE 5 
+                END,
                 p.created_at DESC
               LIMIT ${limit}
             `
@@ -355,12 +412,39 @@ REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
               WHERE p.category_id = ${categoryId}
               AND (
                 REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(LOWER(p.category), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(LOWER(p.company_name), ' ', '') LIKE ${searchPattern} OR
-REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
+                LOWER(p.name) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(p.category, '')), ' ', '') LIKE ${searchPattern} OR
+                LOWER(COALESCE(p.category, '')) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(c.name, '')), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(COALESCE(p.company_name, '')), ' ', '') LIKE ${searchPattern} OR
+                LOWER(COALESCE(p.company_name, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.barcode, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.shelf, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.description, '')) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern} OR
+                EXISTS (
+                  SELECT 1 FROM product_variants pv
+                  WHERE pv.product_id = p.id AND (
+                    LOWER(pv.name) LIKE ${rawSearchPattern} OR
+                    REPLACE(LOWER(pv.name), ' ', '') LIKE ${searchPattern} OR
+                    LOWER(COALESCE(pv.sku, '')) LIKE ${rawSearchPattern} OR
+                    LOWER(COALESCE(pv.barcode, '')) LIKE ${rawSearchPattern} OR
+                    EXISTS (
+                      SELECT 1 FROM product_batches pb
+                      WHERE pb.product_variant_id = pv.id AND LOWER(pb.batch_no) LIKE ${rawSearchPattern}
+                    )
+                  )
+                )
               )
               ORDER BY 
-                CASE WHEN p.id::text = ${searchTerm.trim()} THEN 0 ELSE 1 END,
+                CASE 
+                  WHEN p.id::text = ${trimmedSearch} THEN 0 
+                  WHEN LOWER(p.name) = LOWER(${trimmedSearch}) THEN 1
+                  WHEN LOWER(p.name) LIKE ${prefixPattern} THEN 2
+                  WHEN LOWER(p.name) LIKE ${rawSearchPattern} THEN 3
+                  WHEN LOWER(COALESCE(p.barcode, '')) = LOWER(${trimmedSearch}) THEN 4
+                  ELSE 5 
+                END,
                 p.created_at DESC
               LIMIT ${limit}
             `
@@ -373,12 +457,39 @@ REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
               LEFT JOIN product_categories c ON p.category_id = c.id
               WHERE (
                 REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(LOWER(p.category), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(LOWER(p.company_name), ' ', '') LIKE ${searchPattern} OR
-REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
+                LOWER(p.name) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(p.category, '')), ' ', '') LIKE ${searchPattern} OR
+                LOWER(COALESCE(p.category, '')) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(c.name, '')), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(COALESCE(p.company_name, '')), ' ', '') LIKE ${searchPattern} OR
+                LOWER(COALESCE(p.company_name, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.barcode, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.shelf, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.description, '')) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern} OR
+                EXISTS (
+                  SELECT 1 FROM product_variants pv
+                  WHERE pv.product_id = p.id AND (
+                    LOWER(pv.name) LIKE ${rawSearchPattern} OR
+                    REPLACE(LOWER(pv.name), ' ', '') LIKE ${searchPattern} OR
+                    LOWER(COALESCE(pv.sku, '')) LIKE ${rawSearchPattern} OR
+                    LOWER(COALESCE(pv.barcode, '')) LIKE ${rawSearchPattern} OR
+                    EXISTS (
+                      SELECT 1 FROM product_batches pb
+                      WHERE pb.product_variant_id = pv.id AND LOWER(pb.batch_no) LIKE ${rawSearchPattern}
+                    )
+                  )
+                )
               )
               ORDER BY 
-                CASE WHEN p.id::text = ${searchTerm.trim()} THEN 0 ELSE 1 END,
+                CASE 
+                  WHEN p.id::text = ${trimmedSearch} THEN 0 
+                  WHEN LOWER(p.name) = LOWER(${trimmedSearch}) THEN 1
+                  WHEN LOWER(p.name) LIKE ${prefixPattern} THEN 2
+                  WHEN LOWER(p.name) LIKE ${rawSearchPattern} THEN 3
+                  WHEN LOWER(COALESCE(p.barcode, '')) = LOWER(${trimmedSearch}) THEN 4
+                  ELSE 5 
+                END,
                 p.created_at DESC
               LIMIT ${limit}
             `
@@ -403,12 +514,39 @@ REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
               AND p.category_id = ${categoryId}
               AND (
                 REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(LOWER(p.category), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(LOWER(p.company_name), ' ', '') LIKE ${searchPattern} OR
-REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
+                LOWER(p.name) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(p.category, '')), ' ', '') LIKE ${searchPattern} OR
+                LOWER(COALESCE(p.category, '')) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(c.name, '')), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(COALESCE(p.company_name, '')), ' ', '') LIKE ${searchPattern} OR
+                LOWER(COALESCE(p.company_name, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.barcode, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.shelf, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.description, '')) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern} OR
+                EXISTS (
+                  SELECT 1 FROM product_variants pv
+                  WHERE pv.product_id = p.id AND (
+                    LOWER(pv.name) LIKE ${rawSearchPattern} OR
+                    REPLACE(LOWER(pv.name), ' ', '') LIKE ${searchPattern} OR
+                    LOWER(COALESCE(pv.sku, '')) LIKE ${rawSearchPattern} OR
+                    LOWER(COALESCE(pv.barcode, '')) LIKE ${rawSearchPattern} OR
+                    EXISTS (
+                      SELECT 1 FROM product_batches pb
+                      WHERE pb.product_variant_id = pv.id AND LOWER(pb.batch_no) LIKE ${rawSearchPattern}
+                    )
+                  )
+                )
               )
               ORDER BY 
-                CASE WHEN p.id::text = ${searchTerm.trim()} THEN 0 ELSE 1 END,
+                CASE 
+                  WHEN p.id::text = ${trimmedSearch} THEN 0 
+                  WHEN LOWER(p.name) = LOWER(${trimmedSearch}) THEN 1
+                  WHEN LOWER(p.name) LIKE ${prefixPattern} THEN 2
+                  WHEN LOWER(p.name) LIKE ${rawSearchPattern} THEN 3
+                  WHEN LOWER(COALESCE(p.barcode, '')) = LOWER(${trimmedSearch}) THEN 4
+                  ELSE 5 
+                END,
                 p.created_at DESC
             `
           } else {
@@ -426,12 +564,39 @@ REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
               )
               AND (
                 REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(LOWER(p.category), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(LOWER(p.company_name), ' ', '') LIKE ${searchPattern} OR
-REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
+                LOWER(p.name) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(p.category, '')), ' ', '') LIKE ${searchPattern} OR
+                LOWER(COALESCE(p.category, '')) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(c.name, '')), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(COALESCE(p.company_name, '')), ' ', '') LIKE ${searchPattern} OR
+                LOWER(COALESCE(p.company_name, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.barcode, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.shelf, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.description, '')) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern} OR
+                EXISTS (
+                  SELECT 1 FROM product_variants pv
+                  WHERE pv.product_id = p.id AND (
+                    LOWER(pv.name) LIKE ${rawSearchPattern} OR
+                    REPLACE(LOWER(pv.name), ' ', '') LIKE ${searchPattern} OR
+                    LOWER(COALESCE(pv.sku, '')) LIKE ${rawSearchPattern} OR
+                    LOWER(COALESCE(pv.barcode, '')) LIKE ${rawSearchPattern} OR
+                    EXISTS (
+                      SELECT 1 FROM product_batches pb
+                      WHERE pb.product_variant_id = pv.id AND LOWER(pb.batch_no) LIKE ${rawSearchPattern}
+                    )
+                  )
+                )
               )
               ORDER BY 
-                CASE WHEN p.id::text = ${searchTerm.trim()} THEN 0 ELSE 1 END,
+                CASE 
+                  WHEN p.id::text = ${trimmedSearch} THEN 0 
+                  WHEN LOWER(p.name) = LOWER(${trimmedSearch}) THEN 1
+                  WHEN LOWER(p.name) LIKE ${prefixPattern} THEN 2
+                  WHEN LOWER(p.name) LIKE ${rawSearchPattern} THEN 3
+                  WHEN LOWER(COALESCE(p.barcode, '')) = LOWER(${trimmedSearch}) THEN 4
+                  ELSE 5 
+                END,
                 p.created_at DESC
             `
           }
@@ -446,12 +611,39 @@ REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
               WHERE p.category_id = ${categoryId}
               AND (
                 REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(LOWER(p.category), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(LOWER(p.company_name), ' ', '') LIKE ${searchPattern} OR
-REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
+                LOWER(p.name) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(p.category, '')), ' ', '') LIKE ${searchPattern} OR
+                LOWER(COALESCE(p.category, '')) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(c.name, '')), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(COALESCE(p.company_name, '')), ' ', '') LIKE ${searchPattern} OR
+                LOWER(COALESCE(p.company_name, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.barcode, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.shelf, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.description, '')) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern} OR
+                EXISTS (
+                  SELECT 1 FROM product_variants pv
+                  WHERE pv.product_id = p.id AND (
+                    LOWER(pv.name) LIKE ${rawSearchPattern} OR
+                    REPLACE(LOWER(pv.name), ' ', '') LIKE ${searchPattern} OR
+                    LOWER(COALESCE(pv.sku, '')) LIKE ${rawSearchPattern} OR
+                    LOWER(COALESCE(pv.barcode, '')) LIKE ${rawSearchPattern} OR
+                    EXISTS (
+                      SELECT 1 FROM product_batches pb
+                      WHERE pb.product_variant_id = pv.id AND LOWER(pb.batch_no) LIKE ${rawSearchPattern}
+                    )
+                  )
+                )
               )
               ORDER BY 
-                CASE WHEN p.id::text = ${searchTerm.trim()} THEN 0 ELSE 1 END,
+                CASE 
+                  WHEN p.id::text = ${trimmedSearch} THEN 0 
+                  WHEN LOWER(p.name) = LOWER(${trimmedSearch}) THEN 1
+                  WHEN LOWER(p.name) LIKE ${prefixPattern} THEN 2
+                  WHEN LOWER(p.name) LIKE ${rawSearchPattern} THEN 3
+                  WHEN LOWER(COALESCE(p.barcode, '')) = LOWER(${trimmedSearch}) THEN 4
+                  ELSE 5 
+                END,
                 p.created_at DESC
             `
           } else {
@@ -463,12 +655,39 @@ REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
               LEFT JOIN product_categories c ON p.category_id = c.id
               WHERE (
                 REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(LOWER(p.category), ' ', '') LIKE ${searchPattern} OR
-                REPLACE(LOWER(p.company_name), ' ', '') LIKE ${searchPattern} OR
-REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
+                LOWER(p.name) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(p.category, '')), ' ', '') LIKE ${searchPattern} OR
+                LOWER(COALESCE(p.category, '')) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(c.name, '')), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(COALESCE(p.company_name, '')), ' ', '') LIKE ${searchPattern} OR
+                LOWER(COALESCE(p.company_name, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.barcode, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.shelf, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.description, '')) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern} OR
+                EXISTS (
+                  SELECT 1 FROM product_variants pv
+                  WHERE pv.product_id = p.id AND (
+                    LOWER(pv.name) LIKE ${rawSearchPattern} OR
+                    REPLACE(LOWER(pv.name), ' ', '') LIKE ${searchPattern} OR
+                    LOWER(COALESCE(pv.sku, '')) LIKE ${rawSearchPattern} OR
+                    LOWER(COALESCE(pv.barcode, '')) LIKE ${rawSearchPattern} OR
+                    EXISTS (
+                      SELECT 1 FROM product_batches pb
+                      WHERE pb.product_variant_id = pv.id AND LOWER(pb.batch_no) LIKE ${rawSearchPattern}
+                    )
+                  )
+                )
               )
               ORDER BY 
-                CASE WHEN p.id::text = ${searchTerm.trim()} THEN 0 ELSE 1 END,
+                CASE 
+                  WHEN p.id::text = ${trimmedSearch} THEN 0 
+                  WHEN LOWER(p.name) = LOWER(${trimmedSearch}) THEN 1
+                  WHEN LOWER(p.name) LIKE ${prefixPattern} THEN 2
+                  WHEN LOWER(p.name) LIKE ${rawSearchPattern} THEN 3
+                  WHEN LOWER(COALESCE(p.barcode, '')) = LOWER(${trimmedSearch}) THEN 4
+                  ELSE 5 
+                END,
                 p.created_at DESC
             `
           }
@@ -797,6 +1016,9 @@ REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
       }
     })
 
+    // Sort products primarily by stock availability (stock > 0 first, sorted DESC by stock, 0-stock at the bottom)
+    mappedProducts.sort((a: any, b: any) => compareProductsByStockPriority(a, b, searchTerm))
+
     console.log(`Found ${mappedProducts.length} products`)
 
     if (skipRbac) {
@@ -814,6 +1036,160 @@ REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern}
   }
 }
 
+/**
+ * Lightweight, fast server action for Google-like search autocomplete suggestions.
+ * Fetches top matching products, categories, and company names scoped to the user's company/device.
+ */
+export async function getProductSearchSuggestions(searchTerm?: string, userId?: number) {
+  if (!searchTerm || searchTerm.trim().length < 2) {
+    return {
+      success: true,
+      suggestions: { products: [], categories: [], companies: [], totalCount: 0 },
+    }
+  }
+
+  const query = searchTerm.trim()
+  const searchPattern = `%${query.toLowerCase()}%`
+  const prefixPattern = `${query.toLowerCase()}%`
+
+  try {
+    let products: any[] = []
+    let categories: any[] = []
+    let companies: any[] = []
+
+    if (userId) {
+      products = await sql`
+        SELECT p.id, p.name, p.category, p.company_name, p.price, p.mrp, p.msp
+        FROM products p
+        WHERE p.created_by IN (
+          SELECT d2.id
+          FROM devices d1
+          JOIN devices d2 ON d2.company_id = d1.company_id
+          WHERE d1.id = ${userId}
+        )
+        AND (
+          LOWER(p.name) LIKE ${searchPattern} OR
+          LOWER(COALESCE(p.category, '')) LIKE ${searchPattern} OR
+          LOWER(COALESCE(p.company_name, '')) LIKE ${searchPattern} OR
+          LOWER(COALESCE(p.barcode, '')) LIKE ${searchPattern} OR
+          EXISTS (
+            SELECT 1 FROM product_variants pv
+            WHERE pv.product_id = p.id AND (
+              LOWER(pv.name) LIKE ${searchPattern} OR
+              LOWER(COALESCE(pv.sku, '')) LIKE ${searchPattern} OR
+              LOWER(COALESCE(pv.barcode, '')) LIKE ${searchPattern}
+            )
+          )
+        )
+        ORDER BY
+          CASE 
+            WHEN LOWER(p.name) = LOWER(${query}) THEN 0
+            WHEN LOWER(p.name) LIKE ${prefixPattern} THEN 1
+            ELSE 2
+          END,
+          p.created_at DESC
+        LIMIT 5
+      `
+
+      categories = await sql`
+        SELECT DISTINCT c_name as name FROM (
+          SELECT c.name as c_name
+          FROM product_categories c
+          WHERE LOWER(c.name) LIKE ${searchPattern}
+          UNION
+          SELECT p.category as c_name
+          FROM products p
+          WHERE p.created_by IN (
+            SELECT d2.id FROM devices d1 JOIN devices d2 ON d2.company_id = d1.company_id WHERE d1.id = ${userId}
+          )
+          AND p.category IS NOT NULL AND p.category != '' AND LOWER(p.category) LIKE ${searchPattern}
+        ) sub
+        LIMIT 3
+      `
+
+      companies = await sql`
+        SELECT DISTINCT p.company_name as name
+        FROM products p
+        WHERE p.created_by IN (
+          SELECT d2.id FROM devices d1 JOIN devices d2 ON d2.company_id = d1.company_id WHERE d1.id = ${userId}
+        )
+        AND p.company_name IS NOT NULL AND p.company_name != '' AND LOWER(p.company_name) LIKE ${searchPattern}
+        LIMIT 3
+      `
+    } else {
+      products = await sql`
+        SELECT p.id, p.name, p.category, p.company_name, p.price, p.mrp, p.msp
+        FROM products p
+        WHERE (
+          LOWER(p.name) LIKE ${searchPattern} OR
+          LOWER(COALESCE(p.category, '')) LIKE ${searchPattern} OR
+          LOWER(COALESCE(p.company_name, '')) LIKE ${searchPattern} OR
+          LOWER(COALESCE(p.barcode, '')) LIKE ${searchPattern} OR
+          EXISTS (
+            SELECT 1 FROM product_variants pv
+            WHERE pv.product_id = p.id AND (
+              LOWER(pv.name) LIKE ${searchPattern} OR
+              LOWER(COALESCE(pv.sku, '')) LIKE ${searchPattern} OR
+              LOWER(COALESCE(pv.barcode, '')) LIKE ${searchPattern}
+            )
+          )
+        )
+        ORDER BY
+          CASE 
+            WHEN LOWER(p.name) = LOWER(${query}) THEN 0
+            WHEN LOWER(p.name) LIKE ${prefixPattern} THEN 1
+            ELSE 2
+          END,
+          p.created_at DESC
+        LIMIT 5
+      `
+
+      categories = await sql`
+        SELECT DISTINCT c_name as name FROM (
+          SELECT c.name as c_name FROM product_categories c WHERE LOWER(c.name) LIKE ${searchPattern}
+          UNION
+          SELECT p.category as c_name FROM products p WHERE p.category IS NOT NULL AND p.category != '' AND LOWER(p.category) LIKE ${searchPattern}
+        ) sub
+        LIMIT 3
+      `
+
+      companies = await sql`
+        SELECT DISTINCT p.company_name as name
+        FROM products p
+        WHERE p.company_name IS NOT NULL AND p.company_name != '' AND LOWER(p.company_name) LIKE ${searchPattern}
+        LIMIT 3
+      `
+    }
+
+    const prodSuggestions = (products || []).map((p: any) => ({
+      id: Number(p.id),
+      name: p.name,
+      category: p.category || "",
+      company_name: p.company_name || "",
+      price: Number(p.price || p.msp || p.mrp || 0),
+    }))
+
+    const catSuggestions = (categories || []).map((c: any) => ({ name: String(c.name) }))
+    const compSuggestions = (companies || []).map((c: any) => ({ name: String(c.name) }))
+    const totalCount = prodSuggestions.length + catSuggestions.length + compSuggestions.length
+
+    return {
+      success: true,
+      suggestions: {
+        products: prodSuggestions,
+        categories: catSuggestions,
+        companies: compSuggestions,
+        totalCount,
+      },
+    }
+  } catch (err) {
+    console.error("getProductSearchSuggestions error:", err)
+    return {
+      success: false,
+      suggestions: { products: [], categories: [], companies: [], totalCount: 0 },
+    }
+  }
+}
 
 export async function getTrendingProducts(userId?: number) {
   const result = await getProducts(userId)
@@ -2414,6 +2790,9 @@ export async function getUserProducts(userId: number) {
       stock: resolveDeviceStock(product, stockMap),
       category: product.category_name || product.category || "",
     }))
+
+    // Sort products primarily by stock availability (stock > 0 first, sorted DESC by stock, 0-stock at the bottom)
+    mappedProducts.sort((a: any, b: any) => compareProductsByStockPriority(a, b))
 
     return { success: true, data: await filterProductsForStaff(mappedProducts, userId) }
   } catch (error) {

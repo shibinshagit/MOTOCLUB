@@ -1418,6 +1418,13 @@ export function printJobCard(sale: any, currency = 'AED', businessInfo: any = {}
       <div class="order-id">
         Order ID: ${sale.id}
       </div>
+      ${(sale.courier_partner_name || sale.courier_service_name || sale.tracking_id) ? `
+        <div style="font-size: 16px; font-weight: 700; text-align: center; margin-top: 14px; padding: 8px; border: 2px solid #000; border-radius: 6px; background-color: #f8fafc;">
+          ${sale.courier_partner_name ? `<div>Vendor: ${sale.courier_partner_name}</div>` : ''}
+          ${sale.courier_service_name ? `<div>Courier Service: ${sale.courier_service_name}</div>` : ''}
+          ${sale.tracking_id ? `<div>Tracking ID: ${sale.tracking_id}</div>` : ''}
+        </div>
+      ` : ''}
     </body>
     </html>
   `;

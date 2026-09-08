@@ -16,6 +16,11 @@ export const PAYMENT_METHOD_OPTIONS = [
   { value: "COD", label: "Cash on Delivery (COD)" },
 ]
 
+export const isCodMethod = (method?: string | null) => {
+  const m = (method || "").toUpperCase().trim()
+  return m === "COD" || m === "CASH ON DELIVERY"
+}
+
 export interface SplitPaymentRow extends PaymentRecordInput {
   rowId: string
 }
@@ -29,6 +34,7 @@ interface SplitPaymentInputProps {
   currencySymbol?: string
   disabled?: boolean
   className?: string
+  isEditMode?: boolean
 }
 
 export function SplitPaymentInput({
@@ -40,6 +46,7 @@ export function SplitPaymentInput({
   currencySymbol = "INR",
   disabled = false,
   className = "",
+  isEditMode = false,
 }: SplitPaymentInputProps) {
   // Convert incoming payments array to rows with unique rowId for UI state management
   const [rows, setRows] = React.useState<SplitPaymentRow[]>(() => {
@@ -97,6 +104,19 @@ export function SplitPaymentInput({
 
   const isPendingOrCancelled = paymentStatus === "Pending" || paymentStatus === "Cancelled"
 
+  const hasCod = React.useMemo(() => {
+    return rows.some((r) => isCodMethod(r.paymentMethod))
+  }, [rows])
+
+  // COD rule: selecting COD must automatically force payment status to Credit / Partial during sale creation
+  useEffect(() => {
+    if (!isEditMode && hasCod) {
+      if (paymentStatus === "Paid" || paymentStatus === "Completed" || !paymentStatus) {
+        onPaymentStatusChange?.("Credit")
+      }
+    }
+  }, [hasCod, isEditMode, paymentStatus, onPaymentStatusChange])
+
   useEffect(() => {
     if (paymentStatus === "Pending" || paymentStatus === "Cancelled") {
       const allZero = rows.every((r) => Number(r.amount) === 0)
@@ -106,9 +126,9 @@ export function SplitPaymentInput({
         // eslint-disable-next-line react-hooks/exhaustive-deps
         notifyParent(updated)
       }
-    } else if (paymentStatus === "Paid" || paymentStatus === "Completed") {
-      const totalPaidVal = rows.reduce((sum, r) => sum + (Number(r.amount) || 0), 0)
-      if (totalPaidVal !== totalAmount && totalAmount > 0) {
+    } else if ((paymentStatus === "Paid" || paymentStatus === "Completed") && (!hasCod || isEditMode)) {
+      const totalAllocatedVal = rows.reduce((sum, r) => sum + (Number(r.amount) || 0), 0)
+      if (totalAllocatedVal !== totalAmount && totalAmount > 0) {
         const updated = [
           {
             rowId: rows[0]?.rowId || `row-0-${Date.now()}`,
@@ -122,19 +142,36 @@ export function SplitPaymentInput({
         notifyParent(updated)
       }
     }
-  }, [paymentStatus, totalAmount])
+  }, [paymentStatus, totalAmount, hasCod, isEditMode])
 
-  const totalPaid = React.useMemo(() => {
+  // Total amount allocated across all payment methods (including COD)
+  const totalAllocated = React.useMemo(() => {
     return rows.reduce((sum, r) => sum + (Number(r.amount) || 0), 0)
   }, [rows])
+
+  // Total actually paid/received now.
+  // During sale creation (!isEditMode):
+  // - If total allocated across all rows reaches or exceeds totalAmount, a COD row represents uncollected delivery balance (0 received).
+  // - If total allocated is less than totalAmount (e.g. advance paid on COD like ₹656 out of ₹5,600), the entered amount is an actual paid advance.
+  const totalPaid = React.useMemo(() => {
+    return rows.reduce((sum, r) => {
+      if (!isEditMode && isCodMethod(r.paymentMethod)) {
+        if (totalAmount > 0 && totalAllocated >= totalAmount) {
+          return sum
+        }
+        return sum + (Number(r.amount) || 0)
+      }
+      return sum + (Number(r.amount) || 0)
+    }, 0)
+  }, [rows, totalAmount, totalAllocated, isEditMode])
 
   const balanceAmount = React.useMemo(() => {
     return Math.max(0, totalAmount - totalPaid)
   }, [totalAmount, totalPaid])
 
   const excessAmount = React.useMemo(() => {
-    return totalPaid > totalAmount && totalAmount > 0 ? totalPaid - totalAmount : 0
-  }, [totalAmount, totalPaid])
+    return totalAllocated > totalAmount && totalAmount > 0 ? totalAllocated - totalAmount : 0
+  }, [totalAmount, totalAllocated])
 
   const hasNegativeAmount = React.useMemo(() => {
     return rows.some((r) => Number(r.amount) < 0 || isNaN(Number(r.amount)))
@@ -155,10 +192,17 @@ export function SplitPaymentInput({
     })
     setRows(updated)
     notifyParent(updated)
+
+    if (!isEditMode && field === "paymentMethod") {
+      const willHaveCod = isCodMethod(value) || updated.some((r) => isCodMethod(r.paymentMethod))
+      if (willHaveCod) {
+        onPaymentStatusChange?.("Credit")
+      }
+    }
   }
 
   const handleAddRow = () => {
-    const remaining = Math.max(0, totalAmount - totalPaid)
+    const remaining = Math.max(0, totalAmount - totalAllocated)
     // Suggest payment method that hasn't been used yet if possible
     const usedMethods = new Set(rows.map((r) => r.paymentMethod))
     const availableMethod =
@@ -185,11 +229,11 @@ export function SplitPaymentInput({
   }
 
   const notifyParent = (updatedRows: SplitPaymentRow[]) => {
-    const sumPaid = updatedRows.reduce(
+    const totalAlloc = updatedRows.reduce(
       (sum, r) => sum + (Number(r.amount) || 0),
       0
     )
-    const excess = sumPaid > totalAmount && totalAmount > 0 ? sumPaid - totalAmount : 0
+    const excess = totalAlloc > totalAmount && totalAmount > 0 ? totalAlloc - totalAmount : 0
     const hasNeg = updatedRows.some(
       (r) => Number(r.amount) < 0 || isNaN(Number(r.amount))
     )
@@ -362,11 +406,19 @@ export function SplitPaymentInput({
           {onPaymentStatusChange ? (
             <select
               disabled={disabled}
-              value={paymentStatus || "Paid"}
-              onChange={(e) => onPaymentStatusChange(e.target.value)}
+              value={paymentStatus === "Credit" || paymentStatus === "Partial" ? "Credit" : (paymentStatus || (hasCod && !isEditMode ? "Credit" : "Paid"))}
+              onChange={(e) => {
+                const nextVal = e.target.value
+                if (!isEditMode && hasCod && (nextVal === "Paid" || nextVal === "Completed")) {
+                  return
+                }
+                onPaymentStatusChange(nextVal)
+              }}
               className="h-7 text-xs font-semibold rounded border border-gray-300 bg-white px-2 py-0.5 text-gray-900 focus:outline-none"
             >
-              <option value="Paid">Paid</option>
+              <option value="Paid" disabled={!isEditMode && hasCod}>
+                Paid {!isEditMode && hasCod ? "(Disabled for COD)" : ""}
+              </option>
               <option value="Credit">Credit / Partial</option>
               <option value="Pending">Pending</option>
             </select>
@@ -374,11 +426,13 @@ export function SplitPaymentInput({
             <span className={`font-semibold px-2 py-0.5 rounded text-xs ${
               paymentStatus === "Paid" || paymentStatus === "Completed"
                 ? "bg-emerald-100 text-emerald-800"
-                : paymentStatus === "Credit"
+                : paymentStatus === "Credit" || paymentStatus === "Partial"
                 ? "bg-amber-100 text-amber-800"
                 : "bg-gray-100 text-gray-800"
             }`}>
-              {paymentStatus || "Paid"}
+              {paymentStatus === "Credit" || paymentStatus === "Partial"
+                ? "Credit / Partial"
+                : (paymentStatus || "Paid")}
             </span>
           )}
         </div>

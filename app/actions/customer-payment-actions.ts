@@ -74,11 +74,16 @@ async function reverseSalePayment(saleId: number, reverseAmount: number) {
   if (amountToReverse <= 0) return
 
   const newReceivedAmount = Number(Math.max(0, currentReceived - amountToReverse).toFixed(2))
+  const newRemainingBalance = Number((totalAmount - newReceivedAmount).toFixed(2))
   const newStatus = deriveSaleStatus(totalAmount, newReceivedAmount)
+  const newPaymentStatus = newRemainingBalance <= 0.01 ? "Paid" : "Credit"
+  const newBalanceAmount = Math.max(0, newRemainingBalance)
 
   await sql`
     UPDATE sales
     SET received_amount = ${newReceivedAmount},
+        balance_amount = ${newBalanceAmount},
+        payment_status = ${newPaymentStatus},
         status = ${newStatus},
         updated_at = NOW()
     WHERE id = ${saleId}
@@ -137,6 +142,9 @@ async function applyPaymentToSales(params: {
     const newRemainingBalance = Number((totalAmount - newReceivedAmount).toFixed(2))
     const newStatus = deriveSaleStatus(totalAmount, newReceivedAmount)
 
+    const newPaymentStatus = newRemainingBalance <= 0.01 ? "Paid" : "Credit"
+    const newBalanceAmount = Math.max(0, newRemainingBalance)
+
     const saleCogs = await getSaleCogs(Number(sale.id))
     if (totalAmount > 0 && allocationAmount > 0) {
       totalCogs += saleCogs * (allocationAmount / totalAmount)
@@ -145,6 +153,8 @@ async function applyPaymentToSales(params: {
     await sql`
       UPDATE sales
       SET received_amount = ${newReceivedAmount},
+          balance_amount = ${newBalanceAmount},
+          payment_status = ${newPaymentStatus},
           status = ${newStatus},
           payment_method = ${params.paymentMethod},
           updated_at = NOW()

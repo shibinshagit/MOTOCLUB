@@ -4,17 +4,28 @@ import { useState } from "react"
 import { TrackingDetailsModal } from "./tracking-details-modal"
 import { updateSaleTracking } from "@/app/actions/sale-actions"
 import { useToast } from "@/components/ui/use-toast"
-import { Edit2, Copy, Check } from "lucide-react"
+import { Edit2, Copy, Check, ExternalLink, Plus } from "lucide-react"
+import { generateCourierTrackingUrl, getPublicTrackingUrl } from "@/lib/shipping/tracking-url"
 
 interface TrackingCellProps {
   saleId: number
   deviceId: number
   trackingId: string | null | undefined
   deliveryStatus?: string | null
+  courierServiceName?: string | null
+  trackingUrlTemplate?: string | null
   onUpdate?: () => void
 }
 
-export function TrackingCell({ saleId, deviceId, trackingId, deliveryStatus, onUpdate }: TrackingCellProps) {
+export function TrackingCell({ 
+  saleId, 
+  deviceId, 
+  trackingId, 
+  deliveryStatus, 
+  courierServiceName,
+  trackingUrlTemplate,
+  onUpdate 
+}: TrackingCellProps) {
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [isCopied, setIsCopied] = useState(false)
   const { toast } = useToast()
@@ -28,8 +39,8 @@ export function TrackingCell({ saleId, deviceId, trackingId, deliveryStatus, onU
     }
   }
 
-  const handleSave = async (newTrackingId: string) => {
-    const res = await updateSaleTracking(saleId, deviceId, newTrackingId)
+  const handleSave = async (newTrackingId: string, newCourierService?: string) => {
+    const res = await updateSaleTracking(saleId, deviceId, newTrackingId, newCourierService)
     if (!res.success) {
       throw new Error(res.message)
     }
@@ -38,36 +49,61 @@ export function TrackingCell({ saleId, deviceId, trackingId, deliveryStatus, onU
     if (onUpdate) onUpdate()
   }
 
-  // We can always allow update if there is a tracking ID or if the delivery status is Shipped/Delivered
-  const canUpdate = !!trackingId || ["Shipped", "Delivered"].includes(deliveryStatus || "")
+  const trackUrl = trackingId?.trim()
+    ? (generateCourierTrackingUrl(courierServiceName, trackingId, trackingUrlTemplate) || getPublicTrackingUrl(trackingId))
+    : null
+
+  const handleTrackShipment = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (trackUrl) {
+      window.open(trackUrl, "_blank")
+    }
+  }
 
   return (
-    <div className="flex items-center gap-2 group min-h-[1.5rem]" onClick={(e) => e.stopPropagation()}>
+    <div className="flex flex-col gap-1 min-h-[1.5rem]" onClick={(e) => e.stopPropagation()}>
       {trackingId ? (
-        <>
-          <span className="font-mono text-xs text-slate-700">{trackingId}</span>
-          <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="font-mono text-xs font-bold text-slate-800 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+            {trackingId}
+          </span>
+          <button
+            onClick={handleCopy}
+            className="p-1 text-slate-400 hover:text-slate-600 rounded hover:bg-slate-100 transition-colors"
+            title="Copy tracking ID"
+          >
+            {isCopied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+          </button>
+          <button
+            onClick={() => setIsModalOpen(true)}
+            className="p-1 text-slate-400 hover:text-blue-600 rounded hover:bg-blue-50 transition-colors"
+            title="Update tracking ID"
+          >
+            <Edit2 className="h-3 w-3" />
+          </button>
+          {trackUrl && (
             <button
-              onClick={handleCopy}
-              className="p-1 text-slate-400 hover:text-slate-600 rounded hover:bg-slate-100"
-              title="Copy tracking ID"
+              onClick={handleTrackShipment}
+              className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-1.5 py-0.5 rounded transition-colors"
+              title="Track shipment with carrier"
             >
-              {isCopied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
-            </button>
-          </div>
-        </>
-      ) : (
-        <span className="text-xs text-slate-400 italic">
-          —
-          {canUpdate && (
-            <button
-              onClick={() => setIsModalOpen(true)}
-              className="ml-2 px-2 py-0.5 text-[10px] uppercase font-semibold tracking-wider text-blue-600 hover:bg-blue-50 rounded border border-transparent hover:border-blue-200 transition-colors opacity-0 group-hover:opacity-100"
-            >
-              Add Tracking
+              <ExternalLink className="h-2.5 w-2.5" />
+              Track
             </button>
           )}
-        </span>
+        </div>
+      ) : (
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs text-slate-400 italic">—</span>
+          <button
+            onClick={() => setIsModalOpen(true)}
+            className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded transition-colors"
+            title="Add tracking ID"
+          >
+            <Plus className="h-2.5 w-2.5" />
+            Add Tracking
+          </button>
+        </div>
       )}
 
       {isModalOpen && (
@@ -76,6 +112,7 @@ export function TrackingCell({ saleId, deviceId, trackingId, deliveryStatus, onU
           onClose={() => setIsModalOpen(false)}
           onSave={handleSave}
           initialTrackingId={trackingId}
+          initialCourierServiceName={courierServiceName}
           currentDeliveryStatus={deliveryStatus || "Pending"}
           saleId={saleId}
           deviceId={deviceId}

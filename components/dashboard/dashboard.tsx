@@ -23,6 +23,7 @@ import {
   CalendarDays,
   FileText,
   RotateCcw,
+  LayoutDashboard,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/components/ui/use-toast"
@@ -52,6 +53,8 @@ import AttendanceTab from "./attendance-tab"
 import SalesOrdersTab from "./sales-orders-tab"
 import PayrollRequestsTab from "@/components/admin/payroll-requests-tab"
 import ReturnsTab from "./returns-tab"
+import AdminDashboardView from "@/components/admin/dashboard/admin-dashboard-view"
+import GlobalDateFilter from "./global-date-filter"
 import StaffAuthModal from "../staff/staff-auth-modal"
 import { BrandLogo } from "@/components/brand-logo"
 import { useStaffRestrictions } from "@/hooks/use-staff-restrictions"
@@ -69,8 +72,9 @@ import {
 import { getDeviceProfile } from "@/app/actions/auth-actions"
 import { activateStaff, clearStaff, selectActiveStaff, setStaff } from "@/store/slices/staffSlice"
 import { getStaffForAuthentication } from "@/app/actions/staff-actions"
+import { selectDateRange } from "@/store/slices/dateRangeSlice"
 
-type TabType = "sale" | "sales" | "sales-orders" | "purchase" | "product" | "trending" | "customer" | "transfer" | "accounting" | "supplier" | "platform" | "master" | "attendance" | "requests" | "returns"
+type TabType = "sale" | "sales" | "sales-orders" | "purchase" | "product" | "trending" | "customer" | "transfer" | "accounting" | "supplier" | "platform" | "master" | "attendance" | "requests" | "returns" | "admin-dashboard"
 
 const DEFAULT_CONTENT_TAB: TabType = "sale"
 
@@ -109,7 +113,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
     if (param === "home") return "sales-orders"
     if (
       param &&
-      ["sale", "sales", "sales-orders", "purchase", "product", "trending", "customer", "transfer", "accounting", "supplier", "platform", "master", "attendance", "requests", "returns"].includes(
+      ["sale", "sales", "sales-orders", "purchase", "product", "trending", "customer", "transfer", "accounting", "supplier", "platform", "master", "attendance", "requests", "returns", "admin-dashboard"].includes(
         param,
       )
     ) {
@@ -131,6 +135,11 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const device = useAppSelector(selectDevice)
   const deviceLogo = useAppSelector(selectDeviceLogo)
   const activeStaff = useAppSelector(selectActiveStaff)
+  const dateRange = useAppSelector(selectDateRange)
+  const dateRangeRef = useRef(dateRange)
+  useEffect(() => {
+    dateRangeRef.current = dateRange
+  }, [dateRange])
 
   const [isLoading, setIsLoading] = useState(true)
   const [dbError, setDbError] = useState<string | null>(null)
@@ -147,10 +156,16 @@ export function Dashboard({ onLogout }: DashboardProps) {
     (tabId: string): boolean => {
       if (!device) return false
 
-      // 1. Device level check (Super Admin restrictions)
       const isAdminSession = !activeStaff || activeStaff.role === "admin"
+
+      // Admin Dashboard is strictly reserved for Admin sessions
+      if (tabId === "admin-dashboard") {
+        return Boolean(isAdminSession)
+      }
+
+      // 1. Device level check (Super Admin restrictions)
       const deviceAllowedPagesStr = isAdminSession
-        ? device.admin_pages ?? "sales-orders,sale,returns,purchase,product,customer,supplier,transfer,platform,master,accounting,attendance,requests,trending"
+        ? device.admin_pages ?? "sales-orders,sale,returns,purchase,product,customer,supplier,transfer,platform,master,accounting,attendance,requests,trending,admin-dashboard"
         : device.staff_pages ?? "sales-orders,sale,returns,purchase,product,customer,supplier,transfer,attendance,trending"
 
       const deviceAllowedPages = deviceAllowedPagesStr.split(",").map((p: string) => p.trim())
@@ -182,11 +197,12 @@ export function Dashboard({ onLogout }: DashboardProps) {
     { id: "requests", icon: <FileText className="h-4 w-4" />, label: "Requests" },
     { id: "platform", icon: <Store className="h-4 w-4" />, label: "Platforms" },
     { id: "master", icon: <Database className="h-4 w-4" />, label: "Master Data" },
+    { id: "admin-dashboard", icon: <LayoutDashboard className="h-4 w-4" />, label: "Dashboard" },
   ]
 
   // Primary tabs for bottom navigation (most used)
   const primaryTabs = ["sales-orders", "sale", "purchase"]
-  const secondaryTabs = ["returns", "customer", "attendance", "supplier", "transfer", "platform", "master", "requests"]
+  const secondaryTabs = ["returns", "customer", "attendance", "supplier", "transfer", "platform", "master", "requests", "admin-dashboard"]
 
   // Filtered navigation items based on permission
   const allowedNavItems = useMemo(() => navItems.filter((item: any) => canAccessTab(item.id)), [canAccessTab])
@@ -418,6 +434,16 @@ export function Dashboard({ onLogout }: DashboardProps) {
         url.searchParams.delete("editSaleId")
         url.searchParams.delete("editPurchaseId")
       }
+
+      // Preserve active global date range in URL
+      if (dateRangeRef.current?.from && dateRangeRef.current?.to) {
+        url.searchParams.set("from", dateRangeRef.current.from)
+        url.searchParams.set("to", dateRangeRef.current.to)
+        if (dateRangeRef.current.preset && dateRangeRef.current.preset !== "custom") {
+          url.searchParams.set("preset", dateRangeRef.current.preset)
+        }
+      }
+
       routerRef.current.replace(url.pathname + url.search)
     },
     [],
@@ -538,6 +564,8 @@ export function Dashboard({ onLogout }: DashboardProps) {
           return <PlatformTab userId={device?.id ?? 0} />
         case "master":
           return <MasterDataTab userId={device?.id ?? 0} />
+        case "admin-dashboard":
+          return <AdminDashboardView deviceId={deviceId || 0} companyId={companyId} />
         default:
           return <ErrorTab name={activeTab} />
       }
@@ -590,6 +618,11 @@ export function Dashboard({ onLogout }: DashboardProps) {
           </div>
         </div>
 
+        {/* Global Date Range Filter */}
+        <div className="flex items-center justify-center mx-1 sm:mx-2">
+          <GlobalDateFilter />
+        </div>
+
         <div className="flex items-center space-x-2 sm:space-x-4 flex-shrink-0">
           {/* Mobile Menu Button */}
           <Button
@@ -614,6 +647,22 @@ export function Dashboard({ onLogout }: DashboardProps) {
                 title="Inventory"
               >
                 <Package className="h-5 w-5" />
+              </Button>
+            )}
+
+            {canAccessTab("admin-dashboard") && (
+              <Button
+                onClick={() => handleTabChange("admin-dashboard")}
+                variant="ghost"
+                size="sm"
+                className={cn(
+                  "h-9 px-3 rounded-full hover:bg-violet-50 text-violet-700 font-semibold text-xs flex items-center gap-1.5",
+                  activeTab === "admin-dashboard" && "bg-violet-100",
+                )}
+                title="Admin Dashboard"
+              >
+                <LayoutDashboard className="h-4 w-4" />
+                <span className="hidden md:inline">Dashboard</span>
               </Button>
             )}
 
@@ -699,6 +748,20 @@ export function Dashboard({ onLogout }: DashboardProps) {
                 <Package className="h-5 w-5" />
               </Button>
             )}
+            {canAccessTab("admin-dashboard") && (
+              <Button
+                onClick={() => handleTabChange("admin-dashboard")}
+                variant="ghost"
+                size="sm"
+                className={cn(
+                  "h-9 w-9 rounded-full p-0 hover:bg-violet-50 text-violet-700",
+                  activeTab === "admin-dashboard" && "bg-violet-100",
+                )}
+                title="Admin Dashboard"
+              >
+                <LayoutDashboard className="h-4 w-4" />
+              </Button>
+            )}
             {canAccessTab("accounting") && (
               <Button
                 onClick={() => handleTabChange("accounting")}
@@ -766,6 +829,12 @@ export function Dashboard({ onLogout }: DashboardProps) {
       {isMobileMenuOpen && (
         <div className="z-20 border-b border-border bg-card sm:hidden">
           <div className="space-y-3 px-4 py-3">
+            <div>
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+                Date Range
+              </p>
+              <GlobalDateFilter className="w-full justify-between" />
+            </div>
             <div className="border-t border-border pt-2">
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
                 Account
@@ -791,6 +860,20 @@ export function Dashboard({ onLogout }: DashboardProps) {
                       Staff Logout
                     </Button>
                   ) : null}
+                  {canAccessTab("admin-dashboard") && (
+                    <Button
+                      onClick={() => {
+                        handleTabChange("admin-dashboard")
+                        setIsMobileMenuOpen(false)
+                      }}
+                      variant="outline"
+                      size="sm"
+                      className="mt-2 w-full justify-start text-xs font-semibold text-violet-700 bg-violet-50/70 border-violet-200"
+                    >
+                      <LayoutDashboard className="mr-2 h-4 w-4" />
+                      Admin Dashboard
+                    </Button>
+                  )}
                 </div>
               </div>
             </div> 

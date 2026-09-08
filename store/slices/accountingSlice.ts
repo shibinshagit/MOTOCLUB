@@ -61,6 +61,8 @@ export interface FinancialData {
 interface BalanceData {
   openingBalance: number
   closingBalance: number
+  moneyIn?: number
+  moneyOut?: number
   openingCredits: number
   openingDebits: number
   closingCredits: number

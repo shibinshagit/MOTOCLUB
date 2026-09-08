@@ -141,6 +141,7 @@ async function createTables() {
         platform_name TEXT,
         brand_logo_url TEXT,
         brand_icon_url TEXT,
+        admin_dashboard_pin_hash TEXT,
         updated_at TIMESTAMP DEFAULT NOW()
       )
     `
@@ -815,6 +816,7 @@ async function upgradeLegacyColumns() {
 
   const columns: Array<[string, () => Promise<any>]> = [
     ["platform_settings.platform_name", () => sql`ALTER TABLE platform_settings ADD COLUMN IF NOT EXISTS platform_name TEXT`],
+    ["platform_settings.admin_dashboard_pin_hash", () => sql`ALTER TABLE platform_settings ADD COLUMN IF NOT EXISTS admin_dashboard_pin_hash TEXT`],
     ["devices.currency", () => sql`ALTER TABLE devices ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT 'QAR'`],
     ["devices.logo_url", () => sql`ALTER TABLE devices ADD COLUMN IF NOT EXISTS logo_url TEXT`],
     ["devices.staff_pages", () => sql`ALTER TABLE devices ADD COLUMN IF NOT EXISTS staff_pages TEXT`],

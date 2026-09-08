@@ -4,6 +4,7 @@ import React, { useState, useEffect } from "react"
 import { useAppSelector } from "@/store/hooks"
 import { selectDevice } from "@/store/slices/deviceSlice"
 import { selectActiveStaff } from "@/store/slices/staffSlice"
+import { selectDateRange } from "@/store/slices/dateRangeSlice"
 import {
   Card,
   CardContent,
@@ -46,13 +47,22 @@ export default function AttendanceTab() {
   }
 
   // Filters
-  const [dateRange, setDateRange] = useState("Today")
-  const [customStartDate, setCustomStartDate] = useState(getLocalDateString())
-  const [customEndDate, setCustomEndDate] = useState(getLocalDateString())
+  const globalDateRange = useAppSelector(selectDateRange)
+  const [dateRange, setDateRange] = useState("Custom Date")
+  const [customStartDate, setCustomStartDate] = useState(() => globalDateRange.from || getLocalDateString())
+  const [customEndDate, setCustomEndDate] = useState(() => globalDateRange.to || getLocalDateString())
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth().toString())
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear().toString())
   const [searchTerm, setSearchTerm] = useState("")
   const [statusFilter, setStatusFilter] = useState("All")
+
+  useEffect(() => {
+    if (globalDateRange?.from && globalDateRange?.to) {
+      setCustomStartDate(globalDateRange.from)
+      setCustomEndDate(globalDateRange.to)
+      setDateRange("Custom Date")
+    }
+  }, [globalDateRange?.from, globalDateRange?.to])
   
   const [isLoading, setIsLoading] = useState(true)
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([])

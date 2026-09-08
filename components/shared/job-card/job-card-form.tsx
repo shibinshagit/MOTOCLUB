@@ -22,6 +22,10 @@ import { formatPhoneNumber } from "@/lib/utils"
 import { VariantSelect } from "./variant-select"
 import { JobCardSuccess } from "./job-card-success"
 import { JobCardWhatsappConfirmation } from "./job-card-whatsapp-confirmation"
+import { useFormDraft } from "@/hooks/use-form-draft"
+import { DraftIndicator } from "@/components/shared/draft-indicator"
+import { useConfirm } from "@/hooks/use-confirm"
+import { useCallback, useMemo, useRef } from "react"
 
 interface ProductRow {
   id: string
@@ -71,84 +75,6 @@ export function JobCardForm({
     }
     setIsNewProductModalOpen(false)
     setActiveRowIdForNewProduct(null)
-  }
-
-  useEffect(() => {
-    if (editSaleId) {
-      loadExistingData(editSaleId)
-    } else if (initialCustomer) {
-      setCustomerId(initialCustomer.id || null)
-      setCustomerName(initialCustomer.name || "")
-      const formattedPhone = formatPhoneNumber(initialCustomer.phone || "")
-      setCustomerPhone(formattedPhone)
-      setShippingPhone(formattedPhone)
-      if (initialCustomer.id) {
-        getCustomerAddresses(initialCustomer.id).then((res) => {
-          if (res.success && res.data && res.data.length > 0) {
-            setCustomerAddresses(res.data)
-            const defaultAddr = res.data.find((a: any) => a.is_default) || res.data[0]
-            setShippingCity(defaultAddr.city || "")
-            setShippingDistrict(defaultAddr.district || "")
-            setShippingState(defaultAddr.state || "")
-            setShippingStreet(defaultAddr.street || "")
-            setShippingArea(defaultAddr.area || "")
-            setShippingLandmark(defaultAddr.landmark || "")
-            setShippingAddressType(defaultAddr.address_type || "Home")
-            setShippingPincode(defaultAddr.pincode || "")
-            setShippingPhone(formatPhoneNumber(defaultAddr.phone || initialCustomer.phone || ""))
-          }
-        })
-      }
-    }
-  }, [editSaleId, initialCustomer])
-
-  const loadExistingData = async (id: number) => {
-    setIsLoading(true)
-    const res = await getSaleDetails(id)
-    if (res.success && res.data) {
-      const sale = res.data.sale
-      const items = res.data.items
-      setCustomerId(sale.customer_id)
-      setCustomerName(sale.customer_name_override || sale.customer_name || "")
-      setCustomerPhone(formatPhoneNumber(sale.customer_phone_override || sale.customer_phone || ""))
-      setShippingCity(sale.shipping_city || "")
-      setShippingDistrict(sale.shipping_district || "")
-      setShippingState(sale.shipping_state || "")
-      setShippingStreet(sale.shipping_street || "")
-      setShippingArea(sale.shipping_area || "")
-      setShippingLandmark(sale.shipping_landmark || "")
-      setShippingAddressType(sale.shipping_address_type || "Home")
-      setShippingPincode(sale.shipping_pincode || "")
-      setShippingPhone(formatPhoneNumber(sale.customer_phone_override || sale.customer_phone || ""))
-      setShippingNotes(sale.shipping_notes || "")
-      setCourierPaidExtra(sale.courier_paid_extra > 0 ? sale.courier_paid_extra : "")
-      setOriginalDeliveryStatus(sale.delivery_status || "Pending")
-      if (sale.customer_id) {
-        getCustomerAddresses(sale.customer_id).then((addrRes) => {
-          if (addrRes.success && addrRes.data && addrRes.data.length > 0) {
-            setCustomerAddresses(addrRes.data)
-          }
-        })
-      }
-
-      if (items && items.length > 0) {
-        setProducts(items.map((item: any) => ({
-          id: crypto.randomUUID(),
-          productId: item.product_id,
-          productName: item.service_name || item.product_name || "",
-          productObj: null,
-          variantId: item.product_variant_id,
-          variantName: item.variant_name || "",
-          quantity: item.quantity,
-          price: item.price || item.wholesale_price,
-          msp: item.msp || 0,
-          costPrice: item.cost || item.wholesale_price || 0,
-        })))
-      }
-    } else {
-      toast({ title: "Error", description: "Failed to load Job Card data", variant: "destructive" })
-    }
-    setIsLoading(false)
   }
 
   const [successData, setSuccessData] = useState<any>(null)
@@ -219,6 +145,193 @@ export function JobCardForm({
       costPrice: 0,
     }
   ])
+
+  const { confirm, ConfirmDialog } = useConfirm()
+
+  const draftData = useMemo(() => ({
+    customerId,
+    customerName,
+    customerPhone,
+    shippingCity,
+    shippingDistrict,
+    shippingState,
+    shippingStreet,
+    shippingArea,
+    shippingLandmark,
+    shippingAddressType,
+    shippingPincode,
+    shippingPhone,
+    shippingNotes,
+    courierPaidExtra,
+    products,
+  }), [
+    customerId,
+    customerName,
+    customerPhone,
+    shippingCity,
+    shippingDistrict,
+    shippingState,
+    shippingStreet,
+    shippingArea,
+    shippingLandmark,
+    shippingAddressType,
+    shippingPincode,
+    shippingPhone,
+    shippingNotes,
+    courierPaidExtra,
+    products,
+  ])
+
+  const hasMeaningfulJobCardData = useCallback((d: typeof draftData) => {
+    if (!d) return false
+    if (d.customerId !== null) return true
+    if (d.customerName && d.customerName.trim() !== "") return true
+    if (d.customerPhone && d.customerPhone.trim() !== "") return true
+    if (d.shippingCity && d.shippingCity.trim() !== "") return true
+    if (d.shippingStreet && d.shippingStreet.trim() !== "") return true
+    if (d.shippingPincode && d.shippingPincode.trim() !== "") return true
+    if (d.shippingNotes && d.shippingNotes.trim() !== "") return true
+    if (Array.isArray(d.products)) {
+      const hasProduct = d.products.some(
+        (p) => p.productId !== null || (p.productName && p.productName.trim() !== "")
+      )
+      if (hasProduct) return true
+    }
+    return false
+  }, [])
+
+  const {
+    getDraft,
+    clearDraft,
+    hasDraft,
+    status: draftStatus,
+    lastSaved,
+    markHydrated,
+  } = useFormDraft({
+    formId: "job-card",
+    userId: deviceId,
+    data: draftData,
+    enabled: !editSaleId,
+    hasMeaningfulData: hasMeaningfulJobCardData,
+  })
+
+  const hasInitializedDraftRef = useRef(false)
+
+  useEffect(() => {
+    if (hasInitializedDraftRef.current) return
+    hasInitializedDraftRef.current = true
+
+    if (editSaleId) {
+      loadExistingData(editSaleId)
+      return
+    }
+
+    const draft = getDraft()
+    if (draft && hasMeaningfulJobCardData(draft)) {
+      setCustomerId(draft.customerId ?? null)
+      setCustomerName(draft.customerName || "")
+      setCustomerPhone(draft.customerPhone || "")
+      setShippingCity(draft.shippingCity || "")
+      setShippingDistrict(draft.shippingDistrict || "")
+      setShippingState(draft.shippingState || "")
+      setShippingStreet(draft.shippingStreet || "")
+      setShippingArea(draft.shippingArea || "")
+      setShippingLandmark(draft.shippingLandmark || "")
+      setShippingAddressType(draft.shippingAddressType || "Home")
+      setShippingPincode(draft.shippingPincode || "")
+      setShippingPhone(draft.shippingPhone || "")
+      setShippingNotes(draft.shippingNotes || "")
+      if (draft.courierPaidExtra !== undefined && draft.courierPaidExtra !== null) {
+        setCourierPaidExtra(draft.courierPaidExtra)
+      }
+      if (Array.isArray(draft.products) && draft.products.length > 0) {
+        setProducts(draft.products)
+      }
+      if (draft.customerId) {
+        getCustomerAddresses(draft.customerId).then((res) => {
+          if (res.success && res.data && res.data.length > 0) {
+            setCustomerAddresses(res.data)
+          }
+        })
+      }
+      markHydrated()
+    } else if (initialCustomer) {
+      setCustomerId(initialCustomer.id || null)
+      setCustomerName(initialCustomer.name || "")
+      const formattedPhone = formatPhoneNumber(initialCustomer.phone || "")
+      setCustomerPhone(formattedPhone)
+      setShippingPhone(formattedPhone)
+      if (initialCustomer.id) {
+        getCustomerAddresses(initialCustomer.id).then((res) => {
+          if (res.success && res.data && res.data.length > 0) {
+            setCustomerAddresses(res.data)
+            const defaultAddr = res.data.find((a: any) => a.is_default) || res.data[0]
+            setShippingCity(defaultAddr.city || "")
+            setShippingDistrict(defaultAddr.district || "")
+            setShippingState(defaultAddr.state || "")
+            setShippingStreet(defaultAddr.street || "")
+            setShippingArea(defaultAddr.area || "")
+            setShippingLandmark(defaultAddr.landmark || "")
+            setShippingAddressType(defaultAddr.address_type || "Home")
+            setShippingPincode(defaultAddr.pincode || "")
+            setShippingPhone(formatPhoneNumber(defaultAddr.phone || initialCustomer.phone || ""))
+          }
+        })
+      }
+      markHydrated()
+    } else {
+      markHydrated()
+    }
+  }, [editSaleId, initialCustomer, getDraft, hasMeaningfulJobCardData, markHydrated])
+
+  const loadExistingData = async (id: number) => {
+    setIsLoading(true)
+    const res = await getSaleDetails(id)
+    if (res.success && res.data) {
+      const sale = res.data.sale
+      const items = res.data.items
+      setCustomerId(sale.customer_id)
+      setCustomerName(sale.customer_name_override || sale.customer_name || "")
+      setCustomerPhone(formatPhoneNumber(sale.customer_phone_override || sale.customer_phone || ""))
+      setShippingCity(sale.shipping_city || "")
+      setShippingDistrict(sale.shipping_district || "")
+      setShippingState(sale.shipping_state || "")
+      setShippingStreet(sale.shipping_street || "")
+      setShippingArea(sale.shipping_area || "")
+      setShippingLandmark(sale.shipping_landmark || "")
+      setShippingAddressType(sale.shipping_address_type || "Home")
+      setShippingPincode(sale.shipping_pincode || "")
+      setShippingPhone(formatPhoneNumber(sale.customer_phone_override || sale.customer_phone || ""))
+      setShippingNotes(sale.shipping_notes || "")
+      setCourierPaidExtra(sale.courier_paid_extra > 0 ? sale.courier_paid_extra : "")
+      setOriginalDeliveryStatus(sale.delivery_status || "Pending")
+      if (sale.customer_id) {
+        getCustomerAddresses(sale.customer_id).then((addrRes) => {
+          if (addrRes.success && addrRes.data && addrRes.data.length > 0) {
+            setCustomerAddresses(addrRes.data)
+          }
+        })
+      }
+
+      if (items && items.length > 0) {
+        setProducts(items.map((item: any) => ({
+          id: crypto.randomUUID(),
+          productId: item.product_id,
+          productName: item.service_name || item.product_name || "",
+          productObj: null,
+          variantId: item.product_variant_id,
+          variantName: item.variant_name || "",
+          quantity: item.quantity,
+          price: item.price || item.wholesale_price,
+          msp: item.msp || 0,
+          costPrice: item.cost || item.wholesale_price || 0,
+        })))
+      }
+    } else {
+      toast({ title: "Error", description: "Failed to load Job Card data", variant: "destructive" })
+    }
+    setIsLoading(false)
+  }
 
   const addProductRow = () => {
     setProducts([
@@ -419,6 +532,9 @@ export function JobCardForm({
       }
 
       if (res.success && res.data) {
+        if (!editSaleId) {
+          clearDraft()
+        }
         if (editSaleId && originalDeliveryStatus?.toLowerCase() === "pending") {
           setSuccessData({ ...res.data, showWhatsappConfirmation: true, saleData: input })
         } else {
@@ -437,6 +553,9 @@ export function JobCardForm({
   }
 
   const resetForm = () => {
+    if (!editSaleId) {
+      clearDraft()
+    }
     setCustomerId(null)
     setCustomerName("")
     setCustomerPhone("")
@@ -467,6 +586,39 @@ export function JobCardForm({
     setIsSuccess(false)
     setSuccessData(null)
     if (onClose) onClose()
+  }
+
+  const handleCancel = async () => {
+    if (!editSaleId && (hasDraft || hasMeaningfulJobCardData(draftData))) {
+      const shouldDiscard = await confirm({
+        title: "Discard this unfinished form?",
+        description: "You have unsaved changes in this Job Card. Discarding will clear the saved draft.",
+        confirmLabel: "Discard",
+        cancelLabel: "Continue Editing",
+        destructive: true,
+      })
+      if (!shouldDiscard) return
+      clearDraft()
+      resetForm()
+    } else {
+      if (onClose) onClose()
+    }
+  }
+
+  const handleReset = async () => {
+    if (!editSaleId && (hasDraft || hasMeaningfulJobCardData(draftData))) {
+      const shouldDiscard = await confirm({
+        title: "Reset form and discard draft?",
+        description: "All entered information will be cleared and the saved draft will be deleted.",
+        confirmLabel: "Discard Draft",
+        cancelLabel: "Continue Editing",
+        destructive: true,
+      })
+      if (!shouldDiscard) return
+      resetForm()
+    } else {
+      resetForm()
+    }
   }
 
   const calculateSubtotal = () => {
@@ -1008,39 +1160,44 @@ export function JobCardForm({
       </Card>
 
       {/* Footer / Submit */}
-      <div className="flex justify-end gap-4">
-        {onClose && (
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t">
+        {!editSaleId ? (
+          <DraftIndicator status={draftStatus} hasDraft={hasDraft} lastSaved={lastSaved} />
+        ) : <div />}
+        <div className="flex items-center gap-4 w-full sm:w-auto justify-end">
+          {onClose && (
+            <Button 
+              type="button" 
+              variant="outline" 
+              onClick={handleCancel}
+              disabled={isLoading}
+              className="text-gray-600 border-gray-300 hover:bg-gray-50"
+            >
+              Cancel
+            </Button>
+          )}
           <Button 
             type="button" 
-            variant="outline" 
-            onClick={onClose}
+            variant="ghost" 
+            onClick={handleReset}
             disabled={isLoading}
-            className="text-gray-600 border-gray-300 hover:bg-gray-50"
+            className="text-gray-500 hover:text-gray-700"
           >
-            Cancel
+            Reset
           </Button>
-        )}
-        <Button 
-          type="button" 
-          variant="ghost" 
-          onClick={resetForm}
-          disabled={isLoading}
-          className="text-gray-500 hover:text-gray-700"
-        >
-          Reset
-        </Button>
-        <Button 
-          type="submit" 
-          size="lg" 
-          disabled={isLoading}
-          className="min-w-[180px] shadow-sm"
-        >
-          {isLoading ? (
-            <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generating...</>
-          ) : (
-            <><CheckCircle2 className="mr-2 h-4 w-4" /> Create Job Card</>
-          )}
-        </Button>
+          <Button 
+            type="submit" 
+            size="lg" 
+            disabled={isLoading}
+            className="min-w-[180px] shadow-sm"
+          >
+            {isLoading ? (
+              <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generating...</>
+            ) : (
+              <><CheckCircle2 className="mr-2 h-4 w-4" /> Create Job Card</>
+            )}
+          </Button>
+        </div>
       </div>
 
     </form>
@@ -1171,6 +1328,7 @@ export function JobCardForm({
       userId={deviceId || 1}
       elevated={true}
     />
+    {ConfirmDialog}
     </>
   )
 }

@@ -97,61 +97,83 @@ export function DeliveryStatusSelect({
     }
   }
 
-  const handleUpdateStatusWithTracking = async (newTrackingId: string) => {
+  const handleUpdateStatusWithTracking = async (newTrackingId?: string, newCourierService?: string) => {
     const previousStatus = status
     setIsTrackingModalOpen(false) // Close input modal immediately
     setStatus("Shipping") // Optimistic instant update
-
-    // INSTANTLY open the WhatsApp notification modal with new tracking ID (0ms delay!)
-    setShippingWhatsappData({
-      newTrackingId,
-      trackingToken: newTrackingId,
-      customerName: customerName || "Customer",
-      customerPhone: customerPhone || "",
-      shippingAddress: "",
-      totalAmount: 0,
-      products: [{ productName: "Order Item" }],
-    })
-
     setLoading(true)
+
+    const cleanTracking = newTrackingId?.trim() || ""
+
     try {
-      const res = await updateSaleDeliveryStatus(saleId, deviceId || 0, "Shipping", newTrackingId)
+      const res = await updateSaleDeliveryStatus(saleId, deviceId || 0, "Shipping", cleanTracking || undefined)
       if (res.success) {
-        toast({ title: "Success", description: "Delivery status updated to Shipping." })
+        if (newCourierService) {
+          try {
+            const { updateSaleTracking } = await import("@/app/actions/sale-actions")
+            await updateSaleTracking(saleId, deviceId || 0, cleanTracking, newCourierService)
+          } catch (csErr) {
+            console.warn("Failed to update courier service name:", csErr)
+          }
+        }
 
-        const { getOrCreateTrackingToken } = await import("@/app/actions/sale-actions")
-        const tokenRes = await getOrCreateTrackingToken(saleId)
+        toast({ 
+          title: "Success", 
+          description: cleanTracking 
+            ? "Delivery status updated to Shipping." 
+            : "Delivery status updated to Shipping. Tracking ID can be added later." 
+        })
 
-        // Fetch full sale items asynchronously to enrich the modal payload
-        getSaleDetails(saleId)
-          .then((saleRes) => {
-            if (saleRes.success && saleRes.data) {
-              const saleData = saleRes.data.sale
-              const itemsData = saleRes.data.items || []
-              const prodList = itemsData.map((item: any) => ({
-                productName: item.product_name || item.name || "Product",
-              }))
+        if (onStatusChange) {
+          onStatusChange("Shipping")
+        }
 
-              setShippingWhatsappData((prev) =>
-                prev
-                  ? {
-                      ...prev,
-                      trackingToken: saleData.tracking_token || tokenRes.trackingToken,
-                      customerName: saleData.customer_name || prev.customerName,
-                      customerPhone: saleData.customer_phone || prev.customerPhone,
-                      shippingAddress: saleData.customer_address || prev.shippingAddress,
-                      totalAmount: Number(saleData.total_amount || prev.totalAmount),
-                      products: prodList.length > 0 ? prodList : prev.products,
-                    }
-                  : null
-              )
-            }
+        // Only open WhatsApp notification flow if tracking ID was provided
+        if (cleanTracking) {
+          setShippingWhatsappData({
+            newTrackingId: cleanTracking,
+            trackingToken: cleanTracking,
+            customerName: customerName || "Customer",
+            customerPhone: customerPhone || "",
+            shippingAddress: "",
+            totalAmount: 0,
+            products: [{ productName: "Order Item" }],
           })
-          .catch(() => {})
+
+          const { getOrCreateTrackingToken } = await import("@/app/actions/sale-actions")
+          const tokenRes = await getOrCreateTrackingToken(saleId)
+
+          // Fetch full sale items asynchronously to enrich the modal payload
+          getSaleDetails(saleId)
+            .then((saleRes) => {
+              if (saleRes.success && saleRes.data) {
+                const saleData = saleRes.data.sale
+                const itemsData = saleRes.data.items || []
+                const prodList = itemsData.map((item: any) => ({
+                  productName: item.product_name || item.name || "Product",
+                }))
+
+                setShippingWhatsappData((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        trackingToken: saleData.tracking_token || tokenRes.trackingToken,
+                        customerName: saleData.customer_name || prev.customerName,
+                        customerPhone: saleData.customer_phone || prev.customerPhone,
+                        shippingAddress: saleData.customer_address || prev.shippingAddress,
+                        totalAmount: Number(saleData.total_amount || prev.totalAmount),
+                        products: prodList.length > 0 ? prodList : prev.products,
+                      }
+                    : null
+                )
+              }
+            })
+            .catch(() => {})
+        }
       } else {
         setStatus(previousStatus)
         setShippingWhatsappData(null)
-        toast({ title: "Error", description: res.message || "Failed to update tracking ID.", variant: "destructive" })
+        toast({ title: "Error", description: res.message || "Failed to update delivery status.", variant: "destructive" })
       }
     } catch (err: any) {
       setStatus(previousStatus)

@@ -5,14 +5,14 @@ type ToastFn = (props: {
   duration?: number
 }) => void
 
-export function notifySuccess(toast: ToastFn, description: string, title = "Success") {
-  toast({ title, description })
+export function notifySuccess(toast: ToastFn, description: string, title = "Success", duration = 3500) {
+  toast({ title, description, duration })
 }
 
-export function notifyError(toast: ToastFn, description: string, title = "Error") {
-  toast({ title, description, variant: "destructive" })
+export function notifyError(toast: ToastFn, description: string, title = "Error", duration = 5000) {
+  toast({ title, description, variant: "destructive", duration })
 }
 
-export function notifyWarning(toast: ToastFn, description: string, title = "Warning") {
-  toast({ title, description, variant: "destructive" })
+export function notifyWarning(toast: ToastFn, description: string, title = "Warning", duration = 4000) {
+  toast({ title, description, variant: "destructive", duration })
 }

@@ -2,6 +2,7 @@
 
 import { sql } from "@/lib/db"
 import { revalidatePath, unstable_noStore as noStore } from "next/cache"
+import { format, addDays, parseISO } from "date-fns"
 import { resolveStaffSessionContext } from "@/lib/staff-restrictions-server"
 import { updateProductStock } from "@/app/actions/sale-actions"
 
@@ -318,6 +319,10 @@ export async function getEcommerceReturnRequests(params?: {
   try {
     const statusFilter = params?.status && params.status !== "all" ? params.status.toLowerCase() : null
     const search = params?.search ? `%${params.search.trim().toLowerCase()}%` : null
+    const startDate = params?.startDate || null
+    const endExclusive = params?.endDate
+      ? format(addDays(parseISO(params.endDate), 1), "yyyy-MM-dd")
+      : null
 
     let rows: any[] = []
     if (statusFilter && search) {
@@ -364,6 +369,8 @@ export async function getEcommerceReturnRequests(params?: {
               WHERE ri2.return_request_id = r.id AND (LOWER(COALESCE(p2.name, ri2.product_name, '')) LIKE ${search})
             )
           )
+          AND (${startDate}::timestamp IS NULL OR r.created_at >= ${startDate}::timestamp)
+          AND (${endExclusive}::timestamp IS NULL OR r.created_at < ${endExclusive}::timestamp)
         ORDER BY r.created_at DESC
       `
     } else if (statusFilter) {
@@ -399,6 +406,8 @@ export async function getEcommerceReturnRequests(params?: {
         LEFT JOIN customers c ON c.id = r.customer_id
         LEFT JOIN staff st ON st.id = r.reviewed_by
         WHERE LOWER(r.status) = ${statusFilter}
+          AND (${startDate}::timestamp IS NULL OR r.created_at >= ${startDate}::timestamp)
+          AND (${endExclusive}::timestamp IS NULL OR r.created_at < ${endExclusive}::timestamp)
         ORDER BY r.created_at DESC
       `
     } else if (search) {
@@ -433,7 +442,7 @@ export async function getEcommerceReturnRequests(params?: {
         FROM return_requests r
         LEFT JOIN customers c ON c.id = r.customer_id
         LEFT JOIN staff st ON st.id = r.reviewed_by
-        WHERE LOWER(r.ecommerce_return_request_id) LIKE ${search} OR
+        WHERE (LOWER(r.ecommerce_return_request_id) LIKE ${search} OR
               LOWER(COALESCE(r.order_number, '')) LIKE ${search} OR
               LOWER(COALESCE(c.name, r.customer_name, '')) LIKE ${search} OR
               LOWER(COALESCE(c.phone, r.customer_phone, '')) LIKE ${search} OR
@@ -441,7 +450,9 @@ export async function getEcommerceReturnRequests(params?: {
                 SELECT 1 FROM return_request_items ri2
                 LEFT JOIN products p2 ON p2.id = ri2.product_id
                 WHERE ri2.return_request_id = r.id AND (LOWER(COALESCE(p2.name, ri2.product_name, '')) LIKE ${search})
-              )
+              ))
+          AND (${startDate}::timestamp IS NULL OR r.created_at >= ${startDate}::timestamp)
+          AND (${endExclusive}::timestamp IS NULL OR r.created_at < ${endExclusive}::timestamp)
         ORDER BY r.created_at DESC
       `
     } else {
@@ -476,6 +487,8 @@ export async function getEcommerceReturnRequests(params?: {
         FROM return_requests r
         LEFT JOIN customers c ON c.id = r.customer_id
         LEFT JOIN staff st ON st.id = r.reviewed_by
+        WHERE (${startDate}::timestamp IS NULL OR r.created_at >= ${startDate}::timestamp)
+          AND (${endExclusive}::timestamp IS NULL OR r.created_at < ${endExclusive}::timestamp)
         ORDER BY r.created_at DESC
       `
     }
@@ -489,6 +502,8 @@ export async function getEcommerceReturnRequests(params?: {
         COUNT(*) FILTER (WHERE LOWER(status) = 'completed')::int AS completed_count,
         COUNT(*)::int AS total_count
       FROM return_requests
+      WHERE (${startDate}::timestamp IS NULL OR created_at >= ${startDate}::timestamp)
+        AND (${endExclusive}::timestamp IS NULL OR created_at < ${endExclusive}::timestamp)
     `
 
     const stats = statsRows[0] || {
