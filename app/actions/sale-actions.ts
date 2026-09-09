@@ -1630,6 +1630,15 @@ export async function updateSale(saleData: any) {
     }
 
 
+    const origDelivery = (original.delivery_status || "").trim().toLowerCase()
+    const newDelivery = (shipping.delivery_status || "").trim().toLowerCase()
+    const isNewShip = newDelivery === "shipping" || newDelivery === "shipped"
+    const wasShip = origDelivery === "shipping" || origDelivery === "shipped"
+    let targetShippingDate = original.shipping_date || null
+    if (!wasShip && isNewShip) {
+      targetShippingDate = targetShippingDate || new Date()
+    }
+
     const updateSaleRecord = async (whereDeviceScoped: boolean) => {
         if (whereDeviceScoped) {
           await sql`
@@ -1646,6 +1655,7 @@ export async function updateSale(saleData: any) {
                 staff_id = ${saleData.staffId || null},
                 fulfillment_type = ${shipping.fulfillment_type},
                 delivery_status = ${shipping.delivery_status},
+                shipping_date = CASE WHEN ${isNewShip} THEN COALESCE(shipping_date, NOW()) ELSE shipping_date END,
                 courier_partner_id = ${shipping.courier_partner_id},
                 courier_service_id = ${shipping.courier_service_id},
                 courier_service_name = ${shipping.courier_service_name},
@@ -1682,6 +1692,7 @@ export async function updateSale(saleData: any) {
                 staff_id = ${saleData.staffId || null},
                 fulfillment_type = ${shipping.fulfillment_type},
                 delivery_status = ${shipping.delivery_status},
+                shipping_date = CASE WHEN ${isNewShip} THEN COALESCE(shipping_date, NOW()) ELSE shipping_date END,
                 courier_partner_id = ${shipping.courier_partner_id},
                 courier_service_id = ${shipping.courier_service_id},
                 courier_service_name = ${shipping.courier_service_name},
@@ -2079,7 +2090,7 @@ export async function updateSaleDeliveryStatus(
     const isAdmin = !staffSession || staffSession.role === "admin"
 
     const rows = await sql`
-      SELECT delivery_status, status, fulfillment_type, shipped_at, delivered_at, payment_status, tracking_id, sale_type, source, external_order_id, staff_id, device_id
+      SELECT delivery_status, status, fulfillment_type, shipped_at, delivered_at, payment_status, tracking_id, sale_type, source, external_order_id, staff_id, device_id, shipping_date
       FROM sales
       WHERE id = ${saleId}
       LIMIT 1
@@ -2272,15 +2283,22 @@ export async function updateSaleDeliveryStatus(
       targetTrackingId = clean ? clean : null;
     }
 
-    await sql`
+    const newDeliveryStatus = (deliveryStatus || "").trim().toLowerCase()
+    const isNewShipping = newDeliveryStatus === "shipping" || newDeliveryStatus === "shipped"
+
+    const updated = await sql`
       UPDATE sales
       SET delivery_status = ${deliveryStatus},
           shipped_at = ${shippedAt},
           delivered_at = ${deliveredAt},
           tracking_id = ${targetTrackingId},
+          shipping_date = CASE WHEN ${isNewShipping} THEN COALESCE(shipping_date, NOW()) ELSE shipping_date END,
           updated_at = NOW()
       WHERE id = ${saleId}
+      RETURNING shipping_date
     `
+
+    const finalShippingDate = updated[0]?.shipping_date || null
 
     try {
       await sql`
@@ -2295,7 +2313,12 @@ export async function updateSaleDeliveryStatus(
 
     revalidatePath("/dashboard")
     revalidatePath("/staff/dashboard")
-    return { success: true as const, message: "Delivery status updated", trackingId: targetTrackingId }
+    return { 
+      success: true as const, 
+      message: "Delivery status updated", 
+      trackingId: targetTrackingId,
+      shippingDate: finalShippingDate ? (finalShippingDate instanceof Date ? finalShippingDate.toISOString() : finalShippingDate) : null
+    }
   } catch (error) {
     console.error("updateSaleDeliveryStatus error:", error)
     return {

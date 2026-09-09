@@ -49,14 +49,16 @@ export function JobCardWhatsappConfirmation({
     ? `\n\nTrack your shipment:\n${trackingUrl}`
     : ""
 
+  const displayTrackingId = trackingId || trackingToken || "Will be updated soon"
+
   const whatsappText = isShipping
-    ? `Dear ${customerName},
+    ? `Dear ${customerName || "Customer"},
 
 Great news! Your order with ${deviceName} has been shipped! 🚚📦
 
 📦 Shipping Details:
 • Order ID: #${saleId}
-• Tracking ID: ${trackingId}
+• Tracking ID: ${displayTrackingId}
 • Product(s): 
 ${productsList}
 • Total Amount: ₹${totalAmount}
@@ -68,7 +70,7 @@ ${shippingAddress || "As provided"}
 Thank you for shopping with us!
 
 — ${deviceName}🚗✨${trackingLinkSection}`
-    : `Dear ${customerName},
+    : `Dear ${customerName || "Customer"},
 
 Thank you for your order with ${deviceName}🙏
 We’re happy to confirm that your order has been successfully placed.
@@ -93,7 +95,7 @@ Thank you for choosing us!
 
   const handleSendWhatsapp = () => {
     // Strip non-numeric from phone for the wa.me link
-    const phoneNum = customerPhone.replace(/\D/g, "")
+    const phoneNum = (customerPhone || "").replace(/\D/g, "")
     if (!phoneNum) {
       toast({ title: "Warning", description: "Customer does not have a valid phone number.", variant: "destructive" })
       return

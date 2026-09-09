@@ -5,6 +5,7 @@ export const DELIVERY_STATUSES = [
   "Paid",
   "Packed",
   "Sent",
+  "Shipping",
   "Shipped",
   "In transit",
   "Delivered",
@@ -17,6 +18,7 @@ export type DeliveryStatus = (typeof DELIVERY_STATUSES)[number]
 export type SaleShippingInput = {
   fulfillmentType?: FulfillmentType
   deliveryStatus?: DeliveryStatus | string | null
+  shippingDate?: string | null
   courierPartnerId?: number | null
   courierServiceId?: number | null
   courierServiceName?: string | null
@@ -222,6 +224,7 @@ export function mapSaleShippingFromRecord(record: Record<string, unknown>): Sale
     expenseCourier: Number(record.expense_courier) || 0,
     expensePacking: Number(record.expense_packing) || 0,
     shippingNotes: (record.shipping_notes as string) || "",
+    shippingDate: (record.shipping_date as string) || null,
     shippedAt: (record.shipped_at as string) || null,
     deliveredAt: (record.delivered_at as string) || null,
     shippingCity: (record.shipping_city as string) || "",

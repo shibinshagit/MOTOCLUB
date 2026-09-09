@@ -124,52 +124,68 @@ export function DeliveryStatusSelect({
             : "Delivery status updated to Shipping. Tracking ID can be added later." 
         })
 
-        if (onStatusChange) {
-          onStatusChange("Shipping")
-        }
+        const effectiveTrackingId = cleanTracking || trackingId || ""
 
-        // Only open WhatsApp notification flow if tracking ID was provided
-        if (cleanTracking) {
-          setShippingWhatsappData({
-            newTrackingId: cleanTracking,
-            trackingToken: cleanTracking,
-            customerName: customerName || "Customer",
-            customerPhone: customerPhone || "",
-            shippingAddress: "",
-            totalAmount: 0,
-            products: [{ productName: "Order Item" }],
-          })
-
+        // Fetch or create tracking token for public tracking link
+        let trackingToken = effectiveTrackingId
+        try {
           const { getOrCreateTrackingToken } = await import("@/app/actions/sale-actions")
           const tokenRes = await getOrCreateTrackingToken(saleId)
-
-          // Fetch full sale items asynchronously to enrich the modal payload
-          getSaleDetails(saleId)
-            .then((saleRes) => {
-              if (saleRes.success && saleRes.data) {
-                const saleData = saleRes.data.sale
-                const itemsData = saleRes.data.items || []
-                const prodList = itemsData.map((item: any) => ({
-                  productName: item.product_name || item.name || "Product",
-                }))
-
-                setShippingWhatsappData((prev) =>
-                  prev
-                    ? {
-                        ...prev,
-                        trackingToken: saleData.tracking_token || tokenRes.trackingToken,
-                        customerName: saleData.customer_name || prev.customerName,
-                        customerPhone: saleData.customer_phone || prev.customerPhone,
-                        shippingAddress: saleData.customer_address || prev.shippingAddress,
-                        totalAmount: Number(saleData.total_amount || prev.totalAmount),
-                        products: prodList.length > 0 ? prodList : prev.products,
-                      }
-                    : null
-                )
-              }
-            })
-            .catch(() => {})
+          if (tokenRes?.trackingToken) {
+            trackingToken = tokenRes.trackingToken
+          }
+        } catch (tErr) {
+          console.warn("Failed to get tracking token:", tErr)
         }
+
+        // Set WhatsApp notification state so modal opens for Shipping status update
+        setShippingWhatsappData({
+          newTrackingId: effectiveTrackingId,
+          trackingToken: trackingToken,
+          customerName: customerName || "Customer",
+          customerPhone: customerPhone || "",
+          shippingAddress: "",
+          totalAmount: 0,
+          products: [{ productName: "Order Item" }],
+        })
+
+        // Fetch full sale details asynchronously to enrich customer name, phone, address, total amount, products
+        getSaleDetails(saleId)
+          .then((saleRes) => {
+            if (saleRes.success && saleRes.data) {
+              const saleData = saleRes.data.sale
+              const itemsData = saleRes.data.items || []
+              const prodList = itemsData.map((item: any) => ({
+                productName: item.product_name || item.name || "Product",
+              }))
+
+              const addressParts = [
+                saleData.customer_address,
+                saleData.shipping_street,
+                saleData.shipping_city,
+                saleData.shipping_state,
+                saleData.shipping_pincode,
+              ].filter(Boolean)
+
+              setShippingWhatsappData((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      newTrackingId: effectiveTrackingId || saleData.tracking_id || prev.newTrackingId,
+                      trackingToken: saleData.tracking_token || trackingToken || prev.trackingToken,
+                      customerName: saleData.customer_name || saleData.customer_name_override || prev.customerName,
+                      customerPhone: saleData.customer_phone || saleData.customer_phone_override || prev.customerPhone,
+                      shippingAddress: addressParts.join(", ") || prev.shippingAddress,
+                      totalAmount: Number(saleData.total_amount || prev.totalAmount),
+                      products: prodList.length > 0 ? prodList : prev.products,
+                    }
+                  : null
+              )
+            }
+          })
+          .catch((err) => {
+            console.warn("Failed to fetch sale details for whatsapp modal:", err)
+          })
       } else {
         setStatus(previousStatus)
         setShippingWhatsappData(null)
@@ -393,7 +409,17 @@ export function DeliveryStatusSelect({
 
       {/* Shipping WhatsApp Notification Dialog with New Tracking ID */}
       {shippingWhatsappData && (
-        <Dialog open={true} onOpenChange={(open) => !open && setShippingWhatsappData(null)}>
+        <Dialog 
+          open={true} 
+          onOpenChange={(open) => {
+            if (!open) {
+              setShippingWhatsappData(null)
+              if (onStatusChange) {
+                onStatusChange("Shipping")
+              }
+            }
+          }}
+        >
           <DialogContent className="sm:max-w-lg p-0" onClick={(e) => e.stopPropagation()}>
             <JobCardWhatsappConfirmation
               isShipping={true}

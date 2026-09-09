@@ -296,6 +296,7 @@ async function createTables() {
         staff_id INTEGER,
         sale_type VARCHAR(20) DEFAULT 'product',
         created_by INTEGER,
+        shipping_date TIMESTAMP,
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()
       )
@@ -876,6 +877,7 @@ async function upgradeLegacyColumns() {
     ["purchase_items.batch_id", () => sql`ALTER TABLE purchase_items ADD COLUMN IF NOT EXISTS batch_id INTEGER`],
     ["sales.shipped_at", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS shipped_at TIMESTAMP`],
     ["sales.delivered_at", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMP`],
+    ["sales.shipping_date", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS shipping_date TIMESTAMP`],
     ["sales.shipping_notes", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS shipping_notes TEXT`],
     ["sales.packaging_type_id", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS packaging_type_id INTEGER`],
     ["sales.packaging_type_name", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS packaging_type_name VARCHAR(255)`],

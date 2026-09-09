@@ -542,6 +542,12 @@ export default function SalesOrdersTab() {
                                       <span className="text-slate-400 block font-medium">Tracking ID:</span>
                                       <span className="font-mono font-bold text-slate-900">{sale.tracking_id || "—"}</span>
                                     </div>
+                                    <div>
+                                      <span className="text-slate-400 block font-medium">Shipping Date:</span>
+                                      <span className="font-semibold text-slate-800">
+                                        {sale.shipping_date ? format(new Date(sale.shipping_date), "dd/MM/yyyy") : "—"}
+                                      </span>
+                                    </div>
                                   </div>
 
                                   {/* Quick workflow actions */}

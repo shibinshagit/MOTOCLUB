@@ -19,6 +19,8 @@ export async function getPartnerSales(partnerId: number) {
         s.expense_courier,
         s.weight_kg,
         s.courier_service_name,
+        s.shipping_date,
+        s.created_at,
         COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name,
         COALESCE(NULLIF(s.customer_phone_override, ''), c.phone) as customer_phone
       FROM sales s
@@ -46,22 +48,45 @@ export async function getPartnerSales(partnerId: number) {
 
 export async function updatePartnerDeliveryStatus(saleId: number, deliveryStatus: string, trackingId?: string) {
   try {
-    if (trackingId !== undefined) {
-      await sql`
-        UPDATE sales
-        SET delivery_status = ${deliveryStatus}, tracking_id = ${trackingId}, updated_at = NOW()
-        WHERE id = ${saleId}
-      `
-    } else {
-      await sql`
-        UPDATE sales
-        SET delivery_status = ${deliveryStatus}, updated_at = NOW()
-        WHERE id = ${saleId}
-      `
+    const existing = await sql`
+      SELECT delivery_status, shipping_date, tracking_id
+      FROM sales
+      WHERE id = ${saleId}
+      LIMIT 1
+    `
+    if (existing.length === 0) {
+      return {
+        success: false,
+        message: "Sale not found"
+      }
     }
+
+    const newDeliveryStatus = (deliveryStatus || "").trim().toLowerCase()
+    const isNewShipping = newDeliveryStatus === "shipping" || newDeliveryStatus === "shipped"
+
+    let targetTrackingId: string | null = existing[0].tracking_id || null
+    if (trackingId !== undefined) {
+      const clean = trackingId?.trim()
+      targetTrackingId = clean ? clean : null
+    }
+
+    const updated = await sql`
+      UPDATE sales
+      SET delivery_status = ${deliveryStatus},
+          tracking_id = ${targetTrackingId},
+          shipping_date = CASE WHEN ${isNewShipping} THEN COALESCE(shipping_date, NOW()) ELSE shipping_date END,
+          updated_at = NOW()
+      WHERE id = ${saleId}
+      RETURNING shipping_date
+    `
+
+    const finalShippingDate = updated[0]?.shipping_date || null
+
     return {
       success: true,
-      message: "Delivery status updated successfully"
+      message: "Delivery status updated successfully",
+      shippingDate: finalShippingDate ? (finalShippingDate instanceof Date ? finalShippingDate.toISOString() : finalShippingDate) : null,
+      trackingId: targetTrackingId
     }
   } catch (error) {
     console.error("Error updating delivery status:", error)

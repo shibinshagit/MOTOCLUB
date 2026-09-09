@@ -28,22 +28,29 @@ export function PartnerSalesTable({ initialSales }: { initialSales: any[] }) {
 
   const isOptionDisabled = (currentStatus: string, optionStatus: string) => {
     const statusLower = currentStatus?.toLowerCase() || 'pending';
+    const optionLower = optionStatus?.toLowerCase() || '';
     if (currentStatus === optionStatus) return false;
     
-    // Only allow Sent -> Shipped, and Shipped -> Delivered
-    if (statusLower === 'sent' && optionStatus === 'Shipped') return false;
-    if (statusLower === 'shipped' && optionStatus === 'Delivered') return false;
+    // Only allow Sent -> Shipping/Shipped, and Shipping/Shipped -> Delivered
+    const isCurrentShipping = statusLower === 'shipping' || statusLower === 'shipped';
+    const isOptionShipping = optionLower === 'shipping' || optionLower === 'shipped';
+
+    if (statusLower === 'sent' && isOptionShipping) return false;
+    if (isCurrentShipping && optionLower === 'delivered') return false;
     
     return true; // Disable everything else
   }
 
   const handleStatusChange = async (saleId: number, newStatus: string) => {
     let trackingId: string | undefined = undefined;
+    const newStatusLower = newStatus?.toLowerCase() || '';
     
-    if (newStatus === 'Shipped') {
-      const input = window.prompt("Please enter the Tracking ID:");
-      if (input === null) return; // User cancelled
-      trackingId = input.trim();
+    if (newStatusLower === 'shipped' || newStatusLower === 'shipping') {
+      const currentSale = sales.find(s => s.id === saleId);
+      const input = window.prompt("Please enter the Tracking ID (Optional, leave blank if not ready):", currentSale?.tracking_id || "");
+      if (input !== null) {
+        trackingId = input.trim();
+      }
     }
 
     setLoadingMap(prev => ({ ...prev, [saleId]: true }))
@@ -55,7 +62,8 @@ export function PartnerSalesTable({ initialSales }: { initialSales: any[] }) {
              return { 
                ...s, 
                delivery_status: newStatus, 
-               ...(trackingId !== undefined && { tracking_id: trackingId })
+               shipping_date: result.shippingDate || s.shipping_date,
+               ...(trackingId !== undefined && { tracking_id: result.trackingId ?? (trackingId || null) })
              }
           }
           return s;
@@ -115,13 +123,14 @@ export function PartnerSalesTable({ initialSales }: { initialSales: any[] }) {
         <table className="w-full text-sm text-left">
           <thead className="text-xs text-gray-500 uppercase tracking-wider border-b border-gray-100">
             <tr>
-              <th className="px-6 py-4 font-bold">Date</th>
+              <th className="px-6 py-4 font-bold whitespace-nowrap">Order / Date</th>
               <th className="px-6 py-4 font-bold">Customer</th>
+              <th className="px-6 py-4 font-bold whitespace-nowrap text-right">Amount</th>
+              <th className="px-6 py-4 font-bold text-center">Status</th>
+              <th className="px-6 py-4 font-bold text-center whitespace-nowrap">Shipping Date</th>
               <th className="px-6 py-4 font-bold">Tracking</th>
-              <th className="px-6 py-4 font-bold text-center">Products</th>
               <th className="px-6 py-4 font-bold text-center">Unit / Wt</th>
               <th className="px-6 py-4 font-bold text-center">Courier Cost</th>
-              <th className="px-6 py-4 font-bold text-center">Status</th>
               <th className="px-6 py-4 font-bold text-center">WA</th>
             </tr>
           </thead>
@@ -129,37 +138,17 @@ export function PartnerSalesTable({ initialSales }: { initialSales: any[] }) {
             {sales.map((sale) => (
               <tr key={sale.id} className="hover:bg-gray-50/50 transition-colors">
                 <td className="px-6 py-4 text-gray-600 font-medium whitespace-nowrap">
-                  {sale.sale_date ? format(new Date(sale.sale_date), "M/d/yyyy") : "-"}
+                  <div className="font-bold text-indigo-600">#{sale.id}</div>
+                  <div className="text-xs text-gray-400 mt-0.5">
+                    {sale.sale_date ? format(new Date(sale.sale_date), "dd/MM/yyyy") : "-"}
+                  </div>
                 </td>
                 <td className="px-6 py-4">
                   <div className="font-bold text-gray-900">{sale.customer_name || "Guest"}</div>
                   <div className="text-xs text-gray-400 mt-0.5">{sale.customer_phone || "-"}</div>
                 </td>
-                <td className="px-6 py-4">
-                  <div className="font-bold text-gray-700">{sale.tracking_id || "-"}</div>
-                  <div className="text-xs text-indigo-500 font-semibold mt-0.5">#{sale.id}</div>
-                </td>
-                <td className="px-6 py-4 text-center">
-                  <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
-                    1 Items
-                  </span>
-                </td>
-                <td className="px-6 py-4 text-center">
-                  <input
-                    type="text"
-                    defaultValue={sale.weight_kg || ""}
-                    placeholder="kg/unit"
-                    onBlur={(e) => handleDetailsChange(sale.id, 'weight_kg', e.target.value)}
-                    className="w-16 h-8 text-center text-xs font-medium border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                  />
-                </td>
-                <td className="px-6 py-4 text-center">
-                  <input
-                    type="text"
-                    defaultValue={sale.expense_courier || 0}
-                    onBlur={(e) => handleDetailsChange(sale.id, 'expense_courier', e.target.value)}
-                    className="w-16 h-8 text-center text-xs font-medium border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                  />
+                <td className="px-6 py-4 text-right whitespace-nowrap">
+                  <div className="font-bold text-gray-900">₹{Number(sale.total_amount || 0).toFixed(2)}</div>
                 </td>
                 <td className="px-6 py-4 text-center">
                   <div className="flex items-center justify-center gap-2">
@@ -182,6 +171,41 @@ export function PartnerSalesTable({ initialSales }: { initialSales: any[] }) {
                     </select>
                     {loadingMap[sale.id] && <Loader2 className="h-4 w-4 animate-spin text-gray-400 absolute ml-24" />}
                   </div>
+                </td>
+                <td className="px-6 py-4 text-center whitespace-nowrap">
+                  {sale.shipping_date ? (
+                    <span 
+                      className="font-semibold text-slate-700 text-xs" 
+                      title={format(new Date(sale.shipping_date), "dd/MM/yyyy HH:mm:ss")}
+                    >
+                      {format(new Date(sale.shipping_date), "dd/MM/yyyy")}
+                    </span>
+                  ) : (
+                    <span className="text-slate-400 font-medium">—</span>
+                  )}
+                </td>
+                <td className="px-6 py-4">
+                  <div className="font-bold text-gray-700">{sale.tracking_id || "—"}</div>
+                  {sale.courier_service_name && (
+                    <div className="text-xs text-blue-600 font-semibold mt-0.5">{sale.courier_service_name}</div>
+                  )}
+                </td>
+                <td className="px-6 py-4 text-center">
+                  <input
+                    type="text"
+                    defaultValue={sale.weight_kg || ""}
+                    placeholder="kg/unit"
+                    onBlur={(e) => handleDetailsChange(sale.id, 'weight_kg', e.target.value)}
+                    className="w-16 h-8 text-center text-xs font-medium border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
+                </td>
+                <td className="px-6 py-4 text-center">
+                  <input
+                    type="text"
+                    defaultValue={sale.expense_courier || 0}
+                    onBlur={(e) => handleDetailsChange(sale.id, 'expense_courier', e.target.value)}
+                    className="w-16 h-8 text-center text-xs font-medium border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
                 </td>
                 <td className="px-6 py-4 text-center">
                   <div className="flex justify-center">
