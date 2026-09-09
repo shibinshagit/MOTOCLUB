@@ -1,5 +1,5 @@
 import { createSlice, type PayloadAction } from "@reduxjs/toolkit"
-import { format, isValid, parseISO } from "date-fns"
+import { format, isValid, parseISO, startOfMonth, endOfMonth } from "date-fns"
 import type { RootState } from "../store"
 
 export type DatePreset = "today" | "yesterday" | "last7days" | "this_month" | "last_month" | "custom"
@@ -14,6 +14,15 @@ export function getTodayDateString(): string {
   return format(new Date(), "yyyy-MM-dd")
 }
 
+export function getThisMonthDateRange(): DateRangeState {
+  const now = new Date()
+  return {
+    from: format(startOfMonth(now), "yyyy-MM-dd"),
+    to: format(endOfMonth(now), "yyyy-MM-dd"),
+    preset: "this_month",
+  }
+}
+
 export function isValidIsoDateString(val: string | null | undefined): val is string {
   if (!val || typeof val !== "string") return false
   if (!/^\d{4}-\d{2}-\d{2}$/.test(val)) return false
@@ -22,6 +31,7 @@ export function isValidIsoDateString(val: string | null | undefined): val is str
 }
 
 function getInitialState(): DateRangeState {
+  const thisMonthDefault = getThisMonthDateRange()
   const today = getTodayDateString()
 
   // In browser, attempt to hydrate from URL parameters first, then sessionStorage
@@ -33,10 +43,18 @@ function getInitialState(): DateRangeState {
       const urlPreset = searchParams.get("preset") as DatePreset | null
 
       if (isValidIsoDateString(urlFrom) && isValidIsoDateString(urlTo)) {
+        let inferredPreset: DatePreset = "custom"
+        if (urlPreset) {
+          inferredPreset = urlPreset
+        } else if (urlFrom === thisMonthDefault.from && urlTo === thisMonthDefault.to) {
+          inferredPreset = "this_month"
+        } else if (urlFrom === urlTo && urlFrom === today) {
+          inferredPreset = "today"
+        }
         return {
           from: urlFrom,
           to: urlTo,
-          preset: urlPreset || (urlFrom === urlTo ? (urlFrom === today ? "today" : "custom") : "custom"),
+          preset: inferredPreset,
         }
       }
 
@@ -56,11 +74,7 @@ function getInitialState(): DateRangeState {
     }
   }
 
-  return {
-    from: today,
-    to: today,
-    preset: "today",
-  }
+  return thisMonthDefault
 }
 
 const initialState: DateRangeState = getInitialState()
@@ -90,16 +104,16 @@ export const dateRangeSlice = createSlice({
       }
     },
     resetDateRange: (state) => {
-      const today = getTodayDateString()
-      state.from = today
-      state.to = today
-      state.preset = "today"
+      const defaultMonth = getThisMonthDateRange()
+      state.from = defaultMonth.from
+      state.to = defaultMonth.to
+      state.preset = defaultMonth.preset
 
       if (typeof window !== "undefined") {
         try {
           sessionStorage.setItem(
             "motoclub_global_date_range",
-            JSON.stringify({ from: today, to: today, preset: "today" }),
+            JSON.stringify(defaultMonth),
           )
         } catch {}
       }

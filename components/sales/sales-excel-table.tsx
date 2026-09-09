@@ -17,6 +17,10 @@ import { DeliveryStatusSelect } from "@/components/sales/delivery-status-select"
 import { parseSaleDate } from "@/lib/utils"
 
 function getSaleStatusLabel(sale: any): string {
+  if (sale.status === "Returned") {
+    return "Returned";
+  }
+
   if (
     sale.status === "Cancelled" ||
     sale.payment_status?.toLowerCase() === "cancelled" ||
@@ -48,6 +52,7 @@ function SaleStatusBadge({ status }: { status: string }) {
     Completed: "bg-emerald-50 text-emerald-700 border-emerald-200",
     Credit: "bg-amber-50 text-amber-700 border-amber-200",
     Cancelled: "bg-rose-50 text-rose-700 border-rose-200",
+    Returned: "bg-rose-50 text-rose-700 border-rose-200",
     Pending: "bg-slate-50 text-slate-700 border-slate-200",
   }
 
@@ -56,6 +61,7 @@ function SaleStatusBadge({ status }: { status: string }) {
     Credit: "Partially Paid",
     Pending: "Pending",
     Cancelled: "Cancelled",
+    Returned: "Returned",
   }
 
   return (
@@ -93,7 +99,10 @@ function DeliveryStatusBadge({ status }: { status: string }) {
 }
 
 import { filterSalesSemantic } from "@/lib/sale-search"
-import { Search, X, RotateCcw } from "lucide-react"
+import { Search, X, RotateCcw, Printer, Download, Loader2, FileText } from "lucide-react"
+import { useToast } from "@/components/ui/use-toast"
+import { notifyWarning, notifySuccess, notifyError } from "@/lib/notifications"
+import { downloadSalesSummaryPDF, printSalesSummaryReport } from "@/lib/sales-summary-utils"
 
 type ColumnKey = "saleId" | "status" | "delivery" | "date" | "customer" | "payment" | "total" | "received" | "balance"
 
@@ -129,6 +138,7 @@ interface SalesExcelTableProps {
   onEditSale: (sale: any) => void
   deviceId?: number
   onRefreshSales?: () => void
+  globalDateRange?: { from?: string; to?: string }
 }
 
 function TableSkeleton() {
@@ -172,8 +182,11 @@ export default function SalesExcelTable({
   onEditSale,
   deviceId,
   onRefreshSales,
+  globalDateRange,
 }: SalesExcelTableProps) {
+  const { toast } = useToast()
   const [internalSearchTerm, setInternalSearchTerm] = useState("")
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false)
 
   const activeSearchTerm = externalSearchTerm !== undefined ? externalSearchTerm : internalSearchTerm
 
@@ -325,6 +338,40 @@ export default function SalesExcelTable({
     </th>
   )
 
+  const handlePrintSummary = () => {
+    if (isGeneratingReport) return
+    if (!displaySales || displaySales.length === 0) {
+      notifyWarning(toast, "No sales found for the selected filters.")
+      return
+    }
+    setIsGeneratingReport(true)
+    try {
+      printSalesSummaryReport(displaySales, periodLabel, formatCurrency)
+      notifySuccess(toast, "Sales summary printable report opened.")
+    } catch (err: any) {
+      notifyError(toast, err?.message || "Failed to generate print summary.")
+    } finally {
+      setIsGeneratingReport(false)
+    }
+  }
+
+  const handleDownloadPDF = async () => {
+    if (isGeneratingReport) return
+    if (!displaySales || displaySales.length === 0) {
+      notifyWarning(toast, "No sales found for the selected filters.")
+      return
+    }
+    setIsGeneratingReport(true)
+    try {
+      await downloadSalesSummaryPDF(displaySales, periodLabel, formatCurrency, globalDateRange)
+      notifySuccess(toast, "Sales summary PDF report downloaded.")
+    } catch (err: any) {
+      notifyError(toast, err?.message || "Failed to download PDF report.")
+    } finally {
+      setIsGeneratingReport(false)
+    }
+  }
+
   const stickyActionHeaderClass =
     "sticky right-0 z-20 min-w-[5.5rem] whitespace-nowrap border-l border-slate-200 bg-[#F1F4F9] px-4 py-2.5 text-right shadow-[-8px_0_12px_-8px_rgba(15,23,42,0.12)]"
   const stickyActionCellClass = (rowBg: string, isPending: boolean) =>
@@ -401,8 +448,8 @@ export default function SalesExcelTable({
             ) : null}
           </div>
 
-          <div className="w-full sm:w-auto flex min-h-[28px] items-center gap-2">
-            <div className="relative w-full sm:w-72">
+          <div className="w-full sm:w-auto flex flex-wrap min-h-[28px] items-center gap-2">
+            <div className="relative w-full sm:w-64">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
               <input
                 type="text"
@@ -437,6 +484,38 @@ export default function SalesExcelTable({
                 <span className="hidden sm:inline">Refresh</span>
               </Button>
             )}
+
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1.5 px-2.5 text-xs font-medium bg-white hover:bg-slate-50 border-slate-200 shrink-0 text-slate-700 hover:text-slate-900 shadow-sm"
+              onClick={handlePrintSummary}
+              disabled={isLoading || isGeneratingReport}
+              title="View and print Sales Summary Report"
+            >
+              {isGeneratingReport ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-500" />
+              ) : (
+                <Printer className="h-3.5 w-3.5 text-slate-600" />
+              )}
+              <span>View Summary</span>
+            </Button>
+
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1.5 px-2.5 text-xs font-medium bg-white hover:bg-slate-50 border-slate-200 shrink-0 text-slate-700 hover:text-slate-900 shadow-sm"
+              onClick={handleDownloadPDF}
+              disabled={isLoading || isGeneratingReport}
+              title="Download Sales Summary PDF Report"
+            >
+              {isGeneratingReport ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-500" />
+              ) : (
+                <Download className="h-3.5 w-3.5 text-slate-600" />
+              )}
+              <span>Download PDF</span>
+            </Button>
 
             {activeFilterCount > 0 ? (
               <>
@@ -566,7 +645,7 @@ export default function SalesExcelTable({
                       <td className="whitespace-nowrap px-4 py-2.5 text-xs text-muted-foreground">{index + 1}</td>
                       <td className="whitespace-nowrap px-4 py-2.5 font-semibold text-slate-800">
                         <div className="flex flex-col gap-0.5">
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1.5 flex-wrap">
                             <span>#{sale.id}</span>
                             {isJobCardSale && (
                               <span className="inline-flex items-center rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold text-blue-800 border border-blue-200">
@@ -578,6 +657,17 @@ export default function SalesExcelTable({
                                 ECOM
                               </span>
                             )}
+                            {sale.status === "Returned" ? (
+                              <span className="inline-flex items-center gap-0.5 rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-bold text-rose-800 border border-rose-300">
+                                <RotateCcw className="h-2.5 w-2.5" />
+                                RETURNED
+                              </span>
+                            ) : Number(sale.total_returned_qty) > 0 || Number(sale.return_count) > 0 ? (
+                              <span className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800 border border-amber-300">
+                                <RotateCcw className="h-2.5 w-2.5" />
+                                PARTIAL RETURN
+                              </span>
+                            ) : null}
                           </div>
                           {sale.tracking_id && (
                             <span className="text-[11px] font-mono font-semibold text-blue-700">

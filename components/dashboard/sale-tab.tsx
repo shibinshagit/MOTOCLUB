@@ -1836,6 +1836,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
       onViewSale={handleViewSale}
       onEditSale={handleEditSale}
       deviceId={deviceId || 0}
+      globalDateRange={globalDateRange}
       onRefreshSales={() => fetchSalesForRange(globalDateRange.from, globalDateRange.to)}
     />
   )

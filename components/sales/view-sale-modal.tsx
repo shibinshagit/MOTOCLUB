@@ -25,6 +25,7 @@ import { printSalesReceipt } from "@/lib/receipt-utils"
 import { getSaleDetails, updateSale, updateSaleDeliveryStatus } from "@/app/actions/sale-actions"
 import { getProductById } from "@/app/actions/product-actions"
 import { ProductDetailSlider } from "@/components/products/product-detail-slider"
+import ReturnSaleModal from "@/components/sales/return-sale-modal"
 import { buildTrackingUrl, mapSaleShippingFromRecord } from "@/lib/sale-shipping"
 import { cn } from "@/lib/utils"
 
@@ -44,6 +45,7 @@ function SaleStatusBadge({ status }: { status: string }) {
     Completed: "bg-emerald-50 text-emerald-700 border-emerald-200",
     Credit: "bg-amber-50 text-amber-700 border-amber-200",
     Cancelled: "bg-rose-50 text-rose-700 border-rose-200",
+    Returned: "bg-purple-50 text-purple-700 border-purple-200",
     Pending: "bg-amber-50 text-amber-700 border-amber-200",
   }
 
@@ -133,10 +135,27 @@ export default function ViewSaleModal({
   const [selectedServiceItem, setSelectedServiceItem] = useState<any>(null)
   const [isServiceViewOpen, setIsServiceViewOpen] = useState(false)
   const [isItemLoading, setIsItemLoading] = useState(false)
+  const [isReturnModalOpen, setIsReturnModalOpen] = useState(false)
   const [isUpdatingDelivery, setIsUpdatingDelivery] = useState(false)
   const { toast } = useToast()
 
   const closeDetailProduct = () => setDetailProduct(null)
+
+  const reloadSaleDetails = async () => {
+    if (!saleId) return
+    try {
+      setIsLoading(true)
+      const refreshResult = await getSaleDetails(saleId)
+      if (refreshResult.success && refreshResult.data) {
+        setSaleData(refreshResult.data.sale)
+        setSaleItems(refreshResult.data.items || [])
+      }
+    } catch {
+      notifyError(toast, "Failed to refresh sale details")
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
   useEffect(() => {
     return () => {
@@ -225,6 +244,7 @@ export default function ViewSaleModal({
   const getStatusDisplay = (sale: any) => {
     if (!sale) return "Pending"
     if (sale.status === "Cancelled") return "Cancelled"
+    if (sale.status === "Returned") return "Returned"
     const pStatus = sale.payment_status?.toLowerCase()
     if (pStatus === "paid" || pStatus === "completed") return "Completed"
     if (pStatus === "credit" || pStatus === "partial") return "Credit"
@@ -312,62 +332,24 @@ export default function ViewSaleModal({
     }
   }
 
-  const handleReturn = async () => {
+  const handleReturn = () => {
     if (!saleData || !saleId) return
 
-    if (saleData.status !== "Completed") {
-      notifyError(toast, "Only completed sales can be returned", "Cannot Return Sale")
+    if (saleData.status === "Cancelled") {
+      notifyError(toast, "Cannot return items for a cancelled sale", "Cannot Return Sale")
       return
     }
 
-    const confirmReturn = window.confirm(
-      "This will change the sale status to Cancelled, restore product stock, and create accounting adjustments. This action cannot be undone. Do you want to proceed?"
+    const hasReturnableItems = saleItems.some(
+      (item: any) => (Number(item.quantity) || 0) - (Number(item.returned_quantity) || 0) > 0
     )
 
-    if (!confirmReturn) return
-
-    try {
-      setIsLoading(true)
-
-      const returnData = {
-        id: saleId,
-        customerId: saleData.customer_id,
-        items: saleItems.map((item: any) => ({
-          id: item.id,
-          productId: item.product_id,
-          quantity: item.quantity,
-          price: item.price,
-          cost: item.actual_cost || item.cost || 0,
-          notes: item.notes || "",
-        })),
-        paymentStatus: "Cancelled",
-        paymentMethod: saleData.payment_method || "Cash",
-        saleDate: saleData.sale_date,
-        discount: saleData.discount || 0,
-        receivedAmount: 0,
-        deviceId: saleData.device_id,
-        userId: saleData.created_by,
-        staffId: saleData.staff_id,
-      }
-
-      const result = await updateSale(returnData)
-
-      if (result.success) {
-        notifySuccess(toast, "The sale has been cancelled and stock has been restored", "Sale Returned Successfully")
-
-        const refreshResult = await getSaleDetails(saleId)
-        if (refreshResult.success && refreshResult.data) {
-          setSaleData(refreshResult.data.sale)
-          setSaleItems(refreshResult.data.items || [])
-        }
-      } else {
-        notifyError(toast, result.message || "Failed to process sale return", "Return Failed")
-      }
-    } catch {
-      notifyError(toast, "An error occurred while processing the return", "Return Error")
-    } finally {
-      setIsLoading(false)
+    if (!hasReturnableItems) {
+      notifyError(toast, "All items in this sale have already been fully returned", "No Returnable Items")
+      return
     }
+
+    setIsReturnModalOpen(true)
   }
 
   const handlePrintInvoice = () => {
@@ -508,7 +490,7 @@ export default function ViewSaleModal({
             </div>
           ) : (
             <div className="h-full space-y-3 overflow-y-auto p-4">
-              <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+              <div className={`grid grid-cols-2 gap-2 ${saleData.total_refund_paid > 0 ? "md:grid-cols-5" : "md:grid-cols-4"}`}>
                 <SummaryCard label="Total" value={formatCurrency(total)} tone="violet" />
                 <SummaryCard label="Received" value={formatCurrency(received)} tone="emerald" />
                 <SummaryCard
@@ -517,6 +499,9 @@ export default function ViewSaleModal({
                   tone="amber"
                 />
                 <SummaryCard label="Discount" value={formatCurrency(saleData.discount || 0)} tone="slate" />
+                {saleData.total_refund_paid > 0 ? (
+                  <SummaryCard label="Refund Paid" value={formatCurrency(saleData.total_refund_paid)} tone="amber" />
+                ) : null}
               </div>
 
               <div className="overflow-hidden rounded-xl border border-slate-200 bg-card">
@@ -660,7 +645,19 @@ export default function ViewSaleModal({
                                 </div>
                               </td>
                               <td className="whitespace-nowrap px-4 py-2.5 text-center text-slate-800">
-                                {getDisplayValue(item.quantity, "0")}
+                                {Number(item.returned_quantity) > 0 ? (
+                                  <div className="flex flex-col items-center gap-0.5 text-xs">
+                                    <span className="font-semibold text-slate-900">Sold: {item.quantity}</span>
+                                    <span className="text-[10px] text-amber-700 font-medium bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200">
+                                      Ret: {item.returned_quantity}
+                                    </span>
+                                    <span className="text-[10px] text-emerald-700 font-medium">
+                                      Rem: {item.remaining_quantity ?? Math.max(0, Number(item.quantity) - Number(item.returned_quantity))}
+                                    </span>
+                                  </div>
+                                ) : (
+                                  getDisplayValue(item.quantity, "0")
+                                )}
                               </td>
                               <td className="whitespace-nowrap px-4 py-2.5 text-right text-slate-800">
                                 {formatCurrency(item.price || 0)}
@@ -766,6 +763,66 @@ export default function ViewSaleModal({
                 </div>
               ) : null}
 
+              {saleData.returns && saleData.returns.length > 0 ? (
+                <div className="overflow-hidden rounded-xl border border-slate-200 bg-card mb-4">
+                  <div className="border-b border-slate-200 bg-[#F1F4F9] px-4 py-2 flex justify-between items-center">
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-600">Return History</h3>
+                    <span className="text-xs text-amber-700 font-semibold">{saleData.returns.length} return transaction{saleData.returns.length > 1 ? "s" : ""}</span>
+                  </div>
+                  <div className="p-4 space-y-3">
+                    {saleData.returns.map((ret: any) => (
+                      <div key={ret.id} className="rounded-lg border border-slate-200 bg-slate-50/50 p-3 space-y-2 text-xs">
+                        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-2">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-slate-900">{ret.returnNumber}</span>
+                            <span className="rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
+                              {ret.status}
+                            </span>
+                          </div>
+                          <span className="text-slate-500">
+                            {formatSaleDate(ret.createdAt)} · By {ret.createdByName}
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 py-1 text-slate-700">
+                          <div>
+                            <span className="text-slate-500 font-normal">Calculated Value: </span>
+                            <span className="font-semibold">{formatCurrency(ret.calculatedReturnValue)}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500 font-normal">Refund Paid: </span>
+                            <span className="font-bold text-amber-800">{formatCurrency(ret.refundAmount)}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500 font-normal">Payment Method: </span>
+                            <span className="font-semibold">{ret.refundPaymentMethod}</span>
+                          </div>
+                        </div>
+
+                        {ret.items && ret.items.length > 0 ? (
+                          <div className="rounded border border-slate-200 bg-white p-2 text-[11px] text-slate-700">
+                            <span className="font-semibold text-slate-600 block mb-1">Returned Items:</span>
+                            <div className="flex flex-wrap gap-x-4 gap-y-1">
+                              {ret.items.map((ri: any) => (
+                                <span key={ri.id}>
+                                  • {ri.productName}{ri.variantName ? ` (${ri.variantName})` : ""} × <strong className="text-slate-900">{ri.returnedQuantity}</strong>
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {ret.reason ? (
+                          <p className="text-[11px] text-slate-500 italic">
+                            Reason: {ret.reason}
+                          </p>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
               {saleData.notes ? (
                 <div className="overflow-hidden rounded-xl border border-slate-200 bg-card">
                   <div className="border-b border-slate-200 bg-[#F1F4F9] px-4 py-2">
@@ -830,6 +887,16 @@ export default function ViewSaleModal({
           ) : null}
         </DialogContent>
       </Dialog>
+
+      <ReturnSaleModal
+        isOpen={isReturnModalOpen}
+        onClose={() => setIsReturnModalOpen(false)}
+        saleId={saleId}
+        saleData={saleData}
+        saleItems={saleItems}
+        currency={deviceCurrency}
+        onSuccess={reloadSaleDetails}
+      />
     </>
   )
 }

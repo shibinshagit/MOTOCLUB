@@ -7,6 +7,7 @@ import { recordSaleTransaction, recordSaleAdjustment, deleteSaleTransaction, syn
 import { filterSalesForStaff } from "@/lib/staff-restrictions-server"
 import { normalizeSaleShippingInput } from "@/lib/sale-shipping"
 import { getStaffSession } from "@/lib/staff-session"
+import { ensureReturnTablesExist } from "./sale-return-actions"
 
 function getShippingAmounts(shipping: ReturnType<typeof normalizeSaleShippingInput>) {
   if (shipping.fulfillment_type !== "ship") {
@@ -537,7 +538,24 @@ async function queryDeviceSales(deviceId: number, options: GetUserSalesOptions =
     SELECT 
       s.*, 
       COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name, 
+      COALESCE(NULLIF(s.customer_phone_override, ''), c.phone, '') as customer_phone,
       st.name as staff_name,
+      COALESCE(
+        (SELECT STRING_AGG(
+           CONCAT(
+             COALESCE(p.name, sv.name, si.notes, 'Item'),
+             CASE WHEN pv.name IS NOT NULL AND pv.name != '' THEN CONCAT(' - ', pv.name) ELSE '' END,
+             ' × ',
+             si.quantity
+           ),
+           E'\n'
+         )
+         FROM sale_items si
+         LEFT JOIN products p ON si.product_id = p.id AND NOT EXISTS (SELECT 1 FROM services s2 WHERE s2.id = si.product_id)
+         LEFT JOIN services sv ON si.product_id = sv.id
+         LEFT JOIN product_variants pv ON si.product_variant_id = pv.id
+         WHERE si.sale_id = s.id), ''
+      ) as products_text,
       COALESCE(
         (SELECT STRING_AGG(COALESCE(p.name, sv.name, si.notes, ''), ', ')
          FROM sale_items si
@@ -546,10 +564,22 @@ async function queryDeviceSales(deviceId: number, options: GetUserSalesOptions =
          WHERE si.sale_id = s.id), ''
       ) as items_summary,
       COALESCE(
-        (SELECT SUM(si.quantity * COALESCE(si.cost, si.wholesale_price, 0))
+        (SELECT SUM(si.quantity * COALESCE(si.cost, pv.wholesale_price, p.wholesale_price, 0))
          FROM sale_items si 
+         LEFT JOIN products p ON si.product_id = p.id AND NOT EXISTS (SELECT 1 FROM services s2 WHERE s2.id = si.product_id)
+         LEFT JOIN product_variants pv ON si.product_variant_id = pv.id
          WHERE si.sale_id = s.id), 0
-      ) as total_cost
+      ) as total_cost,
+      COALESCE(
+        (SELECT SUM(sri.returned_quantity)
+         FROM sale_return_items sri
+         WHERE sri.sale_id = s.id), 0
+      ) as total_returned_qty,
+      COALESCE(
+        (SELECT COUNT(sr.id)
+         FROM sale_returns sr
+         WHERE sr.sale_id = s.id), 0
+      ) as return_count
     FROM sales s
     LEFT JOIN customers c ON s.customer_id = c.id
     LEFT JOIN staff st ON s.staff_id = st.id
@@ -684,6 +714,8 @@ export async function getSaleDetails(saleId: number) {
   resetConnectionState()
 
   try {
+    await ensureReturnTablesExist()
+
     const saleResult = await executeWithRetry(async () => {
       return await sql`
         SELECT 
@@ -711,6 +743,11 @@ export async function getSaleDetails(saleId: number) {
       return await sql`
         SELECT 
           si.*,
+          COALESCE((
+            SELECT SUM(sri.returned_quantity)
+            FROM sale_return_items sri
+            WHERE sri.sale_item_id = si.id
+          ), 0) as returned_quantity,
           p.name as product_name,
           p.category as product_category,
           COALESCE((
@@ -745,6 +782,13 @@ export async function getSaleDetails(saleId: number) {
         ORDER BY si.id
       `
     })
+
+    for (const item of itemsResult) {
+      const soldQty = Number(item.quantity) || 0
+      const retQty = Number(item.returned_quantity) || 0
+      item.returned_quantity = retQty
+      item.remaining_quantity = Math.max(0, soldQty - retQty)
+    }
 
     const allocationsResult = await executeWithRetry(async () => {
       return await sql`
@@ -786,6 +830,58 @@ export async function getSaleDetails(saleId: number) {
       notes: p.notes || undefined,
     }))
 
+    // Fetch Return History
+    let returnsList: any[] = []
+    try {
+      const returnsRows = await sql`
+        SELECT 
+          sr.*,
+          st.name as created_by_name
+        FROM sale_returns sr
+        LEFT JOIN staff st ON sr.created_by = st.id
+        WHERE sr.sale_id = ${saleId}
+        ORDER BY sr.created_at DESC
+      `
+
+      for (const ret of returnsRows) {
+        const retItems = await sql`
+          SELECT 
+            sri.*,
+            p.name as product_name,
+            pv.name as variant_name
+          FROM sale_return_items sri
+          LEFT JOIN products p ON sri.product_id = p.id
+          LEFT JOIN product_variants pv ON sri.product_variant_id = pv.id
+          WHERE sri.sale_return_id = ${ret.id}
+          ORDER BY sri.id ASC
+        `
+
+        returnsList.push({
+          id: ret.id,
+          returnNumber: ret.return_number,
+          calculatedReturnValue: Number(ret.calculated_return_value) || 0,
+          refundAmount: Number(ret.refund_amount) || 0,
+          refundPaymentMethod: ret.refund_payment_method || "Cash",
+          reason: ret.reason || "",
+          status: ret.status || "Completed",
+          createdByName: ret.created_by_name || "Staff",
+          createdAt: ret.created_at,
+          items: retItems.map((ri: any) => ({
+            id: ri.id,
+            saleItemId: ri.sale_item_id,
+            productId: ri.product_id,
+            productName: ri.product_name || `Product #${ri.product_id}`,
+            variantName: ri.variant_name || undefined,
+            returnedQuantity: Number(ri.returned_quantity) || 0,
+            unitPrice: Number(ri.unit_price) || 0,
+            calculatedValue: Number(ri.calculated_value) || 0,
+          })),
+        })
+      }
+    } catch (retErr) {
+      console.warn("Could not fetch return history (table may not exist yet):", retErr)
+    }
+
     const subtotal = itemsResult.reduce((sum: number, item: any) => sum + Number(item.quantity) * Number(item.price), 0)
 
     const discountValue =
@@ -796,12 +892,15 @@ export async function getSaleDetails(saleId: number) {
     const totalAmount = Number(saleResult[0].total_amount)
     const receivedAmount = Number(saleResult[0].received_amount || 0)
     const outstandingAmount = totalAmount - receivedAmount
+    const totalRefundPaid = returnsList.reduce((sum: number, r: any) => sum + (Number(r.refundAmount) || 0), 0)
 
     const saleData = {
       ...saleResult[0],
       discount: discountValue,
       subtotal: subtotal,
       outstanding_amount: outstandingAmount,
+      total_refund_paid: totalRefundPaid,
+      returns: returnsList,
       payments: paymentsList.length > 0 ? paymentsList : [
         {
           paymentMethod: saleResult[0].payment_method || "Cash",

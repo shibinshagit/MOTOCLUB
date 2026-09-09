@@ -369,6 +369,16 @@ export default function SalesOrdersTab() {
                                   ECOMMERCE
                                 </Badge>
                               )}
+                              {sale.status === "Returned" && (
+                                <Badge className="bg-rose-100 text-rose-800 border-rose-300 text-[10px] px-1.5 py-0 flex items-center gap-1">
+                                  Returned
+                                </Badge>
+                              )}
+                              {Number(sale.total_returned_qty) > 0 && sale.status !== "Returned" && (
+                                <Badge className="bg-amber-100 text-amber-800 border-amber-300 text-[10px] px-1.5 py-0 flex items-center gap-1">
+                                  Partial Return
+                                </Badge>
+                              )}
                             </div>
                             {sale.return_status && (
                               <div className="mt-0.5">

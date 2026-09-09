@@ -72,7 +72,7 @@ const createSqlClient = () => {
   const sqlFn = postgres(dbUrl, {
     max: 10,
     idle_timeout: 20,
-    connect_timeout: 10,
+    connect_timeout: 15,
     ssl: useLocalDriver ? false : "require",
     onnotice: () => {},
   })
@@ -191,7 +191,19 @@ async function executeWithRetry(queryFn: () => Promise<any>, maxRetries = 2): Pr
       attempt++
 
       const errorMessage = error instanceof Error ? error.message : String(error)
-      if (!errorMessage.includes("timeout") && !errorMessage.includes("Failed to fetch")) {
+      const errLower = errorMessage.toLowerCase()
+      const errCode = String((error as any)?.code || "").toLowerCase()
+
+      const isRetryable =
+        errLower.includes("timeout") ||
+        errLower.includes("connect_timeout") ||
+        errLower.includes("failed to fetch") ||
+        errLower.includes("connection closed") ||
+        errLower.includes("econnreset") ||
+        errCode.includes("connect_timeout") ||
+        errCode.includes("econnreset")
+
+      if (!isRetryable) {
         throw error
       }
 

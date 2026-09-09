@@ -810,6 +810,44 @@ async function createTables() {
       )
     `
   })
+
+  await run("sale_returns", async () => {
+    await sql`
+      CREATE TABLE IF NOT EXISTS sale_returns (
+        id SERIAL PRIMARY KEY,
+        sale_id INTEGER NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
+        device_id INTEGER,
+        customer_id INTEGER,
+        return_number VARCHAR(50) NOT NULL,
+        calculated_return_value DECIMAL(12,2) NOT NULL DEFAULT 0,
+        refund_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+        refund_payment_method VARCHAR(50) DEFAULT 'Cash',
+        reason TEXT,
+        status VARCHAR(50) DEFAULT 'Completed',
+        created_by INTEGER,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `
+  })
+
+  await run("sale_return_items", async () => {
+    await sql`
+      CREATE TABLE IF NOT EXISTS sale_return_items (
+        id SERIAL PRIMARY KEY,
+        sale_return_id INTEGER NOT NULL REFERENCES sale_returns(id) ON DELETE CASCADE,
+        sale_id INTEGER NOT NULL,
+        sale_item_id INTEGER NOT NULL REFERENCES sale_items(id) ON DELETE CASCADE,
+        product_id INTEGER NOT NULL,
+        product_variant_id INTEGER,
+        batch_id INTEGER,
+        returned_quantity INTEGER NOT NULL,
+        unit_price DECIMAL(10,2) NOT NULL,
+        unit_cost DECIMAL(12,2) DEFAULT 0,
+        calculated_value DECIMAL(12,2) NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `
+  })
 }
 
 async function upgradeLegacyColumns() {
@@ -885,6 +923,7 @@ async function upgradeLegacyColumns() {
     ["sale_items.notes", () => sql`ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS notes TEXT`],
     ["sale_items.product_variant_id", () => sql`ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS product_variant_id INTEGER`],
     ["sale_items.batch_id", () => sql`ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS batch_id INTEGER`],
+    ["sale_items.returned_quantity", () => sql`ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS returned_quantity INTEGER DEFAULT 0`],
     ["purchases.device_id", () => sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS device_id INTEGER`],
     ["purchases.payment_method", () => sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50)`],
     ["purchases.purchase_status", () => sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS purchase_status VARCHAR(50) DEFAULT 'Delivered'`],

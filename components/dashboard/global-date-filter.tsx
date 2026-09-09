@@ -160,11 +160,13 @@ export default function GlobalDateFilter({ className, compact = false }: GlobalD
 
   const handleReset = () => {
     dispatch(resetDateRange())
-    const today = getTodayDateString()
-    setLocalFrom(today)
-    setLocalTo(today)
-    setLocalPreset("today")
-    syncToUrl(today, today, "today")
+    const today = new Date()
+    const fromStr = format(startOfMonth(today), "yyyy-MM-dd")
+    const toStr = format(endOfMonth(today), "yyyy-MM-dd")
+    setLocalFrom(fromStr)
+    setLocalTo(toStr)
+    setLocalPreset("this_month")
+    syncToUrl(fromStr, toStr, "this_month")
     setIsOpen(false)
   }
 
@@ -266,10 +268,10 @@ export default function GlobalDateFilter({ className, compact = false }: GlobalD
               size="sm"
               onClick={handleReset}
               className="h-7 px-2 text-[11px] text-slate-500 hover:text-slate-800 hover:bg-slate-100"
-              title="Reset to today"
+              title="Reset to this month"
             >
               <RotateCcw className="h-3 w-3 mr-1" />
-              Reset Today
+              Reset Month
             </Button>
           </div>
 
