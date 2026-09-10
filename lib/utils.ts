@@ -160,3 +160,11 @@ export function parseSaleDateTime(sale: any): Date {
   return new Date()
 }
 
+export function formatOrderId(id: any): string {
+  if (id === null || id === undefined || id === "") return ""
+  const strId = String(id).trim()
+  if (strId.startsWith("MC-")) return strId
+  return `MC-${strId}`
+}
+
+

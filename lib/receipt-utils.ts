@@ -1,7 +1,10 @@
 "use client"
 
 import { getCachedPlatformName, getDefaultDeviceLogoUrl } from "@/lib/platform-branding"
-import { parseSaleDateTime, parseSaleDate } from "@/lib/utils"
+import { parseSaleDateTime, parseSaleDate, formatOrderId } from "@/lib/utils"
+
+export { formatOrderId }
+
 
 // Function to get company info from the DOM
 const getCompanyInfoFromDOM = (): { name: string; address: string; phone: string } => {
@@ -1362,18 +1365,41 @@ export function printJobCard(sale: any, currency = 'AED', businessInfo: any = {}
   const fromName = sale?.branch_name || sale?.device_name || business.device_name || business.branch_name || business.name || 'Moto Club Online';
   const staffName = sale?.staff_name || sale?.staffName || sale?.sales_executive || sale?.sales_executive_name || sale?.created_by_name || sale?.staff?.name || sale?.user_name || businessInfo?.staff_name || '';
 
+  const isDefaultVariant = (vName?: string) => {
+    if (!vName) return true;
+    const clean = vName.trim().toLowerCase().replace(/^\(|\)$/g, '').trim();
+    return clean === 'default' || clean === 'default variant' || clean.includes('default') || clean === '';
+  };
+
   const itemsText = sale.items?.map((item: any) => {
-    return `${item.product_name || 'Item'} ${item.variant_name ? '('+item.variant_name+')' : ''}${item.quantity > 1 ? ` x${item.quantity}` : ''}`
+    const variantDisplay = item.variant_name && !isDefaultVariant(item.variant_name)
+      ? ` (${item.variant_name.trim()})`
+      : '';
+    return `${item.product_name || 'Item'}${variantDisplay}${item.quantity > 1 ? ` x${item.quantity}` : ''}`
   }).join(', ') || '';
+
+  const formattedOrderId = formatOrderId(sale.id);
 
   const html = `
     <!DOCTYPE html>
     <html>
     <head>
-      <title>Job Card - ${sale.id}</title>
+      <title></title>
       <style>
-        @page { margin: 12mm 15mm; }
-        body { font-family: system-ui, -apple-system, sans-serif; color: #000; max-width: 850px; margin: 0 auto; padding: 10px; line-height: 1.4; }
+        @page {
+          size: auto;
+          margin: 0mm;
+        }
+        @media print {
+          html, body {
+            margin: 0;
+            padding: 0;
+          }
+          body {
+            padding: 12mm 15mm !important;
+          }
+        }
+        body { font-family: system-ui, -apple-system, sans-serif; color: #000; max-width: 850px; margin: 0 auto; padding: 12mm 15mm; line-height: 1.4; box-sizing: border-box; }
         .header { display: flex; justify-content: flex-end; align-items: flex-start; margin-bottom: 15px; }
         .logo { max-width: 320px; max-height: 130px; object-fit: contain; }
         .section { margin-bottom: 20px; }
@@ -1416,15 +1442,8 @@ export function printJobCard(sale: any, currency = 'AED', businessInfo: any = {}
         ${itemsText}
       </div>
       <div class="order-id">
-        Order ID: ${sale.id}
+        Order ID: ${formattedOrderId}
       </div>
-      ${(sale.courier_partner_name || sale.courier_service_name || sale.tracking_id) ? `
-        <div style="font-size: 16px; font-weight: 700; text-align: center; margin-top: 14px; padding: 8px; border: 2px solid #000; border-radius: 6px; background-color: #f8fafc;">
-          ${sale.courier_partner_name ? `<div>Vendor: ${sale.courier_partner_name}</div>` : ''}
-          ${sale.courier_service_name ? `<div>Courier Service: ${sale.courier_service_name}</div>` : ''}
-          ${sale.tracking_id ? `<div>Tracking ID: ${sale.tracking_id}</div>` : ''}
-        </div>
-      ` : ''}
     </body>
     </html>
   `;
@@ -1486,6 +1505,12 @@ export function printBatchJobCards(sales: any[], currency = 'AED', businessInfo:
     baseLogo = `${window.location.origin}${baseLogo}`;
   }
 
+  const isDefaultVariant = (vName?: string) => {
+    if (!vName) return true;
+    const clean = vName.trim().toLowerCase().replace(/^\(|\)$/g, '').trim();
+    return clean === 'default' || clean === 'default variant' || clean.includes('default') || clean === '';
+  };
+
   const pagesHtml = sales.map((sale, index) => {
     let logoUrl = sale.device_logo || sale.logo_url || sale.logo || baseLogo;
     if (logoUrl && typeof window !== "undefined" && logoUrl.startsWith("/")) {
@@ -1495,7 +1520,10 @@ export function printBatchJobCards(sales: any[], currency = 'AED', businessInfo:
     const staffName = sale?.staff_name || sale?.staffName || sale?.sales_executive || sale?.sales_executive_name || sale?.created_by_name || sale?.staff?.name || sale?.user_name || businessInfo?.staff_name || '';
 
     const itemsText = sale.items?.map((item: any) => {
-      return `${item.product_name || 'Item'} ${item.variant_name ? '('+item.variant_name+')' : ''}${item.quantity > 1 ? ` x${item.quantity}` : ''}`
+      const variantDisplay = item.variant_name && !isDefaultVariant(item.variant_name)
+        ? ` (${item.variant_name.trim()})`
+        : '';
+      return `${item.product_name || 'Item'}${variantDisplay}${item.quantity > 1 ? ` x${item.quantity}` : ''}`
     }).join(', ') || '';
 
     const landmark = sale.shipping_landmark || sale.landmark || sale.shippingLandmark;
@@ -1505,8 +1533,10 @@ export function printBatchJobCards(sales: any[], currency = 'AED', businessInfo:
       [sale.shipping_city, sale.shipping_district, sale.shipping_state].filter(Boolean).join(', ')
     ].filter(Boolean);
 
+    const formattedOrderId = formatOrderId(sale.id);
+
     return `
-      <div class="page" ${index < sales.length - 1 ? 'style="page-break-after: always;"' : ''}>
+      <div class="page" ${index < sales.length - 1 ? 'style="page-break-after: always; break-after: page;"' : ''}>
         ${logoUrl ? `<div class="header"><img src="${logoUrl}" alt="Logo" class="logo" /></div>` : ''}
 
         <div class="section to-section">
@@ -1533,7 +1563,7 @@ export function printBatchJobCards(sales: any[], currency = 'AED', businessInfo:
           ${itemsText}
         </div>
         <div class="order-id">
-          Order ID: ${sale.id}
+          Order ID: ${formattedOrderId}
         </div>
       </div>
     `;
@@ -1543,10 +1573,28 @@ export function printBatchJobCards(sales: any[], currency = 'AED', businessInfo:
     <!DOCTYPE html>
     <html>
     <head>
-      <title>Batch Job Cards</title>
+      <title></title>
       <style>
-        @page { margin: 12mm 15mm; }
-        body { font-family: system-ui, -apple-system, sans-serif; color: #000; max-width: 850px; margin: 0 auto; padding: 10px; line-height: 1.4; }
+        @page {
+          size: auto;
+          margin: 0mm;
+        }
+        @media print {
+          html, body {
+            margin: 0;
+            padding: 0;
+          }
+          .page {
+            margin: 0;
+            padding: 12mm 15mm !important;
+            box-sizing: border-box;
+            page-break-after: always;
+            break-after: page;
+            page-break-inside: avoid;
+            break-inside: avoid;
+          }
+        }
+        body { font-family: system-ui, -apple-system, sans-serif; color: #000; max-width: 850px; margin: 0 auto; padding: 12mm 15mm; line-height: 1.4; box-sizing: border-box; }
         .header { display: flex; justify-content: flex-end; align-items: flex-start; margin-bottom: 15px; }
         .logo { max-width: 320px; max-height: 130px; object-fit: contain; }
         .section { margin-bottom: 20px; }
@@ -1560,11 +1608,6 @@ export function printBatchJobCards(sales: any[], currency = 'AED', businessInfo:
         .order-id { font-size: 30px; text-align: center; color: #000; font-weight: 900; }
         p { margin: 6px 0; }
         hr { border: none; border-top: 3px dashed #000; margin: 22px 0; }
-        
-        @media print {
-          body { padding: 0; }
-          .page { margin-bottom: 0; padding: 10px; }
-        }
       </style>
     </head>
     <body>
@@ -1616,4 +1659,5 @@ export function printBatchJobCards(sales: any[], currency = 'AED', businessInfo:
     }
   }, 50);
 }
+
 
