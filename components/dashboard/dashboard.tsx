@@ -106,7 +106,7 @@ function LoadingTab() {
 
 export function Dashboard({ onLogout }: DashboardProps) {
   const searchParams = useSearchParams()
-  const tabParam = searchParams.get("tab") as TabType | "home" | null
+  const tabParam = searchParams?.get("tab") as TabType | "home" | null
   const resolveTab = (param: TabType | "stock" | "home" | null): TabType => {
     if (param === "stock") return "product"
     if (param === "sales") return "sale"
@@ -350,11 +350,11 @@ export function Dashboard({ onLogout }: DashboardProps) {
     }
   }, [activeStaff, activeTab, canAccessTab, mounted])
 
-  const salesViewParam = searchParams.get("salesView")
+  const salesViewParam = searchParams?.get("salesView")
   const salesNavView = salesViewParam === "entry" ? "entry" : "list"
   const isOnSaleTab = activeTab === "sale" || activeTab === "sales"
 
-  const purchaseViewParam = searchParams.get("purchaseView")
+  const purchaseViewParam = searchParams?.get("purchaseView")
   const purchaseNavView = purchaseViewParam === "entry" ? "entry" : "list"
   const isOnPurchaseTab = activeTab === "purchase"
 

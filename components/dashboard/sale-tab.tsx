@@ -289,11 +289,12 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
   const switchView = useCallback(
     (view: SalesViewMode) => {
       setActiveView(view)
-      const params = new URLSearchParams(searchParams.toString())
+      const params = new URLSearchParams(searchParams?.toString() || "")
       params.set("tab", "sale")
       params.set("salesView", view === "info" ? "list" : "entry")
       const nextQuery = params.toString()
-      router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname)
+      const path = pathname || ""
+      router.replace(nextQuery ? `${path}?${nextQuery}` : path)
     },
     [pathname, router, searchParams],
   )
@@ -1569,14 +1570,14 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
   }
 
   useEffect(() => {
-    if (!searchParams.get("editSaleId")) return
+    if (!searchParams?.get("editSaleId")) return
     if (activeView === "entry") return
     switchView("entry")
   }, [searchParams, activeView, switchView])
 
   useEffect(() => {
     if (activeView !== "entry") return
-    const editSaleIdRaw = searchParams.get("editSaleId")
+    const editSaleIdRaw = searchParams?.get("editSaleId")
     if (!editSaleIdRaw) return
     const editSaleId = Number(editSaleIdRaw)
     if (!editSaleId || Number.isNaN(editSaleId)) return
@@ -1609,10 +1610,11 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
       setPendingEditDraftId(newEditDraft.id)
     }
 
-    const params = new URLSearchParams(searchParams.toString())
+    const params = new URLSearchParams(searchParams?.toString() || "")
     params.delete("editSaleId")
     const nextQuery = params.toString()
-    router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname)
+    const path = pathname || ""
+    router.replace(nextQuery ? `${path}?${nextQuery}` : path)
     clearEditSaleParamFromUrl()
   }, [
     activeView,

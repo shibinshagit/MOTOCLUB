@@ -32,7 +32,7 @@ export default function AdminSidebar({
   onClose,
 }: AdminSidebarProps) {
   const pathname = usePathname()
-  const activeCompanyId = getActiveCompanyId(pathname)
+  const activeCompanyId = getActiveCompanyId(pathname || "")
   const isCompaniesHome = pathname === "/admin/companies"
   const isDashboard = pathname === "/admin/dashboard"
   const isDrawer = Boolean(onClose)

@@ -4,7 +4,7 @@ import { useState, useEffect } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Loader2, Phone, Mail, MapPin, ShoppingCart, DollarSign, CreditCard, AlertCircle } from "lucide-react"
+import { Loader2, Phone, Mail, MapPin, ShoppingCart, Banknote, Wallet, CreditCard, AlertCircle } from "lucide-react"
 import { useAppSelector } from "@/store/hooks"
 
 interface SimpleViewModalProps {
@@ -121,7 +121,7 @@ function SimpleViewModal({ isOpen, onClose, supplierId, userId }: SimpleViewModa
                 <div className="text-sm text-gray-600">Purchases</div>
               </div>
               <div className="text-center p-3 bg-gray-50 rounded-lg">
-                <DollarSign className="h-6 w-6 mx-auto mb-2 text-gray-600" />
+                <Banknote className="h-6 w-6 mx-auto mb-2 text-gray-600" />
                 <div className="text-lg font-bold">
                   {formatCurrency(supplierData.supplier.total_amount)}
                 </div>
@@ -135,11 +135,13 @@ function SimpleViewModal({ isOpen, onClose, supplierId, userId }: SimpleViewModa
                 <div className="text-sm text-gray-600">Total Paid</div>
               </div>
               <div className="text-center p-3 bg-blue-50 rounded-lg">
-                <DollarSign className="h-6 w-6 mx-auto mb-2 text-blue-600" />
+                <Wallet className="h-6 w-6 mx-auto mb-2 text-blue-600" />
                 <div className="text-lg font-bold text-blue-600">
-                  {formatCurrency(supplierData.supplier.total_credit || 0)}
+                  {formatCurrency(supplierData.supplier.supplier_credit || supplierData.supplier.total_credit || 0)}
                 </div>
-                <div className="text-sm text-gray-600">Total Credit</div>
+                <div className="text-sm text-gray-600">
+                  {supplierData.supplier.supplier_credit > 0 ? "Supplier Credit" : "Total Credit"}
+                </div>
               </div>
               <div className="text-center p-3 bg-orange-50 rounded-lg">
                 <AlertCircle className="h-6 w-6 mx-auto mb-2 text-orange-600" />

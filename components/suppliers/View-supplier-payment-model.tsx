@@ -10,7 +10,7 @@ import {
   Calendar,
   CreditCard,
   Receipt,
-  DollarSign,
+  Banknote,
   Edit,
   Trash2,
   Clock,
@@ -620,7 +620,7 @@ export default function ViewSupplierPaymentModal({
             >
               <CardHeader className="pb-3">
                 <CardTitle className="text-lg font-semibold text-gray-800 flex items-center">
-                  <DollarSign className="h-5 w-5 mr-2 text-yellow-600" />
+                  <Banknote className="h-5 w-5 mr-2 text-yellow-600" />
                   Payment Amount
                 </CardTitle>
               </CardHeader>

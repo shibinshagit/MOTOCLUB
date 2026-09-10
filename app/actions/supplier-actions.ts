@@ -26,8 +26,9 @@ export async function getSuppliers(userId: number, limit?: number, searchTerm?: 
           s.*,
           COALESCE(p.total_purchases, 0) as total_purchases,
           COALESCE(p.total_amount, 0) as total_amount,
-          COALESCE(p.paid_amount, 0) as paid_amount,
-          COALESCE(p.balance_amount, 0) as balance_amount
+          GREATEST(COALESCE(ft.total_paid, 0), COALESCE(p.paid_amount, 0)) as paid_amount,
+          COALESCE(p.balance_amount, 0) as balance_amount,
+          GREATEST(COALESCE(ft.total_paid, 0) - COALESCE(p.paid_amount, 0), 0) as supplier_credit
         FROM suppliers s
         LEFT JOIN LATERAL (
           SELECT 
@@ -38,6 +39,15 @@ export async function getSuppliers(userId: number, limit?: number, searchTerm?: 
           FROM purchases
           WHERE created_by = ${userId} AND TRIM(supplier) = TRIM(s.name)
         ) p ON true
+        LEFT JOIN LATERAL (
+          SELECT 
+            SUM(amount) as total_paid
+          FROM financial_transactions
+          WHERE reference_id = s.id 
+            AND transaction_type = 'supplier_payment'
+            AND created_by = ${userId}
+            AND (status IS NULL OR status != 'Cancelled')
+        ) ft ON true
         WHERE s.created_by = ${userId}
         AND (
           LOWER(s.name) LIKE ${searchPattern} OR 
@@ -53,8 +63,9 @@ export async function getSuppliers(userId: number, limit?: number, searchTerm?: 
           s.*,
           COALESCE(p.total_purchases, 0) as total_purchases,
           COALESCE(p.total_amount, 0) as total_amount,
-          COALESCE(p.paid_amount, 0) as paid_amount,
-          COALESCE(p.balance_amount, 0) as balance_amount
+          GREATEST(COALESCE(ft.total_paid, 0), COALESCE(p.paid_amount, 0)) as paid_amount,
+          COALESCE(p.balance_amount, 0) as balance_amount,
+          GREATEST(COALESCE(ft.total_paid, 0) - COALESCE(p.paid_amount, 0), 0) as supplier_credit
         FROM suppliers s
         LEFT JOIN LATERAL (
           SELECT 
@@ -65,6 +76,15 @@ export async function getSuppliers(userId: number, limit?: number, searchTerm?: 
           FROM purchases
           WHERE created_by = ${userId} AND TRIM(supplier) = TRIM(s.name)
         ) p ON true
+        LEFT JOIN LATERAL (
+          SELECT 
+            SUM(amount) as total_paid
+          FROM financial_transactions
+          WHERE reference_id = s.id 
+            AND transaction_type = 'supplier_payment'
+            AND created_by = ${userId}
+            AND (status IS NULL OR status != 'Cancelled')
+        ) ft ON true
         WHERE s.created_by = ${userId}
         ORDER BY s.name ASC
       `
@@ -126,6 +146,15 @@ export async function getSupplierWithPurchases(id: number, userId: number) {
       WHERE TRIM(supplier) = TRIM(${supplier.name}) AND created_by = ${userId}
     `
 
+    const ftResult = await sql`
+      SELECT COALESCE(SUM(amount), 0) as total_paid
+      FROM financial_transactions
+      WHERE reference_id = ${id}
+        AND transaction_type = 'supplier_payment'
+        AND created_by = ${userId}
+        AND (status IS NULL OR status != 'Cancelled')
+    `
+
     // Get all purchases from this supplier with received amounts
     const purchasesResult = await sql`
       SELECT 
@@ -152,12 +181,19 @@ export async function getSupplierWithPurchases(id: number, userId: number) {
       outstanding_balance: 0,
     }
 
+    const totalPaidFt = Number(ftResult[0]?.total_paid || 0)
+    const paidAmountPurchases = Number(stats.paid_amount || 0)
+    const actualPaidAmount = Math.max(totalPaidFt, paidAmountPurchases)
+    const supplierCredit = Math.max(totalPaidFt - paidAmountPurchases, 0)
+
     return {
       success: true,
       data: {
         supplier: {
           ...supplier,
           ...stats,
+          paid_amount: actualPaidAmount,
+          supplier_credit: supplierCredit,
         },
         purchases: purchasesResult,
       },

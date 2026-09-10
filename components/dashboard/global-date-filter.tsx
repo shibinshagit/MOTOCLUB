@@ -47,9 +47,9 @@ export default function GlobalDateFilter({ className, compact = false }: GlobalD
 
   // Hydrate from URL query parameters on initial mount if present
   useEffect(() => {
-    const urlFrom = searchParams.get("from")
-    const urlTo = searchParams.get("to")
-    const urlPreset = searchParams.get("preset") as DatePreset | null
+    const urlFrom = searchParams?.get("from")
+    const urlTo = searchParams?.get("to")
+    const urlPreset = searchParams?.get("preset") as DatePreset | null
 
     if (isValidIsoDateString(urlFrom) && isValidIsoDateString(urlTo)) {
       if (urlFrom !== dateRange.from || urlTo !== dateRange.to) {

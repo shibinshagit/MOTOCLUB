@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { FormAlert } from "@/components/ui/form-alert"
 import { useToast } from "@/components/ui/use-toast"
 import { notifySuccess } from "@/lib/notifications"
-import { Loader2, DollarSign, Calendar, CreditCard, FileText } from "lucide-react"
+import { Loader2, Banknote, Calendar, CreditCard, FileText } from "lucide-react"
 
 interface EditSupplierPaymentModalProps {
   isOpen: boolean
@@ -215,7 +215,7 @@ export default function EditSupplierPaymentModal({
             {/* Payment Amount */}
             <div className="space-y-2">
               <Label htmlFor="amount" className="flex items-center gap-2">
-                <DollarSign className="h-4 w-4 text-gray-500" />
+                <Banknote className="h-4 w-4 text-gray-500" />
                 Payment Amount ({currency}) *
               </Label>
               <Input

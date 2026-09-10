@@ -69,26 +69,22 @@ export async function paySupplierCredit(
 
       console.log(`Found ${creditPurchases.length} credit purchases for supplier ${supplier.name}`)
 
-      if (creditPurchases.length === 0) {
-        throw new Error("No outstanding credit purchases found for this supplier")
-      }
-
       const totalOutstanding = creditPurchases.reduce((sum: number, purchase: any) => {
         return sum + (Number(purchase.total_amount) - Number(purchase.received_amount || 0))
       }, 0)
 
-      if (paymentAmount > totalOutstanding) {
-        throw new Error(`Payment amount (${paymentAmount}) exceeds total outstanding balance (${totalOutstanding})`)
-      }
+      const amountApplied = Math.min(paymentAmount, totalOutstanding)
+      const extraCredit = Math.max(paymentAmount - totalOutstanding, 0)
+      const remainingOutstanding = Math.max(totalOutstanding - paymentAmount, 0)
 
-      let remainingPayment = paymentAmount
+      let remainingToAllocate = amountApplied
       const allocations: PaymentAllocation[] = []
 
       for (const purchase of creditPurchases) {
-        if (remainingPayment <= 0) break
+        if (remainingToAllocate <= 0) break
 
         const currentBalance = Number(purchase.total_amount) - Number(purchase.received_amount || 0)
-        const allocationAmount = Math.min(remainingPayment, currentBalance)
+        const allocationAmount = Math.min(remainingToAllocate, currentBalance)
         const newReceivedAmount = Number(purchase.received_amount || 0) + allocationAmount
         const newRemainingBalance = Number(purchase.total_amount) - newReceivedAmount
 
@@ -106,17 +102,17 @@ export async function paySupplierCredit(
           remainingBalance: newRemainingBalance,
         })
 
-        remainingPayment -= allocationAmount
+        remainingToAllocate -= allocationAmount
 
         console.log(`Allocated ${allocationAmount} to purchase ${purchase.id}, remaining balance: ${newRemainingBalance}`)
       }
 
-      const remainingCredit = totalOutstanding - paymentAmount
-
       console.log("Payment allocation completed:", {
         totalPaid: paymentAmount,
+        amountApplied,
+        extraCredit,
         allocationsCount: allocations.length,
-        remainingCredit,
+        remainingOutstanding,
       })
 
       let finalPaymentDate: Date
@@ -131,7 +127,10 @@ export async function paySupplierCredit(
 
       const debitAmount = paymentAmount
       const creditAmount = 0
-      let description = `Supplier Payment - ${supplier.name} - ${paymentMethod} - ${allocations.length} purchase(s) affected`
+      let description = extraCredit > 0
+        ? `Supplier Payment - ${supplier.name} - ${paymentMethod} - ${allocations.length} purchase(s) affected (Applied: ${amountApplied.toFixed(2)}, Supplier Credit: ${extraCredit.toFixed(2)})`
+        : `Supplier Payment - ${supplier.name} - ${paymentMethod} - ${allocations.length} purchase(s) affected`
+      
       if (notes && notes.trim()) {
         description += ` - Notes: ${notes.trim()}`
       }
@@ -157,8 +156,10 @@ export async function paySupplierCredit(
         message: "Payment processed successfully",
         data: {
           totalPaid: paymentAmount,
+          amountApplied,
+          extraCredit,
+          remainingCredit: remainingOutstanding,
           allocations,
-          remainingCredit,
           transactionId,
         },
       }
@@ -631,11 +632,7 @@ export async function updateSupplierPayment(data: {
           }
           
           if (remainingToAllocate > 0) {
-            // await sql`ROLLBACK`
-            return {
-              success: false,
-              message: `Cannot allocate ${remainingToAllocate.toFixed(2)} - no outstanding balance available. Total new amount would exceed supplier's outstanding balance.`,
-            }
+            console.log(`Unallocated payment amount of ${remainingToAllocate} recorded as excess supplier credit.`)
           }
         } else {
           // Decrease payment - need to reverse allocation

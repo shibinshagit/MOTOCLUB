@@ -254,11 +254,12 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
   const switchView = useCallback(
     (view: PurchaseViewMode) => {
       setActiveView(view)
-      const params = new URLSearchParams(searchParams.toString())
+      const params = new URLSearchParams(searchParams?.toString() || "")
       params.set("tab", "purchase")
       params.set("purchaseView", view === "info" ? "list" : "entry")
       const nextQuery = params.toString()
-      router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname)
+      const path = pathname || ""
+      router.replace(nextQuery ? `${path}?${nextQuery}` : path)
     },
     [pathname, router, searchParams],
   )

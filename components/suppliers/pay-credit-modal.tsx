@@ -15,12 +15,11 @@ import {
   CreditCard,
   AlertCircle,
   CheckCircle,
-  DollarSign,
+  Banknote,
   X,
   ArrowRight,
   Receipt,
   Building2,
-  Banknote,
   TrendingDown,
   FileText,
   CalendarIcon,
@@ -49,6 +48,14 @@ interface PaymentAllocation {
   remainingBalance: number
 }
 
+interface PaymentResultData {
+  totalPaid: number
+  amountApplied: number
+  extraCredit: number
+  remainingCredit: number
+  allocations: PaymentAllocation[]
+}
+
 export default function PayCreditModal({
   isOpen,
   onClose,
@@ -63,11 +70,7 @@ export default function PayCreditModal({
   const [paymentDate, setPaymentDate] = useState<string>("") // New state for payment date
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [paymentResult, setPaymentResult] = useState<{
-    totalPaid: number
-    allocations: PaymentAllocation[]
-    remainingCredit: number
-  } | null>(null)
+  const [paymentResult, setPaymentResult] = useState<PaymentResultData | null>(null)
 
   const currency = useSelector((state: RootState) => state.device.currency) || "AED"
   const company = useSelector((state: RootState) => state.device.company)
@@ -96,12 +99,7 @@ export default function PayCreditModal({
 
     // Validation
     if (!amount || amount <= 0) {
-      setError("Please enter a valid payment amount")
-      return
-    }
-
-    if (amount > supplier.balance_amount) {
-      setError(`Payment amount cannot exceed credit balance of ${formatCurrency(supplier.balance_amount)}`)
+      setError("Please enter a valid payment amount greater than zero")
       return
     }
 
@@ -115,7 +113,6 @@ export default function PayCreditModal({
       }
       finalPaymentDate = selectedDate
     }
-    // If no date provided, use current date (will be handled in backend)
 
     setIsLoading(true)
 
@@ -127,11 +124,11 @@ export default function PayCreditModal({
         deviceId,
         paymentMethod,
         notes.trim() || undefined,
-        finalPaymentDate // Pass the date to backend
+        finalPaymentDate
       )
 
       if (result.success && result.data) {
-        setPaymentResult(result.data)
+        setPaymentResult(result.data as PaymentResultData)
       } else {
         setError(result.message || "Failed to process payment")
       }
@@ -150,13 +147,14 @@ export default function PayCreditModal({
     onClose()
   }
 
-  const maxAmount = supplier.balance_amount
-  const quickAmounts = [
-    Math.min(100, maxAmount),
-    Math.min(500, maxAmount),
-    Math.min(1000, maxAmount),
-    maxAmount,
-  ].filter((amount, index, arr) => arr.indexOf(amount) === index && amount > 0)
+  const outstandingBalance = supplier.balance_amount || 0
+  const enteredAmount = Number.parseFloat(paymentAmount) || 0
+  const amountApplied = Math.min(enteredAmount, outstandingBalance)
+  const extraSupplierCredit = Math.max(enteredAmount - outstandingBalance, 0)
+
+  const quickAmounts = [100, 500, 1000, outstandingBalance].filter(
+    (amount, index, arr) => arr.indexOf(amount) === index && amount > 0
+  )
 
   // Get today's date in YYYY-MM-DD format for the input max attribute
   const today = new Date().toISOString().split('T')[0]
@@ -165,7 +163,7 @@ export default function PayCreditModal({
     <Dialog open={isOpen} onOpenChange={() => {}}>
       <DialogContent className="max-w-3xl max-h-[95vh] overflow-hidden p-0 bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col [&>button]:hidden">
         {paymentResult ? (
-          // Success View (unchanged)
+          // Success View
           <div className="flex flex-col h-full max-h-[90vh]">
             {/* Success Header */}
             <div className="bg-gradient-to-r from-green-600 to-emerald-600 text-white p-4 relative overflow-hidden">
@@ -183,18 +181,22 @@ export default function PayCreditModal({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4 text-center">
-                    <div className="text-3xl font-bold">{formatCurrency(paymentResult.totalPaid)}</div>
-                    <div className="text-sm text-green-100">Amount Paid</div>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                  <div className="bg-white/10 backdrop-blur-sm rounded-xl p-3 text-center">
+                    <div className="text-2xl font-bold">{formatCurrency(paymentResult.totalPaid)}</div>
+                    <div className="text-xs text-green-100">Amount Paid</div>
                   </div>
-                  <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4 text-center">
-                    <div className="text-3xl font-bold">{paymentResult.allocations.length}</div>
-                    <div className="text-sm text-green-100">Purchases Updated</div>
+                  <div className="bg-white/10 backdrop-blur-sm rounded-xl p-3 text-center">
+                    <div className="text-2xl font-bold">{formatCurrency(paymentResult.amountApplied ?? paymentResult.totalPaid)}</div>
+                    <div className="text-xs text-green-100">Amount Applied</div>
                   </div>
-                  <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4 text-center">
-                    <div className="text-3xl font-bold">{formatCurrency(paymentResult.remainingCredit)}</div>
-                    <div className="text-sm text-green-100">Remaining Credit</div>
+                  <div className="bg-white/10 backdrop-blur-sm rounded-xl p-3 text-center">
+                    <div className="text-2xl font-bold">{formatCurrency(paymentResult.extraCredit ?? 0)}</div>
+                    <div className="text-xs text-green-100">Extra Supplier Credit</div>
+                  </div>
+                  <div className="bg-white/10 backdrop-blur-sm rounded-xl p-3 text-center">
+                    <div className="text-2xl font-bold">{formatCurrency(paymentResult.remainingCredit)}</div>
+                    <div className="text-xs text-green-100">Remaining Balance</div>
                   </div>
                 </div>
               </div>
@@ -240,7 +242,7 @@ export default function PayCreditModal({
                     </div>
                     <div className="space-y-4">
                       <div className="flex items-center space-x-3">
-                        <DollarSign className="h-4 w-4 text-gray-400" />
+                        <Banknote className="h-4 w-4 text-gray-400" />
                         <div>
                           <div className="text-sm text-gray-500">Amount Paid</div>
                           <div className="font-medium text-green-600">{formatCurrency(paymentResult.totalPaid)}</div>
@@ -351,7 +353,7 @@ export default function PayCreditModal({
                     </div>
                     <div>
                       <h2 className="text-xl font-bold">Pay Supplier Credit</h2>
-                      <p className="text-blue-100 text-sm">Process payment for outstanding balance</p>
+                      <p className="text-blue-100 text-sm">Process payment for outstanding balance or advance credit</p>
                     </div>
                   </div>
                   <Button
@@ -397,7 +399,7 @@ export default function PayCreditModal({
                       </div>
                       <div className="text-right">
                         <div className="text-xs text-gray-500 mb-1">Outstanding Balance</div>
-                        <div className="text-2xl font-bold text-red-600">{formatCurrency(supplier.balance_amount)}</div>
+                        <div className="text-2xl font-bold text-red-600">{formatCurrency(outstandingBalance)}</div>
                       </div>
                     </div>
                   </CardContent>
@@ -408,7 +410,7 @@ export default function PayCreditModal({
                   <CardContent className="p-4 space-y-4">
                     <div className="flex items-center space-x-2 mb-3">
                       <div className="bg-green-100 p-1.5 rounded-lg">
-                        <DollarSign className="h-4 w-4 text-green-600" />
+                        <Banknote className="h-4 w-4 text-green-600" />
                       </div>
                       <div>
                         <h3 className="text-base font-semibold text-gray-900">Payment Details</h3>
@@ -423,7 +425,7 @@ export default function PayCreditModal({
                           htmlFor="amount"
                           className="text-sm font-medium text-gray-700 flex items-center space-x-1"
                         >
-                          <DollarSign className="h-3 w-3" />
+                          <Banknote className="h-3 w-3" />
                           <span>Payment Amount *</span>
                         </Label>
                         <Input
@@ -431,15 +433,19 @@ export default function PayCreditModal({
                           type="number"
                           step="0.01"
                           min="0.01"
-                          max={maxAmount}
                           value={paymentAmount}
                           onChange={(e) => setPaymentAmount(e.target.value)}
                           placeholder="0.00"
                           className="text-base font-medium h-10 border-2 focus:border-blue-500 rounded-lg"
                           required
                         />
-                        <div className="text-xs text-gray-500">
-                          Maximum: {formatCurrency(maxAmount)}
+                        <div className="space-y-1">
+                          <div className="text-xs text-gray-500">
+                            Outstanding: {formatCurrency(outstandingBalance)}
+                          </div>
+                          <div className="text-xs text-blue-600 font-medium">
+                            Amount above the outstanding balance will be recorded as supplier credit.
+                          </div>
                         </div>
                       </div>
 
@@ -466,6 +472,22 @@ export default function PayCreditModal({
                         </Select>
                       </div>
                     </div>
+
+                    {/* Dynamic Breakdown Card */}
+                    {enteredAmount > 0 && (
+                      <div className="p-3 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-200 space-y-1.5 text-xs sm:text-sm">
+                        <div className="flex justify-between items-center text-gray-700">
+                          <span>Amount Applied</span>
+                          <span className="font-semibold text-gray-900">{formatCurrency(amountApplied)}</span>
+                        </div>
+                        {extraSupplierCredit > 0 && (
+                          <div className="flex justify-between items-center text-blue-700 font-medium pt-1.5 border-t border-blue-200">
+                            <span>Extra Supplier Credit</span>
+                            <span className="font-bold text-blue-700">{formatCurrency(extraSupplierCredit)}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* Payment Date */}
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -503,7 +525,7 @@ export default function PayCreditModal({
                             onClick={() => setPaymentAmount(amount.toString())}
                             className="h-9 text-xs rounded-lg border-2 hover:border-blue-500 hover:bg-blue-50 transition-all duration-200"
                           >
-                            {amount === maxAmount ? "Full" : formatCurrency(amount)}
+                            {amount === outstandingBalance ? "Full" : formatCurrency(amount)}
                           </Button>
                         ))}
                       </div>

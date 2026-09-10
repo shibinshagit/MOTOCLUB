@@ -17,6 +17,7 @@ import {
   Users,
   TrendingUp,
   DollarSign,
+  Banknote,
   MapPin,
   RefreshCw,
   CreditCard,
@@ -497,23 +498,21 @@ export default function SupplierTab({
               {/* Action Buttons */}
               <div className="flex flex-col sm:flex-row gap-1 ml-2 sm:ml-4 flex-shrink-0">
                 <div className="flex flex-wrap gap-1 justify-end sm:justify-start">
-                  {(supplier.balance_amount || 0) > 0 && (
-                    <Button
-                      size="sm"
-                      className="h-7 px-2 bg-green-600 hover:bg-green-700 text-white text-xs whitespace-nowrap"
-                      onClick={() =>
-                        handlePayCredit({
-                          id: supplier.id,
-                          name: supplier.name,
-                          balance_amount: supplier.balance_amount || 0,
-                        })
-                      }
-                    >
-                      <CreditCard className="h-3 w-3 mr-1 flex-shrink-0" />
-                      <span className="hidden sm:inline">Pay Credit</span>
-                      <span className="sm:hidden">Pay</span>
-                    </Button>
-                  )}
+                  <Button
+                    size="sm"
+                    className="h-7 px-2 bg-green-600 hover:bg-green-700 text-white text-xs whitespace-nowrap"
+                    onClick={() =>
+                      handlePayCredit({
+                        id: supplier.id,
+                        name: supplier.name,
+                        balance_amount: supplier.balance_amount || 0,
+                      })
+                    }
+                  >
+                    <CreditCard className="h-3 w-3 mr-1 flex-shrink-0" />
+                    <span className="hidden sm:inline">Pay Credit</span>
+                    <span className="sm:hidden">Pay</span>
+                  </Button>
                   {(supplier.paid_amount || 0) > 0 && (
                     <Button
                       variant="outline"
@@ -570,7 +569,7 @@ export default function SupplierTab({
                     <span className="text-gray-500 ml-1">purchases</span>
                   </div>
                   <div className="flex items-center">
-                    <DollarSign className="h-3 w-3 text-green-600 mr-1 flex-shrink-0" />
+                    <Banknote className="h-3 w-3 text-green-600 mr-1 flex-shrink-0" />
                     <span className="font-medium text-gray-900">
                       {formatCurrency(supplier.total_amount || 0)}
                     </span>
@@ -594,6 +593,14 @@ export default function SupplierTab({
                     </div>
                     <div className="text-xs text-gray-500">Balance</div>
                   </div>
+                  {(supplier.supplier_credit || 0) > 0 && (
+                    <div className="text-center sm:text-right">
+                      <div className="font-bold text-blue-600">
+                        {formatCurrency(supplier.supplier_credit || 0)}
+                      </div>
+                      <div className="text-xs text-blue-600 font-medium">Credit</div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

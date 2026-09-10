@@ -16,7 +16,7 @@ export default function SaleInvoicePage() {
   const params = useParams()
   const router = useRouter()
   const { platformName } = useBranding()
-  const saleId = Number(params.id)
+  const saleId = Number(params?.id)
 
   const [sale, setSale] = useState<any>(null)
   const [items, setItems] = useState<any[]>([])
@@ -42,7 +42,7 @@ export default function SaleInvoicePage() {
 
       try {
         setIsLoading(true)
-        const result = await getSaleDetails(Number(params.id))
+        const result = await getSaleDetails(saleId)
 
         if (result.success && result.data) {
           setSale(result.data.sale)
@@ -67,7 +67,7 @@ export default function SaleInvoicePage() {
     }
 
     fetchSaleDetails()
-  }, [saleId, params.id, router, currency, companyInfo])
+  }, [saleId, router, currency, companyInfo])
 
   const printReceipt = () => {
     if (!sale || !items.length) return

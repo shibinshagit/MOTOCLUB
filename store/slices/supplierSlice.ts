@@ -12,6 +12,7 @@ export interface Supplier {
   total_amount?: number
   paid_amount?: number
   balance_amount?: number
+  supplier_credit?: number
   created_at?: string
   updated_at?: string
 }
