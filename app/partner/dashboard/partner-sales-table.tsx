@@ -7,13 +7,16 @@ import { DELIVERY_STATUSES } from "@/lib/sale-shipping"
 import { updatePartnerDeliveryStatus, updatePartnerSaleDetails } from "@/app/actions/partner-actions"
 import { notifySuccess, notifyError } from "@/lib/notifications"
 import { useToast } from "@/components/ui/use-toast"
-import { Loader2, Phone, RefreshCw } from "lucide-react"
+import { Loader2, Phone, RefreshCw, FileText, Printer, Package } from "lucide-react"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
+import { Button } from "@/components/ui/button"
 
 export function PartnerSalesTable({ initialSales }: { initialSales: any[] }) {
   const router = useRouter()
   const [sales, setSales] = useState(initialSales)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [loadingMap, setLoadingMap] = useState<Record<number, boolean>>({})
+  const [directConfirmSaleId, setDirectConfirmSaleId] = useState<number | null>(null)
   const { toast } = useToast()
 
   useEffect(() => {
@@ -31,17 +34,32 @@ export function PartnerSalesTable({ initialSales }: { initialSales: any[] }) {
     const optionLower = optionStatus?.toLowerCase() || '';
     if (currentStatus === optionStatus) return false;
     
-    // Only allow Sent -> Shipping/Shipped, and Shipping/Shipped -> Delivered
+    // Allowed transitions for Partner:
+    // Sent -> Direct, Shipping
+    // Direct -> Delivered, Shipping
+    // Shipping/Shipped -> Delivered
     const isCurrentShipping = statusLower === 'shipping' || statusLower === 'shipped';
     const isOptionShipping = optionLower === 'shipping' || optionLower === 'shipped';
 
-    if (statusLower === 'sent' && isOptionShipping) return false;
+    if (statusLower === 'sent' && (optionLower === 'direct' || isOptionShipping)) return false;
+    if (statusLower === 'direct' && (optionLower === 'delivered' || isOptionShipping)) return false;
     if (isCurrentShipping && optionLower === 'delivered') return false;
     
     return true; // Disable everything else
   }
 
   const handleStatusChange = async (saleId: number, newStatus: string) => {
+    const newStatusLower = newStatus?.toLowerCase() || '';
+    
+    if (newStatusLower === 'direct') {
+      setDirectConfirmSaleId(saleId)
+      return
+    }
+
+    await executeStatusUpdate(saleId, newStatus)
+  }
+
+  const executeStatusUpdate = async (saleId: number, newStatus: string) => {
     let trackingId: string | undefined = undefined;
     const newStatusLower = newStatus?.toLowerCase() || '';
     
@@ -77,6 +95,50 @@ export function PartnerSalesTable({ initialSales }: { initialSales: any[] }) {
     } finally {
       setLoadingMap(prev => ({ ...prev, [saleId]: false }))
     }
+  }
+
+  const handleConfirmDirect = async () => {
+    if (!directConfirmSaleId) return
+    const saleId = directConfirmSaleId
+    setDirectConfirmSaleId(null)
+    await executeStatusUpdate(saleId, "Direct")
+  }
+
+  const handlePrintInvoice = (sale: any) => {
+    import("@/lib/receipt-utils").then(({ printSalesReceipt }) => {
+      if (sale.items && sale.items.length > 0) {
+        printSalesReceipt(sale, sale.items, "INR", {}, false)
+      } else {
+        import("@/app/actions/sale-actions").then(({ getSaleDetails }) => {
+          getSaleDetails(sale.id).then((res) => {
+            if (res.success && res.data) {
+              printSalesReceipt(res.data.sale, res.data.items, "INR", {}, false)
+            } else {
+              toast({ title: "Error", description: "Failed to load invoice items", variant: "destructive" })
+            }
+          })
+        })
+      }
+    })
+  }
+
+  const handlePrintLabel = (sale: any) => {
+    import("@/lib/receipt-utils").then(({ printJobCard }) => {
+      if (sale.items && sale.items.length > 0) {
+        printJobCard(sale, "INR")
+      } else {
+        import("@/app/actions/sale-actions").then(({ getSaleDetails }) => {
+          getSaleDetails(sale.id).then((res) => {
+            if (res.success && res.data) {
+              const fullSale = { ...res.data.sale, items: res.data.items }
+              printJobCard(fullSale, "INR")
+            } else {
+              toast({ title: "Error", description: "Failed to load order details", variant: "destructive" })
+            }
+          })
+        })
+      }
+    })
   }
 
   const handleDetailsChange = async (saleId: number, field: 'weight_kg' | 'expense_courier', value: string) => {
@@ -127,6 +189,7 @@ export function PartnerSalesTable({ initialSales }: { initialSales: any[] }) {
               <th className="px-6 py-4 font-bold">Customer</th>
               <th className="px-6 py-4 font-bold whitespace-nowrap text-right">Amount</th>
               <th className="px-6 py-4 font-bold text-center">Status</th>
+              <th className="px-6 py-4 font-bold text-center whitespace-nowrap">Actions</th>
               <th className="px-6 py-4 font-bold text-center whitespace-nowrap">Shipping Date</th>
               <th className="px-6 py-4 font-bold">Tracking</th>
               <th className="px-6 py-4 font-bold text-center">Unit / Wt</th>
@@ -171,6 +234,30 @@ export function PartnerSalesTable({ initialSales }: { initialSales: any[] }) {
                     </select>
                     {loadingMap[sale.id] && <Loader2 className="h-4 w-4 animate-spin text-gray-400 absolute ml-24" />}
                   </div>
+                </td>
+                <td className="px-6 py-4 text-center whitespace-nowrap">
+                  {sale.delivery_status?.toLowerCase() === "direct" ? (
+                    <div className="flex items-center justify-center gap-1">
+                      <button
+                        onClick={() => handlePrintInvoice(sale)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-md border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 transition-colors shadow-2xs cursor-pointer"
+                        title="Print Customer Invoice"
+                      >
+                        <FileText className="h-3.5 w-3.5" />
+                        <span>Invoice</span>
+                      </button>
+                      <button
+                        onClick={() => handlePrintLabel(sale)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-md border border-slate-200 text-slate-700 bg-slate-50 hover:bg-slate-100 transition-colors shadow-2xs cursor-pointer"
+                        title="Print Delivery Label"
+                      >
+                        <Printer className="h-3.5 w-3.5" />
+                        <span>Label</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <span className="text-slate-400 font-medium">—</span>
+                  )}
                 </td>
                 <td className="px-6 py-4 text-center whitespace-nowrap">
                   {sale.shipping_date ? (
@@ -236,7 +323,36 @@ export function PartnerSalesTable({ initialSales }: { initialSales: any[] }) {
       </div>
       </div>
       )}
+
+      {/* Direct Delivery Confirmation Dialog */}
+      <Dialog open={!!directConfirmSaleId} onOpenChange={(open) => !open && setDirectConfirmSaleId(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-indigo-600">
+              <Package className="h-5 w-5" />
+              Direct Delivery
+            </DialogTitle>
+            <DialogDescription className="text-slate-600 mt-2">
+              This order will be marked for direct delivery from the partner/vendor to the customer.
+              <br /><br />
+              The invoice and delivery label will be available for this order.
+              <br /><br />
+              Continue?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 mt-4">
+            <Button variant="outline" onClick={() => setDirectConfirmSaleId(null)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleConfirmDirect}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white"
+            >
+              Confirm Direct Delivery
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
-

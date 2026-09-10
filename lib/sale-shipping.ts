@@ -5,6 +5,7 @@ export const DELIVERY_STATUSES = [
   "Paid",
   "Packed",
   "Sent",
+  "Direct",
   "Shipping",
   "Shipped",
   "In transit",

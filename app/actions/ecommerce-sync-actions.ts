@@ -60,6 +60,7 @@ function mapDeliveryStatus(ecomStatus: string): string {
   if (s === "pending" || s === "order_received" || s === "order received" || !s) return "Paid"
   if (s === "confirmed" || s === "paid") return "Paid"
   if (s === "packed") return "Packed"
+  if (s === "direct") return "Direct"
   if (s === "shipping" || s === "shipped" || s === "sent" || s === "in_transit" || s === "in transit") return "Shipping"
   if (s === "delivered") return "Delivered"
   if (s === "returned" || s === "return") return "Returned"

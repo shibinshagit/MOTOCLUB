@@ -13,7 +13,8 @@ const VALID_TRANSITIONS: Record<string, string[]> = {
   "Pending": [], // No manual exits allowed
   "Paid": ["Packed", "Returned"],
   "Packed": ["Sent", "Returned"],
-  "Sent": ["Shipping", "Returned"],
+  "Sent": ["Direct", "Shipping", "Returned"],
+  "Direct": ["Delivered", "Shipping", "Returned"],
   "Shipping": ["Delivered", "Returned"],
   "Delivered": ["Returned"],
   "Returned": [],
@@ -73,6 +74,8 @@ export function DeliveryStatusSelect({
 
   // Return Confirmation State
   const [returnConfirmOpen, setReturnConfirmOpen] = useState(false)
+  // Direct Delivery Confirmation State
+  const [directConfirmOpen, setDirectConfirmOpen] = useState(false)
 
   const handleUpdateStatus = async (newStatus: string) => {
     const previousStatus = status
@@ -214,12 +217,22 @@ export function DeliveryStatusSelect({
       return // Show WhatsApp photos/videos modal before marking as Sent
     }
 
+    if (newStatus === "Direct") {
+      setDirectConfirmOpen(true)
+      return // Show confirmation dialog first
+    }
+
     if (newStatus === "Shipping") {
       setIsTrackingModalOpen(true)
       return // Halt update until tracking ID is entered
     }
 
     await handleUpdateStatus(newStatus)
+  }
+
+  const handleConfirmDirect = async () => {
+    setDirectConfirmOpen(false)
+    await handleUpdateStatus("Direct")
   }
 
   const handleConfirmReturn = async () => {
@@ -257,6 +270,7 @@ export function DeliveryStatusSelect({
       case "Paid": return "border-blue-300"
       case "Packed": return "border-indigo-300"
       case "Sent": return "border-purple-300"
+      case "Direct": return "border-blue-400"
       case "Shipping": return "border-cyan-300"
       case "Delivered": return "border-green-400"
       case "Returned": return "border-red-300"
@@ -265,7 +279,7 @@ export function DeliveryStatusSelect({
   }
 
   // Enable all standard delivery status options for full flexibility
-  const ALL_STATUS_OPTIONS = ["Pending", "Paid", "Packed", "Sent", "Shipping", "Delivered", "Returned", "Failed"]
+  const ALL_STATUS_OPTIONS = ["Pending", "Paid", "Packed", "Sent", "Direct", "Shipping", "Delivered", "Returned", "Failed"]
   const uniqueOptions = Array.from(new Set([status, currentStatus, ...ALL_STATUS_OPTIONS])).filter(Boolean)
 
   const isDropdownDisabled = loading
@@ -335,6 +349,37 @@ export function DeliveryStatusSelect({
               className="bg-red-600 hover:bg-red-700 text-white"
             >
               {loading ? "Processing..." : "Yes, Mark as Returned"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Direct Delivery Confirmation Dialog */}
+      <Dialog open={directConfirmOpen} onOpenChange={(open) => !open && setDirectConfirmOpen(false)}>
+        <DialogContent onClick={(e) => e.stopPropagation()} className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-indigo-600">
+              <Package className="h-5 w-5" />
+              Direct Delivery
+            </DialogTitle>
+            <DialogDescription className="text-slate-600 mt-2">
+              This order will be marked for direct delivery from the partner/vendor to the customer.
+              <br /><br />
+              The invoice and delivery label will be available for this order.
+              <br /><br />
+              Continue?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 mt-4">
+            <Button variant="outline" onClick={() => setDirectConfirmOpen(false)} disabled={loading}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleConfirmDirect}
+              disabled={loading}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white"
+            >
+              {loading ? "Processing..." : "Confirm Direct Delivery"}
             </Button>
           </DialogFooter>
         </DialogContent>

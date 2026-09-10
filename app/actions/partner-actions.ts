@@ -125,7 +125,7 @@ export async function getPartnerDashboardStats(partnerId: number) {
     const ordersResult = await sql`
       SELECT 
         COUNT(*) as total_orders,
-        COUNT(*) FILTER (WHERE delivery_status IN ('Pending', 'Paid', 'Packed', 'Shipped', 'In transit')) as active_orders
+        COUNT(*) FILTER (WHERE delivery_status IN ('Pending', 'Paid', 'Packed', 'Sent', 'Direct', 'Shipping', 'Shipped', 'In transit')) as active_orders
       FROM sales s
       WHERE (
         s.courier_partner_id = ${partnerId}

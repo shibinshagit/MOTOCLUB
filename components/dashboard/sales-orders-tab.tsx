@@ -369,6 +369,11 @@ export default function SalesOrdersTab() {
                                   ECOMMERCE
                                 </Badge>
                               )}
+                              {sale.status === "Pending" && (
+                                <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-amber-100 text-amber-800 border-amber-300 font-semibold">
+                                  Not Updated
+                                </Badge>
+                              )}
                               {sale.status === "Returned" && (
                                 <Badge className="bg-rose-100 text-rose-800 border-rose-300 text-[10px] px-1.5 py-0 flex items-center gap-1">
                                   Returned
@@ -505,9 +510,23 @@ export default function SalesOrdersTab() {
                             <Button variant="ghost" size="icon" className="h-7 w-7 text-blue-600 hover:text-blue-700 hover:bg-blue-50" onClick={() => handleView(sale)} title="View Details">
                               <Eye className="h-4 w-4" />
                             </Button>
-                            <Button variant="ghost" size="icon" className="h-7 w-7 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50" onClick={() => handleOpenInPOS(sale.id)} title="Open in POS">
-                              <PlayCircle className="h-4 w-4" />
-                            </Button>
+                            <div className="relative inline-block">
+                              <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                className={`h-7 w-7 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 ${sale.status === "Pending" ? "bg-amber-50 ring-1 ring-amber-300" : ""}`} 
+                                onClick={() => handleOpenInPOS(sale.id)} 
+                                title={sale.status === "Pending" ? "Open in POS (Sale Not Updated Yet)" : "Open in POS"}
+                              >
+                                <PlayCircle className="h-4 w-4" />
+                              </Button>
+                              {sale.status === "Pending" && (
+                                <span className="absolute -top-0.5 -right-0.5 flex h-2 w-2">
+                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                                  <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                                </span>
+                              )}
+                            </div>
                             <Button variant="ghost" size="icon" className="h-7 w-7 text-violet-600 hover:text-violet-700 hover:bg-violet-50" onClick={() => handleEdit(sale)} title="Edit">
                               <Edit className="h-4 w-4" />
                             </Button>

@@ -2215,7 +2215,7 @@ export async function updateSaleDeliveryStatus(
     const isJobCard = rows[0].sale_type === 'job_card'
     const isEcommerce = rows[0].source === 'ECOMMERCE' || rows[0].external_order_id != null
 
-    const allowedStatuses = ["Pending", "Paid", "Packed", "Sent", "Shipping", "Delivered", "Returned", "Failed"]
+    const allowedStatuses = ["Pending", "Paid", "Packed", "Sent", "Direct", "Shipping", "Delivered", "Returned", "Failed"]
 
     if (!allowedStatuses.includes(deliveryStatus)) {
       return { success: false as const, message: `Invalid delivery status: ${deliveryStatus}` }
