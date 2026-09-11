@@ -1,6 +1,6 @@
-"use client"
-
 import { useMemo, useState, memo } from "react"
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import {
   ExcelColumnFilterHeader,
   createEmptyColumnFilter,
@@ -69,6 +69,12 @@ interface ProductsExcelTableProps {
   currency: string
   onViewProduct: (product: any) => void
   onEditProduct: (product: any) => void
+  page?: number
+  pageSize?: number
+  totalCount?: number
+  totalPages?: number
+  onPageChange?: (page: number) => void
+  onPageSizeChange?: (pageSize: number) => void
 }
 
 function TableSkeleton({ cols }: { cols: number }) {
@@ -95,6 +101,12 @@ function ProductsExcelTable({
   currency,
   onViewProduct,
   onEditProduct,
+  page = 1,
+  pageSize = 10,
+  totalCount = 0,
+  totalPages = 1,
+  onPageChange,
+  onPageSizeChange,
 }: ProductsExcelTableProps) {
   const formatMoney = (amount: number | string) => {
     const num = typeof amount === "number" ? amount : Number.parseFloat(String(amount || 0))
@@ -190,12 +202,14 @@ function ProductsExcelTable({
     `sticky right-0 z-10 min-w-[5.5rem] whitespace-nowrap border-l border-slate-200 px-4 py-2.5 text-right shadow-[-8px_0_12px_-8px_rgba(15,23,42,0.12)] group-hover:bg-violet-50/50 ${rowBg}`
 
   const colCount = 1 + 3 + (hideCogs ? 0 : 1) + (hideStockCount ? 0 : 3) + 1
+  const startIndex = (page - 1) * pageSize
 
   return (
-    <div className="flex h-full flex-col overflow-hidden rounded-xl border border-slate-200 bg-card">
-      <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-[#F1F4F9] px-4 py-2">
+    <div className="flex h-full flex-col overflow-hidden rounded-xl border border-slate-200 bg-card shadow-sm">
+      <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-[#F1F4F9] px-4 py-2.5">
         <span className="text-xs font-medium text-slate-600">
-          {displayProducts.length} of {searchFilteredProducts.length} products
+          Showing {displayProducts.length} row{displayProducts.length === 1 ? "" : "s"}
+          {totalCount > 0 ? ` of ${totalCount.toLocaleString()} products (Page ${page} of ${totalPages})` : ""}
         </span>
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
@@ -270,7 +284,7 @@ function ProductsExcelTable({
                       index % 2 === 0 ? "bg-white" : "bg-slate-50/60",
                     )}
                   >
-                    <td className="whitespace-nowrap px-4 py-2.5 align-top text-xs text-muted-foreground">{index + 1}</td>
+                    <td className="whitespace-nowrap px-4 py-2.5 align-top text-xs text-muted-foreground">{startIndex + index + 1}</td>
                     <td className="min-w-[200px] max-w-sm whitespace-normal break-words px-4 py-2.5 align-top font-medium leading-snug text-slate-800">
                       {product.name}
                     </td>
@@ -321,6 +335,78 @@ function ProductsExcelTable({
           </tbody>
         </table>
       </div>
+
+      {totalCount > 0 ? (
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-slate-200 bg-[#F1F4F9] px-4 py-3 text-xs text-slate-600">
+          <div className="flex items-center gap-2 font-medium">
+            Showing {startIndex + 1}–{Math.min(startIndex + pageSize, totalCount)} of {totalCount.toLocaleString()} products
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3 sm:gap-4">
+            <div className="flex items-center gap-1.5">
+              <span className="text-slate-500">Per page:</span>
+              <select
+                value={pageSize}
+                onChange={(e) => onPageSizeChange?.(Number(e.target.value))}
+                className="h-8 rounded border border-slate-200 bg-white px-2 text-xs font-medium text-slate-700 focus:border-violet-500 focus:outline-none"
+              >
+                <option value={10}>10</option>
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+              </select>
+            </div>
+
+            <div className="flex items-center gap-1">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 w-8 p-0 text-slate-600 border-slate-200 bg-white disabled:opacity-50"
+                onClick={() => onPageChange?.(1)}
+                disabled={page <= 1 || isLoading}
+                title="First page"
+              >
+                <ChevronsLeft className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 w-8 p-0 text-slate-600 border-slate-200 bg-white disabled:opacity-50"
+                onClick={() => onPageChange?.(page - 1)}
+                disabled={page <= 1 || isLoading}
+                title="Previous page"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+
+              <span className="px-2 font-medium text-slate-700">
+                Page {page} of {totalPages}
+              </span>
+
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 w-8 p-0 text-slate-600 border-slate-200 bg-white disabled:opacity-50"
+                onClick={() => onPageChange?.(page + 1)}
+                disabled={page >= totalPages || isLoading}
+                title="Next page"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 w-8 p-0 text-slate-600 border-slate-200 bg-white disabled:opacity-50"
+                onClick={() => onPageChange?.(totalPages)}
+                disabled={page >= totalPages || isLoading}
+                title="Last page"
+              >
+                <ChevronsRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

@@ -3,6 +3,8 @@
 import { sql, getLastError, resetConnectionState } from "@/lib/db"
 import { revalidatePath } from "next/cache"
 
+import { getSupplierCreditSummary } from "./supplier-payment-actions"
+
 export async function getSuppliers(userId: number, limit?: number, searchTerm?: string) {
   console.log("getSuppliers: Called with userId:", userId, "limit:", limit, "searchTerm:", searchTerm)
 
@@ -16,10 +18,9 @@ export async function getSuppliers(userId: number, limit?: number, searchTerm?: 
   try {
     console.log("getSuppliers: Executing SQL query")
 
-    let suppliers
+    let suppliers: any[]
 
     if (searchTerm && searchTerm.trim()) {
-      // Search query - FIXED: Exclude cancelled purchases from balance calculation
       const searchPattern = `%${searchTerm.toLowerCase()}%`
       suppliers = await sql`
         SELECT 
@@ -27,8 +28,7 @@ export async function getSuppliers(userId: number, limit?: number, searchTerm?: 
           COALESCE(p.total_purchases, 0) as total_purchases,
           COALESCE(p.total_amount, 0) as total_amount,
           GREATEST(COALESCE(ft.total_paid, 0), COALESCE(p.paid_amount, 0)) as paid_amount,
-          COALESCE(p.balance_amount, 0) as balance_amount,
-          GREATEST(COALESCE(ft.total_paid, 0) - COALESCE(p.paid_amount, 0), 0) as supplier_credit
+          COALESCE(p.balance_amount, 0) as balance_amount
         FROM suppliers s
         LEFT JOIN LATERAL (
           SELECT 
@@ -57,15 +57,13 @@ export async function getSuppliers(userId: number, limit?: number, searchTerm?: 
         ORDER BY s.name ASC
       `
     } else {
-      // Regular query - FIXED: Exclude cancelled purchases from balance calculation
       suppliers = await sql`
         SELECT 
           s.*,
           COALESCE(p.total_purchases, 0) as total_purchases,
           COALESCE(p.total_amount, 0) as total_amount,
           GREATEST(COALESCE(ft.total_paid, 0), COALESCE(p.paid_amount, 0)) as paid_amount,
-          COALESCE(p.balance_amount, 0) as balance_amount,
-          GREATEST(COALESCE(ft.total_paid, 0) - COALESCE(p.paid_amount, 0), 0) as supplier_credit
+          COALESCE(p.balance_amount, 0) as balance_amount
         FROM suppliers s
         LEFT JOIN LATERAL (
           SELECT 
@@ -90,8 +88,94 @@ export async function getSuppliers(userId: number, limit?: number, searchTerm?: 
       `
     }
 
-    console.log("getSuppliers: Query successful, found", suppliers.length, "suppliers")
-    return { success: true, data: suppliers }
+    // Batch fetch financial transactions for all suppliers to prevent N+1 query timeouts
+    const supplierIds = suppliers.map((s: any) => s.id)
+    const allTransactions = supplierIds.length > 0
+      ? await sql`
+          SELECT reference_id, amount, transaction_type, description, notes
+          FROM financial_transactions
+          WHERE reference_id = ANY(${supplierIds})
+            AND reference_type = 'supplier'
+            AND created_by = ${userId}
+            AND (status IS NULL OR status != 'Cancelled')
+        `
+      : []
+
+    const txMap: Record<number, any[]> = {}
+    for (const tx of allTransactions) {
+      const refId = Number(tx.reference_id)
+      if (!txMap[refId]) txMap[refId] = []
+      txMap[refId].push(tx)
+    }
+
+    const enrichedSuppliers = suppliers.map((s: any) => {
+      const sTxs = txMap[s.id] || []
+      let originalCredit = 0
+      let refundedCredit = 0
+      let creditUsed = 0
+      let totalPaymentsFromTx = 0
+
+      for (const tx of sTxs) {
+        const type = tx.transaction_type
+        const amt = Number(tx.amount) || 0
+
+        if (type === "supplier_payment") {
+          totalPaymentsFromTx += amt
+          let extra = 0
+          if (tx.notes) {
+            try {
+              const parsed = JSON.parse(tx.notes)
+              if (typeof parsed.extraCredit === "number") {
+                extra = parsed.extraCredit
+              }
+            } catch {
+              // Not JSON
+            }
+          }
+          if (extra === 0 && tx.description) {
+            const match = tx.description.match(/Supplier Credit:\s*([\d.]+)/i)
+            if (match) {
+              extra = Number(match[1]) || 0
+            }
+          }
+          originalCredit += Math.max(extra, 0)
+        } else if (type === "supplier_refund") {
+          refundedCredit += amt
+        } else if (type === "supplier_credit_use") {
+          creditUsed += amt
+        }
+      }
+
+      const totalPurchasesAmount = Number(s.total_amount || 0)
+      const outstandingBalance = Math.max(Number(s.balance_amount || 0), 0)
+      const totalReceivedOnPurchases = Number(s.paid_amount || 0)
+
+      const effectiveTotalPaid = Math.max(totalPaymentsFromTx, totalReceivedOnPurchases)
+      const settledPurchases = Math.max(totalPurchasesAmount - outstandingBalance, 0)
+      const calculatedOverpayment = Math.max(effectiveTotalPaid - settledPurchases, 0)
+
+      const legacyCredit = Math.max(totalPaymentsFromTx - Math.max(totalReceivedOnPurchases - creditUsed, 0), calculatedOverpayment, 0)
+
+      if (originalCredit < legacyCredit) {
+        originalCredit = legacyCredit
+      }
+
+      const availableCredit = Math.max(originalCredit - refundedCredit - creditUsed, 0)
+
+      return {
+        ...s,
+        balance_amount: outstandingBalance,
+        outstanding_balance: outstandingBalance,
+        original_credit: originalCredit,
+        refunded_credit: refundedCredit,
+        credit_used: creditUsed,
+        available_credit: availableCredit,
+        supplier_credit: availableCredit,
+      }
+    })
+
+    console.log("getSuppliers: Query successful, found", enrichedSuppliers.length, "suppliers")
+    return { success: true, data: enrichedSuppliers }
   } catch (error) {
     console.error("getSuppliers: SQL error:", error)
     console.error("getSuppliers: Error details:", getLastError())
@@ -122,7 +206,6 @@ export async function getSupplierWithPurchases(id: number, userId: number) {
   resetConnectionState()
 
   try {
-    // Get supplier details
     const supplierResult = await sql`
       SELECT * FROM suppliers WHERE id = ${id} AND created_by = ${userId}
     `
@@ -133,7 +216,6 @@ export async function getSupplierWithPurchases(id: number, userId: number) {
 
     const supplier = supplierResult[0]
 
-    // FIXED: Get supplier purchase statistics excluding cancelled purchases from balance
     const statsResult = await sql`
       SELECT 
         COUNT(*) as total_purchases,
@@ -146,16 +228,6 @@ export async function getSupplierWithPurchases(id: number, userId: number) {
       WHERE TRIM(supplier) = TRIM(${supplier.name}) AND created_by = ${userId}
     `
 
-    const ftResult = await sql`
-      SELECT COALESCE(SUM(amount), 0) as total_paid
-      FROM financial_transactions
-      WHERE reference_id = ${id}
-        AND transaction_type = 'supplier_payment'
-        AND created_by = ${userId}
-        AND (status IS NULL OR status != 'Cancelled')
-    `
-
-    // Get all purchases from this supplier with received amounts
     const purchasesResult = await sql`
       SELECT 
         p.*,
@@ -181,10 +253,14 @@ export async function getSupplierWithPurchases(id: number, userId: number) {
       outstanding_balance: 0,
     }
 
-    const totalPaidFt = Number(ftResult[0]?.total_paid || 0)
-    const paidAmountPurchases = Number(stats.paid_amount || 0)
-    const actualPaidAmount = Math.max(totalPaidFt, paidAmountPurchases)
-    const supplierCredit = Math.max(totalPaidFt - paidAmountPurchases, 0)
+    const summaryRes = await getSupplierCreditSummary(id, userId)
+    const summary = summaryRes.data || {
+      outstandingBalance: Number(stats.balance_amount || 0),
+      originalCredit: 0,
+      refundedCredit: 0,
+      creditUsed: 0,
+      availableCredit: 0,
+    }
 
     return {
       success: true,
@@ -192,8 +268,13 @@ export async function getSupplierWithPurchases(id: number, userId: number) {
         supplier: {
           ...supplier,
           ...stats,
-          paid_amount: actualPaidAmount,
-          supplier_credit: supplierCredit,
+          balance_amount: summary.outstandingBalance,
+          outstanding_balance: summary.outstandingBalance,
+          original_credit: summary.originalCredit,
+          refunded_credit: summary.refundedCredit,
+          credit_used: summary.creditUsed,
+          available_credit: summary.availableCredit,
+          supplier_credit: summary.availableCredit,
         },
         purchases: purchasesResult,
       },

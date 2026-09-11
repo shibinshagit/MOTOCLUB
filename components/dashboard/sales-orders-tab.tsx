@@ -189,6 +189,22 @@ export default function SalesOrdersTab() {
     )
   }
 
+  const getSaleProfit = (sale: any) => {
+    const itemsCost = sale.items?.reduce(
+      (sum: number, i: any) => sum + Number(i.cost || i.cost_price || 0) * Number(i.quantity || 1),
+      0
+    ) || 0
+    const cost = Number(sale.total_cost) > 0 ? Number(sale.total_cost) : itemsCost
+    const sellingPrice = Number(sale.total_amount || 0)
+    const courierCharge = Number(sale.courier_paid_extra || sale.expense_courier || 0)
+
+    if (sale.status === "Returned" || sale.delivery_status === "Returned") {
+      return 0
+    }
+
+    return sellingPrice - cost - courierCharge
+  }
+
   return (
     <div className="space-y-4 p-4 md:p-6 pb-20">
       {editingSaleId && (
@@ -306,7 +322,7 @@ export default function SalesOrdersTab() {
                   <th className="whitespace-nowrap px-3 py-2.5 text-left">Phone</th>
                   <th className="whitespace-nowrap px-3 py-2.5 text-left">Tracking ID</th>
                   <th className="whitespace-nowrap px-2 py-2.5 text-center">Items</th>
-                  <th className="whitespace-nowrap px-3 py-2.5 text-right">Total</th>
+                  <th className="whitespace-nowrap px-3 py-2.5 text-right">Total / Profit</th>
                   <th className="whitespace-nowrap px-3 py-2.5 text-center">Delivery Status</th>
                   <th className="whitespace-nowrap px-3 py-2.5 text-right">Actions</th>
                 </tr>
@@ -340,6 +356,8 @@ export default function SalesOrdersTab() {
                   } else if (statusLower.includes("cancel") || statusLower.includes("return")) {
                     rowBg = "bg-rose-100/80 border-l-4 border-l-rose-500 hover:bg-rose-200/80 text-rose-950 font-medium"
                   }
+
+                  const saleProfit = getSaleProfit(sale)
 
                   return (
                     <div key={sale.id} className="contents">
@@ -464,8 +482,13 @@ export default function SalesOrdersTab() {
                           )}
                         </td>
                         <td className="whitespace-nowrap px-2 py-2.5 text-center font-medium text-slate-700">{itemQuantity}</td>
-                        <td className="whitespace-nowrap px-3 py-2.5 text-right font-bold text-slate-900">
-                          {currency} {Number(sale.total_amount).toFixed(2)}
+                        <td className="whitespace-nowrap px-3 py-2.5 text-right">
+                          <div className="font-bold text-slate-900">
+                            {currency} {Number(sale.total_amount).toFixed(2)}
+                          </div>
+                          <div className="text-[11px] font-semibold text-emerald-700 mt-0.5" title="Net Profit">
+                            Profit: {currency} {saleProfit.toFixed(2)}
+                          </div>
                         </td>
                         <td className="whitespace-nowrap px-3 py-2.5 text-center" onClick={(e) => e.stopPropagation()}>
                           <DeliveryStatusSelect 
@@ -539,184 +562,150 @@ export default function SalesOrdersTab() {
   
                       {/* Expanded Row */}
                       {isExpanded && (
-                        <tr key={`expanded-${sale.id}`} className="bg-slate-50/50 border-b border-slate-200">
-                          <td colSpan={12} className="p-6">
-                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-                              
-                              {/* Summary Card */}
-                              <div className="col-span-1 lg:col-span-1 space-y-4 order-2 lg:order-2">
-                                {/* Delivery Workflow Card */}
-                                <div className="p-3.5 bg-gradient-to-r from-blue-50/70 to-indigo-50/50 rounded-xl border border-blue-100 space-y-3">
-                                  <div className="flex items-center justify-between">
-                                    <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">Delivery Workflow</span>
-                                    <Badge variant="outline" className="text-xs font-semibold bg-blue-100 text-blue-800 border-blue-200">
-                                      {sale.delivery_status || "Pending"}
-                                    </Badge>
-                                  </div>
+                        <tr key={`expanded-${sale.id}`} className="bg-slate-50/90 border-b border-slate-200">
+                          <td colSpan={12} className="px-3 py-2">
+                            <div className="bg-white p-2.5 sm:p-3 rounded-md border border-slate-200 shadow-2xs space-y-2 text-xs">
+                              {/* Product Table */}
+                              <div className="rounded border border-slate-200 overflow-x-auto">
+                                <table className="w-full text-xs">
+                                  <thead className="bg-[#F8FAFC] text-slate-600 font-semibold border-b border-slate-200">
+                                    <tr>
+                                      <th className="px-2.5 py-1 text-left">Product</th>
+                                      <th className="px-2.5 py-1 text-left">Variant</th>
+                                      <th className="px-2 py-1 text-center">Qty</th>
+                                      <th className="px-2.5 py-1 text-right">Cost Price</th>
+                                      <th className="px-2.5 py-1 text-right">Selling Price</th>
+                                      <th className="px-2.5 py-1 text-right">Line Total</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-100">
+                                    {sale.items?.map((item: any) => (
+                                      <tr key={item.id} className="hover:bg-slate-50/60">
+                                        <td className="px-2.5 py-1 font-medium text-slate-800">{item.product_name || "Unknown Product"}</td>
+                                        <td className="px-2.5 py-1 text-slate-500">{item.variant_name || "Default"}</td>
+                                        <td className="px-2 py-1 text-center text-slate-700 font-medium">{item.quantity}</td>
+                                        <td className="px-2.5 py-1 text-right text-slate-400">{currency} {Number(item.cost || item.cost_price).toFixed(2)}</td>
+                                        <td className="px-2.5 py-1 text-right text-slate-700">{currency} {Number(item.price).toFixed(2)}</td>
+                                        <td className="px-2.5 py-1 text-right font-bold text-slate-900">{currency} {(Number(item.price) * item.quantity).toFixed(2)}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
 
-                                  <div className="grid grid-cols-2 gap-2.5 text-xs">
+                              {/* Compact Side-by-Side: Delivery Info & Customer on Left, Totals & Actions on Right */}
+                              <div className="grid grid-cols-1 lg:grid-cols-12 gap-2 text-xs items-start">
+                                {/* Delivery & Customer Info */}
+                                <div className="lg:col-span-7 bg-slate-50/80 p-2 rounded border border-slate-100 text-[11px] space-y-1">
+                                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-3 gap-y-1">
                                     <div>
-                                      <span className="text-slate-400 block font-medium">Vendor:</span>
+                                      <span className="text-slate-400 font-medium">Vendor: </span>
                                       <span className="font-semibold text-slate-800">{sale.courier_partner_name || "Standard Delivery"}</span>
                                     </div>
                                     <div>
-                                      <span className="text-slate-400 block font-medium">Customer:</span>
-                                      <span className="font-semibold text-slate-800">{sale.customer_name || "N/A"}</span>
-                                    </div>
-                                    <div>
-                                      <span className="text-slate-400 block font-medium">Courier Service:</span>
+                                      <span className="text-slate-400 font-medium">Courier: </span>
                                       <span className="font-semibold text-blue-700">{sale.courier_service_name || "—"}</span>
                                     </div>
                                     <div>
-                                      <span className="text-slate-400 block font-medium">Tracking ID:</span>
+                                      <span className="text-slate-400 font-medium">Tracking ID: </span>
                                       <span className="font-mono font-bold text-slate-900">{sale.tracking_id || "—"}</span>
                                     </div>
                                     <div>
-                                      <span className="text-slate-400 block font-medium">Shipping Date:</span>
+                                      <span className="text-slate-400 font-medium">Shipping Date: </span>
                                       <span className="font-semibold text-slate-800">
                                         {sale.shipping_date ? format(new Date(sale.shipping_date), "dd/MM/yyyy") : "—"}
                                       </span>
                                     </div>
-                                  </div>
-
-                                  {/* Quick workflow actions */}
-                                  <div className="flex items-center gap-2 pt-2 border-t border-blue-100/80 flex-wrap">
-                                    <Button 
-                                      variant="outline" 
-                                      size="sm" 
-                                      onClick={() => handlePrintInvoice(sale)} 
-                                      className="h-7 text-xs bg-white text-blue-700 border-blue-200 hover:bg-blue-50 gap-1.5 font-medium"
-                                    >
-                                      <FileText className="h-3 w-3" />
-                                      Invoice
-                                    </Button>
-                                    <Button 
-                                      variant="outline" 
-                                      size="sm" 
-                                      onClick={() => handlePrint(sale)} 
-                                      className="h-7 text-xs bg-white text-slate-700 border-slate-200 hover:bg-slate-50 gap-1.5 font-medium"
-                                    >
-                                      <Printer className="h-3 w-3" />
-                                      Delivery Label
-                                    </Button>
-                                    {sale.tracking_id && (() => {
-                                      const tUrl = generateCourierTrackingUrl(sale.courier_service_name, sale.tracking_id) || getPublicTrackingUrl(sale.tracking_id);
-                                      return tUrl ? (
-                                        <Button 
-                                          variant="outline" 
-                                          size="sm" 
-                                          onClick={() => window.open(tUrl, "_blank")} 
-                                          className="h-7 text-xs bg-white text-indigo-700 border-indigo-200 hover:bg-indigo-50 gap-1.5 font-semibold"
-                                        >
-                                          <ExternalLink className="h-3 w-3" />
-                                          Track Shipment
-                                        </Button>
-                                      ) : null;
-                                    })()}
-                                  </div>
-                                </div>
-
-                                <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
-                                  <User className="h-4 w-4 text-slate-500" /> Customer Information
-                                </h4>
-                                
-                                <div className="space-y-3 text-sm text-slate-600">
-                                  {(sale.tracking_id || sale.courier_service_name) && (
-                                    <div className="mb-4 bg-slate-50 p-3 rounded-lg border border-slate-100 space-y-2">
-                                      {sale.courier_service_name && (
-                                        <div>
-                                          <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 block mb-0.5">Courier Service</span>
-                                          <p className="font-sans text-blue-600 text-sm font-bold">{sale.courier_service_name}</p>
-                                        </div>
-                                      )}
-                                      {sale.tracking_id && (
-                                        <div>
-                                          <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 block mb-0.5">Tracking ID</span>
-                                          <p className="font-mono text-blue-700 text-sm font-bold">{sale.tracking_id}</p>
-                                        </div>
-                                      )}
+                                    <div>
+                                      <span className="text-slate-400 font-medium">Customer: </span>
+                                      <span className="font-semibold text-slate-800">{sale.customer_name || "N/A"}</span>
                                     </div>
-                                  )}
-                                  <div>
-                                    <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 block mb-1">Customer Details</span>
-                                    <p className="font-medium text-slate-800 text-base">{sale.customer_name || "N/A"}</p>
-                                    <p className="flex items-center gap-1.5 mt-1"><Phone className="h-3.5 w-3.5 text-slate-400" /> {sale.customer_phone ? formatPhoneNumber(sale.customer_phone) : "N/A"}</p>
+                                    <div className="col-span-2 sm:col-span-3">
+                                      <span className="text-slate-400 font-medium">Phone: </span>
+                                      <span className="font-medium text-slate-800">{sale.customer_phone ? formatPhoneNumber(sale.customer_phone) : "N/A"}</span>
+                                    </div>
                                   </div>
-                                  
+
                                   {sale.shipping_street && (
-                                    <div className="pt-2">
-                                      <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 block mb-1">Shipping Address</span>
-                                      <div className="flex items-start gap-1.5 mt-1">
-                                        <MapPin className="h-3.5 w-3.5 text-slate-400 mt-0.5 shrink-0" />
-                                        <div className="space-y-0.5">
-                                          <p className="text-slate-700">{sale.shipping_street}</p>
-                                          {sale.shipping_landmark && <p className="text-xs text-slate-500">Landmark: {sale.shipping_landmark}</p>}
-                                          {(sale.shipping_city || sale.shipping_pincode) && (
-                                            <p className="font-medium text-slate-700">
-                                              {sale.shipping_city}{sale.shipping_pincode ? `, ${sale.shipping_pincode}` : ""}
-                                            </p>
-                                          )}
-                                        </div>
-                                      </div>
-                                      {sale.shipping_address_type && (
-                                        <Badge variant="secondary" className="text-[10px] py-0 px-1.5 mt-2 font-semibold uppercase ml-5">
-                                          {sale.shipping_address_type}
-                                        </Badge>
-                                      )}
+                                    <div className="pt-1 border-t border-slate-200/50 flex items-start gap-1">
+                                      <span className="text-slate-400 font-medium shrink-0">Address: </span>
+                                      <span className="text-slate-700 font-normal">
+                                        {sale.shipping_street}
+                                        {sale.shipping_landmark ? `, Near ${sale.shipping_landmark}` : ""}
+                                        {(sale.shipping_city || sale.shipping_pincode) ? `, ${sale.shipping_city || ""}${sale.shipping_pincode ? ` - ${sale.shipping_pincode}` : ""}` : ""}
+                                        {sale.shipping_address_type && <span className="ml-1.5 px-1 py-0 bg-slate-200 text-slate-700 text-[9px] rounded font-semibold uppercase">{sale.shipping_address_type}</span>}
+                                      </span>
                                     </div>
                                   )}
                                 </div>
-                              </div>
-  
-                              {/* Line Items */}
-                              <div className="col-span-1 lg:col-span-2 space-y-4 order-1 lg:order-1">
-                                <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
-                                  <Layers className="h-4 w-4 text-slate-500" /> Product Line Items
-                                </h4>
-                                
-                                <div className="rounded-lg border border-slate-200 overflow-hidden text-sm shadow-sm">
-                                  <table className="w-full">
-                                    <thead className="bg-[#F1F4F9] text-slate-600 text-xs uppercase tracking-wider font-semibold border-b border-slate-200">
-                                      <tr>
-                                        <th className="px-4 py-3 text-left">Product</th>
-                                        <th className="px-4 py-3 text-left">Variant</th>
-                                        <th className="px-4 py-3 text-center">Qty</th>
-                                        <th className="px-4 py-3 text-right">Cost Price</th>
-                                        <th className="px-4 py-3 text-right">Selling Price</th>
-                                        <th className="px-4 py-3 text-right">Line Total</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-100">
-                                      {sale.items?.map((item: any) => (
-                                        <tr key={item.id} className="hover:bg-slate-50/50 transition-colors">
-                                          <td className="px-4 py-3 font-medium text-slate-800">{item.product_name || "Unknown Product"}</td>
-                                          <td className="px-4 py-3 text-slate-500 text-xs">{item.variant_name || "Default"}</td>
-                                          <td className="px-4 py-3 text-center text-slate-700 font-medium">{item.quantity}</td>
-                                          <td className="px-4 py-3 text-right text-slate-400 text-xs">{currency} {Number(item.cost || item.cost_price).toFixed(2)}</td>
-                                          <td className="px-4 py-3 text-right text-slate-700">{currency} {Number(item.price).toFixed(2)}</td>
-                                          <td className="px-4 py-3 text-right font-bold text-slate-900">{currency} {(Number(item.price) * item.quantity).toFixed(2)}</td>
-                                        </tr>
-                                      ))}
-                                    </tbody>
-                                  </table>
-                                </div>
-  
-                                <div className="flex justify-end pt-2">
-                                  <div className="space-y-2">
+
+                                {/* Totals & Action Buttons */}
+                                <div className="lg:col-span-5 bg-slate-50/80 p-2 rounded border border-slate-100 space-y-1.5 text-[11px]">
+                                  <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5">
                                     {Number(sale.courier_paid_extra || 0) > 0 && (
-                                      <div className="flex justify-end text-sm text-slate-600 px-4">
-                                        <span className="mr-4">Courier Paid (Extra):</span>
-                                        <span>{currency} {Number(sale.courier_paid_extra).toFixed(2)}</span>
+                                      <div>
+                                        <span className="text-slate-500">Courier Paid (Extra): </span>
+                                        <span className="font-semibold text-slate-800">{currency} {Number(sale.courier_paid_extra).toFixed(2)}</span>
                                       </div>
                                     )}
-                                    <div className="flex gap-4 items-center bg-emerald-50 px-4 py-2.5 rounded-lg border border-emerald-100 shadow-sm">
-                                      <span className="text-xs font-semibold uppercase tracking-wider text-emerald-700">Order Total</span>
-                                      <span className="text-lg font-black text-emerald-900">{currency} {Number(sale.total_amount).toFixed(2)}</span>
+                                    <div>
+                                      <span className="text-slate-500">Items Cost: </span>
+                                      <span className="font-semibold text-slate-800">{currency} {(() => {
+                                        const itemsCost = sale.items?.reduce((sum: number, i: any) => sum + (Number(i.cost || i.cost_price || 0) * Number(i.quantity || 1)), 0) || 0;
+                                        const cost = Number(sale.total_cost) > 0 ? Number(sale.total_cost) : itemsCost;
+                                        return cost.toFixed(2);
+                                      })()}</span>
+                                    </div>
+                                  </div>
+
+                                  <div className="flex flex-wrap items-center justify-between gap-1.5 pt-1 border-t border-slate-200/60">
+                                    <div className="flex items-center gap-1.5">
+                                      <div className="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded text-[11px] font-bold">
+                                        Total: {currency} {Number(sale.total_amount).toFixed(2)}
+                                      </div>
+                                      <div className="bg-emerald-50 text-emerald-900 border border-emerald-200 px-2 py-0.5 rounded text-[11px] font-bold">
+                                        Profit: <span className="text-emerald-700">{currency} {saleProfit.toFixed(2)}</span>
+                                      </div>
+                                    </div>
+
+                                    <div className="flex items-center gap-1 ml-auto" onClick={(e) => e.stopPropagation()}>
+                                      <Button 
+                                        variant="outline" 
+                                        size="sm" 
+                                        onClick={() => handlePrintInvoice(sale)} 
+                                        className="h-6 px-2 text-[10px] bg-white text-blue-700 border-blue-200 hover:bg-blue-50 gap-1 font-medium"
+                                      >
+                                        <FileText className="h-3 w-3" />
+                                        <span>Invoice</span>
+                                      </Button>
+                                      <Button 
+                                        variant="outline" 
+                                        size="sm" 
+                                        onClick={() => handlePrint(sale)} 
+                                        className="h-6 px-2 text-[10px] bg-white text-slate-700 border-slate-200 hover:bg-slate-50 gap-1 font-medium"
+                                      >
+                                        <Printer className="h-3 w-3" />
+                                        <span>Label</span>
+                                      </Button>
+                                      {sale.tracking_id && (() => {
+                                        const tUrl = generateCourierTrackingUrl(sale.courier_service_name, sale.tracking_id) || getPublicTrackingUrl(sale.tracking_id);
+                                        return tUrl ? (
+                                          <Button 
+                                            variant="outline" 
+                                            size="sm" 
+                                            onClick={() => window.open(tUrl, "_blank")} 
+                                            className="h-6 px-2 text-[10px] bg-white text-indigo-700 border-indigo-200 hover:bg-indigo-50 gap-1 font-semibold"
+                                          >
+                                            <ExternalLink className="h-3 w-3" />
+                                            <span>Track</span>
+                                          </Button>
+                                        ) : null;
+                                      })()}
                                     </div>
                                   </div>
                                 </div>
                               </div>
-  
+
                             </div>
                           </td>
                         </tr>

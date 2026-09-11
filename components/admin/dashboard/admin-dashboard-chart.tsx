@@ -25,17 +25,17 @@ interface AdminDashboardChartProps {
 const METRIC_LABELS: Record<DashboardMetric, { title: string; description: string; yAxisType: "currency" | "number" }> = {
   sales: {
     title: "Sales Comparison",
-    description: "Daily valid sales comparison between current and previous period",
+    description: "Valid sales comparison between current and previous period",
     yAxisType: "currency",
   },
   profit: {
     title: "Gross Profit Comparison",
-    description: "Daily gross sales margin (Sales - Cost of Goods Sold) comparison",
+    description: "Gross sales margin (Sales - Cost of Goods Sold) comparison",
     yAxisType: "currency",
   },
   expenses: {
     title: "Expenses Comparison",
-    description: "Daily operating debit expenses comparison",
+    description: "Operating debit expenses comparison",
     yAxisType: "currency",
   },
   cogs: {
@@ -45,12 +45,12 @@ const METRIC_LABELS: Record<DashboardMetric, { title: string; description: strin
   },
   quantity: {
     title: "Products Sold Quantity Comparison",
-    description: "Total units sold per day",
+    description: "Total units sold comparison",
     yAxisType: "number",
   },
   orders: {
     title: "Order Count Comparison",
-    description: "Total completed sales/orders per day",
+    description: "Total completed sales/orders comparison",
     yAxisType: "number",
   },
 }
@@ -196,6 +196,7 @@ export default function AdminDashboardChart({
                 axisLine={{ stroke: "#e2e8f0" }}
                 tick={{ fill: "#64748b", fontSize: 11 }}
                 interval="preserveStartEnd"
+                minTickGap={20}
               />
 
               <YAxis

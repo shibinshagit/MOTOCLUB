@@ -23,6 +23,8 @@ import {
   CreditCard,
   History,
   FilePenLine,
+  RotateCcw,
+  Wallet,
 } from "lucide-react"
 import { useAppDispatch, useAppSelector } from "@/store/hooks"
 import {
@@ -49,6 +51,7 @@ import SimpleAddModal from "../suppliers/simple-add-modal"
 import SimpleViewModal from "../suppliers/simple-view-modal"
 import SimpleEditModal from "../suppliers/simple-edit-modal"
 import PayCreditModal from "../suppliers/pay-credit-modal"
+import RefundCreditModal from "../suppliers/refund-credit-modal"
 import ViewSupplierPaymentModal from "../suppliers/View-supplier-payment-model"
 import EditSupplierPaymentModal from "../suppliers/View-suplier-payment-edit"
 import type { SupplierPaymentListRow } from "@/app/actions/supplier-payment-actions"
@@ -145,11 +148,15 @@ export default function SupplierTab({
   const [showViewModal, setShowViewModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
   const [showPayCreditModal, setShowPayCreditModal] = useState(false)
+  const [showRefundModal, setShowRefundModal] = useState(false)
   const [selectedSupplierForPayment, setSelectedSupplierForPayment] = useState<{
     id: number
     name: string
     balance_amount: number
+    available_credit?: number
+    supplier_credit?: number
   } | null>(null)
+  const [selectedSupplierForRefund, setSelectedSupplierForRefund] = useState<any>(null)
 
   const [paymentHistorySupplier, setPaymentHistorySupplier] = useState<{ id: number; name: string } | null>(null)
   const [supplierPayments, setSupplierPayments] = useState<SupplierPaymentListRow[]>([])
@@ -370,9 +377,14 @@ export default function SupplierTab({
 
   const handleAdd = useCallback(() => setShowAddModal(true), [])
 
-  const handlePayCredit = useCallback((supplier: { id: number; name: string; balance_amount: number }) => {
+  const handlePayCredit = useCallback((supplier: { id: number; name: string; balance_amount: number; available_credit?: number; supplier_credit?: number }) => {
     setSelectedSupplierForPayment(supplier)
     setShowPayCreditModal(true)
+  }, [])
+
+  const handleRefundCredit = useCallback((supplier: any) => {
+    setSelectedSupplierForRefund(supplier)
+    setShowRefundModal(true)
   }, [])
 
   const handleOpenPaymentHistory = useCallback((supplier: { id: number; name: string }) => {
@@ -412,7 +424,9 @@ export default function SupplierTab({
     setShowViewModal(false)
     setShowEditModal(false)
     setShowPayCreditModal(false)
+    setShowRefundModal(false)
     setSelectedSupplierForPayment(null)
+    setSelectedSupplierForRefund(null)
     dispatch(setSelectedSupplierId(null))
     onModalClose?.()
   }, [dispatch, onModalClose])
@@ -506,6 +520,7 @@ export default function SupplierTab({
                         id: supplier.id,
                         name: supplier.name,
                         balance_amount: supplier.balance_amount || 0,
+                        available_credit: supplier.available_credit || supplier.supplier_credit || 0,
                       })
                     }
                   >
@@ -593,12 +608,17 @@ export default function SupplierTab({
                     </div>
                     <div className="text-xs text-gray-500">Balance</div>
                   </div>
-                  {(supplier.supplier_credit || 0) > 0 && (
-                    <div className="text-center sm:text-right">
-                      <div className="font-bold text-blue-600">
-                        {formatCurrency(supplier.supplier_credit || 0)}
+                  {((supplier.available_credit || supplier.supplier_credit || 0) > 0 || (supplier.paid_amount || 0) > Math.max((supplier.total_amount || 0) - (supplier.balance_amount || 0), 0)) && (
+                    <div className="text-center sm:text-right bg-blue-50/80 border border-blue-200 rounded-xl px-3 py-1 shadow-sm">
+                      <div className="flex items-center justify-center sm:justify-end font-bold text-blue-600 text-xs sm:text-sm">
+                        <Wallet className="h-3.5 w-3.5 mr-1 flex-shrink-0 text-blue-600" />
+                        {formatCurrency(
+                          supplier.available_credit ||
+                          supplier.supplier_credit ||
+                          Math.max((supplier.paid_amount || 0) - Math.max((supplier.total_amount || 0) - (supplier.balance_amount || 0), 0), 0)
+                        )}
                       </div>
-                      <div className="text-xs text-blue-600 font-medium">Credit</div>
+                      <div className="text-xs text-blue-600 font-semibold">Available Credit</div>
                     </div>
                   )}
                 </div>
@@ -608,7 +628,7 @@ export default function SupplierTab({
         </CardContent>
       </Card>
     ))
-  }, [suppliers, formatCurrency, handleView, handleEdit, handleDelete, handlePayCredit, handleOpenPaymentHistory])
+  }, [suppliers, formatCurrency, handleView, handleEdit, handleDelete, handlePayCredit, handleRefundCredit, handleOpenPaymentHistory])
 
   return (
     <div className="h-full flex flex-col bg-gray-50">
@@ -743,6 +763,17 @@ export default function SupplierTab({
         />
       )}
 
+      {selectedSupplierForRefund && (
+        <RefundCreditModal
+          isOpen={showRefundModal}
+          onClose={handleModalClose}
+          onSuccess={handleModalSuccess}
+          supplier={selectedSupplierForRefund}
+          userId={userId}
+          deviceId={deviceId || 0}
+        />
+      )}
+
       <Dialog
         open={!!paymentHistorySupplier}
         onOpenChange={(open) => {
@@ -755,7 +786,7 @@ export default function SupplierTab({
         <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="">
-              Credit payments{paymentHistorySupplier ? ` — ${paymentHistorySupplier.name}` : ""}
+              Payment & Credit History{paymentHistorySupplier ? ` — ${paymentHistorySupplier.name}` : ""}
             </DialogTitle>
           </DialogHeader>
           {loadingSupplierPayments ? (
@@ -765,7 +796,7 @@ export default function SupplierTab({
             </div>
           ) : supplierPayments.length === 0 ? (
             <p className="text-sm text-gray-500 py-6 text-center">
-              No recorded credit payments for this supplier yet.
+              No recorded credit payments or refunds for this supplier yet.
             </p>
           ) : (
             <ul className="space-y-2">
@@ -775,35 +806,52 @@ export default function SupplierTab({
                   className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm"
                 >
                   <div className="min-w-0">
-                    <div className="font-medium text-gray-900">
-                      {formatCurrency(p.amount)}
+                    <div className="flex items-center space-x-2">
+                      <span className="font-semibold text-gray-900">
+                        {formatCurrency(p.amount)}
+                      </span>
+                      {p.transaction_type === "supplier_refund" ? (
+                        <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded">
+                          Supplier Refund
+                        </span>
+                      ) : p.transaction_type === "supplier_credit_use" ? (
+                        <span className="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-0.5 rounded">
+                          Credit Used
+                        </span>
+                      ) : (
+                        <span className="bg-green-100 text-green-800 text-[10px] font-bold px-2 py-0.5 rounded">
+                          Payment
+                        </span>
+                      )}
                     </div>
-                    <div className="text-xs text-gray-500">
+                    <div className="text-xs text-gray-500 mt-0.5">
                       {p.payment_method} · {new Date(p.transaction_date).toLocaleDateString()}
                     </div>
                   </div>
-                  <div className="flex gap-1 flex-shrink-0">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 px-2 text-blue-600"
-                      onClick={() => setViewSupplierPaymentId(p.id)}
-                    >
-                      <Eye className="h-4 w-4 mr-1" />
-                      View
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 px-2 text-amber-600"
-                      onClick={() => setEditSupplierPaymentId(p.id)}
-                    >
-                      <FilePenLine className="h-4 w-4 mr-1" />
-                      Edit
-                    </Button>
-                  </div>
+                  {p.transaction_type === "supplier_payment" && (
+                    <div className="flex gap-1 flex-shrink-0">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 px-2 text-blue-600"
+                        onClick={() => setViewSupplierPaymentId(p.id)}
+                      >
+                        <Eye className="h-4 w-4 mr-1" />
+                        View
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 px-2 text-amber-600"
+                        onClick={() => setEditSupplierPaymentId(p.id)}
+                      >
+                        <FilePenLine className="h-4 w-4 mr-1" />
+                        Edit
+                      </Button>
+                    </div>
+                  )}
                 </li>
               ))}
             </ul>

@@ -1009,18 +1009,19 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
         })
         setTimeout(() => {
           finalizeDraftAfterSave()
+          setIsSubmitting(false)
         }, 1500)
       } else {
+        setIsSubmitting(false)
         setFormAlert({
           type: "error",
           message: result.message || `Failed to ${isEditMode ? "update" : "complete"} the purchase`,
         })
       }
     } catch (submitError) {
+      setIsSubmitting(false)
       console.error("Purchase submission error:", submitError)
       setFormAlert({ type: "error", message: "An unexpected error occurred" })
-    } finally {
-      setIsSubmitting(false)
     }
   }
 

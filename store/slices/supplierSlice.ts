@@ -12,6 +12,11 @@ export interface Supplier {
   total_amount?: number
   paid_amount?: number
   balance_amount?: number
+  outstanding_balance?: number
+  original_credit?: number
+  refunded_credit?: number
+  credit_used?: number
+  available_credit?: number
   supplier_credit?: number
   created_at?: string
   updated_at?: string
@@ -78,6 +83,12 @@ export const fetchSuppliers = createAsyncThunk(
         total_amount: Number(supplier.total_amount) || 0,
         paid_amount: Number(supplier.paid_amount) || 0,
         balance_amount: Number(supplier.balance_amount) || 0,
+        outstanding_balance: Number(supplier.outstanding_balance ?? supplier.balance_amount) || 0,
+        original_credit: Number(supplier.original_credit) || 0,
+        refunded_credit: Number(supplier.refunded_credit) || 0,
+        credit_used: Number(supplier.credit_used) || 0,
+        available_credit: Number(supplier.available_credit ?? supplier.supplier_credit) || 0,
+        supplier_credit: Number(supplier.supplier_credit ?? supplier.available_credit) || 0,
         created_at: supplier.created_at,
         updated_at: supplier.updated_at,
       }))

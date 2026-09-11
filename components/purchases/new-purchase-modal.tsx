@@ -17,7 +17,9 @@ import ProductSelectSimple from "../sales/product-select-simple"
 import NewProductModal from "../sales/new-product-modal"
 import SupplierAutocomplete from "./supplier-autocomplete"
 import { DatePickerField } from "@/components/ui/date-picker-field"
-import { useDispatch } from "react-redux"
+import { useDispatch, useSelector } from "react-redux"
+import type { RootState } from "@/store/store"
+import { fetchSuppliers } from "@/store/slices/supplierSlice"
 import { addProduct } from "@/store/slices/productSlice"
 import { allocatePurchaseCourierCharge, calculatePurchaseCourierCharge } from "@/lib/purchase-courier"
 
@@ -104,6 +106,20 @@ export default function NewPurchaseModal({
   const [customCourierCharge, setCustomCourierCharge] = useState<number | null>(null)
   const [isEditingCourier, setIsEditingCourier] = useState(false)
   const [courierInputVal, setCourierInputVal] = useState("")
+
+  const [useSupplierCreditOnPurchase, setUseSupplierCreditOnPurchase] = useState(false)
+  const suppliers = useSelector((state: RootState) => state.supplier.suppliers)
+  const selectedSupplierObj = useMemo(
+    () => suppliers.find((s) => s.name === supplier),
+    [suppliers, supplier]
+  )
+  const selectedSupplierCredit = selectedSupplierObj?.available_credit ?? selectedSupplierObj?.supplier_credit ?? 0
+
+  useEffect(() => {
+    if (isOpen && userId) {
+      dispatch(fetchSuppliers({ userId }) as any)
+    }
+  }, [isOpen, userId, dispatch])
 
   // Calculate totals synchronously during render to avoid double-renders and blinking inputs
   const subtotal = useMemo(() => products.reduce((sum, product) => sum + product.total, 0), [products])
@@ -503,6 +519,10 @@ export default function NewPurchaseModal({
       formData.append("items", JSON.stringify(purchaseItems))
       formData.append("courier_charge", courierCharge.toString())
       formData.append("courier_charge_percentage", courierChargePercentage.toString())
+      if (useSupplierCreditOnPurchase && selectedSupplierCredit > 0) {
+        const creditToApply = Math.min(selectedSupplierCredit, Math.max(totalAmount - receivedAmount, 0))
+        formData.append("credit_to_apply", creditToApply.toString())
+      }
 
       // Submit form
       const result = await createPurchase(formData)
@@ -516,8 +536,10 @@ export default function NewPurchaseModal({
         // Close after a short delay to show the success message
         setTimeout(() => {
           onClose()
+          setIsSubmitting(false)
         }, 500)
       } else {
+        setIsSubmitting(false)
         setFormAlert({
           type: "error",
           message: result.message || "Failed to add purchase",
@@ -525,14 +547,13 @@ export default function NewPurchaseModal({
         notifyError(toast, result.message || "Failed to add purchase")
       }
     } catch (error) {
+      setIsSubmitting(false)
       console.error("Add purchase error:", error)
       setFormAlert({
         type: "error",
         message: "An unexpected error occurred",
       })
       notifyError(toast, "An unexpected error occurred")
-    } finally {
-      setIsSubmitting(false)
     }
   }
 
@@ -686,6 +707,43 @@ export default function NewPurchaseModal({
                         {localCurrency} {totalAmount.toFixed(2)}
                       </span>
                     </div>
+
+                    {selectedSupplierCredit > 0 && totalAmount > 0 && (
+                      <div className="p-2.5 bg-blue-50 border border-blue-200 rounded-md text-xs space-y-1.5 mt-2">
+                        <div className="flex justify-between items-center text-gray-700">
+                          <span>Purchase Total:</span>
+                          <span className="font-semibold">{localCurrency} {totalAmount.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between items-center text-blue-800">
+                          <span>Available Supplier Credit:</span>
+                          <span className="font-semibold">{localCurrency} {selectedSupplierCredit.toFixed(2)}</span>
+                        </div>
+                        <div className="flex items-center space-x-2 pt-1 border-t border-blue-200">
+                          <input
+                            type="checkbox"
+                            id="useSupplierCreditPurchase"
+                            checked={useSupplierCreditOnPurchase}
+                            onChange={(e) => setUseSupplierCreditOnPurchase(e.target.checked)}
+                            className="h-3.5 w-3.5 text-blue-600 rounded border-gray-300 cursor-pointer"
+                          />
+                          <Label htmlFor="useSupplierCreditPurchase" className="text-xs text-blue-900 font-medium cursor-pointer">
+                            Use Available Supplier Credit
+                          </Label>
+                        </div>
+                        {useSupplierCreditOnPurchase && (
+                          <>
+                            <div className="flex justify-between text-blue-700 font-medium pt-1 border-t border-blue-200">
+                              <span>Supplier Credit Applied:</span>
+                              <span>- {localCurrency} {Math.min(selectedSupplierCredit, Math.max(totalAmount - (status === "Paid" ? totalAmount : receivedAmount), 0)).toFixed(2)}</span>
+                            </div>
+                            <div className="flex justify-between text-gray-900 font-bold border-t border-blue-200 pt-1">
+                              <span>Remaining to Pay:</span>
+                              <span>{localCurrency} {Math.max(totalAmount - (status === "Paid" ? totalAmount : receivedAmount) - (useSupplierCreditOnPurchase ? selectedSupplierCredit : 0), 0).toFixed(2)}</span>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
 

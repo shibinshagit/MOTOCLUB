@@ -41,7 +41,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import SaleTab from "./sale-tab"
 import PurchaseTab from "./purchase-tab"
-import InventoryDrawer from "@/components/products/inventory-drawer"
+import ProductTab from "./product-tab"
 import TrendingDrawer from "@/components/products/trending-drawer"
 import CustomerTab from "./customer-tab"
 import TransferTab from "./transfer-tab"
@@ -190,6 +190,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
     { id: "sale", icon: <Plus className="h-5 w-5" />, label: "Sales" },
     { id: "returns", icon: <RotateCcw className="h-4 w-4" />, label: "Returns" },
     { id: "purchase", icon: <Receipt className="h-4 w-4" />, label: "Purchase" },
+    { id: "product", icon: <Package className="h-4 w-4" />, label: "Inventory" },
     { id: "customer", icon: <User className="h-4 w-4" />, label: "Customers" },
     { id: "attendance", icon: <CalendarDays className="h-4 w-4" />, label: "Attendance" },
     { id: "supplier", icon: <Truck className="h-4 w-4" />, label: "Suppliers" },
@@ -202,7 +203,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
 
   // Primary tabs for bottom navigation (most used)
   const primaryTabs = ["sales-orders", "sale", "purchase"]
-  const secondaryTabs = ["returns", "customer", "attendance", "supplier", "transfer", "platform", "master", "requests", "admin-dashboard"]
+  const secondaryTabs = ["product", "returns", "customer", "attendance", "supplier", "transfer", "platform", "master", "requests", "admin-dashboard"]
 
   // Filtered navigation items based on permission
   const allowedNavItems = useMemo(() => navItems.filter((item: any) => canAccessTab(item.id)), [canAccessTab])
@@ -516,9 +517,17 @@ export function Dashboard({ onLogout }: DashboardProps) {
       }
       const deviceId = device?.id
       const companyId = company?.id || 1
-      const contentTab = activeTab === "product" || activeTab === "trending" ? lastContentTab : activeTab
+      const contentTab = activeTab === "trending" ? lastContentTab : activeTab
 
       switch (contentTab) {
+        case "product":
+          return (
+            <ProductTab
+              userId={device?.id ?? 0}
+              isAddModalOpen={activeTab === "product" && isAddModalOpen}
+              onModalClose={() => setIsAddModalOpen(false)}
+            />
+          )
         case "sale":
         case "sales":
           return (
@@ -1029,16 +1038,6 @@ export function Dashboard({ onLogout }: DashboardProps) {
           })}
         </div>
       </nav>
-
-      <InventoryDrawer
-        open={activeTab === "product"}
-        onOpenChange={(open) => {
-          if (!open) handleTabChange(lastContentTabRef.current)
-        }}
-        userId={device?.id || 0}
-        isAddModalOpen={activeTab === "product" && isAddModalOpen}
-        onModalClose={() => setIsAddModalOpen(false)}
-      />
 
       <TrendingDrawer
         open={activeTab === "trending"}

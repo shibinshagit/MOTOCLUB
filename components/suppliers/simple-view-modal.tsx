@@ -114,41 +114,46 @@ function SimpleViewModal({ isOpen, onClose, supplierId, userId }: SimpleViewModa
             </div>
 
             {/* Financial Summary */}
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
               <div className="text-center p-3 bg-blue-50 rounded-lg">
-                <ShoppingCart className="h-6 w-6 mx-auto mb-2 text-blue-600" />
-                <div className="text-lg font-bold">{supplierData.supplier.total_purchases || 0}</div>
-                <div className="text-sm text-gray-600">Purchases</div>
+                <ShoppingCart className="h-5 w-5 mx-auto mb-1 text-blue-600" />
+                <div className="text-base font-bold">{supplierData.supplier.total_purchases || 0}</div>
+                <div className="text-xs text-gray-600">Purchases</div>
               </div>
               <div className="text-center p-3 bg-gray-50 rounded-lg">
-                <Banknote className="h-6 w-6 mx-auto mb-2 text-gray-600" />
-                <div className="text-lg font-bold">
+                <Banknote className="h-5 w-5 mx-auto mb-1 text-gray-600" />
+                <div className="text-base font-bold">
                   {formatCurrency(supplierData.supplier.total_amount)}
                 </div>
-                <div className="text-sm text-gray-600">Total Amount</div>
+                <div className="text-xs text-gray-600">Total Amount</div>
               </div>
               <div className="text-center p-3 bg-green-50 rounded-lg">
-                <CreditCard className="h-6 w-6 mx-auto mb-2 text-green-600" />
-                <div className="text-lg font-bold text-green-600">
+                <CreditCard className="h-5 w-5 mx-auto mb-1 text-green-600" />
+                <div className="text-base font-bold text-green-600">
                   {formatCurrency(supplierData.supplier.paid_amount)}
                 </div>
-                <div className="text-sm text-gray-600">Total Paid</div>
-              </div>
-              <div className="text-center p-3 bg-blue-50 rounded-lg">
-                <Wallet className="h-6 w-6 mx-auto mb-2 text-blue-600" />
-                <div className="text-lg font-bold text-blue-600">
-                  {formatCurrency(supplierData.supplier.supplier_credit || supplierData.supplier.total_credit || 0)}
-                </div>
-                <div className="text-sm text-gray-600">
-                  {supplierData.supplier.supplier_credit > 0 ? "Supplier Credit" : "Total Credit"}
-                </div>
+                <div className="text-xs text-gray-600">Total Paid</div>
               </div>
               <div className="text-center p-3 bg-orange-50 rounded-lg">
-                <AlertCircle className="h-6 w-6 mx-auto mb-2 text-orange-600" />
-                <div className="text-lg font-bold text-orange-600">
-                  {formatCurrency(supplierData.supplier.outstanding_balance || 0)}
+                <AlertCircle className="h-5 w-5 mx-auto mb-1 text-orange-600" />
+                <div className="text-base font-bold text-orange-600">
+                  {formatCurrency(supplierData.supplier.outstanding_balance || supplierData.supplier.balance_amount || 0)}
                 </div>
-                <div className="text-sm text-gray-600">Outstanding</div>
+                <div className="text-xs text-gray-600">Outstanding</div>
+              </div>
+              <div className="text-center p-3 bg-amber-50 rounded-lg">
+                <Wallet className="h-5 w-5 mx-auto mb-1 text-amber-600" />
+                <div className="text-base font-bold text-amber-700">
+                  {formatCurrency(supplierData.supplier.refunded_credit || 0)}
+                </div>
+                <div className="text-xs text-gray-600">Refunded</div>
+              </div>
+              <div className="text-center p-3 bg-blue-50 rounded-lg">
+                <Wallet className="h-5 w-5 mx-auto mb-1 text-blue-600" />
+                <div className="text-base font-bold text-blue-600">
+                  {formatCurrency(supplierData.supplier.available_credit || supplierData.supplier.supplier_credit || 0)}
+                </div>
+                <div className="text-xs text-blue-600 font-semibold">Available Credit</div>
               </div>
             </div>
 

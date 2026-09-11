@@ -568,122 +568,308 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
     const ordersDiff = calculatePercentageDiff(currOrders, prevOrders)
 
     // -------------------------------------------------------------------------
-    // Query 4: Daily Breakdown for Current and Previous Period (Chart Data)
+    // Query 4: Breakdown for Current and Previous Period (Chart Data)
     // -------------------------------------------------------------------------
+    const isHourly = durationDays <= 1
+
     const [currentDailyRows, previousDailyRows, currentDailyExpenses, previousDailyExpenses] =
       await Promise.all([
-        sql`
-          SELECT 
-            DATE(s.sale_date) as day_date,
-            COUNT(s.id)::int as order_count,
-            COALESCE(SUM(s.total_amount), 0)::numeric as total_sales,
-            COALESCE(SUM(si.quantity), 0)::int as total_quantity,
-            COALESCE(SUM(
-              COALESCE(
-                (SELECT SUM(sba.quantity * sba.cost_price) FROM sale_batch_allocations sba WHERE sba.sale_item_id = si.id),
-                si.quantity * COALESCE(si.cost, pv.wholesale_price, p.wholesale_price, 0)
+        isHourly
+          ? sql`
+              WITH filtered_sales AS (
+                SELECT s.id, s.total_amount, s.sale_date, EXTRACT(HOUR FROM s.sale_date)::int as hour_val
+                FROM sales s
+                WHERE s.total_amount != 'NaN'::numeric
+                  AND s.sale_date >= ${currStartStr}::timestamp
+                  AND s.sale_date <= ${currEndStr}::timestamp
+                  AND (${effectiveDeviceId === 0} OR s.device_id = ${effectiveDeviceId})
+                  AND (
+                    (${statusFilter === null} AND LOWER(TRIM(s.status)) != 'cancelled')
+                    OR (${statusFilter !== null} AND LOWER(TRIM(s.status)) = LOWER(${statusFilter}))
+                  )
+                  AND (${staffFilter === null} OR s.staff_id = ${staffFilter})
+                  AND (${courierPartnerFilter === null} OR s.courier_partner_id = ${courierPartnerFilter})
+                  AND (${courierServiceFilter === null} OR LOWER(TRIM(COALESCE(s.courier_service_name, ''))) = LOWER(${courierServiceFilter}))
+                  AND (${paymentMethodFilter === null} OR LOWER(TRIM(COALESCE(s.payment_method, ''))) = LOWER(${paymentMethodFilter}))
+              ),
+              sales_agg AS (
+                SELECT 
+                  hour_val,
+                  COUNT(id)::int as order_count,
+                  COALESCE(SUM(total_amount), 0)::numeric as total_sales
+                FROM filtered_sales
+                GROUP BY hour_val
+              ),
+              items_agg AS (
+                SELECT 
+                  fs.hour_val,
+                  COALESCE(SUM(si.quantity), 0)::int as total_quantity,
+                  COALESCE(SUM(
+                    COALESCE(
+                      (SELECT SUM(sba.quantity * sba.cost_price) FROM sale_batch_allocations sba WHERE sba.sale_item_id = si.id),
+                      si.quantity * COALESCE(si.cost, pv.wholesale_price, p.wholesale_price, 0)
+                    )
+                  ), 0)::numeric as total_cogs
+                FROM sale_items si
+                JOIN filtered_sales fs ON si.sale_id = fs.id
+                LEFT JOIN products p ON si.product_id = p.id
+                LEFT JOIN product_variants pv ON si.product_variant_id = pv.id
+                GROUP BY fs.hour_val
               )
-            ), 0)::numeric as total_cogs
-          FROM sales s
-          LEFT JOIN sale_items si ON si.sale_id = s.id
-          LEFT JOIN products p ON si.product_id = p.id
-          LEFT JOIN product_variants pv ON si.product_variant_id = pv.id
-          WHERE s.total_amount != 'NaN'::numeric
-            AND s.sale_date >= ${currStartStr}::timestamp
-            AND s.sale_date <= ${currEndStr}::timestamp
-            AND (${effectiveDeviceId === 0} OR s.device_id = ${effectiveDeviceId})
-            AND (
-              (${statusFilter === null} AND LOWER(TRIM(s.status)) != 'cancelled')
-              OR (${statusFilter !== null} AND LOWER(TRIM(s.status)) = LOWER(${statusFilter}))
-            )
-            AND (${staffFilter === null} OR s.staff_id = ${staffFilter})
-            AND (${courierPartnerFilter === null} OR s.courier_partner_id = ${courierPartnerFilter})
-            AND (${courierServiceFilter === null} OR LOWER(TRIM(COALESCE(s.courier_service_name, ''))) = LOWER(${courierServiceFilter}))
-            AND (${paymentMethodFilter === null} OR LOWER(TRIM(COALESCE(s.payment_method, ''))) = LOWER(${paymentMethodFilter}))
-          GROUP BY DATE(s.sale_date)
-          ORDER BY day_date ASC
-        `,
-        sql`
-          SELECT 
-            DATE(s.sale_date) as day_date,
-            COUNT(s.id)::int as order_count,
-            COALESCE(SUM(s.total_amount), 0)::numeric as total_sales,
-            COALESCE(SUM(si.quantity), 0)::int as total_quantity,
-            COALESCE(SUM(
-              COALESCE(
-                (SELECT SUM(sba.quantity * sba.cost_price) FROM sale_batch_allocations sba WHERE sba.sale_item_id = si.id),
-                si.quantity * COALESCE(si.cost, pv.wholesale_price, p.wholesale_price, 0)
+              SELECT 
+                sa.hour_val,
+                sa.order_count,
+                sa.total_sales,
+                COALESCE(ia.total_quantity, 0)::int as total_quantity,
+                COALESCE(ia.total_cogs, 0)::numeric as total_cogs
+              FROM sales_agg sa
+              LEFT JOIN items_agg ia ON sa.hour_val = ia.hour_val
+              ORDER BY sa.hour_val ASC
+            `
+          : sql`
+              WITH filtered_sales AS (
+                SELECT s.id, s.total_amount, s.sale_date, DATE(s.sale_date) as day_date
+                FROM sales s
+                WHERE s.total_amount != 'NaN'::numeric
+                  AND s.sale_date >= ${currStartStr}::timestamp
+                  AND s.sale_date <= ${currEndStr}::timestamp
+                  AND (${effectiveDeviceId === 0} OR s.device_id = ${effectiveDeviceId})
+                  AND (
+                    (${statusFilter === null} AND LOWER(TRIM(s.status)) != 'cancelled')
+                    OR (${statusFilter !== null} AND LOWER(TRIM(s.status)) = LOWER(${statusFilter}))
+                  )
+                  AND (${staffFilter === null} OR s.staff_id = ${staffFilter})
+                  AND (${courierPartnerFilter === null} OR s.courier_partner_id = ${courierPartnerFilter})
+                  AND (${courierServiceFilter === null} OR LOWER(TRIM(COALESCE(s.courier_service_name, ''))) = LOWER(${courierServiceFilter}))
+                  AND (${paymentMethodFilter === null} OR LOWER(TRIM(COALESCE(s.payment_method, ''))) = LOWER(${paymentMethodFilter}))
+              ),
+              sales_agg AS (
+                SELECT 
+                  day_date,
+                  COUNT(id)::int as order_count,
+                  COALESCE(SUM(total_amount), 0)::numeric as total_sales
+                FROM filtered_sales
+                GROUP BY day_date
+              ),
+              items_agg AS (
+                SELECT 
+                  fs.day_date,
+                  COALESCE(SUM(si.quantity), 0)::int as total_quantity,
+                  COALESCE(SUM(
+                    COALESCE(
+                      (SELECT SUM(sba.quantity * sba.cost_price) FROM sale_batch_allocations sba WHERE sba.sale_item_id = si.id),
+                      si.quantity * COALESCE(si.cost, pv.wholesale_price, p.wholesale_price, 0)
+                    )
+                  ), 0)::numeric as total_cogs
+                FROM sale_items si
+                JOIN filtered_sales fs ON si.sale_id = fs.id
+                LEFT JOIN products p ON si.product_id = p.id
+                LEFT JOIN product_variants pv ON si.product_variant_id = pv.id
+                GROUP BY fs.day_date
               )
-            ), 0)::numeric as total_cogs
-          FROM sales s
-          LEFT JOIN sale_items si ON si.sale_id = s.id
-          LEFT JOIN products p ON si.product_id = p.id
-          LEFT JOIN product_variants pv ON si.product_variant_id = pv.id
-          WHERE s.total_amount != 'NaN'::numeric
-            AND s.sale_date >= ${prevStartStr}::timestamp
-            AND s.sale_date <= ${prevEndStr}::timestamp
-            AND (${effectiveDeviceId === 0} OR s.device_id = ${effectiveDeviceId})
-            AND (
-              (${statusFilter === null} AND LOWER(TRIM(s.status)) != 'cancelled')
-              OR (${statusFilter !== null} AND LOWER(TRIM(s.status)) = LOWER(${statusFilter}))
-            )
-            AND (${staffFilter === null} OR s.staff_id = ${staffFilter})
-            AND (${courierPartnerFilter === null} OR s.courier_partner_id = ${courierPartnerFilter})
-            AND (${courierServiceFilter === null} OR LOWER(TRIM(COALESCE(s.courier_service_name, ''))) = LOWER(${courierServiceFilter}))
-            AND (${paymentMethodFilter === null} OR LOWER(TRIM(COALESCE(s.payment_method, ''))) = LOWER(${paymentMethodFilter}))
-          GROUP BY DATE(s.sale_date)
-          ORDER BY day_date ASC
-        `,
-        sql`
-          SELECT 
-            DATE(transaction_date) as day_date,
-            COALESCE(SUM(debit_amount), 0)::numeric as total_expenses
-          FROM financial_transactions
-          WHERE transaction_date >= ${currStartStr}::timestamp
-            AND transaction_date <= ${currEndStr}::timestamp
-            AND (${effectiveDeviceId === 0} OR device_id = ${effectiveDeviceId})
-            AND (
-              transaction_type IN ('expense', 'sale_shipping', 'salary')
-              OR (transaction_type = 'manual' AND debit_amount > 0)
-            )
-          GROUP BY DATE(transaction_date)
-          ORDER BY day_date ASC
-        `,
-        sql`
-          SELECT 
-            DATE(transaction_date) as day_date,
-            COALESCE(SUM(debit_amount), 0)::numeric as total_expenses
-          FROM financial_transactions
-          WHERE transaction_date >= ${prevStartStr}::timestamp
-            AND transaction_date <= ${prevEndStr}::timestamp
-            AND (${effectiveDeviceId === 0} OR device_id = ${effectiveDeviceId})
-            AND (
-              transaction_type IN ('expense', 'sale_shipping', 'salary')
-              OR (transaction_type = 'manual' AND debit_amount > 0)
-            )
-          GROUP BY DATE(transaction_date)
-          ORDER BY day_date ASC
-        `,
+              SELECT 
+                sa.day_date,
+                sa.order_count,
+                sa.total_sales,
+                COALESCE(ia.total_quantity, 0)::int as total_quantity,
+                COALESCE(ia.total_cogs, 0)::numeric as total_cogs
+              FROM sales_agg sa
+              LEFT JOIN items_agg ia ON sa.day_date = ia.day_date
+              ORDER BY sa.day_date ASC
+            `,
+        isHourly
+          ? sql`
+              WITH filtered_sales AS (
+                SELECT s.id, s.total_amount, s.sale_date, EXTRACT(HOUR FROM s.sale_date)::int as hour_val
+                FROM sales s
+                WHERE s.total_amount != 'NaN'::numeric
+                  AND s.sale_date >= ${prevStartStr}::timestamp
+                  AND s.sale_date <= ${prevEndStr}::timestamp
+                  AND (${effectiveDeviceId === 0} OR s.device_id = ${effectiveDeviceId})
+                  AND (
+                    (${statusFilter === null} AND LOWER(TRIM(s.status)) != 'cancelled')
+                    OR (${statusFilter !== null} AND LOWER(TRIM(s.status)) = LOWER(${statusFilter}))
+                  )
+                  AND (${staffFilter === null} OR s.staff_id = ${staffFilter})
+                  AND (${courierPartnerFilter === null} OR s.courier_partner_id = ${courierPartnerFilter})
+                  AND (${courierServiceFilter === null} OR LOWER(TRIM(COALESCE(s.courier_service_name, ''))) = LOWER(${courierServiceFilter}))
+                  AND (${paymentMethodFilter === null} OR LOWER(TRIM(COALESCE(s.payment_method, ''))) = LOWER(${paymentMethodFilter}))
+              ),
+              sales_agg AS (
+                SELECT 
+                  hour_val,
+                  COUNT(id)::int as order_count,
+                  COALESCE(SUM(total_amount), 0)::numeric as total_sales
+                FROM filtered_sales
+                GROUP BY hour_val
+              ),
+              items_agg AS (
+                SELECT 
+                  fs.hour_val,
+                  COALESCE(SUM(si.quantity), 0)::int as total_quantity,
+                  COALESCE(SUM(
+                    COALESCE(
+                      (SELECT SUM(sba.quantity * sba.cost_price) FROM sale_batch_allocations sba WHERE sba.sale_item_id = si.id),
+                      si.quantity * COALESCE(si.cost, pv.wholesale_price, p.wholesale_price, 0)
+                    )
+                  ), 0)::numeric as total_cogs
+                FROM sale_items si
+                JOIN filtered_sales fs ON si.sale_id = fs.id
+                LEFT JOIN products p ON si.product_id = p.id
+                LEFT JOIN product_variants pv ON si.product_variant_id = pv.id
+                GROUP BY fs.hour_val
+              )
+              SELECT 
+                sa.hour_val,
+                sa.order_count,
+                sa.total_sales,
+                COALESCE(ia.total_quantity, 0)::int as total_quantity,
+                COALESCE(ia.total_cogs, 0)::numeric as total_cogs
+              FROM sales_agg sa
+              LEFT JOIN items_agg ia ON sa.hour_val = ia.hour_val
+              ORDER BY sa.hour_val ASC
+            `
+          : sql`
+              WITH filtered_sales AS (
+                SELECT s.id, s.total_amount, s.sale_date, DATE(s.sale_date) as day_date
+                FROM sales s
+                WHERE s.total_amount != 'NaN'::numeric
+                  AND s.sale_date >= ${prevStartStr}::timestamp
+                  AND s.sale_date <= ${prevEndStr}::timestamp
+                  AND (${effectiveDeviceId === 0} OR s.device_id = ${effectiveDeviceId})
+                  AND (
+                    (${statusFilter === null} AND LOWER(TRIM(s.status)) != 'cancelled')
+                    OR (${statusFilter !== null} AND LOWER(TRIM(s.status)) = LOWER(${statusFilter}))
+                  )
+                  AND (${staffFilter === null} OR s.staff_id = ${staffFilter})
+                  AND (${courierPartnerFilter === null} OR s.courier_partner_id = ${courierPartnerFilter})
+                  AND (${courierServiceFilter === null} OR LOWER(TRIM(COALESCE(s.courier_service_name, ''))) = LOWER(${courierServiceFilter}))
+                  AND (${paymentMethodFilter === null} OR LOWER(TRIM(COALESCE(s.payment_method, ''))) = LOWER(${paymentMethodFilter}))
+              ),
+              sales_agg AS (
+                SELECT 
+                  day_date,
+                  COUNT(id)::int as order_count,
+                  COALESCE(SUM(total_amount), 0)::numeric as total_sales
+                FROM filtered_sales
+                GROUP BY day_date
+              ),
+              items_agg AS (
+                SELECT 
+                  fs.day_date,
+                  COALESCE(SUM(si.quantity), 0)::int as total_quantity,
+                  COALESCE(SUM(
+                    COALESCE(
+                      (SELECT SUM(sba.quantity * sba.cost_price) FROM sale_batch_allocations sba WHERE sba.sale_item_id = si.id),
+                      si.quantity * COALESCE(si.cost, pv.wholesale_price, p.wholesale_price, 0)
+                    )
+                  ), 0)::numeric as total_cogs
+                FROM sale_items si
+                JOIN filtered_sales fs ON si.sale_id = fs.id
+                LEFT JOIN products p ON si.product_id = p.id
+                LEFT JOIN product_variants pv ON si.product_variant_id = pv.id
+                GROUP BY fs.day_date
+              )
+              SELECT 
+                sa.day_date,
+                sa.order_count,
+                sa.total_sales,
+                COALESCE(ia.total_quantity, 0)::int as total_quantity,
+                COALESCE(ia.total_cogs, 0)::numeric as total_cogs
+              FROM sales_agg sa
+              LEFT JOIN items_agg ia ON sa.day_date = ia.day_date
+              ORDER BY sa.day_date ASC
+            `,
+        isHourly
+          ? sql`
+              SELECT 
+                EXTRACT(HOUR FROM transaction_date)::int as hour_val,
+                COALESCE(SUM(debit_amount), 0)::numeric as total_expenses
+              FROM financial_transactions
+              WHERE transaction_date >= ${currStartStr}::timestamp
+                AND transaction_date <= ${currEndStr}::timestamp
+                AND (${effectiveDeviceId === 0} OR device_id = ${effectiveDeviceId})
+                AND (
+                  transaction_type IN ('expense', 'sale_shipping', 'salary')
+                  OR (transaction_type = 'manual' AND debit_amount > 0)
+                )
+              GROUP BY EXTRACT(HOUR FROM transaction_date)::int
+              ORDER BY hour_val ASC
+            `
+          : sql`
+              SELECT 
+                DATE(transaction_date) as day_date,
+                COALESCE(SUM(debit_amount), 0)::numeric as total_expenses
+              FROM financial_transactions
+              WHERE transaction_date >= ${currStartStr}::timestamp
+                AND transaction_date <= ${currEndStr}::timestamp
+                AND (${effectiveDeviceId === 0} OR device_id = ${effectiveDeviceId})
+                AND (
+                  transaction_type IN ('expense', 'sale_shipping', 'salary')
+                  OR (transaction_type = 'manual' AND debit_amount > 0)
+                )
+              GROUP BY DATE(transaction_date)
+              ORDER BY day_date ASC
+            `,
+        isHourly
+          ? sql`
+              SELECT 
+                EXTRACT(HOUR FROM transaction_date)::int as hour_val,
+                COALESCE(SUM(debit_amount), 0)::numeric as total_expenses
+              FROM financial_transactions
+              WHERE transaction_date >= ${prevStartStr}::timestamp
+                AND transaction_date <= ${prevEndStr}::timestamp
+                AND (${effectiveDeviceId === 0} OR device_id = ${effectiveDeviceId})
+                AND (
+                  transaction_type IN ('expense', 'sale_shipping', 'salary')
+                  OR (transaction_type = 'manual' AND debit_amount > 0)
+                )
+              GROUP BY EXTRACT(HOUR FROM transaction_date)::int
+              ORDER BY hour_val ASC
+            `
+          : sql`
+              SELECT 
+                DATE(transaction_date) as day_date,
+                COALESCE(SUM(debit_amount), 0)::numeric as total_expenses
+              FROM financial_transactions
+              WHERE transaction_date >= ${prevStartStr}::timestamp
+                AND transaction_date <= ${prevEndStr}::timestamp
+                AND (${effectiveDeviceId === 0} OR device_id = ${effectiveDeviceId})
+                AND (
+                  transaction_type IN ('expense', 'sale_shipping', 'salary')
+                  OR (transaction_type = 'manual' AND debit_amount > 0)
+                )
+              GROUP BY DATE(transaction_date)
+              ORDER BY day_date ASC
+            `,
       ])
 
-    // Map daily data by date string YYYY-MM-DD
-    const currSalesMap = new Map<string, any>()
-    currentDailyRows.forEach((r: any) => currSalesMap.set(format(new Date(r.day_date), "yyyy-MM-dd"), r))
+    // Map data by key (hour number or date string YYYY-MM-DD)
+    const currSalesMap = new Map<number | string, any>()
+    currentDailyRows.forEach((r: any) => {
+      const key = isHourly ? Number(r.hour_val) : format(new Date(r.day_date), "yyyy-MM-dd")
+      currSalesMap.set(key, r)
+    })
 
-    const prevSalesMap = new Map<string, any>()
-    previousDailyRows.forEach((r: any) => prevSalesMap.set(format(new Date(r.day_date), "yyyy-MM-dd"), r))
+    const prevSalesMap = new Map<number | string, any>()
+    previousDailyRows.forEach((r: any) => {
+      const key = isHourly ? Number(r.hour_val) : format(new Date(r.day_date), "yyyy-MM-dd")
+      prevSalesMap.set(key, r)
+    })
 
-    const currExpenseMap = new Map<string, number>()
-    currentDailyExpenses.forEach((r: any) =>
-      currExpenseMap.set(format(new Date(r.day_date), "yyyy-MM-dd"), Number(r.total_expenses || 0))
-    )
+    const currExpenseMap = new Map<number | string, number>()
+    currentDailyExpenses.forEach((r: any) => {
+      const key = isHourly ? Number(r.hour_val) : format(new Date(r.day_date), "yyyy-MM-dd")
+      currExpenseMap.set(key, Number(r.total_expenses || 0))
+    })
 
-    const prevExpenseMap = new Map<string, number>()
-    previousDailyExpenses.forEach((r: any) =>
-      prevExpenseMap.set(format(new Date(r.day_date), "yyyy-MM-dd"), Number(r.total_expenses || 0))
-    )
+    const prevExpenseMap = new Map<number | string, number>()
+    previousDailyExpenses.forEach((r: any) => {
+      const key = isHourly ? Number(r.hour_val) : format(new Date(r.day_date), "yyyy-MM-dd")
+      prevExpenseMap.set(key, Number(r.total_expenses || 0))
+    })
 
-    // Build timeline points matching days 0 .. durationDays - 1
+    // Build timeline points
     const salesChart: ChartDataPoint[] = []
     const profitChart: ChartDataPoint[] = []
     const expensesChart: ChartDataPoint[] = []
@@ -691,83 +877,160 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
     const quantityChart: ChartDataPoint[] = []
     const ordersChart: ChartDataPoint[] = []
 
-    for (let i = 0; i < Math.min(durationDays, 366); i++) {
-      const currDay = addDays(currentStart, i)
-      const prevDay = addDays(prevStart, i)
+    if (isHourly) {
+      for (let h = 0; h < 24; h++) {
+        const hourLabel = `${String(h).padStart(2, "0")}:00`
+        const currKey = `${format(currentStart, "yyyy-MM-dd")} ${hourLabel}`
+        const prevKey = `${format(prevStart, "yyyy-MM-dd")} ${hourLabel}`
 
-      const currKey = format(currDay, "yyyy-MM-dd")
-      const prevKey = format(prevDay, "yyyy-MM-dd")
+        const currData = currSalesMap.get(h) || { total_sales: 0, order_count: 0, total_quantity: 0, total_cogs: 0 }
+        const prevData = prevSalesMap.get(h) || { total_sales: 0, order_count: 0, total_quantity: 0, total_cogs: 0 }
 
-      const currData = currSalesMap.get(currKey) || { total_sales: 0, order_count: 0, total_quantity: 0, total_cogs: 0 }
-      const prevData = prevSalesMap.get(prevKey) || { total_sales: 0, order_count: 0, total_quantity: 0, total_cogs: 0 }
+        const currDaySales = Number(currData.total_sales || 0)
+        const prevDaySales = Number(prevData.total_sales || 0)
 
-      const currDaySales = Number(currData.total_sales || 0)
-      const prevDaySales = Number(prevData.total_sales || 0)
+        const currDayOrders = Number(currData.order_count || 0)
+        const prevDayOrders = Number(prevData.order_count || 0)
 
-      const currDayOrders = Number(currData.order_count || 0)
-      const prevDayOrders = Number(prevData.order_count || 0)
+        const currDayQty = Number(currData.total_quantity || 0)
+        const prevDayQty = Number(prevData.total_quantity || 0)
 
-      const currDayQty = Number(currData.total_quantity || 0)
-      const prevDayQty = Number(prevData.total_quantity || 0)
+        const currDayCogs = Number(currData.total_cogs || 0)
+        const prevDayCogs = Number(prevData.total_cogs || 0)
 
-      const currDayCogs = Number(currData.total_cogs || 0)
-      const prevDayCogs = Number(prevData.total_cogs || 0)
+        const currDayExp = currExpenseMap.get(h) || 0
+        const prevDayExp = prevExpenseMap.get(h) || 0
 
-      const currDayExp = currExpenseMap.get(currKey) || 0
-      const prevDayExp = prevExpenseMap.get(prevKey) || 0
+        const currDayProfit = currDaySales - currDayCogs
+        const prevDayProfit = prevDaySales - prevDayCogs
 
-      const currDayProfit = currDaySales - currDayCogs
-      const prevDayProfit = prevDaySales - prevDayCogs
+        salesChart.push({
+          label: hourLabel,
+          currentDate: currKey,
+          previousDate: prevKey,
+          currentVal: currDaySales,
+          previousVal: prevDaySales,
+        })
 
-      const label = durationDays <= 1 ? format(currDay, "HH:mm") : format(currDay, "dd MMM")
+        profitChart.push({
+          label: hourLabel,
+          currentDate: currKey,
+          previousDate: prevKey,
+          currentVal: currDayProfit,
+          previousVal: prevDayProfit,
+        })
 
-      salesChart.push({
-        label,
-        currentDate: currKey,
-        previousDate: prevKey,
-        currentVal: currDaySales,
-        previousVal: prevDaySales,
-      })
+        expensesChart.push({
+          label: hourLabel,
+          currentDate: currKey,
+          previousDate: prevKey,
+          currentVal: currDayExp,
+          previousVal: prevDayExp,
+        })
 
-      profitChart.push({
-        label,
-        currentDate: currKey,
-        previousDate: prevKey,
-        currentVal: currDayProfit,
-        previousVal: prevDayProfit,
-      })
+        cogsChart.push({
+          label: hourLabel,
+          currentDate: currKey,
+          previousDate: prevKey,
+          currentVal: currDayCogs,
+          previousVal: prevDayCogs,
+        })
 
-      expensesChart.push({
-        label,
-        currentDate: currKey,
-        previousDate: prevKey,
-        currentVal: currDayExp,
-        previousVal: prevDayExp,
-      })
+        quantityChart.push({
+          label: hourLabel,
+          currentDate: currKey,
+          previousDate: prevKey,
+          currentVal: currDayQty,
+          previousVal: prevDayQty,
+        })
 
-      cogsChart.push({
-        label,
-        currentDate: currKey,
-        previousDate: prevKey,
-        currentVal: currDayCogs,
-        previousVal: prevDayCogs,
-      })
+        ordersChart.push({
+          label: hourLabel,
+          currentDate: currKey,
+          previousDate: prevKey,
+          currentVal: currDayOrders,
+          previousVal: prevDayOrders,
+        })
+      }
+    } else {
+      for (let i = 0; i < Math.min(durationDays, 366); i++) {
+        const currDay = addDays(currentStart, i)
+        const prevDay = addDays(prevStart, i)
 
-      quantityChart.push({
-        label,
-        currentDate: currKey,
-        previousDate: prevKey,
-        currentVal: currDayQty,
-        previousVal: prevDayQty,
-      })
+        const currKey = format(currDay, "yyyy-MM-dd")
+        const prevKey = format(prevDay, "yyyy-MM-dd")
 
-      ordersChart.push({
-        label,
-        currentDate: currKey,
-        previousDate: prevKey,
-        currentVal: currDayOrders,
-        previousVal: prevDayOrders,
-      })
+        const currData = currSalesMap.get(currKey) || { total_sales: 0, order_count: 0, total_quantity: 0, total_cogs: 0 }
+        const prevData = prevSalesMap.get(prevKey) || { total_sales: 0, order_count: 0, total_quantity: 0, total_cogs: 0 }
+
+        const currDaySales = Number(currData.total_sales || 0)
+        const prevDaySales = Number(prevData.total_sales || 0)
+
+        const currDayOrders = Number(currData.order_count || 0)
+        const prevDayOrders = Number(prevData.order_count || 0)
+
+        const currDayQty = Number(currData.total_quantity || 0)
+        const prevDayQty = Number(prevData.total_quantity || 0)
+
+        const currDayCogs = Number(currData.total_cogs || 0)
+        const prevDayCogs = Number(prevData.total_cogs || 0)
+
+        const currDayExp = currExpenseMap.get(currKey) || 0
+        const prevDayExp = prevExpenseMap.get(currKey) || 0
+
+        const currDayProfit = currDaySales - currDayCogs
+        const prevDayProfit = prevDaySales - prevDayCogs
+
+        const label = format(currDay, "dd MMM")
+
+        salesChart.push({
+          label,
+          currentDate: currKey,
+          previousDate: prevKey,
+          currentVal: currDaySales,
+          previousVal: prevDaySales,
+        })
+
+        profitChart.push({
+          label,
+          currentDate: currKey,
+          previousDate: prevKey,
+          currentVal: currDayProfit,
+          previousVal: prevDayProfit,
+        })
+
+        expensesChart.push({
+          label,
+          currentDate: currKey,
+          previousDate: prevKey,
+          currentVal: currDayExp,
+          previousVal: prevDayExp,
+        })
+
+        cogsChart.push({
+          label,
+          currentDate: currKey,
+          previousDate: prevKey,
+          currentVal: currDayCogs,
+          previousVal: prevDayCogs,
+        })
+
+        quantityChart.push({
+          label,
+          currentDate: currKey,
+          previousDate: prevKey,
+          currentVal: currDayQty,
+          previousVal: prevDayQty,
+        })
+
+        ordersChart.push({
+          label,
+          currentDate: currKey,
+          previousDate: prevKey,
+          currentVal: currDayOrders,
+          previousVal: prevDayOrders,
+        })
+      }
     }
 
     // -------------------------------------------------------------------------

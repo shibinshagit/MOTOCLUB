@@ -5,6 +5,7 @@ import postgres from "postgres"
 import { sql, getLastError, resetConnectionState } from "@/lib/db"
 import { revalidatePath } from "next/cache"
 import { recordPurchaseTransaction, recordPurchaseAdjustment, deletePurchaseTransaction } from "./simplified-accounting"
+import { getSupplierCreditSummary } from "./supplier-payment-actions"
 import { adjustDeviceProductStock } from "@/lib/inventory-service"
 
 export async function getPurchases() {
@@ -405,13 +406,75 @@ export async function createPurchase(formData: FormData) {
         }
       }
 
+      // Apply supplier credit if explicitly requested by user
+      const creditToApplyRequested = Number.parseFloat(formData.get("credit_to_apply") as string) || 0
+      let effectiveReceivedAmount = finalReceivedAmount
+      let effectiveStatus = status
+
+      if (!isCancelled && creditToApplyRequested > 0 && effectiveReceivedAmount < totalAmount) {
+        const supplierRows = await tx`
+          SELECT id FROM suppliers WHERE TRIM(name) = TRIM(${supplier}) AND created_by = ${userId} LIMIT 1
+        `
+        if (supplierRows.length > 0) {
+          const supplierId = supplierRows[0].id
+          const summaryRes = await getSupplierCreditSummary(supplierId, userId, tx)
+          if (summaryRes.success && summaryRes.data && summaryRes.data.availableCredit > 0) {
+            const remainingUnpaid = totalAmount - effectiveReceivedAmount
+            const creditToApply = Math.min(creditToApplyRequested, summaryRes.data.availableCredit, remainingUnpaid)
+
+            if (creditToApply > 0) {
+              effectiveReceivedAmount += creditToApply
+              effectiveStatus = (totalAmount - effectiveReceivedAmount) <= 0.01 ? "Paid" : "Credit"
+
+              await tx`
+                UPDATE purchases
+                SET received_amount = ${effectiveReceivedAmount},
+                    status = ${effectiveStatus}
+                WHERE id = ${purchaseId}
+              `
+
+              await tx`
+                INSERT INTO transaction_payments (
+                  purchase_id, payment_method, amount, payment_date, notes
+                ) VALUES (
+                  ${purchaseId}, 'Supplier Credit', ${creditToApply}, ${purchaseDate}, 'Applied from available supplier credit'
+                )
+              `
+
+              const creditDescription = `Supplier Credit Used - ${supplier} - Applied to purchase #${purchaseId}`
+              const creditNotes = JSON.stringify({
+                v: 1,
+                userNotes: "Applied from available credit on purchase creation",
+                appliedAmount: creditToApply,
+                allocations: [{ purchaseId, amount: creditToApply }],
+              })
+
+              await tx`
+                INSERT INTO financial_transactions (
+                  transaction_type, reference_type, reference_id,
+                  amount, received_amount, cost_amount, debit_amount, credit_amount,
+                  status, payment_method, description, notes, device_id, company_id, created_by, transaction_date
+                ) VALUES (
+                  'supplier_credit_use', 'supplier', ${supplierId},
+                  ${creditToApply}, ${creditToApply}, 0, 0, 0,
+                  'Completed', 'Supplier Credit', ${creditDescription}, ${creditNotes},
+                  ${deviceId}, 1, ${userId}, ${purchaseDate}
+                )
+              `
+
+              console.log(`Applied ${creditToApply} supplier credit to purchase #${purchaseId}`)
+            }
+          }
+        }
+      }
+
       // Record purchase in simplified accounting system
       await recordPurchaseTransaction({
         purchaseId,
         totalAmount,
-        receivedAmount: finalReceivedAmount,
-        outstandingAmount: totalAmount - finalReceivedAmount,
-        status,
+        receivedAmount: effectiveReceivedAmount,
+        outstandingAmount: totalAmount - effectiveReceivedAmount,
+        status: effectiveStatus,
         paymentMethod: primaryPaymentMethod,
         supplierName: supplier,
         deviceId,

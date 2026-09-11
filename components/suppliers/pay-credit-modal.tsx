@@ -24,7 +24,7 @@ import {
   FileText,
   CalendarIcon,
 } from "lucide-react"
-import { paySupplierCredit } from "@/app/actions/supplier-payment-actions"
+import { paySupplierCredit, applySupplierCredit, getSupplierCreditSummary } from "@/app/actions/supplier-payment-actions"
 import { useSelector } from "react-redux"
 import type { RootState } from "@/store/store"
 
@@ -36,6 +36,8 @@ interface PayCreditModalProps {
     id: number
     name: string
     balance_amount: number
+    available_credit?: number
+    supplier_credit?: number
   }
   userId: number
   deviceId: number
@@ -50,6 +52,7 @@ interface PaymentAllocation {
 
 interface PaymentResultData {
   totalPaid: number
+  creditUsed?: number
   amountApplied: number
   extraCredit: number
   remainingCredit: number
@@ -64,46 +67,115 @@ export default function PayCreditModal({
   userId,
   deviceId,
 }: PayCreditModalProps) {
+  const [useSupplierCredit, setUseSupplierCredit] = useState(false)
+  const [creditToApplyInput, setCreditToApplyInput] = useState("")
   const [paymentAmount, setPaymentAmount] = useState("")
   const [paymentMethod, setPaymentMethod] = useState("Cash")
   const [notes, setNotes] = useState("")
-  const [paymentDate, setPaymentDate] = useState<string>("") // New state for payment date
+  const [paymentDate, setPaymentDate] = useState<string>("")
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [paymentResult, setPaymentResult] = useState<PaymentResultData | null>(null)
 
+  const [liveCreditSummary, setLiveCreditSummary] = useState<{
+    availableCredit: number
+    outstandingBalance: number
+  } | null>(null)
+
   const currency = useSelector((state: RootState) => state.device.currency) || "AED"
   const company = useSelector((state: RootState) => state.device.company)
+
+  const availableCredit = liveCreditSummary
+    ? liveCreditSummary.availableCredit
+    : (supplier.available_credit ?? supplier.supplier_credit ?? 0)
+  const outstandingBalance = liveCreditSummary
+    ? liveCreditSummary.outstandingBalance
+    : (supplier.balance_amount || 0)
+  const maxCreditApplicable = Math.min(availableCredit, outstandingBalance)
 
   const formatCurrency = (amount: number): string => {
     return `${currency} ${amount.toFixed(2)}`
   }
 
-  // Reset form when modal opens
+  // Fetch live credit summary and reset form when modal opens
   useEffect(() => {
     if (isOpen) {
-      setPaymentAmount("")
-      setPaymentMethod("Cash")
-      setNotes("")
-      setPaymentDate("") // Reset to empty, will use current date as default
       setError(null)
       setPaymentResult(null)
+      setNotes("")
+      setPaymentDate("")
+      setPaymentMethod("Cash")
+      setUseSupplierCredit(false)
+      setCreditToApplyInput("0")
+      setPaymentAmount(outstandingBalance.toString())
+
+      if (supplier?.id && userId) {
+        getSupplierCreditSummary(supplier.id, userId)
+          .then((res) => {
+            if (res.success && res.data) {
+              setLiveCreditSummary({
+                availableCredit: res.data.availableCredit,
+                outstandingBalance: res.data.outstandingBalance,
+              })
+              setPaymentAmount(res.data.outstandingBalance.toString())
+            }
+          })
+          .catch((err) => {
+            console.error("Error fetching live credit summary in modal:", err)
+          })
+      }
     }
-  }, [isOpen])
+  }, [isOpen, supplier?.id, userId])
+
+  const handleToggleSupplierCredit = (checked: boolean) => {
+    setUseSupplierCredit(checked)
+    if (checked) {
+      const initCredit = Math.min(availableCredit, outstandingBalance)
+      setCreditToApplyInput(initCredit.toString())
+      setPaymentAmount(Math.max(outstandingBalance - initCredit, 0).toString())
+    } else {
+      setCreditToApplyInput("0")
+      setPaymentAmount(outstandingBalance.toString())
+    }
+  }
+
+  const handleCreditInputChange = (val: string) => {
+    setCreditToApplyInput(val)
+    const rawVal = Number.parseFloat(val) || 0
+    const clampedCredit = Math.min(Math.max(rawVal, 0), maxCreditApplicable)
+    setPaymentAmount(Math.max(outstandingBalance - clampedCredit, 0).toString())
+  }
+
+  const creditToApplyNum = useSupplierCredit
+    ? Math.min(Math.max(Number.parseFloat(creditToApplyInput) || 0, 0), maxCreditApplicable)
+    : 0
+  const cashPaymentNum = Math.max(Number.parseFloat(paymentAmount) || 0, 0)
+
+  const totalSettled = creditToApplyNum + Math.min(cashPaymentNum, Math.max(outstandingBalance - creditToApplyNum, 0))
+  const remainingOutstanding = Math.max(outstandingBalance - totalSettled, 0)
+  const extraCreditCreated = Math.max(cashPaymentNum - Math.max(outstandingBalance - creditToApplyNum, 0), 0)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
 
-    const amount = Number.parseFloat(paymentAmount)
+    const rawCreditToApply = useSupplierCredit ? (Number.parseFloat(creditToApplyInput) || 0) : 0
 
-    // Validation
-    if (!amount || amount <= 0) {
-      setError("Please enter a valid payment amount greater than zero")
+    if (cashPaymentNum <= 0 && rawCreditToApply <= 0) {
+      setError("Please enter a valid credit amount or cash payment amount")
       return
     }
 
-    // Date validation - if provided, check if it's a valid date
+    if (useSupplierCredit && rawCreditToApply > availableCredit + 0.001) {
+      setError(`Credit to apply cannot exceed available credit of ${formatCurrency(availableCredit)}`)
+      return
+    }
+
+    if (useSupplierCredit && rawCreditToApply > outstandingBalance + 0.001) {
+      setError(`Credit to apply cannot exceed outstanding balance of ${formatCurrency(outstandingBalance)}`)
+      return
+    }
+
     let finalPaymentDate: Date | undefined
     if (paymentDate) {
       const selectedDate = new Date(paymentDate)
@@ -119,12 +191,13 @@ export default function PayCreditModal({
     try {
       const result = await paySupplierCredit(
         supplier.id,
-        amount,
+        cashPaymentNum,
         userId,
         deviceId,
         paymentMethod,
         notes.trim() || undefined,
-        finalPaymentDate
+        finalPaymentDate,
+        creditToApplyNum,
       )
 
       if (result.success && result.data) {
@@ -142,21 +215,15 @@ export default function PayCreditModal({
 
   const handleClose = () => {
     if (paymentResult) {
-      onSuccess() // Refresh data if payment was successful
+      onSuccess()
     }
     onClose()
   }
 
-  const outstandingBalance = supplier.balance_amount || 0
-  const enteredAmount = Number.parseFloat(paymentAmount) || 0
-  const amountApplied = Math.min(enteredAmount, outstandingBalance)
-  const extraSupplierCredit = Math.max(enteredAmount - outstandingBalance, 0)
-
-  const quickAmounts = [100, 500, 1000, outstandingBalance].filter(
+  const quickAmounts = [100, 500, 1000, Math.max(outstandingBalance - creditToApplyNum, 0)].filter(
     (amount, index, arr) => arr.indexOf(amount) === index && amount > 0
   )
 
-  // Get today's date in YYYY-MM-DD format for the input max attribute
   const today = new Date().toISOString().split('T')[0]
 
   return (
@@ -184,15 +251,15 @@ export default function PayCreditModal({
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                   <div className="bg-white/10 backdrop-blur-sm rounded-xl p-3 text-center">
                     <div className="text-2xl font-bold">{formatCurrency(paymentResult.totalPaid)}</div>
-                    <div className="text-xs text-green-100">Amount Paid</div>
+                    <div className="text-xs text-green-100">Cash / Bank Paid</div>
                   </div>
                   <div className="bg-white/10 backdrop-blur-sm rounded-xl p-3 text-center">
-                    <div className="text-2xl font-bold">{formatCurrency(paymentResult.amountApplied ?? paymentResult.totalPaid)}</div>
+                    <div className="text-2xl font-bold">{formatCurrency(paymentResult.creditUsed ?? 0)}</div>
+                    <div className="text-xs text-green-100">Credit Used</div>
+                  </div>
+                  <div className="bg-white/10 backdrop-blur-sm rounded-xl p-3 text-center">
+                    <div className="text-2xl font-bold">{formatCurrency(paymentResult.amountApplied)}</div>
                     <div className="text-xs text-green-100">Amount Applied</div>
-                  </div>
-                  <div className="bg-white/10 backdrop-blur-sm rounded-xl p-3 text-center">
-                    <div className="text-2xl font-bold">{formatCurrency(paymentResult.extraCredit ?? 0)}</div>
-                    <div className="text-xs text-green-100">Extra Supplier Credit</div>
                   </div>
                   <div className="bg-white/10 backdrop-blur-sm rounded-xl p-3 text-center">
                     <div className="text-2xl font-bold">{formatCurrency(paymentResult.remainingCredit)}</div>
@@ -244,7 +311,7 @@ export default function PayCreditModal({
                       <div className="flex items-center space-x-3">
                         <Banknote className="h-4 w-4 text-gray-400" />
                         <div>
-                          <div className="text-sm text-gray-500">Amount Paid</div>
+                          <div className="text-sm text-gray-500">Cash Paid</div>
                           <div className="font-medium text-green-600">{formatCurrency(paymentResult.totalPaid)}</div>
                         </div>
                       </div>
@@ -280,7 +347,7 @@ export default function PayCreditModal({
                   <div className="space-y-3">
                     {paymentResult.allocations.map((allocation, index) => (
                       <div
-                        key={allocation.purchaseId}
+                        key={`${allocation.purchaseId}-${index}`}
                         className="flex items-center justify-between p-4 bg-gradient-to-r from-gray-50 to-gray-100 rounded-xl border border-gray-200 hover:shadow-md transition-all duration-200"
                       >
                         <div className="flex items-center space-x-4">
@@ -353,7 +420,7 @@ export default function PayCreditModal({
                     </div>
                     <div>
                       <h2 className="text-xl font-bold">Pay Supplier Credit</h2>
-                      <p className="text-blue-100 text-sm">Process payment for outstanding balance or advance credit</p>
+                      <p className="text-blue-100 text-sm">Process payment or apply available supplier credit</p>
                     </div>
                   </div>
                   <Button
@@ -405,6 +472,56 @@ export default function PayCreditModal({
                   </CardContent>
                 </Card>
 
+                {/* Available Credit Usage Card */}
+                <Card className="border-blue-200 bg-blue-50/50 shadow-md">
+                  <CardContent className="p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <input
+                          type="checkbox"
+                          id="useSupplierCreditToggle"
+                          checked={useSupplierCredit}
+                          disabled={availableCredit <= 0}
+                          onChange={(e) => handleToggleSupplierCredit(e.target.checked)}
+                          className="h-4 w-4 text-blue-600 rounded focus:ring-blue-500 border-gray-300 cursor-pointer disabled:opacity-50"
+                        />
+                        <Label htmlFor="useSupplierCreditToggle" className={`font-semibold text-sm cursor-pointer ${availableCredit <= 0 ? 'text-gray-400' : 'text-blue-900'}`}>
+                          Use Available Credit
+                        </Label>
+                      </div>
+                      <Badge variant="outline" className={`text-xs font-semibold ${availableCredit > 0 ? 'bg-blue-100 text-blue-800 border-blue-300' : 'bg-gray-100 text-gray-600 border-gray-300'}`}>
+                        Available Credit: {formatCurrency(availableCredit)}
+                      </Badge>
+                    </div>
+
+                    {useSupplierCredit && availableCredit > 0 && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-blue-200">
+                        <div>
+                          <Label className="text-xs font-medium text-gray-700">Credit to Apply</Label>
+                          <Input
+                            type="number"
+                            min="0"
+                            max={maxCreditApplicable}
+                            step="0.01"
+                            value={creditToApplyInput}
+                            onChange={(e) => handleCreditInputChange(e.target.value)}
+                            className="h-9 bg-white text-sm font-medium mt-1 border-blue-300"
+                          />
+                          <span className="text-[11px] text-gray-500 mt-0.5 block">
+                            Max applicable: {formatCurrency(maxCreditApplicable)}
+                          </span>
+                        </div>
+                        <div>
+                          <Label className="text-xs font-medium text-gray-700">Remaining to Pay (Cash / Bank)</Label>
+                          <div className="h-9 flex items-center px-3 bg-white border border-gray-200 rounded-md text-sm font-semibold text-gray-800 mt-1">
+                            {formatCurrency(Math.max(outstandingBalance - creditToApplyNum, 0))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
                 {/* Payment Form Card */}
                 <Card className="border-0 shadow-lg bg-white">
                   <CardContent className="p-4 space-y-4">
@@ -413,8 +530,8 @@ export default function PayCreditModal({
                         <Banknote className="h-4 w-4 text-green-600" />
                       </div>
                       <div>
-                        <h3 className="text-base font-semibold text-gray-900">Payment Details</h3>
-                        <p className="text-xs text-gray-500">Enter payment information</p>
+                        <h3 className="text-base font-semibold text-gray-900">Cash / Bank Payment Details</h3>
+                        <p className="text-xs text-gray-500">Enter cash or bank transfer payment amount</p>
                       </div>
                     </div>
 
@@ -426,25 +543,24 @@ export default function PayCreditModal({
                           className="text-sm font-medium text-gray-700 flex items-center space-x-1"
                         >
                           <Banknote className="h-3 w-3" />
-                          <span>Payment Amount *</span>
+                          <span>Amount to Pay (Cash / Bank)</span>
                         </Label>
                         <Input
                           id="amount"
                           type="number"
                           step="0.01"
-                          min="0.01"
+                          min="0"
                           value={paymentAmount}
                           onChange={(e) => setPaymentAmount(e.target.value)}
                           placeholder="0.00"
                           className="text-base font-medium h-10 border-2 focus:border-blue-500 rounded-lg"
-                          required
                         />
                         <div className="space-y-1">
                           <div className="text-xs text-gray-500">
-                            Outstanding: {formatCurrency(outstandingBalance)}
+                            Remaining Outstanding: {formatCurrency(Math.max(outstandingBalance - creditToApplyNum, 0))}
                           </div>
                           <div className="text-xs text-blue-600 font-medium">
-                            Amount above the outstanding balance will be recorded as supplier credit.
+                            Amount above remaining balance will create extra supplier credit.
                           </div>
                         </div>
                       </div>
@@ -473,21 +589,58 @@ export default function PayCreditModal({
                       </div>
                     </div>
 
-                    {/* Dynamic Breakdown Card */}
-                    {enteredAmount > 0 && (
-                      <div className="p-3 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-200 space-y-1.5 text-xs sm:text-sm">
-                        <div className="flex justify-between items-center text-gray-700">
-                          <span>Amount Applied</span>
-                          <span className="font-semibold text-gray-900">{formatCurrency(amountApplied)}</span>
-                        </div>
-                        {extraSupplierCredit > 0 && (
-                          <div className="flex justify-between items-center text-blue-700 font-medium pt-1.5 border-t border-blue-200">
-                            <span>Extra Supplier Credit</span>
-                            <span className="font-bold text-blue-700">{formatCurrency(extraSupplierCredit)}</span>
-                          </div>
-                        )}
+                    {/* Dynamic Calculation Breakdown Card */}
+                    <div className="p-3.5 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-200 space-y-2 text-xs sm:text-sm">
+                      <div className="flex justify-between items-center text-gray-700">
+                        <span>Outstanding Balance:</span>
+                        <span className="font-semibold text-gray-900">{formatCurrency(outstandingBalance)}</span>
                       </div>
-                    )}
+
+                      {availableCredit > 0 && (
+                        <div className="flex justify-between items-center text-blue-800">
+                          <span>Available Supplier Credit:</span>
+                          <span className="font-semibold">{formatCurrency(availableCredit)}</span>
+                        </div>
+                      )}
+
+                      {useSupplierCredit && creditToApplyNum > 0 && (
+                        <div className="flex justify-between items-center text-blue-700 font-medium border-t border-blue-100 pt-1.5">
+                          <span>Credit to Apply:</span>
+                          <span className="font-bold">- {formatCurrency(creditToApplyNum)}</span>
+                        </div>
+                      )}
+
+                      <div className="flex justify-between items-center text-gray-800 font-medium">
+                        <span>Cash / Bank Payment:</span>
+                        <span className="font-bold text-green-700">{formatCurrency(cashPaymentNum)}</span>
+                      </div>
+
+                      <div className="flex justify-between items-center text-gray-900 font-bold border-t border-blue-200 pt-2 text-sm">
+                        <span>Total Balance Settled:</span>
+                        <span className="text-blue-700">{formatCurrency(totalSettled)}</span>
+                      </div>
+
+                      <div className="flex justify-between items-center text-gray-600 text-xs">
+                        <span>Remaining Outstanding Balance:</span>
+                        <span className={remainingOutstanding > 0 ? "text-orange-600 font-bold" : "text-green-600 font-bold"}>
+                          {formatCurrency(remainingOutstanding)}
+                        </span>
+                      </div>
+
+                      {availableCredit > 0 && (
+                        <div className="flex justify-between items-center text-blue-900 font-semibold text-xs border-t border-blue-200 pt-1.5">
+                          <span>Remaining Supplier Credit:</span>
+                          <span>{formatCurrency(Math.max(availableCredit - creditToApplyNum + extraCreditCreated, 0))}</span>
+                        </div>
+                      )}
+
+                      {extraCreditCreated > 0 && (
+                        <div className="flex justify-between items-center text-emerald-800 font-semibold text-xs pt-1">
+                          <span>Extra Supplier Credit Created:</span>
+                          <span>+ {formatCurrency(extraCreditCreated)}</span>
+                        </div>
+                      )}
+                    </div>
 
                     {/* Payment Date */}
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -515,7 +668,7 @@ export default function PayCreditModal({
 
                     {/* Quick Amount Buttons */}
                     <div className="space-y-2">
-                      <Label className="text-sm font-medium text-gray-700">Quick Amounts</Label>
+                      <Label className="text-sm font-medium text-gray-700">Quick Amounts for Cash Payment</Label>
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                         {quickAmounts.map((amount) => (
                           <Button
@@ -525,7 +678,7 @@ export default function PayCreditModal({
                             onClick={() => setPaymentAmount(amount.toString())}
                             className="h-9 text-xs rounded-lg border-2 hover:border-blue-500 hover:bg-blue-50 transition-all duration-200"
                           >
-                            {amount === outstandingBalance ? "Full" : formatCurrency(amount)}
+                            {amount === Math.max(outstandingBalance - creditToApplyNum, 0) ? "Full Remaining" : formatCurrency(amount)}
                           </Button>
                         ))}
                       </div>
@@ -544,7 +697,7 @@ export default function PayCreditModal({
                         id="notes"
                         value={notes}
                         onChange={(e) => setNotes(e.target.value)}
-                        placeholder="Add any notes about this payment..."
+                        placeholder="Add any notes about this transaction..."
                         rows={2}
                         className="border-2 focus:border-blue-500 rounded-lg resize-none text-sm"
                       />
@@ -558,7 +711,7 @@ export default function PayCreditModal({
             <div className="border-t bg-white p-4">
               <div className="flex flex-col sm:flex-row justify-between items-center space-y-2 sm:space-y-0 sm:space-x-3">
                 <div className="text-xs text-gray-500">
-                  Payment will be allocated to oldest purchases first
+                  Payment and credit will be allocated to oldest purchases first
                 </div>
                 <div className="flex space-x-2">
                   <Button
@@ -573,7 +726,7 @@ export default function PayCreditModal({
                   <Button
                     type="submit"
                     onClick={handleSubmit}
-                    disabled={isLoading || !paymentAmount || Number.parseFloat(paymentAmount) <= 0}
+                    disabled={isLoading || (cashPaymentNum <= 0 && creditToApplyNum <= 0)}
                     className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg shadow-lg hover:shadow-xl transition-all duration-200 text-sm"
                   >
                     {isLoading ? (
@@ -584,7 +737,7 @@ export default function PayCreditModal({
                     ) : (
                       <>
                         <CreditCard className="h-3 w-3 mr-1" />
-                        Pay {paymentAmount ? formatCurrency(Number.parseFloat(paymentAmount)) : "Amount"}
+                        {cashPaymentNum > 0 ? `Pay ${formatCurrency(cashPaymentNum)}` : "Apply Credit"}
                       </>
                     )}
                   </Button>
