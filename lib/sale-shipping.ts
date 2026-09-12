@@ -236,3 +236,82 @@ export function mapSaleShippingFromRecord(record: Record<string, unknown>): Sale
     customerPhoneOverride: (record.customer_phone_override as string) || "",
   }
 }
+
+export function isPaidSale(sale: any): boolean {
+  if (!sale) return false
+  if (
+    sale.status === "Cancelled" ||
+    sale.status === "Returned" ||
+    sale.payment_status?.toLowerCase() === "cancelled" ||
+    sale.delivery_status === "Returned" ||
+    sale.delivery_status?.toLowerCase() === "returned"
+  ) {
+    return false
+  }
+  const pStatus = sale.payment_status?.toLowerCase()
+  if (pStatus === "pending") {
+    return false
+  }
+  const total = Number(sale.total_amount) || 0
+  const received = Number(sale.received_amount) || 0
+  return pStatus === "paid" || pStatus === "completed" || (total > 0 && received >= total)
+}
+
+export function isPendingSale(sale: any): boolean {
+  if (!sale) return false
+  const isCancelledOrReturned =
+    sale.status === "Cancelled" ||
+    sale.status === "Returned" ||
+    sale.payment_status?.toLowerCase() === "cancelled" ||
+    sale.delivery_status === "Returned" ||
+    sale.delivery_status?.toLowerCase() === "returned" ||
+    sale.delivery_status === "Failed" ||
+    sale.delivery_status?.toLowerCase() === "failed"
+
+  if (isCancelledOrReturned) return false
+
+  const dStatus = (sale.delivery_status || "Pending").trim().toLowerCase()
+  return dStatus !== "delivered"
+}
+
+export function isCriticalSale(sale: any): boolean {
+  if (!sale) return false
+
+  // Critical orders are strictly Job Card sales
+  if (!isJobCardSale(sale)) return false
+
+  // Pickup sales (or non-shipping sales) are not critical orders
+  if (getSaleDeliveryLabel(sale) === "Pickup" || (sale.fulfillment_type || "pickup").toLowerCase() !== "ship") {
+    return false
+  }
+
+  const isCancelledOrReturned =
+    sale.status === "Cancelled" ||
+    sale.status === "Returned" ||
+    sale.payment_status?.toLowerCase() === "cancelled" ||
+    sale.delivery_status === "Returned" ||
+    sale.delivery_status?.toLowerCase() === "returned" ||
+    sale.delivery_status === "Failed" ||
+    sale.delivery_status?.toLowerCase() === "failed"
+
+  if (isCancelledOrReturned) return false
+
+  if (!isPaidSale(sale)) return false
+
+  const dStatus = (sale.delivery_status || "Pending").trim().toLowerCase()
+  const nonCriticalStatuses = ["pickup", "direct", "shipping", "shipped", "in transit", "delivered", "returned", "failed"]
+
+  return !nonCriticalStatuses.includes(dStatus)
+}
+
+export function isJobCardSale(sale: any): boolean {
+  if (!sale) return false
+  return sale.sale_type === "job_card" || String(sale.tracking_id || "").startsWith("JC-")
+}
+
+export function isNormalSale(sale: any): boolean {
+  if (!sale) return false
+  return !isJobCardSale(sale)
+}
+
+

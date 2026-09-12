@@ -705,6 +705,287 @@ export async function getUserSales(deviceId: number, options: GetUserSalesOption
   }
 }
 
+export interface GetPaginatedSalesOptions {
+  page?: number
+  pageSize?: number
+  dateFrom?: string
+  dateTo?: string
+  typeFilter?: "all" | "normal" | "job_card"
+  cardFilter?: "all" | "pending" | "critical"
+  searchTerm?: string
+}
+
+export async function getPaginatedUserSales(deviceId: number, options: GetPaginatedSalesOptions = {}) {
+  if (!deviceId) {
+    return { success: false, message: "Device ID is required", data: [], totalCount: 0, page: 1, totalPages: 0 }
+  }
+
+  resetConnectionState()
+
+  const page = Math.max(1, options.page || 1)
+  const pageSize = Math.max(1, Math.min(100, options.pageSize || 25))
+  const offset = (page - 1) * pageSize
+
+  const normalizedSearch = options.searchTerm?.trim() || null
+  const searchPattern = normalizedSearch ? `%${normalizedSearch.toLowerCase()}%` : null
+  const endExclusive = options.dateTo ? getExclusiveEndDate(options.dateTo) : null
+  const allowEcom = isEcomAllowedDevice(deviceId)
+
+  const dateFrom = options.dateFrom || null
+  const typeFilter = options.typeFilter || "all"
+  const cardFilter = options.cardFilter || "all"
+
+  try {
+    const result = await executeWithRetry(async () => {
+      const sales = await sql`
+        SELECT 
+          s.id,
+          COALESCE(s.sale_date, s.created_at) as sale_date,
+          s.status,
+          s.payment_status,
+          s.payment_method,
+          s.fulfillment_type,
+          s.delivery_status,
+          s.tracking_id,
+          s.courier_service_name,
+          md.tracking_url_template as tracking_url_template,
+          s.total_amount,
+          s.received_amount,
+          s.advance_amount,
+          s.balance_amount,
+          s.sale_type,
+          s.source,
+          s.external_order_id,
+          s.customer_id,
+          s.customer_name_override,
+          s.customer_phone_override,
+          s.shipping_address,
+          s.shipping_notes,
+          s.courier_paid_extra,
+          s.expense_courier,
+          COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name,
+          COALESCE(NULLIF(s.customer_phone_override, ''), c.phone, '') as customer_phone,
+          st.name as staff_name,
+          COALESCE(
+            (SELECT SUM(si.quantity * COALESCE(si.cost, pv.wholesale_price, p.wholesale_price, 0))
+             FROM sale_items si 
+             LEFT JOIN products p ON si.product_id = p.id AND NOT EXISTS (SELECT 1 FROM services s2 WHERE s2.id = si.product_id)
+             LEFT JOIN product_variants pv ON si.product_variant_id = pv.id
+             WHERE si.sale_id = s.id), 0
+          ) as total_cost
+        FROM sales s
+        LEFT JOIN customers c ON s.customer_id = c.id
+        LEFT JOIN staff st ON s.staff_id = st.id
+        LEFT JOIN master_data md ON s.courier_partner_id = md.id
+        WHERE (s.device_id = ${deviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
+          AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
+          AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
+          AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
+          AND (
+            ${typeFilter} = 'all'
+            OR (${typeFilter} = 'job_card' AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%'))
+            OR (${typeFilter} = 'normal' AND (COALESCE(s.sale_type, '') != 'job_card' AND (s.tracking_id IS NULL OR s.tracking_id NOT LIKE 'JC-%')))
+          )
+          AND (
+            ${cardFilter} = 'all'
+            OR (${cardFilter} = 'pending' AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned') AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled' AND LOWER(COALESCE(s.delivery_status, '')) NOT IN ('returned', 'failed') AND LOWER(COALESCE(s.delivery_status, 'pending')) != 'delivered')
+            OR (${cardFilter} = 'critical' AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%') AND LOWER(COALESCE(s.fulfillment_type, '')) = 'ship' AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned') AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'pending') AND (LOWER(COALESCE(s.payment_status, '')) IN ('paid', 'completed') OR (s.total_amount > 0 AND s.received_amount >= s.total_amount)) AND LOWER(COALESCE(s.delivery_status, 'pending')) NOT IN ('pickup', 'direct', 'shipping', 'shipped', 'in transit', 'delivered', 'returned', 'failed'))
+          )
+          AND (
+            ${searchPattern}::text IS NULL
+            OR LOWER(COALESCE(s.customer_name_override, c.name, '')) LIKE ${searchPattern}
+            OR LOWER(COALESCE(s.customer_phone_override, c.phone, '')) LIKE ${searchPattern}
+            OR LOWER(COALESCE(c.email, '')) LIKE ${searchPattern}
+            OR CAST(s.id AS TEXT) LIKE ${searchPattern}
+            OR LOWER(COALESCE(s.status, '')) LIKE ${searchPattern}
+            OR LOWER(COALESCE(s.payment_status, '')) LIKE ${searchPattern}
+            OR LOWER(COALESCE(s.payment_method, '')) LIKE ${searchPattern}
+            OR LOWER(COALESCE(s.delivery_status, '')) LIKE ${searchPattern}
+            OR LOWER(COALESCE(s.external_order_id, '')) LIKE ${searchPattern}
+            OR LOWER(COALESCE(s.tracking_id, '')) LIKE ${searchPattern}
+            OR LOWER(COALESCE(st.name, '')) LIKE ${searchPattern}
+            OR CAST(s.total_amount AS TEXT) LIKE ${searchPattern}
+            OR EXISTS (
+              SELECT 1 FROM sale_items si
+              LEFT JOIN products p ON si.product_id = p.id
+              LEFT JOIN services sv ON si.product_id = sv.id
+              LEFT JOIN product_variants pv ON si.product_variant_id = pv.id
+              WHERE si.sale_id = s.id
+                AND (
+                  LOWER(COALESCE(p.name, '')) LIKE ${searchPattern}
+                  OR LOWER(COALESCE(sv.name, '')) LIKE ${searchPattern}
+                  OR LOWER(COALESCE(pv.name, '')) LIKE ${searchPattern}
+                  OR LOWER(COALESCE(si.notes, '')) LIKE ${searchPattern}
+                )
+            )
+          )
+        ORDER BY COALESCE(s.sale_date, s.created_at) DESC, s.id DESC
+        LIMIT ${pageSize} OFFSET ${offset}
+      `
+
+      const countResult = await sql`
+        SELECT COUNT(*) as total
+        FROM sales s
+        LEFT JOIN customers c ON s.customer_id = c.id
+        LEFT JOIN staff st ON s.staff_id = st.id
+        WHERE (s.device_id = ${deviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
+          AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
+          AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
+          AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
+          AND (
+            ${typeFilter} = 'all'
+            OR (${typeFilter} = 'job_card' AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%'))
+            OR (${typeFilter} = 'normal' AND (COALESCE(s.sale_type, '') != 'job_card' AND (s.tracking_id IS NULL OR s.tracking_id NOT LIKE 'JC-%')))
+          )
+          AND (
+            ${cardFilter} = 'all'
+            OR (${cardFilter} = 'pending' AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned') AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled' AND LOWER(COALESCE(s.delivery_status, '')) NOT IN ('returned', 'failed') AND LOWER(COALESCE(s.delivery_status, 'pending')) != 'delivered')
+            OR (${cardFilter} = 'critical' AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%') AND LOWER(COALESCE(s.fulfillment_type, '')) = 'ship' AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned') AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'pending') AND (LOWER(COALESCE(s.payment_status, '')) IN ('paid', 'completed') OR (s.total_amount > 0 AND s.received_amount >= s.total_amount)) AND LOWER(COALESCE(s.delivery_status, 'pending')) NOT IN ('pickup', 'direct', 'shipping', 'shipped', 'in transit', 'delivered', 'returned', 'failed'))
+          )
+          AND (
+            ${searchPattern}::text IS NULL
+            OR LOWER(COALESCE(s.customer_name_override, c.name, '')) LIKE ${searchPattern}
+            OR LOWER(COALESCE(s.customer_phone_override, c.phone, '')) LIKE ${searchPattern}
+            OR LOWER(COALESCE(c.email, '')) LIKE ${searchPattern}
+            OR CAST(s.id AS TEXT) LIKE ${searchPattern}
+            OR LOWER(COALESCE(s.status, '')) LIKE ${searchPattern}
+            OR LOWER(COALESCE(s.payment_status, '')) LIKE ${searchPattern}
+            OR LOWER(COALESCE(s.payment_method, '')) LIKE ${searchPattern}
+            OR LOWER(COALESCE(s.delivery_status, '')) LIKE ${searchPattern}
+            OR LOWER(COALESCE(s.external_order_id, '')) LIKE ${searchPattern}
+            OR LOWER(COALESCE(s.tracking_id, '')) LIKE ${searchPattern}
+            OR LOWER(COALESCE(st.name, '')) LIKE ${searchPattern}
+            OR CAST(s.total_amount AS TEXT) LIKE ${searchPattern}
+            OR EXISTS (
+              SELECT 1 FROM sale_items si
+              LEFT JOIN products p ON si.product_id = p.id
+              LEFT JOIN services sv ON si.product_id = sv.id
+              LEFT JOIN product_variants pv ON si.product_variant_id = pv.id
+              WHERE si.sale_id = s.id
+                AND (
+                  LOWER(COALESCE(p.name, '')) LIKE ${searchPattern}
+                  OR LOWER(COALESCE(sv.name, '')) LIKE ${searchPattern}
+                  OR LOWER(COALESCE(pv.name, '')) LIKE ${searchPattern}
+                  OR LOWER(COALESCE(si.notes, '')) LIKE ${searchPattern}
+                )
+            )
+          )
+      `
+
+      const totalCount = Number(countResult[0]?.total || 0)
+      const totalPages = Math.ceil(totalCount / pageSize)
+
+      return {
+        sales,
+        totalCount,
+        page,
+        totalPages,
+      }
+    })
+
+    const filteredSales = await filterSalesForStaff(result.sales, deviceId)
+
+    return {
+      success: true,
+      data: filteredSales,
+      totalCount: result.totalCount,
+      page: result.page,
+      totalPages: result.totalPages,
+    }
+  } catch (error) {
+    console.error("Get paginated user sales error:", error)
+    return {
+      success: false,
+      message: `Database error: ${getLastError()?.message || "Unknown error"}.`,
+      data: [],
+      totalCount: 0,
+      page: 1,
+      totalPages: 0,
+    }
+  }
+}
+
+export async function getSalesSummaryCards(deviceId: number, options: { dateFrom?: string; dateTo?: string; typeFilter?: string; searchTerm?: string } = {}) {
+  if (!deviceId) {
+    return { success: false, counts: { total: 0, pending: 0, critical: 0 } }
+  }
+
+  resetConnectionState()
+
+  const normalizedSearch = options.searchTerm?.trim() || null
+  const searchPattern = normalizedSearch ? `%${normalizedSearch.toLowerCase()}%` : null
+  const endExclusive = options.dateTo ? getExclusiveEndDate(options.dateTo) : null
+  const allowEcom = isEcomAllowedDevice(deviceId)
+  const dateFrom = options.dateFrom || null
+  const typeFilter = options.typeFilter || "all"
+
+  try {
+    const cardCounts = await executeWithRetry(async () => {
+      const rows = await sql`
+        SELECT
+          COUNT(*)::int as total_count,
+          COUNT(*) FILTER (
+            WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
+              AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled'
+              AND LOWER(COALESCE(s.delivery_status, '')) NOT IN ('returned', 'failed')
+              AND LOWER(COALESCE(s.delivery_status, 'pending')) != 'delivered'
+          )::int as pending_count,
+          COUNT(*) FILTER (
+            WHERE (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%')
+              AND LOWER(COALESCE(s.fulfillment_type, '')) = 'ship'
+              AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
+              AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'pending')
+              AND (LOWER(COALESCE(s.payment_status, '')) IN ('paid', 'completed') OR (s.total_amount > 0 AND s.received_amount >= s.total_amount))
+              AND LOWER(COALESCE(s.delivery_status, 'pending')) NOT IN ('pickup', 'direct', 'shipping', 'shipped', 'in transit', 'delivered', 'returned', 'failed')
+          )::int as critical_count
+        FROM sales s
+        LEFT JOIN customers c ON s.customer_id = c.id
+        LEFT JOIN staff st ON s.staff_id = st.id
+        WHERE (s.device_id = ${deviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
+          AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
+          AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
+          AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
+          AND (
+            ${typeFilter} = 'all'
+            OR (${typeFilter} = 'job_card' AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%'))
+            OR (${typeFilter} = 'normal' AND (COALESCE(s.sale_type, '') != 'job_card' AND (s.tracking_id IS NULL OR s.tracking_id NOT LIKE 'JC-%')))
+          )
+          AND (
+            ${searchPattern}::text IS NULL
+            OR LOWER(COALESCE(s.customer_name_override, c.name, '')) LIKE ${searchPattern}
+            OR LOWER(COALESCE(s.customer_phone_override, c.phone, '')) LIKE ${searchPattern}
+            OR LOWER(COALESCE(c.email, '')) LIKE ${searchPattern}
+            OR CAST(s.id AS TEXT) LIKE ${searchPattern}
+            OR LOWER(COALESCE(s.status, '')) LIKE ${searchPattern}
+            OR LOWER(COALESCE(s.payment_status, '')) LIKE ${searchPattern}
+            OR LOWER(COALESCE(s.payment_method, '')) LIKE ${searchPattern}
+            OR LOWER(COALESCE(s.delivery_status, '')) LIKE ${searchPattern}
+            OR LOWER(COALESCE(s.external_order_id, '')) LIKE ${searchPattern}
+            OR LOWER(COALESCE(s.tracking_id, '')) LIKE ${searchPattern}
+            OR LOWER(COALESCE(st.name, '')) LIKE ${searchPattern}
+            OR CAST(s.total_amount AS TEXT) LIKE ${searchPattern}
+          )
+      `
+      return rows[0] || { total_count: 0, pending_count: 0, critical_count: 0 }
+    })
+
+    return {
+      success: true,
+      counts: {
+        total: Number(cardCounts.total_count || 0),
+        pending: Number(cardCounts.pending_count || 0),
+        critical: Number(cardCounts.critical_count || 0),
+      },
+    }
+  } catch (error) {
+    console.error("Get sales summary cards error:", error)
+    return {
+      success: false,
+      counts: { total: 0, pending: 0, critical: 0 },
+    }
+  }
+}
+
 export async function getSaleDetails(saleId: number) {
   if (!saleId) {
     return { success: false, message: "Sale ID is required" }

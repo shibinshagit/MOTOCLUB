@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { format } from "date-fns"
-import { ChevronLeft, ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -12,13 +11,52 @@ import {
   passesColumnFilter,
   type ExcelColumnFilterValue,
 } from "@/components/sales/excel-column-filter"
-import { getSaleDeliveryLabel } from "@/lib/sale-shipping"
+import { getSaleDeliveryLabel, isPendingSale, isCriticalSale, isJobCardSale, isNormalSale } from "@/lib/sale-shipping"
 import { DeliveryStatusSelect } from "@/components/sales/delivery-status-select"
-import { parseSaleDate } from "@/lib/utils"
+import { PhoneCell } from "@/components/sales/phone-cell"
+import { TrackingCell } from "@/components/sales/tracking-cell"
+import { parseSaleDate, cn } from "@/lib/utils"
+import { printJobCard, printBatchJobCards, printSalesReceipt } from "@/lib/receipt-utils"
+import { getSaleDetails, getPaginatedUserSales, getSalesSummaryCards } from "@/app/actions/sale-actions"
+import { filterSalesSemantic } from "@/lib/sale-search"
+import {
+  Search,
+  X,
+  RotateCcw,
+  Printer,
+  Download,
+  Loader2,
+  ShoppingCart,
+  Clock,
+  AlertTriangle,
+  ChevronDown,
+  ChevronUp,
+  Eye,
+  Edit,
+  Layers,
+  Plus,
+  ChevronLeft,
+  ChevronRight,
+  MapPin,
+  MoreHorizontal,
+  Phone,
+  ExternalLink,
+  Share2,
+} from "lucide-react"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { useToast } from "@/components/ui/use-toast"
+import { notifyWarning, notifySuccess, notifyError } from "@/lib/notifications"
+import { downloadSalesSummaryPDF, printSalesSummaryReport } from "@/lib/sales-summary-utils"
+import { JobCardModal } from "@/components/shared/job-card/job-card-modal"
 
 function getSaleStatusLabel(sale: any): string {
   if (sale.status === "Returned") {
-    return "Returned";
+    return "Returned"
   }
 
   if (
@@ -27,24 +65,24 @@ function getSaleStatusLabel(sale: any): string {
     sale.delivery_status === "Returned" ||
     sale.delivery_status?.toLowerCase() === "returned"
   ) {
-    return "Cancelled";
+    return "Cancelled"
   }
 
-  const pStatus = sale.payment_status?.toLowerCase();
+  const pStatus = sale.payment_status?.toLowerCase()
   if (pStatus === "pending") {
-    return "Pending";
+    return "Pending"
   }
 
-  const total = Number(sale.total_amount) || 0;
-  const received = Number(sale.received_amount) || 0;
+  const total = Number(sale.total_amount) || 0
+  const received = Number(sale.received_amount) || 0
 
   if (pStatus === "paid" || pStatus === "completed" || (total > 0 && received >= total)) {
-    return "Completed";
+    return "Completed"
   }
   if (pStatus === "credit" || pStatus === "partial" || (received > 0 && received < total)) {
-    return "Credit";
+    return "Credit"
   }
-  return "Pending";
+  return "Pending"
 }
 
 function SaleStatusBadge({ status }: { status: string }) {
@@ -66,7 +104,7 @@ function SaleStatusBadge({ status }: { status: string }) {
 
   return (
     <span
-      className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${
+      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
         styles[status] || "border-border bg-muted text-muted-foreground"
       }`}
     >
@@ -97,12 +135,6 @@ function DeliveryStatusBadge({ status }: { status: string }) {
     </span>
   )
 }
-
-import { filterSalesSemantic } from "@/lib/sale-search"
-import { Search, X, RotateCcw, Printer, Download, Loader2, FileText } from "lucide-react"
-import { useToast } from "@/components/ui/use-toast"
-import { notifyWarning, notifySuccess, notifyError } from "@/lib/notifications"
-import { downloadSalesSummaryPDF, printSalesSummaryReport } from "@/lib/sales-summary-utils"
 
 type ColumnKey = "saleId" | "status" | "delivery" | "date" | "customer" | "payment" | "total" | "received" | "balance"
 
@@ -187,6 +219,16 @@ export default function SalesExcelTable({
   const { toast } = useToast()
   const [internalSearchTerm, setInternalSearchTerm] = useState("")
   const [isGeneratingReport, setIsGeneratingReport] = useState(false)
+  const [isCreateJobCardOpen, setIsCreateJobCardOpen] = useState(false)
+  const [editingJobCardId, setEditingJobCardId] = useState<number | null>(null)
+
+  const handleRowEdit = (sale: any) => {
+    if (isJobCardSale(sale)) {
+      setEditingJobCardId(sale.id)
+    } else {
+      onEditSale(sale)
+    }
+  }
 
   const activeSearchTerm = externalSearchTerm !== undefined ? externalSearchTerm : internalSearchTerm
 
@@ -214,9 +256,10 @@ export default function SalesExcelTable({
           sale.delivery_status === "Returned" ||
           sale.delivery_status?.toLowerCase() === "returned"
         if (isCancelledOrReturned) return "—"
-        const received = (sale.payment_status === "Paid" || sale.payment_status === "Completed")
-          ? Number(sale.total_amount || 0)
-          : Number(sale.received_amount || 0)
+        const received =
+          sale.payment_status === "Paid" || sale.payment_status === "Completed"
+            ? Number(sale.total_amount || 0)
+            : Number(sale.received_amount || 0)
         return received > 0 ? formatCurrency(received) : "—"
       },
       balance: (sale: any) => {
@@ -236,58 +279,194 @@ export default function SalesExcelTable({
   }, [sales, valueGetters])
 
   const [columnFilters, setColumnFilters] = useState<ColumnFilters>(() => buildInitialFilters(sales, valueGetters))
+  const [cardFilter, setCardFilter] = useState<"all" | "pending" | "critical">("all")
+  const [typeFilter, setTypeFilter] = useState<"all" | "normal" | "job_card">("all")
+  const [selectedSales, setSelectedSales] = useState<number[]>([])
+  const [expandedSaleId, setExpandedSaleId] = useState<number | null>(null)
 
+  // High-performance server-side state
+  const [page, setPage] = useState(1)
+  const [pageSize] = useState(25)
+  const [debouncedSearch, setDebouncedSearch] = useState("")
+  const [serverSales, setServerSales] = useState<any[]>([])
+  const [totalServerCount, setTotalServerCount] = useState(0)
+  const [totalServerPages, setTotalServerPages] = useState(0)
+  const [serverCardCounts, setServerCardCounts] = useState<{ total: number; pending: number; critical: number } | null>(
+    null,
+  )
+  const [isFetchingServer, setIsFetchingServer] = useState(false)
+  const [expandedCache, setExpandedCache] = useState<Record<number, any>>({})
+  const [loadingExpandedId, setLoadingExpandedId] = useState<number | null>(null)
+
+  // 250ms search debounce
   useEffect(() => {
-    if (!hasLoadedSales) return
-    setColumnFilters(buildInitialFilters(sales, valueGetters))
-  }, [periodLabel, hasLoadedSales, sales, valueGetters])
+    const timer = setTimeout(() => {
+      setDebouncedSearch(activeSearchTerm)
+      setPage(1)
+    }, 250)
+    return () => clearTimeout(timer)
+  }, [activeSearchTerm])
 
-  const displaySales = useMemo(() => {
+  // Fetch paginated sales and card aggregates
+  useEffect(() => {
+    if (!deviceId) return
+    let isCancelled = false
+    setIsFetchingServer(true)
+
+    async function loadData() {
+      try {
+        const [salesRes, cardsRes] = await Promise.all([
+          getPaginatedUserSales(deviceId!, {
+            page,
+            pageSize,
+            dateFrom: globalDateRange?.from,
+            dateTo: globalDateRange?.to,
+            typeFilter,
+            cardFilter,
+            searchTerm: debouncedSearch,
+          }),
+          getSalesSummaryCards(deviceId!, {
+            dateFrom: globalDateRange?.from,
+            dateTo: globalDateRange?.to,
+            typeFilter,
+            searchTerm: debouncedSearch,
+          }),
+        ])
+
+        if (!isCancelled) {
+          if (salesRes.success && salesRes.data) {
+            setServerSales(salesRes.data)
+            setTotalServerCount(salesRes.totalCount)
+            setTotalServerPages(salesRes.totalPages)
+          }
+          if (cardsRes.success && cardsRes.counts) {
+            setServerCardCounts(cardsRes.counts)
+          }
+        }
+      } catch (err) {
+        console.error("Error fetching server sales:", err)
+      } finally {
+        if (!isCancelled) {
+          setIsFetchingServer(false)
+        }
+      }
+    }
+
+    loadData()
+
+    return () => {
+      isCancelled = true
+    }
+  }, [deviceId, page, pageSize, globalDateRange?.from, globalDateRange?.to, typeFilter, cardFilter, debouncedSearch])
+
+  // Prefetch next page silently
+  useEffect(() => {
+    if (deviceId && page < totalServerPages && !isFetchingServer) {
+      getPaginatedUserSales(deviceId, {
+        page: page + 1,
+        pageSize,
+        dateFrom: globalDateRange?.from,
+        dateTo: globalDateRange?.to,
+        typeFilter,
+        cardFilter,
+        searchTerm: debouncedSearch,
+      }).catch(() => {})
+    }
+  }, [
+    deviceId,
+    page,
+    totalServerPages,
+    pageSize,
+    globalDateRange?.from,
+    globalDateRange?.to,
+    typeFilter,
+    cardFilter,
+    debouncedSearch,
+    isFetchingServer,
+  ])
+
+  const toggleExpandRow = async (saleId: number) => {
+    if (expandedSaleId === saleId) {
+      setExpandedSaleId(null)
+      return
+    }
+    setExpandedSaleId(saleId)
+
+    if (!expandedCache[saleId]) {
+      setLoadingExpandedId(saleId)
+      try {
+        const res = await getSaleDetails(saleId)
+        if (res.success && res.data) {
+          const detailObj = res.data.sale
+            ? { ...res.data.sale, items: res.data.items, payments: res.data.payments }
+            : res.data
+          setExpandedCache((prev) => ({ ...prev, [saleId]: detailObj }))
+        }
+      } catch (err) {
+        console.error("Error loading expanded details:", err)
+      } finally {
+        setLoadingExpandedId(null)
+      }
+    }
+  }
+
+  const baseFilteredSales = useMemo(() => {
+    if (deviceId) return serverSales
     if (!hasLoadedSales) return sales
 
-    // 1. Semantic Search filtering
     const semanticallyFiltered = filterSalesSemantic(sales, activeSearchTerm)
+    return semanticallyFiltered.filter((sale) =>
+      (Object.keys(valueGetters) as ColumnKey[]).every((key) =>
+        passesColumnFilter(valueGetters[key](sale), columnFilters[key], uniqueValues[key]),
+      ),
+    )
+  }, [deviceId, serverSales, sales, activeSearchTerm, columnFilters, uniqueValues, valueGetters, hasLoadedSales])
 
-    // 2. Column filters and sort by Sale ID descending (newest first)
-    return semanticallyFiltered
-      .filter((sale) =>
-        (Object.keys(valueGetters) as ColumnKey[]).every((key) =>
-          passesColumnFilter(valueGetters[key](sale), columnFilters[key], uniqueValues[key]),
-        ),
-      )
-      .sort((a, b) => Number(b.id) - Number(a.id))
-  }, [sales, activeSearchTerm, columnFilters, uniqueValues, valueGetters, hasLoadedSales])
+  const typeFilteredSales = useMemo(() => {
+    if (deviceId) return serverSales
+    if (typeFilter === "job_card") {
+      return baseFilteredSales.filter(isJobCardSale)
+    }
+    if (typeFilter === "normal") {
+      return baseFilteredSales.filter(isNormalSale)
+    }
+    return baseFilteredSales
+  }, [deviceId, serverSales, baseFilteredSales, typeFilter])
 
-  const totalSalesAmount = displaySales.reduce((sum, sale) => sum + Number(sale.total_amount || 0), 0)
-  const receivedAmountTotal = displaySales.reduce((sum, sale) => {
-    const isCancelledOrReturned =
-      sale.status === "Cancelled" ||
-      sale.payment_status?.toLowerCase() === "cancelled" ||
-      sale.delivery_status === "Returned" ||
-      sale.delivery_status?.toLowerCase() === "returned"
-    if (isCancelledOrReturned) return sum
-    const received = (sale.payment_status === "Paid" || sale.payment_status === "Completed")
-      ? Number(sale.total_amount || 0)
-      : Number(sale.received_amount || 0)
-    return sum + received
-  }, 0)
-  const remainingAmountTotal = displaySales.reduce((sum, sale) => sum + getRemainingAmount(sale), 0)
-  const cogsTotal = displaySales.reduce((sum, sale) => sum + Number(sale.total_cost || 0), 0)
-  const profitTotal = displaySales.reduce(
-    (sum, sale) => sum + (Number(sale.total_amount || 0) - Number(sale.total_cost || 0)),
-    0,
+  const displaySales = useMemo(() => {
+    if (deviceId) return serverSales
+    let result = typeFilteredSales
+    if (cardFilter === "pending") {
+      result = result.filter(isPendingSale)
+    } else if (cardFilter === "critical") {
+      result = result.filter(isCriticalSale)
+    }
+    return [...result].sort((a, b) => Number(b.id) - Number(a.id))
+  }, [deviceId, serverSales, typeFilteredSales, cardFilter])
+
+  const selectedSalesList = useMemo(() => {
+    return displaySales.filter((s) => selectedSales.includes(s.id))
+  }, [displaySales, selectedSales])
+
+  const totalCount = serverCardCounts ? serverCardCounts.total : typeFilteredSales.length
+  const pendingCount = serverCardCounts ? serverCardCounts.pending : typeFilteredSales.filter(isPendingSale).length
+  const criticalCount = serverCardCounts ? serverCardCounts.critical : typeFilteredSales.filter(isCriticalSale).length
+  const pendingSalesCount = pendingCount
+
+  const totalSalesAmount = useMemo(
+    () => displaySales.reduce((sum, sale) => sum + Number(sale.total_amount || 0), 0),
+    [displaySales],
   )
-
-  const pendingSalesCount = useMemo(() => {
-    return displaySales.filter((sale) => {
-      const isCancelledOrReturned =
-        sale.status === "Cancelled" ||
-        sale.payment_status?.toLowerCase() === "cancelled" ||
-        sale.delivery_status === "Returned" ||
-        sale.delivery_status?.toLowerCase() === "returned"
-      return !isCancelledOrReturned && (getSaleStatusLabel(sale) === "Pending" || sale.status === "Pending" || sale.payment_status === "Pending")
-    }).length
-  }, [displaySales])
+  const pendingSalesAmount = useMemo(
+    () =>
+      displaySales.filter(isPendingSale).reduce((sum, sale) => sum + Number(sale.total_amount || 0), 0),
+    [displaySales],
+  )
+  const criticalSalesAmount = useMemo(
+    () =>
+      displaySales.filter(isCriticalSale).reduce((sum, sale) => sum + Number(sale.total_amount || 0), 0),
+    [displaySales],
+  )
 
   const activeFilterCount = hasLoadedSales
     ? (Object.keys(columnFilters) as ColumnKey[]).filter((key) =>
@@ -323,6 +502,9 @@ export default function SalesExcelTable({
 
   const clearAllFilters = () => {
     setColumnFilters(buildInitialFilters(sales, valueGetters))
+    setCardFilter("all")
+    setTypeFilter("all")
+    setSelectedSales([])
   }
 
   const headerCell = (key: ColumnKey, label: string, align: "left" | "right" = "left") => (
@@ -337,6 +519,23 @@ export default function SalesExcelTable({
       />
     </th>
   )
+
+  const getSaleProfit = (sale: any) => {
+    const itemsCost =
+      sale.items?.reduce(
+        (sum: number, i: any) => sum + Number(i.cost || i.cost_price || 0) * Number(i.quantity || 1),
+        0,
+      ) || 0
+    const cost = Number(sale.total_cost) > 0 ? Number(sale.total_cost) : itemsCost
+    const sellingPrice = Number(sale.total_amount || 0)
+    const courierCharge = Number(sale.courier_paid_extra || sale.expense_courier || 0)
+
+    if (sale.status === "Returned" || sale.delivery_status === "Returned") {
+      return 0
+    }
+
+    return sellingPrice - cost - courierCharge
+  }
 
   const handlePrintSummary = () => {
     if (isGeneratingReport) return
@@ -372,6 +571,44 @@ export default function SalesExcelTable({
     }
   }
 
+  const handleBulkPrintInvoices = async () => {
+    if (selectedSalesList.length === 0) return
+    setIsGeneratingReport(true)
+    try {
+      for (const sale of selectedSalesList) {
+        if (sale.items && sale.items.length > 0) {
+          printSalesReceipt(sale, sale.items, "INR", {}, false)
+        } else {
+          const res = await getSaleDetails(sale.id)
+          if (res.success && res.data) {
+            printSalesReceipt(res.data.sale, res.data.items, "INR", {}, false)
+          }
+        }
+      }
+      notifySuccess(toast, `Sent ${selectedSalesList.length} invoice(s) to print.`)
+    } catch (err: any) {
+      notifyError(toast, err?.message || "Failed to print selected invoices.")
+    } finally {
+      setIsGeneratingReport(false)
+    }
+  }
+
+  const handleBulkPrintLabels = () => {
+    if (selectedSalesList.length === 0) return
+    printBatchJobCards(selectedSalesList, "INR")
+    notifySuccess(toast, `Opened print window for ${selectedSalesList.length} delivery label(s).`)
+  }
+
+  const handleBulkPrintJobCards = () => {
+    const jobCardSales = selectedSalesList.filter(isJobCardSale)
+    if (jobCardSales.length === 0) {
+      notifyWarning(toast, "No Job Card orders selected.")
+      return
+    }
+    printBatchJobCards(jobCardSales, "INR")
+    notifySuccess(toast, `Opened print window for ${jobCardSales.length} Job Card(s).`)
+  }
+
   const stickyActionHeaderClass =
     "sticky right-0 z-20 min-w-[5.5rem] whitespace-nowrap border-l border-slate-200 bg-[#F1F4F9] px-4 py-2.5 text-right shadow-[-8px_0_12px_-8px_rgba(15,23,42,0.12)]"
   const stickyActionCellClass = (rowBg: string, isPending: boolean) =>
@@ -380,76 +617,234 @@ export default function SalesExcelTable({
     }`
 
   return (
-    <div className="space-y-3">
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
-        <div className="rounded-lg border border-violet-100 bg-violet-50 px-3 py-2">
-          <p className="text-[11px] font-medium uppercase tracking-wide text-violet-600">Total</p>
-          <p className="text-sm font-bold text-violet-700">{formatCurrency(totalSalesAmount)}</p>
+    <div className="space-y-3 pb-28 sm:pb-6 min-w-0 max-w-full overflow-hidden">
+      {/* TYPE FILTER CONTROL BAR */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 bg-white p-3 rounded-xl border border-slate-200 shadow-2xs">
+        <div className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-100 p-1 w-full sm:w-auto overflow-x-auto no-scrollbar">
+          <button
+            type="button"
+            onClick={() => {
+              setTypeFilter("all")
+              setPage(1)
+              setSelectedSales([])
+            }}
+            className={cn(
+              "px-3 py-1.5 text-xs font-semibold rounded-md transition-all cursor-pointer whitespace-nowrap shrink-0",
+              typeFilter === "all"
+                ? "bg-white text-slate-900 shadow-2xs font-extrabold"
+                : "text-slate-600 hover:text-slate-900",
+            )}
+          >
+            All Sales ({totalCount})
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setTypeFilter("normal")
+              setPage(1)
+              setSelectedSales([])
+            }}
+            className={cn(
+              "px-3 py-1.5 text-xs font-semibold rounded-md transition-all cursor-pointer whitespace-nowrap shrink-0",
+              typeFilter === "normal"
+                ? "bg-white text-slate-900 shadow-2xs font-extrabold"
+                : "text-slate-600 hover:text-slate-900",
+            )}
+          >
+            Normal Sales
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setTypeFilter("job_card")
+              setPage(1)
+              setSelectedSales([])
+            }}
+            className={cn(
+              "px-3 py-1.5 text-xs font-semibold rounded-md transition-all cursor-pointer whitespace-nowrap shrink-0",
+              typeFilter === "job_card"
+                ? "bg-white text-slate-900 shadow-2xs font-extrabold"
+                : "text-slate-600 hover:text-slate-900",
+            )}
+          >
+            Job Card Sales
+          </button>
         </div>
-        <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2">
-          <p className="text-[11px] font-medium uppercase tracking-wide text-emerald-600">Received</p>
-          <p className="text-sm font-bold text-emerald-700">{formatCurrency(receivedAmountTotal)}</p>
+
+        <div className="text-xs font-medium text-slate-500 hidden sm:block">
+          Unified Sales & Order Management
         </div>
-        <div className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2">
-          <p className="text-[11px] font-medium uppercase tracking-wide text-amber-600">Remaining</p>
-          <p className="text-sm font-bold text-amber-700">{formatCurrency(remainingAmountTotal)}</p>
-        </div>
-        <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2">
-          <p className="text-[11px] font-medium uppercase tracking-wide text-blue-600">Profit</p>
-          <p className="text-sm font-bold text-blue-700">{formatCurrency(profitTotal)}</p>
-        </div>
-        {!hideCogs && (
-          <div className="rounded-lg border border-border bg-muted/40 px-3 py-2">
-            <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">COGS</p>
-            <p className="text-sm font-bold text-foreground">{formatCurrency(cogsTotal)}</p>
-          </div>
-        )}
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-card">
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-2 border-b border-slate-200 bg-[#F1F4F9] px-3 py-2.5 sm:px-4">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-medium text-slate-600">
-              {displaySales.length} of {sales.length} {sales.length === 1 ? "sale" : "sales"}
-            </span>
-            {pendingSalesCount > 0 && (
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800">
-                <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
-                {pendingSalesCount} Pending {pendingSalesCount === 1 ? "Sale" : "Sales"}
+      {/* OPERATIONAL CARDS */}
+      <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+        {/* CARD 1 — TOTAL SALES */}
+        <button
+          type="button"
+          onClick={() => {
+            setCardFilter("all")
+            setPage(1)
+          }}
+          className={cn(
+            "flex flex-col justify-between rounded-xl border p-3.5 text-left transition-all cursor-pointer shadow-xs hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-400 min-w-0",
+            cardFilter === "all"
+              ? "border-violet-500 bg-violet-50/90 ring-2 ring-violet-400/30"
+              : "border-slate-200 bg-white hover:border-violet-300 hover:bg-slate-50/50",
+          )}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-violet-700">Total Sales</span>
+            <ShoppingCart className="h-4 w-4 text-violet-600 shrink-0" />
+          </div>
+          <div className="mt-2 flex items-baseline justify-between gap-2 min-w-0">
+            <div className="min-w-0">
+              <div className="text-xl font-extrabold text-slate-900 leading-tight">
+                {totalCount} <span className="text-xs font-normal text-slate-500">{totalCount === 1 ? "Order" : "Orders"}</span>
+              </div>
+              <div className="text-xs font-semibold text-violet-700 mt-0.5 truncate">
+                {formatCurrency(totalSalesAmount)}
+              </div>
+            </div>
+            {cardFilter === "all" && (
+              <span className="text-[10px] font-bold text-violet-700 bg-violet-100 px-2 py-0.5 rounded-full border border-violet-200 shrink-0">
+                All Orders
               </span>
             )}
           </div>
+        </button>
 
-          <div className="flex items-center gap-1">
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-7 w-7 shrink-0 bg-white"
-              onClick={onPreviousMonth}
-              aria-label="Previous month"
+        {/* CARD 2 — PENDING ORDERS */}
+        <button
+          type="button"
+          onClick={() => {
+            setCardFilter((prev) => (prev === "pending" ? "all" : "pending"))
+            setPage(1)
+          }}
+          className={cn(
+            "flex flex-col justify-between rounded-xl border p-3.5 text-left transition-all cursor-pointer shadow-xs hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-amber-400 min-w-0",
+            cardFilter === "pending"
+              ? "border-amber-500 bg-amber-50/90 ring-2 ring-amber-400/30"
+              : "border-slate-200 bg-white hover:border-amber-300 hover:bg-slate-50/50",
+          )}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-amber-700">Pending Orders</span>
+            <Clock className="h-4 w-4 text-amber-600 shrink-0" />
+          </div>
+          <div className="mt-2 flex items-baseline justify-between gap-2 min-w-0">
+            <div className="min-w-0">
+              <div className="text-xl font-extrabold text-slate-900 leading-tight">
+                {pendingCount} <span className="text-xs font-normal text-slate-500">{pendingCount === 1 ? "Order" : "Orders"}</span>
+              </div>
+              <div className="text-xs font-semibold text-amber-700 mt-0.5 truncate">
+                {formatCurrency(pendingSalesAmount)}
+              </div>
+            </div>
+            {cardFilter === "pending" && (
+              <span className="text-[10px] font-bold text-amber-800 bg-amber-200 px-2 py-0.5 rounded-full border border-amber-300 shrink-0">
+                Active Filter
+              </span>
+            )}
+          </div>
+        </button>
+
+        {/* CARD 3 — CRITICAL ORDERS */}
+        <button
+          type="button"
+          onClick={() => {
+            setCardFilter((prev) => (prev === "critical" ? "all" : "critical"))
+            setPage(1)
+          }}
+          className={cn(
+            "flex flex-col justify-between rounded-xl border p-3.5 text-left transition-all cursor-pointer shadow-xs hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-rose-400 min-w-0",
+            cardFilter === "critical"
+              ? "border-rose-500 bg-rose-50/90 ring-2 ring-rose-400/30"
+              : "border-slate-200 bg-white hover:border-rose-300 hover:bg-slate-50/50",
+          )}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-rose-700">Critical Orders</span>
+            <AlertTriangle className="h-4 w-4 text-rose-600 shrink-0" />
+          </div>
+          <div className="mt-2 flex items-baseline justify-between gap-2 min-w-0">
+            <div className="min-w-0">
+              <div className="text-xl font-extrabold text-slate-900 leading-tight">
+                {criticalCount} <span className="text-xs font-normal text-slate-500">{criticalCount === 1 ? "Order" : "Orders"}</span>
+              </div>
+              <div className="text-xs font-semibold text-rose-700 mt-0.5 truncate">
+                {formatCurrency(criticalSalesAmount)}
+              </div>
+            </div>
+            {cardFilter === "critical" && (
+              <span className="text-[10px] font-bold text-rose-800 bg-rose-200 px-2 py-0.5 rounded-full border border-rose-300 shrink-0">
+                Active Filter
+              </span>
+            )}
+          </div>
+        </button>
+      </div>
+
+      {/* BULK ACTION TOOLBAR */}
+      {selectedSales.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-violet-300 bg-violet-50 p-3 shadow-xs min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-violet-900">
+              {selectedSales.length} {selectedSales.length === 1 ? "order" : "orders"} selected
+            </span>
+            <button
+              type="button"
+              onClick={() => setSelectedSales([])}
+              className="text-xs font-semibold text-violet-700 hover:text-violet-950 underline ml-1 cursor-pointer"
             >
-              <ChevronLeft className="h-3.5 w-3.5" />
-            </Button>
-            <span className="min-w-[7rem] sm:min-w-[9rem] text-center text-xs font-medium text-foreground">{periodLabel}</span>
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-7 w-7 shrink-0 bg-white"
-              onClick={onNextMonth}
-              disabled={!canGoNextMonth}
-              aria-label="Next month"
-            >
-              <ChevronRight className="h-3.5 w-3.5" />
-            </Button>
-            {!isCurrentMonth ? (
-              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={onCurrentMonth}>
-                This month
-              </Button>
-            ) : null}
+              Clear selection
+            </button>
           </div>
 
-          <div className="w-full sm:w-auto flex flex-wrap min-h-[28px] items-center gap-2">
-            <div className="relative w-full sm:w-64">
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 text-xs gap-1.5 bg-white border-violet-300 hover:bg-violet-100 text-violet-900 font-medium flex-1 sm:flex-initial"
+              onClick={handleBulkPrintInvoices}
+              disabled={isLoading || isGeneratingReport}
+            >
+              <Printer className="h-3.5 w-3.5 text-violet-600" />
+              Print Invoices ({selectedSales.length})
+            </Button>
+
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 text-xs gap-1.5 bg-white border-violet-300 hover:bg-violet-100 text-violet-900 font-medium flex-1 sm:flex-initial"
+              onClick={handleBulkPrintLabels}
+              disabled={isLoading || isGeneratingReport}
+            >
+              <Printer className="h-3.5 w-3.5 text-violet-600" />
+              Print Labels ({selectedSales.length})
+            </Button>
+
+            {selectedSalesList.some(isJobCardSale) && (
+              <Button
+                size="sm"
+                className="h-8 text-xs gap-1.5 bg-violet-600 hover:bg-violet-700 text-white font-medium flex-1 sm:flex-initial"
+                onClick={handleBulkPrintJobCards}
+                disabled={isLoading || isGeneratingReport}
+              >
+                <Printer className="h-3.5 w-3.5" />
+                Print Job Cards ({selectedSalesList.filter(isJobCardSale).length})
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* MAIN CONTENT CONTAINER */}
+      <div className="overflow-hidden rounded-xl border border-slate-200 bg-card">
+        {/* HEADER CONTROLS BAR */}
+        <div className="flex flex-col gap-2.5 border-b border-slate-200 bg-[#F1F4F9] p-3 sm:px-4">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+            {/* SEARCH INPUT */}
+            <div className="relative w-full sm:w-72 min-w-0">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
               <input
                 type="text"
@@ -457,13 +852,13 @@ export default function SalesExcelTable({
                 onChange={(e) => handleSearchChange(e.target.value)}
                 placeholder="Search sales, customer, product..."
                 aria-label="Global sale search"
-                className="h-7 w-full rounded-md border border-slate-200 bg-white py-1 pl-8 pr-7 text-xs outline-none transition focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+                className="h-8 w-full rounded-lg border border-slate-200 bg-white py-1 pl-8 pr-7 text-xs outline-none transition focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
               />
               {activeSearchTerm ? (
                 <button
                   type="button"
                   onClick={() => handleSearchChange("")}
-                  className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 cursor-pointer"
                   aria-label="Clear search"
                 >
                   <X className="h-3.5 w-3.5" />
@@ -471,222 +866,697 @@ export default function SalesExcelTable({
               ) : null}
             </div>
 
-            {onRefreshSales && (
+            {/* DATE NAVIGATOR */}
+            <div className="flex items-center justify-between sm:justify-end gap-1 bg-white p-1 rounded-lg border border-slate-200 shrink-0">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 shrink-0"
+                onClick={onPreviousMonth}
+                aria-label="Previous month"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" />
+              </Button>
+              <span className="min-w-[6.5rem] sm:min-w-[8.5rem] text-center text-xs font-semibold text-slate-800 truncate px-1">
+                {periodLabel}
+              </span>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 shrink-0"
+                onClick={onNextMonth}
+                disabled={!canGoNextMonth}
+                aria-label="Next month"
+              >
+                <ChevronRight className="h-3.5 w-3.5" />
+              </Button>
+              {!isCurrentMonth ? (
+                <Button variant="ghost" size="sm" className="h-7 px-2 text-xs shrink-0" onClick={onCurrentMonth}>
+                  This month
+                </Button>
+              ) : null}
+            </div>
+          </div>
+
+          {/* ACTION BUTTONS ROW */}
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-200/60">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-medium text-slate-600">
+                {deviceId ? (
+                  `Showing ${displaySales.length > 0 ? (page - 1) * pageSize + 1 : 0}–${Math.min(
+                    page * pageSize,
+                    totalCount,
+                  )} of ${totalCount}`
+                ) : (
+                  `${displaySales.length} of ${sales.length}`
+                )}
+              </span>
+              {pendingSalesCount > 0 && (
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800">
+                  <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
+                  {pendingSalesCount} Pending
+                </span>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5 w-full sm:w-auto">
+              {onRefreshSales && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 gap-1.5 px-2.5 text-xs font-medium bg-white hover:bg-slate-50 border-slate-200 text-slate-700 shadow-2xs"
+                  onClick={onRefreshSales}
+                  disabled={isLoading || isFetchingServer}
+                  title="Refresh sales list"
+                >
+                  <RotateCcw className={`h-3.5 w-3.5 ${isLoading || isFetchingServer ? "animate-spin" : ""}`} />
+                  <span>Refresh</span>
+                </Button>
+              )}
+
               <Button
                 variant="outline"
                 size="sm"
-                className="h-7 gap-1 px-2.5 text-xs font-medium bg-white hover:bg-slate-50 border-slate-200 shrink-0 text-slate-700 hover:text-slate-900"
-                onClick={onRefreshSales}
-                disabled={isLoading}
-                title="Refresh sales list"
+                className="h-7 gap-1.5 px-2.5 text-xs font-medium bg-white hover:bg-slate-50 border-slate-200 text-slate-700 shadow-2xs"
+                onClick={handlePrintSummary}
+                disabled={isLoading || isGeneratingReport}
+                title="View and print Sales Summary Report"
               >
-                <RotateCcw className={`h-3.5 w-3.5 ${isLoading ? "animate-spin" : ""}`} />
-                <span className="hidden sm:inline">Refresh</span>
+                {isGeneratingReport ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-500" />
+                ) : (
+                  <Printer className="h-3.5 w-3.5 text-slate-600" />
+                )}
+                <span>Summary</span>
               </Button>
-            )}
 
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 gap-1.5 px-2.5 text-xs font-medium bg-white hover:bg-slate-50 border-slate-200 shrink-0 text-slate-700 hover:text-slate-900 shadow-sm"
-              onClick={handlePrintSummary}
-              disabled={isLoading || isGeneratingReport}
-              title="View and print Sales Summary Report"
-            >
-              {isGeneratingReport ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-500" />
-              ) : (
-                <Printer className="h-3.5 w-3.5 text-slate-600" />
-              )}
-              <span>View Summary</span>
-            </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 gap-1.5 px-2.5 text-xs font-medium bg-white hover:bg-slate-50 border-slate-200 text-slate-700 shadow-2xs"
+                onClick={handleDownloadPDF}
+                disabled={isLoading || isGeneratingReport}
+                title="Download Sales Summary PDF Report"
+              >
+                {isGeneratingReport ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-500" />
+                ) : (
+                  <Download className="h-3.5 w-3.5 text-slate-600" />
+                )}
+                <span>PDF</span>
+              </Button>
 
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 gap-1.5 px-2.5 text-xs font-medium bg-white hover:bg-slate-50 border-slate-200 shrink-0 text-slate-700 hover:text-slate-900 shadow-sm"
-              onClick={handleDownloadPDF}
-              disabled={isLoading || isGeneratingReport}
-              title="Download Sales Summary PDF Report"
-            >
-              {isGeneratingReport ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-500" />
-              ) : (
-                <Download className="h-3.5 w-3.5 text-slate-600" />
-              )}
-              <span>Download PDF</span>
-            </Button>
+              <Button
+                size="sm"
+                className="h-7 gap-1.5 px-3 text-xs font-semibold bg-violet-600 hover:bg-violet-700 text-white shadow-2xs"
+                onClick={() => setIsCreateJobCardOpen(true)}
+                title="Create a new Job Card"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                <span>Job Card</span>
+              </Button>
 
-            {activeFilterCount > 0 ? (
-              <>
-                <span className="text-xs font-medium text-violet-700">
-                  {activeFilterCount} column filter{activeFilterCount === 1 ? "" : "s"} active
-                </span>
-                <button
-                  type="button"
+              {activeFilterCount > 0 || cardFilter !== "all" || typeFilter !== "all" ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={clearAllFilters}
-                  className="text-xs font-medium text-brand-blue hover:text-blue-700 hover:underline"
+                  className="h-7 px-2 text-xs text-rose-600 hover:text-rose-800"
                 >
-                  Clear all
-                </button>
-              </>
-            ) : null}
+                  Clear Filters
+                </Button>
+              ) : null}
+            </div>
           </div>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="min-w-full border-separate border-spacing-0 text-sm">
-            <thead>
-              <tr className="border-b border-slate-200 bg-[#F1F4F9] text-xs font-semibold uppercase tracking-wide text-slate-600">
-                <th className="w-12 whitespace-nowrap px-4 py-2.5 text-left">#</th>
-                {headerCell("saleId", "Sale #")}
-                {headerCell("status", "Status")}
-                {headerCell("delivery", "Delivery")}
-                {headerCell("date", "Date")}
-                {headerCell("customer", "Customer")}
-                {headerCell("payment", "Payment")}
-                {headerCell("total", "Total", "right")}
-                {headerCell("received", "Received", "right")}
-                {headerCell("balance", "Balance", "right")}
-                <th className={stickyActionHeaderClass}>Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {isLoading && !hasLoadedSales ? (
+        {/* DATA CONTAINER: DESKTOP TABLE & MOBILE CARDS */}
+        <div className="relative min-w-0">
+          {isFetchingServer && (
+            <div className="absolute inset-0 bg-white/60 z-30 flex items-center justify-center backdrop-blur-[1px]">
+              <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-lg border border-slate-200 shadow-md text-xs font-semibold text-slate-700">
+                <Loader2 className="h-4 w-4 animate-spin text-violet-600" /> Loading sales...
+              </div>
+            </div>
+          )}
+
+          {/* DESKTOP TABLE VIEW (>= 1024px) */}
+          <div className="hidden lg:block overflow-x-auto">
+            <table className="w-full text-left text-xs text-slate-700">
+              <thead className="bg-[#F1F4F9] text-[11px] font-bold uppercase tracking-wider text-slate-600 border-b border-slate-200">
                 <tr>
-                  <td colSpan={11}>
-                    <TableSkeleton />
-                  </td>
+                  <th className="whitespace-nowrap px-3 py-2.5 text-center w-10">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-gray-300 text-violet-600 focus:ring-violet-600 cursor-pointer"
+                      checked={displaySales.length > 0 && selectedSales.length === displaySales.length}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedSales(displaySales.map((s) => s.id))
+                        } else {
+                          setSelectedSales([])
+                        }
+                      }}
+                      title="Select all visible orders"
+                    />
+                  </th>
+                  <th className="whitespace-nowrap px-2 py-2.5 text-center w-8"></th>
+                  <th className="whitespace-nowrap px-3 py-2.5 text-xs font-bold text-slate-600 text-center">#</th>
+                  {headerCell("saleId", "Order #")}
+                  {headerCell("status", "Status")}
+                  {headerCell("delivery", "Delivery Status")}
+                  {headerCell("date", "Date & Time")}
+                  {headerCell("customer", "Customer")}
+                  {headerCell("payment", "Payment")}
+                  {headerCell("total", "Total / Profit", "right")}
+                  {headerCell("received", "Received", "right")}
+                  {headerCell("balance", "Balance", "right")}
+                  <th className={stickyActionHeaderClass}>Action</th>
                 </tr>
-              ) : error ? (
-                <tr>
-                  <td colSpan={11} className="px-4 py-8 text-center text-sm text-rose-600">
-                    {error}
-                  </td>
-                </tr>
-              ) : displaySales.length === 0 ? (
-                <tr>
-                  <td colSpan={11} className="px-4 py-12 text-center text-sm text-muted-foreground">
-                    {sales.length === 0 ? `No sales found for ${periodLabel}` : "No sales match the current column filters"}
-                  </td>
-                </tr>
-              ) : (
-                displaySales.map((sale, index) => {
-                  const remaining = getRemainingAmount(sale)
-                  const received = (sale.payment_status === "Paid" || sale.payment_status === "Completed")
-                    ? Number(sale.total_amount || 0)
-                    : Number(sale.received_amount || 0)
+              </thead>
+              <tbody>
+                {isLoading && !hasLoadedSales ? (
+                  <tr>
+                    <td colSpan={13}>
+                      <TableSkeleton />
+                    </td>
+                  </tr>
+                ) : error ? (
+                  <tr>
+                    <td colSpan={13} className="px-4 py-8 text-center text-sm text-rose-600">
+                      {error}
+                    </td>
+                  </tr>
+                ) : displaySales.length === 0 ? (
+                  <tr>
+                    <td colSpan={13} className="px-4 py-12 text-center text-sm text-muted-foreground">
+                      {sales.length === 0 ? `No sales found for ${periodLabel}` : "No sales match the current filters"}
+                    </td>
+                  </tr>
+                ) : (
+                  displaySales.flatMap((rawSale, index) => {
+                    const sale = expandedCache[rawSale.id] ? { ...rawSale, ...expandedCache[rawSale.id] } : rawSale
+                    const remaining = getRemainingAmount(sale)
+                    const received =
+                      sale.payment_status === "Paid" || sale.payment_status === "Completed"
+                        ? Number(sale.total_amount || 0)
+                        : Number(sale.received_amount || 0)
 
-                  const statusLabel = getSaleStatusLabel(sale)
-                  const isCancelledOrReturned =
-                    sale.status === "Cancelled" ||
-                    sale.payment_status?.toLowerCase() === "cancelled" ||
-                    sale.delivery_status === "Returned" ||
-                    sale.delivery_status?.toLowerCase() === "returned"
+                    const statusLabel = getSaleStatusLabel(sale)
+                    const isCancelledOrReturned =
+                      sale.status === "Cancelled" ||
+                      sale.payment_status?.toLowerCase() === "cancelled" ||
+                      sale.delivery_status === "Returned" ||
+                      sale.delivery_status?.toLowerCase() === "returned"
 
-                  const isPending = !isCancelledOrReturned && (statusLabel === "Pending" || sale.status === "Pending" || sale.payment_status === "Pending")
+                    const isPending =
+                      !isCancelledOrReturned &&
+                      (statusLabel === "Pending" || sale.status === "Pending" || sale.payment_status === "Pending")
 
-                  const deliveryStatusLower = (sale.delivery_status || "").toLowerCase()
-                  let statusClass = "pending"
-                  if (isCancelledOrReturned) {
-                    statusClass = "cancel"
-                  } else if (isPending) {
-                    statusClass = "pending"
-                  } else if (
-                    deliveryStatusLower.includes("deliver") ||
-                    deliveryStatusLower.includes("complete") ||
-                    sale.payment_status === "Paid" ||
-                    sale.payment_status === "Completed"
-                  ) {
-                    statusClass = "deliver"
-                  } else if (
-                    deliveryStatusLower.includes("paid") ||
-                    deliveryStatusLower.includes("pack") ||
-                    deliveryStatusLower.includes("sent") ||
-                    deliveryStatusLower.includes("ship") ||
-                    deliveryStatusLower.includes("transit") ||
-                    deliveryStatusLower.includes("out for delivery") ||
-                    deliveryStatusLower.includes("dispatch")
-                  ) {
-                    statusClass = "ship"
-                  } else {
-                    statusClass = "deliver"
-                  }
+                    const deliveryStatusLower = (sale.delivery_status || "").toLowerCase()
+                    let statusClass = "pending"
+                    if (isCancelledOrReturned) {
+                      statusClass = "cancel"
+                    } else if (isPending) {
+                      statusClass = "pending"
+                    } else if (
+                      deliveryStatusLower.includes("deliver") ||
+                      deliveryStatusLower.includes("complete") ||
+                      sale.payment_status === "Paid" ||
+                      sale.payment_status === "Completed"
+                    ) {
+                      statusClass = "deliver"
+                    } else if (
+                      deliveryStatusLower.includes("paid") ||
+                      deliveryStatusLower.includes("pack") ||
+                      deliveryStatusLower.includes("sent") ||
+                      deliveryStatusLower.includes("ship") ||
+                      deliveryStatusLower.includes("transit") ||
+                      deliveryStatusLower.includes("out for delivery") ||
+                      deliveryStatusLower.includes("dispatch")
+                    ) {
+                      statusClass = "ship"
+                    } else {
+                      statusClass = "deliver"
+                    }
 
-                  let baseBgClass = index % 2 === 0
-                    ? "bg-white hover:bg-violet-50/50 text-slate-800"
-                    : "bg-slate-50/60 hover:bg-violet-50/50 text-slate-800"
-                  let borderLeftClass = ""
+                    let baseBgClass =
+                      index % 2 === 0
+                        ? "bg-white hover:bg-violet-50/50 text-slate-800"
+                        : "bg-slate-50/60 hover:bg-violet-50/50 text-slate-800"
+                    let borderLeftClass = ""
 
-                  if (statusClass === "pending") {
-                    baseBgClass = "bg-amber-100/80 text-amber-950 hover:bg-amber-200/80 font-medium"
-                    borderLeftClass = "border-l-4 border-l-amber-500"
-                  } else if (statusClass === "ship") {
-                    baseBgClass = "bg-blue-100/80 text-blue-950 hover:bg-blue-200/80 font-medium"
-                    borderLeftClass = "border-l-4 border-l-blue-500"
-                  } else if (statusClass === "deliver") {
-                    baseBgClass = "bg-emerald-100/80 text-emerald-950 hover:bg-emerald-200/80 font-medium"
-                    borderLeftClass = "border-l-4 border-l-emerald-500"
-                  } else if (statusClass === "cancel") {
-                    baseBgClass = "bg-rose-100/80 text-rose-950 hover:bg-rose-200/80 font-medium"
-                    borderLeftClass = "border-l-4 border-l-rose-500"
-                  }
+                    if (statusClass === "pending") {
+                      baseBgClass = "bg-amber-100/80 text-amber-950 hover:bg-amber-200/80 font-medium"
+                      borderLeftClass = "border-l-4 border-l-amber-500"
+                    } else if (statusClass === "ship") {
+                      baseBgClass = "bg-blue-100/80 text-blue-950 hover:bg-blue-200/80 font-medium"
+                      borderLeftClass = "border-l-4 border-l-blue-500"
+                    } else if (statusClass === "deliver") {
+                      baseBgClass = "bg-emerald-100/80 text-emerald-950 hover:bg-emerald-200/80 font-medium"
+                      borderLeftClass = "border-l-4 border-l-emerald-500"
+                    } else if (statusClass === "cancel") {
+                      baseBgClass = "bg-rose-100/80 text-rose-950 hover:bg-rose-200/80 font-medium"
+                      borderLeftClass = "border-l-4 border-l-rose-500"
+                    }
 
-                  const rowClass = `${baseBgClass} ${borderLeftClass}`
+                    const isSelected = selectedSales.includes(sale.id)
+                    const isExpanded = expandedSaleId === sale.id
+                    const rowClass = `${baseBgClass} ${borderLeftClass} ${isSelected ? "bg-violet-100/80" : ""}`
+                    const isJobCard = isJobCardSale(sale)
+                    const profitAmount = getSaleProfit(sale)
 
-                  const isJobCardSale = sale.sale_type === 'job_card' || String(sale.tracking_id || "").startsWith("JC-")
-
-                  return (
-                    <tr
-                      key={sale.id}
-                      onClick={() => onViewSale(sale)}
-                      className={`group cursor-pointer border-b border-slate-200 transition-colors ${rowClass}`}
-                    >
-                      <td className="whitespace-nowrap px-4 py-2.5 text-xs text-muted-foreground">{index + 1}</td>
-                      <td className="whitespace-nowrap px-4 py-2.5 font-semibold text-slate-800">
-                        <div className="flex flex-col gap-0.5">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span>#{sale.id}</span>
-                            {isJobCardSale && (
-                              <span className="inline-flex items-center rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold text-blue-800 border border-blue-200">
-                                JOB CARD
+                    const mainRow = (
+                      <tr
+                        key={sale.id}
+                        onClick={() => onViewSale(sale)}
+                        className={`group cursor-pointer border-b border-slate-200 transition-colors ${rowClass}`}
+                      >
+                        <td className="whitespace-nowrap px-3 py-2.5 text-center" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 rounded border-gray-300 text-violet-600 focus:ring-violet-600 cursor-pointer"
+                            checked={isSelected}
+                            onChange={() => {
+                              setSelectedSales((prev) =>
+                                prev.includes(sale.id) ? prev.filter((id) => id !== sale.id) : [...prev, sale.id],
+                              )
+                            }}
+                          />
+                        </td>
+                        <td className="whitespace-nowrap px-2 py-2.5 text-center" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            className="h-6 w-6 inline-flex items-center justify-center text-slate-400 hover:text-slate-700 rounded hover:bg-slate-200/60"
+                            onClick={() => toggleExpandRow(sale.id)}
+                            title={isExpanded ? "Collapse details" : "Expand details"}
+                          >
+                            {isExpanded ? (
+                              <ChevronUp className="h-4 w-4 text-violet-700" />
+                            ) : (
+                              <ChevronDown className="h-4 w-4" />
+                            )}
+                          </button>
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-2.5 text-xs text-muted-foreground">
+                          {(page - 1) * pageSize + index + 1}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-2.5 font-semibold text-slate-800">
+                          <div className="flex flex-col gap-0.5">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-bold text-blue-700">#{sale.id}</span>
+                              {isJobCard ? (
+                                <span className="inline-flex items-center rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold text-blue-800 border border-blue-200">
+                                  JOB CARD
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-700 border border-slate-200">
+                                  NORMAL
+                                </span>
+                              )}
+                              {(sale.source === "ECOMMERCE" || sale.external_order_id) && (
+                                <span className="inline-flex items-center rounded bg-purple-100 px-1.5 py-0.5 text-[10px] font-bold text-purple-800 border border-purple-200">
+                                  ECOM
+                                </span>
+                              )}
+                              {sale.status === "Returned" ? (
+                                <span className="inline-flex items-center gap-0.5 rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-bold text-rose-800 border border-rose-300">
+                                  <RotateCcw className="h-2.5 w-2.5" />
+                                  RETURNED
+                                </span>
+                              ) : Number(sale.total_returned_qty) > 0 || Number(sale.return_count) > 0 ? (
+                                <span className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800 border border-amber-300">
+                                  <RotateCcw className="h-2.5 w-2.5" />
+                                  PARTIAL RETURN
+                                </span>
+                              ) : null}
+                            </div>
+                            {sale.tracking_id && (
+                              <span className="text-[11px] font-mono font-semibold text-blue-700">
+                                {sale.tracking_id}
                               </span>
                             )}
-                            {(sale.source === 'ECOMMERCE' || sale.external_order_id) && (
-                              <span className="inline-flex items-center rounded bg-purple-100 px-1.5 py-0.5 text-[10px] font-bold text-purple-800 border border-purple-200">
-                                ECOM
+                            {sale.external_order_id && (
+                              <span className="text-[11px] font-mono font-semibold text-purple-700">
+                                {sale.external_order_id}
                               </span>
                             )}
-                            {sale.status === "Returned" ? (
-                              <span className="inline-flex items-center gap-0.5 rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-bold text-rose-800 border border-rose-300">
-                                <RotateCcw className="h-2.5 w-2.5" />
-                                RETURNED
-                              </span>
-                            ) : Number(sale.total_returned_qty) > 0 || Number(sale.return_count) > 0 ? (
-                              <span className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800 border border-amber-300">
-                                <RotateCcw className="h-2.5 w-2.5" />
-                                PARTIAL RETURN
+                          </div>
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-2.5">
+                          <SaleStatusBadge status={getSaleStatusLabel(sale)} />
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
+                          {getSaleDeliveryLabel(sale) === "Pickup" ? (
+                            <DeliveryStatusBadge status="Pickup" />
+                          ) : (
+                            <DeliveryStatusSelect
+                              saleId={sale.id}
+                              deviceId={sale.device_id || deviceId || 0}
+                              currentStatus={sale.delivery_status || "Pending"}
+                              customerName={sale.customer_name}
+                              customerPhone={sale.customer_phone || sale.customer_phone_override}
+                              trackingId={sale.tracking_id}
+                              orderNumber={sale.id}
+                              paymentStatus={sale.payment_status}
+                              isJobCard={isJobCard}
+                              userRole="admin"
+                              onStatusChange={() => {
+                                if (onRefreshSales) {
+                                  onRefreshSales()
+                                }
+                              }}
+                            />
+                          )}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-2.5 text-slate-700">
+                          {format(parseSaleDate(sale.sale_date), "yyyy-MM-dd")}
+                        </td>
+                        <td className="max-w-[200px] px-4 py-2.5 text-slate-700">
+                          <div className="flex flex-col gap-0.5">
+                            <span className="font-medium text-slate-800 truncate">
+                              {sale.customer_name || "Walk-in"}
+                            </span>
+                            {sale.items_summary ? (
+                              <span className="text-[11px] text-slate-500 truncate" title={sale.items_summary}>
+                                {sale.items_summary}
                               </span>
                             ) : null}
                           </div>
-                          {sale.tracking_id && (
-                            <span className="text-[11px] font-mono font-semibold text-blue-700">
-                              {sale.tracking_id}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-2.5 text-slate-600">
+                          {getPaymentMethodDisplay(sale)}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-2.5 text-right font-medium text-slate-800">
+                          <div className="flex flex-col items-end">
+                            <span className="font-bold text-slate-900">{formatCurrency(Number(sale.total_amount))}</span>
+                            {!hideCogs && (
+                              <span className="text-[11px] font-semibold text-emerald-700">
+                                Profit: {formatCurrency(profitAmount)}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-2.5 text-right text-emerald-700">
+                          {received > 0 ? formatCurrency(received) : "—"}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-2.5 text-right text-amber-700 font-semibold">
+                          {remaining > 0 ? formatCurrency(remaining) : "—"}
+                        </td>
+                        <td className={stickyActionCellClass(baseBgClass, isPending)}>
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              handleRowEdit(sale)
+                            }}
+                            className="text-sm font-medium text-brand-blue hover:text-blue-700 hover:underline cursor-pointer"
+                          >
+                            Edit
+                          </button>
+                        </td>
+                      </tr>
+                    )
+
+                    if (!isExpanded) return [mainRow]
+
+                    const expandedRow = (
+                      <tr key={`expand-${sale.id}`} className="bg-slate-50 border-b border-slate-200">
+                        <td colSpan={13} className="p-3" onClick={(e) => e.stopPropagation()}>
+                          <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs space-y-3">
+                            <div className="flex flex-wrap items-center justify-between border-b border-slate-100 pb-2 gap-2">
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-bold text-slate-900">Order #{sale.id} Details</span>
+                                {isJobCard && (
+                                  <span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-[10px] font-bold border border-blue-200">
+                                    JOB CARD
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-xs text-slate-500">
+                                Date: {format(parseSaleDate(sale.sale_date), "dd MMM yyyy, hh:mm a")}
+                              </span>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                              {/* Products / Items */}
+                              <div className="space-y-1">
+                                <span className="font-bold text-slate-700 block">Products / Items:</span>
+                                <div className="font-mono text-[11px] text-slate-700 bg-slate-50 p-2.5 rounded-lg border border-slate-200 whitespace-pre-wrap max-h-36 overflow-y-auto">
+                                  {loadingExpandedId === sale.id ? (
+                                    <div className="flex items-center gap-2 text-slate-500 py-1 font-sans">
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin text-violet-600" /> Loading item details...
+                                    </div>
+                                  ) : (
+                                    sale.products_text ||
+                                    (sale.items &&
+                                      sale.items.length > 0 &&
+                                      sale.items
+                                        .map((i: any) => `${i.product_name || i.name || i.notes || "Item"} × ${i.quantity || 1}`)
+                                        .join("\n")) ||
+                                    sale.items_summary ||
+                                    "No item details available"
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Customer & Address */}
+                              <div className="space-y-1.5">
+                                <span className="font-bold text-slate-700 block">Customer Information:</span>
+                                <p className="font-semibold text-slate-900">{sale.customer_name || "Walk-in Customer"}</p>
+                                <PhoneCell
+                                  saleId={sale.id}
+                                  phone={sale.customer_phone || sale.customer_phone_override}
+                                  deviceId={deviceId}
+                                  onUpdate={onRefreshSales}
+                                />
+                                {sale.shipping_address && (
+                                  <p className="text-slate-600 text-[11px] mt-1">
+                                    <MapPin className="inline h-3 w-3 mr-1 text-slate-400" />
+                                    {sale.shipping_address}
+                                  </p>
+                                )}
+                              </div>
+
+                              {/* Shipping & Quick Actions */}
+                              <div className="space-y-2">
+                                <span className="font-bold text-slate-700 block">Shipping & Tracking:</span>
+                                <p className="text-slate-700 font-medium">
+                                  Courier: {sale.courier_service_name || "Standard"}
+                                </p>
+                                <TrackingCell
+                                  saleId={sale.id}
+                                  deviceId={deviceId || 0}
+                                  trackingId={sale.tracking_id}
+                                  deliveryStatus={sale.delivery_status}
+                                  courierServiceName={sale.courier_service_name}
+                                  trackingUrlTemplate={sale.tracking_url_template}
+                                  onUpdate={onRefreshSales}
+                                />
+
+                                <div className="pt-2 flex flex-wrap gap-1.5">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 text-xs px-2.5"
+                                    onClick={() => handleRowEdit(sale)}
+                                  >
+                                    <Edit className="h-3 w-3 mr-1 text-slate-600" /> Edit
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 text-xs px-2.5"
+                                    onClick={() => onViewSale(sale)}
+                                  >
+                                    <Eye className="h-3 w-3 mr-1 text-slate-600" /> View Modal
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 text-xs px-2.5"
+                                    onClick={() => printSalesReceipt(sale, sale.items || [], "INR", {}, false)}
+                                  >
+                                    <Printer className="h-3 w-3 mr-1 text-slate-600" /> Invoice
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 text-xs px-2.5"
+                                    onClick={() => printBatchJobCards([sale], "INR")}
+                                  >
+                                    <Printer className="h-3 w-3 mr-1 text-slate-600" /> Label
+                                  </Button>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+
+                    return [mainRow, expandedRow]
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* MOBILE & TABLET CARD LIST VIEW (< 1024px) */}
+          <div className="block lg:hidden divide-y divide-slate-200 bg-slate-50/50">
+            {isLoading && !hasLoadedSales ? (
+              <div className="p-4 space-y-3">
+                {[...Array(4)].map((_, i) => (
+                  <div key={i} className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
+                    <div className="flex justify-between">
+                      <Skeleton className="h-5 w-24" />
+                      <Skeleton className="h-5 w-16" />
+                    </div>
+                    <Skeleton className="h-4 w-3/4" />
+                    <Skeleton className="h-8 w-full" />
+                  </div>
+                ))}
+              </div>
+            ) : error ? (
+              <div className="p-6 text-center text-sm text-rose-600 bg-white">{error}</div>
+            ) : displaySales.length === 0 ? (
+              <div className="p-8 text-center text-sm text-slate-500 bg-white">
+                {sales.length === 0 ? `No sales found for ${periodLabel}` : "No sales match the current filters"}
+              </div>
+            ) : (
+              displaySales.map((rawSale, index) => {
+                const sale = expandedCache[rawSale.id] ? { ...rawSale, ...expandedCache[rawSale.id] } : rawSale
+                const remaining = getRemainingAmount(sale)
+                const received =
+                  sale.payment_status === "Paid" || sale.payment_status === "Completed"
+                    ? Number(sale.total_amount || 0)
+                    : Number(sale.received_amount || 0)
+
+                const statusLabel = getSaleStatusLabel(sale)
+                const isCancelledOrReturned =
+                  sale.status === "Cancelled" ||
+                  sale.payment_status?.toLowerCase() === "cancelled" ||
+                  sale.delivery_status === "Returned" ||
+                  sale.delivery_status?.toLowerCase() === "returned"
+
+                const isPending =
+                  !isCancelledOrReturned &&
+                  (statusLabel === "Pending" || sale.status === "Pending" || sale.payment_status === "Pending")
+
+                const isJobCard = isJobCardSale(sale)
+                const isSelected = selectedSales.includes(sale.id)
+                const isExpanded = expandedSaleId === sale.id
+                const profitAmount = getSaleProfit(sale)
+
+                return (
+                  <div
+                    key={sale.id}
+                    className={cn(
+                      "p-3.5 bg-white transition-colors space-y-2.5",
+                      isPending ? "bg-amber-50/40" : "",
+                      isSelected ? "bg-violet-50/70 border-l-4 border-l-violet-600" : "",
+                    )}
+                  >
+                    {/* TOP ROW: CHECKBOX + ORDER ID + BADGES + TOTAL & STATUS */}
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <input
+                          type="checkbox"
+                          className="h-5 w-5 rounded border-gray-300 text-violet-600 focus:ring-violet-600 cursor-pointer shrink-0"
+                          checked={isSelected}
+                          onChange={() => {
+                            setSelectedSales((prev) =>
+                              prev.includes(sale.id) ? prev.filter((id) => id !== sale.id) : [...prev, sale.id],
+                            )
+                          }}
+                        />
+                        <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                          <span className="font-extrabold text-blue-700 text-sm">#{sale.id}</span>
+                          {isJobCard ? (
+                            <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold text-blue-800 border border-blue-200">
+                              JOB CARD
+                            </span>
+                          ) : (
+                            <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-700 border border-slate-200">
+                              NORMAL
                             </span>
                           )}
-                          {sale.external_order_id && (
-                            <span className="text-[11px] font-mono font-semibold text-purple-700">
-                              {sale.external_order_id}
+                          {(sale.source === "ECOMMERCE" || sale.external_order_id) && (
+                            <span className="rounded bg-purple-100 px-1.5 py-0.5 text-[10px] font-bold text-purple-800 border border-purple-200">
+                              ECOM
                             </span>
                           )}
+                          {sale.status === "Returned" ? (
+                            <span className="rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-bold text-rose-800 border border-rose-300">
+                              RETURNED
+                            </span>
+                          ) : Number(sale.total_returned_qty) > 0 || Number(sale.return_count) > 0 ? (
+                            <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800 border border-amber-300">
+                              PARTIAL RETURN
+                            </span>
+                          ) : null}
                         </div>
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-2.5">
-                        <SaleStatusBadge status={getSaleStatusLabel(sale)} />
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
+                      </div>
+
+                      <div className="text-right shrink-0">
+                        <div className="text-sm font-extrabold text-slate-900 leading-tight">
+                          {formatCurrency(Number(sale.total_amount))}
+                        </div>
+                        <div className="mt-0.5">
+                          <SaleStatusBadge status={statusLabel} />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* CUSTOMER & DATE */}
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div className="min-w-0">
+                        <span className="text-[10px] font-semibold text-slate-400 block uppercase tracking-wider">
+                          Customer
+                        </span>
+                        <span className="font-bold text-slate-800 block truncate">
+                          {sale.customer_name || "Walk-in Customer"}
+                        </span>
+                        {(sale.customer_phone || sale.customer_phone_override) && (
+                          <span className="text-[11px] text-slate-500 font-mono block">
+                            {sale.customer_phone || sale.customer_phone_override}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-right shrink-0">
+                        <span className="text-[10px] font-semibold text-slate-400 block uppercase tracking-wider">
+                          Date & Time
+                        </span>
+                        <span className="font-semibold text-slate-700 block">
+                          {format(parseSaleDate(sale.sale_date), "dd MMM yyyy")}
+                        </span>
+                        <span className="text-[11px] text-slate-500 block">
+                          {format(parseSaleDate(sale.sale_date), "hh:mm a")}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* ITEMS SUMMARY & PROFIT */}
+                    <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 p-2 border border-slate-100 text-xs">
+                      <div className="min-w-0 flex-1">
+                        <span className="text-slate-600 truncate block font-medium">
+                          {sale.items_summary || sale.products_text || "1 order item"}
+                        </span>
+                      </div>
+                      {!hideCogs && (
+                        <span className="shrink-0 text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                          Profit: {formatCurrency(profitAmount)}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* DELIVERY STATUS & TRACKING CONTROLS */}
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pt-0.5">
+                      <div className="flex-1">
                         {getSaleDeliveryLabel(sale) === "Pickup" ? (
-                          <DeliveryStatusBadge status="Pickup" />
+                          <div className="inline-flex items-center gap-1 text-xs font-medium text-slate-600 bg-slate-100 px-2.5 py-1 rounded-md">
+                            Delivery: Pickup
+                          </div>
                         ) : (
                           <DeliveryStatusSelect
                             saleId={sale.id}
@@ -697,61 +1567,243 @@ export default function SalesExcelTable({
                             trackingId={sale.tracking_id}
                             orderNumber={sale.id}
                             paymentStatus={sale.payment_status}
-                            isJobCard={isJobCardSale}
+                            isJobCard={isJobCard}
                             userRole="admin"
-                            onStatusChange={() => {
-                              if (onRefreshSales) {
-                                onRefreshSales()
-                              }
-                            }}
+                            onStatusChange={() => onRefreshSales?.()}
                           />
                         )}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-2.5 text-slate-700">
-                        {format(parseSaleDate(sale.sale_date), "yyyy-MM-dd")}
-                      </td>
-                      <td className="max-w-[200px] px-4 py-2.5 text-slate-700">
-                        <div className="flex flex-col gap-0.5">
-                          <span className="font-medium text-slate-800 truncate">{sale.customer_name || "Walk-in"}</span>
-                          {sale.items_summary ? (
-                            <span className="text-[11px] text-slate-500 truncate" title={sale.items_summary}>
-                              {sale.items_summary}
-                            </span>
-                          ) : null}
+                      </div>
+
+                      {sale.tracking_id && (
+                        <div className="shrink-0">
+                          <TrackingCell
+                            saleId={sale.id}
+                            deviceId={deviceId || 0}
+                            trackingId={sale.tracking_id}
+                            deliveryStatus={sale.delivery_status}
+                            courierServiceName={sale.courier_service_name}
+                            trackingUrlTemplate={sale.tracking_url_template}
+                            onUpdate={onRefreshSales}
+                          />
                         </div>
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-2.5 text-slate-600">
-                        {getPaymentMethodDisplay(sale)}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-2.5 text-right font-medium text-slate-800">
-                        {formatCurrency(Number(sale.total_amount))}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-2.5 text-right text-emerald-700">
-                        {received > 0 ? formatCurrency(received) : "—"}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-2.5 text-right text-amber-700 font-semibold">
-                        {remaining > 0 ? formatCurrency(remaining) : "—"}
-                      </td>
-                      <td className={stickyActionCellClass(baseBgClass, isPending)}>
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            onEditSale(sale)
-                          }}
-                          className="text-sm font-medium text-brand-blue hover:text-blue-700 hover:underline"
+                      )}
+                    </div>
+
+                    {/* ACTION BUTTONS TOOLBAR */}
+                    <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-8 text-xs px-2.5 font-medium gap-1 bg-white border-slate-200"
+                          onClick={() => printSalesReceipt(sale, sale.items || [], "INR", {}, false)}
                         >
-                          Edit
-                        </button>
-                      </td>
-                    </tr>
-                  )
-                })
-              )}
-            </tbody>
-          </table>
+                          <Printer className="h-3.5 w-3.5 text-slate-600" />
+                          Invoice
+                        </Button>
+
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-8 text-xs px-2.5 font-medium gap-1 bg-white border-slate-200"
+                          onClick={() => printBatchJobCards([sale], "INR")}
+                        >
+                          <Printer className="h-3.5 w-3.5 text-slate-600" />
+                          Label
+                        </Button>
+
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-8 text-xs px-2 font-medium text-slate-600 gap-1"
+                          onClick={() => toggleExpandRow(sale.id)}
+                        >
+                          {isExpanded ? (
+                            <>
+                              Less <ChevronUp className="h-3.5 w-3.5" />
+                            </>
+                          ) : (
+                            <>
+                              Details <ChevronDown className="h-3.5 w-3.5" />
+                            </>
+                          )}
+                        </Button>
+                      </div>
+
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="outline" size="sm" className="h-8 w-8 p-0 shrink-0 border-slate-200">
+                            <MoreHorizontal className="h-4 w-4 text-slate-600" />
+                            <span className="sr-only">More actions</span>
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-48">
+                          <DropdownMenuItem onClick={() => onViewSale(sale)}>
+                            <Eye className="h-4 w-4 mr-2 text-slate-500" /> View Modal
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleRowEdit(sale)}>
+                            <Edit className="h-4 w-4 mr-2 text-slate-500" /> Edit Sale
+                          </DropdownMenuItem>
+                          {isJobCard && (
+                            <DropdownMenuItem onClick={() => setEditingJobCardId(sale.id)}>
+                              <Layers className="h-4 w-4 mr-2 text-blue-600" /> Edit Job Card
+                            </DropdownMenuItem>
+                          )}
+                          <DropdownMenuItem onClick={() => printSalesReceipt(sale, sale.items || [], "INR", {}, false)}>
+                            <Printer className="h-4 w-4 mr-2 text-slate-500" /> Print Invoice
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => printBatchJobCards([sale], "INR")}>
+                            <Printer className="h-4 w-4 mr-2 text-slate-500" /> Print Delivery Label
+                          </DropdownMenuItem>
+                          {isJobCard && (
+                            <DropdownMenuItem onClick={() => printBatchJobCards([sale], "INR")}>
+                              <Printer className="h-4 w-4 mr-2 text-blue-600" /> Print Job Card
+                            </DropdownMenuItem>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+
+                    {/* MOBILE EXPANDED DETAILS */}
+                    {isExpanded && (
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-3 text-xs mt-2">
+                        <div className="font-bold text-slate-900 border-b border-slate-200 pb-1.5 flex justify-between items-center">
+                          <span>Order #{sale.id} Details</span>
+                          <span className="text-[11px] font-normal text-slate-500">
+                            {format(parseSaleDate(sale.sale_date), "dd/MM/yyyy, hh:mm a")}
+                          </span>
+                        </div>
+
+                        {/* PRODUCTS LIST */}
+                        <div>
+                          <span className="font-bold text-slate-700 block mb-1">Products / Items:</span>
+                          <div className="font-mono text-[11px] bg-white p-2.5 rounded border border-slate-200 max-h-36 overflow-y-auto whitespace-pre-wrap">
+                            {loadingExpandedId === sale.id ? (
+                              <div className="flex items-center gap-2 text-slate-500 py-1 font-sans">
+                                <Loader2 className="h-3.5 w-3.5 animate-spin text-violet-600" /> Loading item details...
+                              </div>
+                            ) : (
+                              sale.products_text ||
+                              (sale.items &&
+                                sale.items.length > 0 &&
+                                sale.items
+                                  .map(
+                                    (i: any) =>
+                                      `${i.product_name || i.name || i.notes || "Item"} × ${i.quantity || 1}`,
+                                  )
+                                  .join("\n")) ||
+                              sale.items_summary ||
+                              "No item details available"
+                            )}
+                          </div>
+                        </div>
+
+                        {/* FINANCIAL SUMMARY */}
+                        <div className="grid grid-cols-2 gap-2 bg-white p-2.5 rounded border border-slate-200">
+                          <div>
+                            <span className="text-[11px] text-slate-500 block">Total Amount</span>
+                            <span className="font-bold text-slate-900">{formatCurrency(Number(sale.total_amount))}</span>
+                          </div>
+                          <div>
+                            <span className="text-[11px] text-slate-500 block">Received Amount</span>
+                            <span className="font-bold text-emerald-700">
+                              {received > 0 ? formatCurrency(received) : "—"}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-[11px] text-slate-500 block">Balance Remaining</span>
+                            <span className="font-bold text-amber-700">
+                              {remaining > 0 ? formatCurrency(remaining) : "0"}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-[11px] text-slate-500 block">Calculated Profit</span>
+                            <span className="font-bold text-emerald-700">{formatCurrency(profitAmount)}</span>
+                          </div>
+                        </div>
+
+                        {/* CUSTOMER & SHIPPING ADDRESS */}
+                        <div className="bg-white p-2.5 rounded border border-slate-200 space-y-1">
+                          <span className="font-bold text-slate-700 block">Customer & Shipping Details:</span>
+                          <p className="font-semibold text-slate-800">{sale.customer_name || "Walk-in Customer"}</p>
+                          <PhoneCell
+                            saleId={sale.id}
+                            phone={sale.customer_phone || sale.customer_phone_override}
+                            deviceId={deviceId}
+                            onUpdate={onRefreshSales}
+                          />
+                          {sale.shipping_address && (
+                            <p className="text-slate-600 text-[11px] pt-1">
+                              <MapPin className="inline h-3 w-3 mr-1 text-slate-400" />
+                              {sale.shipping_address}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )
+              })
+            )}
+          </div>
         </div>
+
+        {/* SERVER-SIDE PAGINATION FOOTER */}
+        {deviceId ? (
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-slate-200 bg-[#F1F4F9] px-4 py-3 text-xs font-medium text-slate-600">
+            <div>
+              Showing {serverSales.length > 0 ? (page - 1) * pageSize + 1 : 0} to{" "}
+              {Math.min(page * pageSize, totalServerCount)} of {totalServerCount} sales
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 px-3 text-xs bg-white border-slate-200"
+                disabled={page <= 1 || isFetchingServer}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              >
+                <ChevronLeft className="h-3.5 w-3.5 mr-1" />
+                Previous
+              </Button>
+              <span className="px-2 text-slate-700 font-semibold">
+                Page {page} of {totalServerPages || 1}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 px-3 text-xs bg-white border-slate-200"
+                disabled={page >= totalServerPages || isFetchingServer}
+                onClick={() => setPage((p) => Math.min(totalServerPages, p + 1))}
+              >
+                Next
+                <ChevronRight className="h-3.5 w-3.5 ml-1" />
+              </Button>
+            </div>
+          </div>
+        ) : null}
       </div>
+
+      {isCreateJobCardOpen && (
+        <JobCardModal
+          isOpen={true}
+          onClose={() => {
+            setIsCreateJobCardOpen(false)
+            onRefreshSales?.()
+          }}
+        />
+      )}
+
+      {editingJobCardId && (
+        <JobCardModal
+          isOpen={true}
+          onClose={() => {
+            setEditingJobCardId(null)
+            onRefreshSales?.()
+          }}
+          editSaleId={editingJobCardId}
+        />
+      )}
     </div>
   )
 }

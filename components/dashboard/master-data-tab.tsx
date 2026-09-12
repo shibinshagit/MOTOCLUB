@@ -14,10 +14,16 @@ import {
   Users,
   Eye,
   Sparkles,
+  Package,
+  RotateCcw,
+  FileText,
 } from "lucide-react"
 import TrendingInlineView from "@/components/products/trending-inline-view"
 import StaffManagementView from "@/components/admin/staff-management-view"
 import EcommerceBannerManagement from "@/components/master-data/ecommerce-banner-management"
+import ProductTab from "@/components/dashboard/product-tab"
+import ReturnsTab from "@/components/dashboard/returns-tab"
+import PayrollRequestsTab from "@/components/admin/payroll-requests-tab"
 import { CourierProfileModal } from "@/components/master-data/courier-profile-modal"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -57,11 +63,15 @@ import { cn } from "@/lib/utils"
 
 interface MasterDataTabProps {
   userId: number
+  initialCategory?: string
 }
 
 const CATEGORY_ICONS: Record<string, any> = {
   courier: Truck,
   manual_category: Database,
+  inventory: Package,
+  returns: RotateCcw,
+  requests: FileText,
   trending: Flame,
   staff: Users,
   ecommerce_banner: Sparkles,
@@ -82,11 +92,19 @@ const EMPTY_FORM: MasterDataInput = {
   sortOrder: 0,
 }
 
-export default function MasterDataTab({ userId }: MasterDataTabProps) {
+export default function MasterDataTab({ userId, initialCategory }: MasterDataTabProps) {
   const deviceId = useSelector(selectDeviceId) || 1
   const { toast } = useToast()
 
-  const [activeCategory, setActiveCategory] = useState<MasterDataCategory>("courier")
+  const [activeCategory, setActiveCategory] = useState<MasterDataCategory>(
+    (initialCategory as MasterDataCategory) || "courier"
+  )
+
+  useEffect(() => {
+    if (initialCategory) {
+      setActiveCategory(initialCategory as MasterDataCategory)
+    }
+  }, [initialCategory])
   const [items, setItems] = useState<MasterDataItem[]>([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState("")
@@ -287,7 +305,7 @@ export default function MasterDataTab({ userId }: MasterDataTabProps) {
                   <Icon className="mt-0.5 h-4 w-4 shrink-0" />
                   <span className="min-w-0">
                     <span className="block text-sm font-medium">{category.label}</span>
-                    {category.id !== "trending" && category.id !== "staff" && (
+                    {!["trending", "staff", "ecommerce_banner", "inventory", "returns", "requests"].includes(category.id) && (
                       <span className="block text-[11px] opacity-70">{count} item{count === 1 ? "" : "s"}</span>
                     )}
                   </span>
@@ -298,7 +316,19 @@ export default function MasterDataTab({ userId }: MasterDataTabProps) {
         </div>
 
         <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-          {activeCategory === "trending" ? (
+          {activeCategory === "inventory" ? (
+            <div className="p-4">
+              <ProductTab userId={userId} />
+            </div>
+          ) : activeCategory === "returns" ? (
+            <div className="p-4">
+              <ReturnsTab />
+            </div>
+          ) : activeCategory === "requests" ? (
+            <div className="p-4">
+              <PayrollRequestsTab deviceId={deviceId} initialSubTab="requests" />
+            </div>
+          ) : activeCategory === "trending" ? (
             <TrendingInlineView userId={userId} />
           ) : activeCategory === "staff" ? (
             <StaffManagementView userId={userId} />

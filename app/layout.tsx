@@ -10,6 +10,14 @@ import { DEFAULT_PLATFORM_NAME, BRAND_TAGLINE } from "@/lib/brand"
 export const metadata: Metadata = {
   title: DEFAULT_PLATFORM_NAME,
   description: BRAND_TAGLINE,
+  icons: {
+    icon: [
+      { url: "/icon.png", type: "image/png" },
+      { url: "/favicon.ico", type: "image/x-icon" },
+    ],
+    shortcut: "/icon.png",
+    apple: "/icon.png",
+  },
 }
 
 export default function RootLayout({

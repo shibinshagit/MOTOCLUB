@@ -10,6 +10,21 @@ export const MASTER_DATA_CATEGORIES = [
     description: "Standard categories for petty cash and manual accounting entries.",
   },
   {
+    id: "inventory",
+    label: "Inventory / Stock",
+    description: "Manage product catalog, stock levels, categories, and pricing.",
+  },
+  {
+    id: "returns",
+    label: "Returns",
+    description: "Manage customer and supplier product returns.",
+  },
+  {
+    id: "requests",
+    label: "Staff Requests",
+    description: "Manage staff salary advances, leave, and petty cash requests.",
+  },
+  {
     id: "trending",
     label: "Trending Products",
     description: "View and manage products highlighted in trending lists.",

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { getAllJobCards } from "@/app/actions/job-card-actions"
 import { deleteSale } from "@/app/actions/sale-actions"
 import { DeliveryStatusSelect } from "@/components/sales/delivery-status-select"
+import { isPendingSale, isCriticalSale } from "@/lib/sale-shipping"
 import { TrackingCell } from "@/components/sales/tracking-cell"
 import { PhoneCell } from "@/components/sales/phone-cell"
 import { StaffOwnerSelect } from "@/components/sales/staff-owner-select"
@@ -16,8 +17,8 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { ChevronDown, ChevronUp, MapPin, Phone, User, Calendar, Layers, Printer, Edit, Trash2, Search, PlayCircle, Eye, Plus, Loader2, FileText, ExternalLink } from "lucide-react"
-import { formatPhoneNumber, parseSaleDateTime, parseSaleDate } from "@/lib/utils"
+import { ChevronDown, ChevronUp, MapPin, Phone, User, Calendar, Layers, Printer, Edit, Trash2, Search, PlayCircle, Eye, Plus, Loader2, FileText, ExternalLink, ShoppingCart, Clock, AlertTriangle } from "lucide-react"
+import { formatPhoneNumber, parseSaleDateTime, parseSaleDate, cn } from "@/lib/utils"
 import { useToast } from "@/components/ui/use-toast"
 import {
   AlertDialog,
@@ -162,7 +163,9 @@ export default function SalesOrdersTab() {
     }
   }
 
-  const filteredSales = sales.filter((sale) => {
+  const [cardFilter, setCardFilter] = useState<"all" | "pending" | "critical">("all")
+
+  const baseFilteredSales = sales.filter((sale) => {
     if (!searchTerm) return true
     const term = searchTerm.toLowerCase()
     return (
@@ -173,6 +176,31 @@ export default function SalesOrdersTab() {
       sale.id?.toString().includes(term)
     )
   })
+
+  const filteredSales = baseFilteredSales.filter((sale) => {
+    if (cardFilter === "pending") return isPendingSale(sale)
+    if (cardFilter === "critical") return isCriticalSale(sale)
+    return true
+  })
+
+  const totalCount = baseFilteredSales.length
+  const totalSalesAmount = baseFilteredSales.reduce((sum, sale) => sum + Number(sale.total_amount || 0), 0)
+
+  const pendingSalesList = baseFilteredSales.filter(isPendingSale)
+  const pendingCount = pendingSalesList.length
+  const pendingSalesAmount = pendingSalesList.reduce((sum, sale) => sum + Number(sale.total_amount || 0), 0)
+
+  const criticalSalesList = baseFilteredSales.filter(isCriticalSale)
+  const criticalCount = criticalSalesList.length
+  const criticalSalesAmount = criticalSalesList.reduce((sum, sale) => sum + Number(sale.total_amount || 0), 0)
+
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat("en-IN", {
+      style: "currency",
+      currency: currency || "INR",
+      maximumFractionDigits: 2,
+    }).format(amount)
+  }
 
   useEffect(() => {
     return () => {
@@ -288,6 +316,105 @@ export default function SalesOrdersTab() {
             <Plus className="h-4 w-4" /> Create Job Card
           </Button>
         </div>
+      </div>
+
+      {/* OPERATIONAL ORDER CARDS */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        {/* CARD 1 — TOTAL SALES */}
+        <button
+          type="button"
+          onClick={() => setCardFilter("all")}
+          className={cn(
+            "flex flex-col justify-between rounded-xl border p-3.5 text-left transition-all cursor-pointer shadow-xs hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-400",
+            cardFilter === "all"
+              ? "border-violet-500 bg-violet-50/90 ring-2 ring-violet-400/30"
+              : "border-slate-200 bg-white hover:border-violet-300 hover:bg-slate-50/50"
+          )}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-violet-700">Total Sales</span>
+            <ShoppingCart className="h-4 w-4 text-violet-600" />
+          </div>
+          <div className="mt-2 flex items-baseline justify-between gap-2">
+            <div>
+              <div className="text-xl font-extrabold text-slate-900 leading-tight">
+                {totalCount} <span className="text-xs font-normal text-slate-500">{totalCount === 1 ? "Order" : "Orders"}</span>
+              </div>
+              <div className="text-xs font-semibold text-violet-700 mt-0.5">
+                {formatCurrency(totalSalesAmount)}
+              </div>
+            </div>
+            {cardFilter === "all" && (
+              <span className="text-[10px] font-bold text-violet-700 bg-violet-100 px-2 py-0.5 rounded-full border border-violet-200">
+                All Orders
+              </span>
+            )}
+          </div>
+        </button>
+
+        {/* CARD 2 — PENDING ORDERS */}
+        <button
+          type="button"
+          onClick={() => setCardFilter((prev) => (prev === "pending" ? "all" : "pending"))}
+          className={cn(
+            "flex flex-col justify-between rounded-xl border p-3.5 text-left transition-all cursor-pointer shadow-xs hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-amber-400",
+            cardFilter === "pending"
+              ? "border-amber-500 bg-amber-50/90 ring-2 ring-amber-400/30"
+              : "border-slate-200 bg-white hover:border-amber-300 hover:bg-slate-50/50"
+          )}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-amber-700">Pending Orders</span>
+            <Clock className="h-4 w-4 text-amber-600" />
+          </div>
+          <div className="mt-2 flex items-baseline justify-between gap-2">
+            <div>
+              <div className="text-xl font-extrabold text-slate-900 leading-tight">
+                {pendingCount} <span className="text-xs font-normal text-slate-500">{pendingCount === 1 ? "Order" : "Orders"}</span>
+              </div>
+              <div className="text-xs font-semibold text-amber-700 mt-0.5">
+                {formatCurrency(pendingSalesAmount)}
+              </div>
+            </div>
+            {cardFilter === "pending" && (
+              <span className="text-[10px] font-bold text-amber-800 bg-amber-200 px-2 py-0.5 rounded-full border border-amber-300">
+                Active Filter
+              </span>
+            )}
+          </div>
+        </button>
+
+        {/* CARD 3 — CRITICAL ORDERS */}
+        <button
+          type="button"
+          onClick={() => setCardFilter((prev) => (prev === "critical" ? "all" : "critical"))}
+          className={cn(
+            "flex flex-col justify-between rounded-xl border p-3.5 text-left transition-all cursor-pointer shadow-xs hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-rose-400",
+            cardFilter === "critical"
+              ? "border-rose-500 bg-rose-50/90 ring-2 ring-rose-400/30"
+              : "border-slate-200 bg-white hover:border-rose-300 hover:bg-slate-50/50"
+          )}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-rose-700">Critical Orders</span>
+            <AlertTriangle className="h-4 w-4 text-rose-600" />
+          </div>
+          <div className="mt-2 flex items-baseline justify-between gap-2">
+            <div>
+              <div className="text-xl font-extrabold text-slate-900 leading-tight">
+                {criticalCount} <span className="text-xs font-normal text-slate-500">{criticalCount === 1 ? "Order" : "Orders"}</span>
+              </div>
+              <div className="text-xs font-semibold text-rose-700 mt-0.5">
+                {formatCurrency(criticalSalesAmount)}
+              </div>
+            </div>
+            {cardFilter === "critical" && (
+              <span className="text-[10px] font-bold text-rose-800 bg-rose-200 px-2 py-0.5 rounded-full border border-rose-300">
+                Active Filter
+              </span>
+            )}
+          </div>
+        </button>
       </div>
 
       {filteredSales.length === 0 ? (

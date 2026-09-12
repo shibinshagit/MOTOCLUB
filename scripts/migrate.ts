@@ -1196,6 +1196,12 @@ async function createIndexes() {
     ["idx_product_share_links_product", () => sql`CREATE INDEX IF NOT EXISTS idx_product_share_links_product ON product_share_links(product_id, device_id)`],
     ["idx_tp_sale_id", () => sql`CREATE INDEX IF NOT EXISTS idx_tp_sale_id ON transaction_payments(sale_id)`],
     ["idx_tp_purchase_id", () => sql`CREATE INDEX IF NOT EXISTS idx_tp_purchase_id ON transaction_payments(purchase_id)`],
+    ["idx_sales_device_date", () => sql`CREATE INDEX IF NOT EXISTS idx_sales_device_date ON sales(device_id, sale_date DESC)`],
+    ["idx_sales_sale_type", () => sql`CREATE INDEX IF NOT EXISTS idx_sales_sale_type ON sales(sale_type)`],
+    ["idx_sales_delivery_status", () => sql`CREATE INDEX IF NOT EXISTS idx_sales_delivery_status ON sales(delivery_status)`],
+    ["idx_sales_payment_status", () => sql`CREATE INDEX IF NOT EXISTS idx_sales_payment_status ON sales(payment_status)`],
+    ["idx_sales_customer_id", () => sql`CREATE INDEX IF NOT EXISTS idx_sales_customer_id ON sales(customer_id)`],
+    ["idx_sale_items_sale_id", () => sql`CREATE INDEX IF NOT EXISTS idx_sale_items_sale_id ON sale_items(sale_id)`],
   ]
 
   for (const [label, fn] of indexes) {

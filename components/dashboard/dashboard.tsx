@@ -107,19 +107,18 @@ function LoadingTab() {
 export function Dashboard({ onLogout }: DashboardProps) {
   const searchParams = useSearchParams()
   const tabParam = searchParams?.get("tab") as TabType | "home" | null
-  const resolveTab = (param: TabType | "stock" | "home" | null): TabType => {
+  const resolveTab = (param: TabType | "stock" | "home" | "sales-orders" | null): TabType => {
     if (param === "stock") return "product"
-    if (param === "sales") return "sale"
-    if (param === "home") return "sales-orders"
+    if (param === "sales" || param === "sales-orders" || param === "home") return "sale"
     if (
       param &&
-      ["sale", "sales", "sales-orders", "purchase", "product", "trending", "customer", "transfer", "accounting", "supplier", "platform", "master", "attendance", "requests", "returns", "admin-dashboard"].includes(
+      ["sale", "sales", "purchase", "product", "trending", "customer", "transfer", "accounting", "supplier", "platform", "master", "attendance", "requests", "returns", "admin-dashboard"].includes(
         param,
       )
     ) {
-      return param
+      return param as TabType
     }
-    return "sales-orders"
+    return "sale"
   }
   const initialTab = resolveTab(tabParam)
 
@@ -171,7 +170,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
       const deviceAllowedPages = deviceAllowedPagesStr.split(",").map((p: string) => p.trim())
 
       let mappedTabId = tabId
-      if (tabId === "sales") mappedTabId = "sale"
+      if (tabId === "sales" || tabId === "sales-orders") mappedTabId = "sale"
       if (tabId === "stock") mappedTabId = "product"
 
       if (!deviceAllowedPages.includes(mappedTabId)) {
@@ -186,24 +185,20 @@ export function Dashboard({ onLogout }: DashboardProps) {
 
   // Navigation items configuration
   const navItems = [
-    { id: "sales-orders", icon: <Receipt className="h-4 w-4" />, label: "Order List" },
-    { id: "sale", icon: <Plus className="h-5 w-5" />, label: "Sales" },
-    { id: "returns", icon: <RotateCcw className="h-4 w-4" />, label: "Returns" },
+    { id: "sale", icon: <Receipt className="h-4 w-4" />, label: "Sales" },
     { id: "purchase", icon: <Receipt className="h-4 w-4" />, label: "Purchase" },
-    { id: "product", icon: <Package className="h-4 w-4" />, label: "Inventory" },
     { id: "customer", icon: <User className="h-4 w-4" />, label: "Customers" },
     { id: "attendance", icon: <CalendarDays className="h-4 w-4" />, label: "Attendance" },
     { id: "supplier", icon: <Truck className="h-4 w-4" />, label: "Suppliers" },
     { id: "transfer", icon: <ArrowRightLeft className="h-4 w-4" />, label: "Transfers" },
-    { id: "requests", icon: <FileText className="h-4 w-4" />, label: "Requests" },
     { id: "platform", icon: <Store className="h-4 w-4" />, label: "Platforms" },
     { id: "master", icon: <Database className="h-4 w-4" />, label: "Master Data" },
     { id: "admin-dashboard", icon: <LayoutDashboard className="h-4 w-4" />, label: "Dashboard" },
   ]
 
   // Primary tabs for bottom navigation (most used)
-  const primaryTabs = ["sales-orders", "sale", "purchase"]
-  const secondaryTabs = ["product", "returns", "customer", "attendance", "supplier", "transfer", "platform", "master", "requests", "admin-dashboard"]
+  const primaryTabs = ["sale", "purchase", "master"]
+  const secondaryTabs = ["customer", "attendance", "supplier", "transfer", "platform", "admin-dashboard"]
 
   // Filtered navigation items based on permission
   const allowedNavItems = useMemo(() => navItems.filter((item: any) => canAccessTab(item.id)), [canAccessTab])
@@ -528,8 +523,13 @@ export function Dashboard({ onLogout }: DashboardProps) {
               onModalClose={() => setIsAddModalOpen(false)}
             />
           )
+        case "returns":
+          return <MasterDataTab userId={device?.id ?? 0} initialCategory="returns" />
+        case "requests":
+          return <MasterDataTab userId={device?.id ?? 0} initialCategory="requests" />
         case "sale":
         case "sales":
+        case "sales-orders":
           return (
             <SaleTab
               userId={device?.id ?? 0}
@@ -538,8 +538,6 @@ export function Dashboard({ onLogout }: DashboardProps) {
               mode={salesNavView === "entry" ? "entry" : "info"}
             />
           )
-        case "sales-orders":
-          return <SalesOrdersTab />
         case "purchase":
           return (
             <PurchaseTab
@@ -565,10 +563,6 @@ export function Dashboard({ onLogout }: DashboardProps) {
           return <TransferTab userId={device?.id ?? 0} />
         case "accounting":
           return <AccountingTab userId={device?.id ?? 0} companyId={companyId} deviceId={deviceId || 0} />
-        case "requests":
-          return <PayrollRequestsTab deviceId={deviceId || 0} initialSubTab="requests" />
-        case "returns":
-          return <ReturnsTab />
         case "platform":
           return <PlatformTab userId={device?.id ?? 0} />
         case "master":
@@ -643,7 +637,6 @@ export function Dashboard({ onLogout }: DashboardProps) {
             {isMobileMenuOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
           </Button>          {/* Desktop Controls */}
           <div className="hidden sm:flex items-center space-x-2">
-
             {canAccessTab("product") && (
               <Button
                 onClick={handleInventoryToggle}
@@ -656,22 +649,6 @@ export function Dashboard({ onLogout }: DashboardProps) {
                 title="Inventory"
               >
                 <Package className="h-5 w-5" />
-              </Button>
-            )}
-
-            {canAccessTab("admin-dashboard") && (
-              <Button
-                onClick={() => handleTabChange("admin-dashboard")}
-                variant="ghost"
-                size="sm"
-                className={cn(
-                  "h-9 px-3 rounded-full hover:bg-violet-50 text-violet-700 font-semibold text-xs flex items-center gap-1.5",
-                  activeTab === "admin-dashboard" && "bg-violet-100",
-                )}
-                title="Admin Dashboard"
-              >
-                <LayoutDashboard className="h-4 w-4" />
-                <span className="hidden md:inline">Dashboard</span>
               </Button>
             )}
 
@@ -755,20 +732,6 @@ export function Dashboard({ onLogout }: DashboardProps) {
                 title="Inventory"
               >
                 <Package className="h-5 w-5" />
-              </Button>
-            )}
-            {canAccessTab("admin-dashboard") && (
-              <Button
-                onClick={() => handleTabChange("admin-dashboard")}
-                variant="ghost"
-                size="sm"
-                className={cn(
-                  "h-9 w-9 rounded-full p-0 hover:bg-violet-50 text-violet-700",
-                  activeTab === "admin-dashboard" && "bg-violet-100",
-                )}
-                title="Admin Dashboard"
-              >
-                <LayoutDashboard className="h-4 w-4" />
               </Button>
             )}
             {canAccessTab("accounting") && (
@@ -869,20 +832,6 @@ export function Dashboard({ onLogout }: DashboardProps) {
                       Staff Logout
                     </Button>
                   ) : null}
-                  {canAccessTab("admin-dashboard") && (
-                    <Button
-                      onClick={() => {
-                        handleTabChange("admin-dashboard")
-                        setIsMobileMenuOpen(false)
-                      }}
-                      variant="outline"
-                      size="sm"
-                      className="mt-2 w-full justify-start text-xs font-semibold text-violet-700 bg-violet-50/70 border-violet-200"
-                    >
-                      <LayoutDashboard className="mr-2 h-4 w-4" />
-                      Admin Dashboard
-                    </Button>
-                  )}
                 </div>
               </div>
             </div> 
@@ -906,18 +855,33 @@ export function Dashboard({ onLogout }: DashboardProps) {
 
       {/* Bottom Navigation - Mobile */}
       <div className="sm:hidden">
+        {/* Backdrop Overlay when expanded */}
+        {isFooterExpanded && (
+          <div
+            className="fixed inset-0 z-40 bg-slate-950/40 backdrop-blur-[2px] transition-opacity duration-300 sm:hidden"
+            onClick={() => setIsFooterExpanded(false)}
+          />
+        )}
+
         <div className="fixed inset-x-0 bottom-0 z-50">
           {/* Secondary tabs drawer */}
-          <div className={`border-t border-border bg-card transition-all duration-300 ease-in-out ${
-            isFooterExpanded 
-              ? 'translate-y-0 opacity-100' 
-              : 'translate-y-full opacity-0 pointer-events-none'
-          }`}>
-            <div className="safe-area-inset-bottom grid h-14 grid-cols-5 border-b border-border">
+          <div
+            className={`border-t border-slate-200 bg-white/95 backdrop-blur-md rounded-t-2xl shadow-2xl transition-all duration-300 ease-out transform ${
+              isFooterExpanded
+                ? "translate-y-0 opacity-100"
+                : "translate-y-full opacity-0 pointer-events-none"
+            }`}
+          >
+            {/* Drawer Handle */}
+            <div className="flex justify-center pt-2.5 pb-1 cursor-pointer" onClick={() => setIsFooterExpanded(false)}>
+              <div className="h-1.5 w-10 rounded-full bg-slate-300 hover:bg-slate-400 transition-colors" />
+            </div>
+
+            <div className="safe-area-inset-bottom grid grid-cols-3 gap-2 px-3 py-2 border-b border-slate-100 max-h-[60vh] overflow-y-auto">
               {allowedSecondaryTabs.map((tabId: string) => {
-                const item = navItems.find(nav => nav.id === tabId)
+                const item = navItems.find((nav) => nav.id === tabId)
                 if (!item) return null
-                
+
                 return (
                   <MobileNavItem
                     key={item.id}
@@ -925,16 +889,19 @@ export function Dashboard({ onLogout }: DashboardProps) {
                     label={item.label}
                     iconOnly={Boolean((item as any).iconOnly)}
                     isActive={activeTab === item.id}
-                    onClick={() => handleTabChange(item.id as TabType)}
+                    onClick={() => {
+                      handleTabChange(item.id as TabType)
+                      setIsFooterExpanded(false)
+                    }}
                   />
                 )
               })}
             </div>
           </div>
 
-          {/* Primary tabs */}
-          <div className="border-t border-border bg-card pb-safe">
-            <div className="grid grid-cols-4 h-16">
+          {/* Primary tabs bar */}
+          <div className="border-t border-slate-200 bg-white/95 backdrop-blur-md pb-safe">
+            <div className="grid grid-cols-4 h-16 items-center px-1">
               {allowedPrimaryTabs.map((tabId: string) => {
                 if (tabId === "purchase") {
                   return (
@@ -960,9 +927,9 @@ export function Dashboard({ onLogout }: DashboardProps) {
                   )
                 }
 
-                const item = navItems.find(nav => nav.id === tabId)
+                const item = navItems.find((nav) => nav.id === tabId)
                 if (!item) return null
-                
+
                 return (
                   <MobileNavItem
                     key={item.id}
@@ -974,23 +941,25 @@ export function Dashboard({ onLogout }: DashboardProps) {
                   />
                 )
               })}
-              
+
               <button
+                type="button"
                 onClick={() => setIsFooterExpanded(!isFooterExpanded)}
-                className={`flex flex-col items-center justify-center h-16 transition-all duration-200 ${
-                  isFooterExpanded 
-                    ? "bg-violet-50 text-violet-700"
-                    : "text-gray-500"
-                }`}
+                className={cn(
+                  "flex flex-col items-center justify-center h-full rounded-xl transition-all duration-200 active:scale-95",
+                  isFooterExpanded
+                    ? "bg-violet-50 text-violet-700 font-semibold shadow-xs"
+                    : "text-slate-600 hover:bg-slate-50"
+                )}
               >
-                <div className="mb-1">
+                <div className="mb-0.5">
                   {isFooterExpanded ? (
                     <ChevronDown className="h-4 w-4" />
                   ) : (
                     <ChevronUp className="h-4 w-4" />
                   )}
                 </div>
-                <span className="text-xs font-medium leading-none">
+                <span className="text-[11px] font-medium leading-tight">
                   {isFooterExpanded ? "Less" : "More"}
                 </span>
               </button>
@@ -1235,25 +1204,27 @@ const NavItem = React.memo(function NavItem({ icon, label, iconOnly = false, isA
 const MobileNavItem = React.memo(function MobileNavItem({ icon, label, iconOnly = false, isActive, onClick }: NavItemProps) {
   return (
     <button
-      className={`flex flex-col items-center justify-center h-full transition-all duration-200 ${
-        isActive ? "bg-violet-50 text-violet-700" : "text-muted-foreground"
-      }`}
+      type="button"
+      className={cn(
+        "flex flex-col items-center justify-center py-2 px-1 rounded-xl transition-all duration-200 active:scale-95 w-full",
+        isActive ? "bg-violet-50 text-violet-700 font-semibold shadow-xs" : "text-slate-600 hover:bg-slate-50"
+      )}
       onClick={onClick}
     >
       <div
         className={
           iconOnly
-            ? `flex h-10 w-10 items-center justify-center rounded-full border shadow-sm ${
+            ? `flex h-9 w-9 items-center justify-center rounded-full border shadow-sm ${
                 isActive
                   ? "border-violet-600 bg-violet-600 text-white"
                   : "border-border bg-card"
               }`
-            : "mb-1"
+            : "mb-1 text-current"
         }
       >
         {icon}
       </div>
-      {!iconOnly ? <span className="text-xs font-medium leading-none truncate max-w-full px-0.5">{label}</span> : null}
+      {!iconOnly ? <span className="text-[11px] font-medium leading-tight truncate max-w-full text-center px-0.5">{label}</span> : null}
     </button>
   )
 })
