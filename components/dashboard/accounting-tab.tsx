@@ -2151,7 +2151,9 @@ const renderTransactionList = (
                 {isDataLoading ? (
                   <Skeleton className="h-6 w-24 bg-white/20" />
                 ) : (
-                  `${currency} ${getOpeningBalance().toFixed(2)}`
+                  getOpeningBalance() < 0 
+                    ? `- ${currency} ${Math.abs(getOpeningBalance()).toFixed(2)}`
+                    : `${currency} ${getOpeningBalance().toFixed(2)}`
                 )}
               </div>
             </div>
@@ -2161,7 +2163,9 @@ const renderTransactionList = (
                 {isDataLoading ? (
                   <Skeleton className="h-6 w-24 bg-white/20" />
                 ) : (
-                  `${currency} ${getClosingBalance().toFixed(2)}`
+                  getClosingBalance() < 0
+                    ? `- ${currency} ${Math.abs(getClosingBalance()).toFixed(2)}`
+                    : `${currency} ${getClosingBalance().toFixed(2)}`
                 )}
               </div>
             </div>

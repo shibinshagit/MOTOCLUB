@@ -199,12 +199,12 @@ export async function updateStaffRequestStatus(
       await sql`
         INSERT INTO financial_transactions (
           transaction_date, transaction_type, transaction_name, category_name,
-          reference_type, reference_id, amount, status, payment_method,
+          reference_type, reference_id, amount, debit_amount, status, payment_method,
           description, notes, device_id, company_id, created_by
         )
         VALUES (
           NOW(), 'expense', ${`Salary Advance Paid - ${staffName}`}, 'Salary & Wages',
-          'salary_advance', ${requestId}, ${req.amount}, 'Completed', 'Cash',
+          'salary_advance', ${requestId}, ${req.amount}, ${req.amount}, 'Completed', 'Cash',
           ${`Salary advance requested on ${new Date(req.created_at).toLocaleDateString()}`},
           ${adminRemarks || null}, ${req.device_id}, ${req.company_id}, ${req.staff_id}
         )

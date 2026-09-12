@@ -32,6 +32,7 @@ interface ProductSelectSimpleProps {
   error?: string
   hideServiceIcon?: boolean
   initialProductName?: string
+  autoOpen?: boolean
 }
 
 // Helper: truncate names
@@ -71,9 +72,10 @@ function ProductSelectSimple({
   error,
   hideServiceIcon = false,
   initialProductName,
+  autoOpen = false,
 }: ProductSelectSimpleProps) {
   const deviceId = useSelector(selectDeviceId)
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(autoOpen)
   const [services, setServices] = useState<any[]>([])
   const [products, setProducts] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
@@ -87,6 +89,16 @@ function ProductSelectSimple({
   const [categoryOpen, setCategoryOpen] = useState(false)
 
   const debouncedSearchTerm = useDebounce(localSearchTerm, 300)
+
+  // Auto-open if requested
+  useEffect(() => {
+    if (autoOpen) {
+      setOpen(true)
+      if (!isServiceMode && products.length === 0) {
+        searchProducts("")
+      }
+    }
+  }, [autoOpen])
 
   // Fetch services on mount
   useEffect(() => {

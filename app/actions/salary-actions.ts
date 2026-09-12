@@ -211,12 +211,12 @@ export async function createSalaryPayment(data: {
       await sql`
         INSERT INTO financial_transactions (
           transaction_date, transaction_type, transaction_name, category_name,
-          reference_type, reference_id, amount, status, payment_method,
+          reference_type, reference_id, amount, debit_amount, status, payment_method,
           description, notes, device_id, company_id, created_by
         )
         VALUES (
           ${data.paymentDate}, 'expense', ${txName}, 'Salary & Wages',
-          'salary_payment', ${paymentId}, ${data.netSalary}, 'Completed', ${data.paymentMethod},
+          'salary_payment', ${paymentId}, ${data.netSalary}, ${data.netSalary}, 'Completed', ${data.paymentMethod},
           ${`Base: ${data.baseSalary}, Bonus: ${data.bonus}, Advance Deduction: ${data.advanceDeduction}, Other Deductions: ${data.otherDeductions}`},
           ${data.notes || null}, ${data.deviceId}, ${companyId}, ${data.staffId}
         )

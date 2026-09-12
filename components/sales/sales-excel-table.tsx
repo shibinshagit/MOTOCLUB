@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, useCallback } from "react"
 import { format } from "date-fns"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -117,9 +117,11 @@ function DeliveryStatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
     Pickup: "bg-slate-50 text-slate-700 border-slate-200",
     Pending: "bg-amber-50 text-amber-700 border-amber-200",
+    Paid: "bg-emerald-50 text-emerald-700 border-emerald-200",
     Packed: "bg-blue-50 text-blue-700 border-blue-200",
-    Shipped: "bg-violet-50 text-violet-700 border-violet-200",
-    "In transit": "bg-indigo-50 text-indigo-700 border-indigo-200",
+    Sent: "bg-purple-50 text-purple-700 border-purple-200",
+    Direct: "bg-blue-50 text-blue-700 border-blue-200",
+    Shipping: "bg-cyan-50 text-cyan-700 border-cyan-200",
     Delivered: "bg-emerald-50 text-emerald-700 border-emerald-200",
     Returned: "bg-rose-50 text-rose-700 border-rose-200",
     Failed: "bg-rose-50 text-rose-700 border-rose-200",
@@ -308,56 +310,59 @@ export default function SalesExcelTable({
   }, [activeSearchTerm])
 
   // Fetch paginated sales and card aggregates
-  useEffect(() => {
+  const fetchServerSales = useCallback(async () => {
     if (!deviceId) return
-    let isCancelled = false
     setIsFetchingServer(true)
+    try {
+      const [salesRes, cardsRes] = await Promise.all([
+        getPaginatedUserSales(deviceId!, {
+          page,
+          pageSize,
+          dateFrom: globalDateRange?.from,
+          dateTo: globalDateRange?.to,
+          typeFilter,
+          cardFilter,
+          searchTerm: debouncedSearch,
+        }),
+        getSalesSummaryCards(deviceId!, {
+          dateFrom: globalDateRange?.from,
+          dateTo: globalDateRange?.to,
+          typeFilter,
+          searchTerm: debouncedSearch,
+        }),
+      ])
 
-    async function loadData() {
-      try {
-        const [salesRes, cardsRes] = await Promise.all([
-          getPaginatedUserSales(deviceId!, {
-            page,
-            pageSize,
-            dateFrom: globalDateRange?.from,
-            dateTo: globalDateRange?.to,
-            typeFilter,
-            cardFilter,
-            searchTerm: debouncedSearch,
-          }),
-          getSalesSummaryCards(deviceId!, {
-            dateFrom: globalDateRange?.from,
-            dateTo: globalDateRange?.to,
-            typeFilter,
-            searchTerm: debouncedSearch,
-          }),
-        ])
-
-        if (!isCancelled) {
-          if (salesRes.success && salesRes.data) {
-            setServerSales(salesRes.data)
-            setTotalServerCount(salesRes.totalCount)
-            setTotalServerPages(salesRes.totalPages)
-          }
-          if (cardsRes.success && cardsRes.counts) {
-            setServerCardCounts(cardsRes.counts)
-          }
-        }
-      } catch (err) {
-        console.error("Error fetching server sales:", err)
-      } finally {
-        if (!isCancelled) {
-          setIsFetchingServer(false)
-        }
+      if (salesRes.success && salesRes.data) {
+        setServerSales(salesRes.data)
+        setTotalServerCount(salesRes.totalCount)
+        setTotalServerPages(salesRes.totalPages)
       }
-    }
-
-    loadData()
-
-    return () => {
-      isCancelled = true
+      if (cardsRes.success && cardsRes.counts) {
+        setServerCardCounts(cardsRes.counts)
+      }
+    } catch (err) {
+      console.error("Error fetching server sales:", err)
+    } finally {
+      setIsFetchingServer(false)
     }
   }, [deviceId, page, pageSize, globalDateRange?.from, globalDateRange?.to, typeFilter, cardFilter, debouncedSearch])
+
+  useEffect(() => {
+    fetchServerSales()
+  }, [fetchServerSales, sales])
+
+  const handleDeliveryStatusChange = useCallback(
+    (saleId: number, newStatus: string) => {
+      setServerSales((prev) =>
+        prev.map((s) => (s.id === saleId ? { ...s, delivery_status: newStatus } : s))
+      )
+      fetchServerSales()
+      if (onRefreshSales) {
+        onRefreshSales()
+      }
+    },
+    [fetchServerSales, onRefreshSales]
+  )
 
   // Prefetch next page silently
   useEffect(() => {
@@ -925,7 +930,10 @@ export default function SalesExcelTable({
                   variant="outline"
                   size="sm"
                   className="h-7 gap-1.5 px-2.5 text-xs font-medium bg-white hover:bg-slate-50 border-slate-200 text-slate-700 shadow-2xs"
-                  onClick={onRefreshSales}
+                  onClick={() => {
+                    fetchServerSales()
+                    onRefreshSales()
+                  }}
                   disabled={isLoading || isFetchingServer}
                   title="Refresh sales list"
                 >
@@ -1221,11 +1229,7 @@ export default function SalesExcelTable({
                               paymentStatus={sale.payment_status}
                               isJobCard={isJobCard}
                               userRole="admin"
-                              onStatusChange={() => {
-                                if (onRefreshSales) {
-                                  onRefreshSales()
-                                }
-                              }}
+                              onStatusChange={(newStatus) => handleDeliveryStatusChange(sale.id, newStatus)}
                             />
                           )}
                         </td>
@@ -1264,16 +1268,31 @@ export default function SalesExcelTable({
                           {remaining > 0 ? formatCurrency(remaining) : "—"}
                         </td>
                         <td className={stickyActionCellClass(baseBgClass, isPending)}>
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              handleRowEdit(sale)
-                            }}
-                            className="text-sm font-medium text-brand-blue hover:text-blue-700 hover:underline cursor-pointer"
-                          >
-                            Edit
-                          </button>
+                          <div className="flex items-center justify-end gap-1.5">
+                            <Button
+                              type="button"
+                              size="sm"
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                onEditSale(sale)
+                              }}
+                              className="h-6 px-2 text-[11px] font-bold bg-green-600 hover:bg-green-700 text-white shadow-2xs gap-1 cursor-pointer"
+                              title="Open and edit in POS mode"
+                            >
+                              <ShoppingCart className="h-3 w-3" />
+                              POS
+                            </Button>
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                handleRowEdit(sale)
+                              }}
+                              className="text-xs font-medium text-brand-blue hover:text-blue-700 hover:underline cursor-pointer"
+                            >
+                              Edit
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     )
@@ -1569,7 +1588,7 @@ export default function SalesExcelTable({
                             paymentStatus={sale.payment_status}
                             isJobCard={isJobCard}
                             userRole="admin"
-                            onStatusChange={() => onRefreshSales?.()}
+                            onStatusChange={(newStatus) => handleDeliveryStatusChange(sale.id, newStatus)}
                           />
                         )}
                       </div>
@@ -1640,6 +1659,9 @@ export default function SalesExcelTable({
                         <DropdownMenuContent align="end" className="w-48">
                           <DropdownMenuItem onClick={() => onViewSale(sale)}>
                             <Eye className="h-4 w-4 mr-2 text-slate-500" /> View Modal
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => onEditSale(sale)}>
+                            <ShoppingCart className="h-4 w-4 mr-2 text-green-600" /> Open in POS
                           </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => handleRowEdit(sale)}>
                             <Edit className="h-4 w-4 mr-2 text-slate-500" /> Edit Sale
@@ -1789,6 +1811,7 @@ export default function SalesExcelTable({
           isOpen={true}
           onClose={() => {
             setIsCreateJobCardOpen(false)
+            fetchServerSales()
             onRefreshSales?.()
           }}
         />
@@ -1799,6 +1822,7 @@ export default function SalesExcelTable({
           isOpen={true}
           onClose={() => {
             setEditingJobCardId(null)
+            fetchServerSales()
             onRefreshSales?.()
           }}
           editSaleId={editingJobCardId}

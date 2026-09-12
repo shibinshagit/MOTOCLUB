@@ -48,12 +48,21 @@ export function DeliveryStatusSelect({
 }) {
   const { toast } = useToast()
   const [loading, setLoading] = useState(false)
-  const [status, setStatus] = useState(currentStatus || "Pending")
+  const initialStatus = currentStatus || "Pending"
+  const [status, setStatus] = useState(initialStatus)
+  const [pendingOptimisticStatus, setPendingOptimisticStatus] = useState<string | null>(null)
 
-  // Keep internal status state in sync when parent prop updates
+  // Keep internal status state in sync when parent prop updates from server
   useEffect(() => {
-    setStatus(currentStatus || "Pending")
-  }, [currentStatus])
+    const cleanCurrent = currentStatus || "Pending"
+    if (pendingOptimisticStatus !== null) {
+      if (cleanCurrent === pendingOptimisticStatus) {
+        setPendingOptimisticStatus(null)
+      }
+    } else {
+      setStatus(cleanCurrent)
+    }
+  }, [currentStatus, pendingOptimisticStatus])
   
   // WhatsApp Notification State
   const [whatsappStep, setWhatsappStep] = useState<"none" | "prepare" | "confirm">("none")
@@ -79,7 +88,8 @@ export function DeliveryStatusSelect({
 
   const handleUpdateStatus = async (newStatus: string) => {
     const previousStatus = status
-    setStatus(newStatus) // Optimistic instant update
+    setStatus(newStatus) // Instant UI update
+    setPendingOptimisticStatus(newStatus)
     setLoading(true)
     try {
       const res = await updateSaleDeliveryStatus(saleId, deviceId, newStatus)
@@ -90,10 +100,12 @@ export function DeliveryStatusSelect({
         }
       } else {
         setStatus(previousStatus) // Revert on error
+        setPendingOptimisticStatus(null)
         toast({ title: "Error", description: res.message, variant: "destructive" })
       }
     } catch (err: any) {
       setStatus(previousStatus) // Revert on error
+      setPendingOptimisticStatus(null)
       toast({ title: "Error", description: "An error occurred", variant: "destructive" })
     } finally {
       setLoading(false)
@@ -104,6 +116,7 @@ export function DeliveryStatusSelect({
     const previousStatus = status
     setIsTrackingModalOpen(false) // Close input modal immediately
     setStatus("Shipping") // Optimistic instant update
+    setPendingOptimisticStatus("Shipping")
     setLoading(true)
 
     const cleanTracking = newTrackingId?.trim() || ""
@@ -280,7 +293,8 @@ export function DeliveryStatusSelect({
 
   // Enable all standard delivery status options for full flexibility
   const ALL_STATUS_OPTIONS = ["Pending", "Paid", "Packed", "Sent", "Direct", "Shipping", "Delivered", "Returned", "Failed"]
-  const uniqueOptions = Array.from(new Set([status, currentStatus, ...ALL_STATUS_OPTIONS])).filter(Boolean)
+  const uniqueOptions = Array.from(new Set([status, currentStatus, ...ALL_STATUS_OPTIONS]))
+    .filter((opt): opt is string => Boolean(opt) && opt !== "Shipped" && opt !== "shipped" && opt !== "In transit" && opt !== "in transit")
 
   const isDropdownDisabled = loading
 

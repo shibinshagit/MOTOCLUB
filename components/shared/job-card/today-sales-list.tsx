@@ -258,7 +258,10 @@ export function TodaySalesList({ onOpenCreateModal }: { onOpenCreateModal?: () =
                       paymentStatus={sale.payment_status}
                       isJobCard={true}
                       userRole="staff"
-                      onStatusChange={() => fetchSales()}
+                      onStatusChange={(newStatus) => {
+                        setSales((prev) => prev.map((s) => (s.id === sale.id ? { ...s, delivery_status: newStatus } : s)))
+                        fetchSales()
+                      }}
                     />
                   </div>
                 </div>
@@ -482,7 +485,10 @@ export function TodaySalesList({ onOpenCreateModal }: { onOpenCreateModal?: () =
                           paymentStatus={sale.payment_status}
                           isJobCard={true}
                           userRole="staff"
-                          onStatusChange={() => fetchSales()}
+                          onStatusChange={(newStatus) => {
+                            setSales((prev) => prev.map((s) => (s.id === sale.id ? { ...s, delivery_status: newStatus } : s)))
+                            fetchSales()
+                          }}
                         />
                       </td>
                       <td 

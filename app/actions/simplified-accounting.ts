@@ -1408,12 +1408,12 @@ export async function getAccountingBalances(deviceId: number, fromDateStr: strin
     // Single atomic scan to compute opening, period (Money In / Out), and closing balances
     const balanceResult = await sql`
       SELECT 
-        COALESCE(SUM(CASE WHEN transaction_date < ${openingCutoff}::timestamp THEN credit_amount ELSE 0 END), 0) as opening_credits,
-        COALESCE(SUM(CASE WHEN transaction_date < ${openingCutoff}::timestamp THEN debit_amount ELSE 0 END), 0) as opening_debits,
-        COALESCE(SUM(CASE WHEN transaction_date >= ${openingCutoff}::timestamp AND transaction_date < ${closingExclusiveCutoff}::timestamp THEN credit_amount ELSE 0 END), 0) as period_credits,
-        COALESCE(SUM(CASE WHEN transaction_date >= ${openingCutoff}::timestamp AND transaction_date < ${closingExclusiveCutoff}::timestamp THEN debit_amount ELSE 0 END), 0) as period_debits,
-        COALESCE(SUM(CASE WHEN transaction_date < ${closingExclusiveCutoff}::timestamp THEN credit_amount ELSE 0 END), 0) as closing_credits,
-        COALESCE(SUM(CASE WHEN transaction_date < ${closingExclusiveCutoff}::timestamp THEN debit_amount ELSE 0 END), 0) as closing_debits
+        COALESCE(SUM(CASE WHEN transaction_date < ${openingCutoff}::timestamp THEN COALESCE(credit_amount, 0) ELSE 0 END), 0) as opening_credits,
+        COALESCE(SUM(CASE WHEN transaction_date < ${openingCutoff}::timestamp THEN CASE WHEN COALESCE(debit_amount, 0) > 0 THEN debit_amount WHEN transaction_type = 'expense' THEN COALESCE(amount, 0) ELSE 0 END ELSE 0 END), 0) as opening_debits,
+        COALESCE(SUM(CASE WHEN transaction_date >= ${openingCutoff}::timestamp AND transaction_date < ${closingExclusiveCutoff}::timestamp THEN COALESCE(credit_amount, 0) ELSE 0 END), 0) as period_credits,
+        COALESCE(SUM(CASE WHEN transaction_date >= ${openingCutoff}::timestamp AND transaction_date < ${closingExclusiveCutoff}::timestamp THEN CASE WHEN COALESCE(debit_amount, 0) > 0 THEN debit_amount WHEN transaction_type = 'expense' THEN COALESCE(amount, 0) ELSE 0 END ELSE 0 END), 0) as period_debits,
+        COALESCE(SUM(CASE WHEN transaction_date < ${closingExclusiveCutoff}::timestamp THEN COALESCE(credit_amount, 0) ELSE 0 END), 0) as closing_credits,
+        COALESCE(SUM(CASE WHEN transaction_date < ${closingExclusiveCutoff}::timestamp THEN CASE WHEN COALESCE(debit_amount, 0) > 0 THEN debit_amount WHEN transaction_type = 'expense' THEN COALESCE(amount, 0) ELSE 0 END ELSE 0 END), 0) as closing_debits
       FROM financial_transactions
       WHERE device_id = ${deviceId}
         AND transaction_date < ${closingExclusiveCutoff}::timestamp
@@ -1422,16 +1422,19 @@ export async function getAccountingBalances(deviceId: number, fromDateStr: strin
     const row = balanceResult[0]
     const openingCredits = Number(row?.opening_credits) || 0
     const openingDebits = Number(row?.opening_debits) || 0
-    const openingBalance = openingCredits - openingDebits
+    
+    // Accurate Opening Balance calculation: Credits - Debits prior to start date
+    const rawOpening = openingCredits - openingDebits
+    const openingBalance = Number(rawOpening.toFixed(2))
 
-    const moneyIn = Number(row?.period_credits) || 0
-    const moneyOut = Number(row?.period_debits) || 0
+    const moneyIn = Number((Number(row?.period_credits) || 0).toFixed(2))
+    const moneyOut = Number((Number(row?.period_debits) || 0).toFixed(2))
 
     const closingCredits = Number(row?.closing_credits) || 0
     const closingDebits = Number(row?.closing_debits) || 0
 
-    // Reconciled Closing Balance: Opening Balance + Money In - Money Out === closingCredits - closingDebits
-    const closingBalance = openingBalance + moneyIn - moneyOut
+    // Reconciled Closing Balance: Opening Balance + Money In - Money Out
+    const closingBalance = Number((openingBalance + moneyIn - moneyOut).toFixed(2))
 
     console.log("Balance calculation results:", {
       openingCredits,

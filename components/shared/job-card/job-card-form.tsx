@@ -1189,10 +1189,16 @@ export function JobCardForm({
             type="submit" 
             size="lg" 
             disabled={isLoading}
-            className="min-w-[180px] shadow-sm"
+            className={`min-w-[180px] shadow-sm font-semibold transition-all ${
+              editSaleId 
+                ? "bg-green-600 hover:bg-green-700 text-white" 
+                : "bg-blue-600 hover:bg-blue-700 text-white"
+            }`}
           >
             {isLoading ? (
-              <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generating...</>
+              <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> {editSaleId ? "Updating Sale..." : "Generating..."}</>
+            ) : editSaleId ? (
+              <><CheckCircle2 className="mr-2 h-4 w-4" /> Update Sale</>
             ) : (
               <><CheckCircle2 className="mr-2 h-4 w-4" /> Create Job Card</>
             )}

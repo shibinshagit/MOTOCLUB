@@ -181,7 +181,9 @@ export async function createJobCard(input: JobCardInput) {
             courier_paid_extra,
             created_by,
             advance_amount,
-            balance_amount
+            balance_amount,
+            fulfillment_type,
+            delivery_status
           ) VALUES (
             ${resolvedCustomerId || null},
             ${totalAmount},
@@ -206,7 +208,9 @@ export async function createJobCard(input: JobCardInput) {
             ${input.courierPaidExtra || 0},
             ${createdBy},
             0,
-            ${totalAmount}
+            ${totalAmount},
+            'ship',
+            'Pending'
           )
           RETURNING id
         `
@@ -342,7 +346,9 @@ export async function updateJobCard(id: number, input: any) {
           shipping_address_type = ${input.shippingAddressType || 'Home'},
           shipping_pincode = ${input.shippingPincode || null},
           courier_paid_extra = ${input.courierPaidExtra || 0},
-          balance_amount = ${balanceAmount}
+          balance_amount = ${balanceAmount},
+          fulfillment_type = COALESCE(fulfillment_type, 'ship'),
+          delivery_status = COALESCE(delivery_status, 'Pending')
         WHERE id = ${id} AND staff_id = ${staffId}
         RETURNING tracking_id
       `
@@ -362,7 +368,9 @@ export async function updateJobCard(id: number, input: any) {
           shipping_address_type = ${input.shippingAddressType || 'Home'},
           shipping_pincode = ${input.shippingPincode || null},
           courier_paid_extra = ${input.courierPaidExtra || 0},
-          balance_amount = ${balanceAmount}
+          balance_amount = ${balanceAmount},
+          fulfillment_type = COALESCE(fulfillment_type, 'ship'),
+          delivery_status = COALESCE(delivery_status, 'Pending')
         WHERE id = ${id}
         RETURNING tracking_id
       `
@@ -750,7 +758,7 @@ export async function markJobCardPaid(saleId: number, deviceId: number) {
         UPDATE sales 
         SET 
           payment_status = 'Paid',
-          delivery_status = 'Paid',
+          delivery_status = CASE WHEN delivery_status IS NULL OR delivery_status = 'Pending' THEN 'Paid' ELSE delivery_status END,
           received_amount = total_amount,
           balance_amount = 0
         WHERE id = ${saleId} AND staff_id = ${session.staffId}
@@ -760,7 +768,7 @@ export async function markJobCardPaid(saleId: number, deviceId: number) {
         UPDATE sales 
         SET 
           payment_status = 'Paid',
-          delivery_status = 'Paid',
+          delivery_status = CASE WHEN delivery_status IS NULL OR delivery_status = 'Pending' THEN 'Paid' ELSE delivery_status END,
           received_amount = total_amount,
           balance_amount = 0
         WHERE id = ${saleId}

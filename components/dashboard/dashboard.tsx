@@ -593,8 +593,8 @@ export function Dashboard({ onLogout }: DashboardProps) {
       
       {/* Top Navbar */}
       <header className="sticky top-0 z-10 flex h-16 items-center justify-between border-b border-border bg-card px-2 sm:px-4">
-        <div className="flex items-center flex-1 min-w-0 mr-1 sm:mr-3">
-          <div className="relative mr-2 sm:mr-3 h-8 w-8 sm:h-10 sm:w-10 flex-shrink-0">
+        <div className="flex items-center shrink-0 min-w-0 mr-1 sm:mr-3">
+          <div className="relative mr-1.5 sm:mr-3 h-8 w-8 sm:h-10 sm:w-10 flex-shrink-0">
             {deviceLogo ? (
               <Image
                 src={deviceLogo}
@@ -608,7 +608,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
               <BrandLogo variant="icon" width={40} height={40} className="h-full w-full" priority />
             )}
           </div>
-          <div className="flex flex-col min-w-0 flex-1">
+          <div className="hidden sm:flex flex-col min-w-0 flex-1">
             <span className="text-sm sm:text-xl font-bold text-gray-800 truncate max-w-[130px] sm:max-w-none">
               {company?.name || "Company"}
             </span>
@@ -622,7 +622,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
         </div>
 
         {/* Global Date Range Filter */}
-        <div className="flex items-center justify-center mx-1 sm:mx-2">
+        <div className="flex items-center justify-center shrink-0 mx-1 sm:mx-2">
           <GlobalDateFilter />
         </div>
 
@@ -1045,35 +1045,74 @@ const SalesNavSegment = React.memo(function SalesNavSegment({
   onSelect,
   compact = false,
 }: SalesNavSegmentProps) {
+  if (compact) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center h-full px-0.5">
+        <div
+          className={cn(
+            "relative flex items-center justify-between w-full h-11 rounded-xl p-0.5 border transition-all duration-200",
+            isOnSaleTab
+              ? "bg-violet-50/80 border-violet-200 text-violet-700 shadow-xs"
+              : "bg-slate-50 border-slate-200/80 text-slate-600 hover:bg-slate-100/70"
+          )}
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={isOnSaleTab && activeView === "list"}
+            onClick={() => onSelect("list")}
+            className={cn(
+              "flex flex-1 flex-col items-center justify-center h-full rounded-lg transition-all text-center min-w-0 py-0.5",
+              isOnSaleTab && activeView === "list"
+                ? "bg-white text-violet-700 font-semibold shadow-xs"
+                : "text-slate-600 hover:text-slate-900"
+            )}
+            title="Sales List"
+          >
+            <Receipt className="h-3.5 w-3.5 shrink-0" />
+            <span className="text-[10px] font-medium leading-tight truncate w-full px-0.5">Sales</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={isOnSaleTab && activeView === "entry"}
+            aria-label="New Sale"
+            title="New Sale"
+            onClick={() => onSelect("entry")}
+            className={cn(
+              "flex h-8 w-7 items-center justify-center rounded-lg transition-all shrink-0 ml-0.5 active:scale-95",
+              isOnSaleTab && activeView === "entry"
+                ? "bg-violet-600 text-white shadow-xs"
+                : "bg-slate-200/80 text-slate-700 hover:bg-slate-300/80"
+            )}
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div
-      className={cn(
-        "flex flex-1 flex-col items-center justify-center",
-        compact ? "px-0.5 py-1" : "px-1 py-2",
-      )}
+      className="flex flex-1 flex-col items-center justify-center px-1 py-2"
       role="tablist"
       aria-label="Sales views"
     >
-      <div
-        className={cn(
-          "inline-flex w-full rounded-lg border border-slate-200 bg-[#F1F4F9] shadow-sm",
-          compact ? "max-w-none p-0.5" : "max-w-[148px] p-1",
-        )}
-      >
+      <div className="inline-flex w-full max-w-[148px] rounded-lg border border-slate-200 bg-[#F1F4F9] p-1 shadow-sm">
         <button
           type="button"
           role="tab"
           aria-selected={isOnSaleTab && activeView === "list"}
           onClick={() => onSelect("list")}
           className={cn(
-            "flex flex-1 flex-col items-center justify-center rounded-md font-medium transition-all duration-200",
-            compact ? "px-1 py-1 text-[9px]" : "px-2 py-1.5 text-[10px] sm:text-xs",
+            "flex flex-1 flex-col items-center justify-center rounded-md px-2 py-1.5 text-[10px] sm:text-xs font-medium transition-all duration-200",
             isOnSaleTab && activeView === "list"
               ? "bg-white text-violet-700 shadow-sm"
               : "text-muted-foreground hover:text-slate-900",
           )}
         >
-          <Receipt className={compact ? "h-3 w-3" : "h-3.5 w-3.5"} />
+          <Receipt className="h-3.5 w-3.5" />
           <span className="mt-0.5 leading-none">Sales</span>
         </button>
         <button
@@ -1084,14 +1123,13 @@ const SalesNavSegment = React.memo(function SalesNavSegment({
           title="New sale"
           onClick={() => onSelect("entry")}
           className={cn(
-            "flex flex-1 flex-col items-center justify-center rounded-md font-medium transition-all duration-200",
-            compact ? "px-1 py-1" : "px-2 py-1.5",
+            "flex flex-1 flex-col items-center justify-center rounded-md px-2 py-1.5 font-medium transition-all duration-200",
             isOnSaleTab && activeView === "entry"
               ? "bg-white text-violet-700 shadow-sm"
               : "text-muted-foreground hover:text-slate-900",
           )}
         >
-          <Plus className={compact ? "h-3 w-3" : "h-4 w-4"} />
+          <Plus className="h-4 w-4" />
         </button>
       </div>
     </div>
@@ -1111,35 +1149,74 @@ const PurchaseNavSegment = React.memo(function PurchaseNavSegment({
   onSelect,
   compact = false,
 }: PurchaseNavSegmentProps) {
+  if (compact) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center h-full px-0.5">
+        <div
+          className={cn(
+            "relative flex items-center justify-between w-full h-11 rounded-xl p-0.5 border transition-all duration-200",
+            isOnPurchaseTab
+              ? "bg-violet-50/80 border-violet-200 text-violet-700 shadow-xs"
+              : "bg-slate-50 border-slate-200/80 text-slate-600 hover:bg-slate-100/70"
+          )}
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={isOnPurchaseTab && activeView === "list"}
+            onClick={() => onSelect("list")}
+            className={cn(
+              "flex flex-1 flex-col items-center justify-center h-full rounded-lg transition-all text-center min-w-0 py-0.5",
+              isOnPurchaseTab && activeView === "list"
+                ? "bg-white text-violet-700 font-semibold shadow-xs"
+                : "text-slate-600 hover:text-slate-900"
+            )}
+            title="Purchases List"
+          >
+            <Receipt className="h-3.5 w-3.5 shrink-0" />
+            <span className="text-[10px] font-medium leading-tight truncate w-full px-0.5">Purchases</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={isOnPurchaseTab && activeView === "entry"}
+            aria-label="New Purchase"
+            title="New Purchase"
+            onClick={() => onSelect("entry")}
+            className={cn(
+              "flex h-8 w-7 items-center justify-center rounded-lg transition-all shrink-0 ml-0.5 active:scale-95",
+              isOnPurchaseTab && activeView === "entry"
+                ? "bg-violet-600 text-white shadow-xs"
+                : "bg-slate-200/80 text-slate-700 hover:bg-slate-300/80"
+            )}
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div
-      className={cn(
-        "flex flex-1 flex-col items-center justify-center",
-        compact ? "px-0.5 py-1" : "px-1 py-2",
-      )}
+      className="flex flex-1 flex-col items-center justify-center px-1 py-2"
       role="tablist"
       aria-label="Purchase views"
     >
-      <div
-        className={cn(
-          "inline-flex w-full rounded-lg border border-slate-200 bg-[#F1F4F9] shadow-sm",
-          compact ? "max-w-none p-0.5" : "max-w-[148px] p-1",
-        )}
-      >
+      <div className="inline-flex w-full max-w-[148px] rounded-lg border border-slate-200 bg-[#F1F4F9] p-1 shadow-sm">
         <button
           type="button"
           role="tab"
           aria-selected={isOnPurchaseTab && activeView === "list"}
           onClick={() => onSelect("list")}
           className={cn(
-            "flex flex-1 flex-col items-center justify-center rounded-md font-medium transition-all duration-200",
-            compact ? "px-1 py-1 text-[9px]" : "px-2 py-1.5 text-[10px] sm:text-xs",
+            "flex flex-1 flex-col items-center justify-center rounded-md px-2 py-1.5 text-[10px] sm:text-xs font-medium transition-all duration-200",
             isOnPurchaseTab && activeView === "list"
               ? "bg-white text-violet-700 shadow-sm"
               : "text-muted-foreground hover:text-slate-900",
           )}
         >
-          <Receipt className={compact ? "h-3 w-3" : "h-3.5 w-3.5"} />
+          <Receipt className="h-3.5 w-3.5" />
           <span className="mt-0.5 leading-none">Purchases</span>
         </button>
         <button
@@ -1150,14 +1227,13 @@ const PurchaseNavSegment = React.memo(function PurchaseNavSegment({
           title="New purchase"
           onClick={() => onSelect("entry")}
           className={cn(
-            "flex flex-1 flex-col items-center justify-center rounded-md font-medium transition-all duration-200",
-            compact ? "px-1 py-1" : "px-2 py-1.5",
+            "flex flex-1 flex-col items-center justify-center rounded-md px-2 py-1.5 font-medium transition-all duration-200",
             isOnPurchaseTab && activeView === "entry"
               ? "bg-white text-violet-700 shadow-sm"
               : "text-muted-foreground hover:text-slate-900",
           )}
         >
-          <Plus className={compact ? "h-3 w-3" : "h-4 w-4"} />
+          <Plus className="h-4 w-4" />
         </button>
       </div>
     </div>

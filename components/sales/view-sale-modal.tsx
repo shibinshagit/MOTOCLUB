@@ -4,7 +4,7 @@ import { useState, useEffect, type ReactNode } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Edit, Loader2, Package, Printer, RotateCcw, Trash2, Wrench } from "lucide-react"
+import { Edit, Loader2, Package, Printer, RefreshCw, RotateCcw, Trash2, Wrench } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 import { notifyError, notifySuccess } from "@/lib/notifications"
 import {
@@ -26,6 +26,8 @@ import { getSaleDetails, updateSale, updateSaleDeliveryStatus } from "@/app/acti
 import { getProductById } from "@/app/actions/product-actions"
 import { ProductDetailSlider } from "@/components/products/product-detail-slider"
 import ReturnSaleModal from "@/components/sales/return-sale-modal"
+import { CreateReplacementModal } from "@/components/sales/create-replacement-modal"
+import { ReplacementShipmentCard } from "@/components/sales/replacement-shipment-card"
 import { buildTrackingUrl, mapSaleShippingFromRecord } from "@/lib/sale-shipping"
 import { cn } from "@/lib/utils"
 
@@ -136,6 +138,7 @@ export default function ViewSaleModal({
   const [isServiceViewOpen, setIsServiceViewOpen] = useState(false)
   const [isItemLoading, setIsItemLoading] = useState(false)
   const [isReturnModalOpen, setIsReturnModalOpen] = useState(false)
+  const [isReplacementModalOpen, setIsReplacementModalOpen] = useState(false)
   const [isUpdatingDelivery, setIsUpdatingDelivery] = useState(false)
   const { toast } = useToast()
 
@@ -441,6 +444,16 @@ export default function ViewSaleModal({
               >
                 <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
                 Return
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setIsReplacementModalOpen(true)}
+                disabled={isLoading || !saleData || saleData.status === "Cancelled"}
+                className="h-8 border-blue-200 bg-white px-3 text-xs text-blue-700 hover:bg-blue-50"
+              >
+                <RefreshCw className="mr-1.5 h-3.5 w-3.5 text-blue-600" />
+                Create Replacement
               </Button>
               <Button
                 variant="outline"
@@ -763,6 +776,34 @@ export default function ViewSaleModal({
                 </div>
               ) : null}
 
+              {saleData.replacements && saleData.replacements.length > 0 ? (
+                <div className="overflow-hidden rounded-xl border border-blue-200 bg-card mb-4">
+                  <div className="border-b border-blue-200 bg-blue-50/80 px-4 py-2 flex justify-between items-center">
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-blue-900 flex items-center gap-1.5">
+                      <RefreshCw className="h-3.5 w-3.5 text-blue-600" />
+                      Replacement Shipments History
+                    </h3>
+                    <span className="text-xs text-blue-700 font-semibold">
+                      {saleData.replacements.length} replacement shipment{saleData.replacements.length > 1 ? "s" : ""}
+                    </span>
+                  </div>
+                  <div className="p-4 space-y-3">
+                    {saleData.replacements.map((rep: any) => (
+                      <ReplacementShipmentCard
+                        key={rep.id}
+                        replacement={rep}
+                        originalSaleId={saleData.id}
+                        customerName={saleData.customer_name}
+                        customerPhone={saleData.customer_phone}
+                        shippingAddress={saleData.shipping_address || saleData.customer_address}
+                        trackingUrlTemplate={saleData.tracking_url_template}
+                        onRefresh={reloadSaleDetails}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
               {saleData.returns && saleData.returns.length > 0 ? (
                 <div className="overflow-hidden rounded-xl border border-slate-200 bg-card mb-4">
                   <div className="border-b border-slate-200 bg-[#F1F4F9] px-4 py-2 flex justify-between items-center">
@@ -897,6 +938,16 @@ export default function ViewSaleModal({
         currency={deviceCurrency}
         onSuccess={reloadSaleDetails}
       />
+
+      {saleData ? (
+        <CreateReplacementModal
+          isOpen={isReplacementModalOpen}
+          onClose={() => setIsReplacementModalOpen(false)}
+          sale={saleData}
+          saleItems={saleItems}
+          onSuccess={reloadSaleDetails}
+        />
+      ) : null}
     </>
   )
 }

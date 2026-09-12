@@ -22,8 +22,8 @@ interface TrackingDetailsModalProps {
   initialCourierServiceName?: string | null
   currentDeliveryStatus?: string
   targetDeliveryStatus?: string
-  saleId: number
-  deviceId: number
+  saleId?: number
+  deviceId?: number
 }
 
 export function TrackingDetailsModal({

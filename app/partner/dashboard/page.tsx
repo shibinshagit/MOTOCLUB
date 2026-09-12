@@ -37,6 +37,7 @@ export default async function PartnerDashboardPage() {
   const data = result[0]
 
   let sales: any[] = []
+  let replacementShipments: any[] = []
   let stats = { totalOrders: 0, activeOrders: 0, totalEarnings: 0, todayActivity: 0 }
   
   const [salesResult, statsResult] = await Promise.all([
@@ -46,6 +47,7 @@ export default async function PartnerDashboardPage() {
 
   if (salesResult.success && salesResult.data) {
     sales = salesResult.data
+    replacementShipments = salesResult.replacementShipments || []
   }
   if (statsResult.success && statsResult.data) {
     stats = statsResult.data
@@ -167,7 +169,7 @@ export default async function PartnerDashboardPage() {
 
           <div className="mt-8">
             <h2 className="text-xl font-bold text-gray-900 mb-4">Assigned Orders</h2>
-            <PartnerSalesTable initialSales={sales} />
+            <PartnerSalesTable initialSales={sales} initialReplacements={replacementShipments} />
           </div>
         </div>
       </main>

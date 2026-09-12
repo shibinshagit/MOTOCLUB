@@ -848,6 +848,53 @@ async function createTables() {
       )
     `
   })
+
+  await run("replacement_shipments", async () => {
+    await sql`
+      CREATE TABLE IF NOT EXISTS replacement_shipments (
+        id SERIAL PRIMARY KEY,
+        replacement_number VARCHAR(50) UNIQUE NOT NULL,
+        sale_id INTEGER NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
+        customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL,
+        device_id INTEGER,
+        reason VARCHAR(100) NOT NULL,
+        status VARCHAR(50) DEFAULT 'Pending',
+        fulfillment_type VARCHAR(20) DEFAULT 'ship',
+        courier_partner_id INTEGER,
+        courier_service_id INTEGER,
+        courier_service_name VARCHAR(255),
+        tracking_id VARCHAR(255),
+        shipping_date TIMESTAMP,
+        shipped_at TIMESTAMP,
+        delivered_at TIMESTAMP,
+        shipping_address TEXT,
+        shipping_city VARCHAR(255),
+        shipping_street TEXT,
+        shipping_landmark VARCHAR(255),
+        shipping_address_type VARCHAR(50),
+        shipping_pincode VARCHAR(20),
+        notes TEXT,
+        created_by INTEGER,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `
+  })
+
+  await run("replacement_shipment_items", async () => {
+    await sql`
+      CREATE TABLE IF NOT EXISTS replacement_shipment_items (
+        id SERIAL PRIMARY KEY,
+        replacement_shipment_id INTEGER NOT NULL REFERENCES replacement_shipments(id) ON DELETE CASCADE,
+        sale_item_id INTEGER REFERENCES sale_items(id) ON DELETE SET NULL,
+        product_id INTEGER NOT NULL,
+        product_variant_id INTEGER,
+        batch_id INTEGER,
+        quantity INTEGER NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `
+  })
 }
 
 async function upgradeLegacyColumns() {
@@ -1202,6 +1249,9 @@ async function createIndexes() {
     ["idx_sales_payment_status", () => sql`CREATE INDEX IF NOT EXISTS idx_sales_payment_status ON sales(payment_status)`],
     ["idx_sales_customer_id", () => sql`CREATE INDEX IF NOT EXISTS idx_sales_customer_id ON sales(customer_id)`],
     ["idx_sale_items_sale_id", () => sql`CREATE INDEX IF NOT EXISTS idx_sale_items_sale_id ON sale_items(sale_id)`],
+    ["idx_replacement_shipments_sale_id", () => sql`CREATE INDEX IF NOT EXISTS idx_replacement_shipments_sale_id ON replacement_shipments(sale_id)`],
+    ["idx_replacement_shipments_courier", () => sql`CREATE INDEX IF NOT EXISTS idx_replacement_shipments_courier ON replacement_shipments(courier_partner_id)`],
+    ["idx_replacement_shipment_items_rs_id", () => sql`CREATE INDEX IF NOT EXISTS idx_replacement_shipment_items_rs_id ON replacement_shipment_items(replacement_shipment_id)`],
   ]
 
   for (const [label, fn] of indexes) {

@@ -1416,6 +1416,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
           setIsSubmitting(false)
           if (result.success) {
             markInventoryStale(dispatch)
+            fetchSalesForRange(globalDateRange.from, globalDateRange.to)
             toast({
               title: "Success",
               description: "Sale updated successfully",
@@ -1483,6 +1484,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
 
         if (result.success) {
           markInventoryStale(dispatch)
+          fetchSalesForRange(globalDateRange.from, globalDateRange.to)
           setFormAlert({
             type: "success",
             message: "Sale completed successfully",
@@ -2705,7 +2707,9 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                               <Button
                                 onClick={handleSubmitSale}
                                 disabled={isSubmitting}
-                                className="w-full bg-blue-600 hover:bg-blue-700 text-white h-auto py-2"
+                                className={`w-full text-white h-auto py-2.5 font-semibold shadow-sm transition-all ${
+                                  isEditMode ? "bg-green-600 hover:bg-green-700" : "bg-blue-600 hover:bg-blue-700"
+                                }`}
                               >
                                 {isSubmitting ? (
                                   <span className="flex items-center justify-center">

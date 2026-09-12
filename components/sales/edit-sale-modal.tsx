@@ -1361,7 +1361,7 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
                       <Button
                         onClick={handleSubmit}
                         disabled={isSubmitting}
-                        className="w-full bg-blue-600 hover:bg-blue-700 text-white h-auto py-3"
+                        className="w-full bg-green-600 hover:bg-green-700 text-white font-semibold h-auto py-3 shadow-md transition-all"
                       >
                         {isSubmitting ? (
                           <span className="flex items-center justify-center">

@@ -1660,4 +1660,101 @@ export function printBatchJobCards(sales: any[], currency = 'AED', businessInfo:
   }, 50);
 }
 
+export function printReplacementNote(replacement: any, originalSale: any = {}) {
+  if (typeof window === "undefined" || typeof document === "undefined") return
+
+  const printWindow = window.open("", "_blank", "width=800,height=900")
+  if (!printWindow) return
+
+  const items = replacement.items || []
+  const itemsHtml = items
+    .map(
+      (item: any, idx: number) => `
+      <tr>
+        <td style="padding: 8px; border-bottom: 1px solid #e2e8f0; font-weight: 500;">${idx + 1}</td>
+        <td style="padding: 8px; border-bottom: 1px solid #e2e8f0; font-weight: 600;">${item.product_name || `Product #${item.product_id}`}${item.variant_name ? ` (${item.variant_name})` : ""}</td>
+        <td style="padding: 8px; border-bottom: 1px solid #e2e8f0; font-family: monospace;">${item.batch_number || "—"}</td>
+        <td style="padding: 8px; border-bottom: 1px solid #e2e8f0; text-align: right; font-weight: 700;">${item.quantity}</td>
+      </tr>
+    `
+    )
+    .join("")
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Replacement Note - ${replacement.replacement_number}</title>
+        <style>
+          body { font-family: system-ui, -apple-system, sans-serif; color: #1e293b; padding: 24px; max-width: 800px; margin: 0 auto; }
+          .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #2563eb; padding-bottom: 15px; margin-bottom: 20px; }
+          .badge { background: #dbeafe; color: #1e40af; font-weight: 700; padding: 4px 12px; border-radius: 9999px; font-size: 12px; }
+          .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; background: #f8fafc; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 13px; margin-bottom: 20px; }
+          table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 13px; }
+          th { background: #f1f5f9; padding: 10px 8px; text-align: left; border-bottom: 2px solid #cbd5e1; font-weight: 700; }
+          .notice { background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; padding: 12px; border-radius: 8px; font-size: 13px; text-align: center; margin-top: 25px; font-weight: 600; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div>
+            <h1 style="margin: 0; font-size: 22px; color: #0f172a;">REPLACEMENT SHIPMENT NOTE</h1>
+            <p style="margin: 4px 0 0 0; color: #64748b; font-size: 13px;">Non-Commercial Packing & Fulfillment Note</p>
+          </div>
+          <div>
+            <span class="badge">🔄 REPLACEMENT ${replacement.replacement_number}</span>
+          </div>
+        </div>
+
+        <div class="grid">
+          <div>
+            <strong>Original Order ID:</strong> #${originalSale?.id || replacement.sale_id}<br/>
+            <strong>Replacement ID:</strong> ${replacement.replacement_number}<br/>
+            <strong>Reason:</strong> ${replacement.reason || "Replacement"}<br/>
+            <strong>Created Date:</strong> ${replacement.created_at ? new Date(replacement.created_at).toLocaleDateString() : "Today"}
+          </div>
+          <div>
+            <strong>Customer:</strong> ${originalSale?.customer_name || replacement.customer_name || "Customer"}<br/>
+            <strong>Phone:</strong> ${originalSale?.customer_phone || replacement.customer_phone || "—"}<br/>
+            <strong>Courier Partner:</strong> ${replacement.courier_partner_name || replacement.courier_service_name || "Courier"}<br/>
+            <strong>Tracking ID:</strong> ${replacement.tracking_id || "Pending"}
+          </div>
+        </div>
+
+        <div style="margin-bottom: 15px; font-size: 13px;">
+          <strong>Shipping Address:</strong><br/>
+          <div style="background: #ffffff; padding: 10px; border: 1px solid #e2e8f0; border-radius: 6px; margin-top: 4px;">
+            ${replacement.shipping_address || originalSale?.shipping_address || originalSale?.customer_address || "As provided"}
+          </div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 40px;">#</th>
+              <th>Product / Item</th>
+              <th>Batch</th>
+              <th style="text-align: right; width: 80px;">Qty</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${itemsHtml}
+          </tbody>
+        </table>
+
+        <div class="notice">
+          COMMERCIAL AMOUNT: ₹0 &bull; PAYMENT: NO PAYMENT REQUIRED (Fulfillment Note)
+        </div>
+      </body>
+    </html>
+  `
+
+  printWindow.document.write(html)
+  printWindow.document.close()
+  setTimeout(() => {
+    printWindow.focus()
+    printWindow.print()
+  }, 250)
+}
+
 

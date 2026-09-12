@@ -7,8 +7,6 @@ export const DELIVERY_STATUSES = [
   "Sent",
   "Direct",
   "Shipping",
-  "Shipped",
-  "In transit",
   "Delivered",
   "Returned",
   "Failed",
@@ -116,9 +114,31 @@ export function buildTrackingUrl(template?: string | null, trackingId?: string |
 export function getSaleDeliveryLabel(sale: {
   fulfillment_type?: string | null
   delivery_status?: string | null
+  sale_type?: string | null
+  tracking_id?: string | null
 }) {
-  if (sale.fulfillment_type !== "ship") return "Pickup"
-  return sale.delivery_status || "Pending"
+  if (!sale) return "Pending"
+
+  const status = sale.delivery_status || "Pending"
+
+  const isJobCard =
+    sale.sale_type === "job_card" ||
+    String(sale.tracking_id || "").startsWith("JC-") ||
+    String(sale.tracking_id || "").startsWith("DOD")
+
+  if (isJobCard) {
+    return status
+  }
+
+  if (sale.fulfillment_type === "ship") {
+    return status
+  }
+
+  if (sale.fulfillment_type === "pickup") {
+    return status !== "Pending" && status !== "Pickup" ? status : "Pickup"
+  }
+
+  return status
 }
 
 export function normalizeSaleShippingInput(input?: SaleShippingInput | null) {
@@ -299,14 +319,18 @@ export function isCriticalSale(sale: any): boolean {
   if (!isPaidSale(sale)) return false
 
   const dStatus = (sale.delivery_status || "Pending").trim().toLowerCase()
-  const nonCriticalStatuses = ["pickup", "direct", "shipping", "shipped", "in transit", "delivered", "returned", "failed"]
+  const nonCriticalStatuses = ["pickup", "direct", "shipping", "delivered", "returned", "failed"]
 
   return !nonCriticalStatuses.includes(dStatus)
 }
 
 export function isJobCardSale(sale: any): boolean {
   if (!sale) return false
-  return sale.sale_type === "job_card" || String(sale.tracking_id || "").startsWith("JC-")
+  return (
+    sale.sale_type === "job_card" ||
+    String(sale.tracking_id || "").startsWith("JC-") ||
+    String(sale.tracking_id || "").startsWith("DOD")
+  )
 }
 
 export function isNormalSale(sale: any): boolean {

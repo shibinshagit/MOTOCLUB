@@ -4,25 +4,52 @@ import { useState, useEffect } from "react"
 import { format } from "date-fns"
 import { useRouter } from "next/navigation"
 import { DELIVERY_STATUSES } from "@/lib/sale-shipping"
-import { updatePartnerDeliveryStatus, updatePartnerSaleDetails } from "@/app/actions/partner-actions"
+import { updatePartnerDeliveryStatus, updatePartnerSaleDetails, updatePartnerReplacementDeliveryStatus } from "@/app/actions/partner-actions"
 import { notifySuccess, notifyError } from "@/lib/notifications"
 import { useToast } from "@/components/ui/use-toast"
-import { Loader2, Phone, RefreshCw, FileText, Printer, Package } from "lucide-react"
+import { Loader2, Phone, RefreshCw, FileText, Printer, Package, Truck, Clock } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 
-export function PartnerSalesTable({ initialSales }: { initialSales: any[] }) {
+import { TrackingDetailsModal } from "@/components/sales/tracking-details-modal"
+
+export function PartnerSalesTable({
+  initialSales,
+  initialReplacements = [],
+}: {
+  initialSales: any[]
+  initialReplacements?: any[]
+}) {
   const router = useRouter()
   const [sales, setSales] = useState(initialSales)
+  const [replacements, setReplacements] = useState(initialReplacements)
   const [isRefreshing, setIsRefreshing] = useState(false)
-  const [loadingMap, setLoadingMap] = useState<Record<number, boolean>>({})
+  const [loadingMap, setLoadingMap] = useState<Record<string, boolean>>({})
   const [directConfirmSaleId, setDirectConfirmSaleId] = useState<number | null>(null)
+  
+  const [trackingModal, setTrackingModal] = useState<{
+    isOpen: boolean
+    targetType: "sale" | "replacement"
+    targetId: number
+    targetStatus: string
+    initialTrackingId: string
+    initialCourierServiceName: string
+  }>({
+    isOpen: false,
+    targetType: "sale",
+    targetId: 0,
+    targetStatus: "Shipping",
+    initialTrackingId: "",
+    initialCourierServiceName: "",
+  })
+
   const { toast } = useToast()
 
   useEffect(() => {
     setSales(initialSales)
+    setReplacements(initialReplacements)
     setIsRefreshing(false)
-  }, [initialSales])
+  }, [initialSales, initialReplacements])
 
   const handleRefresh = () => {
     setIsRefreshing(true)
@@ -56,24 +83,26 @@ export function PartnerSalesTable({ initialSales }: { initialSales: any[] }) {
       return
     }
 
+    if (newStatusLower === 'shipped' || newStatusLower === 'shipping') {
+      const currentSale = sales.find(s => s.id === saleId);
+      setTrackingModal({
+        isOpen: true,
+        targetType: "sale",
+        targetId: saleId,
+        targetStatus: newStatus,
+        initialTrackingId: currentSale?.tracking_id || "",
+        initialCourierServiceName: currentSale?.courier_service_name || "",
+      })
+      return
+    }
+
     await executeStatusUpdate(saleId, newStatus)
   }
 
-  const executeStatusUpdate = async (saleId: number, newStatus: string) => {
-    let trackingId: string | undefined = undefined;
-    const newStatusLower = newStatus?.toLowerCase() || '';
-    
-    if (newStatusLower === 'shipped' || newStatusLower === 'shipping') {
-      const currentSale = sales.find(s => s.id === saleId);
-      const input = window.prompt("Please enter the Tracking ID (Optional, leave blank if not ready):", currentSale?.tracking_id || "");
-      if (input !== null) {
-        trackingId = input.trim();
-      }
-    }
-
+  const executeStatusUpdate = async (saleId: number, newStatus: string, trackingId?: string, courierServiceName?: string) => {
     setLoadingMap(prev => ({ ...prev, [saleId]: true }))
     try {
-      const result = await updatePartnerDeliveryStatus(saleId, newStatus, trackingId)
+      const result = await updatePartnerDeliveryStatus(saleId, newStatus, trackingId, courierServiceName)
       if (result.success) {
         setSales(prev => prev.map(s => {
           if (s.id === saleId) {
@@ -81,7 +110,8 @@ export function PartnerSalesTable({ initialSales }: { initialSales: any[] }) {
                ...s, 
                delivery_status: newStatus, 
                shipping_date: result.shippingDate || s.shipping_date,
-               ...(trackingId !== undefined && { tracking_id: result.trackingId ?? (trackingId || null) })
+               ...(trackingId !== undefined && { tracking_id: result.trackingId ?? (trackingId || null) }),
+               ...(courierServiceName !== undefined && { courier_service_name: result.courierServiceName ?? courierServiceName })
              }
           }
           return s;
@@ -102,6 +132,67 @@ export function PartnerSalesTable({ initialSales }: { initialSales: any[] }) {
     const saleId = directConfirmSaleId
     setDirectConfirmSaleId(null)
     await executeStatusUpdate(saleId, "Direct")
+  }
+
+  const handleReplacementStatusChange = async (replacementId: number, newStatus: string) => {
+    const newStatusLower = newStatus?.toLowerCase() || ""
+
+    if (newStatusLower === "shipped" || newStatusLower === "shipping") {
+      const currentRs = replacements.find((r) => r.id === replacementId)
+      setTrackingModal({
+        isOpen: true,
+        targetType: "replacement",
+        targetId: replacementId,
+        targetStatus: newStatus,
+        initialTrackingId: currentRs?.tracking_id || "",
+        initialCourierServiceName: currentRs?.courier_service_name || "",
+      })
+      return
+    }
+
+    await executeReplacementStatusUpdate(replacementId, newStatus)
+  }
+
+  const executeReplacementStatusUpdate = async (replacementId: number, newStatus: string, trackingId?: string, courierServiceName?: string) => {
+    setLoadingMap((prev) => ({ ...prev, [`rs-${replacementId}`]: true }))
+    try {
+      const result = await updatePartnerReplacementDeliveryStatus(replacementId, newStatus, trackingId, courierServiceName)
+      if (result.success) {
+        setReplacements((prev) =>
+          prev.map((r) => {
+            if (r.id === replacementId) {
+              return {
+                ...r,
+                delivery_status: newStatus,
+                status: newStatus,
+                shipping_date: result.shippingDate || r.shipping_date,
+                ...(trackingId !== undefined && { tracking_id: result.trackingId ?? (trackingId || null) }),
+                ...(courierServiceName !== undefined && { courier_service_name: result.courierServiceName ?? courierServiceName }),
+              }
+            }
+            return r
+          })
+        )
+        notifySuccess(toast, "Replacement status updated successfully", "Success")
+      } else {
+        notifyError(toast, result.message || "Failed to update replacement status")
+      }
+    } catch {
+      notifyError(toast, "An error occurred while updating status")
+    } finally {
+      setLoadingMap((prev) => ({ ...prev, [`rs-${replacementId}`]: false }))
+    }
+  }
+
+  const handleSaveTrackingFromModal = async (trackingId: string, courierServiceName?: string) => {
+    const { targetType, targetId, targetStatus } = trackingModal
+    setTrackingModal((prev) => ({ ...prev, isOpen: false }))
+
+    if (targetType === "sale") {
+      await executeStatusUpdate(targetId, targetStatus, trackingId, courierServiceName)
+    } else {
+      await executeReplacementStatusUpdate(targetId, targetStatus, trackingId, courierServiceName)
+    }
   }
 
   const handlePrintInvoice = (sale: any) => {
@@ -174,6 +265,92 @@ export function PartnerSalesTable({ initialSales }: { initialSales: any[] }) {
           Refresh
         </button>
       </div>
+
+      {/* Replacement Shipments Section */}
+      {replacements.length > 0 && (
+        <div className="bg-gradient-to-r from-blue-900 to-indigo-900 rounded-xl p-5 shadow-md text-white space-y-4">
+          <div className="flex items-center justify-between border-b border-blue-800/80 pb-3">
+            <div className="flex items-center gap-2">
+              <RefreshCw className="h-5 w-5 text-blue-300" />
+              <h3 className="text-base font-bold">Replacement Shipments ({replacements.length})</h3>
+            </div>
+            <span className="text-xs bg-blue-800/80 text-blue-200 px-3 py-1 rounded-full font-medium">
+              Logistics Only &bull; ₹0 Payment
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {replacements.map((rs) => (
+              <div key={rs.id} className="bg-white text-slate-800 rounded-lg p-4 shadow-sm border border-blue-200 space-y-2">
+                <div className="flex items-center justify-between border-b pb-2">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-blue-900 text-sm">{rs.replacement_number}</span>
+                      <span className="text-[10px] font-bold bg-blue-100 text-blue-800 px-2 py-0.5 rounded">
+                        🔄 Replacement
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500">
+                      Original Order: <span className="font-semibold text-slate-800">#{rs.sale_id}</span>
+                    </p>
+                  </div>
+                  <span className="text-xs font-bold bg-emerald-100 text-emerald-800 px-2.5 py-0.5 rounded-full">
+                    ₹0 (No Payment)
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 text-xs py-1">
+                  <div>
+                    <span className="text-slate-400 text-[10px] uppercase font-semibold">Reason</span>
+                    <p className="font-semibold text-slate-800">{rs.reason || "Missing Item"}</p>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 text-[10px] uppercase font-semibold">Customer</span>
+                    <p className="font-semibold text-slate-800">{rs.customer_name || "Customer"}</p>
+                  </div>
+                </div>
+
+                <div className="bg-slate-50 p-2 rounded border text-xs space-y-1">
+                  <span className="text-[10px] font-semibold text-slate-500 uppercase">Items:</span>
+                  {(rs.items || []).map((item: any) => (
+                    <div key={item.id} className="flex justify-between text-slate-800">
+                      <span>{item.product_name}{item.variant_name ? ` (${item.variant_name})` : ""}</span>
+                      <span className="font-mono font-bold">× {item.quantity}</span>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex items-center justify-between pt-2 border-t text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-500 font-medium">Status:</span>
+                    <select
+                      value={rs.delivery_status || rs.status || "Pending"}
+                      onChange={(e) => handleReplacementStatusChange(rs.id, e.target.value)}
+                      disabled={loadingMap[`rs-${rs.id}`]}
+                      className="h-7 rounded border border-slate-300 bg-white px-2 text-xs font-semibold text-blue-900"
+                    >
+                      {DELIVERY_STATUSES.map((st) => (
+                        <option key={st} value={st}>
+                          {st}
+                        </option>
+                      ))}
+                    </select>
+                    {loadingMap[`rs-${rs.id}`] && <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-600" />}
+                  </div>
+
+                  {rs.tracking_id ? (
+                    <span className="font-mono font-bold text-blue-900 bg-blue-50 px-2 py-1 rounded border border-blue-200">
+                      {rs.tracking_id}
+                    </span>
+                  ) : (
+                    <span className="text-slate-400 italic">No Tracking</span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {sales.length === 0 ? (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8 text-center text-gray-500 font-medium">
@@ -353,6 +530,16 @@ export function PartnerSalesTable({ initialSales }: { initialSales: any[] }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <TrackingDetailsModal
+        isOpen={trackingModal.isOpen}
+        onClose={() => setTrackingModal((prev) => ({ ...prev, isOpen: false }))}
+        onSave={handleSaveTrackingFromModal}
+        initialTrackingId={trackingModal.initialTrackingId}
+        initialCourierServiceName={trackingModal.initialCourierServiceName}
+        targetDeliveryStatus={trackingModal.targetStatus}
+        saleId={trackingModal.targetId}
+      />
     </div>
   )
 }

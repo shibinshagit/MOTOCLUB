@@ -33,9 +33,63 @@ export async function getPartnerSales(partnerId: number) {
       ORDER BY COALESCE(s.sale_date, s.created_at) DESC, s.id DESC
     `
 
+    let replacementShipments: any[] = []
+    try {
+      replacementShipments = await sql`
+        SELECT 
+          rs.id,
+          rs.replacement_number,
+          rs.sale_id,
+          rs.reason,
+          rs.status as delivery_status,
+          rs.status,
+          rs.tracking_id,
+          rs.shipping_address,
+          rs.courier_service_name,
+          rs.shipping_date,
+          rs.created_at,
+          COALESCE(c.name, '') as customer_name,
+          COALESCE(c.phone, '') as customer_phone,
+          true as is_replacement
+        FROM replacement_shipments rs
+        LEFT JOIN customers c ON rs.customer_id = c.id
+        WHERE (
+          rs.courier_partner_id = ${partnerId}
+          OR rs.courier_partner_id = (SELECT linked_partner_id FROM staff WHERE id = ${partnerId} AND linked_partner_id IS NOT NULL)
+          OR (rs.courier_service_id IS NOT NULL AND rs.courier_service_id = (SELECT linked_partner_id FROM staff WHERE id = ${partnerId} AND linked_partner_id IS NOT NULL))
+        )
+        ORDER BY rs.created_at DESC, rs.id DESC
+      `
+
+      if (replacementShipments.length > 0) {
+        const rsIds = replacementShipments.map((r: any) => r.id)
+        const rsItems = await sql`
+          SELECT 
+            rsi.*,
+            p.name as product_name,
+            pv.name as variant_name
+          FROM replacement_shipment_items rsi
+          LEFT JOIN products p ON rsi.product_id = p.id
+          LEFT JOIN product_variants pv ON rsi.product_variant_id = pv.id
+          WHERE rsi.replacement_shipment_id = ANY(${rsIds})
+        `
+        const itemsMap: Record<number, any[]> = {}
+        for (const item of rsItems) {
+          if (!itemsMap[item.replacement_shipment_id]) itemsMap[item.replacement_shipment_id] = []
+          itemsMap[item.replacement_shipment_id].push(item)
+        }
+        for (const rs of replacementShipments) {
+          rs.items = itemsMap[rs.id] || []
+        }
+      }
+    } catch (err) {
+      console.warn("Could not fetch replacement shipments for partner:", err)
+    }
+
     return {
       success: true,
-      data: sales
+      data: sales,
+      replacementShipments: replacementShipments,
     }
   } catch (error) {
     console.error("Error fetching partner sales:", error)
@@ -46,10 +100,15 @@ export async function getPartnerSales(partnerId: number) {
   }
 }
 
-export async function updatePartnerDeliveryStatus(saleId: number, deliveryStatus: string, trackingId?: string) {
+export async function updatePartnerDeliveryStatus(
+  saleId: number,
+  deliveryStatus: string,
+  trackingId?: string,
+  courierServiceName?: string
+) {
   try {
     const existing = await sql`
-      SELECT delivery_status, shipping_date, tracking_id
+      SELECT delivery_status, shipping_date, tracking_id, courier_service_name
       FROM sales
       WHERE id = ${saleId}
       LIMIT 1
@@ -70,10 +129,17 @@ export async function updatePartnerDeliveryStatus(saleId: number, deliveryStatus
       targetTrackingId = clean ? clean : null
     }
 
+    let targetCourierServiceName: string | null = existing[0].courier_service_name || null
+    if (courierServiceName !== undefined) {
+      const cleanService = courierServiceName?.trim()
+      targetCourierServiceName = cleanService ? cleanService : targetCourierServiceName
+    }
+
     const updated = await sql`
       UPDATE sales
       SET delivery_status = ${deliveryStatus},
           tracking_id = ${targetTrackingId},
+          courier_service_name = ${targetCourierServiceName},
           shipping_date = CASE WHEN ${isNewShipping} THEN COALESCE(shipping_date, NOW()) ELSE shipping_date END,
           updated_at = NOW()
       WHERE id = ${saleId}
@@ -86,7 +152,8 @@ export async function updatePartnerDeliveryStatus(saleId: number, deliveryStatus
       success: true,
       message: "Delivery status updated successfully",
       shippingDate: finalShippingDate ? (finalShippingDate instanceof Date ? finalShippingDate.toISOString() : finalShippingDate) : null,
-      trackingId: targetTrackingId
+      trackingId: targetTrackingId,
+      courierServiceName: targetCourierServiceName
     }
   } catch (error) {
     console.error("Error updating delivery status:", error)
@@ -207,5 +274,72 @@ export async function getPartnerSalesAnalytics(partnerId: number, monthStr: stri
   } catch (error) {
     console.error("Error fetching partner analytics:", error)
     return { success: false, message: "Failed to load analytics" }
+  }
+}
+
+export async function updatePartnerReplacementDeliveryStatus(
+  replacementId: number,
+  deliveryStatus: string,
+  trackingId?: string,
+  courierServiceName?: string
+) {
+  try {
+    const existing = await sql`
+      SELECT status, shipping_date, tracking_id, courier_service_name
+      FROM replacement_shipments
+      WHERE id = ${replacementId}
+      LIMIT 1
+    `
+    if (existing.length === 0) {
+      return {
+        success: false,
+        message: "Replacement shipment not found"
+      }
+    }
+
+    const newDeliveryStatus = (deliveryStatus || "").trim()
+    const isNewShipping = newDeliveryStatus === "Shipping" || newDeliveryStatus === "Shipped" || newDeliveryStatus === "In transit"
+    const isDelivered = newDeliveryStatus === "Delivered"
+
+    let targetTrackingId: string | null = existing[0].tracking_id || null
+    if (trackingId !== undefined) {
+      const clean = trackingId?.trim()
+      targetTrackingId = clean ? clean : null
+    }
+
+    let targetCourierServiceName: string | null = existing[0].courier_service_name || null
+    if (courierServiceName !== undefined) {
+      const cleanService = courierServiceName?.trim()
+      targetCourierServiceName = cleanService ? cleanService : targetCourierServiceName
+    }
+
+    const updated = await sql`
+      UPDATE replacement_shipments
+      SET status = ${newDeliveryStatus},
+          tracking_id = ${targetTrackingId},
+          courier_service_name = ${targetCourierServiceName},
+          shipping_date = CASE WHEN ${isNewShipping} THEN COALESCE(shipping_date, NOW()) ELSE shipping_date END,
+          shipped_at = CASE WHEN ${isNewShipping} THEN COALESCE(shipped_at, NOW()) ELSE shipped_at END,
+          delivered_at = CASE WHEN ${isDelivered} THEN COALESCE(delivered_at, NOW()) ELSE delivered_at END,
+          updated_at = NOW()
+      WHERE id = ${replacementId}
+      RETURNING shipping_date
+    `
+
+    const finalShippingDate = updated[0]?.shipping_date || null
+
+    return {
+      success: true,
+      message: "Replacement delivery status updated successfully",
+      shippingDate: finalShippingDate ? (finalShippingDate instanceof Date ? finalShippingDate.toISOString() : finalShippingDate) : null,
+      trackingId: targetTrackingId,
+      courierServiceName: targetCourierServiceName
+    }
+  } catch (error) {
+    console.error("Error updating replacement delivery status:", error)
+    return {
+      success: false,
+      message: "Failed to update replacement delivery status"
+    }
   }
 }

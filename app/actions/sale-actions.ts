@@ -8,6 +8,7 @@ import { filterSalesForStaff } from "@/lib/staff-restrictions-server"
 import { normalizeSaleShippingInput } from "@/lib/sale-shipping"
 import { getStaffSession } from "@/lib/staff-session"
 import { ensureReturnTablesExist } from "./sale-return-actions"
+import { getReplacementShipmentsForSale } from "./replacement-actions"
 
 function getShippingAmounts(shipping: ReturnType<typeof normalizeSaleShippingInput>) {
   if (shipping.fulfillment_type !== "ship") {
@@ -1006,10 +1007,12 @@ export async function getSaleDetails(saleId: number) {
           c.email as customer_email,
           COALESCE(NULLIF(s.shipping_address, ''), c.address) as customer_address,
           st.name as staff_name,
+          COALESCE(cp.name, md.name, '') as courier_partner_name,
           md.tracking_url_template as tracking_url_template
         FROM sales s
         LEFT JOIN customers c ON s.customer_id = c.id
         LEFT JOIN staff st ON s.staff_id = st.id
+        LEFT JOIN staff cp ON cp.id = s.courier_partner_id
         LEFT JOIN master_data md ON md.id = s.courier_partner_id
         WHERE s.id = ${saleId}
       `
@@ -1163,6 +1166,36 @@ export async function getSaleDetails(saleId: number) {
       console.warn("Could not fetch return history (table may not exist yet):", retErr)
     }
 
+    // Fetch Replacement Shipments History
+    let replacementsList: any[] = []
+    try {
+      const repRes = await getReplacementShipmentsForSale(saleId)
+      if (repRes.success && repRes.data) {
+        replacementsList = repRes.data
+      }
+    } catch (repErr) {
+      console.warn("Could not fetch replacement history:", repErr)
+    }
+
+    // Calculate replaced quantity & eligible replacement quantity per sale item
+    const replacedQtyMap: Record<number, number> = {}
+    for (const rs of replacementsList) {
+      if (rs.status === "Cancelled") continue
+      for (const rsi of rs.items || []) {
+        if (rsi.sale_item_id) {
+          replacedQtyMap[rsi.sale_item_id] = (replacedQtyMap[rsi.sale_item_id] || 0) + (Number(rsi.quantity) || 0)
+        }
+      }
+    }
+
+    for (const item of itemsResult) {
+      const soldQty = Number(item.quantity) || 0
+      const retQty = Number(item.returned_quantity) || 0
+      const replacedQty = replacedQtyMap[item.id] || 0
+      item.replaced_quantity = replacedQty
+      item.eligible_replacement_quantity = Math.max(0, soldQty - replacedQty)
+    }
+
     const subtotal = itemsResult.reduce((sum: number, item: any) => sum + Number(item.quantity) * Number(item.price), 0)
 
     const discountValue =
@@ -1182,6 +1215,7 @@ export async function getSaleDetails(saleId: number) {
       outstanding_amount: outstandingAmount,
       total_refund_paid: totalRefundPaid,
       returns: returnsList,
+      replacements: replacementsList,
       payments: paymentsList.length > 0 ? paymentsList : [
         {
           paymentMethod: saleResult[0].payment_method || "Cash",
@@ -1312,16 +1346,11 @@ export async function addSale(saleData: any) {
       }
     }
 
-    // Delivery Status sync logic (independent from Payment Status "Paid" logic)
-    if (newOrderStatus.toLowerCase() !== "cancelled") {
-      const isCodApproved = isCod(newPaymentMethod) && receivedAmount > 0;
-      const isStandardApproved = !hasCodPayment && (newPaymentStatus.toLowerCase() === "paid" || newPaymentStatus.toLowerCase() === "completed");
-      
-      if (isStandardApproved) {
-        if (!shipping.delivery_status || shipping.delivery_status.toLowerCase() === "pending") {
-          shipping.delivery_status = "Paid";
-        }
-      }
+    // Ensure default delivery_status is Paid if payment status is Paid, otherwise Pending
+    if (newPaymentStatus.toLowerCase() === "paid" && (!shipping.delivery_status || shipping.delivery_status === "Pending")) {
+      shipping.delivery_status = "Paid";
+    } else if (!shipping.delivery_status) {
+      shipping.delivery_status = "Pending";
     }
 
     const saleResult = await sql`
@@ -1829,11 +1858,12 @@ function calculateSaleChanges(
     }
   }
 
-  // Delivery Status sync logic (independent from Payment Status "Paid" logic)
-  if (newOrderStatus.toLowerCase() !== "cancelled") {
-    const isStandardApproved = !hasCodPayment && (newPaymentStatus.toLowerCase() === "paid" || newPaymentStatus.toLowerCase() === "completed");
-    if (isStandardApproved && shipping && (!shipping.delivery_status || shipping.delivery_status.toLowerCase() === "pending")) {
+  // Delivery Status sync logic: automatically set delivery_status to Paid if payment is Paid and delivery is Pending/null
+  if (shipping) {
+    if (newPaymentStatus.toLowerCase() === "paid" && (!shipping.delivery_status || shipping.delivery_status === "Pending")) {
       shipping.delivery_status = "Paid";
+    } else if (!shipping.delivery_status) {
+      shipping.delivery_status = "Pending";
     }
   }
 
@@ -2408,15 +2438,13 @@ export async function updateSale(saleData: any) {
 
         if (jobCardResult.length > 0) {
           const jobCard = jobCardResult[0]
-          // Only update to Paid if it's currently Pending
-          if (jobCard.delivery_status?.toLowerCase() === "pending") {
+          if (jobCard.delivery_status?.toLowerCase() === "paid") {
             await sql`
               UPDATE job_cards
-              SET delivery_status = 'Paid',
+              SET delivery_status = 'Pending',
                   updated_at = ${new Date()}
               WHERE id = ${jobCard.id}
             `
-            console.log(`Job Card ${jobCard.id} delivery status synced to Paid`)
           }
         }
       }
