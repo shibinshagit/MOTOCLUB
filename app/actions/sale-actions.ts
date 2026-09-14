@@ -245,8 +245,9 @@ export async function updateProductStock(
         const availableBatches = await sql`
           SELECT pb.id as batch_id, COALESCE(pbds.stock, pb.remaining_quantity, 0) as stock, pbds.id as pbds_id
           FROM product_batches pb
+          JOIN product_variants pv ON pv.id = pb.product_variant_id
           LEFT JOIN product_batch_device_stock pbds ON pbds.batch_id = pb.id AND pbds.device_id = ${deviceId}
-          WHERE pb.product_id = ${productId} AND pb.product_variant_id = ${resolvedVariantId}
+          WHERE pv.product_id = ${productId} AND pb.product_variant_id = ${resolvedVariantId}
             AND COALESCE(pbds.stock, pb.remaining_quantity, 0) > 0
           ORDER BY pb.created_at ASC
         `
@@ -276,8 +277,9 @@ export async function updateProductStock(
           const defaultBatches = await sql`
             SELECT pb.id as batch_id, COALESCE(pbds.stock, pb.remaining_quantity, 0) as stock, pbds.id as pbds_id
             FROM product_batches pb
+            JOIN product_variants pv ON pv.id = pb.product_variant_id
             LEFT JOIN product_batch_device_stock pbds ON pbds.batch_id = pb.id AND pbds.device_id = ${deviceId}
-            WHERE pb.product_id = ${productId} AND pb.product_variant_id = ${resolvedVariantId}
+            WHERE pv.product_id = ${productId} AND pb.product_variant_id = ${resolvedVariantId}
             ORDER BY pb.created_at ASC LIMIT 1
           `
           if (defaultBatches.length > 0) {
@@ -333,8 +335,9 @@ export async function updateProductStock(
         const availableBatches = await sql`
           SELECT pb.id as batch_id, COALESCE(pbds.stock, pb.remaining_quantity, 0) as stock, pbds.id as pbds_id
           FROM product_batches pb
+          JOIN product_variants pv ON pv.id = pb.product_variant_id
           LEFT JOIN product_batch_device_stock pbds ON pbds.batch_id = pb.id AND pbds.device_id = ${deviceId}
-          WHERE pb.product_id = ${productId} AND pb.product_variant_id = ${resolvedVariantId}
+          WHERE pv.product_id = ${productId} AND pb.product_variant_id = ${resolvedVariantId}
           ORDER BY pb.created_at DESC LIMIT 1
         `
         if (availableBatches.length > 0) {
@@ -1538,10 +1541,11 @@ export async function addSale(saleData: any) {
         for (const allocation of allocations) {
           if (!allocation.batchId || allocation.quantity <= 0) continue
           const batch = await sql`
-            SELECT id FROM product_batches
-            WHERE id = ${allocation.batchId}
-              AND product_id = ${item.productId}
-              AND product_variant_id = ${variantId}
+            SELECT pb.id FROM product_batches pb
+            JOIN product_variants pv ON pv.id = pb.product_variant_id
+            WHERE pb.id = ${allocation.batchId}
+              AND pv.product_id = ${item.productId}
+              AND pb.product_variant_id = ${variantId}
           `
           if (batch.length === 0) {
             throw new Error("Selected batch does not belong to the selected product variant")
@@ -2279,10 +2283,11 @@ export async function updateSale(saleData: any) {
               throw new Error("A batch-managed sale allocation requires a batch")
             }
             const batch = await sql`
-              SELECT id FROM product_batches
-              WHERE id = ${alloc.batchId}
-                AND product_id = ${item.productId}
-                AND product_variant_id = ${resolvedVariantId}
+              SELECT pb.id FROM product_batches pb
+              JOIN product_variants pv ON pv.id = pb.product_variant_id
+              WHERE pb.id = ${alloc.batchId}
+                AND pv.product_id = ${item.productId}
+                AND pb.product_variant_id = ${resolvedVariantId}
             `
             if (batch.length === 0) {
               throw new Error("Selected batch does not belong to the selected product variant")

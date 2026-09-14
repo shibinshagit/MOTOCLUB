@@ -1520,7 +1520,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
       console.error("Sale submission error:", error)
       setFormAlert({
         type: "error",
-        message: "An unexpected error occurred",
+        message: error instanceof Error ? error.message : "An unexpected error occurred",
       })
     } finally {
       setIsSubmitting(false)

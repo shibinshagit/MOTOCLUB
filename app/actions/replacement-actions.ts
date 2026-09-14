@@ -189,8 +189,9 @@ export async function createReplacementShipment(input: CreateReplacementInput) {
             batchRows = await tx`
               SELECT pb.id, COALESCE(pbds.stock, 0) as stock
               FROM product_batches pb
+              JOIN product_variants pv ON pv.id = pb.product_variant_id
               LEFT JOIN product_batch_device_stock pbds ON pbds.batch_id = pb.id AND pbds.device_id = ${effectiveDeviceId}
-              WHERE pb.product_id = ${itemInput.productId} AND pb.product_variant_id = ${variantId}
+              WHERE pv.product_id = ${itemInput.productId} AND pb.product_variant_id = ${variantId}
                 AND COALESCE(pbds.stock, 0) >= ${itemInput.quantity}
               ORDER BY pb.created_at ASC LIMIT 1
             `
@@ -198,8 +199,9 @@ export async function createReplacementShipment(input: CreateReplacementInput) {
             batchRows = await tx`
               SELECT pb.id, COALESCE(pbds.stock, 0) as stock
               FROM product_batches pb
+              JOIN product_variants pv ON pv.id = pb.product_variant_id
               LEFT JOIN product_batch_device_stock pbds ON pbds.batch_id = pb.id AND pbds.device_id = ${effectiveDeviceId}
-              WHERE pb.product_id = ${itemInput.productId}
+              WHERE pv.product_id = ${itemInput.productId}
                 AND COALESCE(pbds.stock, 0) >= ${itemInput.quantity}
               ORDER BY pb.created_at ASC LIMIT 1
             `
