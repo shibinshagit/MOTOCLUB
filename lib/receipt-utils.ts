@@ -1362,8 +1362,17 @@ export function printJobCard(sale: any, currency = 'AED', businessInfo: any = {}
     rawLogo = `${window.location.origin}${rawLogo}`;
   }
   const logoUrl = rawLogo;
-  const fromName = sale?.branch_name || sale?.device_name || business.device_name || business.branch_name || business.name || 'Moto Club Online';
-  const staffName = sale?.staff_name || sale?.staffName || sale?.sales_executive || sale?.sales_executive_name || sale?.created_by_name || sale?.staff?.name || sale?.user_name || businessInfo?.staff_name || '';
+  let storeDeviceName = "";
+  try {
+    const { store } = require("@/store/store");
+    const state = store.getState();
+    if (state?.device?.name) {
+      storeDeviceName = state.device.name;
+    }
+  } catch (e) {
+    // ignore
+  }
+  const fromName = sale?.device_name || sale?.device?.name || storeDeviceName || sale?.branch_name || business.device_name || business.branch_name || business.name || 'Moto Club Online';
 
   const isDefaultVariant = (vName?: string) => {
     if (!vName) return true;
@@ -1431,7 +1440,6 @@ export function printJobCard(sale: any, currency = 'AED', businessInfo: any = {}
       <div class="section from-section">
         <p class="from-title">From,</p>
         <p>${fromName}</p>
-        ${staffName ? `<p class="exec-name">Sales Executive: ${staffName}</p>` : ''}
         <p>Pin:- 676503</p>
         <p>Ph:- 9995442239</p>
       </div>
@@ -1511,13 +1519,23 @@ export function printBatchJobCards(sales: any[], currency = 'AED', businessInfo:
     return clean === 'default' || clean === 'default variant' || clean.includes('default') || clean === '';
   };
 
+  let storeDeviceName = "";
+  try {
+    const { store } = require("@/store/store");
+    const state = store.getState();
+    if (state?.device?.name) {
+      storeDeviceName = state.device.name;
+    }
+  } catch (e) {
+    // ignore
+  }
+
   const pagesHtml = sales.map((sale, index) => {
     let logoUrl = sale.device_logo || sale.logo_url || sale.logo || baseLogo;
     if (logoUrl && typeof window !== "undefined" && logoUrl.startsWith("/")) {
       logoUrl = `${window.location.origin}${logoUrl}`;
     }
-    const fromName = sale?.branch_name || sale?.device_name || business.device_name || business.branch_name || business.name || 'Moto Club Online';
-    const staffName = sale?.staff_name || sale?.staffName || sale?.sales_executive || sale?.sales_executive_name || sale?.created_by_name || sale?.staff?.name || sale?.user_name || businessInfo?.staff_name || '';
+    const fromName = sale?.device_name || sale?.device?.name || storeDeviceName || sale?.branch_name || business.device_name || business.branch_name || business.name || 'Moto Club Online';
 
     const itemsText = sale.items?.map((item: any) => {
       const variantDisplay = item.variant_name && !isDefaultVariant(item.variant_name)
@@ -1552,7 +1570,6 @@ export function printBatchJobCards(sales: any[], currency = 'AED', businessInfo:
         <div class="section from-section">
           <p class="from-title">From,</p>
           <p>${fromName}</p>
-          ${staffName ? `<p class="exec-name">Sales Executive: ${staffName}</p>` : ''}
           <p>Pin:- 676503</p>
           <p>Ph:- 9995442239</p>
         </div>
