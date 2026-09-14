@@ -4,7 +4,7 @@ import { sql } from "@/lib/db"
 import { revalidatePath, unstable_noStore as noStore } from "next/cache"
 import { format, addDays, parseISO } from "date-fns"
 import { getStaffSession } from "@/lib/staff-session"
-import { addCustomer } from "./customer-actions"
+import { addCustomer, syncCustomerShippingAddress } from "./customer-actions"
 
 export interface JobCardProductInput {
   productId: number
@@ -20,6 +20,7 @@ export interface JobCardInput {
   customerPhone?: string
   customerId?: number | null
   deviceId?: number | null
+  staffId?: number | null
 
   // Structured shipping address
   shippingCity?: string
@@ -45,19 +46,22 @@ export async function createJobCard(input: JobCardInput) {
     const session = await getStaffSession()
     if (session) {
       deviceId = session.deviceId
-      staffId = session.staffId
+      staffId = input.staffId || session.staffId
       createdBy = deviceId
     } else {
       const { getAdminSession } = await import("./admin-auth-actions")
       const adminSession = await getAdminSession()
       if (adminSession.authenticated) {
         deviceId = input.deviceId || 1
+        staffId = input.staffId || null
         createdBy = adminSession.admin.id
       } else if (input.deviceId) {
         deviceId = input.deviceId
+        staffId = input.staffId || null
         createdBy = input.deviceId
       } else {
         deviceId = 1
+        staffId = input.staffId || null
         createdBy = 1
       }
     }
@@ -88,36 +92,17 @@ export async function createJobCard(input: JobCardInput) {
     }
 
     // Save/Update Customer Address in customer_addresses if we have address data
-    if (resolvedCustomerId && (input.shippingCity || input.shippingStreet || input.shippingPincode || input.shippingDistrict || input.shippingState)) {
-      // Check if exact address exists for this customer
-      const existingAddress = await sql`
-        SELECT id FROM customer_addresses 
-        WHERE customer_id = ${resolvedCustomerId} 
-          AND (street = ${input.shippingStreet || null} OR (street IS NULL AND CAST(${input.shippingStreet || null} AS text) IS NULL))
-          AND (city = ${input.shippingCity || null} OR (city IS NULL AND CAST(${input.shippingCity || null} AS text) IS NULL))
-        LIMIT 1
-      `
-      
-      if (existingAddress.length === 0) {
-        // We'll mark the new address as default and reset others if needed
-        await sql`UPDATE customer_addresses SET is_default = false WHERE customer_id = ${resolvedCustomerId}`
-        await sql`
-          INSERT INTO customer_addresses (
-            customer_id, phone, city, district, state, pincode, street, landmark, address_type, is_default
-          ) VALUES (
-            ${resolvedCustomerId},
-            ${input.shippingPhone || input.customerPhone || null},
-            ${input.shippingCity || null},
-            ${input.shippingDistrict || null},
-            ${input.shippingState || null},
-            ${input.shippingPincode || null},
-            ${input.shippingStreet || null},
-            ${input.shippingLandmark || null},
-            ${input.shippingAddressType || 'Home'},
-            true
-          )
-        `
-      }
+    if (resolvedCustomerId && (input.shippingCity || input.shippingStreet || input.shippingPincode || input.shippingDistrict || input.shippingState || input.shippingLandmark)) {
+      await syncCustomerShippingAddress(resolvedCustomerId, {
+        shippingCity: input.shippingCity,
+        shippingDistrict: input.shippingDistrict,
+        shippingState: input.shippingState,
+        shippingStreet: input.shippingStreet,
+        shippingPincode: input.shippingPincode,
+        shippingLandmark: input.shippingLandmark,
+        shippingAddressType: input.shippingAddressType || "Home",
+        customerPhoneOverride: input.shippingPhone || input.customerPhone,
+      })
     }
 
     // Totals calculated below
@@ -382,6 +367,19 @@ export async function updateJobCard(id: number, input: any) {
 
     const trackingId = updatedSaleRows[0]?.tracking_id || ""
 
+    if (resolvedCustomerId && (input.shippingCity || input.shippingStreet || input.shippingPincode || input.shippingDistrict || input.shippingState || input.shippingLandmark)) {
+      await syncCustomerShippingAddress(resolvedCustomerId, {
+        shippingCity: input.shippingCity,
+        shippingDistrict: input.shippingDistrict,
+        shippingState: input.shippingState,
+        shippingStreet: input.shippingStreet,
+        shippingPincode: input.shippingPincode,
+        shippingLandmark: input.shippingLandmark,
+        shippingAddressType: input.shippingAddressType || "Home",
+        customerPhoneOverride: input.shippingPhone || input.customerPhone,
+      })
+    }
+
     // 4. Delete existing sale items
     await sql`DELETE FROM sale_items WHERE sale_id = ${id}`
 
@@ -613,6 +611,8 @@ export async function getAllJobCards(
           COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name,
           COALESCE(NULLIF(s.customer_phone_override, ''), c.phone) as customer_phone,
           COALESCE(cp.name, md_partner.name, '') as courier_partner_name,
+          st.name as staff_name,
+          st.role as staff_role,
           d.name as branch_name,
           d.name as device_name,
           d.logo_url as device_logo,
@@ -625,6 +625,7 @@ export async function getAllJobCards(
         LEFT JOIN devices d ON s.device_id = d.id
         LEFT JOIN staff cp ON cp.id = s.courier_partner_id
         LEFT JOIN master_data md_partner ON md_partner.id = s.courier_partner_id
+        LEFT JOIN staff st ON s.staff_id = st.id
         LEFT JOIN return_requests err ON (err.sale_id = s.id OR (s.external_order_id IS NOT NULL AND (err.order_number = s.external_order_id OR err.order_id = s.id)))
         WHERE s.device_id = ${deviceId}
           AND (${allowEcom} OR s.source IS NULL OR s.source != 'ECOMMERCE')
@@ -647,6 +648,8 @@ export async function getAllJobCards(
           COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name,
           COALESCE(NULLIF(s.customer_phone_override, ''), c.phone) as customer_phone,
           COALESCE(cp.name, md_partner.name, '') as courier_partner_name,
+          st.name as staff_name,
+          st.role as staff_role,
           d.name as branch_name,
           d.name as device_name,
           d.logo_url as device_logo,
@@ -659,6 +662,7 @@ export async function getAllJobCards(
         LEFT JOIN devices d ON s.device_id = d.id
         LEFT JOIN staff cp ON cp.id = s.courier_partner_id
         LEFT JOIN master_data md_partner ON md_partner.id = s.courier_partner_id
+        LEFT JOIN staff st ON s.staff_id = st.id
         LEFT JOIN return_requests err ON (err.sale_id = s.id OR (s.external_order_id IS NOT NULL AND (err.order_number = s.external_order_id OR err.order_id = s.id)))
         WHERE (s.status != 'Cancelled' OR s.delivery_status = 'Returned')
           AND (

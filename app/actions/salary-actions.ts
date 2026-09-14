@@ -19,6 +19,7 @@ export async function ensureSalaryTables() {
         bonus DECIMAL(12,2) DEFAULT 0,
         advance_deduction DECIMAL(12,2) DEFAULT 0,
         other_deductions DECIMAL(12,2) DEFAULT 0,
+        staff_purchase_deduction DECIMAL(12,2) DEFAULT 0,
         net_salary DECIMAL(12,2) NOT NULL DEFAULT 0,
         payment_method VARCHAR(50) DEFAULT 'Bank Transfer',
         status VARCHAR(50) DEFAULT 'Approved',
@@ -29,6 +30,12 @@ export async function ensureSalaryTables() {
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()
       )
+    `
+
+    // Ensure staff_purchase_deduction column exists if table was created previously
+    await sql`
+      ALTER TABLE salary_payments 
+      ADD COLUMN IF NOT EXISTS staff_purchase_deduction DECIMAL(12,2) DEFAULT 0
     `
 
     await sql`
@@ -49,6 +56,23 @@ export async function ensureSalaryTables() {
         approved_at TIMESTAMP,
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `
+
+    await sql`
+      CREATE TABLE IF NOT EXISTS staff_purchase_settlements (
+        id SERIAL PRIMARY KEY,
+        sale_id INTEGER NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
+        staff_id INTEGER NOT NULL REFERENCES staff(id) ON DELETE CASCADE,
+        salary_payment_id INTEGER REFERENCES salary_payments(id) ON DELETE SET NULL,
+        settlement_type VARCHAR(50) NOT NULL,
+        amount DECIMAL(12,2) NOT NULL,
+        payment_method VARCHAR(50) DEFAULT 'Salary Deduction',
+        payment_month VARCHAR(20),
+        reference_number VARCHAR(100),
+        notes TEXT,
+        created_by INTEGER,
+        created_at TIMESTAMP DEFAULT NOW()
       )
     `
   } catch (error) {
@@ -87,6 +111,61 @@ export async function getStaffPayrollSummary(deviceId: number, month?: string) {
       GROUP BY staff_id
     `
 
+    // Fetch genuine staff purchase sales & settlements for device
+    const staffSales = await sql`
+      SELECT s.id, s.staff_id, s.created_by, s.total_amount
+      FROM sales s
+      WHERE s.device_id = ${deviceId} 
+        AND s.status != 'Cancelled'
+        AND (
+          s.sale_type = 'staff_purchase' 
+          OR s.payment_method IN ('Staff Account', 'Staff Credit', 'Staff Purchase')
+        )
+    `
+
+    // Fetch approved credit / staff purchase requests
+    const creditRequests = await sql`
+      SELECT staff_id, SUM(amount) as total_credit
+      FROM staff_requests
+      WHERE device_id = ${deviceId} 
+        AND request_type IN ('credit_request', 'staff_purchase') 
+        AND status = 'Approved'
+      GROUP BY staff_id
+    `
+
+    const creditReqMap: Record<number, number> = {}
+    creditRequests.forEach((cr: any) => {
+      creditReqMap[cr.staff_id] = Number(cr.total_credit) || 0
+    })
+
+    const settlements = await sql`
+      SELECT sale_id, SUM(amount) as total_settled
+      FROM staff_purchase_settlements
+      GROUP BY sale_id
+    `
+
+    const settledMap: Record<number, number> = {}
+    settlements.forEach((st: any) => {
+      settledMap[st.sale_id] = Number(st.total_settled) || 0
+    })
+
+    const purchaseOutstandingMap: Record<number, number> = {}
+    staffMembers.forEach((stf: any) => {
+      let totalOut = creditReqMap[stf.id] || 0
+
+      staffSales.forEach((sale: any) => {
+        const matchesStaff = (sale.staff_id === stf.id) || (sale.created_by === stf.id)
+
+        if (matchesStaff) {
+          const tot = Number(sale.total_amount) || 0
+          const set = settledMap[sale.id] || 0
+          const out = Math.max(0, tot - set)
+          totalOut += out
+        }
+      })
+      purchaseOutstandingMap[stf.id] = totalOut
+    })
+
     const advanceMap: Record<number, number> = {}
     advances.forEach((adv: any) => {
       advanceMap[adv.staff_id] = Number(adv.total_advance) || 0
@@ -100,6 +179,7 @@ export async function getStaffPayrollSummary(deviceId: number, month?: string) {
     const summary = staffMembers.map((member: any) => {
       const pmt = paymentMap[member.id]
       const advanceTaken = advanceMap[member.id] || 0
+      const staffPurchaseOutstanding = purchaseOutstandingMap[member.id] || 0
       const baseSalary = Number(member.salary) || 0
 
       return {
@@ -110,6 +190,7 @@ export async function getStaffPayrollSummary(deviceId: number, month?: string) {
         baseSalary,
         salaryDate: member.salary_date ? (member.salary_date instanceof Date ? member.salary_date.toISOString().split("T")[0] : String(member.salary_date)) : "",
         advanceTaken,
+        staffPurchaseOutstanding,
         paymentStatus: pmt ? pmt.status : "Unpaid",
         paidAmount: pmt ? Number(pmt.net_salary) : 0,
         paymentDetails: pmt || null
@@ -143,6 +224,7 @@ export async function createSalaryPayment(data: {
   bonus: number
   advanceDeduction: number
   otherDeductions: number
+  staffPurchaseDeduction?: number
   netSalary: number
   paymentMethod: string
   referenceNumber?: string
@@ -153,15 +235,62 @@ export async function createSalaryPayment(data: {
   try {
     const status = data.status || "Approved"
     const companyId = data.companyId || 1
+    const staffPurchaseDed = Math.max(0, Number(data.staffPurchaseDeduction) || 0)
 
     // Check if staff member exists
-    const staffQuery = await sql`SELECT name FROM staff WHERE id = ${data.staffId} LIMIT 1`
+    const staffQuery = await sql`SELECT id, name, phone FROM staff WHERE id = ${data.staffId} LIMIT 1`
     if (staffQuery.length === 0) {
       return { success: false, message: "Staff member not found" }
     }
     const staffName = staffQuery[0].name
+    const staffPhone = staffQuery[0].phone?.trim()
 
-    // Check if payment already exists for this staff and month
+    // 1. Validate staff purchase deduction limit against active outstanding purchases
+    const staffSales = await sql`
+      SELECT s.id, s.total_amount, c.phone as customer_phone, c.name as customer_name
+      FROM sales s
+      LEFT JOIN customers c ON s.customer_id = c.id
+      WHERE s.device_id = ${data.deviceId} AND s.status != 'Cancelled' AND (
+        s.staff_id = ${data.staffId} OR s.created_by = ${data.staffId}
+        OR (${staffPhone}::text IS NOT NULL AND c.phone = ${staffPhone})
+        OR (${staffName}::text IS NOT NULL AND LOWER(c.name) = LOWER(${staffName}))
+      )
+      ORDER BY s.sale_date ASC
+    `
+
+    const saleIds = staffSales.map((s: any) => s.id)
+    let totalAvailableOutstanding = 0
+    const saleOutstandingMap: Record<number, { total: number; settled: number; outstanding: number }> = {}
+
+    if (saleIds.length > 0) {
+      const existingSettlements = await sql`
+        SELECT sale_id, COALESCE(SUM(amount), 0) as settled
+        FROM staff_purchase_settlements
+        WHERE sale_id = ANY(${saleIds})
+        GROUP BY sale_id
+      `
+      const settledLookup: Record<number, number> = {}
+      existingSettlements.forEach((st: any) => {
+        settledLookup[st.sale_id] = Number(st.settled) || 0
+      })
+
+      staffSales.forEach((s: any) => {
+        const tot = Number(s.total_amount) || 0
+        const set = settledLookup[s.id] || 0
+        const out = Math.max(0, tot - set)
+        saleOutstandingMap[s.id] = { total: tot, settled: set, outstanding: out }
+        totalAvailableOutstanding += out
+      })
+    }
+
+    if (staffPurchaseDed > 0 && staffPurchaseDed > totalAvailableOutstanding + 0.01) {
+      return {
+        success: false,
+        message: `Maximum available staff purchase deduction is ${totalAvailableOutstanding.toFixed(2)}`
+      }
+    }
+
+    // 2. Check if payment already exists for this staff and month
     const existing = await sql`
       SELECT id FROM salary_payments
       WHERE staff_id = ${data.staffId} AND payment_month = ${data.paymentMonth}
@@ -169,6 +298,14 @@ export async function createSalaryPayment(data: {
     `
 
     let paymentId: number
+    const calculatedNetSalary = Math.max(
+      0,
+      Number(data.baseSalary || 0) +
+        Number(data.bonus || 0) -
+        Number(data.advanceDeduction || 0) -
+        staffPurchaseDed -
+        Number(data.otherDeductions || 0)
+    )
 
     if (existing.length > 0) {
       paymentId = existing[0].id
@@ -180,7 +317,8 @@ export async function createSalaryPayment(data: {
           bonus = ${data.bonus},
           advance_deduction = ${data.advanceDeduction},
           other_deductions = ${data.otherDeductions},
-          net_salary = ${data.netSalary},
+          staff_purchase_deduction = ${staffPurchaseDed},
+          net_salary = ${calculatedNetSalary},
           payment_method = ${data.paymentMethod},
           status = ${status},
           reference_number = ${data.referenceNumber || null},
@@ -188,16 +326,22 @@ export async function createSalaryPayment(data: {
           updated_at = NOW()
         WHERE id = ${paymentId}
       `
+
+      // Remove existing salary deduction settlements for this payment to re-allocate cleanly
+      await sql`
+        DELETE FROM staff_purchase_settlements
+        WHERE salary_payment_id = ${paymentId} AND settlement_type = 'salary_deduction'
+      `
     } else {
       const result = await sql`
         INSERT INTO salary_payments (
           staff_id, device_id, company_id, payment_month, payment_date,
-          base_salary, bonus, advance_deduction, other_deductions, net_salary,
+          base_salary, bonus, advance_deduction, other_deductions, staff_purchase_deduction, net_salary,
           payment_method, status, reference_number, notes, created_by
         )
         VALUES (
           ${data.staffId}, ${data.deviceId}, ${companyId}, ${data.paymentMonth}, ${data.paymentDate},
-          ${data.baseSalary}, ${data.bonus}, ${data.advanceDeduction}, ${data.otherDeductions}, ${data.netSalary},
+          ${data.baseSalary}, ${data.bonus}, ${data.advanceDeduction}, ${data.otherDeductions}, ${staffPurchaseDed}, ${calculatedNetSalary},
           ${data.paymentMethod}, ${status}, ${data.referenceNumber || null}, ${data.notes || null}, ${data.staffId}
         )
         RETURNING id
@@ -205,7 +349,53 @@ export async function createSalaryPayment(data: {
       paymentId = result[0].id
     }
 
-    // Automatically log an expense financial transaction if approved or paid
+    // 3. Allocate staff purchase deduction to sales (oldest first)
+    if (staffPurchaseDed > 0 && (status === "Approved" || status === "Paid")) {
+      let remainingDeduction = staffPurchaseDed
+
+      for (const sale of staffSales) {
+        if (remainingDeduction <= 0) break
+
+        // Re-check settled excluding current salary_payment_id
+        const saleSettlements = await sql`
+          SELECT COALESCE(SUM(amount), 0) as settled
+          FROM staff_purchase_settlements
+          WHERE sale_id = ${sale.id}
+        `
+        const alreadySettled = Number(saleSettlements[0]?.settled) || 0
+        const saleTotal = Number(sale.total_amount) || 0
+        const currentOutstanding = Math.max(0, saleTotal - alreadySettled)
+
+        if (currentOutstanding > 0) {
+          const allocAmount = Math.min(remainingDeduction, currentOutstanding)
+
+          await sql`
+            INSERT INTO staff_purchase_settlements (
+              sale_id, staff_id, salary_payment_id, settlement_type,
+              amount, payment_method, payment_month, reference_number, notes, created_by
+            )
+            VALUES (
+              ${sale.id}, ${data.staffId}, ${paymentId}, 'salary_deduction',
+              ${allocAmount}, 'Salary Deduction', ${data.paymentMonth}, ${`SALARY-${data.paymentMonth}`},
+              ${`Deducted during ${data.paymentMonth} payroll`}, ${data.staffId}
+            )
+          `
+
+          const newTotalSettled = alreadySettled + allocAmount
+          const newStatus = newTotalSettled >= saleTotal - 0.01 ? "Paid" : (newTotalSettled > 0 ? "Partially Paid" : "Pending")
+
+          await sql`
+            UPDATE sales
+            SET received_amount = ${newTotalSettled}, status = ${newStatus}, updated_at = NOW()
+            WHERE id = ${sale.id}
+          `
+
+          remainingDeduction -= allocAmount
+        }
+      }
+    }
+
+    // 4. Log financial transaction
     if (status === "Approved" || status === "Paid") {
       const txName = `Salary Payout - ${staffName} (${data.paymentMonth})`
       await sql`
@@ -216,8 +406,8 @@ export async function createSalaryPayment(data: {
         )
         VALUES (
           ${data.paymentDate}, 'expense', ${txName}, 'Salary & Wages',
-          'salary_payment', ${paymentId}, ${data.netSalary}, ${data.netSalary}, 'Completed', ${data.paymentMethod},
-          ${`Base: ${data.baseSalary}, Bonus: ${data.bonus}, Advance Deduction: ${data.advanceDeduction}, Other Deductions: ${data.otherDeductions}`},
+          'salary_payment', ${paymentId}, ${calculatedNetSalary}, ${calculatedNetSalary}, 'Completed', ${data.paymentMethod},
+          ${`Base: ${data.baseSalary}, Bonus: ${data.bonus}, Advance Deduction: ${data.advanceDeduction}, Staff Purchase Deduction: ${staffPurchaseDed}, Other Deductions: ${data.otherDeductions}`},
           ${data.notes || null}, ${data.deviceId}, ${companyId}, ${data.staffId}
         )
       `

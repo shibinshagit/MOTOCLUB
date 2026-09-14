@@ -494,3 +494,130 @@ export async function setDefaultCustomerAddress(customerId: number, addressId: n
     return { success: false, message: "Failed to update default address" }
   }
 }
+
+export async function syncCustomerShippingAddress(customerId: number, data: any) {
+  if (!customerId) {
+    return { success: false, message: "Customer ID is required" }
+  }
+
+  resetConnectionState()
+
+  try {
+    // Check customer exists
+    const custCheck = await sql`SELECT id FROM customers WHERE id = ${customerId} LIMIT 1`
+    if (custCheck.length === 0) {
+      return { success: false, message: "Customer not found" }
+    }
+
+    const street = (data.shipping_street || data.shippingStreet || data.street || data.shipping_address || data.shippingAddress || data.address || "").trim() || null
+    const city = (data.shipping_city || data.shippingCity || data.city || "").trim() || null
+    const district = (data.shipping_district || data.shippingDistrict || data.district || "").trim() || null
+    const state = (data.shipping_state || data.shippingState || data.state || "").trim() || null
+    const pincode = (data.shipping_pincode || data.shippingPincode || data.pincode || "").trim() || null
+    const landmark = (data.shipping_landmark || data.shippingLandmark || data.landmark || "").trim() || null
+    const address_type = (data.shipping_address_type || data.shippingAddressType || data.address_type || "Shipping Address").trim() || "Shipping Address"
+    const phone = (data.customer_phone_override || data.customerPhoneOverride || data.shippingPhone || data.phone || "").trim() || null
+
+    // Validation: skip empty address
+    if (!street && !city && !district && !state && !pincode && !landmark) {
+      return { success: false, message: "No valid address fields to sync" }
+    }
+
+    const norm = (val?: string | null) => (val || "").toLowerCase().trim().replace(/\s+/g, " ")
+
+    const existingAddresses = await sql`
+      SELECT * FROM customer_addresses WHERE customer_id = ${customerId}
+    `
+
+    const incomingStreetNorm = norm(street)
+    const incomingCityNorm = norm(city)
+    const incomingDistrictNorm = norm(district)
+    const incomingStateNorm = norm(state)
+    const incomingPincodeNorm = norm(pincode)
+    const incomingLandmarkNorm = norm(landmark)
+
+    const matching = existingAddresses.find((e: any) => {
+      const eStreet = norm(e.street)
+      const eCity = norm(e.city)
+      const eDistrict = norm(e.district)
+      const eState = norm(e.state)
+      const ePincode = norm(e.pincode)
+      const eLandmark = norm(e.landmark)
+
+      // Exact field match
+      const exactMatch =
+        eStreet === incomingStreetNorm &&
+        eCity === incomingCityNorm &&
+        eDistrict === incomingDistrictNorm &&
+        eState === incomingStateNorm &&
+        ePincode === incomingPincodeNorm &&
+        eLandmark === incomingLandmarkNorm
+
+      if (exactMatch) return true
+
+      // Fallback matching when street contains full address string
+      if (incomingStreetNorm && eStreet && (eStreet === incomingStreetNorm || eStreet.includes(incomingStreetNorm) || incomingStreetNorm.includes(eStreet))) {
+        if (!eCity || !incomingCityNorm || eCity === incomingCityNorm) {
+          if (!ePincode || !incomingPincodeNorm || ePincode === incomingPincodeNorm) {
+            return true
+          }
+        }
+      }
+
+      return false
+    })
+
+    if (matching) {
+      return { success: true, duplicated: true, data: matching, message: "Address already exists for customer" }
+    }
+
+    // Determine if this address should be default
+    const isFirstAddress = existingAddresses.length === 0
+    const hasDefault = existingAddresses.some((a: any) => a.is_default === true)
+    const shouldBeDefault = isFirstAddress || !hasDefault
+
+    const result = await sql`
+      INSERT INTO customer_addresses (
+        customer_id, phone, city, district, state, pincode, street, landmark, address_type, is_default, created_at, updated_at
+      ) VALUES (
+        ${customerId},
+        ${phone},
+        ${city},
+        ${district},
+        ${state},
+        ${pincode},
+        ${street},
+        ${landmark},
+        ${address_type},
+        ${shouldBeDefault},
+        NOW(),
+        NOW()
+      )
+      RETURNING *
+    `
+
+    // Update customer top-level summary fields if they are blank or if this is default
+    if (shouldBeDefault) {
+      const formattedSummary = [street, landmark, city, district, state, pincode ? `PIN: ${pincode}` : null]
+        .filter(Boolean)
+        .join(", ")
+
+      await sql`
+        UPDATE customers
+        SET address = COALESCE(NULLIF(address, ''), ${formattedSummary}),
+            city = COALESCE(NULLIF(city, ''), ${city}),
+            district = COALESCE(NULLIF(district, ''), ${district}),
+            state = COALESCE(NULLIF(state, ''), ${state}),
+            street = COALESCE(NULLIF(street, ''), ${street}),
+            landmark = COALESCE(NULLIF(landmark, ''), ${landmark}),
+            pincode = COALESCE(NULLIF(pincode, ''), ${pincode})
+        WHERE id = ${customerId}
+      `
+    }
+
+    return { success: true, duplicated: false, data: result[0], message: "Address synced successfully" }
+  } catch (error) {
+    console.error("syncCustomerShippingAddress error:", error)
+    return { success: false, message: "Failed to sync customer address" }
+  }
+}

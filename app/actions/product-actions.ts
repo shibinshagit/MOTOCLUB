@@ -209,11 +209,12 @@ export async function getProducts(
   limit?: number,
   searchTerm?: string,
   categoryId?: number | null,
-  skipRbac?: boolean
+  skipRbac?: boolean,
+  categoryName?: string | null
 ) {
   resetConnectionState()
 
-  console.log("getProducts called with:", { userId, limit, searchTerm, categoryId })
+  console.log("getProducts called with:", { userId, limit, searchTerm, categoryId, categoryName })
 
   try {
     let products
@@ -1042,6 +1043,7 @@ export async function getPaginatedProducts({
   pageSize = 10,
   searchTerm = "",
   categoryId = null,
+  categoryName = null,
   skipRbac = false,
 }: {
   userId?: number
@@ -1049,6 +1051,7 @@ export async function getPaginatedProducts({
   pageSize?: number
   searchTerm?: string
   categoryId?: number | null
+  categoryName?: string | null
   skipRbac?: boolean
 }) {
   resetConnectionState()
@@ -1930,7 +1933,12 @@ export async function getPaginatedProducts({
  * Lightweight, fast server action for Google-like search autocomplete suggestions.
  * Fetches top matching products, categories, and company names scoped to the user's company/device.
  */
-export async function getProductSearchSuggestions(searchTerm?: string, userId?: number) {
+export async function getProductSearchSuggestions(
+  searchTerm?: string,
+  userId?: number,
+  categoryId?: number | null,
+  categoryName?: string | null
+) {
   if (!searchTerm || searchTerm.trim().length < 2) {
     return {
       success: true,
@@ -1941,6 +1949,7 @@ export async function getProductSearchSuggestions(searchTerm?: string, userId?: 
   const query = searchTerm.trim()
   const searchPattern = `%${query.toLowerCase()}%`
   const prefixPattern = `${query.toLowerCase()}%`
+  const catNameLower = categoryName ? categoryName.trim().toLowerCase() : null
 
   try {
     let products: any[] = []
@@ -1948,46 +1957,86 @@ export async function getProductSearchSuggestions(searchTerm?: string, userId?: 
     let companies: any[] = []
 
     if (userId) {
-      products = await sql`
-        SELECT p.id, p.name, p.category, p.company_name, p.price, p.mrp, p.msp
-        FROM products p
-        WHERE p.created_by IN (
-          SELECT d2.id
-          FROM devices d1
-          JOIN devices d2 ON d2.company_id = d1.company_id
-          WHERE d1.id = ${userId}
-        )
-        AND (
-          LOWER(p.name) LIKE ${searchPattern} OR
-          LOWER(COALESCE(p.category, '')) LIKE ${searchPattern} OR
-          LOWER(COALESCE(p.company_name, '')) LIKE ${searchPattern} OR
-          LOWER(COALESCE(p.barcode, '')) LIKE ${searchPattern} OR
-          EXISTS (
-            SELECT 1 FROM product_variants pv
-            WHERE pv.product_id = p.id AND (
-              LOWER(pv.name) LIKE ${searchPattern} OR
-              LOWER(COALESCE(pv.sku, '')) LIKE ${searchPattern} OR
-              LOWER(COALESCE(pv.barcode, '')) LIKE ${searchPattern}
+      if (categoryId || catNameLower) {
+        products = await sql`
+          SELECT p.id, p.name, p.category, p.company_name, p.price, p.mrp, p.msp
+          FROM products p
+          LEFT JOIN product_categories c ON p.category_id = c.id
+          WHERE p.created_by IN (
+            SELECT d2.id
+            FROM devices d1
+            JOIN devices d2 ON d2.company_id = d1.company_id
+            WHERE d1.id = ${userId}
+          )
+          AND (
+            (${categoryId}::int IS NOT NULL AND p.category_id = ${categoryId}) OR
+            (${catNameLower}::text IS NOT NULL AND (LOWER(COALESCE(p.category, '')) = ${catNameLower} OR LOWER(COALESCE(c.name, '')) = ${catNameLower}))
+          )
+          AND (
+            LOWER(p.name) LIKE ${searchPattern} OR
+            LOWER(COALESCE(p.category, '')) LIKE ${searchPattern} OR
+            LOWER(COALESCE(p.company_name, '')) LIKE ${searchPattern} OR
+            LOWER(COALESCE(p.barcode, '')) LIKE ${searchPattern} OR
+            EXISTS (
+              SELECT 1 FROM product_variants pv
+              WHERE pv.product_id = p.id AND (
+                LOWER(pv.name) LIKE ${searchPattern} OR
+                LOWER(COALESCE(pv.sku, '')) LIKE ${searchPattern} OR
+                LOWER(COALESCE(pv.barcode, '')) LIKE ${searchPattern}
+              )
             )
           )
-        )
-        ORDER BY
-          CASE 
-            WHEN LOWER(p.name) = LOWER(${query}) THEN 0
-            WHEN LOWER(p.name) LIKE ${prefixPattern} THEN 1
-            ELSE 2
-          END,
-          p.created_at DESC
-        LIMIT 5
-      `
+          ORDER BY
+            CASE 
+              WHEN LOWER(p.name) = LOWER(${query}) THEN 0
+              WHEN LOWER(p.name) LIKE ${prefixPattern} THEN 1
+              ELSE 2
+            END,
+            p.created_at DESC
+          LIMIT 5
+        `
+      } else {
+        products = await sql`
+          SELECT p.id, p.name, p.category, p.company_name, p.price, p.mrp, p.msp
+          FROM products p
+          WHERE p.created_by IN (
+            SELECT d2.id
+            FROM devices d1
+            JOIN devices d2 ON d2.company_id = d1.company_id
+            WHERE d1.id = ${userId}
+          )
+          AND (
+            LOWER(p.name) LIKE ${searchPattern} OR
+            LOWER(COALESCE(p.category, '')) LIKE ${searchPattern} OR
+            LOWER(COALESCE(p.company_name, '')) LIKE ${searchPattern} OR
+            LOWER(COALESCE(p.barcode, '')) LIKE ${searchPattern} OR
+            EXISTS (
+              SELECT 1 FROM product_variants pv
+              WHERE pv.product_id = p.id AND (
+                LOWER(pv.name) LIKE ${searchPattern} OR
+                LOWER(COALESCE(pv.sku, '')) LIKE ${searchPattern} OR
+                LOWER(COALESCE(pv.barcode, '')) LIKE ${searchPattern}
+              )
+            )
+          )
+          ORDER BY
+            CASE 
+              WHEN LOWER(p.name) = LOWER(${query}) THEN 0
+              WHEN LOWER(p.name) LIKE ${prefixPattern} THEN 1
+              ELSE 2
+            END,
+            p.created_at DESC
+          LIMIT 5
+        `
+      }
 
       categories = await sql`
-        SELECT DISTINCT c_name as name FROM (
-          SELECT c.name as c_name
+        SELECT DISTINCT c_id, c_name as name FROM (
+          SELECT c.id as c_id, c.name as c_name
           FROM product_categories c
           WHERE LOWER(c.name) LIKE ${searchPattern}
           UNION
-          SELECT p.category as c_name
+          SELECT p.category_id as c_id, p.category as c_name
           FROM products p
           WHERE p.created_by IN (
             SELECT d2.id FROM devices d1 JOIN devices d2 ON d2.company_id = d1.company_id WHERE d1.id = ${userId}
@@ -2007,38 +2056,72 @@ export async function getProductSearchSuggestions(searchTerm?: string, userId?: 
         LIMIT 3
       `
     } else {
-      products = await sql`
-        SELECT p.id, p.name, p.category, p.company_name, p.price, p.mrp, p.msp
-        FROM products p
-        WHERE (
-          LOWER(p.name) LIKE ${searchPattern} OR
-          LOWER(COALESCE(p.category, '')) LIKE ${searchPattern} OR
-          LOWER(COALESCE(p.company_name, '')) LIKE ${searchPattern} OR
-          LOWER(COALESCE(p.barcode, '')) LIKE ${searchPattern} OR
-          EXISTS (
-            SELECT 1 FROM product_variants pv
-            WHERE pv.product_id = p.id AND (
-              LOWER(pv.name) LIKE ${searchPattern} OR
-              LOWER(COALESCE(pv.sku, '')) LIKE ${searchPattern} OR
-              LOWER(COALESCE(pv.barcode, '')) LIKE ${searchPattern}
+      if (categoryId || catNameLower) {
+        products = await sql`
+          SELECT p.id, p.name, p.category, p.company_name, p.price, p.mrp, p.msp
+          FROM products p
+          LEFT JOIN product_categories c ON p.category_id = c.id
+          WHERE (
+            (${categoryId}::int IS NOT NULL AND p.category_id = ${categoryId}) OR
+            (${catNameLower}::text IS NOT NULL AND (LOWER(COALESCE(p.category, '')) = ${catNameLower} OR LOWER(COALESCE(c.name, '')) = ${catNameLower}))
+          )
+          AND (
+            LOWER(p.name) LIKE ${searchPattern} OR
+            LOWER(COALESCE(p.category, '')) LIKE ${searchPattern} OR
+            LOWER(COALESCE(p.company_name, '')) LIKE ${searchPattern} OR
+            LOWER(COALESCE(p.barcode, '')) LIKE ${searchPattern} OR
+            EXISTS (
+              SELECT 1 FROM product_variants pv
+              WHERE pv.product_id = p.id AND (
+                LOWER(pv.name) LIKE ${searchPattern} OR
+                LOWER(COALESCE(pv.sku, '')) LIKE ${searchPattern} OR
+                LOWER(COALESCE(pv.barcode, '')) LIKE ${searchPattern}
+              )
             )
           )
-        )
-        ORDER BY
-          CASE 
-            WHEN LOWER(p.name) = LOWER(${query}) THEN 0
-            WHEN LOWER(p.name) LIKE ${prefixPattern} THEN 1
-            ELSE 2
-          END,
-          p.created_at DESC
-        LIMIT 5
-      `
+          ORDER BY
+            CASE 
+              WHEN LOWER(p.name) = LOWER(${query}) THEN 0
+              WHEN LOWER(p.name) LIKE ${prefixPattern} THEN 1
+              ELSE 2
+            END,
+            p.created_at DESC
+          LIMIT 5
+        `
+      } else {
+        products = await sql`
+          SELECT p.id, p.name, p.category, p.company_name, p.price, p.mrp, p.msp
+          FROM products p
+          WHERE (
+            LOWER(p.name) LIKE ${searchPattern} OR
+            LOWER(COALESCE(p.category, '')) LIKE ${searchPattern} OR
+            LOWER(COALESCE(p.company_name, '')) LIKE ${searchPattern} OR
+            LOWER(COALESCE(p.barcode, '')) LIKE ${searchPattern} OR
+            EXISTS (
+              SELECT 1 FROM product_variants pv
+              WHERE pv.product_id = p.id AND (
+                LOWER(pv.name) LIKE ${searchPattern} OR
+                LOWER(COALESCE(pv.sku, '')) LIKE ${searchPattern} OR
+                LOWER(COALESCE(pv.barcode, '')) LIKE ${searchPattern}
+              )
+            )
+          )
+          ORDER BY
+            CASE 
+              WHEN LOWER(p.name) = LOWER(${query}) THEN 0
+              WHEN LOWER(p.name) LIKE ${prefixPattern} THEN 1
+              ELSE 2
+            END,
+            p.created_at DESC
+          LIMIT 5
+        `
+      }
 
       categories = await sql`
-        SELECT DISTINCT c_name as name FROM (
-          SELECT c.name as c_name FROM product_categories c WHERE LOWER(c.name) LIKE ${searchPattern}
+        SELECT DISTINCT c_id, c_name as name FROM (
+          SELECT c.id as c_id, c.name as c_name FROM product_categories c WHERE LOWER(c.name) LIKE ${searchPattern}
           UNION
-          SELECT p.category as c_name FROM products p WHERE p.category IS NOT NULL AND p.category != '' AND LOWER(p.category) LIKE ${searchPattern}
+          SELECT p.category_id as c_id, p.category as c_name FROM products p WHERE p.category IS NOT NULL AND p.category != '' AND LOWER(p.category) LIKE ${searchPattern}
         ) sub
         LIMIT 3
       `
@@ -2059,7 +2142,10 @@ export async function getProductSearchSuggestions(searchTerm?: string, userId?: 
       price: Number(p.price || p.msp || p.mrp || 0),
     }))
 
-    const catSuggestions = (categories || []).map((c: any) => ({ name: String(c.name) }))
+    const catSuggestions = (categories || []).map((c: any) => ({
+      id: c.c_id ? Number(c.c_id) : undefined,
+      name: String(c.name),
+    }))
     const compSuggestions = (companies || []).map((c: any) => ({ name: String(c.name) }))
     const totalCount = prodSuggestions.length + catSuggestions.length + compSuggestions.length
 

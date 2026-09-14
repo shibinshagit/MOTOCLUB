@@ -7,8 +7,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { format } from "date-fns"
 import { useEffect, useState } from "react"
-import { getCustomerSales } from "@/app/actions/customer-actions"
-import { User, Mail, Phone, MapPin, Calendar, ShoppingBag, DollarSign, Package, Clock, TrendingUp } from "lucide-react"
+import { getCustomerSales, getCustomerAddresses, setDefaultCustomerAddress } from "@/app/actions/customer-actions"
+import { User, Mail, Phone, MapPin, Calendar, ShoppingBag, DollarSign, Package, Clock, TrendingUp, CheckCircle2 } from "lucide-react"
 import { useSelector } from "react-redux"
 import { selectDeviceCurrency } from "@/store/slices/deviceSlice"
 
@@ -20,7 +20,9 @@ interface ViewCustomerModalProps {
 
 export default function ViewCustomerModal({ isOpen, onClose, customer }: ViewCustomerModalProps) {
   const [sales, setSales] = useState([])
+  const [addresses, setAddresses] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
+  const [loadingAddresses, setLoadingAddresses] = useState(false)
   const [totalSpent, setTotalSpent] = useState(0)
   const [totalAmount, setTotalAmount] = useState(0)
   const [totalCredit, setTotalCredit] = useState(0)
@@ -30,8 +32,36 @@ export default function ViewCustomerModal({ isOpen, onClose, customer }: ViewCus
   useEffect(() => {
     if (isOpen && customer?.id) {
       fetchCustomerSales()
+      fetchCustomerAddresses()
     }
   }, [isOpen, customer?.id])
+
+  const fetchCustomerAddresses = async () => {
+    if (!customer?.id) return
+    setLoadingAddresses(true)
+    try {
+      const res = await getCustomerAddresses(customer.id)
+      if (res.success && Array.isArray(res.data)) {
+        setAddresses(res.data)
+      }
+    } catch (err) {
+      console.error("Error fetching customer addresses:", err)
+    } finally {
+      setLoadingAddresses(false)
+    }
+  }
+
+  const handleSetDefault = async (addressId: number) => {
+    if (!customer?.id || !addressId) return
+    try {
+      const res = await setDefaultCustomerAddress(customer.id, addressId)
+      if (res.success) {
+        fetchCustomerAddresses()
+      }
+    } catch (err) {
+      console.error("Error setting default address:", err)
+    }
+  }
 
   const fetchCustomerSales = async () => {
     setLoading(true)
@@ -227,6 +257,89 @@ export default function ViewCustomerModal({ isOpen, onClose, customer }: ViewCus
               </Card>
             </div>
           </div>
+
+          <Separator className="bg-gray-200" />
+
+          {/* Addresses Section */}
+          <Card className="bg-white shadow-sm border-gray-200">
+            <CardHeader className="pb-4">
+              <CardTitle className="text-lg font-semibold text-gray-800 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <MapPin className="h-5 w-5 text-blue-600" />
+                  Addresses
+                  <Badge variant="secondary" className="ml-2">
+                    {addresses.length} {addresses.length === 1 ? "Address" : "Addresses"}
+                  </Badge>
+                </div>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {loadingAddresses ? (
+                <div className="flex items-center justify-center py-6">
+                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                  <span className="ml-2 text-sm text-gray-600">Loading addresses...</span>
+                </div>
+              ) : addresses.length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {addresses.map((addr: any) => (
+                    <div
+                      key={addr.id}
+                      className={`p-4 rounded-lg border relative ${
+                        addr.is_default
+                          ? "bg-blue-50/50 border-blue-200 shadow-xs"
+                          : "bg-white border-gray-200"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-sm text-gray-900">
+                            {addr.address_type || "Shipping Address"}
+                          </span>
+                          {addr.is_default && (
+                            <Badge className="bg-blue-600 text-white hover:bg-blue-700 text-[10px] px-2 py-0.5">
+                              Default
+                            </Badge>
+                          )}
+                        </div>
+                        {!addr.is_default && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleSetDefault(addr.id)}
+                            className="text-xs text-blue-600 hover:text-blue-800 hover:bg-blue-50 h-7 px-2"
+                          >
+                            Set as Default
+                          </Button>
+                        )}
+                      </div>
+                      <div className="text-xs text-gray-700 space-y-1">
+                        {addr.street && <p className="font-medium text-gray-900">{addr.street}</p>}
+                        {(addr.city || addr.district || addr.state || addr.pincode) && (
+                          <p>
+                            {[addr.city, addr.district, addr.state, addr.pincode ? `PIN: ${addr.pincode}` : null]
+                              .filter(Boolean)
+                              .join(", ")}
+                          </p>
+                        )}
+                        {addr.landmark && <p className="text-gray-500">Landmark: {addr.landmark}</p>}
+                        {addr.phone && <p className="text-gray-600 font-mono mt-1">Phone: {addr.phone}</p>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-6 text-sm text-gray-500 bg-gray-50 rounded-lg border border-dashed border-gray-200">
+                  <MapPin className="h-8 w-8 text-gray-300 mx-auto mb-2" />
+                  <p>No saved addresses found for this customer.</p>
+                  {customer.address && (
+                    <p className="text-xs text-gray-400 mt-1">
+                      Legacy address: {customer.address}
+                    </p>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
           <Separator className="bg-gray-200" />
 

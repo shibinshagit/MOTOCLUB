@@ -238,10 +238,11 @@ export async function updateAttendanceStatus(
 
 export async function getStaffAttendanceHistory(staffId: number, startDate: string, endDate: string) {
   try {
+    noStore()
     const attendance = await sql`
       SELECT * FROM staff_attendance
       WHERE staff_id = ${staffId} 
-      AND date >= ${startDate} AND date <= ${endDate}
+      AND date >= ${startDate}::date AND date <= ${endDate}::date
       ORDER BY date DESC
     `
     return { success: true, data: attendance as AttendanceRecord[] }

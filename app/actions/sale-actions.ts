@@ -9,6 +9,7 @@ import { normalizeSaleShippingInput } from "@/lib/sale-shipping"
 import { getStaffSession } from "@/lib/staff-session"
 import { ensureReturnTablesExist } from "./sale-return-actions"
 import { getReplacementShipmentsForSale } from "./replacement-actions"
+import { syncCustomerShippingAddress } from "./customer-actions"
 
 function getShippingAmounts(shipping: ReturnType<typeof normalizeSaleShippingInput>) {
   if (shipping.fulfillment_type !== "ship") {
@@ -1404,6 +1405,14 @@ export async function addSale(saleData: any) {
     const sale = saleResult[0]
     saleId = sale.id
 
+    if (saleData.customerId && shipping) {
+      try {
+        await syncCustomerShippingAddress(saleData.customerId, shipping)
+      } catch (addrSyncErr) {
+        console.warn("Could not sync customer shipping address on addSale:", addrSyncErr)
+      }
+    }
+
     // Save payment records into transaction_payments
     try {
       if (Array.isArray(saleData.payments) && saleData.payments.length > 0) {
@@ -2128,6 +2137,14 @@ export async function updateSale(saleData: any) {
       }
 
       await updateSaleRecord(Boolean(saleData.deviceId))
+
+      if (saleData.customerId && shipping) {
+        try {
+          await syncCustomerShippingAddress(saleData.customerId, shipping)
+        } catch (addrSyncErr) {
+          console.warn("Could not sync customer shipping address on updateSale:", addrSyncErr)
+        }
+      }
 
       // Sync transaction_payments if payments provided
       try {

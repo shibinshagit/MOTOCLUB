@@ -2,6 +2,7 @@
 
 import { sql } from "@/lib/db"
 import { revalidatePath, unstable_noStore as noStore } from "next/cache"
+import { syncCustomerShippingAddress } from "./customer-actions"
 
 export interface EcommerceOrderItemInput {
   productId: number
@@ -439,6 +440,18 @@ export async function syncEcommerceOrder(
     `
 
     const saleId = saleRows[0].id
+
+    if (resolvedCustomerId && (order.delivery_address || order.customer_phone)) {
+      try {
+        await syncCustomerShippingAddress(resolvedCustomerId, {
+          shipping_address: order.delivery_address,
+          customer_phone_override: order.customer_phone || null,
+          shipping_address_type: "Shipping Address",
+        })
+      } catch (eComAddrErr) {
+        console.warn("Could not sync customer address for ecommerce order:", eComAddrErr)
+      }
+    }
 
     // 9. INSERT SALE ITEMS & DEDUCT INVENTORY (EXACTLY ONCE)
     const { updateProductStock } = await import("./sale-actions")

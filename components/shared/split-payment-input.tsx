@@ -14,6 +14,7 @@ export const PAYMENT_METHOD_OPTIONS = [
   { value: "Bank Transfer", label: "Bank Transfer" },
   { value: "Cheque", label: "Cheque" },
   { value: "COD", label: "Cash on Delivery (COD)" },
+  { value: "Staff Account", label: "Staff Account / Purchase" },
 ]
 
 export const isCodMethod = (method?: string | null) => {

@@ -90,6 +90,8 @@ export default function StaffProfileTab() {
   const [purchaseDetails, setPurchaseDetails] = useState<any>(null)
   const [isLoadingPurchases, setIsLoadingPurchases] = useState(false)
   const [purchasesPage, setPurchasesPage] = useState(1)
+  const [selectedPurchaseForAudit, setSelectedPurchaseForAudit] = useState<any>(null)
+  const [isAuditModalOpen, setIsAuditModalOpen] = useState(false)
 
   // New Request Modal state
   const [isSubmitOpen, setIsSubmitOpen] = useState(false)
@@ -209,7 +211,7 @@ export default function StaffProfileTab() {
     if (!device?.id) return
     setIsLoadingPurchases(true)
     try {
-      const res = await getStaffPurchaseDetails(0, device.id)
+      const res = await getStaffPurchaseDetails(activeStaff?.id || 0, device.id)
       if (res.success) {
         setPurchaseDetails(res.data)
       }
@@ -365,48 +367,56 @@ export default function StaffProfileTab() {
   return (
     <div className="space-y-6">
       {/* Profile Header Banner */}
-      <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 text-white rounded-2xl p-6 shadow-md border border-slate-800">
+      <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 text-white rounded-2xl p-4 sm:p-6 shadow-md border border-slate-800">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <div className="h-16 w-16 rounded-2xl bg-gradient-to-tr from-blue-500 to-indigo-600 flex items-center justify-center text-white text-2xl font-black shadow-lg">
+          <div className="flex items-center gap-3 sm:gap-4 w-full sm:w-auto">
+            <div className="h-12 w-12 sm:h-16 sm:w-16 rounded-2xl bg-gradient-to-tr from-blue-500 to-indigo-600 flex items-center justify-center text-white text-xl sm:text-2xl font-black shadow-lg shrink-0">
               {(activeStaff?.name || "Staff").charAt(0).toUpperCase()}
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-2xl font-bold tracking-tight">{activeStaff?.name || "Staff Member"}</h1>
-                <Badge className="bg-blue-500/20 text-blue-300 border-blue-400/30">
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="text-xl sm:text-2xl font-bold tracking-tight truncate max-w-[180px] sm:max-w-none">{activeStaff?.name || "Staff Member"}</h1>
+                <Badge className="bg-blue-500/20 text-blue-300 border-blue-400/30 text-xs shrink-0">
                   {activeStaff?.role || "Staff"}
                 </Badge>
               </div>
-              <div className="flex flex-wrap items-center gap-4 mt-2 text-xs text-slate-300">
+              <div className="flex flex-wrap items-center gap-3 mt-1.5 text-xs text-slate-300">
                 {activeStaff?.phone && (
                   <span className="flex items-center gap-1">
-                    <Phone className="h-3.5 w-3.5 text-blue-400" /> {activeStaff.phone}
+                    <Phone className="h-3.5 w-3.5 text-blue-400 shrink-0" /> {activeStaff.phone}
                   </span>
                 )}
                 {device?.name && (
                   <span className="flex items-center gap-1">
-                    <Building className="h-3.5 w-3.5 text-emerald-400" /> {device.name}
+                    <Building className="h-3.5 w-3.5 text-emerald-400 shrink-0" /> {device.name}
                   </span>
                 )}
               </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full sm:w-auto">
             <Button
-              variant={profileSection === "attendance" ? "default" : "outline"}
+              type="button"
               onClick={() => setProfileSection("attendance")}
-              className={profileSection === "attendance" ? "bg-blue-600 hover:bg-blue-700 text-white" : "border-slate-700 text-slate-200 hover:bg-slate-800"}
+              className={
+                profileSection === "attendance"
+                  ? "bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs sm:text-sm px-3 py-2.5 w-full justify-center shadow-md border border-blue-500/50"
+                  : "bg-slate-800/90 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 font-medium text-xs sm:text-sm px-3 py-2.5 w-full justify-center transition-all"
+              }
             >
-              <Calendar className="mr-2 h-4 w-4" /> Attendance & Notes
+              <Calendar className="mr-2 h-4 w-4 text-emerald-400 shrink-0" /> Attendance & Notes
             </Button>
             <Button
-              variant={profileSection === "financials" ? "default" : "outline"}
+              type="button"
               onClick={() => setProfileSection("financials")}
-              className={profileSection === "financials" ? "bg-blue-600 hover:bg-blue-700 text-white" : "border-slate-700 text-slate-200 hover:bg-slate-800"}
+              className={
+                profileSection === "financials"
+                  ? "bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs sm:text-sm px-3 py-2.5 w-full justify-center shadow-md border border-blue-500/50"
+                  : "bg-slate-800/90 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 font-medium text-xs sm:text-sm px-3 py-2.5 w-full justify-center transition-all"
+              }
             >
-              <Banknote className="mr-2 h-4 w-4" /> Financials & Requests
+              <Banknote className="mr-2 h-4 w-4 text-blue-400 shrink-0" /> Financials & Requests
             </Button>
           </div>
         </div>
@@ -504,7 +514,7 @@ export default function StaffProfileTab() {
       {profileSection === "financials" && (
         <Card className="shadow-sm border-slate-200">
           <CardHeader className="pb-4 border-b bg-slate-50/50">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
               <div>
                 <CardTitle className="text-lg font-bold text-slate-900">Financial History & Requests</CardTitle>
                 <CardDescription className="text-xs text-slate-500 mt-1">
@@ -512,27 +522,33 @@ export default function StaffProfileTab() {
                 </CardDescription>
               </div>
 
-              <div className="flex items-center gap-2">
-                <Button size="sm" onClick={() => handleOpenSubmit("salary_advance")} className="bg-emerald-600 hover:bg-emerald-700 text-white">
-                  <Plus className="mr-1 h-4 w-4" /> Request Salary Advance
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 w-full lg:w-auto">
+                <Button size="sm" onClick={() => handleOpenSubmit("salary_advance")} className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs w-full justify-center">
+                  <Plus className="mr-1 h-3.5 w-3.5 shrink-0" /> Request Salary Advance
                 </Button>
-                <Button size="sm" onClick={() => handleOpenSubmit("leave_request")} variant="outline">
-                  <Plus className="mr-1 h-4 w-4" /> Request Leave
+                <Button size="sm" onClick={() => handleOpenSubmit("credit_request")} className="bg-purple-600 hover:bg-purple-700 text-white text-xs w-full justify-center">
+                  <Plus className="mr-1 h-3.5 w-3.5 shrink-0" /> Request Staff Purchase
+                </Button>
+                <Button size="sm" onClick={() => handleOpenSubmit("leave_request")} variant="outline" className="text-xs w-full justify-center">
+                  <Plus className="mr-1 h-3.5 w-3.5 shrink-0" /> Request Leave
                 </Button>
               </div>
             </div>
           </CardHeader>
           <CardContent className="pt-6">
             <Tabs value={financialTab} onValueChange={(val: any) => setFinancialTab(val)} className="w-full">
-              <TabsList className="grid w-full grid-cols-3 mb-6 bg-slate-100">
-                <TabsTrigger value="salary" className="text-xs font-semibold">
-                  <Banknote className="mr-1.5 h-4 w-4 text-emerald-600" /> Salary History
+              <TabsList className="grid w-full grid-cols-3 mb-6 bg-slate-100 p-1 h-auto">
+                <TabsTrigger value="salary" className="text-[11px] sm:text-xs font-semibold py-2 px-1 sm:px-3 flex items-center justify-center gap-1">
+                  <Banknote className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-emerald-600 shrink-0" />
+                  <span className="truncate">Salary<span className="hidden sm:inline"> History</span></span>
                 </TabsTrigger>
-                <TabsTrigger value="requests" className="text-xs font-semibold">
-                  <FileText className="mr-1.5 h-4 w-4 text-blue-600" /> My Requests
+                <TabsTrigger value="requests" className="text-[11px] sm:text-xs font-semibold py-2 px-1 sm:px-3 flex items-center justify-center gap-1">
+                  <FileText className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-blue-600 shrink-0" />
+                  <span className="truncate"><span className="hidden sm:inline">My </span>Requests</span>
                 </TabsTrigger>
-                <TabsTrigger value="purchases" className="text-xs font-semibold">
-                  <ShoppingBag className="mr-1.5 h-4 w-4 text-purple-600" /> Staff Purchases
+                <TabsTrigger value="purchases" className="text-[11px] sm:text-xs font-semibold py-2 px-1 sm:px-3 flex items-center justify-center gap-1">
+                  <ShoppingBag className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-purple-600 shrink-0" />
+                  <span className="truncate"><span className="hidden sm:inline">Staff </span>Purchases</span>
                 </TabsTrigger>
               </TabsList>
 
@@ -550,8 +566,46 @@ export default function StaffProfileTab() {
                   </div>
                 ) : (
                   <>
-                    <div className="rounded-xl border border-slate-200 overflow-hidden bg-white">
-                      <table className="w-full text-sm text-left">
+                    {/* MOBILE CARD LIST VIEW (< md) */}
+                    <div className="block md:hidden space-y-3">
+                      {paginate(salaryHistory, salaryPage).map((item: any, idx: number) => (
+                        <div key={item.id || idx} className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm space-y-2.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-semibold text-slate-900">
+                              {item.payment_date || item.created_at ? new Date(item.payment_date || item.created_at).toLocaleDateString() : "-"}
+                            </span>
+                            <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 text-[10px]">
+                              {item.status || "Paid"}
+                            </Badge>
+                          </div>
+
+                          <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100 flex items-center justify-between">
+                            <div>
+                              <span className="text-[10px] text-slate-400 font-semibold uppercase block">Payment Type</span>
+                              <span className="text-xs font-medium text-slate-700 capitalize">
+                                {item.payment_type || item.type || "Salary Payout"}
+                              </span>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-[10px] text-slate-400 font-semibold uppercase block">Amount Paid</span>
+                              <span className="text-sm font-bold text-slate-900">
+                                {currency} {Number(item.amount || item.paid_amount || 0).toFixed(2)}
+                              </span>
+                            </div>
+                          </div>
+
+                          {item.remarks && (
+                            <p className="text-xs text-slate-500 italic">
+                              Remarks: {item.remarks || item.notes}
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* DESKTOP TABLE VIEW (>= md) */}
+                    <div className="hidden md:block overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+                      <table className="w-full min-w-[550px] text-sm text-left">
                         <thead className="bg-slate-50 text-xs text-slate-500 uppercase border-b">
                           <tr>
                             <th className="px-4 py-3 font-semibold">Date</th>
@@ -588,7 +642,7 @@ export default function StaffProfileTab() {
                     </div>
 
                     {/* Salary Pagination */}
-                    <div className="flex items-center justify-between pt-2">
+                    <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 text-center sm:text-left">
                       <p className="text-xs text-slate-500">
                         Showing {Math.min((salaryPage - 1) * ITEMS_PER_PAGE + 1, salaryHistory.length)} to{" "}
                         {Math.min(salaryPage * ITEMS_PER_PAGE, salaryHistory.length)} of {salaryHistory.length} entries
@@ -636,8 +690,62 @@ export default function StaffProfileTab() {
                   </div>
                 ) : (
                   <>
-                    <div className="rounded-xl border border-slate-200 overflow-hidden bg-white">
-                      <table className="w-full text-sm text-left">
+                    {/* MOBILE CARD LIST VIEW (< md) */}
+                    <div className="block md:hidden space-y-3">
+                      {paginate(requests, requestsPage).map((req: any) => (
+                        <div key={req.id} className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm space-y-2.5">
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <span className="text-[10px] text-slate-400 block font-mono">
+                                {new Date(req.created_at).toLocaleDateString()}
+                              </span>
+                              <h4 className="font-semibold text-slate-900 text-sm mt-0.5">
+                                {req.request_type === "credit_request"
+                                  ? "Staff Purchase Request"
+                                  : req.request_type === "salary_advance"
+                                  ? "Salary Advance"
+                                  : req.request_type === "leave_request"
+                                  ? `Leave Request (${req.leave_type || "Casual"})`
+                                  : (req.request_type || "")
+                                      .replace(/_/g, " ")
+                                      .replace(/\b\w/g, (c: string) => c.toUpperCase())}
+                              </h4>
+                            </div>
+                            <Badge
+                              className={
+                                req.status === "Approved"
+                                  ? "bg-emerald-100 text-emerald-800 border-emerald-200 text-[10px]"
+                                  : req.status === "Rejected"
+                                  ? "bg-rose-100 text-rose-800 border-rose-200 text-[10px]"
+                                  : "bg-amber-100 text-amber-800 border-amber-200 text-[10px]"
+                              }
+                            >
+                              {req.status || "Pending"}
+                            </Badge>
+                          </div>
+
+                          <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100 flex items-center justify-between">
+                            <span className="text-xs text-slate-500 font-medium">Requested Value</span>
+                            <span className="text-sm font-bold text-slate-900">
+                              {req.request_type === "leave_request"
+                                ? `${req.leave_type || "Leave"}`
+                                : `${currency} ${Number(req.amount || 0).toFixed(2)}`}
+                            </span>
+                          </div>
+
+                          {req.reason && (
+                            <div className="text-xs text-slate-600">
+                              <span className="font-semibold text-slate-700">Reason: </span>
+                              {req.reason}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* DESKTOP TABLE VIEW (>= md) */}
+                    <div className="hidden md:block overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+                      <table className="w-full min-w-[600px] text-sm text-left">
                         <thead className="bg-slate-50 text-xs text-slate-500 uppercase border-b">
                           <tr>
                             <th className="px-4 py-3 font-semibold">Date</th>
@@ -653,8 +761,16 @@ export default function StaffProfileTab() {
                               <td className="px-4 py-3 font-medium text-slate-900">
                                 {new Date(req.created_at).toLocaleDateString()}
                               </td>
-                              <td className="px-4 py-3 capitalize font-semibold text-slate-800">
-                                {req.request_type ? req.request_type.replace("_", " ") : "Request"}
+                              <td className="px-4 py-3 font-semibold text-slate-800">
+                                {req.request_type === "credit_request"
+                                  ? "Staff Purchase Request"
+                                  : req.request_type === "salary_advance"
+                                  ? "Salary Advance"
+                                  : req.request_type === "leave_request"
+                                  ? `Leave Request (${req.leave_type || "Casual"})`
+                                  : (req.request_type || "")
+                                      .replace(/_/g, " ")
+                                      .replace(/\b\w/g, (c: string) => c.toUpperCase())}
                               </td>
                               <td className="px-4 py-3 text-right font-bold text-slate-900">
                                 {req.request_type === "leave_request"
@@ -684,7 +800,7 @@ export default function StaffProfileTab() {
                     </div>
 
                     {/* Requests Pagination */}
-                    <div className="flex items-center justify-between pt-2">
+                    <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 text-center sm:text-left">
                       <p className="text-xs text-slate-500">
                         Showing {Math.min((requestsPage - 1) * ITEMS_PER_PAGE + 1, requests.length)} to{" "}
                         {Math.min(requestsPage * ITEMS_PER_PAGE, requests.length)} of {requests.length} entries
@@ -722,73 +838,183 @@ export default function StaffProfileTab() {
                     <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
                   </div>
                 ) : !purchaseDetails || purchasesList.length === 0 ? (
-                  <div className="text-center py-12 text-slate-500 bg-slate-50 rounded-xl border border-dashed">
-                    <ShoppingBag className="h-8 w-8 mx-auto mb-2 text-slate-400" />
-                    <p className="font-semibold text-slate-800">No staff purchase records found</p>
-                    <p className="text-xs mt-1">Purchases billed to your staff account will be listed here.</p>
+                  <div className="text-center py-12 text-slate-500 bg-slate-50 rounded-xl border border-dashed flex flex-col items-center justify-center">
+                    <ShoppingBag className="h-10 w-10 mx-auto mb-2 text-purple-400 opacity-80" />
+                    <p className="font-semibold text-slate-800 text-base">No staff purchase records found</p>
+                    <p className="text-xs text-slate-500 mt-1 max-w-sm">Purchases billed to your staff account will be listed here.</p>
+                    <Button
+                      size="sm"
+                      onClick={() => handleOpenSubmit("credit_request")}
+                      className="mt-4 bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold"
+                    >
+                      <Plus className="mr-1.5 h-4 w-4" /> Request Staff Purchase
+                    </Button>
                   </div>
                 ) : (
                   <>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
-                      <div className="bg-slate-50 p-4 rounded-xl border">
-                        <p className="text-xs text-slate-500">Total Purchase Value</p>
-                        <h4 className="text-lg font-bold text-slate-900 mt-1">
-                          {currency} {Number(purchaseDetails.totalPurchases || 0).toFixed(2)}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                      <div className="bg-slate-50 p-3 sm:p-3.5 rounded-xl border border-slate-200">
+                        <p className="text-[10px] sm:text-[11px] text-slate-500 font-semibold uppercase tracking-wider">Total Purchase Value</p>
+                        <h4 className="text-sm sm:text-lg font-bold text-slate-900 mt-1">
+                          {currency} {Number(purchaseDetails?.totalPurchases || 0).toFixed(2)}
                         </h4>
                       </div>
-                      <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100">
-                        <p className="text-xs text-emerald-600">Total Paid</p>
-                        <h4 className="text-lg font-bold text-emerald-800 mt-1">
-                          {currency} {Number(purchaseDetails.totalPaid || 0).toFixed(2)}
+                      <div className="bg-blue-50 p-3 sm:p-3.5 rounded-xl border border-blue-100">
+                        <p className="text-[10px] sm:text-[11px] text-blue-600 font-semibold uppercase tracking-wider">Direct Paid</p>
+                        <h4 className="text-sm sm:text-lg font-bold text-blue-800 mt-1">
+                          {currency} {Number(purchaseDetails?.directPaid || 0).toFixed(2)}
                         </h4>
                       </div>
-                      <div className="bg-amber-50 p-4 rounded-xl border border-amber-100">
-                        <p className="text-xs text-amber-600">Outstanding Balance</p>
-                        <h4 className="text-lg font-bold text-amber-800 mt-1">
-                          {currency} {Number(purchaseDetails.outstandingBalance || 0).toFixed(2)}
+                      <div className="bg-purple-50 p-3 sm:p-3.5 rounded-xl border border-purple-100">
+                        <p className="text-[10px] sm:text-[11px] text-purple-600 font-semibold uppercase tracking-wider">Salary Deducted</p>
+                        <h4 className="text-sm sm:text-lg font-bold text-purple-800 mt-1">
+                          {currency} {Number(purchaseDetails?.salaryDeducted || 0).toFixed(2)}
+                        </h4>
+                      </div>
+                      <div className="bg-amber-50 p-3 sm:p-3.5 rounded-xl border border-amber-200">
+                        <p className="text-[10px] sm:text-[11px] text-amber-700 font-semibold uppercase tracking-wider">Outstanding Balance</p>
+                        <h4 className="text-sm sm:text-lg font-bold text-amber-900 mt-1">
+                          {currency} {Number(purchaseDetails?.outstandingBalance || 0).toFixed(2)}
                         </h4>
                       </div>
                     </div>
 
-                    <div className="rounded-xl border border-slate-200 overflow-hidden bg-white">
-                      <table className="w-full text-sm text-left">
-                        <thead className="bg-slate-50 text-xs text-slate-500 uppercase border-b">
+                    {/* MOBILE CARD LIST VIEW (< md) */}
+                    <div className="block md:hidden space-y-3">
+                      {paginate(purchasesList, purchasesPage).map((pur: any) => (
+                        <div key={pur.id} className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm space-y-2.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-blue-600 text-sm">#{pur.tracking_id || pur.id}</span>
+                              <span className="text-[10px] text-slate-400">
+                                {new Date(pur.created_at || pur.sale_date).toLocaleDateString()}
+                              </span>
+                            </div>
+                            <Badge
+                              className={
+                                pur.payment_status === "Paid"
+                                  ? "bg-emerald-100 text-emerald-800 border-emerald-200 text-[10px]"
+                                  : pur.payment_status === "Partially Paid"
+                                  ? "bg-blue-100 text-blue-800 border-blue-200 text-[10px]"
+                                  : "bg-amber-100 text-amber-800 border-amber-200 text-[10px]"
+                              }
+                            >
+                              {pur.payment_status || "Pending"}
+                            </Badge>
+                          </div>
+
+                          <div className="text-xs text-slate-700 font-medium line-clamp-2">
+                            📦 {pur.product_names || "Staff Product Purchase"}
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2 bg-slate-50 p-2.5 rounded-lg border border-slate-100 text-xs">
+                            <div>
+                              <span className="text-[10px] text-slate-400 block font-semibold uppercase">Total</span>
+                              <span className="font-bold text-slate-900">
+                                {currency} {Number(pur.total_amount || 0).toFixed(2)}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-[10px] text-blue-600 block font-semibold uppercase">Direct Paid</span>
+                              <span className="font-semibold text-blue-800">
+                                {currency} {Number(pur.direct_paid || 0).toFixed(2)}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-[10px] text-purple-600 block font-semibold uppercase">Salary Deducted</span>
+                              <span className="font-semibold text-purple-800">
+                                {currency} {Number(pur.salary_deducted || 0).toFixed(2)}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-[10px] text-amber-700 block font-semibold uppercase">Outstanding</span>
+                              <span className="font-bold text-amber-900">
+                                {currency} {Number(pur.outstanding_amount || 0).toFixed(2)}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="flex justify-end pt-1">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 text-xs border-slate-200 text-slate-700 hover:bg-slate-100"
+                              onClick={() => {
+                                setSelectedPurchaseForAudit(pur)
+                                setIsAuditModalOpen(true)
+                              }}
+                            >
+                              <FileText className="h-3.5 w-3.5 mr-1 text-slate-500" /> History
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* DESKTOP TABLE VIEW (>= md) */}
+                    <div className="hidden md:block overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+                      <table className="w-full min-w-[700px] text-sm text-left border-collapse">
+                        <thead className="bg-slate-50 text-[11px] text-slate-500 uppercase border-b font-semibold">
                           <tr>
-                            <th className="px-4 py-3 font-semibold">Order / Date</th>
-                            <th className="px-4 py-3 font-semibold">Item Details</th>
-                            <th className="px-4 py-3 font-semibold text-right">Total Amount</th>
-                            <th className="px-4 py-3 font-semibold text-right">Paid</th>
-                            <th className="px-4 py-3 font-semibold text-center">Status</th>
+                            <th className="px-4 py-3">Order / Date</th>
+                            <th className="px-4 py-3">Item Details</th>
+                            <th className="px-4 py-3 text-right">Purchase Total</th>
+                            <th className="px-4 py-3 text-right">Direct Paid</th>
+                            <th className="px-4 py-3 text-right">Salary Deducted</th>
+                            <th className="px-4 py-3 text-right">Outstanding</th>
+                            <th className="px-4 py-3 text-center">Status</th>
+                            <th className="px-4 py-3 text-center">Action</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                           {paginate(purchasesList, purchasesPage).map((pur: any) => (
-                            <tr key={pur.id} className="hover:bg-slate-50/50">
+                            <tr key={pur.id} className="hover:bg-slate-50/50 transition-colors">
                               <td className="px-4 py-3 font-medium text-slate-900">
-                                <div>#{pur.tracking_id || pur.id}</div>
+                                <div className="font-bold text-blue-600">#{pur.tracking_id || pur.id}</div>
                                 <div className="text-xs text-slate-400">
-                                  {new Date(pur.created_at).toLocaleDateString()}
+                                  {new Date(pur.created_at || pur.sale_date).toLocaleDateString()}
                                 </div>
                               </td>
-                              <td className="px-4 py-3 text-slate-700 text-xs">
+                              <td className="px-4 py-3 text-slate-700 text-xs max-w-[180px] truncate" title={pur.product_names}>
                                 {pur.product_names || "Staff Product Purchase"}
                               </td>
                               <td className="px-4 py-3 text-right font-bold text-slate-900">
                                 {currency} {Number(pur.total_amount || 0).toFixed(2)}
                               </td>
-                              <td className="px-4 py-3 text-right font-semibold text-emerald-700">
-                                {currency} {Number(pur.paid_amount || 0).toFixed(2)}
+                              <td className="px-4 py-3 text-right font-medium text-blue-700 text-xs">
+                                {currency} {Number(pur.direct_paid || 0).toFixed(2)}
+                              </td>
+                              <td className="px-4 py-3 text-right font-medium text-purple-700 text-xs">
+                                {currency} {Number(pur.salary_deducted || 0).toFixed(2)}
+                              </td>
+                              <td className="px-4 py-3 text-right font-bold text-amber-800">
+                                {currency} {Number(pur.outstanding_amount || 0).toFixed(2)}
                               </td>
                               <td className="px-4 py-3 text-center">
                                 <Badge
                                   className={
                                     pur.payment_status === "Paid"
-                                      ? "bg-emerald-100 text-emerald-800"
-                                      : "bg-amber-100 text-amber-800"
+                                      ? "bg-emerald-100 text-emerald-800 border-emerald-200"
+                                      : pur.payment_status === "Partially Paid"
+                                      ? "bg-blue-100 text-blue-800 border-blue-200"
+                                      : "bg-amber-100 text-amber-800 border-amber-200"
                                   }
                                 >
                                   {pur.payment_status || "Pending"}
                                 </Badge>
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 text-xs border-slate-200 text-slate-700 hover:bg-slate-100"
+                                  onClick={() => {
+                                    setSelectedPurchaseForAudit(pur)
+                                    setIsAuditModalOpen(true)
+                                  }}
+                                >
+                                  <FileText className="h-3.5 w-3.5 mr-1 text-slate-500" /> History
+                                </Button>
                               </td>
                             </tr>
                           ))}
@@ -797,7 +1023,7 @@ export default function StaffProfileTab() {
                     </div>
 
                     {/* Purchases Pagination */}
-                    <div className="flex items-center justify-between pt-2">
+                    <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 text-center sm:text-left">
                       <p className="text-xs text-slate-500">
                         Showing {Math.min((purchasesPage - 1) * ITEMS_PER_PAGE + 1, purchasesList.length)} to{" "}
                         {Math.min(purchasesPage * ITEMS_PER_PAGE, purchasesList.length)} of {purchasesList.length} entries
@@ -889,20 +1115,29 @@ export default function StaffProfileTab() {
       <Dialog open={isSubmitOpen} onOpenChange={setIsSubmitOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle className="capitalize text-slate-900">
-              Submit {requestForm.requestType.replace("_", " ")}
+            <DialogTitle className="text-slate-900 flex items-center gap-2">
+              {requestForm.requestType === "salary_advance" && "💵 Request Salary Advance"}
+              {requestForm.requestType === "credit_request" && "💳 Request Staff Purchase / Credit"}
+              {requestForm.requestType === "leave_request" && "📅 Request Leave"}
             </DialogTitle>
+            <DialogDescription className="text-xs text-slate-500">
+              {requestForm.requestType === "credit_request"
+                ? "Submit a request to purchase items on staff credit or store credit account."
+                : "Submit your request to management/admin for approval."}
+            </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
             {requestForm.requestType !== "leave_request" ? (
               <div className="space-y-1">
-                <Label className="text-xs font-semibold">Requested Amount ({currency})</Label>
+                <Label className="text-xs font-semibold">
+                  {requestForm.requestType === "credit_request" ? "Purchase / Credit Amount" : "Requested Amount"} ({currency})
+                </Label>
                 <Input
                   type="number"
                   value={requestForm.amount || ""}
                   onChange={(e) => setRequestForm({ ...requestForm, amount: Number(e.target.value) })}
-                  placeholder="e.g. 5000"
+                  placeholder="e.g. 2500"
                 />
               </div>
             ) : (
@@ -945,6 +1180,110 @@ export default function StaffProfileTab() {
             </Button>
             <Button onClick={handleSubmitRequest} disabled={isSubmitting} className="bg-blue-600 hover:bg-blue-700 text-white">
               {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Submit Request"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* MODAL 3: STAFF PURCHASE TRANSACTION HISTORY & AUDIT TRAIL */}
+      <Dialog open={isAuditModalOpen} onOpenChange={setIsAuditModalOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-slate-900">
+              <ShoppingBag className="h-5 w-5 text-purple-600" />
+              Staff Purchase Audit Trail — #{selectedPurchaseForAudit?.tracking_id || selectedPurchaseForAudit?.id}
+            </DialogTitle>
+            <DialogDescription className="text-xs text-slate-500">
+              Detailed record of direct payments and salary deductions applied towards this staff purchase.
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedPurchaseForAudit && (
+            <div className="space-y-4 py-2">
+              <div className="grid grid-cols-3 gap-2 bg-slate-50 p-3 rounded-xl border text-xs">
+                <div>
+                  <span className="text-slate-500 block text-[10px] uppercase font-semibold">Purchase Total</span>
+                  <span className="font-bold text-slate-900 text-sm">
+                    {currency} {Number(selectedPurchaseForAudit.total_amount || 0).toFixed(2)}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block text-[10px] uppercase font-semibold">Total Settled</span>
+                  <span className="font-bold text-emerald-700 text-sm">
+                    {currency} {Number(selectedPurchaseForAudit.paid_amount || 0).toFixed(2)}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block text-[10px] uppercase font-semibold">Outstanding</span>
+                  <span className="font-bold text-amber-800 text-sm">
+                    {currency} {Number(selectedPurchaseForAudit.outstanding_amount || 0).toFixed(2)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <h4 className="text-xs font-bold text-slate-800 flex items-center justify-between">
+                  <span>Settlement Transactions</span>
+                  <Badge variant="outline" className="text-[10px]">
+                    {selectedPurchaseForAudit.settlements?.length || 0} Transactions
+                  </Badge>
+                </h4>
+
+                {!selectedPurchaseForAudit.settlements || selectedPurchaseForAudit.settlements.length === 0 ? (
+                  <div className="text-center py-6 bg-slate-50 rounded-lg border border-dashed text-xs text-slate-500">
+                    No direct payments or salary deductions recorded yet.
+                  </div>
+                ) : (
+                  <div className="rounded-lg border overflow-hidden max-h-60 overflow-y-auto">
+                    <table className="w-full text-xs text-left">
+                      <thead className="bg-slate-50 text-slate-500 uppercase text-[10px] border-b">
+                        <tr>
+                          <th className="p-2 font-semibold">Date</th>
+                          <th className="p-2 font-semibold">Type</th>
+                          <th className="p-2 font-semibold">Details</th>
+                          <th className="p-2 font-semibold text-right">Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {selectedPurchaseForAudit.settlements.map((st: any) => (
+                          <tr key={st.id} className="hover:bg-slate-50/50">
+                            <td className="p-2 font-mono text-[11px]">
+                              {new Date(st.created_at).toLocaleDateString()}
+                            </td>
+                            <td className="p-2">
+                              {st.settlement_type === "direct_payment" ? (
+                                <Badge className="bg-blue-100 text-blue-800 border-blue-200 text-[10px] px-1.5 py-0">
+                                  Direct Payment
+                                </Badge>
+                              ) : (
+                                <Badge className="bg-purple-100 text-purple-800 border-purple-200 text-[10px] px-1.5 py-0">
+                                  Salary Deduction
+                                </Badge>
+                              )}
+                            </td>
+                            <td className="p-2 text-slate-600 text-[11px]">
+                              {st.settlement_type === "salary_deduction" ? (
+                                <span>Salary: {st.salary_month || st.payment_month || "Payroll"}</span>
+                              ) : (
+                                <span>{st.payment_method || "Direct Cash/UPI"}</span>
+                              )}
+                            </td>
+                            <td className="p-2 text-right font-bold text-slate-900">
+                              {currency} {Number(st.amount || 0).toFixed(2)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setIsAuditModalOpen(false)}>
+              Close
             </Button>
           </DialogFooter>
         </DialogContent>

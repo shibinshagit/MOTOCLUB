@@ -15,6 +15,7 @@ import { getSaleDeliveryLabel, isPendingSale, isCriticalSale, isJobCardSale, isN
 import { DeliveryStatusSelect } from "@/components/sales/delivery-status-select"
 import { PhoneCell } from "@/components/sales/phone-cell"
 import { TrackingCell } from "@/components/sales/tracking-cell"
+import { StaffOwnerSelect } from "@/components/sales/staff-owner-select"
 import { parseSaleDate, cn } from "@/lib/utils"
 import { printJobCard, printBatchJobCards, printSalesReceipt } from "@/lib/receipt-utils"
 import { getSaleDetails, getPaginatedUserSales, getSalesSummaryCards } from "@/app/actions/sale-actions"
@@ -138,7 +139,7 @@ function DeliveryStatusBadge({ status }: { status: string }) {
   )
 }
 
-type ColumnKey = "saleId" | "status" | "delivery" | "date" | "customer" | "payment" | "total" | "received" | "balance"
+type ColumnKey = "saleId" | "status" | "delivery" | "date" | "customer" | "staff" | "payment" | "total" | "received" | "balance"
 
 type ColumnFilters = Record<ColumnKey, ExcelColumnFilterValue>
 
@@ -249,6 +250,7 @@ export default function SalesExcelTable({
       delivery: (sale: any) => getSaleDeliveryLabel(sale),
       date: (sale: any) => format(parseSaleDate(sale.sale_date), "yyyy-MM-dd"),
       customer: (sale: any) => sale.customer_name || "Walk-in",
+      staff: (sale: any) => sale.staff_name || "Store / Admin",
       payment: (sale: any) => getPaymentMethodDisplay(sale),
       total: (sale: any) => formatCurrency(Number(sale.total_amount)),
       received: (sale: any) => {
@@ -1035,6 +1037,7 @@ export default function SalesExcelTable({
                   {headerCell("delivery", "Delivery Status")}
                   {headerCell("date", "Date & Time")}
                   {headerCell("customer", "Customer")}
+                  {headerCell("staff", "Staff Member")}
                   {headerCell("payment", "Payment")}
                   {headerCell("total", "Total / Profit", "right")}
                   {headerCell("received", "Received", "right")}
@@ -1045,19 +1048,19 @@ export default function SalesExcelTable({
               <tbody>
                 {isLoading && !hasLoadedSales ? (
                   <tr>
-                    <td colSpan={13}>
+                    <td colSpan={14}>
                       <TableSkeleton />
                     </td>
                   </tr>
                 ) : error ? (
                   <tr>
-                    <td colSpan={13} className="px-4 py-8 text-center text-sm text-rose-600">
+                    <td colSpan={14} className="px-4 py-8 text-center text-sm text-rose-600">
                       {error}
                     </td>
                   </tr>
                 ) : displaySales.length === 0 ? (
                   <tr>
-                    <td colSpan={13} className="px-4 py-12 text-center text-sm text-muted-foreground">
+                    <td colSpan={14} className="px-4 py-12 text-center text-sm text-muted-foreground">
                       {sales.length === 0 ? `No sales found for ${periodLabel}` : "No sales match the current filters"}
                     </td>
                   </tr>
@@ -1248,6 +1251,15 @@ export default function SalesExcelTable({
                             ) : null}
                           </div>
                         </td>
+                        <td className="whitespace-nowrap px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
+                          <StaffOwnerSelect
+                            saleId={sale.id}
+                            deviceId={sale.device_id || deviceId || 0}
+                            currentStaffId={sale.staff_id}
+                            currentStaffName={sale.staff_name}
+                            onUpdate={onRefreshSales}
+                          />
+                        </td>
                         <td className="whitespace-nowrap px-4 py-2.5 text-slate-600">
                           {getPaymentMethodDisplay(sale)}
                         </td>
@@ -1301,7 +1313,7 @@ export default function SalesExcelTable({
 
                     const expandedRow = (
                       <tr key={`expand-${sale.id}`} className="bg-slate-50 border-b border-slate-200">
-                        <td colSpan={13} className="p-3" onClick={(e) => e.stopPropagation()}>
+                        <td colSpan={14} className="p-3" onClick={(e) => e.stopPropagation()}>
                           <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs space-y-3">
                             <div className="flex flex-wrap items-center justify-between border-b border-slate-100 pb-2 gap-2">
                               <div className="flex items-center gap-2">
@@ -1339,7 +1351,7 @@ export default function SalesExcelTable({
                                 </div>
                               </div>
 
-                              {/* Customer & Address */}
+                              {/* Customer & Address & Staff */}
                               <div className="space-y-1.5">
                                 <span className="font-bold text-slate-700 block">Customer Information:</span>
                                 <p className="font-semibold text-slate-900">{sale.customer_name || "Walk-in Customer"}</p>
@@ -1349,6 +1361,16 @@ export default function SalesExcelTable({
                                   deviceId={deviceId}
                                   onUpdate={onRefreshSales}
                                 />
+                                <div className="pt-1">
+                                  <span className="text-[11px] font-semibold text-slate-500 block mb-0.5">Assigned Staff / Owner:</span>
+                                  <StaffOwnerSelect
+                                    saleId={sale.id}
+                                    deviceId={sale.device_id || deviceId || 0}
+                                    currentStaffId={sale.staff_id}
+                                    currentStaffName={sale.staff_name}
+                                    onUpdate={onRefreshSales}
+                                  />
+                                </div>
                                 {sale.shipping_address && (
                                   <p className="text-slate-600 text-[11px] mt-1">
                                     <MapPin className="inline h-3 w-3 mr-1 text-slate-400" />
@@ -1553,6 +1575,18 @@ export default function SalesExcelTable({
                           {format(parseSaleDate(sale.sale_date), "hh:mm a")}
                         </span>
                       </div>
+                    </div>
+
+                    {/* ASSIGNED STAFF / OWNER */}
+                    <div className="flex items-center justify-between gap-2 text-xs bg-slate-50 p-2 rounded-lg border border-slate-100" onClick={(e) => e.stopPropagation()}>
+                      <span className="text-[11px] font-semibold text-slate-500 shrink-0">Assigned Staff:</span>
+                      <StaffOwnerSelect
+                        saleId={sale.id}
+                        deviceId={sale.device_id || deviceId || 0}
+                        currentStaffId={sale.staff_id}
+                        currentStaffName={sale.staff_name}
+                        onUpdate={onRefreshSales}
+                      />
                     </div>
 
                     {/* ITEMS SUMMARY & PROFIT */}

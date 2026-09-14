@@ -77,26 +77,26 @@ export function PartnerSalesChart({ partnerId }: PartnerSalesChartProps) {
   }, [partnerId, currentMonth])
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-      <div className="flex justify-between items-center mb-6">
-        <div className="flex items-center gap-3">
-          <div className="bg-indigo-50 p-2 rounded-lg">
-            <TrendingUp className="h-5 w-5 text-indigo-500" />
+    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-3.5 sm:p-6 overflow-hidden">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 sm:mb-6">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="bg-indigo-50 p-2 rounded-lg shrink-0">
+            <TrendingUp className="h-4 w-4 sm:h-5 sm:w-5 text-indigo-500" />
           </div>
-          <h2 className="text-xl font-bold text-gray-900">Earnings Trend</h2>
+          <h2 className="text-base sm:text-xl font-bold text-gray-900 truncate">Earnings Trend</h2>
         </div>
-        <div className="flex items-center gap-4">
-          <div className="text-xs font-medium text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-xs">
+          <div className="text-[11px] font-medium text-gray-500 bg-gray-100 px-2.5 py-1 rounded-full whitespace-nowrap">
             {format(startOfMonth(currentMonth), 'M/d/yyyy')} - {format(endOfMonth(currentMonth), 'M/d/yyyy')}
           </div>
-          <div className="flex bg-gray-50 border border-gray-100 rounded-lg p-0.5">
+          <div className="flex bg-gray-50 border border-gray-100 rounded-lg p-0.5 shrink-0">
             <Button 
               variant="ghost" 
               size="sm" 
               onClick={() => setChartType('bar')}
               className={`h-7 w-8 p-0 rounded-md ${chartType === 'bar' ? 'bg-white shadow-sm text-indigo-500' : 'hover:bg-gray-100 text-gray-400'}`}
             >
-              <BarChart2 className="h-4 w-4" />
+              <BarChart2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
             </Button>
             <Button 
               variant="ghost" 
@@ -104,17 +104,17 @@ export function PartnerSalesChart({ partnerId }: PartnerSalesChartProps) {
               onClick={() => setChartType('line')}
               className={`h-7 w-8 p-0 rounded-md ${chartType === 'line' ? 'bg-white shadow-sm text-indigo-500' : 'hover:bg-gray-100 text-gray-400'}`}
             >
-              <TrendingUp className="h-4 w-4" />
+              <TrendingUp className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
             </Button>
           </div>
-          <div className="flex items-center gap-1.5 text-xs font-medium text-gray-600">
-            <div className="w-2.5 h-2.5 rounded-full bg-emerald-400"></div>
-            Earnings
+          <div className="flex items-center gap-1.5 text-[11px] sm:text-xs font-medium text-gray-600 shrink-0">
+            <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 shrink-0"></div>
+            <span>Earnings</span>
           </div>
         </div>
       </div>
 
-      <div className="h-80 w-full">
+      <div className="h-64 sm:h-80 w-full">
         {isLoading ? (
           <div className="h-full flex items-center justify-center">
             <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
@@ -132,13 +132,14 @@ export function PartnerSalesChart({ partnerId }: PartnerSalesChartProps) {
                   dataKey="dayStr" 
                   axisLine={false}
                   tickLine={false}
-                  tick={{ fontSize: 10, fill: '#94a3b8' }}
+                  tick={{ fontSize: 9, fill: '#94a3b8' }}
                   dy={10}
+                  interval="preserveStartEnd"
                 />
                 <YAxis 
                   axisLine={false}
                   tickLine={false}
-                  tick={{ fontSize: 10, fill: '#94a3b8' }}
+                  tick={{ fontSize: 9, fill: '#94a3b8' }}
                   tickFormatter={(value) => `₹${value}`}
                 />
                 <Tooltip
@@ -156,13 +157,14 @@ export function PartnerSalesChart({ partnerId }: PartnerSalesChartProps) {
                   dataKey="dayStr" 
                   axisLine={false}
                   tickLine={false}
-                  tick={{ fontSize: 10, fill: '#94a3b8' }}
+                  tick={{ fontSize: 9, fill: '#94a3b8' }}
                   dy={10}
+                  interval="preserveStartEnd"
                 />
                 <YAxis 
                   axisLine={false}
                   tickLine={false}
-                  tick={{ fontSize: 10, fill: '#94a3b8' }}
+                  tick={{ fontSize: 9, fill: '#94a3b8' }}
                   tickFormatter={(value) => `₹${value}`}
                 />
                 <Tooltip

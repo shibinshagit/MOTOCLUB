@@ -29,6 +29,7 @@ import ReturnSaleModal from "@/components/sales/return-sale-modal"
 import { CreateReplacementModal } from "@/components/sales/create-replacement-modal"
 import { ReplacementShipmentCard } from "@/components/sales/replacement-shipment-card"
 import { buildTrackingUrl, mapSaleShippingFromRecord } from "@/lib/sale-shipping"
+import { StaffOwnerSelect } from "@/components/sales/staff-owner-select"
 import { cn } from "@/lib/utils"
 
 interface ViewSaleModalProps {
@@ -537,7 +538,20 @@ export default function ViewSaleModal({
                   />
                   <InfoCell label="Payment" value={getPaymentMethodDisplay(saleData.payment_method)} />
                   <InfoCell label="Customer" value={saleData.customer_name || "Walk-in Customer"} />
-                  <InfoCell label="Staff" value={saleData.staff_name || "Not assigned"} />
+                  <div className="border-b border-slate-200 px-4 py-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Staff / Assigned Owner</p>
+                    <div className="mt-1">
+                      <StaffOwnerSelect
+                        saleId={saleData.id}
+                        deviceId={saleData.device_id || deviceId || 0}
+                        currentStaffId={saleData.staff_id}
+                        currentStaffName={saleData.staff_name}
+                        onUpdate={() => {
+                          reloadSaleDetails()
+                        }}
+                      />
+                    </div>
+                  </div>
                   <InfoCell label="Phone" value={getDisplayValue(saleData.customer_phone)} />
                   <InfoCell label="Email" value={getDisplayValue(saleData.customer_email)} />
                   {saleData.customer_address ? (

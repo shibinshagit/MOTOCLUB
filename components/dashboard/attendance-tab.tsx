@@ -32,7 +32,7 @@ import {
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { getFilteredAttendance, updateAttendanceStatus, AttendanceRecord } from "@/app/actions/attendance-actions"
-import { Search, Loader2, Calendar as CalendarIcon, Clock, Edit2, Download, Printer, Filter, UserCircle } from "lucide-react"
+import { Search, Loader2, Calendar as CalendarIcon, Clock, Edit2, Download, Printer, Filter, UserCircle, FileText } from "lucide-react"
 
 export default function AttendanceTab() {
   const device = useAppSelector(selectDevice)
@@ -204,7 +204,8 @@ export default function AttendanceTab() {
 
   const filteredAttendance = attendance.filter(a => {
     const matchesSearch = (a.staff_name || "").toLowerCase().includes(searchTerm.toLowerCase()) || 
-                          (a.staff_phone || "").includes(searchTerm)
+                          (a.staff_phone || "").includes(searchTerm) ||
+                          (a.remarks || "").toLowerCase().includes(searchTerm.toLowerCase())
     return matchesSearch
   })
 
@@ -367,10 +368,10 @@ export default function AttendanceTab() {
             <div className="flex flex-wrap gap-2">
               <div className="relative">
                 <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-500" />
-                <Input type="text" placeholder="Search staff..." className="pl-9 w-[180px]" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+                <Input type="text" placeholder="Search staff or notes..." className="pl-9 w-[220px]" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
               </div>
               <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-[130px]"><SelectValue placeholder="Status" /></SelectTrigger>
+                <SelectTrigger className="w-[150px]"><SelectValue placeholder="Status" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="All">All Statuses</SelectItem>
                   <SelectItem value="Present">Present</SelectItem>
@@ -380,6 +381,7 @@ export default function AttendanceTab() {
                   <SelectItem value="Holiday">Holiday</SelectItem>
                   <SelectItem value="Week Off">Week Off</SelectItem>
                   <SelectItem value="Late">Late</SelectItem>
+                  <SelectItem value="Note">Daily Note / Remark</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -410,7 +412,7 @@ export default function AttendanceTab() {
                     <th className="px-4 py-3 font-medium">Check In</th>
                     <th className="px-4 py-3 font-medium">Check Out</th>
                     <th className="px-4 py-3 font-medium">Working Hrs</th>
-                    <th className="px-4 py-3 font-medium">Remarks</th>
+                    <th className="px-4 py-3 font-medium">Remarks / Daily Note</th>
                     <th className="px-4 py-3 font-medium text-right print:hidden">Actions</th>
                   </tr>
                 </thead>
@@ -436,19 +438,32 @@ export default function AttendanceTab() {
                           record.status === 'Leave' ? 'bg-purple-100 text-purple-800 print:text-purple-800' :
                           record.status === 'Holiday' ? 'bg-amber-100 text-amber-800 print:text-amber-800' :
                           record.status === 'Week Off' ? 'bg-slate-100 text-slate-800 print:text-slate-800' :
+                          record.status === 'Note' ? 'bg-indigo-100 text-indigo-800 border-indigo-200 print:text-indigo-800' :
                           'bg-gray-100 text-gray-800 print:text-gray-800'
                         }`}>
-                          {record.status || (record.check_in ? 'Present' : 'Not Marked')}
+                          {record.status === 'Note' ? 'Note Added' : (record.status || (record.check_in ? 'Present' : 'Not Marked'))}
                         </span>
                       </td>
                       <td className="px-4 py-3">{formatTime(record.check_in)}</td>
                       <td className="px-4 py-3">{formatTime(record.check_out)}</td>
                       <td className="px-4 py-3">{formatHours(record.working_minutes)}</td>
-                      <td className="px-4 py-3 text-sm text-gray-600 max-w-[150px] truncate print:whitespace-normal">
-                        {record.remarks || "-"}
+                      <td className="px-4 py-3 text-sm">
+                        {record.remarks ? (
+                          <button
+                            type="button"
+                            onClick={() => handleEditClick(record)}
+                            className="flex items-center gap-1.5 text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-2.5 py-1 rounded-md text-xs font-medium max-w-[200px] text-left transition-colors shadow-2xs group"
+                            title="Click to view or edit full daily note"
+                          >
+                            <FileText className="h-3.5 w-3.5 shrink-0 text-amber-600 group-hover:scale-110 transition-transform" />
+                            <span className="truncate">{record.remarks}</span>
+                          </button>
+                        ) : (
+                          <span className="text-gray-400 font-mono">-</span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-right print:hidden">
-                        <Button variant="ghost" size="sm" onClick={() => handleEditClick(record)}>
+                        <Button variant="ghost" size="sm" onClick={() => handleEditClick(record)} title="Edit Attendance or Note">
                           <Edit2 className="h-4 w-4" />
                         </Button>
                       </td>

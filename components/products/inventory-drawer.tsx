@@ -38,6 +38,7 @@ import {
   updateProduct,
   removeProduct,
   setSearchTerm,
+  setSelectedCategory,
   setError,
   setSilentRefreshing,
 } from "@/store/slices/productSlice"
@@ -61,7 +62,7 @@ export default function InventoryDrawer({
   onModalClose,
 }: InventoryDrawerProps) {
   const dispatch = useDispatch<AppDispatch>()
-  const { products, searchTerm, loading, error, fetchedTime, needsRefresh, silentRefreshing } = useSelector(
+  const { products, searchTerm, selectedCategory, loading, error, fetchedTime, needsRefresh, silentRefreshing } = useSelector(
     (state: RootState) => state.product,
   )
   const currency = useSelector(selectDeviceCurrency)
@@ -108,9 +109,19 @@ export default function InventoryDrawer({
   }, [open, hasCachedProducts, hasLoaded])
 
   const searchedProducts = useMemo(() => {
-    if (!searchTerm.trim()) return products
-    return filterProductsSemantic(products, searchTerm)
-  }, [products, searchTerm])
+    let result = products
+    if (selectedCategory) {
+      const catName = selectedCategory.name.toLowerCase()
+      result = result.filter(
+        (p) =>
+          (p.category_id && selectedCategory.id && String(p.category_id) === String(selectedCategory.id)) ||
+          (p.category && String(p.category).toLowerCase() === catName) ||
+          (p.category_name && String(p.category_name).toLowerCase() === catName)
+      )
+    }
+    if (!searchTerm.trim()) return result
+    return filterProductsSemantic(result, searchTerm)
+  }, [products, searchTerm, selectedCategory])
 
   const fetchProducts = useCallback(
     async ({ silent = false, force = false }: { silent?: boolean; force?: boolean } = {}) => {
@@ -278,11 +289,13 @@ export default function InventoryDrawer({
                 <InventorySearchBox
                   value={searchTerm}
                   onChange={(val) => dispatch(setSearchTerm(val))}
+                  selectedCategory={selectedCategory}
+                  onSelectCategory={(cat) => dispatch(setSelectedCategory(cat))}
                   onSelectProduct={handleViewProduct}
                   products={products}
                   userId={userId}
                   placeholder="Search products..."
-                  className="w-48 lg:w-56"
+                  className="w-auto min-w-[200px]"
                 />
               </div>
 
@@ -325,6 +338,8 @@ export default function InventoryDrawer({
             <InventorySearchBox
               value={searchTerm}
               onChange={(val) => dispatch(setSearchTerm(val))}
+              selectedCategory={selectedCategory}
+              onSelectCategory={(cat) => dispatch(setSelectedCategory(cat))}
               onSelectProduct={handleViewProduct}
               products={products}
               userId={userId}

@@ -20,6 +20,11 @@ export interface Product {
   [key: string]: any
 }
 
+export interface SelectedCategoryFilter {
+  id?: number | string | null
+  name: string
+}
+
 interface ProductState {
   products: Product[]
   filteredProducts: Product[]
@@ -27,6 +32,7 @@ interface ProductState {
   silentRefreshing: boolean
   error: string | null
   searchTerm: string
+  selectedCategory: SelectedCategoryFilter | null
   showingAll: boolean
   currency: string
   lastUpdated: Date | null
@@ -41,6 +47,7 @@ const initialState: ProductState = {
   silentRefreshing: false,
   error: null,
   searchTerm: "",
+  selectedCategory: null,
   showingAll: true,
   currency: "USD",
   lastUpdated: null,
@@ -116,6 +123,9 @@ const productSlice = createSlice({
     setSearchTerm: (state, action: PayloadAction<string>) => {
       state.searchTerm = action.payload
     },
+    setSelectedCategory: (state, action: PayloadAction<SelectedCategoryFilter | null>) => {
+      state.selectedCategory = action.payload
+    },
     setShowingAll: (state, action: PayloadAction<boolean>) => {
       state.showingAll = action.payload
     },
@@ -125,6 +135,7 @@ const productSlice = createSlice({
     clearFilters: (state) => {
       state.filteredProducts = state.products
       state.searchTerm = ""
+      state.selectedCategory = null
       state.showingAll = true
     },
     resetProductsState: (state) => {
@@ -134,6 +145,7 @@ const productSlice = createSlice({
       state.silentRefreshing = false
       state.error = null
       state.searchTerm = ""
+      state.selectedCategory = null
       state.showingAll = true
       state.currency = "USD"
       state.lastUpdated = null
@@ -154,6 +166,7 @@ export const {
   forceClearProducts,
   setError,
   setSearchTerm,
+  setSelectedCategory,
   setShowingAll,
   setCurrency,
   clearFilters,

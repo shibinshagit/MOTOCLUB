@@ -94,9 +94,11 @@ export default function LoginForm() {
       {error && <FormAlert type="error" message={error} />}
 
       <div className="space-y-2">
-        <Label htmlFor="phone">Email or Phone</Label>
+        <Label htmlFor="phone" className="text-sm font-semibold text-slate-700">
+          Email or Phone
+        </Label>
         <div className="relative">
-          <PhoneIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+          <PhoneIcon className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <Input
             id="phone"
             name="phone"
@@ -104,15 +106,17 @@ export default function LoginForm() {
             placeholder="Enter your email or phone number"
             required
             autoComplete="username"
-            className="border-gray-200 bg-white pl-10"
+            className="h-11 border-slate-200 bg-white pl-10 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20 rounded-xl"
           />
         </div>
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="password">Password</Label>
+        <Label htmlFor="password" className="text-sm font-semibold text-slate-700">
+          Password
+        </Label>
         <div className="relative">
-          <LockIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+          <LockIcon className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <Input
             id="password"
             name="password"
@@ -120,29 +124,33 @@ export default function LoginForm() {
             placeholder="Enter your password"
             required
             autoComplete="current-password"
-            className="border-gray-200 bg-white pl-10 pr-10"
+            className="h-11 border-slate-200 bg-white pl-10 pr-11 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20 rounded-xl"
           />
           <Button
             type="button"
             variant="ghost"
             size="sm"
-            className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
+            className="absolute right-1 top-1/2 h-9 w-9 -translate-y-1/2 p-0 text-slate-400 hover:bg-slate-100 hover:text-slate-700 rounded-lg"
             onClick={() => setShowPassword(!showPassword)}
           >
-            {showPassword ? <EyeOffIcon className="h-4 w-4 text-gray-400" /> : <EyeIcon className="h-4 w-4 text-gray-400" />}
+            {showPassword ? <EyeOffIcon className="h-4 w-4" /> : <EyeIcon className="h-4 w-4" />}
             <span className="sr-only">{showPassword ? "Hide password" : "Show password"}</span>
           </Button>
         </div>
       </div>
 
-      <Button type="submit" className="w-full" disabled={isLoading}>
+      <Button
+        type="submit"
+        className="w-full h-11 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm rounded-xl shadow-sm transition-all duration-200 active:scale-[0.99]"
+        disabled={isLoading}
+      >
         {isLoading ? (
-          <>
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            Signing in...
-          </>
+          <div className="flex items-center justify-center gap-2">
+            <Loader2 className="h-4 w-4 animate-spin text-white" />
+            <span>Signing in...</span>
+          </div>
         ) : (
-          "Sign in"
+          "Sign In"
         )}
       </Button>
     </form>

@@ -10,6 +10,7 @@ import { Plus, Trash2, CheckCircle2, User, Phone, MapPin, Loader2 } from "lucide
 import { useToast } from "@/components/ui/use-toast"
 import { useSelector } from "react-redux"
 import { selectDeviceId, selectDeviceCurrency } from "@/store/slices/deviceSlice"
+import { selectActiveStaff } from "@/store/slices/staffSlice"
 import { createJobCard, updateJobCard } from "@/app/actions/job-card-actions"
 import { getSaleDetails } from "@/app/actions/sale-actions"
 import { getCustomerAddresses, addSecondaryCustomerAddress, setDefaultCustomerAddress } from "@/app/actions/customer-actions"
@@ -51,6 +52,7 @@ export function JobCardForm({
 }) {
   const deviceId = useSelector(selectDeviceId)
   const currency = useSelector(selectDeviceCurrency)
+  const activeStaff = useSelector(selectActiveStaff)
   const { toast } = useToast()
 
   const [isLoading, setIsLoading] = useState(false)
@@ -503,6 +505,7 @@ export function JobCardForm({
         customerPhone,
         customerId,
         deviceId,
+        staffId: activeStaff?.id || null,
         shippingPhone,
         shippingCity,
         shippingDistrict,
@@ -672,17 +675,17 @@ export function JobCardForm({
 
   return (
     <>
-    <form onSubmit={handleSubmit} className="space-y-6 max-w-5xl mx-auto pb-24">
+    <form onSubmit={handleSubmit} className="space-y-6 max-w-5xl mx-auto pb-24 w-full overflow-x-hidden">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold tracking-tight text-gray-900">{editSaleId ? "Edit Job Card" : "Create Job Card"}</h1>
-        <p className="text-muted-foreground text-sm">Internal order {editSaleId ? "editing" : "creation"} screen without inventory/accounting updates</p>
+        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900">{editSaleId ? "Edit Job Card" : "Create Job Card"}</h1>
+        <p className="text-muted-foreground text-xs sm:text-sm mt-0.5">Internal order {editSaleId ? "editing" : "creation"} screen without inventory/accounting updates</p>
       </div>
 
       <div className="space-y-6">
         {/* Customer Checkout Style Details */}
         <Card className="shadow-sm border-gray-200">
-          <CardHeader className="border-b bg-gray-50/50 py-4">
+          <CardHeader className="border-b bg-gray-50/50 py-3 sm:py-4">
             <CardTitle className="text-base font-semibold flex items-center gap-2 text-gray-900">
               <User className="h-4 w-4 text-gray-500" /> Customer Information
             </CardTitle>
@@ -777,20 +780,20 @@ export function JobCardForm({
 
         {/* Shipping Address - Checkout Style */}
         <Card className="shadow-sm border-gray-200">
-          <CardHeader className="border-b bg-gray-50/50 py-4">
+          <CardHeader className="border-b bg-gray-50/50 py-3 sm:py-4">
             <CardTitle className="text-base font-semibold flex items-center gap-2 text-gray-900">
               <MapPin className="h-4 w-4 text-gray-500" /> Shipping Address
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4 pt-4">
             {customerId && (
-              <div className="space-y-3 mb-6 bg-gray-50 p-4 rounded-lg border border-gray-100">
+              <div className="space-y-3 mb-6 bg-gray-50 p-3 sm:p-4 rounded-lg border border-gray-100">
                 <div className="flex items-center justify-between">
                   <Label className="text-sm font-semibold text-gray-700">Saved Addresses</Label>
                 </div>
                 
                 {customerAddresses.length > 0 ? (
-                  <div className="flex flex-wrap gap-3">
+                  <div className="flex flex-nowrap sm:flex-wrap overflow-x-auto pb-2 gap-2.5 max-w-full">
                     {customerAddresses.map((addr: any) => {
                       const isSelected = 
                         shippingCity === (addr.city || "") && 
@@ -811,7 +814,7 @@ export function JobCardForm({
                             setShippingPincode(addr.pincode || "")
                             setShippingPhone(addr.phone || customerPhone || "")
                           }}
-                          className={`relative cursor-pointer border rounded-md p-3 text-left transition-all hover:border-gray-400 min-w-[200px] ${
+                          className={`relative cursor-pointer border rounded-md p-3 text-left transition-all hover:border-gray-400 min-w-[170px] sm:min-w-[200px] shrink-0 ${
                             isSelected ? "border-black ring-1 ring-black bg-white" : "border-gray-200 bg-white"
                           }`}
                         >
@@ -822,7 +825,7 @@ export function JobCardForm({
                             </span>
                           </div>
                           <div className="text-xs text-gray-500 space-y-0.5">
-                            <p className="truncate max-w-[180px]">{addr.street}</p>
+                            <p className="truncate max-w-[150px]">{addr.street}</p>
                             <p>{addr.city}{addr.pincode ? `, ${addr.pincode}` : ""}</p>
                             <p className="flex items-center gap-1 mt-1"><Phone className="h-3 w-3" /> {addr.phone || customerPhone}</p>
                           </div>
@@ -846,10 +849,10 @@ export function JobCardForm({
                     <button
                       type="button"
                       onClick={() => setIsAddAddressModalOpen(true)}
-                      className="border border-dashed border-gray-300 rounded-md p-3 flex flex-col items-center justify-center text-gray-500 hover:bg-gray-100 hover:text-gray-900 transition-colors min-w-[150px]"
+                      className="border border-dashed border-gray-300 rounded-md p-3 flex flex-col items-center justify-center text-gray-500 hover:bg-gray-100 hover:text-gray-900 transition-colors min-w-[140px] shrink-0"
                     >
                       <Plus className="h-5 w-5 mb-1" />
-                      <span className="text-xs font-medium">Add Secondary<br/>Address</span>
+                      <span className="text-xs font-medium text-center">Add Secondary<br/>Address</span>
                     </button>
                   </div>
                 ) : null}
@@ -978,7 +981,7 @@ export function JobCardForm({
 
       {/* Products Section */}
       <Card className="shadow-sm border-gray-200">
-        <CardHeader className="border-b bg-gray-50/50 py-4 flex flex-row items-center justify-between">
+        <CardHeader className="border-b bg-gray-50/50 py-3 sm:py-4 flex flex-row items-center justify-between">
           <CardTitle className="text-base font-semibold text-gray-900">Product Line Items</CardTitle>
           <Button
             type="button"
@@ -1016,121 +1019,225 @@ export function JobCardForm({
         </CardHeader>
         <CardContent className="pt-4 space-y-4">
           
-          <div className="rounded-md border border-gray-200 overflow-hidden w-full">
-            <div className="overflow-x-auto w-full">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-gray-600 font-medium border-b border-gray-200">
-                <tr>
-                  <th className="p-3 text-left w-[40%]">Product Search</th>
-                  <th className="p-3 text-left w-[20%]">Variant</th>
-                  <th className="p-3 text-right w-[10%]">Qty</th>
-                  <th className="p-3 text-right w-[15%] text-xs font-normal text-gray-400">MSP</th>
-                  <th className="p-3 text-right w-[15%]">MRP</th>
-                  <th className="p-3 text-right w-[15%]">Total</th>
-                  <th className="p-3 w-[50px]"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {products.map((product) => (
-                  <tr key={product.id} className="hover:bg-gray-50/30">
-                    <td className="p-2">
-                      <ProductSelectSimple
-                        value={product.productId}
-                        initialProductName={product.productName}
-                        onChange={(id, name, price, ws, stock, obj) => handleProductSelect(product.id, id, name, price, ws, stock, obj)}
-                        onAddNew={() => {
-                          setActiveRowIdForNewProduct(product.id)
-                          setIsNewProductModalOpen(true)
-                        }}
-                        userId={deviceId || 1}
-                        usePriceType="retail"
-                        hideServiceIcon={true}
-                      />
-                    </td>
-                    <td className="p-2">
-                      <VariantSelect
-                        variants={product.productObj?.variants || []}
-                        value={product.variantId || undefined}
-                        onChange={(vId, vName) => {
-                          updateProductRow(product.id, "variantId", vId)
-                          updateProductRow(product.id, "variantName", vName)
-                          
-                          const variant = product.productObj?.variants?.find((v: any) => v.id === vId)
-                          if (variant) {
-                            if (variant.mrp || variant.price) {
-                              updateProductRow(product.id, "price", Number(variant.mrp || variant.price))
-                            }
-                            if (variant.msp !== undefined) {
-                              updateProductRow(product.id, "msp", Number(variant.msp))
-                            }
-                            if (variant.cost_price) {
-                              updateProductRow(product.id, "costPrice", Number(variant.cost_price))
-                            }
+          {/* MOBILE LINE ITEMS CARD VIEW (< md) */}
+          <div className="block md:hidden space-y-3">
+            {products.map((product, idx) => (
+              <div key={product.id} className="bg-slate-50/80 p-3 rounded-xl border border-slate-200 space-y-3 relative">
+                <div className="flex items-center justify-between gap-2 border-b border-slate-200/80 pb-2">
+                  <span className="text-xs font-bold text-slate-700">Item #{idx + 1}</span>
+                  {products.length > 1 && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => removeProductRow(product.id)}
+                      className="h-7 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 px-2"
+                    >
+                      <Trash2 className="h-3.5 w-3.5 mr-1" /> Remove
+                    </Button>
+                  )}
+                </div>
+
+                <div className="space-y-1">
+                  <Label className="text-xs font-medium text-slate-700">Select Product</Label>
+                  <ProductSelectSimple
+                    value={product.productId}
+                    initialProductName={product.productName}
+                    onChange={(id, name, price, ws, stock, obj) => handleProductSelect(product.id, id, name, price, ws, stock, obj)}
+                    onAddNew={() => {
+                      setActiveRowIdForNewProduct(product.id)
+                      setIsNewProductModalOpen(true)
+                    }}
+                    userId={deviceId || 1}
+                    usePriceType="retail"
+                    hideServiceIcon={true}
+                  />
+                </div>
+
+                {product.productId && (
+                  <div className="space-y-1">
+                    <Label className="text-xs font-medium text-slate-700">Variant</Label>
+                    <VariantSelect
+                      variants={product.productObj?.variants || []}
+                      value={product.variantId || undefined}
+                      onChange={(vId, vName) => {
+                        updateProductRow(product.id, "variantId", vId)
+                        updateProductRow(product.id, "variantName", vName)
+                        
+                        const variant = product.productObj?.variants?.find((v: any) => v.id === vId)
+                        if (variant) {
+                          if (variant.mrp || variant.price) {
+                            updateProductRow(product.id, "price", Number(variant.mrp || variant.price))
                           }
-                        }}
-                        disabled={!product.productId}
-                      />
-                    </td>
-                    <td className="p-2">
-                      <Input
-                        type="number"
-                        min="1"
-                        value={product.quantity}
-                        onChange={(e) => updateProductRow(product.id, "quantity", parseInt(e.target.value) || 1)}
-                        className="text-right w-full"
-                      />
-                    </td>
-                    <td className="p-2 text-right text-xs font-normal text-gray-400">
-                      {currency} {(parseFloat(String(product.msp || 0))).toFixed(2)}
-                    </td>
-                    <td className="p-2">
-                      <Input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={product.price}
-                        onChange={(e) => updateProductRow(product.id, "price", parseFloat(e.target.value) || 0)}
-                        className="text-right w-full"
-                      />
-                    </td>
-                    <td className="p-2 text-right font-medium text-gray-900">
+                          if (variant.msp !== undefined) {
+                            updateProductRow(product.id, "msp", Number(variant.msp))
+                          }
+                          if (variant.cost_price) {
+                            updateProductRow(product.id, "costPrice", Number(variant.cost_price))
+                          }
+                        }
+                      }}
+                      disabled={!product.productId}
+                    />
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-3 pt-1">
+                  <div className="space-y-1">
+                    <Label className="text-xs font-medium text-slate-700">Quantity</Label>
+                    <Input
+                      type="number"
+                      min="1"
+                      value={product.quantity}
+                      onChange={(e) => updateProductRow(product.id, "quantity", parseInt(e.target.value) || 1)}
+                      className="text-right text-xs"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="text-xs font-medium text-slate-700">Selling Price</Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={product.price}
+                      onChange={(e) => updateProductRow(product.id, "price", parseFloat(e.target.value) || 0)}
+                      className="text-right text-xs"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-2 border-t border-slate-200/80 text-xs">
+                  <span className="text-slate-400">
+                    MSP: {currency} {(parseFloat(String(product.msp || 0))).toFixed(2)}
+                  </span>
+                  <div className="text-right">
+                    <span className="text-slate-500 font-medium">Total: </span>
+                    <span className="font-bold text-slate-900">
                       {currency} {(parseFloat(String(product.price || 0)) * product.quantity).toFixed(2)}
-                    </td>
-                    <td className="p-2 text-center">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => removeProductRow(product.id)}
-                        className="text-gray-400 hover:text-red-600 hover:bg-red-50/50 h-8 w-8 rounded-md"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
-        </div>
+
+          {/* DESKTOP LINE ITEMS TABLE VIEW (>= md) */}
+          <div className="hidden md:block rounded-md border border-gray-200 overflow-hidden w-full">
+            <div className="overflow-x-auto w-full">
+              <table className="w-full min-w-[700px] text-sm">
+                <thead className="bg-gray-50 text-gray-600 font-medium border-b border-gray-200">
+                  <tr>
+                    <th className="p-3 text-left w-[40%]">Product Search</th>
+                    <th className="p-3 text-left w-[20%]">Variant</th>
+                    <th className="p-3 text-right w-[10%]">Qty</th>
+                    <th className="p-3 text-right w-[15%] text-xs font-normal text-gray-400">MSP</th>
+                    <th className="p-3 text-right w-[15%]">MRP</th>
+                    <th className="p-3 text-right w-[15%]">Total</th>
+                    <th className="p-3 w-[50px]"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {products.map((product) => (
+                    <tr key={product.id} className="hover:bg-gray-50/30">
+                      <td className="p-2">
+                        <ProductSelectSimple
+                          value={product.productId}
+                          initialProductName={product.productName}
+                          onChange={(id, name, price, ws, stock, obj) => handleProductSelect(product.id, id, name, price, ws, stock, obj)}
+                          onAddNew={() => {
+                            setActiveRowIdForNewProduct(product.id)
+                            setIsNewProductModalOpen(true)
+                          }}
+                          userId={deviceId || 1}
+                          usePriceType="retail"
+                          hideServiceIcon={true}
+                        />
+                      </td>
+                      <td className="p-2">
+                        <VariantSelect
+                          variants={product.productObj?.variants || []}
+                          value={product.variantId || undefined}
+                          onChange={(vId, vName) => {
+                            updateProductRow(product.id, "variantId", vId)
+                            updateProductRow(product.id, "variantName", vName)
+                            
+                            const variant = product.productObj?.variants?.find((v: any) => v.id === vId)
+                            if (variant) {
+                              if (variant.mrp || variant.price) {
+                                updateProductRow(product.id, "price", Number(variant.mrp || variant.price))
+                              }
+                              if (variant.msp !== undefined) {
+                                updateProductRow(product.id, "msp", Number(variant.msp))
+                              }
+                              if (variant.cost_price) {
+                                updateProductRow(product.id, "costPrice", Number(variant.cost_price))
+                              }
+                            }
+                          }}
+                          disabled={!product.productId}
+                        />
+                      </td>
+                      <td className="p-2">
+                        <Input
+                          type="number"
+                          min="1"
+                          value={product.quantity}
+                          onChange={(e) => updateProductRow(product.id, "quantity", parseInt(e.target.value) || 1)}
+                          className="text-right w-full"
+                        />
+                      </td>
+                      <td className="p-2 text-right text-xs font-normal text-gray-400">
+                        {currency} {(parseFloat(String(product.msp || 0))).toFixed(2)}
+                      </td>
+                      <td className="p-2">
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={product.price}
+                          onChange={(e) => updateProductRow(product.id, "price", parseFloat(e.target.value) || 0)}
+                          className="text-right w-full"
+                        />
+                      </td>
+                      <td className="p-2 text-right font-medium text-gray-900">
+                        {currency} {(parseFloat(String(product.price || 0)) * product.quantity).toFixed(2)}
+                      </td>
+                      <td className="p-2 text-center">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => removeProductRow(product.id)}
+                          className="text-gray-400 hover:text-red-600 hover:bg-red-50/50 h-8 w-8 rounded-md"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
 
           <Button type="button" variant="outline" onClick={addProductRow} className="w-full border-dashed border-gray-300 hover:border-gray-400 hover:bg-gray-50/50">
             <Plus className="h-4 w-4 mr-2 text-gray-500" /> Add Product Row
           </Button>
 
-          {/* Totals */}
-          <div className="flex justify-between items-start gap-6 pt-4">
-          <div className="flex-1 w-full max-w-lg">
-            <Label className="text-xs font-medium text-gray-700 mb-1 block">Order Notes / Instructions</Label>
-            <textarea
-              className="flex min-h-[115px] w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm ring-offset-white placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-950 disabled:cursor-not-allowed disabled:opacity-50 resize-none"
-              placeholder="Any special instructions for this order..."
-              value={shippingNotes}
-              onChange={(e) => setShippingNotes(e.target.value)}
-            />
-          </div>
+          {/* Totals & Notes Section */}
+          <div className="flex flex-col lg:flex-row justify-between items-stretch lg:items-start gap-4 pt-4">
+            <div className="flex-1 w-full lg:max-w-lg">
+              <Label className="text-xs font-medium text-gray-700 mb-1 block">Order Notes / Instructions</Label>
+              <textarea
+                className="flex min-h-[100px] w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm ring-offset-white placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-950 disabled:cursor-not-allowed disabled:opacity-50 resize-none"
+                placeholder="Any special instructions for this order..."
+                value={shippingNotes}
+                onChange={(e) => setShippingNotes(e.target.value)}
+              />
+            </div>
 
-          <div className="w-full max-w-sm p-4 bg-gray-50 rounded-lg border border-gray-100 shrink-0">
+            <div className="w-full lg:max-w-sm p-4 bg-gray-50 rounded-lg border border-gray-100 shrink-0 space-y-3">
               <div className="space-y-1">
                 <Label className="text-xs font-medium text-gray-700">Courier Paid (Extra)</Label>
                 <div className="relative">
@@ -1149,7 +1256,7 @@ export function JobCardForm({
                 </div>
               </div>
               <div className="h-px bg-gray-200 w-full" />
-              <div className="flex justify-between font-bold text-gray-900 text-base">
+              <div className="flex justify-between font-bold text-gray-900 text-sm sm:text-base">
                 <span>Estimated Total:</span>
                 <span>{currency} {(calculateSubtotal() + (Number(courierPaidExtra) || 0)).toFixed(2)}</span>
               </div>
@@ -1159,19 +1266,20 @@ export function JobCardForm({
         </CardContent>
       </Card>
 
-      {/* Footer / Submit */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t">
+      {/* Footer / Actions */}
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t">
         {!editSaleId ? (
           <DraftIndicator status={draftStatus} hasDraft={hasDraft} lastSaved={lastSaved} />
         ) : <div />}
-        <div className="flex items-center gap-4 w-full sm:w-auto justify-end">
+        
+        <div className="flex flex-wrap sm:flex-nowrap items-center gap-2.5 w-full sm:w-auto justify-end">
           {onClose && (
             <Button 
               type="button" 
               variant="outline" 
               onClick={handleCancel}
               disabled={isLoading}
-              className="text-gray-600 border-gray-300 hover:bg-gray-50"
+              className="flex-1 sm:flex-none text-xs sm:text-sm text-gray-600 border-gray-300 hover:bg-gray-50 h-10"
             >
               Cancel
             </Button>
@@ -1181,7 +1289,7 @@ export function JobCardForm({
             variant="ghost" 
             onClick={handleReset}
             disabled={isLoading}
-            className="text-gray-500 hover:text-gray-700"
+            className="flex-1 sm:flex-none text-xs sm:text-sm text-gray-500 hover:text-gray-700 h-10"
           >
             Reset
           </Button>
@@ -1189,7 +1297,7 @@ export function JobCardForm({
             type="submit" 
             size="lg" 
             disabled={isLoading}
-            className={`min-w-[180px] shadow-sm font-semibold transition-all ${
+            className={`w-full sm:w-auto min-w-[160px] sm:min-w-[180px] shadow-sm text-xs sm:text-sm font-semibold transition-all h-10 ${
               editSaleId 
                 ? "bg-green-600 hover:bg-green-700 text-white" 
                 : "bg-blue-600 hover:bg-blue-700 text-white"

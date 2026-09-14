@@ -149,31 +149,33 @@ export function StaffCustomerTab({
 
   return (
     <div className="space-y-6">
+      {/* Top Bar Header & Action Buttons */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h2 className="text-2xl font-bold tracking-tight text-slate-900">Customers</h2>
-          <p className="text-sm text-slate-500">Manage your customer relationships and view history.</p>
+          <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">Customers</h2>
+          <p className="text-xs sm:text-sm text-slate-500">Manage your customer relationships and view history.</p>
         </div>
-        <div className="flex gap-2 w-full sm:w-auto">
-          <Button variant="outline" onClick={handleRefresh} disabled={isRefreshing || isLoading}>
-            <RefreshCw className={`mr-2 h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
+        <div className="grid grid-cols-2 sm:flex gap-2 w-full sm:w-auto">
+          <Button variant="outline" onClick={handleRefresh} disabled={isRefreshing || isLoading} className="w-full sm:w-auto justify-center text-xs sm:text-sm">
+            <RefreshCw className={`mr-2 h-4 w-4 shrink-0 ${isRefreshing ? "animate-spin" : ""}`} />
             Refresh
           </Button>
-          <Button onClick={() => setIsAddModalOpen(true)} className="flex-1 sm:flex-none">
-            <Plus className="mr-2 h-4 w-4" /> Add Customer
+          <Button onClick={() => setIsAddModalOpen(true)} className="w-full sm:w-auto justify-center text-xs sm:text-sm bg-purple-600 hover:bg-purple-700 text-white">
+            <Plus className="mr-2 h-4 w-4 shrink-0" /> Add Customer
           </Button>
         </div>
       </div>
 
-      <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-        <form onSubmit={handleSearch} className="flex gap-2">
+      {/* Search Bar */}
+      <div className="bg-white p-3 sm:p-4 rounded-xl shadow-sm border border-slate-200">
+        <form onSubmit={handleSearch} className="flex flex-col sm:flex-row gap-2">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <Input
-              placeholder="Search by name, phone, email, or vehicle..."
+              placeholder="Search by name, phone, email..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10"
+              className="pl-10 text-xs sm:text-sm"
             />
             {searchTerm && (
               <button
@@ -185,15 +187,135 @@ export function StaffCustomerTab({
               </button>
             )}
           </div>
-          <Button type="submit" disabled={isSearching || isLoading}>
+          <Button type="submit" disabled={isSearching || isLoading} className="w-full sm:w-auto text-xs sm:text-sm justify-center bg-purple-600 hover:bg-purple-700 text-white">
             {isSearching ? <Loader2 className="h-4 w-4 animate-spin" /> : "Search"}
           </Button>
         </form>
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden w-full">
+      {/* MOBILE LIST CARD VIEW (< md) */}
+      <div className="block md:hidden space-y-3">
+        {isLoading ? (
+          <div className="bg-white p-8 rounded-xl border border-slate-200 text-center shadow-sm">
+            <Loader2 className="h-8 w-8 animate-spin mx-auto text-slate-300" />
+            <p className="mt-2 text-slate-500 text-sm">Loading customers...</p>
+          </div>
+        ) : customers.length === 0 ? (
+          <div className="bg-white p-8 rounded-xl border border-slate-200 text-center text-slate-500 shadow-sm">
+            <div className="h-12 w-12 rounded-full bg-slate-100 flex items-center justify-center mx-auto mb-3">
+              <User className="h-6 w-6 text-slate-400" />
+            </div>
+            <p className="text-base font-medium text-slate-900">No customers found</p>
+            <p className="text-xs mt-1">Try adjusting your search or add a new customer.</p>
+          </div>
+        ) : (
+          customers.map((customer) => {
+            const type = getCustomerType(Number(customer.order_count) || 0)
+            return (
+              <div
+                key={customer.id}
+                onClick={() => handleViewCustomer(customer)}
+                className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all space-y-3 cursor-pointer"
+              >
+                {/* Header Row: Avatar, Name & Type Badge */}
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-bold shrink-0">
+                      {customer.name.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className="font-semibold text-slate-900 text-sm truncate">{customer.name}</h3>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border ${type.color}`}>
+                          {type.label}
+                        </span>
+                        <span className="text-[11px] text-slate-500 font-medium">
+                          • {customer.order_count || 0} Orders
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="text-right shrink-0">
+                    <span className="text-[10px] text-slate-400 block">
+                      {customer.last_visit ? `${formatDistanceToNow(new Date(customer.last_visit))} ago` : "No visits"}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Contact Info Block */}
+                <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100 text-xs space-y-1.5">
+                  {customer.phone && (
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 text-slate-800 font-medium">
+                        <Phone className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                        <a href={`tel:${customer.phone}`} onClick={(e) => e.stopPropagation()} className="hover:underline">
+                          {customer.phone}
+                        </a>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={(e) => handleCopyPhone(e, customer.phone, customer.id)}
+                          className="p-1 hover:bg-slate-200 rounded text-slate-500 transition-colors"
+                          title="Copy Phone Number"
+                        >
+                          {copiedPhoneId === customer.id ? (
+                            <Check className="h-3.5 w-3.5 text-emerald-600" />
+                          ) : (
+                            <Copy className="h-3.5 w-3.5" />
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => handleWhatsApp(e, customer.phone, customer.name)}
+                          className="p-1 hover:bg-emerald-100 text-emerald-600 rounded transition-colors"
+                          title="WhatsApp"
+                        >
+                          <MessageCircle className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  {customer.email && (
+                    <div className="flex items-center gap-1.5 text-slate-500 text-[11px] truncate">
+                      <Mail className="h-3 w-3 text-slate-400 shrink-0" />
+                      <span className="truncate">{customer.email}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Actions Row */}
+                <div className="flex items-center gap-2 pt-1">
+                  <Button
+                    size="sm"
+                    className="flex-1 bg-purple-600 hover:bg-purple-700 text-white text-xs h-8 font-semibold shadow-xs"
+                    onClick={(e) => handleCreateSale(e, customer)}
+                  >
+                    <ShoppingCart className="h-3.5 w-3.5 mr-1.5" /> Create Job Card
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-xs h-8 border-slate-200 text-slate-700"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleViewCustomer(customer)
+                    }}
+                  >
+                    <User className="h-3.5 w-3.5 mr-1 text-slate-500" /> Profile
+                  </Button>
+                </div>
+              </div>
+            )
+          })
+        )}
+      </div>
+
+      {/* DESKTOP TABLE VIEW (>= md) */}
+      <div className="hidden md:block bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden w-full">
         <div className="overflow-x-auto w-full">
-          <table className="w-full text-sm text-left">
+          <table className="w-full min-w-[650px] text-sm text-left">
             <thead className="text-xs text-slate-500 uppercase bg-slate-50/80 border-b border-slate-200">
               <tr>
                 <th className="px-6 py-4 font-semibold">Customer</th>

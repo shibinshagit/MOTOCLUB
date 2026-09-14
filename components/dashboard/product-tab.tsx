@@ -63,6 +63,7 @@ export default function ProductTab({
   const [pageSize, setPageSize] = useState<number>(10)
   const [searchTerm, setSearchTerm] = useState<string>("")
   const [debouncedSearch, setDebouncedSearch] = useState<string>("")
+  const [selectedCategory, setSelectedCategory] = useState<{ id?: number | string | null; name: string } | null>(null)
   const [loading, setLoading] = useState<boolean>(true)
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false)
   const [isExporting, setIsExporting] = useState<boolean>(false)
@@ -90,6 +91,11 @@ export default function ProductTab({
     return () => clearTimeout(timer)
   }, [searchTerm])
 
+  // Reset to page 1 on category change
+  useEffect(() => {
+    setPage(1)
+  }, [selectedCategory])
+
   // Fetch paginated inventory data from backend
   const fetchInventory = useCallback(
     async ({ silent = false, isRefresh = false }: { silent?: boolean; isRefresh?: boolean } = {}) => {
@@ -109,6 +115,8 @@ export default function ProductTab({
           page,
           pageSize,
           searchTerm: debouncedSearch,
+          categoryId: selectedCategory?.id ? Number(selectedCategory.id) : null,
+          categoryName: selectedCategory?.name || null,
         })
 
         if (result.success) {
@@ -136,7 +144,7 @@ export default function ProductTab({
         fetchInFlightRef.current = false
       }
     },
-    [userId, page, pageSize, debouncedSearch, dispatch, toast],
+    [userId, page, pageSize, debouncedSearch, selectedCategory, dispatch, toast],
   )
 
   useEffect(() => {
@@ -224,7 +232,14 @@ export default function ProductTab({
     if (!userId) return
     setIsExporting(true)
     try {
-      const result = await getProducts(userId, undefined, debouncedSearch)
+      const result = await getProducts(
+        userId,
+        undefined,
+        debouncedSearch,
+        selectedCategory?.id ? Number(selectedCategory.id) : null,
+        false,
+        selectedCategory?.name || null
+      )
       if (result.success && result.data && result.data.length > 0) {
         exportProductsToPDF(
           result.data,
@@ -259,7 +274,7 @@ export default function ProductTab({
     <div className="w-full max-w-full space-y-4">
       {/* Top Header Card */}
       <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-[#F1F4F9] p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 shrink-0">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-violet-100 text-violet-700">
             <Package className="h-5 w-5" />
           </div>
@@ -272,11 +287,13 @@ export default function ProductTab({
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-          <div className="w-full sm:w-64 md:w-72">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3 flex-1 justify-end min-w-0">
+          <div className="w-full sm:w-auto min-w-[220px] max-w-xl">
             <InventorySearchBox
               value={searchTerm}
               onChange={setSearchTerm}
+              selectedCategory={selectedCategory}
+              onSelectCategory={setSelectedCategory}
               onSelectProduct={handleViewProduct}
               products={products}
               userId={userId}

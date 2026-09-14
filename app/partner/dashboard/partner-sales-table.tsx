@@ -358,147 +358,306 @@ export function PartnerSalesTable({
         </div>
       ) : (
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden pt-2">
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm text-left">
-          <thead className="text-xs text-gray-500 uppercase tracking-wider border-b border-gray-100">
-            <tr>
-              <th className="px-6 py-4 font-bold whitespace-nowrap">Order / Date</th>
-              <th className="px-6 py-4 font-bold">Customer</th>
-              <th className="px-6 py-4 font-bold whitespace-nowrap text-right">Amount</th>
-              <th className="px-6 py-4 font-bold text-center">Status</th>
-              <th className="px-6 py-4 font-bold text-center whitespace-nowrap">Actions</th>
-              <th className="px-6 py-4 font-bold text-center whitespace-nowrap">Shipping Date</th>
-              <th className="px-6 py-4 font-bold">Tracking</th>
-              <th className="px-6 py-4 font-bold text-center">Unit / Wt</th>
-              <th className="px-6 py-4 font-bold text-center">Courier Cost</th>
-              <th className="px-6 py-4 font-bold text-center">WA</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-50">
+          {/* Mobile Card List View (< md) */}
+          <div className="block md:hidden divide-y divide-gray-100">
             {sales.map((sale) => (
-              <tr key={sale.id} className="hover:bg-gray-50/50 transition-colors">
-                <td className="px-6 py-4 text-gray-600 font-medium whitespace-nowrap">
-                  <div className="font-bold text-indigo-600">#{sale.id}</div>
-                  <div className="text-xs text-gray-400 mt-0.5">
-                    {sale.sale_date ? format(new Date(sale.sale_date), "dd/MM/yyyy") : "-"}
+              <div key={sale.id} className="p-4 space-y-3 hover:bg-slate-50/60 transition-colors">
+                {/* Header: Order ID + Date & Amount */}
+                <div className="flex items-start justify-between gap-2 border-b border-gray-100 pb-2.5">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-extrabold text-indigo-600 text-base">#{sale.id}</span>
+                      <span className="text-[11px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">
+                        {sale.sale_date ? format(new Date(sale.sale_date), "dd/MM/yyyy") : "-"}
+                      </span>
+                    </div>
                   </div>
-                </td>
-                <td className="px-6 py-4">
-                  <div className="font-bold text-gray-900">{sale.customer_name || "Guest"}</div>
-                  <div className="text-xs text-gray-400 mt-0.5">{sale.customer_phone || "-"}</div>
-                </td>
-                <td className="px-6 py-4 text-right whitespace-nowrap">
-                  <div className="font-bold text-gray-900">₹{Number(sale.total_amount || 0).toFixed(2)}</div>
-                </td>
-                <td className="px-6 py-4 text-center">
-                  <div className="flex items-center justify-center gap-2">
-                    <select
-                      value={sale.delivery_status || "Pending"}
-                      onChange={(e) => handleStatusChange(sale.id, e.target.value)}
-                      disabled={loadingMap[sale.id]}
-                      className="h-8 rounded-full border border-transparent bg-blue-100 text-blue-700 px-3 py-1 text-xs font-bold focus:border-blue-300 focus:ring-2 focus:ring-blue-200 disabled:opacity-50 appearance-none text-center cursor-pointer hover:bg-blue-200 transition-colors"
-                      style={{ paddingRight: '1rem', backgroundImage: 'none' }}
+                  <div className="text-right">
+                    <span className="text-[10px] text-slate-400 block font-semibold uppercase">Total Amount</span>
+                    <span className="text-base font-extrabold text-slate-900">
+                      ₹{Number(sale.total_amount || 0).toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Customer Details & WhatsApp */}
+                <div className="flex items-center justify-between bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                  <div className="min-w-0 pr-2">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Customer</span>
+                    <p className="font-bold text-slate-900 text-sm truncate">{sale.customer_name || "Guest"}</p>
+                    <p className="text-xs text-slate-500 font-medium">{sale.customer_phone || "-"}</p>
+                  </div>
+                  {sale.customer_phone ? (
+                    <a
+                      href={`https://wa.me/${sale.customer_phone.replace(/\D/g, "")}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="h-8 w-8 rounded-full bg-emerald-500 hover:bg-emerald-600 text-white flex items-center justify-center transition-colors shadow-sm shrink-0"
+                      title="Chat on WhatsApp"
                     >
-                      {DELIVERY_STATUSES.map(status => (
-                        <option 
-                          key={status} 
-                          value={status} 
-                          disabled={isOptionDisabled(sale.delivery_status, status)}
-                        >
-                          {status}
-                        </option>
-                      ))}
-                    </select>
-                    {loadingMap[sale.id] && <Loader2 className="h-4 w-4 animate-spin text-gray-400 absolute ml-24" />}
+                      <Phone className="h-3.5 w-3.5 fill-current" />
+                    </a>
+                  ) : (
+                    <button
+                      disabled
+                      className="h-8 w-8 rounded-full bg-gray-200 text-gray-400 flex items-center justify-center shrink-0 cursor-not-allowed"
+                    >
+                      <Phone className="h-3.5 w-3.5 fill-current" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Status & Direct Actions */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-slate-600 shrink-0">Delivery Status:</span>
+                    <div className="relative flex-1 max-w-[190px]">
+                      <select
+                        value={sale.delivery_status || "Pending"}
+                        onChange={(e) => handleStatusChange(sale.id, e.target.value)}
+                        disabled={loadingMap[sale.id]}
+                        className="w-full h-8 rounded-full border border-blue-200 bg-blue-100 text-blue-700 px-3 py-1 text-xs font-bold focus:border-blue-300 focus:ring-2 focus:ring-blue-200 disabled:opacity-50 appearance-none text-center cursor-pointer hover:bg-blue-200 transition-colors"
+                      >
+                        {DELIVERY_STATUSES.map((status) => (
+                          <option
+                            key={status}
+                            value={status}
+                            disabled={isOptionDisabled(sale.delivery_status, status)}
+                          >
+                            {status}
+                          </option>
+                        ))}
+                      </select>
+                      {loadingMap[sale.id] && (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-600 absolute right-2 top-2" />
+                      )}
+                    </div>
                   </div>
-                </td>
-                <td className="px-6 py-4 text-center whitespace-nowrap">
-                  {sale.delivery_status?.toLowerCase() === "direct" ? (
-                    <div className="flex items-center justify-center gap-1">
+
+                  {sale.delivery_status?.toLowerCase() === "direct" && (
+                    <div className="flex items-center gap-2 pt-1">
                       <button
                         onClick={() => handlePrintInvoice(sale)}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-md border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 transition-colors shadow-2xs cursor-pointer"
-                        title="Print Customer Invoice"
+                        className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 transition-colors shadow-2xs"
                       >
                         <FileText className="h-3.5 w-3.5" />
-                        <span>Invoice</span>
+                        <span>Print Invoice</span>
                       </button>
                       <button
                         onClick={() => handlePrintLabel(sale)}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-md border border-slate-200 text-slate-700 bg-slate-50 hover:bg-slate-100 transition-colors shadow-2xs cursor-pointer"
-                        title="Print Delivery Label"
+                        className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-200 text-slate-700 bg-slate-50 hover:bg-slate-100 transition-colors shadow-2xs"
                       >
                         <Printer className="h-3.5 w-3.5" />
-                        <span>Label</span>
+                        <span>Print Label</span>
                       </button>
                     </div>
-                  ) : (
-                    <span className="text-slate-400 font-medium">—</span>
                   )}
-                </td>
-                <td className="px-6 py-4 text-center whitespace-nowrap">
-                  {sale.shipping_date ? (
-                    <span 
-                      className="font-semibold text-slate-700 text-xs" 
-                      title={format(new Date(sale.shipping_date), "dd/MM/yyyy HH:mm:ss")}
-                    >
-                      {format(new Date(sale.shipping_date), "dd/MM/yyyy")}
-                    </span>
-                  ) : (
-                    <span className="text-slate-400 font-medium">—</span>
-                  )}
-                </td>
-                <td className="px-6 py-4">
-                  <div className="font-bold text-gray-700">{sale.tracking_id || "—"}</div>
-                  {sale.courier_service_name && (
-                    <div className="text-xs text-blue-600 font-semibold mt-0.5">{sale.courier_service_name}</div>
-                  )}
-                </td>
-                <td className="px-6 py-4 text-center">
-                  <input
-                    type="text"
-                    defaultValue={sale.weight_kg || ""}
-                    placeholder="kg/unit"
-                    onBlur={(e) => handleDetailsChange(sale.id, 'weight_kg', e.target.value)}
-                    className="w-16 h-8 text-center text-xs font-medium border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                  />
-                </td>
-                <td className="px-6 py-4 text-center">
-                  <input
-                    type="text"
-                    defaultValue={sale.expense_courier || 0}
-                    onBlur={(e) => handleDetailsChange(sale.id, 'expense_courier', e.target.value)}
-                    className="w-16 h-8 text-center text-xs font-medium border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                  />
-                </td>
-                <td className="px-6 py-4 text-center">
-                  <div className="flex justify-center">
-                    {sale.customer_phone ? (
-                      <a 
-                        href={`https://wa.me/${sale.customer_phone.replace(/\D/g, '')}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="h-8 w-8 rounded-full bg-indigo-500 hover:bg-indigo-600 text-white flex items-center justify-center transition-colors shadow-sm"
-                        title="Chat on WhatsApp"
-                      >
-                        <Phone className="h-3.5 w-3.5 fill-current" />
-                      </a>
-                    ) : (
-                      <button 
-                        disabled
-                        className="h-8 w-8 rounded-full bg-gray-300 text-white flex items-center justify-center shadow-sm cursor-not-allowed"
-                      >
-                        <Phone className="h-3.5 w-3.5 fill-current" />
-                      </button>
+                </div>
+
+                {/* Tracking & Shipping Info */}
+                {(sale.tracking_id || sale.courier_service_name || sale.shipping_date) && (
+                  <div className="bg-blue-50/60 rounded-lg p-2.5 border border-blue-100 text-xs space-y-1">
+                    {sale.shipping_date && (
+                      <div className="flex justify-between">
+                        <span className="text-slate-500 font-medium">Shipping Date:</span>
+                        <span className="font-semibold text-slate-800">
+                          {format(new Date(sale.shipping_date), "dd/MM/yyyy")}
+                        </span>
+                      </div>
+                    )}
+                    {sale.tracking_id && (
+                      <div className="flex justify-between">
+                        <span className="text-slate-500 font-medium">Tracking ID:</span>
+                        <span className="font-mono font-bold text-blue-900">{sale.tracking_id}</span>
+                      </div>
+                    )}
+                    {sale.courier_service_name && (
+                      <div className="flex justify-between">
+                        <span className="text-slate-500 font-medium">Courier:</span>
+                        <span className="font-semibold text-blue-700">{sale.courier_service_name}</span>
+                      </div>
                     )}
                   </div>
-                </td>
-              </tr>
+                )}
+
+                {/* Details Inputs (Unit Wt & Courier Cost) */}
+                <div className="grid grid-cols-2 gap-3 pt-1 border-t border-gray-100">
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                      Unit / Wt (kg)
+                    </label>
+                    <input
+                      type="text"
+                      defaultValue={sale.weight_kg || ""}
+                      placeholder="kg/unit"
+                      onBlur={(e) => handleDetailsChange(sale.id, "weight_kg", e.target.value)}
+                      className="w-full h-8 text-center text-xs font-semibold border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                      Courier Cost (₹)
+                    </label>
+                    <input
+                      type="text"
+                      defaultValue={sale.expense_courier || 0}
+                      onBlur={(e) => handleDetailsChange(sale.id, "expense_courier", e.target.value)}
+                      className="w-full h-8 text-center text-xs font-semibold border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </div>
+                </div>
+              </div>
             ))}
-          </tbody>
-        </table>
-      </div>
-      </div>
+          </div>
+
+          {/* Desktop Table View (>= md) */}
+          <div className="hidden md:block overflow-x-auto">
+            <table className="w-full text-xs sm:text-sm text-left">
+              <thead className="text-xs text-gray-500 uppercase tracking-wider border-b border-gray-100 bg-slate-50/50">
+                <tr>
+                  <th className="px-3 py-3.5 lg:px-4 font-bold whitespace-nowrap">Order / Date</th>
+                  <th className="px-3 py-3.5 lg:px-4 font-bold">Customer</th>
+                  <th className="px-3 py-3.5 lg:px-4 font-bold whitespace-nowrap text-right">Amount</th>
+                  <th className="px-3 py-3.5 lg:px-4 font-bold text-center">Status</th>
+                  <th className="px-3 py-3.5 lg:px-4 font-bold text-center whitespace-nowrap">Actions</th>
+                  <th className="px-3 py-3.5 lg:px-4 font-bold text-center whitespace-nowrap">Shipping Date</th>
+                  <th className="px-3 py-3.5 lg:px-4 font-bold">Tracking</th>
+                  <th className="px-2 py-3.5 lg:px-3 font-bold text-center">Unit / Wt</th>
+                  <th className="px-2 py-3.5 lg:px-3 font-bold text-center">Courier Cost</th>
+                  <th className="px-2 py-3.5 lg:px-3 font-bold text-center">WA</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {sales.map((sale) => (
+                  <tr key={sale.id} className="hover:bg-gray-50/50 transition-colors">
+                    <td className="px-3 py-3 lg:px-4 text-gray-600 font-medium whitespace-nowrap">
+                      <div className="font-bold text-indigo-600">#{sale.id}</div>
+                      <div className="text-xs text-gray-400 mt-0.5">
+                        {sale.sale_date ? format(new Date(sale.sale_date), "dd/MM/yyyy") : "-"}
+                      </div>
+                    </td>
+                    <td className="px-3 py-3 lg:px-4">
+                      <div className="font-bold text-gray-900 truncate max-w-[140px]" title={sale.customer_name || "Guest"}>
+                        {sale.customer_name || "Guest"}
+                      </div>
+                      <div className="text-xs text-gray-400 mt-0.5">{sale.customer_phone || "-"}</div>
+                    </td>
+                    <td className="px-3 py-3 lg:px-4 text-right whitespace-nowrap">
+                      <div className="font-bold text-gray-900">₹{Number(sale.total_amount || 0).toFixed(2)}</div>
+                    </td>
+                    <td className="px-3 py-3 lg:px-4 text-center">
+                      <div className="flex items-center justify-center gap-1.5">
+                        <select
+                          value={sale.delivery_status || "Pending"}
+                          onChange={(e) => handleStatusChange(sale.id, e.target.value)}
+                          disabled={loadingMap[sale.id]}
+                          className="h-7 rounded-full border border-transparent bg-blue-100 text-blue-700 px-2.5 py-0.5 text-xs font-bold focus:border-blue-300 focus:ring-2 focus:ring-blue-200 disabled:opacity-50 appearance-none text-center cursor-pointer hover:bg-blue-200 transition-colors"
+                          style={{ paddingRight: '0.75rem', backgroundImage: 'none' }}
+                        >
+                          {DELIVERY_STATUSES.map(status => (
+                            <option 
+                              key={status} 
+                              value={status} 
+                              disabled={isOptionDisabled(sale.delivery_status, status)}
+                            >
+                              {status}
+                            </option>
+                          ))}
+                        </select>
+                        {loadingMap[sale.id] && <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-600" />}
+                      </div>
+                    </td>
+                    <td className="px-3 py-3 lg:px-4 text-center whitespace-nowrap">
+                      {sale.delivery_status?.toLowerCase() === "direct" ? (
+                        <div className="flex items-center justify-center gap-1">
+                          <button
+                            onClick={() => handlePrintInvoice(sale)}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold rounded-md border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 transition-colors shadow-2xs cursor-pointer"
+                            title="Print Customer Invoice"
+                          >
+                            <FileText className="h-3 w-3" />
+                            <span>Invoice</span>
+                          </button>
+                          <button
+                            onClick={() => handlePrintLabel(sale)}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold rounded-md border border-slate-200 text-slate-700 bg-slate-50 hover:bg-slate-100 transition-colors shadow-2xs cursor-pointer"
+                            title="Print Delivery Label"
+                          >
+                            <Printer className="h-3 w-3" />
+                            <span>Label</span>
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-slate-400 font-medium">—</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-3 lg:px-4 text-center whitespace-nowrap">
+                      {sale.shipping_date ? (
+                        <span 
+                          className="font-semibold text-slate-700 text-xs" 
+                          title={format(new Date(sale.shipping_date), "dd/MM/yyyy HH:mm:ss")}
+                        >
+                          {format(new Date(sale.shipping_date), "dd/MM/yyyy")}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400 font-medium">—</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-3 lg:px-4">
+                      <div className="font-bold text-gray-700 truncate max-w-[120px]" title={sale.tracking_id || "—"}>
+                        {sale.tracking_id || "—"}
+                      </div>
+                      {sale.courier_service_name && (
+                        <div className="text-[11px] text-blue-600 font-semibold truncate max-w-[120px]" title={sale.courier_service_name}>
+                          {sale.courier_service_name}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-2 py-3 lg:px-3 text-center">
+                      <input
+                        type="text"
+                        defaultValue={sale.weight_kg || ""}
+                        placeholder="kg/unit"
+                        onBlur={(e) => handleDetailsChange(sale.id, 'weight_kg', e.target.value)}
+                        className="w-14 h-7 text-center text-xs font-medium border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      />
+                    </td>
+                    <td className="px-2 py-3 lg:px-3 text-center">
+                      <input
+                        type="text"
+                        defaultValue={sale.expense_courier || 0}
+                        onBlur={(e) => handleDetailsChange(sale.id, 'expense_courier', e.target.value)}
+                        className="w-14 h-7 text-center text-xs font-medium border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      />
+                    </td>
+                    <td className="px-2 py-3 lg:px-3 text-center">
+                      <div className="flex justify-center">
+                        {sale.customer_phone ? (
+                          <a 
+                            href={`https://wa.me/${sale.customer_phone.replace(/\D/g, '')}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="h-7 w-7 rounded-full bg-indigo-500 hover:bg-indigo-600 text-white flex items-center justify-center transition-colors shadow-sm"
+                            title="Chat on WhatsApp"
+                          >
+                            <Phone className="h-3 w-3 fill-current" />
+                          </a>
+                        ) : (
+                          <button 
+                            disabled
+                            className="h-7 w-7 rounded-full bg-gray-300 text-white flex items-center justify-center shadow-sm cursor-not-allowed"
+                          >
+                            <Phone className="h-3 w-3 fill-current" />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
 
       {/* Direct Delivery Confirmation Dialog */}

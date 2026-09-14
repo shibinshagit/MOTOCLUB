@@ -4,15 +4,23 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from "react"
 import { Search, X, Package, Folder, Building2, ChevronRight, Loader2 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
+import { getProductSearchSuggestions } from "@/app/actions/product-actions"
 import {
   generateProductSuggestions,
   type ProductSuggestionsResult,
   type SuggestionProductItem,
 } from "@/lib/product-search"
 
+export interface SelectedCategoryFilter {
+  id?: number | string | null
+  name: string
+}
+
 interface InventorySearchBoxProps {
   value: string
   onChange: (val: string) => void
+  selectedCategory?: SelectedCategoryFilter | string | null
+  onSelectCategory?: (category: SelectedCategoryFilter | null) => void
   onSelectProduct?: (product: any) => void
   products?: any[]
   userId?: number
@@ -24,12 +32,14 @@ interface InventorySearchBoxProps {
 
 type FlatSuggestionItem =
   | { type: "product"; item: SuggestionProductItem; label: string; sublabel?: string }
-  | { type: "category"; name: string; label: string }
+  | { type: "category"; id?: number | string; name: string; label: string }
   | { type: "company"; name: string; label: string }
 
 export function InventorySearchBox({
   value,
   onChange,
+  selectedCategory = null,
+  onSelectCategory,
   onSelectProduct,
   products = [],
   userId,
@@ -41,9 +51,24 @@ export function InventorySearchBox({
   const [isOpen, setIsOpen] = useState(false)
   const [highlightedIndex, setHighlightedIndex] = useState(-1)
   const [debouncedValue, setDebouncedValue] = useState(value)
+  const [serverSuggestions, setServerSuggestions] = useState<ProductSuggestionsResult>({
+    products: [],
+    categories: [],
+    companies: [],
+    totalCount: 0,
+  })
+
   const containerRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
+
+  const activeCategory = useMemo<SelectedCategoryFilter | null>(() => {
+    if (!selectedCategory) return null
+    if (typeof selectedCategory === "string") {
+      return { name: selectedCategory }
+    }
+    return selectedCategory
+  }, [selectedCategory])
 
   // 250ms debounce for suggestion computation
   useEffect(() => {
@@ -53,13 +78,41 @@ export function InventorySearchBox({
     return () => clearTimeout(timer)
   }, [value])
 
-  // Compute suggestions from loaded products
+  // Fetch catalog-wide search suggestions from server when userId is available
+  useEffect(() => {
+    let isMounted = true
+    if (!debouncedValue || debouncedValue.trim().length < 2) {
+      setServerSuggestions({ products: [], categories: [], companies: [], totalCount: 0 })
+      return
+    }
+
+    if (userId) {
+      getProductSearchSuggestions(
+        debouncedValue,
+        userId,
+        activeCategory?.id ? Number(activeCategory.id) : null,
+        activeCategory?.name || null
+      ).then((res) => {
+        if (isMounted && res.success && res.suggestions) {
+          setServerSuggestions(res.suggestions)
+        }
+      })
+    }
+    return () => {
+      isMounted = false
+    }
+  }, [debouncedValue, userId, activeCategory])
+
+  // Compute suggestions from server or loaded products
   const suggestions: ProductSuggestionsResult = useMemo(() => {
     if (!debouncedValue || debouncedValue.trim().length < 2) {
       return { products: [], categories: [], companies: [], totalCount: 0 }
     }
+    if (userId && serverSuggestions.totalCount > 0) {
+      return serverSuggestions
+    }
     return generateProductSuggestions(products, debouncedValue, 8)
-  }, [products, debouncedValue])
+  }, [products, debouncedValue, userId, serverSuggestions])
 
   // Flatten suggestions into a single array for keyboard navigation (Arrow Up / Down)
   const flatItems: FlatSuggestionItem[] = useMemo(() => {
@@ -78,6 +131,7 @@ export function InventorySearchBox({
     for (const c of suggestions.categories) {
       items.push({
         type: "category",
+        id: (c as any).id,
         name: c.name,
         label: c.name,
       })
@@ -116,18 +170,24 @@ export function InventorySearchBox({
       if (item.type === "product") {
         onChange(item.label)
         if (onSelectProduct) {
-          const originalProduct = products.find((p) => p.id === item.item.id)
+          const originalProduct = products.find((p) => p.id === item.item.id) || item.item
           if (originalProduct) onSelectProduct(originalProduct)
         }
       } else if (item.type === "category") {
-        onChange(item.name)
+        if (onSelectCategory) {
+          onSelectCategory({ id: item.id || null, name: item.name })
+        }
+        onChange("") // Clear search input so user can type product name immediately
+        setTimeout(() => {
+          inputRef.current?.focus()
+        }, 50)
       } else if (item.type === "company") {
         onChange(item.name)
       }
       setIsOpen(false)
       setHighlightedIndex(-1)
     },
-    [onChange, onSelectProduct, products]
+    [onChange, onSelectCategory, onSelectProduct, products]
   )
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -168,8 +228,29 @@ export function InventorySearchBox({
   const showDropdown = isOpen && value.trim().length >= 2 && flatItems.length > 0
 
   return (
-    <div ref={containerRef} className={cn("relative w-full", className)}>
-      <div className="relative">
+    <div ref={containerRef} className={cn("relative flex w-full flex-col sm:flex-row items-stretch sm:items-center gap-1.5", className)}>
+      {/* Category Filter Chip */}
+      {activeCategory ? (
+        <div className="inline-flex h-8 shrink-0 items-center justify-between gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-800 shadow-sm max-w-full sm:max-w-[200px] transition-all">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <Folder className="h-3.5 w-3.5 text-violet-600 shrink-0" />
+            <span className="truncate" title={activeCategory.name}>{activeCategory.name}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              onSelectCategory?.(null)
+              inputRef.current?.focus()
+            }}
+            className="ml-0.5 rounded-full p-0.5 hover:bg-violet-200/80 text-violet-600 hover:text-violet-950 transition-colors shrink-0"
+            title="Remove category filter"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      ) : null}
+
+      <div className="relative flex-1 min-w-0">
         <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400 pointer-events-none" />
         <Input
           ref={inputRef}

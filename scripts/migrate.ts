@@ -1248,6 +1248,7 @@ async function createIndexes() {
     ["idx_sales_delivery_status", () => sql`CREATE INDEX IF NOT EXISTS idx_sales_delivery_status ON sales(delivery_status)`],
     ["idx_sales_payment_status", () => sql`CREATE INDEX IF NOT EXISTS idx_sales_payment_status ON sales(payment_status)`],
     ["idx_sales_customer_id", () => sql`CREATE INDEX IF NOT EXISTS idx_sales_customer_id ON sales(customer_id)`],
+    ["idx_customer_addresses_customer_id", () => sql`CREATE INDEX IF NOT EXISTS idx_customer_addresses_customer_id ON customer_addresses(customer_id)`],
     ["idx_sale_items_sale_id", () => sql`CREATE INDEX IF NOT EXISTS idx_sale_items_sale_id ON sale_items(sale_id)`],
     ["idx_replacement_shipments_sale_id", () => sql`CREATE INDEX IF NOT EXISTS idx_replacement_shipments_sale_id ON replacement_shipments(sale_id)`],
     ["idx_replacement_shipments_courier", () => sql`CREATE INDEX IF NOT EXISTS idx_replacement_shipments_courier ON replacement_shipments(courier_partner_id)`],
@@ -1256,6 +1257,50 @@ async function createIndexes() {
 
   for (const [label, fn] of indexes) {
     await runSafe(label, fn)
+  }
+}
+
+async function backfillCustomerAddressesFromSales() {
+  console.log("\n── Backfilling customer addresses from historical sales ──\n")
+  try {
+    const salesWithAddresses = (await sql`
+      SELECT customer_id, shipping_address, shipping_street, shipping_city, shipping_district, shipping_state, shipping_pincode, shipping_landmark, shipping_address_type, customer_phone_override
+      FROM sales
+      WHERE customer_id IS NOT NULL
+        AND (
+          (shipping_address IS NOT NULL AND shipping_address != '') OR
+          (shipping_street IS NOT NULL AND shipping_street != '') OR
+          (shipping_city IS NOT NULL AND shipping_city != '') OR
+          (shipping_pincode IS NOT NULL AND shipping_pincode != '')
+        )
+      ORDER BY id ASC
+    `) as any[]
+
+    console.log(`Found ${salesWithAddresses.length} historical sales with shipping addresses to verify/backfill.`)
+
+    const { syncCustomerShippingAddress } = await import("../app/actions/customer-actions")
+
+    let syncedCount = 0
+    for (const sale of salesWithAddresses) {
+      const res = await syncCustomerShippingAddress(Number(sale.customer_id), {
+        shipping_street: sale.shipping_street,
+        shipping_city: sale.shipping_city,
+        shipping_district: sale.shipping_district,
+        shipping_state: sale.shipping_state,
+        shipping_pincode: sale.shipping_pincode,
+        shipping_landmark: sale.shipping_landmark,
+        shipping_address_type: sale.shipping_address_type || "Shipping Address",
+        shipping_address: sale.shipping_address,
+        customer_phone_override: sale.customer_phone_override,
+      })
+      if (res.success && !res.duplicated) {
+        syncedCount++
+      }
+    }
+
+    console.log(`  ✓ Synced ${syncedCount} missing customer addresses from historical sales.`)
+  } catch (err: any) {
+    console.error("  ✗ Backfill customer addresses error:", err.message)
   }
 }
 
@@ -1362,6 +1407,7 @@ async function migrate() {
     await migrateManualEntryCategories()
     await dropLegacyTables()
     await createIndexes()
+    await backfillCustomerAddressesFromSales()
     await backfillTransactionPayments()
     await createInventoryLedgerTrigger()
     await seedAdmin()

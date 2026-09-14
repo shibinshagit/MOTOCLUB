@@ -63,6 +63,7 @@ export default function PayrollRequestsTab({ deviceId, currency = "INR", initial
     baseSalary: 0,
     bonus: 0,
     advanceDeduction: 0,
+    staffPurchaseDeduction: 0,
     otherDeductions: 0,
     paymentMethod: "Bank Transfer",
     referenceNumber: "",
@@ -163,6 +164,7 @@ export default function PayrollRequestsTab({ deviceId, currency = "INR", initial
       baseSalary: staff.baseSalary || 0,
       bonus: 0,
       advanceDeduction: staff.advanceTaken || 0,
+      staffPurchaseDeduction: 0,
       otherDeductions: 0,
       paymentMethod: "Bank Transfer",
       referenceNumber: "",
@@ -178,6 +180,7 @@ export default function PayrollRequestsTab({ deviceId, currency = "INR", initial
     Number(payForm.baseSalary || 0) +
       Number(payForm.bonus || 0) -
       Number(payForm.advanceDeduction || 0) -
+      Number(payForm.staffPurchaseDeduction || 0) -
       Number(payForm.otherDeductions || 0)
   )
 
@@ -194,6 +197,7 @@ export default function PayrollRequestsTab({ deviceId, currency = "INR", initial
         baseSalary: Number(payForm.baseSalary),
         bonus: Number(payForm.bonus),
         advanceDeduction: Number(payForm.advanceDeduction),
+        staffPurchaseDeduction: Number(payForm.staffPurchaseDeduction || 0),
         otherDeductions: Number(payForm.otherDeductions),
         netSalary,
         paymentMethod: payForm.paymentMethod,
@@ -694,15 +698,41 @@ export default function PayrollRequestsTab({ deviceId, currency = "INR", initial
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-3 gap-3">
               <div>
                 <Label className="text-xs font-semibold">Advance Deduction ({currency})</Label>
                 <Input
                   type="number"
                   value={payForm.advanceDeduction}
                   onChange={(e) => setPayForm({ ...payForm, advanceDeduction: Number(e.target.value) })}
-                  className="text-xs text-amber-700"
+                  className="text-xs text-amber-700 font-semibold"
                 />
+              </div>
+              <div>
+                <div className="flex justify-between items-center">
+                  <Label className="text-xs font-semibold">Staff Purchase ({currency})</Label>
+                </div>
+                <Input
+                  type="number"
+                  value={payForm.staffPurchaseDeduction || ""}
+                  onChange={(e) => {
+                    const val = Number(e.target.value) || 0
+                    const maxVal = Number(selectedStaffForPay?.staffPurchaseOutstanding || 0)
+                    if (maxVal > 0 && val > maxVal) {
+                      notifyError(toast, `Maximum available staff purchase deduction is ${formatCurr(maxVal)}`)
+                      setPayForm({ ...payForm, staffPurchaseDeduction: maxVal })
+                    } else {
+                      setPayForm({ ...payForm, staffPurchaseDeduction: val })
+                    }
+                  }}
+                  placeholder={selectedStaffForPay?.staffPurchaseOutstanding ? `Max ${selectedStaffForPay.staffPurchaseOutstanding}` : "0"}
+                  className="text-xs text-purple-700 font-semibold"
+                />
+                {Number(selectedStaffForPay?.staffPurchaseOutstanding || 0) > 0 && (
+                  <p className="text-[10px] text-purple-600 mt-0.5 font-medium truncate" title={`Max: ${formatCurr(selectedStaffForPay.staffPurchaseOutstanding)}`}>
+                    Max: {formatCurr(selectedStaffForPay.staffPurchaseOutstanding)}
+                  </p>
+                )}
               </div>
               <div>
                 <Label className="text-xs font-semibold">Other Deductions ({currency})</Label>
@@ -710,7 +740,7 @@ export default function PayrollRequestsTab({ deviceId, currency = "INR", initial
                   type="number"
                   value={payForm.otherDeductions}
                   onChange={(e) => setPayForm({ ...payForm, otherDeductions: Number(e.target.value) })}
-                  className="text-xs text-red-700"
+                  className="text-xs text-red-700 font-semibold"
                 />
               </div>
             </div>
@@ -787,10 +817,31 @@ export default function PayrollRequestsTab({ deviceId, currency = "INR", initial
           </DialogHeader>
 
           <div className="space-y-4 py-2">
-            <div className="bg-slate-50 p-3 rounded-lg text-xs space-y-1">
-              <p><span className="font-semibold">Type:</span> {actionModal.request?.request_type}</p>
-              <p><span className="font-semibold">Reason:</span> {actionModal.request?.reason}</p>
-              {actionModal.request?.amount > 0 && <p><span className="font-semibold">Amount:</span> {formatCurr(actionModal.request?.amount)}</p>}
+            <div className="bg-slate-50 p-3 rounded-lg text-xs space-y-1 border">
+              <p>
+                <span className="font-semibold text-slate-700">Type:</span>{" "}
+                <span className="font-medium text-slate-900">
+                  {actionModal.request?.request_type === "credit_request"
+                    ? "Staff Purchase Request"
+                    : actionModal.request?.request_type === "salary_advance"
+                    ? "Salary Advance"
+                    : actionModal.request?.request_type === "leave_request"
+                    ? `Leave Request (${actionModal.request?.leave_type || "Casual"})`
+                    : (actionModal.request?.request_type || "")
+                        .replace(/_/g, " ")
+                        .replace(/\b\w/g, (c: string) => c.toUpperCase())}
+                </span>
+              </p>
+              <p>
+                <span className="font-semibold text-slate-700">Reason:</span>{" "}
+                <span className="text-slate-900">{actionModal.request?.reason || "-"}</span>
+              </p>
+              {Number(actionModal.request?.amount || 0) > 0 && (
+                <p>
+                  <span className="font-semibold text-slate-700">Amount:</span>{" "}
+                  <span className="font-bold text-slate-900">{formatCurr(actionModal.request?.amount)}</span>
+                </p>
+              )}
             </div>
 
             <div>

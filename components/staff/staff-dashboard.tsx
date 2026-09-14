@@ -136,7 +136,7 @@ export default function StaffDashboard() {
       <div className="hidden md:flex md:w-64 md:flex-col md:fixed md:inset-y-0 bg-white border-r">
         <div className="flex flex-col flex-grow pt-5 overflow-y-auto">
           <div className="flex items-center flex-shrink-0 px-4 mb-5">
-            <BrandLogo />
+            <BrandLogo overrideSrc={device?.logo_url || undefined} />
           </div>
           <div className="px-4 pb-4">
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Staff Portal</p>
@@ -145,16 +145,21 @@ export default function StaffDashboard() {
                 {device.name}
               </p>
             )}
-            {userName && (
-              <div className="flex items-center gap-1.5 mt-1.5 text-xs font-medium text-blue-700 bg-blue-50 px-2.5 py-1 rounded-md border border-blue-100">
-                <UserCircle className="h-4 w-4 text-blue-600 flex-shrink-0" />
-                <span className="truncate font-semibold" title={userName}>{userName}</span>
-              </div>
-            )}
           </div>
           <NavigationMenu />
         </div>
-        <div className="flex-shrink-0 flex border-t border-gray-200 p-4">
+        <div className="mt-auto flex-shrink-0 border-t border-gray-200 p-4">
+          <div className="flex items-center gap-3 mb-4 px-2">
+            <UserCircle className="h-8 w-8 text-slate-400 flex-shrink-0" />
+            <div className="flex flex-col min-w-0 overflow-hidden">
+              <span className="text-sm font-medium text-slate-800 truncate" title={userName || "Staff"}>
+                {userName || "Staff"}
+              </span>
+              <span className="text-xs text-slate-500 truncate">
+                {activeStaff?.position || (activeStaff?.role ? activeStaff.role.charAt(0).toUpperCase() + activeStaff.role.slice(1) : "Staff")}
+              </span>
+            </div>
+          </div>
           <Button variant="ghost" className="w-full justify-start text-red-600 hover:text-red-700 hover:bg-red-50" onClick={handleLogout}>
             <LogOut className="mr-3 h-5 w-5" />
             Logout
@@ -163,8 +168,10 @@ export default function StaffDashboard() {
       </div>
 
       {/* Mobile Header */}
-      <div className="md:hidden fixed top-0 left-0 right-0 z-10 bg-white border-b flex justify-between items-center p-4">
-        <BrandLogo className="h-8 w-auto" />
+      <div className="md:hidden fixed top-0 left-0 right-0 z-10 bg-white border-b flex justify-between items-center px-4 py-3 h-16">
+        <div className="flex items-center min-w-0 overflow-hidden">
+          <BrandLogo overrideSrc={device?.logo_url || undefined} className="h-8 w-auto max-h-8 object-contain" />
+        </div>
         <Button variant="ghost" size="icon" onClick={() => setIsMobileMenuOpen(true)}>
           <Menu className="h-6 w-6" />
         </Button>
@@ -182,7 +189,7 @@ export default function StaffDashboard() {
             </div>
             <div className="flex-1 h-0 pt-5 pb-4 overflow-y-auto">
               <div className="flex-shrink-0 flex items-center px-4 mb-5">
-                <BrandLogo />
+                <BrandLogo overrideSrc={device?.logo_url || undefined} />
               </div>
               <div className="px-4 pb-4">
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Staff Portal</p>
@@ -191,16 +198,21 @@ export default function StaffDashboard() {
                     {device.name}
                   </p>
                 )}
-                {userName && (
-                  <div className="flex items-center gap-1.5 mt-1.5 text-xs font-medium text-blue-700 bg-blue-50 px-2.5 py-1 rounded-md border border-blue-100">
-                    <UserCircle className="h-4 w-4 text-blue-600 flex-shrink-0" />
-                    <span className="truncate font-semibold" title={userName}>{userName}</span>
-                  </div>
-                )}
               </div>
               <NavigationMenu />
             </div>
-            <div className="flex-shrink-0 flex border-t border-gray-200 p-4">
+            <div className="mt-auto flex-shrink-0 border-t border-gray-200 p-4">
+              <div className="flex items-center gap-3 mb-4 px-2">
+                <UserCircle className="h-8 w-8 text-slate-400 flex-shrink-0" />
+                <div className="flex flex-col min-w-0 overflow-hidden">
+                  <span className="text-sm font-medium text-slate-800 truncate" title={userName || "Staff"}>
+                    {userName || "Staff"}
+                  </span>
+                  <span className="text-xs text-slate-500 truncate">
+                    {activeStaff?.position || (activeStaff?.role ? activeStaff.role.charAt(0).toUpperCase() + activeStaff.role.slice(1) : "Staff")}
+                  </span>
+                </div>
+              </div>
               <Button variant="ghost" className="w-full justify-start text-red-600 hover:text-red-700 hover:bg-red-50" onClick={handleLogout}>
                 <LogOut className="mr-3 h-5 w-5" />
                 Logout

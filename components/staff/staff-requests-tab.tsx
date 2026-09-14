@@ -36,10 +36,12 @@ import {
 import { getSalaryPaymentHistory } from "@/app/actions/salary-actions"
 import { useAppSelector } from "@/store/hooks"
 import { selectDevice } from "@/store/slices/deviceSlice"
+import { selectActiveStaff } from "@/store/slices/staffSlice"
 
 export default function StaffRequestsTab() {
   const [activeTab, setActiveTab] = useState<"requests" | "salary" | "purchases">("requests")
   const device = useAppSelector(selectDevice)
+  const activeStaff = useAppSelector(selectActiveStaff)
   const currency = device?.currency || "INR"
 
   // Requests state
@@ -100,8 +102,7 @@ export default function StaffRequestsTab() {
     if (!device?.id) return
     setIsLoadingPurchases(true)
     try {
-      // staffId will be resolved from session on server
-      const res = await getStaffPurchaseDetails(0, device.id)
+      const res = await getStaffPurchaseDetails(activeStaff?.id || 0, device.id)
       if (res.success) {
         setPurchaseDetails(res.data)
       }
@@ -196,19 +197,19 @@ export default function StaffRequestsTab() {
           </p>
         </div>
 
-        <Tabs value={activeTab} onValueChange={(val: any) => setActiveTab(val)}>
-          <TabsList className="bg-slate-100 p-1">
-            <TabsTrigger value="requests" className="text-xs font-semibold">
-              <FileText className="h-3.5 w-3.5 mr-1.5" />
-              My Requests
+        <Tabs value={activeTab} onValueChange={(val: any) => setActiveTab(val)} className="w-full sm:w-auto">
+          <TabsList className="bg-slate-100 p-1 w-full sm:w-auto grid grid-cols-3 sm:flex">
+            <TabsTrigger value="requests" className="text-[11px] sm:text-xs font-semibold px-1.5 sm:px-3 py-1.5">
+              <FileText className="h-3.5 w-3.5 mr-1 shrink-0" />
+              <span className="truncate"><span className="hidden sm:inline">My </span>Requests</span>
             </TabsTrigger>
-            <TabsTrigger value="salary" className="text-xs font-semibold">
-              <Banknote className="h-3.5 w-3.5 mr-1.5" />
-              My Salary
+            <TabsTrigger value="salary" className="text-[11px] sm:text-xs font-semibold px-1.5 sm:px-3 py-1.5">
+              <Banknote className="h-3.5 w-3.5 mr-1 shrink-0" />
+              <span className="truncate"><span className="hidden sm:inline">My </span>Salary</span>
             </TabsTrigger>
-            <TabsTrigger value="purchases" className="text-xs font-semibold">
-              <ShoppingBag className="h-3.5 w-3.5 mr-1.5" />
-              Sales & Purchases
+            <TabsTrigger value="purchases" className="text-[11px] sm:text-xs font-semibold px-1.5 sm:px-3 py-1.5">
+              <ShoppingBag className="h-3.5 w-3.5 mr-1 shrink-0" />
+              <span className="truncate">Sales<span className="hidden sm:inline"> & Purchases</span></span>
             </TabsTrigger>
           </TabsList>
         </Tabs>
@@ -278,7 +279,7 @@ export default function StaffRequestsTab() {
                   You haven't submitted any requests yet. Use the buttons above to request salary advance, credit, or leave.
                 </div>
               ) : (
-                <table className="w-full text-left text-sm border-collapse">
+                <table className="w-full min-w-[600px] text-left text-sm border-collapse">
                   <thead>
                     <tr className="bg-slate-50 border-b text-xs uppercase text-slate-500 font-semibold">
                       <th className="p-3">Request Date</th>
@@ -373,7 +374,7 @@ export default function StaffRequestsTab() {
             ) : salaryHistory.length === 0 ? (
               <div className="text-center py-12 text-slate-500 text-sm">No salary payments recorded yet.</div>
             ) : (
-              <table className="w-full text-left text-sm border-collapse">
+              <table className="w-full min-w-[600px] text-left text-sm border-collapse">
                 <thead>
                   <tr className="bg-slate-50 border-b text-xs uppercase text-slate-500 font-semibold">
                     <th className="p-3">Payment Date</th>
@@ -452,7 +453,7 @@ export default function StaffRequestsTab() {
               ) : purchaseDetails?.sales?.length === 0 ? (
                 <div className="text-center py-12 text-slate-500 text-sm">No sales or purchases created yet.</div>
               ) : (
-                <table className="w-full text-left text-sm border-collapse">
+                <table className="w-full min-w-[600px] text-left text-sm border-collapse">
                   <thead>
                     <tr className="bg-slate-50 border-b text-xs uppercase text-slate-500 font-semibold">
                       <th className="p-3">Order #</th>
