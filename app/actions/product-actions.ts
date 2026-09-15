@@ -189,7 +189,7 @@ function normalizePlatformStatus(value: unknown, defaultStatus: PlatformStatus =
 
 function resolveDeviceStock(product: any, stockMap: Map<number, number>) {
   if (stockMap.has(product.id)) {
-    return Math.max(0, Number(stockMap.get(product.id) || 0))
+    return Number(stockMap.get(product.id) || 0)
   }
 
   return 0
@@ -982,7 +982,7 @@ export async function getProducts(
     const mappedProducts = products.map((product: any) => {
       const currentDeviceStock = userId ? resolveDeviceStock(product, stockMap) : 0
       const companyTotalStock = userId
-        ? Math.max(0, Number(companyTotalStockMap.get(product.id) ?? currentDeviceStock))
+        ? Number(companyTotalStockMap.get(product.id) ?? currentDeviceStock)
         : currentDeviceStock
       const variants = variantsByProductId.get(Number(product.id)) || []
       const defaultVariant = variants[0] || null
@@ -1000,7 +1000,7 @@ export async function getProducts(
         updated_at: product.updated_at ? (product.updated_at instanceof Date ? product.updated_at.toISOString() : String(product.updated_at)) : null,
         stock: currentDeviceStock,
         company_total_stock: companyTotalStock,
-        other_devices_stock: Math.max(0, companyTotalStock - currentDeviceStock),
+        other_devices_stock: companyTotalStock - currentDeviceStock,
         category: product.category_name || product.category || "",
         variants,
         // Surface default variant fields at the top level for backward compat
@@ -1866,7 +1866,7 @@ export async function getPaginatedProducts({
     const mappedProducts = products.map((product: any) => {
       const currentDeviceStock = userId ? resolveDeviceStock(product, stockMap) : 0
       const companyTotalStock = userId
-        ? Math.max(0, Number(companyTotalStockMap.get(product.id) ?? currentDeviceStock))
+        ? Number(companyTotalStockMap.get(product.id) ?? currentDeviceStock)
         : currentDeviceStock
       const variants = variantsByProductId.get(Number(product.id)) || []
       const defaultVariant = variants[0] || null
@@ -1884,7 +1884,7 @@ export async function getPaginatedProducts({
         updated_at: product.updated_at ? (product.updated_at instanceof Date ? product.updated_at.toISOString() : String(product.updated_at)) : null,
         stock: currentDeviceStock,
         company_total_stock: companyTotalStock,
-        other_devices_stock: Math.max(0, companyTotalStock - currentDeviceStock),
+        other_devices_stock: companyTotalStock - currentDeviceStock,
         category: product.category_name || product.category || "",
         variants,
         variant_id: defaultVariant?.id ?? null,

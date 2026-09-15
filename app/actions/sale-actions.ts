@@ -198,47 +198,23 @@ export async function updateProductStock(
     }
 
     // 1. Always update product_device_stock (legacy/device stock)
-    const devStock = await sql`SELECT id, stock FROM product_device_stock WHERE product_id = ${productId} AND device_id = ${deviceId} LIMIT 1`
-    const currentLegacyStock = devStock.length > 0 ? Number(devStock[0].stock || 0) : 0
-    const nextLegacyStock = Math.max(0, currentLegacyStock + delta)
-    
-    if (devStock.length > 0) {
-      await sql`UPDATE product_device_stock SET stock = ${nextLegacyStock}, updated_at = NOW() WHERE id = ${devStock[0].id}`
-    } else {
-      await sql`INSERT INTO product_device_stock (product_id, device_id, stock, updated_at) VALUES (${productId}, ${deviceId}, ${nextLegacyStock}, NOW())`
-    }
+    await sql`
+      INSERT INTO product_device_stock (product_id, device_id, stock, updated_at)
+      VALUES (${productId}, ${deviceId}, ${delta}, NOW())
+      ON CONFLICT (product_id, device_id)
+      DO UPDATE SET stock = product_device_stock.stock + EXCLUDED.stock, updated_at = NOW()
+    `
 
     // 2. Update product_batch_device_stock (batch stock)
     if (resolvedVariantId) {
       if (batchId) {
         // Specific batch provided
-        const batchStockRows = await sql`
-          SELECT id, stock FROM product_batch_device_stock
-          WHERE batch_id = ${batchId} AND device_id = ${deviceId}
-          LIMIT 1
+        await sql`
+          INSERT INTO product_batch_device_stock (batch_id, device_id, stock, updated_at)
+          VALUES (${batchId}, ${deviceId}, ${delta}, NOW())
+          ON CONFLICT (batch_id, device_id)
+          DO UPDATE SET stock = product_batch_device_stock.stock + EXCLUDED.stock, updated_at = NOW()
         `
-        let currentBatchStock = 0
-        if (batchStockRows.length > 0) {
-          currentBatchStock = Number(batchStockRows[0].stock || 0)
-        } else {
-          const pbRows = await sql`SELECT remaining_quantity FROM product_batches WHERE id = ${batchId} LIMIT 1`
-          currentBatchStock = pbRows.length > 0 ? Number(pbRows[0].remaining_quantity || 0) : currentLegacyStock
-        }
-
-        const nextBatchStock = Math.max(0, currentBatchStock + delta)
-
-        if (batchStockRows.length > 0) {
-          await sql`
-            UPDATE product_batch_device_stock 
-            SET stock = ${nextBatchStock}, updated_at = NOW()
-            WHERE id = ${batchStockRows[0].id}
-          `
-        } else {
-          await sql`
-            INSERT INTO product_batch_device_stock (batch_id, device_id, stock, updated_at)
-            VALUES (${batchId}, ${deviceId}, ${nextBatchStock}, NOW())
-          `
-        }
       } else if (delta < 0) {
         // Subtracting stock without a specific batch: deduct FIFO from product's batches
         let remainingToDeduct = Math.abs(delta)
@@ -256,7 +232,7 @@ export async function updateProductStock(
           if (remainingToDeduct <= 0) break
           const currentStock = Number(batch.stock || 0)
           const take = Math.min(remainingToDeduct, currentStock)
-          const nextStock = Math.max(0, currentStock - take)
+          const nextStock = currentStock - take
           remainingToDeduct -= take
 
           if (batch.pbds_id) {
@@ -285,7 +261,7 @@ export async function updateProductStock(
           if (defaultBatches.length > 0) {
             const defBatchId = defaultBatches[0].batch_id
             const currentStock = Number(defaultBatches[0].stock || 0)
-            const nextStock = Math.max(0, currentStock - remainingToDeduct)
+            const nextStock = currentStock - remainingToDeduct
             
             if (defaultBatches[0].pbds_id) {
               await sql`
@@ -305,29 +281,17 @@ export async function updateProductStock(
               INSERT INTO product_batches (
                 product_id, product_variant_id, batch_no, cost_price, selling_price, quantity_purchased, remaining_quantity, status
               ) VALUES (
-                ${productId}, ${resolvedVariantId}, ${newBatchNo}, 0, 0, ${nextLegacyStock}, ${nextLegacyStock}, 'active'
+                ${productId}, ${resolvedVariantId}, ${newBatchNo}, 0, 0, ${delta}, ${delta}, 'active'
               ) RETURNING id
             `
             const defBatchId = newB[0].id
             
-            // Check if a pbds record somehow exists (preventing race condition)
-            const existingPbds = await sql`
-              SELECT id FROM product_batch_device_stock
-              WHERE batch_id = ${defBatchId} AND device_id = ${deviceId}
-              LIMIT 1
+            await sql`
+              INSERT INTO product_batch_device_stock (batch_id, device_id, stock, updated_at)
+              VALUES (${defBatchId}, ${deviceId}, ${delta}, NOW())
+              ON CONFLICT (batch_id, device_id)
+              DO UPDATE SET stock = product_batch_device_stock.stock + EXCLUDED.stock, updated_at = NOW()
             `
-            if (existingPbds.length > 0) {
-              await sql`
-                UPDATE product_batch_device_stock
-                SET stock = ${nextLegacyStock}, updated_at = NOW()
-                WHERE id = ${existingPbds[0].id}
-              `
-            } else {
-              await sql`
-                INSERT INTO product_batch_device_stock (batch_id, device_id, stock, updated_at)
-                VALUES (${defBatchId}, ${deviceId}, ${nextLegacyStock}, NOW())
-              `
-            }
           }
         }
       } else if (delta > 0) {
@@ -368,23 +332,12 @@ export async function updateProductStock(
           `
           const adjBatchId = adjBatch[0].id
           
-          const existingPbds = await sql`
-            SELECT id FROM product_batch_device_stock
-            WHERE batch_id = ${adjBatchId} AND device_id = ${deviceId}
-            LIMIT 1
+          await sql`
+            INSERT INTO product_batch_device_stock (batch_id, device_id, stock, updated_at)
+            VALUES (${adjBatchId}, ${deviceId}, ${delta}, NOW())
+            ON CONFLICT (batch_id, device_id)
+            DO UPDATE SET stock = product_batch_device_stock.stock + EXCLUDED.stock, updated_at = NOW()
           `
-          if (existingPbds.length > 0) {
-            await sql`
-              UPDATE product_batch_device_stock
-              SET stock = ${nextLegacyStock}, updated_at = NOW()
-              WHERE id = ${existingPbds[0].id}
-            `
-          } else {
-            await sql`
-              INSERT INTO product_batch_device_stock (batch_id, device_id, stock, updated_at)
-              VALUES (${adjBatchId}, ${deviceId}, ${nextLegacyStock}, NOW())
-            `
-          }
         }
       }
     }

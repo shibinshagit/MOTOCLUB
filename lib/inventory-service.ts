@@ -27,7 +27,7 @@ export async function getDeviceProductStock(productId: number, deviceId: number)
         ), 0)
       END as stock
   `
-  return Math.max(0, Number(rows[0]?.stock || 0))
+  return Number(rows[0]?.stock || 0)
 }
 
 /**
@@ -40,13 +40,13 @@ export async function getDeviceVariantStock(variantId: number, deviceId: number)
     JOIN product_batches pb ON pb.id = pbds.batch_id
     WHERE pb.product_variant_id = ${variantId} AND pbds.device_id = ${deviceId}
   `
-  return Math.max(0, Number(rows[0]?.stock || 0))
+  return Number(rows[0]?.stock || 0)
 }
 
 /**
  * Adjusts the stock of a product, automatically routing the update 
  * to either the legacy table or the variant batch tables.
- * Stock values are bounded at 0 to prevent negative stock counts.
+ * Stock values can be negative to support overselling/negative inventory.
  */
 export async function adjustDeviceProductStock(
   productId: number,
@@ -83,49 +83,19 @@ export async function adjustDeviceProductStock(
   }
 
   if (effectiveBatchId) {
-    const batchStock = await query`
-      SELECT id, stock FROM product_batch_device_stock
-      WHERE batch_id = ${effectiveBatchId} AND device_id = ${deviceId}
-      LIMIT 1
+    await query`
+      INSERT INTO product_batch_device_stock (batch_id, device_id, stock, updated_at)
+      VALUES (${effectiveBatchId}, ${deviceId}, ${quantityChange}, CURRENT_TIMESTAMP)
+      ON CONFLICT (batch_id, device_id)
+      DO UPDATE SET stock = product_batch_device_stock.stock + EXCLUDED.stock, updated_at = CURRENT_TIMESTAMP
     `
-
-    if (batchStock.length > 0) {
-      const currentVal = Number(batchStock[0].stock || 0)
-      const newVal = Math.max(0, currentVal + quantityChange)
-      await query`
-        UPDATE product_batch_device_stock
-        SET stock = ${newVal}, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ${batchStock[0].id}
-      `
-    } else {
-      const newVal = Math.max(0, quantityChange)
-      await query`
-        INSERT INTO product_batch_device_stock (batch_id, device_id, stock)
-        VALUES (${effectiveBatchId}, ${deviceId}, ${newVal})
-      `
-    }
   } else {
     // Legacy stock fallback
-    const legacyStock = await query`
-      SELECT id, stock FROM product_device_stock
-      WHERE product_id = ${productId} AND device_id = ${deviceId}
-      LIMIT 1
+    await query`
+      INSERT INTO product_device_stock (product_id, device_id, stock, updated_at)
+      VALUES (${productId}, ${deviceId}, ${quantityChange}, CURRENT_TIMESTAMP)
+      ON CONFLICT (product_id, device_id)
+      DO UPDATE SET stock = product_device_stock.stock + EXCLUDED.stock, updated_at = CURRENT_TIMESTAMP
     `
-
-    if (legacyStock.length > 0) {
-      const currentVal = Number(legacyStock[0].stock || 0)
-      const newVal = Math.max(0, currentVal + quantityChange)
-      await query`
-        UPDATE product_device_stock
-        SET stock = ${newVal}, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ${legacyStock[0].id}
-      `
-    } else {
-      const newVal = Math.max(0, quantityChange)
-      await query`
-        INSERT INTO product_device_stock (product_id, device_id, stock)
-        VALUES (${productId}, ${deviceId}, ${newVal})
-      `
-    }
   }
 }

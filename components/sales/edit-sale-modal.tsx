@@ -529,13 +529,12 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
     wholesalePrice?: number,
     stock?: number,
   ) => {
-    // Check if stock is available
+    // Check if stock is low or negative
     if (stock !== undefined && stock <= 0) {
       setBarcodeAlert({
-        type: "error",
-        message: `${productName} is out of stock`,
+        type: "warning",
+        message: `${productName} stock is shortage (${stock}). Overselling enabled.`,
       })
-      return false
     }
 
     // Find if product already exists in the list
@@ -547,26 +546,17 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
       const product = updatedProducts[existingProductIndex]
       const newQuantity = product.quantity + 1
 
-      // Check if new quantity exceeds stock
       if (stock !== undefined && newQuantity > stock) {
         setBarcodeAlert({
           type: "warning",
-          message: `Only ${stock} units available for ${productName}`,
+          message: `Insufficient stock (${stock} available) for ${productName}. Overselling allowed.`,
         })
+      }
 
-        // Set quantity to available stock
-        updatedProducts[existingProductIndex] = {
-          ...product,
-          quantity: stock,
-          total: stock * (Number(price) || 0),
-        }
-      } else {
-        // Update with new quantity
-        updatedProducts[existingProductIndex] = {
-          ...product,
-          quantity: newQuantity,
-          total: newQuantity * (Number(price) || 0),
-        }
+      updatedProducts[existingProductIndex] = {
+        ...product,
+        quantity: newQuantity,
+        total: newQuantity * (Number(price) || 0),
       }
 
       setProducts(updatedProducts)

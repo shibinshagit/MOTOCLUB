@@ -698,18 +698,10 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
           (updates.quantity !== undefined || updates.stock !== undefined) &&
           updatedProduct.quantity > effectiveStock
         ) {
-          updatedProduct.quantity = effectiveStock
-          setBarcodeAlert(
-            effectiveStock <= 0
-              ? {
-                  type: "error",
-                  message: `${updatedProduct.productName || "Selected product"} is out of stock`,
-                }
-              : {
-                  type: "warning",
-                  message: `Only ${effectiveStock} units available for ${updatedProduct.productName}`,
-                },
-          )
+          setBarcodeAlert({
+            type: "warning",
+            message: `Insufficient stock (${effectiveStock} available) for ${updatedProduct.productName || "product"}. Overselling allowed.`,
+          })
         }
 
         if (updates.quantity !== undefined || updates.price !== undefined) {
@@ -724,9 +716,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
   }, [hideStockCount, isEditMode])
 
   const isProductOutOfStock = (product: ProductRow) => {
-    if (hideStockCount || !product.productId || product.isService) return false
-    const effectiveStock = (product.stock ?? 0) + (isEditMode ? (product.originalQuantity ?? 0) : 0)
-    return effectiveStock <= 0
+    return false
   }
 
   const handleQuantityInputChange = useCallback((product: ProductRow, rawValue: string) => {
@@ -734,23 +724,12 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     const requestedQuantity = Number.isFinite(parsed) ? parsed : 0
     const effectiveStock = (product.stock ?? 0) + (isEditMode ? (product.originalQuantity ?? 0) : 0)
 
-    if (isProductOutOfStock(product)) {
-      setBarcodeAlert({
-        type: "error",
-        message: `${product.productName || "Selected product"} is out of stock`,
-      })
-      updateProductRow(product.id, { quantity: 0 })
-      return
-    }
-
     const safeRequested = Math.max(requestedQuantity, 1)
     if (!hideStockCount && !product.isService && product.stock !== undefined && safeRequested > effectiveStock) {
       setBarcodeAlert({
         type: "warning",
-        message: `Only ${effectiveStock} units available for ${product.productName}`,
+        message: `Insufficient stock (${effectiveStock} available) for ${product.productName}. Overselling allowed.`,
       })
-      updateProductRow(product.id, { quantity: effectiveStock })
-      return
     }
 
     let allocations = product.allocations || []
@@ -809,8 +788,8 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
   ) => {
     if (!hideStockCount && stock !== undefined && stock <= 0) {
       setBarcodeAlert({
-        type: "error",
-        message: `${productName} is out of stock`,
+        type: "warning",
+        message: `${productName} stock is shortage (${stock}). Overselling enabled.`,
       })
     }
 
@@ -1007,19 +986,13 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
           if (result.data.stock !== undefined && newQuantity > effectiveStock) {
             setBarcodeAlert({
               type: "warning",
-              message: `Only ${effectiveStock} units available for ${result.data.name}`,
+              message: `Insufficient stock (${effectiveStock} available) for ${result.data.name}. Overselling enabled.`,
             })
-            updatedProducts[existingProductIndex] = {
-              ...product,
-              quantity: effectiveStock,
-              total: effectiveStock * (Number(result.data.price) || 0),
-            }
-          } else {
-            updatedProducts[existingProductIndex] = {
-              ...product,
-              quantity: newQuantity,
-              total: newQuantity * (Number(result.data.price) || 0),
-            }
+          }
+          updatedProducts[existingProductIndex] = {
+            ...product,
+            quantity: newQuantity,
+            total: newQuantity * (Number(result.data.price) || 0),
           }
 
           setProducts(updatedProducts)
@@ -1319,28 +1292,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
       return
     }
 
-    // Validate stock counts
-    if (!hideStockCount) {
-      for (const p of products) {
-        if (p.productId !== null && !p.isService) {
-          const effectiveStock = (p.stock ?? 0) + (isEditMode ? (p.originalQuantity ?? 0) : 0)
-          if (effectiveStock <= 0) {
-            setFormAlert({
-              type: "error",
-              message: `Cannot complete sale. ${p.productName}${p.variantName ? ` (${p.variantName})` : ""} is out of stock.`,
-            })
-            return
-          }
-          if (p.quantity > effectiveStock) {
-            setFormAlert({
-              type: "error",
-              message: `Cannot complete sale. Only ${effectiveStock} units available for ${p.productName}${p.variantName ? ` (${p.variantName})` : ""}.`,
-            })
-            return
-          }
-        }
-      }
-    }
+    // Stock validation skipped to allow overselling / negative stock
 
     if ((paymentStatus === "Credit" || paymentStatus === "Partial") && receivedAmount > totalAmount) {
       setFormAlert({

@@ -758,7 +758,8 @@ export async function exportStockToPDF(products: any[], filename = "stock_report
     products.forEach((product, index) => {
       const stock = Number(product.stock) || 0
       let status = "In Stock"
-      if (stock <= 0) status = "Out of Stock"
+      if (stock < 0) status = "Shortage"
+      else if (stock === 0) status = "Out of Stock"
       else if (stock <= 5) status = "Low Stock"
 
       htmlContent += `
@@ -953,7 +954,8 @@ export async function exportDetailedSaleToPDF(
 
 // Helper function to get stock status
 function getStockStatus(stock: number): string {
-  if (stock <= 0) return "Out of Stock"
+  if (stock < 0) return "Shortage"
+  if (stock === 0) return "Out of Stock"
   if (stock <= 5) return "Low Stock"
   return "In Stock"
 }
