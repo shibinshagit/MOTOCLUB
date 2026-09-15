@@ -10,16 +10,18 @@ export interface SaleSummaryRow {
   productList: string
   cost: number
   sellingPrice: number
-  courierCharge: number
-  netProfit: number
+  totalPrice: number
+  partnerCourier: number
+  profit: number
 }
 
 export interface SalesSummaryTotals {
   totalOrders: number
   totalCost: number
   totalSelling: number
-  totalCourier: number
-  totalNetProfit: number
+  totalPrice: number
+  totalPartnerCourier: number
+  totalProfit: number
 }
 
 function escapeHtml(str: string): string {
@@ -57,15 +59,46 @@ export function extractSaleSummaryRow(sale: any): SaleSummaryRow {
     .filter(Boolean)
     .join("\n")
 
-  const rawProductList = sale.products_text?.trim() || sale.items_summary?.trim() || "Item × 1"
+  let rawProductList = sale.products_text?.trim() || sale.items_summary?.trim()
+
+  if (!rawProductList && Array.isArray(sale.items) && sale.items.length > 0) {
+    rawProductList = sale.items
+      .map((item: any) => {
+        const name = item.product_name || item.name || item.title || item.notes || "Item"
+        const variant = item.variant_name || item.variant || ""
+        const qty = item.quantity || 1
+        return `${name}${variant && variant !== "Default Variant" && variant !== "Default" ? ` - ${variant}` : ""} × ${qty}`
+      })
+      .join("\n")
+  }
+
+  if (!rawProductList) {
+    rawProductList = "Item × 1"
+  }
+
   const productList = rawProductList
     .replace(/ - Default Variant/g, "")
     .replace(/ - Default/g, "")
 
-  const cost = Number(sale.total_cost || 0)
-  const sellingPrice = Number(sale.total_amount || 0)
-  const courierCharge = Number(sale.courier_paid_extra || sale.expense_courier || 0)
-  const netProfit = sellingPrice - cost - courierCharge
+  const itemsCost =
+    sale.items?.reduce(
+      (sum: number, i: any) => sum + Number(i.cost || i.cost_price || 0) * Number(i.quantity || 1),
+      0,
+    ) || 0
+  const cost = Number(sale.total_cost || 0) > 0 ? Number(sale.total_cost) : itemsCost
+  const customerCourier = Number(sale.courier_paid_extra || 0)
+  const totalPrice = Number(sale.total_amount || 0)
+  const sellingPrice = Math.max(0, totalPrice - customerCourier)
+  const partnerCourier = Number(sale.expense_courier || 0)
+
+  const isCancelledOrReturned =
+    sale.status === "Cancelled" ||
+    sale.status === "Returned" ||
+    sale.delivery_status === "Returned" ||
+    sale.delivery_status?.toLowerCase() === "returned" ||
+    sale.payment_status?.toLowerCase() === "cancelled"
+
+  const profit = isCancelledOrReturned ? 0 : totalPrice - cost - partnerCourier
 
   return {
     saleId,
@@ -76,8 +109,9 @@ export function extractSaleSummaryRow(sale: any): SaleSummaryRow {
     productList,
     cost,
     sellingPrice,
-    courierCharge,
-    netProfit,
+    totalPrice,
+    partnerCourier,
+    profit,
   }
 }
 
@@ -87,10 +121,18 @@ export function computeSalesSummaryTotals(rows: SaleSummaryRow[]): SalesSummaryT
       totalOrders: acc.totalOrders + 1,
       totalCost: acc.totalCost + row.cost,
       totalSelling: acc.totalSelling + row.sellingPrice,
-      totalCourier: acc.totalCourier + row.courierCharge,
-      totalNetProfit: acc.totalNetProfit + row.netProfit,
+      totalPrice: acc.totalPrice + row.totalPrice,
+      totalPartnerCourier: acc.totalPartnerCourier + row.partnerCourier,
+      totalProfit: acc.totalProfit + row.profit,
     }),
-    { totalOrders: 0, totalCost: 0, totalSelling: 0, totalCourier: 0, totalNetProfit: 0 },
+    {
+      totalOrders: 0,
+      totalCost: 0,
+      totalSelling: 0,
+      totalPrice: 0,
+      totalPartnerCourier: 0,
+      totalProfit: 0,
+    },
   )
 }
 
@@ -150,8 +192,9 @@ export async function downloadSalesSummaryPDF(
     row.productList,
     formatPdfCurrency(row.cost, formatCurrency),
     formatPdfCurrency(row.sellingPrice, formatCurrency),
-    formatPdfCurrency(row.courierCharge, formatCurrency),
-    formatPdfCurrency(row.netProfit, formatCurrency),
+    formatPdfCurrency(row.totalPrice, formatCurrency),
+    formatPdfCurrency(row.partnerCourier, formatCurrency),
+    formatPdfCurrency(row.profit, formatCurrency),
   ])
 
   // Summary Totals row
@@ -160,13 +203,14 @@ export async function downloadSalesSummaryPDF(
     "SUMMARY TOTALS",
     formatPdfCurrency(totals.totalCost, formatCurrency),
     formatPdfCurrency(totals.totalSelling, formatCurrency),
-    formatPdfCurrency(totals.totalCourier, formatCurrency),
-    formatPdfCurrency(totals.totalNetProfit, formatCurrency),
+    formatPdfCurrency(totals.totalPrice, formatCurrency),
+    formatPdfCurrency(totals.totalPartnerCourier, formatCurrency),
+    formatPdfCurrency(totals.totalProfit, formatCurrency),
   ])
 
   autoTable(doc, {
     startY: 30,
-    head: [["Sale / Customer", "Product List", "Cost", "Selling", "Courier", "Net Profit"]],
+    head: [["Sale / Customer", "Product List", "Cost", "Selling", "Total Price", "Partner Courier", "Profit"]],
     body: tableBody,
     theme: "grid",
     headStyles: {
@@ -183,12 +227,13 @@ export async function downloadSalesSummaryPDF(
       overflow: "linebreak",
     },
     columnStyles: {
-      0: { cellWidth: 36 },
-      1: { cellWidth: 54 },
-      2: { cellWidth: 24, halign: "right" },
-      3: { cellWidth: 24, halign: "right" },
-      4: { cellWidth: 24, halign: "right" },
-      5: { cellWidth: 28, halign: "right", fontStyle: "bold" },
+      0: { cellWidth: 32 },
+      1: { cellWidth: 42 },
+      2: { cellWidth: 20, halign: "right" },
+      3: { cellWidth: 20, halign: "right" },
+      4: { cellWidth: 22, halign: "right" },
+      5: { cellWidth: 24, halign: "right" },
+      6: { cellWidth: 24, halign: "right", fontStyle: "bold" },
     },
     didParseCell: function (data: any) {
       if (data.row.index === tableBody.length - 1) {
@@ -368,12 +413,13 @@ export function printSalesSummaryReport(
   <table class="print-table">
     <thead>
       <tr>
-        <th style="width: 22%;">Sale / Customer</th>
-        <th style="width: 33%;">Product List</th>
-        <th class="num-col" style="width: 11%;">Cost</th>
-        <th class="num-col" style="width: 11%;">Selling</th>
-        <th class="num-col" style="width: 11%;">Courier</th>
-        <th class="num-col" style="width: 12%;">Net Profit</th>
+        <th style="width: 20%;">Sale / Customer</th>
+        <th style="width: 28%;">Product List</th>
+        <th class="num-col" style="width: 10%;">Cost</th>
+        <th class="num-col" style="width: 10%;">Selling</th>
+        <th class="num-col" style="width: 11%;">Total Price</th>
+        <th class="num-col" style="width: 11%;">Partner Courier</th>
+        <th class="num-col" style="width: 10%;">Profit</th>
       </tr>
     </thead>
     <tbody>
@@ -389,8 +435,9 @@ export function printSalesSummaryReport(
           <td class="cell-multiline">${escapeHtml(row.productList)}</td>
           <td class="num-col">${escapeHtml(formatCurrency(row.cost))}</td>
           <td class="num-col">${escapeHtml(formatCurrency(row.sellingPrice))}</td>
-          <td class="num-col">${escapeHtml(formatCurrency(row.courierCharge))}</td>
-          <td class="num-col" style="font-weight: 700;">${escapeHtml(formatCurrency(row.netProfit))}</td>
+          <td class="num-col">${escapeHtml(formatCurrency(row.totalPrice))}</td>
+          <td class="num-col">${escapeHtml(formatCurrency(row.partnerCourier))}</td>
+          <td class="num-col" style="font-weight: 700;">${escapeHtml(formatCurrency(row.profit))}</td>
         </tr>
       `,
         )
@@ -413,12 +460,16 @@ export function printSalesSummaryReport(
         <div class="totals-val">${escapeHtml(formatCurrency(totals.totalSelling))}</div>
       </div>
       <div class="totals-item">
-        <div class="totals-label">Total Courier</div>
-        <div class="totals-val">${escapeHtml(formatCurrency(totals.totalCourier))}</div>
+        <div class="totals-label">Total Price</div>
+        <div class="totals-val">${escapeHtml(formatCurrency(totals.totalPrice))}</div>
       </div>
       <div class="totals-item">
-        <div class="totals-label">Total Net Profit</div>
-        <div class="totals-val" style="color: #16a34a;">${escapeHtml(formatCurrency(totals.totalNetProfit))}</div>
+        <div class="totals-label">Total Partner Courier</div>
+        <div class="totals-val">${escapeHtml(formatCurrency(totals.totalPartnerCourier))}</div>
+      </div>
+      <div class="totals-item">
+        <div class="totals-label">Total Profit</div>
+        <div class="totals-val" style="color: #16a34a;">${escapeHtml(formatCurrency(totals.totalProfit))}</div>
       </div>
     </div>
   </div>
@@ -436,3 +487,71 @@ export function printSalesSummaryReport(
   printWindow.document.write(html)
   printWindow.document.close()
 }
+
+export function downloadSalesSummaryExcel(
+  sales: any[],
+  periodLabel?: string,
+  dateRange?: { from?: string; to?: string },
+) {
+  const rows = sales.map(extractSaleSummaryRow)
+  const totals = computeSalesSummaryTotals(rows)
+
+  const headers = [
+    "Sale / Customer",
+    "Product List",
+    "Cost",
+    "Selling",
+    "Total Price",
+    "Partner Courier",
+    "Profit",
+  ]
+
+  const dataRows = rows.map((row) => [
+    row.combinedCustomer.replace(/\n/g, ", "),
+    row.productList.replace(/\n/g, "; "),
+    row.cost,
+    row.sellingPrice,
+    row.totalPrice,
+    row.partnerCourier,
+    row.profit,
+  ])
+
+  const totalsRow = [
+    `Total Orders: ${totals.totalOrders}`,
+    "SUMMARY TOTALS",
+    totals.totalCost,
+    totals.totalSelling,
+    totals.totalPrice,
+    totals.totalPartnerCourier,
+    totals.totalProfit,
+  ]
+
+  const csvLines = [
+    headers.join(","),
+    ...dataRows.map((r) =>
+      r
+        .map((cell) =>
+          typeof cell === "number" ? cell.toFixed(2) : `"${String(cell).replace(/"/g, '""')}"`,
+        )
+        .join(","),
+    ),
+    "",
+    totalsRow
+      .map((cell) =>
+        typeof cell === "number" ? cell.toFixed(2) : `"${String(cell).replace(/"/g, '""')}"`,
+      )
+      .join(","),
+  ]
+
+  const csvContent = csvLines.join("\r\n")
+  const blob = new Blob(["\ufeff" + csvContent], { type: "text/csv;charset=utf-8;" })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement("a")
+  const baseFilename = getSalesSummaryFilename(dateRange?.from, dateRange?.to, periodLabel)
+  link.setAttribute("href", url)
+  link.setAttribute("download", `${baseFilename}.csv`)
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+}
+

@@ -772,6 +772,29 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
           COALESCE(NULLIF(s.customer_phone_override, ''), c.phone, '') as customer_phone,
           st.name as staff_name,
           COALESCE(
+            (SELECT STRING_AGG(
+               CONCAT(
+                 COALESCE(p.name, sv.name, si.notes, 'Item'),
+                 CASE WHEN pv.name IS NOT NULL AND pv.name != '' THEN CONCAT(' - ', pv.name) ELSE '' END,
+                 ' × ',
+                 si.quantity
+               ),
+               E'\n'
+             )
+             FROM sale_items si
+             LEFT JOIN products p ON si.product_id = p.id AND NOT EXISTS (SELECT 1 FROM services s2 WHERE s2.id = si.product_id)
+             LEFT JOIN services sv ON si.product_id = sv.id
+             LEFT JOIN product_variants pv ON si.product_variant_id = pv.id
+             WHERE si.sale_id = s.id), ''
+          ) as products_text,
+          COALESCE(
+            (SELECT STRING_AGG(COALESCE(p.name, sv.name, si.notes, ''), ', ')
+             FROM sale_items si
+             LEFT JOIN products p ON si.product_id = p.id AND NOT EXISTS (SELECT 1 FROM services s2 WHERE s2.id = si.product_id)
+             LEFT JOIN services sv ON si.product_id = sv.id
+             WHERE si.sale_id = s.id), ''
+          ) as items_summary,
+          COALESCE(
             (SELECT SUM(si.quantity * COALESCE(si.cost, pv.wholesale_price, p.wholesale_price, 0))
              FROM sale_items si 
              LEFT JOIN products p ON si.product_id = p.id AND NOT EXISTS (SELECT 1 FROM services s2 WHERE s2.id = si.product_id)

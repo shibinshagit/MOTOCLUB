@@ -52,7 +52,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { useToast } from "@/components/ui/use-toast"
 import { notifyWarning, notifySuccess, notifyError } from "@/lib/notifications"
-import { downloadSalesSummaryPDF, printSalesSummaryReport } from "@/lib/sales-summary-utils"
+import { downloadSalesSummaryPDF, printSalesSummaryReport, downloadSalesSummaryExcel } from "@/lib/sales-summary-utils"
 import { JobCardModal } from "@/components/shared/job-card/job-card-modal"
 
 function getSaleStatusLabel(sale: any): string {
@@ -534,14 +534,20 @@ export default function SalesExcelTable({
         0,
       ) || 0
     const cost = Number(sale.total_cost) > 0 ? Number(sale.total_cost) : itemsCost
-    const sellingPrice = Number(sale.total_amount || 0)
-    const courierCharge = Number(sale.courier_paid_extra || sale.expense_courier || 0)
+    const totalPrice = Number(sale.total_amount || 0)
+    const partnerCourier = Number(sale.expense_courier || 0)
 
-    if (sale.status === "Returned" || sale.delivery_status === "Returned") {
+    if (
+      sale.status === "Returned" ||
+      sale.status === "Cancelled" ||
+      sale.delivery_status === "Returned" ||
+      sale.delivery_status?.toLowerCase() === "returned" ||
+      sale.payment_status?.toLowerCase() === "cancelled"
+    ) {
       return 0
     }
 
-    return sellingPrice - cost - courierCharge
+    return totalPrice - cost - partnerCourier
   }
 
   const handlePrintSummary = () => {
@@ -575,6 +581,20 @@ export default function SalesExcelTable({
       notifyError(toast, err?.message || "Failed to download PDF report.")
     } finally {
       setIsGeneratingReport(false)
+    }
+  }
+
+  const handleDownloadExcel = () => {
+    if (isGeneratingReport) return
+    if (!displaySales || displaySales.length === 0) {
+      notifyWarning(toast, "No sales found for the selected filters.")
+      return
+    }
+    try {
+      downloadSalesSummaryExcel(displaySales, periodLabel, globalDateRange)
+      notifySuccess(toast, "Sales summary Excel report downloaded.")
+    } catch (err: any) {
+      notifyError(toast, err?.message || "Failed to download Excel report.")
     }
   }
 
@@ -974,6 +994,18 @@ export default function SalesExcelTable({
                   <Download className="h-3.5 w-3.5 text-slate-600" />
                 )}
                 <span>PDF</span>
+              </Button>
+
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 gap-1.5 px-2.5 text-xs font-medium bg-white hover:bg-slate-50 border-slate-200 text-slate-700 shadow-2xs"
+                onClick={handleDownloadExcel}
+                disabled={isLoading || isGeneratingReport}
+                title="Download Sales Summary Excel / CSV Report"
+              >
+                <Download className="h-3.5 w-3.5 text-emerald-600" />
+                <span>Excel</span>
               </Button>
 
               <Button

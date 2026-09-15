@@ -223,14 +223,20 @@ export default function SalesOrdersTab() {
       0
     ) || 0
     const cost = Number(sale.total_cost) > 0 ? Number(sale.total_cost) : itemsCost
-    const sellingPrice = Number(sale.total_amount || 0)
-    const courierCharge = Number(sale.courier_paid_extra || sale.expense_courier || 0)
+    const totalPrice = Number(sale.total_amount || 0)
+    const partnerCourier = Number(sale.expense_courier || 0)
 
-    if (sale.status === "Returned" || sale.delivery_status === "Returned") {
+    if (
+      sale.status === "Returned" ||
+      sale.status === "Cancelled" ||
+      sale.delivery_status === "Returned" ||
+      sale.delivery_status?.toLowerCase() === "returned" ||
+      sale.payment_status?.toLowerCase() === "cancelled"
+    ) {
       return 0
     }
 
-    return sellingPrice - cost - courierCharge
+    return totalPrice - cost - partnerCourier
   }
 
   return (
