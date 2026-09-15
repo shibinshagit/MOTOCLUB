@@ -1253,6 +1253,13 @@ async function createIndexes() {
     ["idx_replacement_shipments_sale_id", () => sql`CREATE INDEX IF NOT EXISTS idx_replacement_shipments_sale_id ON replacement_shipments(sale_id)`],
     ["idx_replacement_shipments_courier", () => sql`CREATE INDEX IF NOT EXISTS idx_replacement_shipments_courier ON replacement_shipments(courier_partner_id)`],
     ["idx_replacement_shipment_items_rs_id", () => sql`CREATE INDEX IF NOT EXISTS idx_replacement_shipment_items_rs_id ON replacement_shipment_items(replacement_shipment_id)`],
+    ["idx_sales_courier_partner_id", () => sql`CREATE INDEX IF NOT EXISTS idx_sales_courier_partner_id ON sales(courier_partner_id)`],
+    ["idx_sales_courier_service_id", () => sql`CREATE INDEX IF NOT EXISTS idx_sales_courier_service_id ON sales(courier_service_id)`],
+    ["idx_sales_tracking_id", () => sql`CREATE INDEX IF NOT EXISTS idx_sales_tracking_id ON sales(tracking_id)`],
+    ["idx_replacement_shipments_courier_service", () => sql`CREATE INDEX IF NOT EXISTS idx_replacement_shipments_courier_service ON replacement_shipments(courier_service_id)`],
+    ["idx_replacement_shipments_tracking_id", () => sql`CREATE INDEX IF NOT EXISTS idx_replacement_shipments_tracking_id ON replacement_shipments(tracking_id)`],
+    ["idx_customers_phone", () => sql`CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone)`],
+    ["idx_customers_name", () => sql`CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(name)`],
   ]
 
   for (const [label, fn] of indexes) {

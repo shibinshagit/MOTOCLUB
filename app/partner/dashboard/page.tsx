@@ -1,13 +1,17 @@
 import { redirect } from "next/navigation"
 import { getStaffSession } from "@/lib/staff-session"
 import { sql } from "@/lib/db"
-import { getPartnerSales, getPartnerDashboardStats } from "@/app/actions/partner-actions"
+import { getFilteredPartnerOrders, getPartnerDashboardStats } from "@/app/actions/partner-actions"
 import { PartnerSalesTable } from "./partner-sales-table"
 import { PartnerSalesChart } from "./partner-sales-chart"
 import { PartnerDashboardShell } from "./partner-dashboard-shell"
 import { Package, Banknote, Calendar, Truck } from "lucide-react"
 
-export default async function PartnerDashboardPage() {
+export default async function PartnerDashboardPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ [key: string]: string | string[] | undefined }>
+}) {
   const session = await getStaffSession()
 
   if (!session || session.role !== "partner") {
@@ -36,18 +40,42 @@ export default async function PartnerDashboardPage() {
   const data = result[0]
   const logoUrl = data.device_logo_url || null
 
-  let sales: any[] = []
-  let replacementShipments: any[] = []
+  const rawParams = (await searchParams) || {}
+  const page = Math.max(1, Number(rawParams.page) || 1)
+  const search = typeof rawParams.search === "string" ? rawParams.search : ""
+  const status = typeof rawParams.status === "string" ? rawParams.status : "All"
+  const orderType = typeof rawParams.orderType === "string" ? rawParams.orderType : "All"
+  const tracking = typeof rawParams.tracking === "string" ? rawParams.tracking : "All"
+  const dateRange = typeof rawParams.dateRange === "string" ? rawParams.dateRange : "All"
+  const fromDate = typeof rawParams.fromDate === "string" ? rawParams.fromDate : ""
+  const toDate = typeof rawParams.toDate === "string" ? rawParams.toDate : ""
+
+  let orders: any[] = []
+  let totalCount = 0
+  let totalPages = 1
+  let pendingReplacementsCount = 0
   let stats = { totalOrders: 0, activeOrders: 0, totalEarnings: 0, todayActivity: 0 }
-  
+
   const [salesResult, statsResult] = await Promise.all([
-    getPartnerSales(session.staffId),
-    getPartnerDashboardStats(session.staffId)
+    getFilteredPartnerOrders({
+      page,
+      pageSize: 20,
+      search,
+      status,
+      orderType,
+      tracking,
+      dateRange,
+      fromDate,
+      toDate,
+    }),
+    getPartnerDashboardStats(session.staffId),
   ])
 
-  if (salesResult.success && salesResult.data) {
-    sales = salesResult.data
-    replacementShipments = salesResult.replacementShipments || []
+  if (salesResult.success) {
+    orders = salesResult.data || []
+    totalCount = salesResult.totalCount || 0
+    totalPages = salesResult.totalPages || 1
+    pendingReplacementsCount = salesResult.pendingReplacementsCount || 0
   }
   if (statsResult.success && statsResult.data) {
     stats = statsResult.data
@@ -55,8 +83,8 @@ export default async function PartnerDashboardPage() {
 
   return (
     <PartnerDashboardShell data={data} logoUrl={logoUrl}>
-      <div className="p-3.5 sm:p-6 md:p-8 w-full max-w-7xl mx-auto">
-        <header className="mb-6 sm:mb-8">
+      <div className="p-3.5 sm:p-6 md:p-8 w-full max-w-7xl mx-auto space-y-6">
+        <header>
           <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">
             Welcome, {data.partner_name}
           </h1>
@@ -65,7 +93,7 @@ export default async function PartnerDashboardPage() {
           </p>
         </header>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 mb-6 sm:mb-8">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
           {/* Total Orders */}
           <div className="bg-gradient-to-br from-[#2979ff] to-[#1565c0] p-3.5 sm:p-4 rounded-xl shadow-md border-0 flex flex-col justify-between text-white relative overflow-hidden group">
             <div className="absolute -right-4 -top-4 opacity-20 transform group-hover:scale-110 transition-transform duration-300">
@@ -77,12 +105,12 @@ export default async function PartnerDashboardPage() {
                 <Package className="h-4 w-4 sm:h-5 sm:w-5 text-blue-200" />
               </div>
               <h3 className="mt-1.5 sm:mt-2 text-2xl sm:text-3xl font-extrabold">{stats.totalOrders}</h3>
-              <p className="mt-1 sm:mt-2 text-[10px] sm:text-[11px] font-medium text-blue-100">All time entries</p>
+              <p className="mt-1 sm:mt-2 text-[10px] sm:text-[11px] font-medium text-blue-100">Assigned</p>
             </div>
           </div>
 
-          {/* My Earnings */}
-          <div className="bg-gradient-to-br from-[#00c853] to-[#00b0ff] p-3.5 sm:p-4 rounded-xl shadow-md border-0 flex flex-col justify-between text-white relative overflow-hidden group">
+          {/* Earnings */}
+          <div className="bg-gradient-to-br from-[#00c853] to-[#009624] p-3.5 sm:p-4 rounded-xl shadow-md border-0 flex flex-col justify-between text-white relative overflow-hidden group">
             <div className="absolute -right-4 -top-4 opacity-20 transform group-hover:scale-110 transition-transform duration-300">
               <Banknote className="h-16 w-16 sm:h-20 sm:w-20" />
             </div>
@@ -129,13 +157,19 @@ export default async function PartnerDashboardPage() {
           </div>
         </div>
 
-        <div className="mb-6 sm:mb-8">
+        <div>
           <PartnerSalesChart partnerId={session.staffId} />
         </div>
 
-        <div className="mt-6 sm:mt-8">
-          <h2 className="text-lg sm:text-xl font-bold text-gray-900 mb-3 sm:mb-4">Assigned Orders</h2>
-          <PartnerSalesTable initialSales={sales} initialReplacements={replacementShipments} />
+        <div>
+          <PartnerSalesTable
+            initialOrders={orders}
+            initialTotalCount={totalCount}
+            initialPage={page}
+            initialPageSize={20}
+            initialTotalPages={totalPages}
+            pendingReplacementsCount={pendingReplacementsCount}
+          />
         </div>
       </div>
     </PartnerDashboardShell>

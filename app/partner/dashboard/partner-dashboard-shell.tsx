@@ -2,7 +2,8 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { LayoutDashboard, UserCircle, Menu, X } from "lucide-react"
+import { usePathname } from "next/navigation"
+import { LayoutDashboard, UserCircle, Menu, X, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { BrandLogo } from "@/components/brand-logo"
 import { LogoutButton } from "./logout-button"
@@ -21,6 +22,10 @@ export function PartnerDashboardShell({
   children: React.ReactNode
 }) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+  const pathname = usePathname()
+
+  const isDashboardActive = pathname === "/partner/dashboard"
+  const isReplacementsActive = pathname === "/partner/replacement-shipments"
 
   return (
     <div className="flex h-screen w-full bg-gray-50 overflow-hidden">
@@ -47,10 +52,25 @@ export function PartnerDashboardShell({
             <nav className="space-y-1">
               <Link
                 href="/partner/dashboard"
-                className="flex items-center gap-3 px-3 py-2 bg-slate-100 text-slate-900 rounded-lg font-medium text-sm transition-colors"
+                className={`flex items-center gap-3 px-3 py-2 rounded-lg font-medium text-sm transition-colors ${
+                  isDashboardActive
+                    ? "bg-slate-100 text-slate-900 font-bold"
+                    : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                }`}
               >
-                <LayoutDashboard className="h-4 w-4 text-slate-600" />
+                <LayoutDashboard className={`h-4 w-4 ${isDashboardActive ? "text-slate-900" : "text-slate-500"}`} />
                 Dashboard
+              </Link>
+              <Link
+                href="/partner/replacement-shipments"
+                className={`flex items-center gap-3 px-3 py-2 rounded-lg font-medium text-sm transition-colors ${
+                  isReplacementsActive
+                    ? "bg-indigo-50 text-indigo-900 font-bold border border-indigo-100"
+                    : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                }`}
+              >
+                <RefreshCw className={`h-4 w-4 ${isReplacementsActive ? "text-indigo-600" : "text-slate-500"}`} />
+                Replacement Shipments
               </Link>
             </nav>
           </div>
@@ -111,10 +131,26 @@ export function PartnerDashboardShell({
                   <Link
                     href="/partner/dashboard"
                     onClick={() => setIsMobileMenuOpen(false)}
-                    className="flex items-center gap-3 px-3 py-2.5 bg-slate-100 text-slate-900 rounded-lg font-medium text-sm"
+                    className={`flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium text-sm ${
+                      isDashboardActive
+                        ? "bg-slate-100 text-slate-900 font-bold"
+                        : "text-slate-600 hover:bg-slate-50"
+                    }`}
                   >
-                    <LayoutDashboard className="h-5 w-5 text-slate-600" />
+                    <LayoutDashboard className={`h-5 w-5 ${isDashboardActive ? "text-slate-900" : "text-slate-500"}`} />
                     Dashboard
+                  </Link>
+                  <Link
+                    href="/partner/replacement-shipments"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className={`flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium text-sm ${
+                      isReplacementsActive
+                        ? "bg-indigo-50 text-indigo-900 font-bold"
+                        : "text-slate-600 hover:bg-slate-50"
+                    }`}
+                  >
+                    <RefreshCw className={`h-5 w-5 ${isReplacementsActive ? "text-indigo-600" : "text-slate-500"}`} />
+                    Replacement Shipments
                   </Link>
                 </nav>
               </div>
