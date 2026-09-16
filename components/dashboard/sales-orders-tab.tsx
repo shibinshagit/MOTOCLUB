@@ -759,13 +759,14 @@ export default function SalesOrdersTab() {
                                     </div>
                                   </div>
 
-                                  {sale.shipping_street && (
+                                  {(sale.shipping_street || sale.shipping_address) && (
                                     <div className="pt-1 border-t border-slate-200/50 flex items-start gap-1">
                                       <span className="text-slate-400 font-medium shrink-0">Address: </span>
                                       <span className="text-slate-700 font-normal">
-                                        {sale.shipping_street}
+                                        {sale.shipping_street || sale.shipping_address}
                                         {sale.shipping_landmark ? `, Near ${sale.shipping_landmark}` : ""}
-                                        {(sale.shipping_city || sale.shipping_pincode) ? `, ${sale.shipping_city || ""}${sale.shipping_pincode ? ` - ${sale.shipping_pincode}` : ""}` : ""}
+                                        {[sale.shipping_city, sale.shipping_district, sale.shipping_state].filter(Boolean).join(", ") ? `, ${[sale.shipping_city, sale.shipping_district, sale.shipping_state].filter(Boolean).join(", ")}` : ""}
+                                        {sale.shipping_pincode ? ` - ${sale.shipping_pincode}` : ""}
                                         {sale.shipping_address_type && <span className="ml-1.5 px-1 py-0 bg-slate-200 text-slate-700 text-[9px] rounded font-semibold uppercase">{sale.shipping_address_type}</span>}
                                       </span>
                                     </div>

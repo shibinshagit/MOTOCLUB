@@ -36,6 +36,8 @@ export type SaleShippingInput = {
   
   // Job Card granular fields
   shippingCity?: string | null
+  shippingDistrict?: string | null
+  shippingState?: string | null
   shippingStreet?: string | null
   shippingLandmark?: string | null
   shippingAddressType?: string | null
@@ -167,6 +169,8 @@ export function normalizeSaleShippingInput(input?: SaleShippingInput | null) {
       delivered_at: null,
       shipping_notes: null,
       shipping_city: null,
+      shipping_district: null,
+      shipping_state: null,
       shipping_street: null,
       shipping_landmark: null,
       shipping_address_type: null,
@@ -209,11 +213,13 @@ export function normalizeSaleShippingInput(input?: SaleShippingInput | null) {
     shipped_at: shippedAt,
     delivered_at: deliveredAt,
     shipping_notes: input?.shippingNotes?.trim() || null,
-    shipping_city: input?.shippingCity?.trim() || null,
-    shipping_street: input?.shippingStreet?.trim() || null,
-    shipping_landmark: input?.shippingLandmark?.trim() || null,
-    shipping_address_type: input?.shippingAddressType?.trim() || null,
-    shipping_pincode: input?.shippingPincode?.trim() || null,
+    shipping_city: (input as any)?.shippingCity?.trim() || (input as any)?.shipping_city?.trim() || null,
+    shipping_district: (input as any)?.shippingDistrict?.trim() || (input as any)?.shipping_district?.trim() || (input as any)?.district?.trim() || null,
+    shipping_state: (input as any)?.shippingState?.trim() || (input as any)?.shipping_state?.trim() || (input as any)?.state?.trim() || null,
+    shipping_street: (input as any)?.shippingStreet?.trim() || (input as any)?.shipping_street?.trim() || null,
+    shipping_landmark: (input as any)?.shippingLandmark?.trim() || (input as any)?.shipping_landmark?.trim() || null,
+    shipping_address_type: (input as any)?.shippingAddressType?.trim() || (input as any)?.shipping_address_type?.trim() || null,
+    shipping_pincode: (input as any)?.shippingPincode?.trim() || (input as any)?.shipping_pincode?.trim() || null,
     customer_phone_override: input?.customerPhoneOverride?.trim() || null,
   }
 }
@@ -234,7 +240,7 @@ export function mapSaleShippingFromRecord(record: Record<string, unknown>): Sale
     packagingTypeName: (record.packaging_type_name as string) || "",
     trackingId: (record.tracking_id as string) || "",
     shippingAddress: (record.shipping_address as string) || 
-      [record.shipping_street, record.shipping_landmark, record.shipping_city, record.shipping_pincode]
+      [record.shipping_street, record.shipping_landmark, record.shipping_city, record.shipping_district, record.shipping_state, record.shipping_pincode]
         .filter(Boolean)
         .join(", ") || "",
     weightKg: record.weight_kg != null ? Number(record.weight_kg) : null,
@@ -248,11 +254,13 @@ export function mapSaleShippingFromRecord(record: Record<string, unknown>): Sale
     shippingDate: (record.shipping_date as string) || null,
     shippedAt: (record.shipped_at as string) || null,
     deliveredAt: (record.delivered_at as string) || null,
-    shippingCity: (record.shipping_city as string) || "",
-    shippingStreet: (record.shipping_street as string) || "",
-    shippingLandmark: (record.shipping_landmark as string) || "",
+    shippingCity: (record.shipping_city as string) || (record.city as string) || (record.customer_city as string) || "",
+    shippingDistrict: (record.shipping_district as string) || (record.district as string) || (record.customer_district as string) || "",
+    shippingState: (record.shipping_state as string) || (record.state as string) || (record.customer_state as string) || "",
+    shippingStreet: (record.shipping_street as string) || (record.street as string) || (record.customer_street as string) || "",
+    shippingLandmark: (record.shipping_landmark as string) || (record.landmark as string) || (record.customer_landmark as string) || "",
     shippingAddressType: (record.shipping_address_type as string) || "",
-    shippingPincode: (record.shipping_pincode as string) || "",
+    shippingPincode: (record.shipping_pincode as string) || (record.pincode as string) || (record.customer_pincode as string) || "",
     customerPhoneOverride: (record.customer_phone_override as string) || "",
   }
 }

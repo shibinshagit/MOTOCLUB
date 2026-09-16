@@ -1340,16 +1340,100 @@ export function printPurchaseReceipt(purchase: any, items: any[], currency = "AE
   `)
 }
 
+function buildJobCardAddressLines(sale: any) {
+  const street = (
+    sale.shipping_street ||
+    sale.shippingStreet ||
+    sale.shipping_address ||
+    sale.shippingAddress ||
+    sale.customer_street ||
+    sale.street ||
+    sale.customer_address ||
+    sale.address ||
+    sale.customer?.street ||
+    sale.customer?.address ||
+    ""
+  ).trim();
+
+  const landmark = (
+    sale.shipping_landmark ||
+    sale.landmark ||
+    sale.shippingLandmark ||
+    sale.customer_landmark ||
+    sale.customer?.landmark ||
+    ""
+  ).trim();
+
+  const city = (
+    sale.shipping_city ||
+    sale.shippingCity ||
+    sale.city ||
+    sale.customer_city ||
+    sale.customer?.city ||
+    ""
+  ).trim();
+
+  const district = (
+    sale.shipping_district ||
+    sale.shippingDistrict ||
+    sale.district ||
+    sale.customer_district ||
+    sale.customer?.district ||
+    ""
+  ).trim();
+
+  const state = (
+    sale.shipping_state ||
+    sale.shippingState ||
+    sale.state ||
+    sale.customer_state ||
+    sale.customer?.state ||
+    ""
+  ).trim();
+
+  const pincode = (
+    sale.shipping_pincode ||
+    sale.shippingPincode ||
+    sale.pincode ||
+    sale.customer_pincode ||
+    sale.customer?.pincode ||
+    ""
+  ).trim();
+
+  const addressLines: string[] = [];
+
+  if (street) {
+    addressLines.push(street);
+  }
+
+  if (landmark) {
+    addressLines.push(`Landmark: ${landmark}`);
+  }
+
+  const streetLower = street.toLowerCase();
+  const locationParts: string[] = [];
+  if (city && !streetLower.includes(city.toLowerCase())) {
+    locationParts.push(city);
+  }
+  if (district && !streetLower.includes(district.toLowerCase())) {
+    locationParts.push(district);
+  }
+  if (state && !streetLower.includes(state.toLowerCase())) {
+    locationParts.push(state);
+  }
+
+  if (locationParts.length > 0) {
+    addressLines.push(locationParts.join(', '));
+  }
+
+  return { addressLines, pincode };
+}
+
 // Print Job Card
 export function printJobCard(sale: any, currency = 'AED', businessInfo: any = {}) {
   if (typeof window === 'undefined') return;
 
-  const landmark = sale.shipping_landmark || sale.landmark || sale.shippingLandmark;
-  const addressLines = [
-    sale.shipping_street || sale.shipping_address,
-    landmark ? `Landmark: ${landmark}` : null,
-    [sale.shipping_city, sale.shipping_district, sale.shipping_state].filter(Boolean).join(', ')
-  ].filter(Boolean);
+  const { addressLines, pincode } = buildJobCardAddressLines(sale);
 
   const business = {
     name: getCachedPlatformName(),
@@ -1431,7 +1515,7 @@ export function printJobCard(sale: any, currency = 'AED', businessInfo: any = {}
         <p class="to-title">To,</p>
         <p class="customer-name">${sale.customer_name || 'N/A'}</p>
         ${addressLines.map(line => `<p>${line}</p>`).join('')}
-        ${sale.shipping_pincode ? `<p>Pin:- ${sale.shipping_pincode}</p>` : ''}
+        ${pincode ? `<p>Pin:- ${pincode}</p>` : ''}
         <p>Ph:- ${sale.customer_phone || 'N/A'}</p>
       </div>
 
@@ -1544,12 +1628,7 @@ export function printBatchJobCards(sales: any[], currency = 'AED', businessInfo:
       return `${item.product_name || 'Item'}${variantDisplay}${item.quantity > 1 ? ` x${item.quantity}` : ''}`
     }).join(', ') || '';
 
-    const landmark = sale.shipping_landmark || sale.landmark || sale.shippingLandmark;
-    const addressLines = [
-      sale.shipping_street || sale.shipping_address,
-      landmark ? `Landmark: ${landmark}` : null,
-      [sale.shipping_city, sale.shipping_district, sale.shipping_state].filter(Boolean).join(', ')
-    ].filter(Boolean);
+    const { addressLines, pincode } = buildJobCardAddressLines(sale);
 
     const formattedOrderId = formatOrderId(sale.id);
 
@@ -1561,7 +1640,7 @@ export function printBatchJobCards(sales: any[], currency = 'AED', businessInfo:
           <p class="to-title">To,</p>
           <p class="customer-name">${sale.customer_name || 'N/A'}</p>
           ${addressLines.map(line => `<p>${line}</p>`).join('')}
-          ${sale.shipping_pincode ? `<p>Pin:- ${sale.shipping_pincode}</p>` : ''}
+          ${pincode ? `<p>Pin:- ${pincode}</p>` : ''}
           <p>Ph:- ${sale.customer_phone || 'N/A'}</p>
         </div>
 

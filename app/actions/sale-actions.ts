@@ -108,6 +108,13 @@ function shippingFieldsChanged(original: any, shipping: ReturnType<typeof normal
     (original.packaging_type_name || null) !== shipping.packaging_type_name ||
     (original.tracking_id || null) !== shipping.tracking_id ||
     (original.shipping_address || null) !== shipping.shipping_address ||
+    (original.shipping_city || null) !== shipping.shipping_city ||
+    (original.shipping_district || null) !== shipping.shipping_district ||
+    (original.shipping_state || null) !== shipping.shipping_state ||
+    (original.shipping_street || null) !== shipping.shipping_street ||
+    (original.shipping_landmark || null) !== shipping.shipping_landmark ||
+    (original.shipping_address_type || null) !== shipping.shipping_address_type ||
+    (original.shipping_pincode || null) !== shipping.shipping_pincode ||
     Number(original.weight_kg || 0) !== Number(shipping.weight_kg || 0) ||
     Number(original.length_cm || 0) !== Number(shipping.length_cm || 0) ||
     Number(original.width_cm || 0) !== Number(shipping.width_cm || 0) ||
@@ -497,6 +504,13 @@ async function queryDeviceSales(deviceId: number, options: GetUserSalesOptions =
       s.*, 
       COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name, 
       COALESCE(NULLIF(s.customer_phone_override, ''), c.phone, '') as customer_phone,
+      c.street as customer_street,
+      c.city as customer_city,
+      c.district as customer_district,
+      c.state as customer_state,
+      c.pincode as customer_pincode,
+      c.landmark as customer_landmark,
+      c.address as customer_address,
       st.name as staff_name,
       COALESCE(
         (SELECT STRING_AGG(
@@ -717,7 +731,21 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
           s.customer_id,
           s.customer_name_override,
           s.customer_phone_override,
-          s.shipping_address,
+          COALESCE(NULLIF(s.shipping_address, ''), c.address) as shipping_address,
+          COALESCE(NULLIF(s.shipping_street, ''), c.street) as shipping_street,
+          COALESCE(NULLIF(s.shipping_city, ''), c.city) as shipping_city,
+          COALESCE(NULLIF(s.shipping_district, ''), c.district) as shipping_district,
+          COALESCE(NULLIF(s.shipping_state, ''), c.state) as shipping_state,
+          COALESCE(NULLIF(s.shipping_pincode, ''), c.pincode) as shipping_pincode,
+          COALESCE(NULLIF(s.shipping_landmark, ''), c.landmark) as shipping_landmark,
+          COALESCE(NULLIF(s.shipping_address_type, ''), c.address_type) as shipping_address_type,
+          c.street as customer_street,
+          c.city as customer_city,
+          c.district as customer_district,
+          c.state as customer_state,
+          c.pincode as customer_pincode,
+          c.landmark as customer_landmark,
+          c.address as customer_address,
           s.shipping_notes,
           s.courier_paid_extra,
           s.expense_courier,
@@ -986,6 +1014,12 @@ export async function getSaleDetails(saleId: number) {
           COALESCE(NULLIF(s.customer_phone_override, ''), c.phone) as customer_phone,
           c.email as customer_email,
           COALESCE(NULLIF(s.shipping_address, ''), c.address) as customer_address,
+          c.street as customer_street,
+          c.city as customer_city,
+          c.district as customer_district,
+          c.state as customer_state,
+          c.pincode as customer_pincode,
+          c.landmark as customer_landmark,
           st.name as staff_name,
           COALESCE(cp.name, md.name, '') as courier_partner_name,
           md.tracking_url_template as tracking_url_template
@@ -1339,7 +1373,7 @@ export async function addSale(saleData: any) {
         device_id, payment_method, discount, received_amount, staff_id, sale_type,
         fulfillment_type, delivery_status, courier_partner_id, courier_service_id, courier_service_name,
         packaging_type_id, packaging_type_name,
-        tracking_id, shipping_address, weight_kg, length_cm, width_cm, height_cm,
+        tracking_id, shipping_address, shipping_city, shipping_district, shipping_state, shipping_street, shipping_landmark, shipping_address_type, shipping_pincode, weight_kg, length_cm, width_cm, height_cm,
         courier_paid_extra, expense_courier, expense_packing, shipped_at, delivered_at, shipping_notes,
         advance_amount, balance_amount
       )
@@ -1365,6 +1399,13 @@ export async function addSale(saleData: any) {
         ${shipping.packaging_type_name},
         ${shipping.tracking_id},
         ${shipping.shipping_address},
+        ${shipping.shipping_city},
+        ${shipping.shipping_district},
+        ${shipping.shipping_state},
+        ${shipping.shipping_street},
+        ${shipping.shipping_landmark},
+        ${shipping.shipping_address_type},
+        ${shipping.shipping_pincode},
         ${shipping.weight_kg},
         ${shipping.length_cm},
         ${shipping.width_cm},
@@ -2062,6 +2103,13 @@ export async function updateSale(saleData: any) {
                 packaging_type_name = ${shipping.packaging_type_name},
                 tracking_id = ${shipping.tracking_id},
                 shipping_address = ${shipping.shipping_address},
+                shipping_city = ${shipping.shipping_city},
+                shipping_district = ${shipping.shipping_district},
+                shipping_state = ${shipping.shipping_state},
+                shipping_street = ${shipping.shipping_street},
+                shipping_landmark = ${shipping.shipping_landmark},
+                shipping_address_type = ${shipping.shipping_address_type},
+                shipping_pincode = ${shipping.shipping_pincode},
                 weight_kg = ${shipping.weight_kg},
                 length_cm = ${shipping.length_cm},
                 width_cm = ${shipping.width_cm},
@@ -2099,6 +2147,13 @@ export async function updateSale(saleData: any) {
                 packaging_type_name = ${shipping.packaging_type_name},
                 tracking_id = ${shipping.tracking_id},
                 shipping_address = ${shipping.shipping_address},
+                shipping_city = ${shipping.shipping_city},
+                shipping_district = ${shipping.shipping_district},
+                shipping_state = ${shipping.shipping_state},
+                shipping_street = ${shipping.shipping_street},
+                shipping_landmark = ${shipping.shipping_landmark},
+                shipping_address_type = ${shipping.shipping_address_type},
+                shipping_pincode = ${shipping.shipping_pincode},
                 weight_kg = ${shipping.weight_kg},
                 length_cm = ${shipping.length_cm},
                 width_cm = ${shipping.width_cm},

@@ -483,7 +483,7 @@ export async function getTodayJobCards(monthStr?: string, searchTerm?: string) {
 
     if (startDate && searchPattern) {
       sales = await sql`
-        SELECT s.*, COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name, COALESCE(NULLIF(s.customer_phone_override, ''), c.phone) as customer_phone, d.name as branch_name, d.name as device_name, d.logo_url as device_logo
+        SELECT s.*, COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name, COALESCE(NULLIF(s.customer_phone_override, ''), c.phone) as customer_phone, c.street as customer_street, c.city as customer_city, c.district as customer_district, c.state as customer_state, c.pincode as customer_pincode, c.landmark as customer_landmark, c.address as customer_address, d.name as branch_name, d.name as device_name, d.logo_url as device_logo
         FROM sales s 
         LEFT JOIN customers c ON s.customer_id = c.id
         LEFT JOIN devices d ON s.device_id = d.id
@@ -503,7 +503,7 @@ export async function getTodayJobCards(monthStr?: string, searchTerm?: string) {
       `
     } else if (startDate && !searchPattern) {
       sales = await sql`
-        SELECT s.*, COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name, COALESCE(NULLIF(s.customer_phone_override, ''), c.phone) as customer_phone, d.name as branch_name, d.name as device_name, d.logo_url as device_logo
+        SELECT s.*, COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name, COALESCE(NULLIF(s.customer_phone_override, ''), c.phone) as customer_phone, c.street as customer_street, c.city as customer_city, c.district as customer_district, c.state as customer_state, c.pincode as customer_pincode, c.landmark as customer_landmark, c.address as customer_address, d.name as branch_name, d.name as device_name, d.logo_url as device_logo
         FROM sales s 
         LEFT JOIN customers c ON s.customer_id = c.id
         LEFT JOIN devices d ON s.device_id = d.id
@@ -517,7 +517,7 @@ export async function getTodayJobCards(monthStr?: string, searchTerm?: string) {
       `
     } else if (!startDate && searchPattern) {
       sales = await sql`
-        SELECT s.*, COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name, COALESCE(NULLIF(s.customer_phone_override, ''), c.phone) as customer_phone, d.name as branch_name, d.name as device_name, d.logo_url as device_logo
+        SELECT s.*, COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name, COALESCE(NULLIF(s.customer_phone_override, ''), c.phone) as customer_phone, c.street as customer_street, c.city as customer_city, c.district as customer_district, c.state as customer_state, c.pincode as customer_pincode, c.landmark as customer_landmark, c.address as customer_address, d.name as branch_name, d.name as device_name, d.logo_url as device_logo
         FROM sales s 
         LEFT JOIN customers c ON s.customer_id = c.id
         LEFT JOIN devices d ON s.device_id = d.id
@@ -537,7 +537,7 @@ export async function getTodayJobCards(monthStr?: string, searchTerm?: string) {
       `
     } else {
       sales = await sql`
-        SELECT s.*, COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name, COALESCE(NULLIF(s.customer_phone_override, ''), c.phone) as customer_phone, d.name as branch_name, d.name as device_name, d.logo_url as device_logo
+        SELECT s.*, COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name, COALESCE(NULLIF(s.customer_phone_override, ''), c.phone) as customer_phone, c.street as customer_street, c.city as customer_city, c.district as customer_district, c.state as customer_state, c.pincode as customer_pincode, c.landmark as customer_landmark, c.address as customer_address, d.name as branch_name, d.name as device_name, d.logo_url as device_logo
         FROM sales s 
         LEFT JOIN customers c ON s.customer_id = c.id
         LEFT JOIN devices d ON s.device_id = d.id
@@ -647,6 +647,13 @@ export async function getAllJobCards(
           s.*,
           COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name,
           COALESCE(NULLIF(s.customer_phone_override, ''), c.phone) as customer_phone,
+          c.street as customer_street,
+          c.city as customer_city,
+          c.district as customer_district,
+          c.state as customer_state,
+          c.pincode as customer_pincode,
+          c.landmark as customer_landmark,
+          c.address as customer_address,
           COALESCE(cp.name, md_partner.name, '') as courier_partner_name,
           st.name as staff_name,
           st.role as staff_role,
