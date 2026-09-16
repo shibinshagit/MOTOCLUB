@@ -1382,7 +1382,7 @@ function buildJobCardAddressLines(sale: any) {
     ""
   ).trim();
 
-  const state = (
+  let state = (
     sale.shipping_state ||
     sale.shippingState ||
     sale.state ||
@@ -1390,6 +1390,19 @@ function buildJobCardAddressLines(sale: any) {
     sale.customer?.state ||
     ""
   ).trim();
+
+  if (!state) {
+    const combinedText = `${street} ${city} ${district} ${sale.shipping_address || ''} ${sale.customer_address || ''}`.toLowerCase();
+    const keralaDistricts = [
+      "thiruvananthapuram", "trivandrum", "kollam", "quilon", "pathanamthitta",
+      "alappuzha", "alleppey", "kottayam", "idukki", "ernakulam", "cochin", "kochi",
+      "thrissur", "trichur", "palakkad", "palghat", "malappuram", "kozhikode", "calicut",
+      "wayanad", "kannur", "cannanoor", "kasaragod", "kasargod"
+    ];
+    if (keralaDistricts.some(d => combinedText.includes(d)) || combinedText.includes("kerala")) {
+      state = "Kerala";
+    }
+  }
 
   const pincode = (
     sale.shipping_pincode ||
