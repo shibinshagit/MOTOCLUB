@@ -17,7 +17,8 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { ChevronDown, ChevronUp, MapPin, Phone, User, Calendar, Layers, Printer, Edit, Trash2, Search, PlayCircle, Eye, Plus, Loader2, FileText, ExternalLink, ShoppingCart, Clock, AlertTriangle } from "lucide-react"
+import { ChevronDown, ChevronUp, MapPin, Phone, User, Calendar, Layers, Printer, Edit, Trash2, Search, PlayCircle, Eye, Plus, Loader2, FileText, ExternalLink, ShoppingCart, Clock, AlertTriangle, Info } from "lucide-react"
+import { SalesBreakdownModal } from "@/components/shared/sales-breakdown-modal"
 import { formatPhoneNumber, parseSaleDateTime, parseSaleDate, cn } from "@/lib/utils"
 import { useToast } from "@/components/ui/use-toast"
 import {
@@ -53,6 +54,7 @@ export default function SalesOrdersTab() {
   const [editingSaleId, setEditingSaleId] = useState<number | null>(null)
   const [viewingSaleId, setViewingSaleId] = useState<number | null>(null)
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
+  const [isBreakdownModalOpen, setIsBreakdownModalOpen] = useState(false)
   
   const [selectedSales, setSelectedSales] = useState<number[]>([])
   const [staffList, setStaffList] = useState<any[]>([])
@@ -338,8 +340,21 @@ export default function SalesOrdersTab() {
           )}
         >
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-violet-700">Total Sales</span>
-            <ShoppingCart className="h-4 w-4 text-violet-600" />
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-violet-700">Total Sales</span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setIsBreakdownModalOpen(true)
+                }}
+                title="View sales breakdown"
+                className="p-0.5 rounded-full hover:bg-violet-200/60 text-violet-600 hover:text-violet-800 transition-colors cursor-pointer"
+              >
+                <Info className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <ShoppingCart className="h-4 w-4 text-violet-600 shrink-0" />
           </div>
           <div className="mt-2 flex items-baseline justify-between gap-2">
             <div>
@@ -852,6 +867,14 @@ export default function SalesOrdersTab() {
           </div>
         </div>
       )}
+
+      <SalesBreakdownModal
+        isOpen={isBreakdownModalOpen}
+        onClose={() => setIsBreakdownModalOpen(false)}
+        deviceId={deviceId || 0}
+        dateRange={dateRange || {}}
+        currency={currency}
+      />
     </div>
   )
 }

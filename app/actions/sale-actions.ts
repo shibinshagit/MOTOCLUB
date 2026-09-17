@@ -10,6 +10,7 @@ import { getStaffSession } from "@/lib/staff-session"
 import { ensureReturnTablesExist } from "./sale-return-actions"
 import { getReplacementShipmentsForSale } from "./replacement-actions"
 import { syncCustomerShippingAddress } from "./customer-actions"
+import { getAuthoritativeProfitSummary, type AuthoritativeProfitSummary } from "@/lib/profit-calculation"
 
 function getShippingAmounts(shipping: ReturnType<typeof normalizeSaleShippingInput>) {
   if (shipping.fulfillment_type !== "ship") {
@@ -932,7 +933,11 @@ export async function getSalesSummaryCards(deviceId: number, options: { dateFrom
     const cardCounts = await executeWithRetry(async () => {
       const rows = await sql`
         SELECT
-          COUNT(*)::int as total_count,
+          COUNT(*) FILTER (
+            WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
+              AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled'
+              AND LOWER(COALESCE(s.delivery_status, '')) NOT IN ('returned', 'failed')
+          )::int as total_count,
           COUNT(*) FILTER (
             WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
               AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled'
@@ -992,6 +997,242 @@ export async function getSalesSummaryCards(deviceId: number, options: { dateFrom
       success: false,
       counts: { total: 0, pending: 0, critical: 0 },
     }
+  }
+}
+
+export interface SalesBreakdownData {
+  totalRecords: number
+  validOrders: number
+  validSalesRevenue: number
+  cancelledOrders: number
+  cancelledSalesRevenue: number
+  ecommerceValidOrders: number
+  ecommerceValidRevenue: number
+  jobCardValidOrders: number
+  jobCardValidRevenue: number
+  normalValidOrders: number
+  normalValidRevenue: number
+  posValidRevenue: number
+}
+
+export async function getSalesBreakdown(
+  deviceId: number,
+  options: {
+    dateFrom?: string
+    dateTo?: string
+    typeFilter?: string
+    staffId?: number | "all"
+    courierPartnerId?: number | "all"
+    courierServiceName?: string | "all"
+    paymentMethod?: string | "all"
+    statusFilter?: string | "all"
+  } = {}
+) {
+  resetConnectionState()
+
+  const allowEcom = deviceId === 0 || isEcomAllowedDevice(deviceId)
+  const endExclusive = options.dateTo ? getExclusiveEndDate(options.dateTo) : null
+  const dateFrom = options.dateFrom || null
+  const staffFilter = options.staffId && options.staffId !== "all" ? Number(options.staffId) : null
+  const courierPartnerFilter =
+    options.courierPartnerId && options.courierPartnerId !== "all" ? Number(options.courierPartnerId) : null
+  const courierServiceFilter =
+    options.courierServiceName && options.courierServiceName !== "all" ? options.courierServiceName.trim() : null
+  const paymentMethodFilter =
+    options.paymentMethod && options.paymentMethod !== "all" ? options.paymentMethod.trim() : null
+
+  try {
+    const res = await executeWithRetry(async () => {
+      const rows = await sql`
+        WITH raw_sales AS (
+          SELECT 
+            s.id,
+            s.total_amount,
+            s.sale_date,
+            s.created_at,
+            s.status,
+            s.payment_status,
+            s.delivery_status,
+            s.sale_type,
+            s.tracking_id,
+            s.source
+          FROM sales s
+          WHERE s.total_amount != 'NaN'::numeric
+            AND (${deviceId === 0} OR s.device_id = ${deviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
+            AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
+            AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
+            AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
+            AND (${staffFilter === null} OR s.staff_id = ${staffFilter})
+            AND (${courierPartnerFilter === null} OR s.courier_partner_id = ${courierPartnerFilter})
+            AND (${courierServiceFilter === null} OR LOWER(TRIM(COALESCE(s.courier_service_name, ''))) = LOWER(${courierServiceFilter}))
+            AND (${paymentMethodFilter === null} OR LOWER(TRIM(COALESCE(s.payment_method, ''))) = LOWER(${paymentMethodFilter}))
+        )
+        SELECT
+          COUNT(*)::int AS total_records,
+          
+          -- Valid / Non-Cancelled Sales
+          COUNT(*) FILTER (
+            WHERE LOWER(COALESCE(status, '')) NOT IN ('cancelled', 'returned')
+              AND LOWER(COALESCE(payment_status, '')) != 'cancelled'
+              AND LOWER(COALESCE(delivery_status, '')) NOT IN ('returned', 'failed')
+          )::int AS valid_orders,
+          
+          COALESCE(SUM(total_amount) FILTER (
+            WHERE LOWER(COALESCE(status, '')) NOT IN ('cancelled', 'returned')
+              AND LOWER(COALESCE(payment_status, '')) != 'cancelled'
+              AND LOWER(COALESCE(delivery_status, '')) NOT IN ('returned', 'failed')
+          ), 0)::numeric AS valid_sales_revenue,
+
+          -- Cancelled Sales
+          COUNT(*) FILTER (
+            WHERE LOWER(COALESCE(status, '')) = 'cancelled'
+               OR LOWER(COALESCE(payment_status, '')) = 'cancelled'
+               OR LOWER(COALESCE(delivery_status, '')) IN ('returned', 'failed')
+          )::int AS cancelled_orders,
+
+          COALESCE(SUM(total_amount) FILTER (
+            WHERE LOWER(COALESCE(status, '')) = 'cancelled'
+               OR LOWER(COALESCE(payment_status, '')) = 'cancelled'
+               OR LOWER(COALESCE(delivery_status, '')) IN ('returned', 'failed')
+          ), 0)::numeric AS cancelled_sales_revenue,
+
+          -- Category Breakdown (Valid Non-Cancelled Only)
+          COUNT(*) FILTER (
+            WHERE LOWER(COALESCE(status, '')) NOT IN ('cancelled', 'returned')
+              AND LOWER(COALESCE(payment_status, '')) != 'cancelled'
+              AND LOWER(COALESCE(delivery_status, '')) NOT IN ('returned', 'failed')
+              AND (source = 'ECOMMERCE')
+          )::int AS ecommerce_valid_orders,
+
+          COALESCE(SUM(total_amount) FILTER (
+            WHERE LOWER(COALESCE(status, '')) NOT IN ('cancelled', 'returned')
+              AND LOWER(COALESCE(payment_status, '')) != 'cancelled'
+              AND LOWER(COALESCE(delivery_status, '')) NOT IN ('returned', 'failed')
+              AND (source = 'ECOMMERCE')
+          ), 0)::numeric AS ecommerce_valid_revenue,
+
+          COUNT(*) FILTER (
+            WHERE LOWER(COALESCE(status, '')) NOT IN ('cancelled', 'returned')
+              AND LOWER(COALESCE(payment_status, '')) != 'cancelled'
+              AND LOWER(COALESCE(delivery_status, '')) NOT IN ('returned', 'failed')
+              AND (sale_type = 'job_card' OR tracking_id LIKE 'JC-%')
+              AND (source IS NULL OR source != 'ECOMMERCE')
+          )::int AS job_card_valid_orders,
+
+          COALESCE(SUM(total_amount) FILTER (
+            WHERE LOWER(COALESCE(status, '')) NOT IN ('cancelled', 'returned')
+              AND LOWER(COALESCE(payment_status, '')) != 'cancelled'
+              AND LOWER(COALESCE(delivery_status, '')) NOT IN ('returned', 'failed')
+              AND (sale_type = 'job_card' OR tracking_id LIKE 'JC-%')
+              AND (source IS NULL OR source != 'ECOMMERCE')
+          ), 0)::numeric AS job_card_valid_revenue,
+
+          COUNT(*) FILTER (
+            WHERE LOWER(COALESCE(status, '')) NOT IN ('cancelled', 'returned')
+              AND LOWER(COALESCE(payment_status, '')) != 'cancelled'
+              AND LOWER(COALESCE(delivery_status, '')) NOT IN ('returned', 'failed')
+              AND (COALESCE(sale_type, '') != 'job_card' AND (tracking_id IS NULL OR tracking_id NOT LIKE 'JC-%'))
+              AND (source IS NULL OR source != 'ECOMMERCE')
+          )::int AS normal_valid_orders,
+
+          COALESCE(SUM(total_amount) FILTER (
+            WHERE LOWER(COALESCE(status, '')) NOT IN ('cancelled', 'returned')
+              AND LOWER(COALESCE(payment_status, '')) != 'cancelled'
+              AND LOWER(COALESCE(delivery_status, '')) NOT IN ('returned', 'failed')
+              AND (COALESCE(sale_type, '') != 'job_card' AND (tracking_id IS NULL OR tracking_id NOT LIKE 'JC-%'))
+              AND (source IS NULL OR source != 'ECOMMERCE')
+          ), 0)::numeric AS normal_valid_revenue,
+
+          -- Total POS Valid (Normal + Job Card)
+          COALESCE(SUM(total_amount) FILTER (
+            WHERE LOWER(COALESCE(status, '')) NOT IN ('cancelled', 'returned')
+              AND LOWER(COALESCE(payment_status, '')) != 'cancelled'
+              AND LOWER(COALESCE(delivery_status, '')) NOT IN ('returned', 'failed')
+              AND (source IS NULL OR source != 'ECOMMERCE')
+          ), 0)::numeric AS pos_valid_revenue
+
+        FROM raw_sales
+      `
+      return rows[0]
+    })
+
+    if (!res) {
+      return { success: false, data: null, message: "No data found" }
+    }
+
+    return {
+      success: true,
+      data: {
+        totalRecords: Number(res.total_records || 0),
+        validOrders: Number(res.valid_orders || 0),
+        validSalesRevenue: Number(res.valid_sales_revenue || 0),
+        cancelledOrders: Number(res.cancelled_orders || 0),
+        cancelledSalesRevenue: Number(res.cancelled_sales_revenue || 0),
+        ecommerceValidOrders: Number(res.ecommerce_valid_orders || 0),
+        ecommerceValidRevenue: Number(res.ecommerce_valid_revenue || 0),
+        jobCardValidOrders: Number(res.job_card_valid_orders || 0),
+        jobCardValidRevenue: Number(res.job_card_valid_revenue || 0),
+        normalValidOrders: Number(res.normal_valid_orders || 0),
+        normalValidRevenue: Number(res.normal_valid_revenue || 0),
+        posValidRevenue: Number(res.pos_valid_revenue || 0),
+      } as SalesBreakdownData,
+    }
+  } catch (error) {
+    console.error("Error fetching sales breakdown:", error)
+    return { success: false, data: null, error: String(error) }
+  }
+}
+
+export type ProfitBreakdownData = AuthoritativeProfitSummary
+export type ExpenseBreakdownData = AuthoritativeProfitSummary
+
+export async function getProfitBreakdown(
+  deviceId: number,
+  options: {
+    dateFrom?: string
+    dateTo?: string
+    staffId?: number | "all"
+    courierPartnerId?: number | "all"
+    courierServiceName?: string | "all"
+    paymentMethod?: string | "all"
+    statusFilter?: string | "all"
+  } = {}
+) {
+  resetConnectionState()
+  try {
+    const summary = await getAuthoritativeProfitSummary(deviceId, options)
+    return {
+      success: true,
+      data: summary as ProfitBreakdownData,
+    }
+  } catch (error) {
+    console.error("getProfitBreakdown error:", error)
+    return { success: false, data: null, message: "Failed to fetch profit breakdown" }
+  }
+}
+
+export async function getExpenseBreakdown(
+  deviceId: number,
+  options: {
+    dateFrom?: string
+    dateTo?: string
+    staffId?: number | "all"
+    courierPartnerId?: number | "all"
+    courierServiceName?: string | "all"
+    paymentMethod?: string | "all"
+    statusFilter?: string | "all"
+  } = {}
+) {
+  resetConnectionState()
+  try {
+    const summary = await getAuthoritativeProfitSummary(deviceId, options)
+    return {
+      success: true,
+      data: summary as ExpenseBreakdownData,
+    }
+  } catch (error) {
+    console.error("getExpenseBreakdown error:", error)
+    return { success: false, data: null, message: "Failed to fetch expense breakdown" }
   }
 }
 

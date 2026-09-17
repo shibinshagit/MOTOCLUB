@@ -45,14 +45,21 @@ interface Payable {
 }
 
 export interface FinancialData {
+  salesRevenue: number
   totalIncome: number
   totalCogs: number
+  grossProfit: number
   totalProfit: number
   totalExpenses: number
+  operatingExpenses: number
+  otherIncome: number
   netProfit: number
   accountsReceivable: number
   accountsPayable: number
   outstandingReceivables: number
+  expenseBreakdown?: any[]
+  shippingSummary?: any
+  excludedMoneyOut?: any
   transactions: Transaction[]
   receivables: Receivable[]
   payables: Payable[]

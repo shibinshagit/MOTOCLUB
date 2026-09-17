@@ -285,6 +285,13 @@ export async function getAdminDashboardFilterOptions(deviceId?: number) {
 // 3. Main Dashboard Data Aggregation Action
 // ---------------------------------------------------------------------------
 
+function isEcomAllowedDevice(deviceId: number): boolean {
+  const allowed = process.env.ECOMMERCE_DEVICE_IDS
+    ? process.env.ECOMMERCE_DEVICE_IDS.split(",").map((id) => Number(id.trim()))
+    : [1, 4]
+  return allowed.includes(Number(deviceId))
+}
+
 function calculatePercentageDiff(current: number, previous: number) {
   if (!Number.isFinite(current) || !Number.isFinite(previous)) {
     return { diff: 0, isIncrease: false }
@@ -388,6 +395,7 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
     }
 
     const effectiveDeviceId = query.deviceId || actor.deviceId || 0
+    const allowEcom = effectiveDeviceId === 0 || isEcomAllowedDevice(effectiveDeviceId)
     const { currentStart, currentEnd, prevStart, prevEnd, durationDays } = resolveDateRanges(query)
 
     const currStartStr = format(currentStart, "yyyy-MM-dd HH:mm:ss")
@@ -419,14 +427,15 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
     // -------------------------------------------------------------------------
     const currentSalesAgg = await sql`
       WITH filtered_sales AS (
-        SELECT s.id, s.total_amount, s.sale_date
+        SELECT s.id, s.total_amount, COALESCE(s.sale_date, s.created_at) as sale_date
         FROM sales s
         WHERE s.total_amount != 'NaN'::numeric
-          AND s.sale_date >= ${currStartStr}::timestamp
-          AND s.sale_date <= ${currEndStr}::timestamp
-          AND (${effectiveDeviceId === 0} OR s.device_id = ${effectiveDeviceId})
+          AND COALESCE(s.sale_date, s.created_at) >= ${currStartStr}::timestamp
+          AND COALESCE(s.sale_date, s.created_at) <= ${currEndStr}::timestamp
+          AND (${effectiveDeviceId === 0} OR s.device_id = ${effectiveDeviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
+          AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
           AND (
-            (${statusFilter === null} AND LOWER(TRIM(s.status)) != 'cancelled')
+            (${statusFilter === null} AND LOWER(TRIM(s.status)) != 'cancelled' AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) != 'returned')
             OR (${statusFilter !== null} AND LOWER(TRIM(s.status)) = LOWER(${statusFilter}))
           )
           AND (${staffFilter === null} OR s.staff_id = ${staffFilter})
@@ -461,14 +470,15 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
     // -------------------------------------------------------------------------
     const previousSalesAgg = await sql`
       WITH filtered_sales AS (
-        SELECT s.id, s.total_amount, s.sale_date
+        SELECT s.id, s.total_amount, COALESCE(s.sale_date, s.created_at) as sale_date
         FROM sales s
         WHERE s.total_amount != 'NaN'::numeric
-          AND s.sale_date >= ${prevStartStr}::timestamp
-          AND s.sale_date <= ${prevEndStr}::timestamp
-          AND (${effectiveDeviceId === 0} OR s.device_id = ${effectiveDeviceId})
+          AND COALESCE(s.sale_date, s.created_at) >= ${prevStartStr}::timestamp
+          AND COALESCE(s.sale_date, s.created_at) <= ${prevEndStr}::timestamp
+          AND (${effectiveDeviceId === 0} OR s.device_id = ${effectiveDeviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
+          AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
           AND (
-            (${statusFilter === null} AND LOWER(TRIM(s.status)) != 'cancelled')
+            (${statusFilter === null} AND LOWER(TRIM(s.status)) != 'cancelled' AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) != 'returned')
             OR (${statusFilter !== null} AND LOWER(TRIM(s.status)) = LOWER(${statusFilter}))
           )
           AND (${staffFilter === null} OR s.staff_id = ${staffFilter})
@@ -577,14 +587,15 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
         isHourly
           ? sql`
               WITH filtered_sales AS (
-                SELECT s.id, s.total_amount, s.sale_date, EXTRACT(HOUR FROM s.sale_date)::int as hour_val
+                SELECT s.id, s.total_amount, COALESCE(s.sale_date, s.created_at) as sale_date, EXTRACT(HOUR FROM COALESCE(s.sale_date, s.created_at))::int as hour_val
                 FROM sales s
                 WHERE s.total_amount != 'NaN'::numeric
-                  AND s.sale_date >= ${currStartStr}::timestamp
-                  AND s.sale_date <= ${currEndStr}::timestamp
-                  AND (${effectiveDeviceId === 0} OR s.device_id = ${effectiveDeviceId})
+                  AND COALESCE(s.sale_date, s.created_at) >= ${currStartStr}::timestamp
+                  AND COALESCE(s.sale_date, s.created_at) <= ${currEndStr}::timestamp
+                  AND (${effectiveDeviceId === 0} OR s.device_id = ${effectiveDeviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
+                  AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
                   AND (
-                    (${statusFilter === null} AND LOWER(TRIM(s.status)) != 'cancelled')
+                    (${statusFilter === null} AND LOWER(TRIM(s.status)) != 'cancelled' AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) != 'returned')
                     OR (${statusFilter !== null} AND LOWER(TRIM(s.status)) = LOWER(${statusFilter}))
                   )
                   AND (${staffFilter === null} OR s.staff_id = ${staffFilter})
@@ -628,14 +639,15 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
             `
           : sql`
               WITH filtered_sales AS (
-                SELECT s.id, s.total_amount, s.sale_date, DATE(s.sale_date) as day_date
+                SELECT s.id, s.total_amount, COALESCE(s.sale_date, s.created_at) as sale_date, DATE(COALESCE(s.sale_date, s.created_at)) as day_date
                 FROM sales s
                 WHERE s.total_amount != 'NaN'::numeric
-                  AND s.sale_date >= ${currStartStr}::timestamp
-                  AND s.sale_date <= ${currEndStr}::timestamp
-                  AND (${effectiveDeviceId === 0} OR s.device_id = ${effectiveDeviceId})
+                  AND COALESCE(s.sale_date, s.created_at) >= ${currStartStr}::timestamp
+                  AND COALESCE(s.sale_date, s.created_at) <= ${currEndStr}::timestamp
+                  AND (${effectiveDeviceId === 0} OR s.device_id = ${effectiveDeviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
+                  AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
                   AND (
-                    (${statusFilter === null} AND LOWER(TRIM(s.status)) != 'cancelled')
+                    (${statusFilter === null} AND LOWER(TRIM(s.status)) != 'cancelled' AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) != 'returned')
                     OR (${statusFilter !== null} AND LOWER(TRIM(s.status)) = LOWER(${statusFilter}))
                   )
                   AND (${staffFilter === null} OR s.staff_id = ${staffFilter})
@@ -680,14 +692,15 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
         isHourly
           ? sql`
               WITH filtered_sales AS (
-                SELECT s.id, s.total_amount, s.sale_date, EXTRACT(HOUR FROM s.sale_date)::int as hour_val
+                SELECT s.id, s.total_amount, COALESCE(s.sale_date, s.created_at) as sale_date, EXTRACT(HOUR FROM COALESCE(s.sale_date, s.created_at))::int as hour_val
                 FROM sales s
                 WHERE s.total_amount != 'NaN'::numeric
-                  AND s.sale_date >= ${prevStartStr}::timestamp
-                  AND s.sale_date <= ${prevEndStr}::timestamp
-                  AND (${effectiveDeviceId === 0} OR s.device_id = ${effectiveDeviceId})
+                  AND COALESCE(s.sale_date, s.created_at) >= ${prevStartStr}::timestamp
+                  AND COALESCE(s.sale_date, s.created_at) <= ${prevEndStr}::timestamp
+                  AND (${effectiveDeviceId === 0} OR s.device_id = ${effectiveDeviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
+                  AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
                   AND (
-                    (${statusFilter === null} AND LOWER(TRIM(s.status)) != 'cancelled')
+                    (${statusFilter === null} AND LOWER(TRIM(s.status)) != 'cancelled' AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) != 'returned')
                     OR (${statusFilter !== null} AND LOWER(TRIM(s.status)) = LOWER(${statusFilter}))
                   )
                   AND (${staffFilter === null} OR s.staff_id = ${staffFilter})
@@ -731,14 +744,15 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
             `
           : sql`
               WITH filtered_sales AS (
-                SELECT s.id, s.total_amount, s.sale_date, DATE(s.sale_date) as day_date
+                SELECT s.id, s.total_amount, COALESCE(s.sale_date, s.created_at) as sale_date, DATE(COALESCE(s.sale_date, s.created_at)) as day_date
                 FROM sales s
                 WHERE s.total_amount != 'NaN'::numeric
-                  AND s.sale_date >= ${prevStartStr}::timestamp
-                  AND s.sale_date <= ${prevEndStr}::timestamp
-                  AND (${effectiveDeviceId === 0} OR s.device_id = ${effectiveDeviceId})
+                  AND COALESCE(s.sale_date, s.created_at) >= ${prevStartStr}::timestamp
+                  AND COALESCE(s.sale_date, s.created_at) <= ${prevEndStr}::timestamp
+                  AND (${effectiveDeviceId === 0} OR s.device_id = ${effectiveDeviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
+                  AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
                   AND (
-                    (${statusFilter === null} AND LOWER(TRIM(s.status)) != 'cancelled')
+                    (${statusFilter === null} AND LOWER(TRIM(s.status)) != 'cancelled' AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) != 'returned')
                     OR (${statusFilter !== null} AND LOWER(TRIM(s.status)) = LOWER(${statusFilter}))
                   )
                   AND (${staffFilter === null} OR s.staff_id = ${staffFilter})

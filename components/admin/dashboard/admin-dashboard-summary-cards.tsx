@@ -11,6 +11,7 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   PackageCheck,
+  Info,
 } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -29,6 +30,9 @@ interface AdminDashboardSummaryCardsProps {
   currency: string
   activeMetric: DashboardMetric
   onSelectMetric: (metric: DashboardMetric) => void
+  onOpenBreakdown?: () => void
+  onOpenProfitBreakdown?: () => void
+  onOpenExpenseBreakdown?: () => void
 }
 
 function formatAmount(value: number, currency: string): string {
@@ -55,6 +59,9 @@ export default function AdminDashboardSummaryCards({
   currency,
   activeMetric,
   onSelectMetric,
+  onOpenBreakdown,
+  onOpenProfitBreakdown,
+  onOpenExpenseBreakdown,
 }: AdminDashboardSummaryCardsProps) {
   const isFiltered = (cards.totalProfit as any).isFiltered
 
@@ -137,11 +144,8 @@ export default function AdminDashboardSummaryCards({
         const isActive = activeMetric === item.id
         const Icon = item.icon
         const isUp = item.metric.isIncrease
-
-        // Determine badge color based on whether an increase is good
-        // For sales/profit/quantity/orders: up = green, down = red
-        // For expenses/cogs: up = red/amber, down = green
         const isGood = item.metric.isPositiveDirection ? isUp : !isUp
+        const isBreakdownEligible = item.id === "sales" || item.id === "orders"
 
         return (
           <Card
@@ -161,9 +165,48 @@ export default function AdminDashboardSummaryCards({
 
             <CardContent className="p-3.5 sm:p-4">
               <div className="flex items-center justify-between gap-1 mb-2">
-                <span className="text-[11px] sm:text-xs font-medium text-gray-500 truncate">
-                  {item.label}
-                </span>
+                <div className="flex items-center gap-1 min-w-0">
+                  <span className="text-[11px] sm:text-xs font-medium text-gray-500 truncate">
+                    {item.label}
+                  </span>
+                  {item.id === "profit" && onOpenProfitBreakdown ? (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onOpenProfitBreakdown()
+                      }}
+                      title="View profit breakdown"
+                      className="p-0.5 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition-colors"
+                    >
+                      <Info className="h-3 w-3" />
+                    </button>
+                  ) : item.id === "expenses" && onOpenExpenseBreakdown ? (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onOpenExpenseBreakdown()
+                      }}
+                      title="View expense breakdown"
+                      className="p-0.5 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition-colors"
+                    >
+                      <Info className="h-3 w-3" />
+                    </button>
+                  ) : isBreakdownEligible && onOpenBreakdown ? (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onOpenBreakdown()
+                      }}
+                      title="View sales breakdown"
+                      className="p-0.5 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition-colors"
+                    >
+                      <Info className="h-3 w-3" />
+                    </button>
+                  ) : null}
+                </div>
                 <div className={cn("p-1.5 rounded-lg shrink-0", item.color)}>
                   <Icon className="h-3.5 w-3.5" />
                 </div>

@@ -31,6 +31,10 @@ import {
 import { useAppSelector } from "@/store/hooks"
 import { selectDateRange } from "@/store/slices/dateRangeSlice"
 
+import { SalesBreakdownModal } from "@/components/shared/sales-breakdown-modal"
+import ProfitBreakdownModal from "@/components/shared/profit-breakdown-modal"
+import ExpenseBreakdownModal from "@/components/shared/expense-breakdown-modal"
+
 interface AdminDashboardViewProps {
   deviceId?: number
   companyId?: number
@@ -48,6 +52,9 @@ export default function AdminDashboardView({
   const [isUnlocked, setIsUnlocked] = useState(false)
   const [isCheckingAuth, setIsCheckingAuth] = useState(true)
   const [pinModalOpen, setPinModalOpen] = useState(false)
+  const [isBreakdownModalOpen, setIsBreakdownModalOpen] = useState(false)
+  const [isProfitModalOpen, setIsProfitModalOpen] = useState(false)
+  const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false)
   const [activeMetric, setActiveMetric] = useState<DashboardMetric>("sales")
 
   const [filters, setFilters] = useState<AdminDashboardQuery>(() => ({
@@ -384,6 +391,9 @@ export default function AdminDashboardView({
                 currency={dashboardData.currency}
                 activeMetric={activeMetric}
                 onSelectMetric={setActiveMetric}
+                onOpenBreakdown={() => setIsBreakdownModalOpen(true)}
+                onOpenProfitBreakdown={() => setIsProfitModalOpen(true)}
+                onOpenExpenseBreakdown={() => setIsExpenseModalOpen(true)}
               />
 
               {/* Main Dual-Series Comparison Graph */}
@@ -397,6 +407,57 @@ export default function AdminDashboardView({
 
               {/* Staff Activity Section */}
               <AdminDashboardStaffSection data={dashboardData.staffSummary} />
+
+              {/* Sales Breakdown Modal */}
+              <SalesBreakdownModal
+                isOpen={isBreakdownModalOpen}
+                onClose={() => setIsBreakdownModalOpen(false)}
+                deviceId={deviceId}
+                dateRange={{ from: filters.customFrom, to: filters.customTo }}
+                periodLabel={dashboardData.periodLabel}
+                currency={dashboardData.currency}
+                filters={{
+                  staffId: filters.staffId,
+                  courierPartnerId: filters.courierPartnerId,
+                  courierServiceName: filters.courierServiceName,
+                  paymentMethod: filters.paymentMethod,
+                  statusFilter: filters.status,
+                }}
+              />
+
+              {/* Profit Breakdown Modal */}
+              <ProfitBreakdownModal
+                isOpen={isProfitModalOpen}
+                onClose={() => setIsProfitModalOpen(false)}
+                deviceId={deviceId}
+                dateRange={{ from: filters.customFrom, to: filters.customTo }}
+                periodLabel={dashboardData.periodLabel}
+                currency={dashboardData.currency}
+                filters={{
+                  staffId: filters.staffId,
+                  courierPartnerId: filters.courierPartnerId,
+                  courierServiceName: filters.courierServiceName,
+                  paymentMethod: filters.paymentMethod,
+                  statusFilter: filters.status,
+                }}
+              />
+
+              {/* Expense Breakdown Modal */}
+              <ExpenseBreakdownModal
+                isOpen={isExpenseModalOpen}
+                onClose={() => setIsExpenseModalOpen(false)}
+                deviceId={deviceId}
+                dateRange={{ from: filters.customFrom, to: filters.customTo }}
+                periodLabel={dashboardData.periodLabel}
+                currency={dashboardData.currency}
+                filters={{
+                  staffId: filters.staffId,
+                  courierPartnerId: filters.courierPartnerId,
+                  courierServiceName: filters.courierServiceName,
+                  paymentMethod: filters.paymentMethod,
+                  statusFilter: filters.status,
+                }}
+              />
             </>
           ) : null}
         </div>

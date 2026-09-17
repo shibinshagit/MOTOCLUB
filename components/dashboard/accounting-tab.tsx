@@ -34,6 +34,7 @@ import {
   Banknote,
   ChevronLeft,
   ChevronRight,
+  Info,
 } from "lucide-react"
 import { useAppSelector, useAppDispatch } from "@/store/hooks"
 import { useStaffRestrictions } from "@/hooks/use-staff-restrictions"
@@ -89,6 +90,8 @@ import ManualCategorySelect from "../manual/manual-category-select"
 import ViewSupplierPaymentModal from "../suppliers/View-supplier-payment-model"
 import EditSupplierPaymentModal from "../suppliers/View-suplier-payment-edit"
 import PayrollRequestsTab from "@/components/admin/payroll-requests-tab"
+import ProfitBreakdownModal from "@/components/shared/profit-breakdown-modal"
+import ExpenseBreakdownModal from "@/components/shared/expense-breakdown-modal"
 
 interface AccountingTabProps {
   userId: number
@@ -200,6 +203,8 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
 
   // Date range modal state
   const [isDateModalOpen, setIsDateModalOpen] = useState(false)
+  const [isProfitModalOpen, setIsProfitModalOpen] = useState(false)
+  const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false)
   const [tempDateFrom, setTempDateFrom] = useState<Date>(new Date())
   const [tempDateTo, setTempDateTo] = useState<Date>(new Date())
 
@@ -721,7 +726,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
               </div>
               <div class="summary-card">
                 <h3>Total Sales</h3>
-                <div class="value">${currency} ${getSalesTotal().toFixed(2)}</div>
+                <div class="value">${currency} ${(financialData?.salesRevenue ?? financialData?.totalIncome ?? getSalesTotal()).toFixed(2)}</div>
               </div>
               <div class="summary-card">
                 <h3>Total Purchases</h3>
@@ -729,7 +734,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
               </div>
               <div class="summary-card">
                 <h3>Gross Profit</h3>
-                <div class="value">${currency} ${getTotalProfit().toFixed(2)}</div>
+                <div class="value">${currency} ${(financialData?.grossProfit ?? financialData?.totalProfit ?? getTotalProfit()).toFixed(2)}</div>
               </div>
               <div class="summary-card">
                 <h3>Money In</h3>
@@ -2336,9 +2341,11 @@ const renderTransactionList = (
                 <CardContent className="p-3">
                   <div className="mb-1 flex items-center gap-1 text-emerald-700">
                     <ShoppingCart className="h-4 w-4" />
-                    <span className="text-xs font-medium">Sales</span>
+                    <span className="text-xs font-medium">Sales Revenue</span>
                   </div>
-                  <div className="text-lg font-bold text-emerald-700">{`${currency} ${getSalesTotal().toFixed(2)}`}</div>
+                  <div className="text-lg font-bold text-emerald-700">
+                    {`${currency} ${(financialData?.salesRevenue ?? financialData?.totalIncome ?? getSalesTotal()).toFixed(2)}`}
+                  </div>
                   <div className="mt-1 text-[10px] text-emerald-600">
                     {
                       filteredTransactions.filter(
@@ -2369,17 +2376,29 @@ const renderTransactionList = (
                 </CardContent>
               </Card>
 
-              {/* Profit */}
+              {/* Gross Profit */}
               <Card className="border border-blue-100 bg-blue-50">
                 <CardContent className="p-3">
-                  <div className="mb-1 flex items-center gap-1 text-blue-700">
-                    <TrendingUp className="h-4 w-4" />
-                    <span className="text-xs font-medium">Profit</span>
+                  <div className="mb-1 flex items-center justify-between text-blue-700">
+                    <div className="flex items-center gap-1">
+                      <TrendingUp className="h-4 w-4" />
+                      <span className="text-xs font-medium">Gross Profit</span>
+                    </div>
+                    <button
+                      onClick={() => setIsProfitModalOpen(true)}
+                      className="text-blue-500 hover:text-blue-700 transition-colors p-0.5 rounded hover:bg-blue-100"
+                      title="View Profit Breakdown"
+                      type="button"
+                    >
+                      <Info className="h-3.5 w-3.5" />
+                    </button>
                   </div>
-                  <div className="text-lg font-bold text-blue-700">{`${currency} ${getTotalProfit().toFixed(2)}`}</div>
+                  <div className="text-lg font-bold text-blue-700">
+                    {`${currency} ${(financialData?.grossProfit ?? financialData?.totalProfit ?? getTotalProfit()).toFixed(2)}`}
+                  </div>
                   {!hideCogs && (
                     <div className="mt-1 text-[10px] text-brand-blue">
-                      COGS: {currency} {getFilteredCogs().toFixed(2)}
+                      COGS: {currency} {(financialData?.totalCogs ?? getFilteredCogs()).toFixed(2)}
                     </div>
                   )}
                 </CardContent>
@@ -2402,13 +2421,23 @@ const renderTransactionList = (
               {/* Money Out */}
               <Card className="border border-rose-100 bg-rose-50">
                 <CardContent className="p-3">
-                  <div className="mb-1 flex items-center gap-1 text-rose-700">
-                    <CreditCard className="h-4 w-4" />
-                    <span className="text-xs font-medium">Money Out</span>
+                  <div className="mb-1 flex items-center justify-between text-rose-700">
+                    <div className="flex items-center gap-1">
+                      <CreditCard className="h-4 w-4" />
+                      <span className="text-xs font-medium">Money Out</span>
+                    </div>
+                    <button
+                      onClick={() => setIsExpenseModalOpen(true)}
+                      className="text-rose-500 hover:text-rose-700 transition-colors p-0.5 rounded hover:bg-rose-100"
+                      title="View Expense Breakdown"
+                      type="button"
+                    >
+                      <Info className="h-3.5 w-3.5" />
+                    </button>
                   </div>
                   <div className="text-lg font-bold text-rose-700">{`${currency} ${getSpends().toFixed(2)}`}</div>
                   <div className="mt-1 text-[10px] text-rose-600">
-                    Outflows: {filteredTransactions.filter((t) => getCashImpact(t) < 0).length}
+                    Operating Expenses: {currency} {(financialData?.totalExpenses ?? financialData?.operatingExpenses ?? 0).toFixed(2)}
                   </div>
                 </CardContent>
               </Card>
@@ -3077,6 +3106,26 @@ const renderTransactionList = (
         deviceId={deviceId}
         currency={currency}
         onPaymentUpdated={handleSupplierPaymentUpdated}
+      />
+      <ProfitBreakdownModal
+        isOpen={isProfitModalOpen}
+        onClose={() => setIsProfitModalOpen(false)}
+        deviceId={deviceId}
+        dateRange={{
+          from: dateFrom ? format(dateFrom, "yyyy-MM-dd") : format(new Date(), "yyyy-MM-dd"),
+          to: dateTo ? format(dateTo, "yyyy-MM-dd") : format(new Date(), "yyyy-MM-dd"),
+        }}
+        currency={currency}
+      />
+      <ExpenseBreakdownModal
+        isOpen={isExpenseModalOpen}
+        onClose={() => setIsExpenseModalOpen(false)}
+        deviceId={deviceId}
+        dateRange={{
+          from: dateFrom ? format(dateFrom, "yyyy-MM-dd") : format(new Date(), "yyyy-MM-dd"),
+          to: dateTo ? format(dateTo, "yyyy-MM-dd") : format(new Date(), "yyyy-MM-dd"),
+        }}
+        currency={currency}
       />
       {ConfirmDialog}
     </div>

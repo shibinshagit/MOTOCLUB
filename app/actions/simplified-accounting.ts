@@ -2,6 +2,7 @@
 
 import { format, addDays, parseISO } from "date-fns"
 import { sql } from "@/lib/db"
+import { getAuthoritativeProfitSummary } from "@/lib/profit-calculation"
 
 // Record supplier payment transaction
 export async function recordSupplierPayment(paymentData: {
@@ -1100,31 +1101,25 @@ export async function getFinancialSummary(
 
     console.log(`Found ${transactions.length} transactions for device ${deviceId}`)
 
-    // FIXED: Calculate totals - Include partial credit payments in income
-    let totalIncome = 0
-    let totalExpenses = 0
-    let totalCogs = 0
-    let totalProfit = 0
-    let cashBalance = 0
+    // Fetch Authoritative Sales, COGS & Profit from single backend source of truth
+    const authoritativeProfit = await getAuthoritativeProfitSummary(deviceId, {
+      dateFrom: fromDateStr,
+      dateTo: toDateStr,
+    })
 
+    let cashBalance = 0
     transactions.forEach((tx: any) => {
       const creditAmount = Number(tx.credit_amount) || 0
       const debitAmount = Number(tx.debit_amount) || 0
-      const costAmount = Number(tx.cost_amount) || 0
-
-      // FIXED: Include all credit amounts (including partial credit payments) in income
-      totalIncome += creditAmount
-      totalCogs += costAmount
-      totalExpenses += debitAmount
-
-      // Calculate profit for all sales that have actual cash impact
-      if (creditAmount > 0 && costAmount > 0) {
-        totalProfit += creditAmount - costAmount
-      }
-
-      // FIXED: Calculate cash balance = money in - money out
       cashBalance += (creditAmount - debitAmount)
     })
+
+    const totalIncome = authoritativeProfit.salesRevenue + authoritativeProfit.otherIncome
+    const totalCogs = authoritativeProfit.salesCogs
+    const totalProfit = authoritativeProfit.grossProfit
+    const grossProfit = authoritativeProfit.grossProfit
+    const totalExpenses = authoritativeProfit.operatingExpenses
+    const netProfit = authoritativeProfit.netProfit
 
     // Get receivables (sales with outstanding amounts)
     const receivablesQuery = await sql`
@@ -1209,7 +1204,6 @@ export async function getFinancialSummary(
     const accountsPayable =
       payablesQuery.reduce((sum: number, p: any) => sum + Number(p.outstanding_amount), 0) +
       transferPayablesQuery.reduce((sum: number, p: any) => sum + Number(p.outstanding_amount), 0)
-    const netProfit = totalIncome - totalExpenses
 
     console.log("Financial summary calculated:", {
       totalIncome,
@@ -1225,11 +1219,18 @@ export async function getFinancialSummary(
 
     // FIXED: Proper partial credit sale and purchase handling in transaction mapping
     return {
+      salesRevenue: authoritativeProfit.salesRevenue,
       totalIncome,
       totalCogs,
+      grossProfit,
       totalProfit,
       totalExpenses,
+      operatingExpenses: authoritativeProfit.operatingExpenses,
+      otherIncome: authoritativeProfit.otherIncome,
       netProfit,
+      expenseBreakdown: authoritativeProfit.expenseBreakdown,
+      shippingSummary: authoritativeProfit.shippingSummary,
+      excludedMoneyOut: authoritativeProfit.excludedMoneyOut,
       accountsReceivable,
       accountsPayable,
       outstandingReceivables: accountsReceivable,
@@ -1346,11 +1347,18 @@ export async function getFinancialSummary(
       dateTo: toDateStr,
     })
     return {
+      salesRevenue: 0,
       totalIncome: 0,
       totalCogs: 0,
+      grossProfit: 0,
       totalProfit: 0,
       totalExpenses: 0,
+      operatingExpenses: 0,
+      otherIncome: 0,
       netProfit: 0,
+      expenseBreakdown: [],
+      shippingSummary: { customerShippingCollected: 0, actualCourierCost: 0, netShippingDifference: 0 },
+      excludedMoneyOut: { inventoryPurchases: 0, supplierPayments: 0, customerRefunds: 0, otherAdjustments: 0 },
       accountsReceivable: 0,
       accountsPayable: 0,
       outstandingReceivables: 0,

@@ -43,7 +43,9 @@ import {
   Phone,
   ExternalLink,
   Share2,
+  Info,
 } from "lucide-react"
+import { SalesBreakdownModal } from "@/components/shared/sales-breakdown-modal"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -287,6 +289,7 @@ export default function SalesExcelTable({
   const [typeFilter, setTypeFilter] = useState<"all" | "normal" | "job_card">("all")
   const [selectedSales, setSelectedSales] = useState<number[]>([])
   const [expandedSaleId, setExpandedSaleId] = useState<number | null>(null)
+  const [isBreakdownModalOpen, setIsBreakdownModalOpen] = useState(false)
 
   // High-performance server-side state
   const [page, setPage] = useState(1)
@@ -720,7 +723,20 @@ export default function SalesExcelTable({
           )}
         >
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-violet-700">Total Sales</span>
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-violet-700">Total Sales</span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setIsBreakdownModalOpen(true)
+                }}
+                title="View sales breakdown"
+                className="p-0.5 rounded-full hover:bg-violet-200/60 text-violet-600 hover:text-violet-800 transition-colors cursor-pointer"
+              >
+                <Info className="h-3.5 w-3.5" />
+              </button>
+            </div>
             <ShoppingCart className="h-4 w-4 text-violet-600 shrink-0" />
           </div>
           <div className="mt-2 flex items-baseline justify-between gap-2 min-w-0">
@@ -1901,6 +1917,22 @@ export default function SalesExcelTable({
           editSaleId={editingJobCardId}
         />
       )}
+
+      <SalesBreakdownModal
+        isOpen={isBreakdownModalOpen}
+        onClose={() => setIsBreakdownModalOpen(false)}
+        deviceId={deviceId || 0}
+        dateRange={globalDateRange || {}}
+        periodLabel={periodLabel}
+        currency={undefined}
+        filters={{ typeFilter }}
+        onFilterClick={(type, val) => {
+          if (type === "type") {
+            setTypeFilter(val as any)
+            setIsBreakdownModalOpen(false)
+          }
+        }}
+      />
     </div>
   )
 }
