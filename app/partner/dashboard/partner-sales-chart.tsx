@@ -19,12 +19,22 @@ import { getPartnerSalesAnalytics } from "@/app/actions/partner-actions"
 
 interface PartnerSalesChartProps {
   partnerId: number
+  dateRange?: string
+  fromDate?: string
+  toDate?: string
+  initialData?: any[]
 }
 
-export function PartnerSalesChart({ partnerId }: PartnerSalesChartProps) {
-  const [currentMonth, setCurrentMonth] = useState(startOfMonth(new Date()))
-  const [data, setData] = useState<any[]>([])
-  const [isLoading, setIsLoading] = useState(true)
+export function PartnerSalesChart({
+  partnerId,
+  dateRange = "This Month",
+  fromDate = "",
+  toDate = "",
+  initialData = [],
+}: PartnerSalesChartProps) {
+  const [data, setData] = useState<any[]>(initialData)
+  const [rangeBadge, setRangeBadge] = useState<string>("")
+  const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [chartType, setChartType] = useState<'bar' | 'line'>('line')
 
@@ -35,8 +45,7 @@ export function PartnerSalesChart({ partnerId }: PartnerSalesChartProps) {
       setIsLoading(true)
       setError(null)
       try {
-        const monthStr = format(currentMonth, 'yyyy-MM-dd')
-        const result = await getPartnerSalesAnalytics(partnerId, monthStr)
+        const result = await getPartnerSalesAnalytics(partnerId, { dateRange, fromDate, toDate })
         
         if (!mounted) return
 
@@ -46,25 +55,13 @@ export function PartnerSalesChart({ partnerId }: PartnerSalesChartProps) {
         }
 
         const rawData = result.data || []
-        
-        const daysInMonth = eachDayOfInterval({
-          start: startOfMonth(currentMonth),
-          end: endOfMonth(currentMonth)
-        })
+        setData(rawData)
 
-        const formattedData = daysInMonth.map(day => {
-          const dayString = format(day, 'yyyy-MM-dd')
-          const row = rawData.find((r: any) => r.date === dayString)
-          const earningsAmount = row ? Number(row.earnings_amount) : 0
-          
-          return {
-            date: day,
-            dayStr: format(day, "d EEE"), 
-            earnings: earningsAmount
-          }
-        })
-
-        setData(formattedData)
+        if (result.startDate && result.endDate) {
+          setRangeBadge(`${result.startDate} - ${result.endDate}`)
+        } else {
+          setRangeBadge(dateRange)
+        }
       } catch (err: any) {
         if (mounted) setError(err.message || "An error occurred")
       } finally {
@@ -74,7 +71,7 @@ export function PartnerSalesChart({ partnerId }: PartnerSalesChartProps) {
 
     fetchData()
     return () => { mounted = false }
-  }, [partnerId, currentMonth])
+  }, [partnerId, dateRange, fromDate, toDate])
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-3.5 sm:p-6 overflow-hidden">
@@ -86,9 +83,11 @@ export function PartnerSalesChart({ partnerId }: PartnerSalesChartProps) {
           <h2 className="text-base sm:text-xl font-bold text-gray-900 truncate">Earnings Trend</h2>
         </div>
         <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-xs">
-          <div className="text-[11px] font-medium text-gray-500 bg-gray-100 px-2.5 py-1 rounded-full whitespace-nowrap">
-            {format(startOfMonth(currentMonth), 'M/d/yyyy')} - {format(endOfMonth(currentMonth), 'M/d/yyyy')}
-          </div>
+          {rangeBadge && (
+            <div className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2.5 py-1 rounded-full whitespace-nowrap">
+              {rangeBadge}
+            </div>
+          )}
           <div className="flex bg-gray-50 border border-gray-100 rounded-lg p-0.5 shrink-0">
             <Button 
               variant="ghost" 

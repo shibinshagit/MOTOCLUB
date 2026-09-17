@@ -15,6 +15,64 @@ export type PartnerOrderFilterParams = {
   tracking?: string
 }
 
+function getPartnerDateBounds(dateRange?: string, fromDate?: string, toDate?: string) {
+  const range = (dateRange || "This Month").trim()
+  const now = new Date()
+  
+  let start: Date
+  let end: Date
+
+  if (range === "Today") {
+    start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0)
+    end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0, 0)
+  } else if (range === "Yesterday") {
+    start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 0, 0, 0, 0)
+    end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0)
+  } else if (range === "Last 7 Days") {
+    start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6, 0, 0, 0, 0)
+    end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0, 0)
+  } else if (range === "Last 30 Days") {
+    start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29, 0, 0, 0, 0)
+    end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0, 0)
+  } else if (range === "This Month") {
+    start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0)
+    end = new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 0, 0, 0)
+  } else if (range === "Last Month") {
+    start = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0, 0)
+    end = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0)
+  } else if (range === "Custom Range" && (fromDate || toDate)) {
+    const fStr = (fromDate || toDate || "").trim()
+    const tStr = (toDate || fromDate || "").trim()
+    const [fy, fm, fd] = fStr.split("-").map(Number)
+    const [ty, tm, td] = tStr.split("-").map(Number)
+    
+    start = new Date(fy || 1970, (fm ? fm - 1 : 0), fd || 1, 0, 0, 0, 0)
+    end = new Date(ty || 2099, (tm ? tm - 1 : 11), (td || 31) + 1, 0, 0, 0, 0)
+  } else {
+    start = new Date(1970, 0, 1, 0, 0, 0, 0)
+    end = new Date(2099, 11, 31, 23, 59, 59, 999)
+  }
+
+  const formatLocalDate = (d: Date) => {
+    const year = d.getFullYear()
+    const month = String(d.getMonth() + 1).padStart(2, "0")
+    const day = String(d.getDate()).padStart(2, "0")
+    const hours = String(d.getHours()).padStart(2, "0")
+    const minutes = String(d.getMinutes()).padStart(2, "0")
+    const seconds = String(d.getSeconds()).padStart(2, "0")
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
+  }
+
+  return {
+    range,
+    startDateStr: formatLocalDate(start),
+    endDateStr: formatLocalDate(end),
+    startDateObj: start,
+    endDateObj: end,
+    isAllTime: range === "All",
+  }
+}
+
 export async function getFilteredPartnerOrders(params: PartnerOrderFilterParams = {}) {
   try {
     const session = await getStaffSession()
@@ -40,7 +98,7 @@ export async function getFilteredPartnerOrders(params: PartnerOrderFilterParams 
     const search = (params.search || "").trim()
     const status = (params.status || "All").trim()
     const orderType = (params.orderType || "All").trim()
-    const dateRange = (params.dateRange || "All").trim()
+    const dateRange = (params.dateRange || "This Month").trim()
     const fromDate = (params.fromDate || "").trim()
     const toDate = (params.toDate || "").trim()
     const tracking = (params.tracking || "All").trim()
@@ -48,9 +106,7 @@ export async function getFilteredPartnerOrders(params: PartnerOrderFilterParams 
     const cleanNumStr = search.replace(/^(#|MC-|RS-)/i, "").trim()
     const digitsOnly = search.replace(/\D/g, "")
 
-    const hasFromDate = Boolean(dateRange === "Custom Range" && fromDate)
-    const fromDateVal = hasFromDate ? `${fromDate} 00:00:00` : "1970-01-01 00:00:00"
-    const toDateVal = hasFromDate ? `${toDate || fromDate} 23:59:59.999` : "2099-12-31 23:59:59.999"
+    const { startDateStr, endDateStr, isAllTime } = getPartnerDateBounds(dateRange, fromDate, toDate)
 
     let combinedOrders: any[] = []
     let totalCount = 0
@@ -100,14 +156,7 @@ export async function getFilteredPartnerOrders(params: PartnerOrderFilterParams 
           )
           AND (${status === "All"} OR LOWER(s.delivery_status) = LOWER(${status}))
           AND (${tracking === "All"} OR (${tracking === "With Tracking"} AND s.tracking_id IS NOT NULL AND TRIM(s.tracking_id) != '') OR (${tracking === "Without Tracking"} AND (s.tracking_id IS NULL OR TRIM(s.tracking_id) = '')))
-          AND (
-            ${dateRange === "All"}
-            OR (${dateRange === "Today"} AND DATE(COALESCE(s.sale_date, s.created_at)) = CURRENT_DATE)
-            OR (${dateRange === "Yesterday"} AND DATE(COALESCE(s.sale_date, s.created_at)) = CURRENT_DATE - INTERVAL '1 day')
-            OR (${dateRange === "Last 7 Days"} AND COALESCE(s.sale_date, s.created_at) >= CURRENT_DATE - INTERVAL '7 days')
-            OR (${dateRange === "Last 30 Days"} AND COALESCE(s.sale_date, s.created_at) >= CURRENT_DATE - INTERVAL '30 days')
-            OR (${hasFromDate} AND COALESCE(s.sale_date, s.created_at) >= ${fromDateVal}::timestamp AND COALESCE(s.sale_date, s.created_at) <= ${toDateVal}::timestamp)
-          )
+          AND (${isAllTime} OR (COALESCE(s.sale_date, s.created_at) >= ${startDateStr}::timestamp AND COALESCE(s.sale_date, s.created_at) < ${endDateStr}::timestamp))
           AND (
             ${!search}
             OR s.id::text ILIKE ${'%' + cleanNumStr + '%'}
@@ -142,14 +191,7 @@ export async function getFilteredPartnerOrders(params: PartnerOrderFilterParams 
           )
           AND (${status === "All"} OR LOWER(s.delivery_status) = LOWER(${status}))
           AND (${tracking === "All"} OR (${tracking === "With Tracking"} AND s.tracking_id IS NOT NULL AND TRIM(s.tracking_id) != '') OR (${tracking === "Without Tracking"} AND (s.tracking_id IS NULL OR TRIM(s.tracking_id) = '')))
-          AND (
-            ${dateRange === "All"}
-            OR (${dateRange === "Today"} AND DATE(COALESCE(s.sale_date, s.created_at)) = CURRENT_DATE)
-            OR (${dateRange === "Yesterday"} AND DATE(COALESCE(s.sale_date, s.created_at)) = CURRENT_DATE - INTERVAL '1 day')
-            OR (${dateRange === "Last 7 Days"} AND COALESCE(s.sale_date, s.created_at) >= CURRENT_DATE - INTERVAL '7 days')
-            OR (${dateRange === "Last 30 Days"} AND COALESCE(s.sale_date, s.created_at) >= CURRENT_DATE - INTERVAL '30 days')
-            OR (${hasFromDate} AND COALESCE(s.sale_date, s.created_at) >= ${fromDateVal}::timestamp AND COALESCE(s.sale_date, s.created_at) <= ${toDateVal}::timestamp)
-          )
+          AND (${isAllTime} OR (COALESCE(s.sale_date, s.created_at) >= ${startDateStr}::timestamp AND COALESCE(s.sale_date, s.created_at) < ${endDateStr}::timestamp))
           AND (
             ${!search}
             OR s.id::text ILIKE ${'%' + cleanNumStr + '%'}
@@ -213,14 +255,7 @@ export async function getFilteredPartnerOrders(params: PartnerOrderFilterParams 
           )
           AND (${status === "All"} OR LOWER(rs.status) = LOWER(${status}))
           AND (${tracking === "All"} OR (${tracking === "With Tracking"} AND rs.tracking_id IS NOT NULL AND TRIM(rs.tracking_id) != '') OR (${tracking === "Without Tracking"} AND (rs.tracking_id IS NULL OR TRIM(rs.tracking_id) = '')))
-          AND (
-            ${dateRange === "All"}
-            OR (${dateRange === "Today"} AND DATE(rs.created_at) = CURRENT_DATE)
-            OR (${dateRange === "Yesterday"} AND DATE(rs.created_at) = CURRENT_DATE - INTERVAL '1 day')
-            OR (${dateRange === "Last 7 Days"} AND rs.created_at >= CURRENT_DATE - INTERVAL '7 days')
-            OR (${dateRange === "Last 30 Days"} AND rs.created_at >= CURRENT_DATE - INTERVAL '30 days')
-            OR (${hasFromDate} AND rs.created_at >= ${fromDateVal}::timestamp AND rs.created_at <= ${toDateVal}::timestamp)
-          )
+          AND (${isAllTime} OR (rs.created_at >= ${startDateStr}::timestamp AND rs.created_at < ${endDateStr}::timestamp))
           AND (
             ${!search}
             OR rs.replacement_number ILIKE ${'%' + search + '%'}
@@ -256,14 +291,7 @@ export async function getFilteredPartnerOrders(params: PartnerOrderFilterParams 
           )
           AND (${status === "All"} OR LOWER(rs.status) = LOWER(${status}))
           AND (${tracking === "All"} OR (${tracking === "With Tracking"} AND rs.tracking_id IS NOT NULL AND TRIM(rs.tracking_id) != '') OR (${tracking === "Without Tracking"} AND (rs.tracking_id IS NULL OR TRIM(rs.tracking_id) = '')))
-          AND (
-            ${dateRange === "All"}
-            OR (${dateRange === "Today"} AND DATE(rs.created_at) = CURRENT_DATE)
-            OR (${dateRange === "Yesterday"} AND DATE(rs.created_at) = CURRENT_DATE - INTERVAL '1 day')
-            OR (${dateRange === "Last 7 Days"} AND rs.created_at >= CURRENT_DATE - INTERVAL '7 days')
-            OR (${dateRange === "Last 30 Days"} AND rs.created_at >= CURRENT_DATE - INTERVAL '30 days')
-            OR (${hasFromDate} AND rs.created_at >= ${fromDateVal}::timestamp AND rs.created_at <= ${toDateVal}::timestamp)
-          )
+          AND (${isAllTime} OR (rs.created_at >= ${startDateStr}::timestamp AND rs.created_at < ${endDateStr}::timestamp))
           AND (
             ${!search}
             OR rs.replacement_number ILIKE ${'%' + search + '%'}
@@ -341,14 +369,7 @@ export async function getFilteredPartnerOrders(params: PartnerOrderFilterParams 
             )
             AND (${status === "All"} OR LOWER(s.delivery_status) = LOWER(${status}))
             AND (${tracking === "All"} OR (${tracking === "With Tracking"} AND s.tracking_id IS NOT NULL AND TRIM(s.tracking_id) != '') OR (${tracking === "Without Tracking"} AND (s.tracking_id IS NULL OR TRIM(s.tracking_id) = '')))
-            AND (
-              ${dateRange === "All"}
-              OR (${dateRange === "Today"} AND DATE(COALESCE(s.sale_date, s.created_at)) = CURRENT_DATE)
-              OR (${dateRange === "Yesterday"} AND DATE(COALESCE(s.sale_date, s.created_at)) = CURRENT_DATE - INTERVAL '1 day')
-              OR (${dateRange === "Last 7 Days"} AND COALESCE(s.sale_date, s.created_at) >= CURRENT_DATE - INTERVAL '7 days')
-              OR (${dateRange === "Last 30 Days"} AND COALESCE(s.sale_date, s.created_at) >= CURRENT_DATE - INTERVAL '30 days')
-              OR (${hasFromDate} AND COALESCE(s.sale_date, s.created_at) >= ${fromDateVal}::timestamp AND COALESCE(s.sale_date, s.created_at) <= ${toDateVal}::timestamp)
-            )
+            AND (${isAllTime} OR (COALESCE(s.sale_date, s.created_at) >= ${startDateStr}::timestamp AND COALESCE(s.sale_date, s.created_at) < ${endDateStr}::timestamp))
             AND (
               ${!search}
               OR s.id::text ILIKE ${'%' + cleanNumStr + '%'}
@@ -419,14 +440,7 @@ export async function getFilteredPartnerOrders(params: PartnerOrderFilterParams 
             )
             AND (${status === "All"} OR LOWER(rs.status) = LOWER(${status}))
             AND (${tracking === "All"} OR (${tracking === "With Tracking"} AND rs.tracking_id IS NOT NULL AND TRIM(rs.tracking_id) != '') OR (${tracking === "Without Tracking"} AND (rs.tracking_id IS NULL OR TRIM(rs.tracking_id) = '')))
-            AND (
-              ${dateRange === "All"}
-              OR (${dateRange === "Today"} AND DATE(rs.created_at) = CURRENT_DATE)
-              OR (${dateRange === "Yesterday"} AND DATE(rs.created_at) = CURRENT_DATE - INTERVAL '1 day')
-              OR (${dateRange === "Last 7 Days"} AND rs.created_at >= CURRENT_DATE - INTERVAL '7 days')
-              OR (${dateRange === "Last 30 Days"} AND rs.created_at >= CURRENT_DATE - INTERVAL '30 days')
-              OR (${hasFromDate} AND rs.created_at >= ${fromDateVal}::timestamp AND rs.created_at <= ${toDateVal}::timestamp)
-            )
+            AND (${isAllTime} OR (rs.created_at >= ${startDateStr}::timestamp AND rs.created_at < ${endDateStr}::timestamp))
             AND (
               ${!search}
               OR rs.replacement_number ILIKE ${'%' + search + '%'}
@@ -465,14 +479,7 @@ export async function getFilteredPartnerOrders(params: PartnerOrderFilterParams 
               )
               AND (${status === "All"} OR LOWER(s.delivery_status) = LOWER(${status}))
               AND (${tracking === "All"} OR (${tracking === "With Tracking"} AND s.tracking_id IS NOT NULL AND TRIM(s.tracking_id) != '') OR (${tracking === "Without Tracking"} AND (s.tracking_id IS NULL OR TRIM(s.tracking_id) = '')))
-              AND (
-                ${dateRange === "All"}
-                OR (${dateRange === "Today"} AND DATE(COALESCE(s.sale_date, s.created_at)) = CURRENT_DATE)
-                OR (${dateRange === "Yesterday"} AND DATE(COALESCE(s.sale_date, s.created_at)) = CURRENT_DATE - INTERVAL '1 day')
-                OR (${dateRange === "Last 7 Days"} AND COALESCE(s.sale_date, s.created_at) >= CURRENT_DATE - INTERVAL '7 days')
-                OR (${dateRange === "Last 30 Days"} AND COALESCE(s.sale_date, s.created_at) >= CURRENT_DATE - INTERVAL '30 days')
-                OR (${hasFromDate} AND COALESCE(s.sale_date, s.created_at) >= ${fromDateVal}::timestamp AND COALESCE(s.sale_date, s.created_at) <= ${toDateVal}::timestamp)
-              )
+              AND (${isAllTime} OR (COALESCE(s.sale_date, s.created_at) >= ${startDateStr}::timestamp AND COALESCE(s.sale_date, s.created_at) < ${endDateStr}::timestamp))
               AND (
                 ${!search}
                 OR s.id::text ILIKE ${'%' + cleanNumStr + '%'}
@@ -504,14 +511,7 @@ export async function getFilteredPartnerOrders(params: PartnerOrderFilterParams 
               )
               AND (${status === "All"} OR LOWER(rs.status) = LOWER(${status}))
               AND (${tracking === "All"} OR (${tracking === "With Tracking"} AND rs.tracking_id IS NOT NULL AND TRIM(rs.tracking_id) != '') OR (${tracking === "Without Tracking"} AND (rs.tracking_id IS NULL OR TRIM(rs.tracking_id) = '')))
-              AND (
-                ${dateRange === "All"}
-                OR (${dateRange === "Today"} AND DATE(rs.created_at) = CURRENT_DATE)
-                OR (${dateRange === "Yesterday"} AND DATE(rs.created_at) = CURRENT_DATE - INTERVAL '1 day')
-                OR (${dateRange === "Last 7 Days"} AND rs.created_at >= CURRENT_DATE - INTERVAL '7 days')
-                OR (${dateRange === "Last 30 Days"} AND rs.created_at >= CURRENT_DATE - INTERVAL '30 days')
-                OR (${hasFromDate} AND rs.created_at >= ${fromDateVal}::timestamp AND rs.created_at <= ${toDateVal}::timestamp)
-              )
+              AND (${isAllTime} OR (rs.created_at >= ${startDateStr}::timestamp AND rs.created_at < ${endDateStr}::timestamp))
               AND (
                 ${!search}
                 OR rs.replacement_number ILIKE ${'%' + search + '%'}
@@ -534,7 +534,7 @@ export async function getFilteredPartnerOrders(params: PartnerOrderFilterParams 
                 )
               )
             )
-          ) as count
+          )::int as count
         `
       ])
 
@@ -542,32 +542,7 @@ export async function getFilteredPartnerOrders(params: PartnerOrderFilterParams 
       totalCount = Number(countRes[0]?.count || 0)
     }
 
-    // Populate replacement shipment items if replacements exist in current page
-    const replacementRecordsInPage = combinedOrders.filter((r: any) => r.is_replacement || r.record_type === "replacement")
-    if (replacementRecordsInPage.length > 0) {
-      const rsIds = replacementRecordsInPage.map((r: any) => r.id)
-      const rsItems = await sql`
-        SELECT 
-          rsi.*,
-          p.name as product_name,
-          pv.name as variant_name
-        FROM replacement_shipment_items rsi
-        LEFT JOIN products p ON rsi.product_id = p.id
-        LEFT JOIN product_variants pv ON rsi.product_variant_id = pv.id
-        WHERE rsi.replacement_shipment_id = ANY(${rsIds})
-      `
-      const itemsMap: Record<number, any[]> = {}
-      for (const item of rsItems) {
-        if (!itemsMap[item.replacement_shipment_id]) itemsMap[item.replacement_shipment_id] = []
-        itemsMap[item.replacement_shipment_id].push(item)
-      }
-      for (const rs of replacementRecordsInPage) {
-        rs.items = itemsMap[rs.id] || []
-      }
-    }
-
-    // Pending replacement shipments count for dashboard banner
-    const pendingReplacementsCountRes = await sql`
+    const pendingReplacementsRes = await sql`
       SELECT COUNT(*)::int as count
       FROM replacement_shipments rs
       WHERE (
@@ -575,26 +550,26 @@ export async function getFilteredPartnerOrders(params: PartnerOrderFilterParams 
         OR rs.courier_partner_id = (SELECT linked_partner_id FROM staff WHERE id = ${partnerId} AND linked_partner_id IS NOT NULL)
         OR (rs.courier_service_id IS NOT NULL AND rs.courier_service_id = (SELECT linked_partner_id FROM staff WHERE id = ${partnerId} AND linked_partner_id IS NOT NULL))
       )
-      AND LOWER(rs.status) NOT IN ('delivered', 'cancelled', 'failed', 'returned')
+      AND LOWER(rs.status) IN ('pending', 'processing')
     `
+    const pendingReplacementsCount = Number(pendingReplacementsRes[0]?.count || 0)
 
     const totalPages = Math.ceil(totalCount / pageSize) || 1
 
     return {
       success: true,
       data: combinedOrders,
-      replacementShipments: replacementRecordsInPage,
       totalCount,
       page,
       pageSize,
       totalPages,
-      pendingReplacementsCount: Number(pendingReplacementsCountRes[0]?.count || 0),
+      pendingReplacementsCount,
     }
   } catch (error) {
-    console.error("Error fetching filtered partner orders:", error)
+    console.error("Error in getFilteredPartnerOrders:", error)
     return {
       success: false,
-      message: "Failed to fetch partner orders",
+      message: "Failed to load partner orders",
       data: [],
       replacementShipments: [],
       totalCount: 0,
@@ -694,11 +669,11 @@ export async function updatePartnerSaleDetails(saleId: number, weightKg: string,
   }
 }
 
-export async function getPartnerDashboardStats(partnerId: number) {
+export async function getPartnerDashboardStats(partnerId: number, params: PartnerOrderFilterParams = {}) {
   try {
-    const today = new Date().toISOString().split('T')[0]
+    const { startDateStr, endDateStr, isAllTime } = getPartnerDateBounds(params.dateRange, params.fromDate, params.toDate)
     
-    // Total Orders and Active Orders
+    // Total Orders and Active Orders in date range
     const ordersResult = await sql`
       SELECT 
         COUNT(*) as total_orders,
@@ -709,9 +684,10 @@ export async function getPartnerDashboardStats(partnerId: number) {
         OR s.courier_partner_id = (SELECT linked_partner_id FROM staff WHERE id = ${partnerId} AND linked_partner_id IS NOT NULL)
         OR (s.courier_service_id IS NOT NULL AND s.courier_service_id = (SELECT linked_partner_id FROM staff WHERE id = ${partnerId} AND linked_partner_id IS NOT NULL))
       )
+      AND (${isAllTime} OR (COALESCE(s.sale_date, s.created_at) >= ${startDateStr}::timestamp AND COALESCE(s.sale_date, s.created_at) < ${endDateStr}::timestamp))
     `
     
-    // Total Earnings (sum of expense_courier)
+    // Total Earnings (sum of expense_courier) in date range
     const earningsResult = await sql`
       SELECT SUM(COALESCE(expense_courier, 0)) as total_earnings
       FROM sales s
@@ -720,18 +696,22 @@ export async function getPartnerDashboardStats(partnerId: number) {
         OR s.courier_partner_id = (SELECT linked_partner_id FROM staff WHERE id = ${partnerId} AND linked_partner_id IS NOT NULL)
         OR (s.courier_service_id IS NOT NULL AND s.courier_service_id = (SELECT linked_partner_id FROM staff WHERE id = ${partnerId} AND linked_partner_id IS NOT NULL))
       )
+      AND (${isAllTime} OR (COALESCE(s.sale_date, s.created_at) >= ${startDateStr}::timestamp AND COALESCE(s.sale_date, s.created_at) < ${endDateStr}::timestamp))
     `
     
-    // Today's Activity (orders updated today or assigned today)
+    // Period Activity
     const activityResult = await sql`
-      SELECT COUNT(*) as today_activity
+      SELECT COUNT(*) as period_activity
       FROM sales s
       WHERE (
         s.courier_partner_id = ${partnerId}
         OR s.courier_partner_id = (SELECT linked_partner_id FROM staff WHERE id = ${partnerId} AND linked_partner_id IS NOT NULL)
         OR (s.courier_service_id IS NOT NULL AND s.courier_service_id = (SELECT linked_partner_id FROM staff WHERE id = ${partnerId} AND linked_partner_id IS NOT NULL))
       )
-      AND (DATE(s.created_at) = ${today} OR DATE(s.updated_at) = ${today})
+      AND (${isAllTime} OR (
+        (s.created_at >= ${startDateStr}::timestamp AND s.created_at < ${endDateStr}::timestamp)
+        OR (s.updated_at >= ${startDateStr}::timestamp AND s.updated_at < ${endDateStr}::timestamp)
+      ))
     `
 
     return {
@@ -740,7 +720,7 @@ export async function getPartnerDashboardStats(partnerId: number) {
         totalOrders: Number(ordersResult[0]?.total_orders || 0),
         activeOrders: Number(ordersResult[0]?.active_orders || 0),
         totalEarnings: Number(earningsResult[0]?.total_earnings || 0),
-        todayActivity: Number(activityResult[0]?.today_activity || 0)
+        todayActivity: Number(activityResult[0]?.period_activity || 0)
       }
     }
   } catch (error) {
@@ -752,21 +732,26 @@ export async function getPartnerDashboardStats(partnerId: number) {
   }
 }
 
-export async function getPartnerSalesAnalytics(partnerId: number, monthStr: string) {
+export async function getPartnerSalesAnalytics(partnerId: number, params: PartnerOrderFilterParams | string = {}) {
   try {
-    const [yearStr, monthStrPart] = monthStr.split('-')
-    const year = parseInt(yearStr, 10)
-    const month = parseInt(monthStrPart, 10)
-    
-    const startDate = `${year}-${String(month).padStart(2, '0')}-01`
-    const nextMonth = month === 12 ? 1 : month + 1
-    const nextYear = month === 12 ? year + 1 : year
-    const endDate = `${nextYear}-${String(nextMonth).padStart(2, '0')}-01`
-    
-    const result = await sql`
+    let dateParams: PartnerOrderFilterParams = {}
+    if (typeof params === "string") {
+      // Backwards compatibility if called with monthStr
+      dateParams = { dateRange: "This Month" }
+    } else {
+      dateParams = params
+    }
+
+    const { startDateStr, endDateStr, startDateObj, endDateObj, isAllTime } = getPartnerDateBounds(
+      dateParams.dateRange,
+      dateParams.fromDate,
+      dateParams.toDate
+    )
+
+    const rawRows = await sql`
       SELECT 
-        TO_CHAR(sale_date, 'YYYY-MM-DD') as date,
-        SUM(COALESCE(expense_courier, 0)) as earnings_amount,
+        TO_CHAR(COALESCE(s.sale_date, s.created_at), 'YYYY-MM-DD') as date,
+        SUM(COALESCE(s.expense_courier, 0)) as earnings_amount,
         COUNT(*) as order_count
       FROM sales s
       WHERE (
@@ -774,16 +759,66 @@ export async function getPartnerSalesAnalytics(partnerId: number, monthStr: stri
         OR s.courier_partner_id = (SELECT linked_partner_id FROM staff WHERE id = ${partnerId} AND linked_partner_id IS NOT NULL)
         OR (s.courier_service_id IS NOT NULL AND s.courier_service_id = (SELECT linked_partner_id FROM staff WHERE id = ${partnerId} AND linked_partner_id IS NOT NULL))
       )
-        AND sale_date >= ${startDate}::date
-        AND sale_date < ${endDate}::date
-      GROUP BY TO_CHAR(sale_date, 'YYYY-MM-DD')
+      AND (${isAllTime} OR (COALESCE(s.sale_date, s.created_at) >= ${startDateStr}::timestamp AND COALESCE(s.sale_date, s.created_at) < ${endDateStr}::timestamp))
+      GROUP BY TO_CHAR(COALESCE(s.sale_date, s.created_at), 'YYYY-MM-DD')
       ORDER BY date ASC
     `
-    
-    return { success: true, data: result }
+
+    const rowMap = new Map<string, number>()
+    for (const r of rawRows) {
+      if (r.date) {
+        rowMap.set(r.date, Number(r.earnings_amount || 0))
+      }
+    }
+
+    let cur = new Date(startDateObj)
+    let last = new Date(endDateObj)
+    last.setDate(last.getDate() - 1)
+
+    if (isAllTime) {
+      if (rawRows.length > 0 && rawRows[0].date) {
+        const [sy, sm, sd] = rawRows[0].date.split("-").map(Number)
+        cur = new Date(sy, sm - 1, sd)
+        const lastRowDate = rawRows[rawRows.length - 1].date
+        const [ey, em, ed] = lastRowDate.split("-").map(Number)
+        last = new Date(ey, em - 1, ed)
+      } else {
+        const now = new Date()
+        cur = new Date(now.getFullYear(), now.getMonth(), 1)
+        last = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+      }
+    }
+
+    const series: Array<{ date: string; dayStr: string; earnings: number }> = []
+    let steps = 0
+
+    while (cur <= last && steps < 366) {
+      const year = cur.getFullYear()
+      const month = String(cur.getMonth() + 1).padStart(2, "0")
+      const day = String(cur.getDate()).padStart(2, "0")
+      const dateStr = `${year}-${month}-${day}`
+      const dayStr = `${cur.getDate()}/${cur.getMonth() + 1}`
+      const earnings = rowMap.get(dateStr) || 0
+
+      series.push({
+        date: dateStr,
+        dayStr,
+        earnings,
+      })
+
+      cur.setDate(cur.getDate() + 1)
+      steps++
+    }
+
+    return {
+      success: true,
+      data: series,
+      startDate: series[0]?.date || startDateStr.split(" ")[0],
+      endDate: series[series.length - 1]?.date || endDateStr.split(" ")[0],
+    }
   } catch (error) {
     console.error("Error fetching partner analytics:", error)
-    return { success: false, message: "Failed to load analytics" }
+    return { success: false, message: "Failed to load analytics", data: [] }
   }
 }
 

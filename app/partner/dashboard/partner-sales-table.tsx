@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button"
 import { TrackingDetailsModal } from "@/components/sales/tracking-details-modal"
 import { PartnerFilterToolbar, PartnerFilterState } from "@/components/partner/partner-filter-toolbar"
 import { PartnerPagination } from "@/components/partner/partner-pagination"
+import { printJobCard } from "@/lib/receipt-utils"
 
 interface PartnerSalesTableProps {
   initialOrders?: any[]
@@ -381,22 +382,7 @@ export function PartnerSalesTable({
   }
 
   const handlePrintLabel = (sale: any) => {
-    import("@/lib/receipt-utils").then(({ printJobCard }) => {
-      if (sale.items && sale.items.length > 0) {
-        printJobCard(sale, "INR")
-      } else {
-        import("@/app/actions/sale-actions").then(({ getSaleDetails }) => {
-          getSaleDetails(sale.id).then((res) => {
-            if (res.success && res.data) {
-              const fullSale = { ...res.data.sale, items: res.data.items }
-              printJobCard(fullSale, "INR")
-            } else {
-              toast({ title: "Error", description: "Failed to load order details", variant: "destructive" })
-            }
-          })
-        })
-      }
-    })
+    printJobCard(sale, "INR")
   }
 
   const handleDetailsChange = async (saleId: number, field: 'weight_kg' | 'expense_courier', value: string) => {

@@ -1442,11 +1442,147 @@ function buildJobCardAddressLines(sale: any) {
   return { addressLines, pincode };
 }
 
-// Print Job Card
-export function printJobCard(sale: any, currency = 'AED', businessInfo: any = {}) {
-  if (typeof window === 'undefined') return;
+export function extractJobCardItemsText(sale: any): string {
+  if (!sale) return '';
 
-  const { addressLines, pincode } = buildJobCardAddressLines(sale);
+  const isDefaultVariant = (vName?: string) => {
+    if (!vName) return true;
+    const clean = String(vName).trim().toLowerCase().replace(/^\(|\)$/g, '').trim();
+    return clean === 'default' || clean === 'default variant' || clean === 'default-variant' || clean.includes('default') || clean === '';
+  };
+
+  const cleanProductText = (str: string): string => {
+    if (!str) return '';
+    return str
+      .replace(/\s*-\s*default\s*variant/gi, '')
+      .replace(/\s*-\s*default-variant/gi, '')
+      .replace(/\s*-\s*default/gi, '')
+      .replace(/\s*\(\s*default\s*variant\s*\)/gi, '')
+      .replace(/\s*\(\s*default-variant\s*\)/gi, '')
+      .replace(/\s*\(\s*default\s*\)/gi, '')
+      .replace(/\bdefault variant\b/gi, '')
+      .replace(/\bdefault-variant\b/gi, '')
+      .replace(/\s+-\s*×/g, ' ×')
+      .replace(/\s+-\s*x/gi, ' x')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+  };
+
+  let rawItems = sale.items || sale.sale_items || sale.saleItems || sale.products || sale.order_items || sale.orderItems || sale.line_items || sale.lineItems || sale.details;
+
+  if (typeof rawItems === 'string') {
+    try {
+      rawItems = JSON.parse(rawItems);
+    } catch (e) {
+      // not JSON
+    }
+  }
+
+  if (Array.isArray(rawItems) && rawItems.length > 0) {
+    const formattedList = rawItems.map((item: any) => {
+      if (!item) return '';
+      if (typeof item === 'string') return cleanProductText(item);
+
+      const pName = (
+        item.product_name ||
+        item.productName ||
+        item.service_name ||
+        item.serviceName ||
+        item.name ||
+        item.product_title ||
+        item.productTitle ||
+        item.title ||
+        item.product?.name ||
+        item.item_name ||
+        item.itemName ||
+        item.description ||
+        ''
+      ).trim();
+
+      let vName = item.variant_name || item.variantName || item.variant?.name || (typeof item.variant === 'string' ? item.variant : '');
+      const variantDisplay = vName && !isDefaultVariant(vName) ? ` (${String(vName).trim()})` : '';
+
+      const qty = Number(item.quantity || item.qty || item.count || 1);
+      const qtyDisplay = qty > 1 ? ` x${qty}` : '';
+
+      if (pName) {
+        return cleanProductText(`${pName}${variantDisplay}${qtyDisplay}`);
+      }
+      return '';
+    }).filter(Boolean);
+
+    if (formattedList.length > 0) {
+      return formattedList.join(', ');
+    }
+  }
+
+  // Pre-aggregated text properties from database queries
+  if (sale.products_text || sale.productsText) {
+    const text = cleanProductText(
+      String(sale.products_text || sale.productsText)
+        .split('\n')
+        .map(s => s.trim())
+        .filter(Boolean)
+        .join(', ')
+    );
+    if (text) return text;
+  }
+
+  if (sale.items_summary || sale.itemsSummary) {
+    const text = cleanProductText(String(sale.items_summary || sale.itemsSummary));
+    if (text) return text;
+  }
+
+  if (sale.product_names || sale.productNames) {
+    return cleanProductText(String(sale.product_names || sale.productNames));
+  }
+
+  if (sale.items_text || sale.itemsText) {
+    return cleanProductText(String(sale.items_text || sale.itemsText));
+  }
+
+  const rootPName = (
+    sale.product_name ||
+    sale.productName ||
+    sale.service_name ||
+    sale.serviceName ||
+    sale.item_name ||
+    sale.itemName ||
+    ''
+  ).trim();
+
+  if (rootPName) {
+    let vName = sale.variant_name || sale.variantName || sale.variant?.name || (typeof sale.variant === 'string' ? sale.variant : '');
+    const variantDisplay = vName && !isDefaultVariant(vName) ? ` (${String(vName).trim()})` : '';
+    const qty = Number(sale.quantity || sale.qty || 1);
+    const qtyDisplay = qty > 1 ? ` x${qty}` : '';
+    return cleanProductText(`${rootPName}${variantDisplay}${qtyDisplay}`);
+  }
+
+  return '';
+}
+
+// Print Job Card
+export async function printJobCard(sale: any, currency = 'AED', businessInfo: any = {}) {
+  if (typeof window === 'undefined' || !sale) return;
+
+  let currentSale = sale;
+  let itemsText = extractJobCardItemsText(currentSale);
+
+  if (!itemsText && currentSale?.id) {
+    try {
+      const { getSaleDetails } = await import("@/app/actions/sale-actions");
+      const res = await getSaleDetails(currentSale.id);
+      if (res.success && res.data) {
+        currentSale = { ...res.data.sale, ...currentSale, items: res.data.items };
+        itemsText = extractJobCardItemsText(currentSale);
+      }
+    } catch (e) {
+      console.error("Error loading sale items for printJobCard:", e);
+    }
+  }
+
+  const { addressLines, pincode } = buildJobCardAddressLines(currentSale);
 
   const business = {
     name: getCachedPlatformName(),
@@ -1454,7 +1590,7 @@ export function printJobCard(sale: any, currency = 'AED', businessInfo: any = {}
     ...businessInfo,
   }
   
-  let rawLogo = sale?.device_logo || sale?.logo_url || sale?.logo || business.device_logo || business.logo || business.logo_url || getDefaultDeviceLogoUrl() || "";
+  let rawLogo = currentSale?.device_logo || currentSale?.logo_url || currentSale?.logo || business.device_logo || business.logo || business.logo_url || getDefaultDeviceLogoUrl() || "";
   if (rawLogo && typeof window !== "undefined" && rawLogo.startsWith("/")) {
     rawLogo = `${window.location.origin}${rawLogo}`;
   }
@@ -1469,22 +1605,9 @@ export function printJobCard(sale: any, currency = 'AED', businessInfo: any = {}
   } catch (e) {
     // ignore
   }
-  const fromName = sale?.device_name || sale?.device?.name || storeDeviceName || sale?.branch_name || business.device_name || business.branch_name || business.name || 'Moto Club Online';
+  const fromName = currentSale?.device_name || currentSale?.device?.name || storeDeviceName || currentSale?.branch_name || business.device_name || business.branch_name || business.name || 'Moto Club Online';
 
-  const isDefaultVariant = (vName?: string) => {
-    if (!vName) return true;
-    const clean = vName.trim().toLowerCase().replace(/^\(|\)$/g, '').trim();
-    return clean === 'default' || clean === 'default variant' || clean.includes('default') || clean === '';
-  };
-
-  const itemsText = sale.items?.map((item: any) => {
-    const variantDisplay = item.variant_name && !isDefaultVariant(item.variant_name)
-      ? ` (${item.variant_name.trim()})`
-      : '';
-    return `${item.product_name || 'Item'}${variantDisplay}${item.quantity > 1 ? ` x${item.quantity}` : ''}`
-  }).join(', ') || '';
-
-  const formattedOrderId = formatOrderId(sale.id);
+  const formattedOrderId = formatOrderId(currentSale.id);
 
   const html = `
     <!DOCTYPE html>
@@ -1526,10 +1649,10 @@ export function printJobCard(sale: any, currency = 'AED', businessInfo: any = {}
       
       <div class="section to-section">
         <p class="to-title">To,</p>
-        <p class="customer-name">${sale.customer_name || 'N/A'}</p>
+        <p class="customer-name">${currentSale.customer_name || 'N/A'}</p>
         ${addressLines.map(line => `<p>${line}</p>`).join('')}
         ${pincode ? `<p>Pin:- ${pincode}</p>` : ''}
-        <p>Ph:- ${sale.customer_phone || 'N/A'}</p>
+        <p>Ph:- ${currentSale.customer_phone || 'N/A'}</p>
       </div>
 
       <hr />
@@ -1553,51 +1676,49 @@ export function printJobCard(sale: any, currency = 'AED', businessInfo: any = {}
     </html>
   `;
   
-  setTimeout(() => {
-    try {
-      let iframe = document.getElementById('job-card-print-iframe') as HTMLIFrameElement;
-      if (!iframe) {
-        iframe = document.createElement('iframe');
-        iframe.id = 'job-card-print-iframe';
-        iframe.style.position = 'fixed';
-        iframe.style.right = '0';
-        iframe.style.bottom = '0';
-        iframe.style.width = '0';
-        iframe.style.height = '0';
-        iframe.style.border = '0';
-        iframe.style.visibility = 'hidden';
-        document.body.appendChild(iframe);
-      }
-
-      const doc = iframe.contentWindow?.document || iframe.contentDocument;
-      if (doc) {
-        doc.open();
-        doc.write(html);
-        doc.close();
-
-        setTimeout(() => {
-          iframe.contentWindow?.focus();
-          iframe.contentWindow?.print();
-        }, 200);
-        return;
-      }
-    } catch (e) {
-      console.warn("Iframe print fallback to window.open", e);
+  try {
+    let iframe = document.getElementById('job-card-print-iframe') as HTMLIFrameElement;
+    if (!iframe) {
+      iframe = document.createElement('iframe');
+      iframe.id = 'job-card-print-iframe';
+      iframe.style.position = 'fixed';
+      iframe.style.right = '0';
+      iframe.style.bottom = '0';
+      iframe.style.width = '0';
+      iframe.style.height = '0';
+      iframe.style.border = '0';
+      iframe.style.visibility = 'hidden';
+      document.body.appendChild(iframe);
     }
 
-    const printWindow = window.open('', '_blank', 'width=800,height=900');
-    if (printWindow) {
-      printWindow.document.write(html);
-      printWindow.document.close();
+    const doc = iframe.contentWindow?.document || iframe.contentDocument;
+    if (doc) {
+      doc.open();
+      doc.write(html);
+      doc.close();
+
       setTimeout(() => {
-        printWindow.focus();
-        printWindow.print();
-      }, 250);
+        iframe.contentWindow?.focus();
+        iframe.contentWindow?.print();
+      }, 10);
+      return;
     }
-  }, 50);
+  } catch (e) {
+    console.warn("Iframe print fallback to window.open", e);
+  }
+
+  const printWindow = window.open('', '_blank', 'width=800,height=900');
+  if (printWindow) {
+    printWindow.document.write(html);
+    printWindow.document.close();
+    setTimeout(() => {
+      printWindow.focus();
+      printWindow.print();
+    }, 10);
+  }
 }
 
-export function printBatchJobCards(sales: any[], currency = 'AED', businessInfo: any = {}) {
+export async function printBatchJobCards(sales: any[], currency = 'AED', businessInfo: any = {}) {
   if (typeof window === 'undefined' || !sales || sales.length === 0) return;
   
   const business = {
@@ -1610,12 +1731,6 @@ export function printBatchJobCards(sales: any[], currency = 'AED', businessInfo:
     baseLogo = `${window.location.origin}${baseLogo}`;
   }
 
-  const isDefaultVariant = (vName?: string) => {
-    if (!vName) return true;
-    const clean = vName.trim().toLowerCase().replace(/^\(|\)$/g, '').trim();
-    return clean === 'default' || clean === 'default variant' || clean.includes('default') || clean === '';
-  };
-
   let storeDeviceName = "";
   try {
     const { store } = require("@/store/store");
@@ -1627,26 +1742,37 @@ export function printBatchJobCards(sales: any[], currency = 'AED', businessInfo:
     // ignore
   }
 
-  const pagesHtml = sales.map((sale, index) => {
+  const resolvedSales = await Promise.all(
+    sales.map(async (sale) => {
+      let itemsText = extractJobCardItemsText(sale);
+      if (!itemsText && sale?.id) {
+        try {
+          const { getSaleDetails } = await import("@/app/actions/sale-actions");
+          const res = await getSaleDetails(sale.id);
+          if (res.success && res.data) {
+            return { ...res.data.sale, ...sale, items: res.data.items };
+          }
+        } catch (e) {
+          console.error("Error loading sale items for printBatchJobCards:", e);
+        }
+      }
+      return sale;
+    })
+  );
+
+  const pagesHtml = resolvedSales.map((sale, index) => {
     let logoUrl = sale.device_logo || sale.logo_url || sale.logo || baseLogo;
     if (logoUrl && typeof window !== "undefined" && logoUrl.startsWith("/")) {
       logoUrl = `${window.location.origin}${logoUrl}`;
     }
     const fromName = sale?.device_name || sale?.device?.name || storeDeviceName || sale?.branch_name || business.device_name || business.branch_name || business.name || 'Moto Club Online';
 
-    const itemsText = sale.items?.map((item: any) => {
-      const variantDisplay = item.variant_name && !isDefaultVariant(item.variant_name)
-        ? ` (${item.variant_name.trim()})`
-        : '';
-      return `${item.product_name || 'Item'}${variantDisplay}${item.quantity > 1 ? ` x${item.quantity}` : ''}`
-    }).join(', ') || '';
-
+    const itemsText = extractJobCardItemsText(sale);
     const { addressLines, pincode } = buildJobCardAddressLines(sale);
-
     const formattedOrderId = formatOrderId(sale.id);
 
     return `
-      <div class="page" ${index < sales.length - 1 ? 'style="page-break-after: always; break-after: page;"' : ''}>
+      <div class="page" ${index < resolvedSales.length - 1 ? 'style="page-break-after: always; break-after: page;"' : ''}>
         ${logoUrl ? `<div class="header"><img src="${logoUrl}" alt="Logo" class="logo" /></div>` : ''}
 
         <div class="section to-section">
@@ -1725,48 +1851,46 @@ export function printBatchJobCards(sales: any[], currency = 'AED', businessInfo:
     </html>
   `;
 
-  setTimeout(() => {
-    try {
-      let iframe = document.getElementById('job-card-batch-print-iframe') as HTMLIFrameElement;
-      if (!iframe) {
-        iframe = document.createElement('iframe');
-        iframe.id = 'job-card-batch-print-iframe';
-        iframe.style.position = 'fixed';
-        iframe.style.right = '0';
-        iframe.style.bottom = '0';
-        iframe.style.width = '0';
-        iframe.style.height = '0';
-        iframe.style.border = '0';
-        iframe.style.visibility = 'hidden';
-        document.body.appendChild(iframe);
-      }
-
-      const doc = iframe.contentWindow?.document || iframe.contentDocument;
-      if (doc) {
-        doc.open();
-        doc.write(html);
-        doc.close();
-
-        setTimeout(() => {
-          iframe.contentWindow?.focus();
-          iframe.contentWindow?.print();
-        }, 200);
-        return;
-      }
-    } catch (e) {
-      console.warn("Iframe print fallback to window.open", e);
+  try {
+    let iframe = document.getElementById('job-card-batch-print-iframe') as HTMLIFrameElement;
+    if (!iframe) {
+      iframe = document.createElement('iframe');
+      iframe.id = 'job-card-batch-print-iframe';
+      iframe.style.position = 'fixed';
+      iframe.style.right = '0';
+      iframe.style.bottom = '0';
+      iframe.style.width = '0';
+      iframe.style.height = '0';
+      iframe.style.border = '0';
+      iframe.style.visibility = 'hidden';
+      document.body.appendChild(iframe);
     }
 
-    const printWindow = window.open('', '_blank', 'width=800,height=900');
-    if (printWindow) {
-      printWindow.document.write(html);
-      printWindow.document.close();
+    const doc = iframe.contentWindow?.document || iframe.contentDocument;
+    if (doc) {
+      doc.open();
+      doc.write(html);
+      doc.close();
+
       setTimeout(() => {
-        printWindow.focus();
-        printWindow.print();
-      }, 250);
+        iframe.contentWindow?.focus();
+        iframe.contentWindow?.print();
+      }, 10);
+      return;
     }
-  }, 50);
+  } catch (e) {
+    console.warn("Iframe print fallback to window.open", e);
+  }
+
+  const printWindow = window.open('', '_blank', 'width=800,height=900');
+  if (printWindow) {
+    printWindow.document.write(html);
+    printWindow.document.close();
+    setTimeout(() => {
+      printWindow.focus();
+      printWindow.print();
+    }, 10);
+  }
 }
 
 export function printReplacementNote(replacement: any, originalSale: any = {}) {

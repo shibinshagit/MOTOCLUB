@@ -49,12 +49,14 @@ const TRACKING_OPTIONS = [
 ]
 
 const DATE_RANGES = [
-  { value: "All", label: "All Time" },
+  { value: "This Month", label: "This Month" },
   { value: "Today", label: "Today" },
   { value: "Yesterday", label: "Yesterday" },
   { value: "Last 7 Days", label: "Last 7 Days" },
+  { value: "Last Month", label: "Last Month" },
   { value: "Last 30 Days", label: "Last 30 Days" },
   { value: "Custom Range", label: "Custom Range" },
+  { value: "All", label: "All Time" },
 ]
 
 interface PartnerFilterToolbarProps {

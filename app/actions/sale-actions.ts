@@ -517,7 +517,7 @@ async function queryDeviceSales(deviceId: number, options: GetUserSalesOptions =
         (SELECT STRING_AGG(
            CONCAT(
              COALESCE(p.name, sv.name, si.notes, 'Item'),
-             CASE WHEN pv.name IS NOT NULL AND pv.name != '' THEN CONCAT(' - ', pv.name) ELSE '' END,
+              CASE WHEN pv.name IS NOT NULL AND pv.name != '' AND LOWER(TRIM(pv.name)) NOT IN ('default', 'default variant', 'default-variant') THEN CONCAT(' - ', pv.name) ELSE '' END,
              ' × ',
              si.quantity
            ),
@@ -757,7 +757,7 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
             (SELECT STRING_AGG(
                CONCAT(
                  COALESCE(p.name, sv.name, si.notes, 'Item'),
-                 CASE WHEN pv.name IS NOT NULL AND pv.name != '' THEN CONCAT(' - ', pv.name) ELSE '' END,
+                 CASE WHEN pv.name IS NOT NULL AND pv.name != '' AND LOWER(TRIM(pv.name)) NOT IN ('default', 'default variant', 'default-variant') THEN CONCAT(' - ', pv.name) ELSE '' END,
                  ' × ',
                  si.quantity
                ),
