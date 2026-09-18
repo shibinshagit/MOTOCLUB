@@ -822,26 +822,22 @@ export async function getProducts(
       const deviceStocks = await sql`
         SELECT 
           p.id AS product_id,
-          CASE 
-            WHEN EXISTS (
-              SELECT 1 FROM product_batch_device_stock pbds
-              JOIN product_batches pb ON pb.id = pbds.batch_id
-              JOIN product_variants pv ON pv.id = pb.product_variant_id
-              WHERE pv.product_id = p.id AND pbds.device_id = ${userId}
-            ) THEN COALESCE((
-              SELECT SUM(pbds.stock)
-              FROM product_batch_device_stock pbds
-              JOIN product_batches pb ON pb.id = pbds.batch_id
-              JOIN product_variants pv ON pv.id = pb.product_variant_id
-              WHERE pv.product_id = p.id AND pbds.device_id = ${userId}
-            ), 0)
-            ELSE COALESCE((
-              SELECT SUM(pds.stock)
-              FROM product_device_stock pds
-              WHERE pds.product_id = p.id AND pds.device_id = ${userId}
-            ), 0)
-          END AS stock
+          COALESCE(pb_stock.total_stock, pd_stock.total_stock, 0) AS stock
         FROM products p
+        LEFT JOIN (
+          SELECT pv.product_id, SUM(pbds.stock) as total_stock
+          FROM product_batch_device_stock pbds
+          JOIN product_batches pb ON pb.id = pbds.batch_id
+          JOIN product_variants pv ON pv.id = pb.product_variant_id
+          WHERE pbds.device_id = ${userId}
+          GROUP BY pv.product_id
+        ) pb_stock ON pb_stock.product_id = p.id
+        LEFT JOIN (
+          SELECT pds.product_id, SUM(pds.stock) as total_stock
+          FROM product_device_stock pds
+          WHERE pds.device_id = ${userId}
+          GROUP BY pds.product_id
+        ) pd_stock ON pd_stock.product_id = p.id
         WHERE p.created_by IN (
           SELECT d2.id
           FROM devices d1
@@ -854,35 +850,24 @@ export async function getProducts(
       const companyDeviceStocks = await sql`
         SELECT 
           p.id AS product_id,
-          CASE 
-            WHEN EXISTS (
-              SELECT 1 FROM product_batch_device_stock pbds
-              JOIN product_batches pb ON pb.id = pbds.batch_id
-              JOIN product_variants pv ON pv.id = pb.product_variant_id
-              JOIN devices d ON d.id = pbds.device_id
-              WHERE pv.product_id = p.id AND d.company_id = (
-                SELECT company_id FROM devices WHERE id = ${userId}
-              )
-            ) THEN COALESCE((
-              SELECT SUM(pbds.stock)
-              FROM product_batch_device_stock pbds
-              JOIN product_batches pb ON pb.id = pbds.batch_id
-              JOIN product_variants pv ON pv.id = pb.product_variant_id
-              JOIN devices d ON d.id = pbds.device_id
-              WHERE pv.product_id = p.id AND d.company_id = (
-                SELECT company_id FROM devices WHERE id = ${userId}
-              )
-            ), 0)
-            ELSE COALESCE((
-              SELECT SUM(pds.stock)
-              FROM product_device_stock pds
-              JOIN devices d ON d.id = pds.device_id
-              WHERE pds.product_id = p.id AND d.company_id = (
-                SELECT company_id FROM devices WHERE id = ${userId}
-              )
-            ), 0)
-          END AS total_stock
+          COALESCE(pb_stock.total_stock, pd_stock.total_stock, 0) AS total_stock
         FROM products p
+        LEFT JOIN (
+          SELECT pv.product_id, SUM(pbds.stock) as total_stock
+          FROM product_batch_device_stock pbds
+          JOIN product_batches pb ON pb.id = pbds.batch_id
+          JOIN product_variants pv ON pv.id = pb.product_variant_id
+          JOIN devices d ON d.id = pbds.device_id
+          WHERE d.company_id = (SELECT company_id FROM devices WHERE id = ${userId})
+          GROUP BY pv.product_id
+        ) pb_stock ON pb_stock.product_id = p.id
+        LEFT JOIN (
+          SELECT pds.product_id, SUM(pds.stock) as total_stock
+          FROM product_device_stock pds
+          JOIN devices d ON d.id = pds.device_id
+          WHERE d.company_id = (SELECT company_id FROM devices WHERE id = ${userId})
+          GROUP BY pds.product_id
+        ) pd_stock ON pd_stock.product_id = p.id
         WHERE p.created_by IN (
           SELECT d2.id
           FROM devices d1
@@ -1189,6 +1174,20 @@ export async function getPaginatedProducts({
             SELECT p.*, c.name as category_name
             FROM products p
             LEFT JOIN product_categories c ON p.category_id = c.id
+            LEFT JOIN (
+              SELECT pv.product_id, SUM(pbds.stock) as total_stock
+              FROM product_batch_device_stock pbds
+              JOIN product_batches pb ON pb.id = pbds.batch_id
+              JOIN product_variants pv ON pv.id = pb.product_variant_id
+              WHERE pbds.device_id = ${userId}
+              GROUP BY pv.product_id
+            ) pb_stock ON pb_stock.product_id = p.id
+            LEFT JOIN (
+              SELECT pds.product_id, SUM(pds.stock) as total_stock
+              FROM product_device_stock pds
+              WHERE pds.device_id = ${userId}
+              GROUP BY pds.product_id
+            ) pd_stock ON pd_stock.product_id = p.id
             WHERE p.created_by IN (
               SELECT d2.id FROM devices d1 JOIN devices d2 ON d2.company_id = d1.company_id WHERE d1.id = ${userId}
             )
@@ -1228,50 +1227,8 @@ export async function getPaginatedProducts({
                 WHEN LOWER(COALESCE(p.barcode, '')) = LOWER(${trimmedSearch}) THEN 4
                 ELSE 5 
               END,
-              CASE WHEN (
-                COALESCE((
-                  CASE 
-                    WHEN EXISTS (
-                      SELECT 1 FROM product_batch_device_stock pbds
-                      JOIN product_batches pb ON pb.id = pbds.batch_id
-                      JOIN product_variants pv ON pv.id = pb.product_variant_id
-                      WHERE pv.product_id = p.id AND pbds.device_id = ${userId}
-                    ) THEN (
-                      SELECT SUM(pbds.stock)
-                      FROM product_batch_device_stock pbds
-                      JOIN product_batches pb ON pb.id = pbds.batch_id
-                      JOIN product_variants pv ON pv.id = pb.product_variant_id
-                      WHERE pv.product_id = p.id AND pbds.device_id = ${userId}
-                    )
-                    ELSE (
-                      SELECT SUM(pds.stock)
-                      FROM product_device_stock pds
-                      WHERE pds.product_id = p.id AND pds.device_id = ${userId}
-                    )
-                  END
-                ), 0)
-              ) > 0 THEN 1 ELSE 0 END DESC,
-              COALESCE((
-                CASE 
-                  WHEN EXISTS (
-                    SELECT 1 FROM product_batch_device_stock pbds
-                    JOIN product_batches pb ON pb.id = pbds.batch_id
-                    JOIN product_variants pv ON pv.id = pb.product_variant_id
-                    WHERE pv.product_id = p.id AND pbds.device_id = ${userId}
-                  ) THEN (
-                    SELECT SUM(pbds.stock)
-                    FROM product_batch_device_stock pbds
-                    JOIN product_batches pb ON pb.id = pbds.batch_id
-                    JOIN product_variants pv ON pv.id = pb.product_variant_id
-                    WHERE pv.product_id = p.id AND pbds.device_id = ${userId}
-                  )
-                  ELSE (
-                    SELECT SUM(pds.stock)
-                    FROM product_device_stock pds
-                    WHERE pds.product_id = p.id AND pds.device_id = ${userId}
-                  )
-                END
-              ), 0) DESC,
+              CASE WHEN COALESCE(pb_stock.total_stock, pd_stock.total_stock, 0) > 0 THEN 1 ELSE 0 END DESC,
+              COALESCE(pb_stock.total_stock, pd_stock.total_stock, 0) DESC,
               p.created_at DESC
             LIMIT ${safePageSize} OFFSET ${offset}
           `
@@ -1315,6 +1272,20 @@ export async function getPaginatedProducts({
             SELECT p.*, c.name as category_name
             FROM products p
             LEFT JOIN product_categories c ON p.category_id = c.id
+            LEFT JOIN (
+              SELECT pv.product_id, SUM(pbds.stock) as total_stock
+              FROM product_batch_device_stock pbds
+              JOIN product_batches pb ON pb.id = pbds.batch_id
+              JOIN product_variants pv ON pv.id = pb.product_variant_id
+              WHERE pbds.device_id = ${userId}
+              GROUP BY pv.product_id
+            ) pb_stock ON pb_stock.product_id = p.id
+            LEFT JOIN (
+              SELECT pds.product_id, SUM(pds.stock) as total_stock
+              FROM product_device_stock pds
+              WHERE pds.device_id = ${userId}
+              GROUP BY pds.product_id
+            ) pd_stock ON pd_stock.product_id = p.id
             WHERE p.created_by IN (
               SELECT d2.id FROM devices d1 JOIN devices d2 ON d2.company_id = d1.company_id WHERE d1.id = ${userId}
             )
@@ -1353,50 +1324,8 @@ export async function getPaginatedProducts({
                 WHEN LOWER(COALESCE(p.barcode, '')) = LOWER(${trimmedSearch}) THEN 4
                 ELSE 5 
               END,
-              CASE WHEN (
-                COALESCE((
-                  CASE 
-                    WHEN EXISTS (
-                      SELECT 1 FROM product_batch_device_stock pbds
-                      JOIN product_batches pb ON pb.id = pbds.batch_id
-                      JOIN product_variants pv ON pv.id = pb.product_variant_id
-                      WHERE pv.product_id = p.id AND pbds.device_id = ${userId}
-                    ) THEN (
-                      SELECT SUM(pbds.stock)
-                      FROM product_batch_device_stock pbds
-                      JOIN product_batches pb ON pb.id = pbds.batch_id
-                      JOIN product_variants pv ON pv.id = pb.product_variant_id
-                      WHERE pv.product_id = p.id AND pbds.device_id = ${userId}
-                    )
-                    ELSE (
-                      SELECT SUM(pds.stock)
-                      FROM product_device_stock pds
-                      WHERE pds.product_id = p.id AND pds.device_id = ${userId}
-                    )
-                  END
-                ), 0)
-              ) > 0 THEN 1 ELSE 0 END DESC,
-              COALESCE((
-                CASE 
-                  WHEN EXISTS (
-                    SELECT 1 FROM product_batch_device_stock pbds
-                    JOIN product_batches pb ON pb.id = pbds.batch_id
-                    JOIN product_variants pv ON pv.id = pb.product_variant_id
-                    WHERE pv.product_id = p.id AND pbds.device_id = ${userId}
-                  ) THEN (
-                    SELECT SUM(pbds.stock)
-                    FROM product_batch_device_stock pbds
-                    JOIN product_batches pb ON pb.id = pbds.batch_id
-                    JOIN product_variants pv ON pv.id = pb.product_variant_id
-                    WHERE pv.product_id = p.id AND pbds.device_id = ${userId}
-                  )
-                  ELSE (
-                    SELECT SUM(pds.stock)
-                    FROM product_device_stock pds
-                    WHERE pds.product_id = p.id AND pds.device_id = ${userId}
-                  )
-                END
-              ), 0) DESC,
+              CASE WHEN COALESCE(pb_stock.total_stock, pd_stock.total_stock, 0) > 0 THEN 1 ELSE 0 END DESC,
+              COALESCE(pb_stock.total_stock, pd_stock.total_stock, 0) DESC,
               p.created_at DESC
             LIMIT ${safePageSize} OFFSET ${offset}
           `
@@ -1563,55 +1492,27 @@ export async function getPaginatedProducts({
             SELECT p.*, c.name as category_name
             FROM products p
             LEFT JOIN product_categories c ON p.category_id = c.id
+            LEFT JOIN (
+              SELECT pv.product_id, SUM(pbds.stock) as total_stock
+              FROM product_batch_device_stock pbds
+              JOIN product_batches pb ON pb.id = pbds.batch_id
+              JOIN product_variants pv ON pv.id = pb.product_variant_id
+              WHERE pbds.device_id = ${userId}
+              GROUP BY pv.product_id
+            ) pb_stock ON pb_stock.product_id = p.id
+            LEFT JOIN (
+              SELECT pds.product_id, SUM(pds.stock) as total_stock
+              FROM product_device_stock pds
+              WHERE pds.device_id = ${userId}
+              GROUP BY pds.product_id
+            ) pd_stock ON pd_stock.product_id = p.id
             WHERE p.created_by IN (
               SELECT d2.id FROM devices d1 JOIN devices d2 ON d2.company_id = d1.company_id WHERE d1.id = ${userId}
             )
             AND p.category_id = ${categoryId}
             ORDER BY 
-              CASE WHEN (
-                COALESCE((
-                  CASE 
-                    WHEN EXISTS (
-                      SELECT 1 FROM product_batch_device_stock pbds
-                      JOIN product_batches pb ON pb.id = pbds.batch_id
-                      JOIN product_variants pv ON pv.id = pb.product_variant_id
-                      WHERE pv.product_id = p.id AND pbds.device_id = ${userId}
-                    ) THEN (
-                      SELECT SUM(pbds.stock)
-                      FROM product_batch_device_stock pbds
-                      JOIN product_batches pb ON pb.id = pbds.batch_id
-                      JOIN product_variants pv ON pv.id = pb.product_variant_id
-                      WHERE pv.product_id = p.id AND pbds.device_id = ${userId}
-                    )
-                    ELSE (
-                      SELECT SUM(pds.stock)
-                      FROM product_device_stock pds
-                      WHERE pds.product_id = p.id AND pds.device_id = ${userId}
-                    )
-                  END
-                ), 0)
-              ) > 0 THEN 1 ELSE 0 END DESC,
-              COALESCE((
-                CASE 
-                  WHEN EXISTS (
-                    SELECT 1 FROM product_batch_device_stock pbds
-                    JOIN product_batches pb ON pb.id = pbds.batch_id
-                    JOIN product_variants pv ON pv.id = pb.product_variant_id
-                    WHERE pv.product_id = p.id AND pbds.device_id = ${userId}
-                  ) THEN (
-                    SELECT SUM(pbds.stock)
-                    FROM product_batch_device_stock pbds
-                    JOIN product_batches pb ON pb.id = pbds.batch_id
-                    JOIN product_variants pv ON pv.id = pb.product_variant_id
-                    WHERE pv.product_id = p.id AND pbds.device_id = ${userId}
-                  )
-                  ELSE (
-                    SELECT SUM(pds.stock)
-                    FROM product_device_stock pds
-                    WHERE pds.product_id = p.id AND pds.device_id = ${userId}
-                  )
-                END
-              ), 0) DESC,
+              CASE WHEN COALESCE(pb_stock.total_stock, pd_stock.total_stock, 0) > 0 THEN 1 ELSE 0 END DESC,
+              COALESCE(pb_stock.total_stock, pd_stock.total_stock, 0) DESC,
               p.created_at DESC
             LIMIT ${safePageSize} OFFSET ${offset}
           `
@@ -1628,54 +1529,26 @@ export async function getPaginatedProducts({
             SELECT p.*, c.name as category_name
             FROM products p
             LEFT JOIN product_categories c ON p.category_id = c.id
+            LEFT JOIN (
+              SELECT pv.product_id, SUM(pbds.stock) as total_stock
+              FROM product_batch_device_stock pbds
+              JOIN product_batches pb ON pb.id = pbds.batch_id
+              JOIN product_variants pv ON pv.id = pb.product_variant_id
+              WHERE pbds.device_id = ${userId}
+              GROUP BY pv.product_id
+            ) pb_stock ON pb_stock.product_id = p.id
+            LEFT JOIN (
+              SELECT pds.product_id, SUM(pds.stock) as total_stock
+              FROM product_device_stock pds
+              WHERE pds.device_id = ${userId}
+              GROUP BY pds.product_id
+            ) pd_stock ON pd_stock.product_id = p.id
             WHERE p.created_by IN (
               SELECT d2.id FROM devices d1 JOIN devices d2 ON d2.company_id = d1.company_id WHERE d1.id = ${userId}
             )
             ORDER BY 
-              CASE WHEN (
-                COALESCE((
-                  CASE 
-                    WHEN EXISTS (
-                      SELECT 1 FROM product_batch_device_stock pbds
-                      JOIN product_batches pb ON pb.id = pbds.batch_id
-                      JOIN product_variants pv ON pv.id = pb.product_variant_id
-                      WHERE pv.product_id = p.id AND pbds.device_id = ${userId}
-                    ) THEN (
-                      SELECT SUM(pbds.stock)
-                      FROM product_batch_device_stock pbds
-                      JOIN product_batches pb ON pb.id = pbds.batch_id
-                      JOIN product_variants pv ON pv.id = pb.product_variant_id
-                      WHERE pv.product_id = p.id AND pbds.device_id = ${userId}
-                    )
-                    ELSE (
-                      SELECT SUM(pds.stock)
-                      FROM product_device_stock pds
-                      WHERE pds.product_id = p.id AND pds.device_id = ${userId}
-                    )
-                  END
-                ), 0)
-              ) > 0 THEN 1 ELSE 0 END DESC,
-              COALESCE((
-                CASE 
-                  WHEN EXISTS (
-                    SELECT 1 FROM product_batch_device_stock pbds
-                    JOIN product_batches pb ON pb.id = pbds.batch_id
-                    JOIN product_variants pv ON pv.id = pb.product_variant_id
-                    WHERE pv.product_id = p.id AND pbds.device_id = ${userId}
-                  ) THEN (
-                    SELECT SUM(pbds.stock)
-                    FROM product_batch_device_stock pbds
-                    JOIN product_batches pb ON pb.id = pbds.batch_id
-                    JOIN product_variants pv ON pv.id = pb.product_variant_id
-                    WHERE pv.product_id = p.id AND pbds.device_id = ${userId}
-                  )
-                  ELSE (
-                    SELECT SUM(pds.stock)
-                    FROM product_device_stock pds
-                    WHERE pds.product_id = p.id AND pds.device_id = ${userId}
-                  )
-                END
-              ), 0) DESC,
+              CASE WHEN COALESCE(pb_stock.total_stock, pd_stock.total_stock, 0) > 0 THEN 1 ELSE 0 END DESC,
+              COALESCE(pb_stock.total_stock, pd_stock.total_stock, 0) DESC,
               p.created_at DESC
             LIMIT ${safePageSize} OFFSET ${offset}
           `
@@ -1721,26 +1594,22 @@ export async function getPaginatedProducts({
       const deviceStocks = await sql`
         SELECT 
           p.id AS product_id,
-          CASE 
-            WHEN EXISTS (
-              SELECT 1 FROM product_batch_device_stock pbds
-              JOIN product_batches pb ON pb.id = pbds.batch_id
-              JOIN product_variants pv ON pv.id = pb.product_variant_id
-              WHERE pv.product_id = p.id AND pbds.device_id = ${userId}
-            ) THEN COALESCE((
-              SELECT SUM(pbds.stock)
-              FROM product_batch_device_stock pbds
-              JOIN product_batches pb ON pb.id = pbds.batch_id
-              JOIN product_variants pv ON pv.id = pb.product_variant_id
-              WHERE pv.product_id = p.id AND pbds.device_id = ${userId}
-            ), 0)
-            ELSE COALESCE((
-              SELECT SUM(pds.stock)
-              FROM product_device_stock pds
-              WHERE pds.product_id = p.id AND pds.device_id = ${userId}
-            ), 0)
-          END AS stock
+          COALESCE(pb_stock.total_stock, pd_stock.total_stock, 0) AS stock
         FROM products p
+        LEFT JOIN (
+          SELECT pv.product_id, SUM(pbds.stock) as total_stock
+          FROM product_batch_device_stock pbds
+          JOIN product_batches pb ON pb.id = pbds.batch_id
+          JOIN product_variants pv ON pv.id = pb.product_variant_id
+          WHERE pbds.device_id = ${userId} AND pv.product_id = ANY(${productIds})
+          GROUP BY pv.product_id
+        ) pb_stock ON pb_stock.product_id = p.id
+        LEFT JOIN (
+          SELECT pds.product_id, SUM(pds.stock) as total_stock
+          FROM product_device_stock pds
+          WHERE pds.device_id = ${userId} AND pds.product_id = ANY(${productIds})
+          GROUP BY pds.product_id
+        ) pd_stock ON pd_stock.product_id = p.id
         WHERE p.id = ANY(${productIds})
       `
       stockMap = new Map<number, number>(deviceStocks.map((row: any) => [Number(row.product_id), Number(row.stock)]))
@@ -1748,35 +1617,28 @@ export async function getPaginatedProducts({
       const companyDeviceStocks = await sql`
         SELECT 
           p.id AS product_id,
-          CASE 
-            WHEN EXISTS (
-              SELECT 1 FROM product_batch_device_stock pbds
-              JOIN product_batches pb ON pb.id = pbds.batch_id
-              JOIN product_variants pv ON pv.id = pb.product_variant_id
-              JOIN devices d ON d.id = pbds.device_id
-              WHERE pv.product_id = p.id AND d.company_id = (
-                SELECT company_id FROM devices WHERE id = ${userId}
-              )
-            ) THEN COALESCE((
-              SELECT SUM(pbds.stock)
-              FROM product_batch_device_stock pbds
-              JOIN product_batches pb ON pb.id = pbds.batch_id
-              JOIN product_variants pv ON pv.id = pb.product_variant_id
-              JOIN devices d ON d.id = pbds.device_id
-              WHERE pv.product_id = p.id AND d.company_id = (
-                SELECT company_id FROM devices WHERE id = ${userId}
-              )
-            ), 0)
-            ELSE COALESCE((
-              SELECT SUM(pds.stock)
-              FROM product_device_stock pds
-              JOIN devices d ON d.id = pds.device_id
-              WHERE pds.product_id = p.id AND d.company_id = (
-                SELECT company_id FROM devices WHERE id = ${userId}
-              )
-            ), 0)
-          END AS total_stock
+          COALESCE(pb_stock.total_stock, pd_stock.total_stock, 0) AS total_stock
         FROM products p
+        LEFT JOIN (
+          SELECT pv.product_id, SUM(pbds.stock) as total_stock
+          FROM product_batch_device_stock pbds
+          JOIN product_batches pb ON pb.id = pbds.batch_id
+          JOIN product_variants pv ON pv.id = pb.product_variant_id
+          JOIN devices d ON d.id = pbds.device_id
+          WHERE d.company_id = (
+            SELECT company_id FROM devices WHERE id = ${userId}
+          ) AND pv.product_id = ANY(${productIds})
+          GROUP BY pv.product_id
+        ) pb_stock ON pb_stock.product_id = p.id
+        LEFT JOIN (
+          SELECT pds.product_id, SUM(pds.stock) as total_stock
+          FROM product_device_stock pds
+          JOIN devices d ON d.id = pds.device_id
+          WHERE d.company_id = (
+            SELECT company_id FROM devices WHERE id = ${userId}
+          ) AND pds.product_id = ANY(${productIds})
+          GROUP BY pds.product_id
+        ) pd_stock ON pd_stock.product_id = p.id
         WHERE p.id = ANY(${productIds})
       `
       companyTotalStockMap = new Map(
