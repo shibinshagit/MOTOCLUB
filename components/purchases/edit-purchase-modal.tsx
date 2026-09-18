@@ -19,7 +19,8 @@ import SupplierAutocomplete from "./supplier-autocomplete"
 import { DatePickerField } from "@/components/ui/date-picker-field"
 import { useDispatch } from "react-redux"
 import { addProduct } from "@/store/slices/productSlice"
-import { allocatePurchaseCourierCharge, calculatePurchaseCourierCharge } from "@/lib/purchase-courier"
+import { allocatePurchaseCosts, calculatePurchaseCourierCharge } from "@/lib/purchase-courier"
+import { markInventoryStale } from "@/lib/inventory-sync"
 
 interface EditPurchaseModalProps {
   isOpen: boolean
@@ -98,24 +99,26 @@ export default function EditPurchaseModal({
   const totalAmount = useMemo(() => Number(subtotal) + Number(taxAmount) - Number(discountAmount) + Number(courierCharge), [subtotal, taxAmount, discountAmount, courierCharge])
 
   const purchaseItemsWithAllocations = useMemo(() => {
-    const courierAllocations = allocatePurchaseCourierCharge(products, courierCharge)
+    const costAllocations = allocatePurchaseCosts(products, courierCharge, discountAmount)
     return products.map((item, idx) => {
-      const allocation = courierAllocations[idx]
+      const allocation = costAllocations[idx]
       return {
         ...item,
-        allocationPercentage: allocation.allocationPercentage,
-        allocatedCourier: allocation.courierCharge,
-        finalCost: item.lineTotal + allocation.courierCharge,
+        allocationPercentage: allocation ? allocation.allocationPercentage : 0,
+        allocatedCourier: allocation ? allocation.courierCharge : 0,
+        allocatedDiscount: allocation ? allocation.discountAmount : 0,
+        finalCost: allocation ? allocation.lineTotalCost : item.lineTotal,
       }
     })
-  }, [products, courierCharge, subtotal, courierChargePercentage])
+  }, [products, courierCharge, discountAmount, subtotal, courierChargePercentage])
 
   const allocationMap = useMemo(() => {
-    const map = new Map<string, { allocationPercentage: number; allocatedCourier: number; finalCost: number }>()
+    const map = new Map<string, { allocationPercentage: number; allocatedCourier: number; allocatedDiscount: number; finalCost: number }>()
     purchaseItemsWithAllocations.forEach(item => {
       map.set(item.id, {
         allocationPercentage: item.allocationPercentage,
         allocatedCourier: item.allocatedCourier,
+        allocatedDiscount: item.allocatedDiscount,
         finalCost: item.finalCost,
       })
     })
@@ -189,7 +192,8 @@ export default function EditPurchaseModal({
         (sum: number, item: any) => sum + Number(item.line_total ?? (item.quantity * item.price)),
         0,
       )
-      setDiscountAmount(Math.max(0, lineTotalsBeforeDiscount + Number(purchase.courier_charge || 0) - Number(purchase.total_amount || 0)))
+      const savedDiscount = purchase.discount !== undefined && purchase.discount !== null ? Number(purchase.discount) : NaN
+      setDiscountAmount(!isNaN(savedDiscount) ? savedDiscount : Math.max(0, lineTotalsBeforeDiscount + Number(purchase.courier_charge || 0) - Number(purchase.total_amount || 0)))
 
       const statusMap: Record<string, string> = {
         "Pending": "Credit",
@@ -241,122 +245,6 @@ export default function EditPurchaseModal({
     }
   }, [purchaseId, isOpen, deviceId, toast])
 
-  useEffect(() => {
-    if (isOpen && purchaseId) {
-      fetchPurchaseDetails()
-    }
-  }, [isOpen, purchaseId, fetchPurchaseDetails])
-
-  useEffect(() => {
-    if (!isOpen) {
-      resetForm()
-      setIsLoading(true)
-      lastPurchaseIdRef.current = null
-      isLoadingRef.current = false
-      isSubmittingRef.current = false
-    }
-  }, [isOpen, resetForm])
-
-  useEffect(() => {
-    if (status === "Paid") {
-      setReceivedAmount(totalAmount)
-    } else if (status === "Cancelled") {
-      setReceivedAmount(0)
-    }
-  }, [status, totalAmount])
-
-  const handleStatusChange = useCallback((newStatus: string) => {
-    setStatus(newStatus)
-  }, [])
-
-  const addProductRow = useCallback(() => {
-    setProducts(prev => [
-      ...prev,
-      {
-        id: crypto.randomUUID(),
-        productId: null,
-        productName: "",
-        quantity: 1,
-        price: 0,
-        total: 0,
-        wholesalePrice: 0,
-        taxPercentage: 0,
-        taxAmount: 0,
-        lineTotal: 0,
-      },
-    ])
-  }, [])
-
-  const removeProductRow = useCallback((id: string) => {
-    setProducts(prev => prev.length > 1 ? prev.filter(product => product.id !== id) : prev)
-  }, [])
-
-  const updateProductRow = useCallback((id: string, updates: Partial<ProductRow>) => {
-    setProducts(prev =>
-      prev.map(product => {
-        if (product.id === id) {
-          const updatedProduct = { ...product, ...updates }
-          if (updates.quantity !== undefined || updates.price !== undefined) {
-            updatedProduct.total = updatedProduct.quantity * updatedProduct.price
-          }
-          if (updates.taxPercentage !== undefined || updates.quantity !== undefined || updates.price !== undefined) {
-            updatedProduct.taxAmount = updatedProduct.quantity * updatedProduct.price * (updatedProduct.taxPercentage / 100)
-            updatedProduct.lineTotal = updatedProduct.total + updatedProduct.taxAmount
-          }
-          return updatedProduct
-        }
-        return product
-      })
-    )
-  }, [])
-
-  const handleProductSelect = useCallback((
-    id: string,
-    productId: number,
-    productName: string,
-    price: number,
-    wholesalePrice?: number,
-    _stock?: number,
-    productObj?: any,
-  ) => {
-    const priceToUse = wholesalePrice || price
-    const currentQuantity = products.find(p => p.id === id)?.quantity || 1
-    const defaultTaxPercentage = productObj?.tax_percentage || 0
-
-    updateProductRow(id, {
-      productId,
-      productName,
-      price: priceToUse,
-      wholesalePrice,
-      taxPercentage: defaultTaxPercentage,
-      total: currentQuantity * priceToUse,
-    })
-  }, [products, updateProductRow])
-
-  const handleAddNewFromRow = useCallback((rowId: string) => {
-    setActiveProductRowId(rowId)
-    setIsNewProductModalOpen(true)
-  }, [])
-
-  const handleNewProduct = useCallback((product: any) => {
-    dispatch(addProduct(product))
-    notifySuccess(toast, `Product "${product.name}" added successfully`)
-
-    const targetRowId = activeProductRowId || products.find(p => !p.productId)?.id || products[products.length - 1].id
-    const priceToUse = product.wholesale_price || product.price
-
-    updateProductRow(targetRowId, {
-      productId: product.id,
-      productName: product.name,
-      price: priceToUse,
-      wholesalePrice: product.wholesale_price,
-      total: (products.find(p => p.id === targetRowId)?.quantity || 1) * priceToUse,
-    })
-
-    setIsNewProductModalOpen(false)
-    setActiveProductRowId(null)
-  }, [dispatch, toast, activeProductRowId, products, updateProductRow])
-
   // Form validation
   const validateForm = useCallback(() => {
     if (!supplier) {
@@ -378,10 +266,10 @@ export default function EditPurchaseModal({
     return null
   }, [supplier, products, status, paymentMethod, receivedAmount, totalAmount])
 
-  // Optimized form submission with duplicate prevention
+  // Form submission
   const handleSubmit = useCallback(async () => {
     if (isSubmittingRef.current) {
-      return // Prevent duplicate submissions
+      return
     }
 
     const validationError = validateForm()
@@ -425,16 +313,19 @@ export default function EditPurchaseModal({
         tax_amount: p.taxAmount || 0,
         line_total: p.lineTotal,
         courier_charge: p.allocatedCourier,
+        discount: p.allocatedDiscount,
       }))
 
       formData.append("items", JSON.stringify(items))
       formData.append("courier_charge", courierCharge.toString())
       formData.append("courier_charge_percentage", courierChargePercentage.toString())
+      formData.append("discount", discountAmount.toString())
 
       const result = await updatePurchase(formData)
 
       if (result.success) {
         notifySuccess(toast, "Purchase updated successfully")
+        markInventoryStale(dispatch)
         onPurchaseUpdated?.()
         setTimeout(() => {
           onClose()
@@ -466,10 +357,100 @@ export default function EditPurchaseModal({
     userId,
     deviceId,
     products,
+    purchaseItemsWithAllocations,
+    courierCharge,
+    courierChargePercentage,
+    discountAmount,
     toast,
     onPurchaseUpdated,
     onClose,
   ])
+
+  // Update product row
+  const updateProductRow = useCallback((id: string, updates: Partial<ProductRow>) => {
+    setProducts((prev) =>
+      prev.map((product) => {
+        if (product.id === id) {
+          const updatedProduct = { ...product, ...updates }
+          if (updates.quantity !== undefined || updates.price !== undefined) {
+            updatedProduct.total = updatedProduct.quantity * updatedProduct.price
+          }
+          if (updates.taxPercentage !== undefined || updates.quantity !== undefined || updates.price !== undefined) {
+            updatedProduct.taxAmount = updatedProduct.quantity * updatedProduct.price * (updatedProduct.taxPercentage / 100)
+            updatedProduct.lineTotal = updatedProduct.total + updatedProduct.taxAmount
+          }
+          return updatedProduct
+        }
+        return product
+      })
+    )
+  }, [])
+
+  // Handle product selection
+  const handleProductSelect = (
+    id: string,
+    productId: number,
+    productName: string,
+    price: number,
+    wholesalePrice?: number,
+    _stock?: number,
+    productObj?: any,
+  ) => {
+    const priceToUse = wholesalePrice || price
+    const defaultTaxPercentage = productObj?.tax_percentage || 0
+    updateProductRow(id, {
+      productId,
+      productName,
+      price: priceToUse,
+      wholesalePrice,
+      taxPercentage: defaultTaxPercentage,
+      total: (products.find((p) => p.id === id)?.quantity || 1) * priceToUse,
+    })
+  }
+
+  const handleAddNewFromRow = (rowId: string) => {
+    setActiveProductRowId(rowId)
+    setIsNewProductModalOpen(true)
+  }
+
+  const handleNewProduct = (newProduct: any) => {
+    if (!activeProductRowId) return
+    handleProductSelect(
+      activeProductRowId,
+      newProduct.id,
+      newProduct.name,
+      newProduct.wholesale_price || newProduct.price || 0,
+      newProduct.wholesale_price,
+      newProduct.stock || 0,
+      newProduct,
+    )
+    setIsNewProductModalOpen(false)
+    setActiveProductRowId(null)
+  }
+
+  // Remove product row
+  const removeProductRow = useCallback((id: string) => {
+    setProducts((prev) => prev.length > 1 ? prev.filter((product) => product.id !== id) : prev)
+  }, [])
+
+  // Add product row
+  const addProductRow = () => {
+    setProducts([
+      ...products,
+      {
+        id: crypto.randomUUID(),
+        productId: null,
+        productName: "",
+        quantity: 1,
+        price: 0,
+        total: 0,
+        wholesalePrice: 0,
+        taxPercentage: 0,
+        taxAmount: 0,
+        lineTotal: 0,
+      },
+    ])
+  }
 
   // Memoized close handler
   const handleClose = useCallback(() => {
@@ -540,7 +521,7 @@ export default function EditPurchaseModal({
                       </div>
                       <div>
                         <Label className="text-sm font-medium text-gray-700">Payment Status</Label>
-                        <Select value={status} onValueChange={handleStatusChange}>
+                        <Select value={status} onValueChange={(val) => setStatus(val)}>
                           <SelectTrigger className="h-9 mt-1 bg-white border-gray-300 text-gray-900">
                             <SelectValue />
                           </SelectTrigger>

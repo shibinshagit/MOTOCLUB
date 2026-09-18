@@ -21,7 +21,8 @@ import { useDispatch, useSelector } from "react-redux"
 import type { RootState } from "@/store/store"
 import { fetchSuppliers } from "@/store/slices/supplierSlice"
 import { addProduct } from "@/store/slices/productSlice"
-import { allocatePurchaseCourierCharge, calculatePurchaseCourierCharge } from "@/lib/purchase-courier"
+import { allocatePurchaseCosts, calculatePurchaseCourierCharge } from "@/lib/purchase-courier"
+import { markInventoryStale } from "@/lib/inventory-sync"
 
 interface NewPurchaseModalProps {
   isOpen: boolean
@@ -177,24 +178,26 @@ export default function NewPurchaseModal({
       }] : []
     })
 
-    const courierAllocations = allocatePurchaseCourierCharge(items, courierCharge)
+    const costAllocations = allocatePurchaseCosts(items, courierCharge, discountAmount)
     return items.map((item: AllocationItem, idx: number) => {
-      const allocation = courierAllocations[idx]
+      const allocation = costAllocations[idx]
       return {
         ...item,
         allocationPercentage: allocation.allocationPercentage,
         allocatedCourier: allocation.courierCharge,
-        finalCost: item.line_total + allocation.courierCharge,
+        allocatedDiscount: allocation.discountAmount,
+        finalCost: allocation.lineTotalCost,
       }
     })
-  }, [products, courierCharge, subtotal, courierChargePercentage])
+  }, [products, courierCharge, discountAmount, subtotal, courierChargePercentage])
 
   const allocationMap = useMemo(() => {
-    const map = new Map<string, { allocationPercentage: number; allocatedCourier: number; finalCost: number }>()
+    const map = new Map<string, { allocationPercentage: number; allocatedCourier: number; allocatedDiscount: number; finalCost: number }>()
     purchaseItemsWithAllocations.forEach(item => {
       map.set(item.key, {
         allocationPercentage: item.allocationPercentage,
         allocatedCourier: item.allocatedCourier,
+        allocatedDiscount: item.allocatedDiscount,
         finalCost: item.finalCost,
       })
     })
@@ -473,6 +476,7 @@ export default function NewPurchaseModal({
       tax_amount: item.tax_amount,
       line_total: item.line_total,
       courier_charge: item.allocatedCourier,
+      discount: item.allocatedDiscount,
     }))
 
     if (purchaseItems.length === 0) {
@@ -519,6 +523,7 @@ export default function NewPurchaseModal({
       formData.append("items", JSON.stringify(purchaseItems))
       formData.append("courier_charge", courierCharge.toString())
       formData.append("courier_charge_percentage", courierChargePercentage.toString())
+      formData.append("discount", discountAmount.toString())
       if (useSupplierCreditOnPurchase && selectedSupplierCredit > 0) {
         const creditToApply = Math.min(selectedSupplierCredit, Math.max(totalAmount - receivedAmount, 0))
         formData.append("credit_to_apply", creditToApply.toString())
@@ -529,6 +534,7 @@ export default function NewPurchaseModal({
 
       if (result.success) {
         notifySuccess(toast, "Purchase added successfully")
+        markInventoryStale(dispatch)
         // Call the callback if provided
         if (onPurchaseAdded) {
           onPurchaseAdded()

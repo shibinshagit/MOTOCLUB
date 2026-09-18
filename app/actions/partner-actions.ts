@@ -542,6 +542,82 @@ export async function getFilteredPartnerOrders(params: PartnerOrderFilterParams 
       totalCount = Number(countRes[0]?.count || 0)
     }
 
+    if (combinedOrders && combinedOrders.length > 0) {
+      const replacementIds: number[] = []
+      const saleIds: number[] = []
+
+      for (const order of combinedOrders) {
+        if (order.is_replacement || order.record_type === "replacement") {
+          replacementIds.push(Number(order.id))
+        } else {
+          saleIds.push(Number(order.id))
+        }
+      }
+
+      const rsItemsMap: Record<number, any[]> = {}
+      if (replacementIds.length > 0) {
+        const rsItems = await sql`
+          SELECT 
+            rsi.id,
+            rsi.replacement_shipment_id,
+            rsi.sale_item_id,
+            rsi.product_id,
+            rsi.product_variant_id,
+            rsi.batch_id,
+            rsi.quantity,
+            COALESCE(p.name, 'Product') as product_name,
+            pv.name as variant_name,
+            pv.sku as variant_sku
+          FROM replacement_shipment_items rsi
+          LEFT JOIN products p ON rsi.product_id = p.id
+          LEFT JOIN product_variants pv ON rsi.product_variant_id = pv.id
+          WHERE rsi.replacement_shipment_id = ANY(${replacementIds})
+          ORDER BY rsi.id ASC
+        `
+        for (const item of rsItems) {
+          const rsId = Number(item.replacement_shipment_id)
+          if (!rsItemsMap[rsId]) rsItemsMap[rsId] = []
+          rsItemsMap[rsId].push(item)
+        }
+      }
+
+      const saleItemsMap: Record<number, any[]> = {}
+      if (saleIds.length > 0) {
+        const saleItems = await sql`
+          SELECT 
+            si.id,
+            si.sale_id,
+            si.product_id,
+            si.product_variant_id,
+            si.quantity,
+            si.price,
+            COALESCE(p.name, 'Product') as product_name,
+            pv.name as variant_name,
+            pv.sku as variant_sku
+          FROM sale_items si
+          LEFT JOIN products p ON si.product_id = p.id
+          LEFT JOIN product_variants pv ON si.product_variant_id = pv.id
+          WHERE si.sale_id = ANY(${saleIds})
+          ORDER BY si.id ASC
+        `
+        for (const item of saleItems) {
+          const sId = Number(item.sale_id)
+          if (!saleItemsMap[sId]) saleItemsMap[sId] = []
+          saleItemsMap[sId].push(item)
+        }
+      }
+
+      combinedOrders = combinedOrders.map((order: any) => {
+        const isRs = Boolean(order.is_replacement || order.record_type === "replacement")
+        const orderId = Number(order.id)
+        const items = isRs ? (rsItemsMap[orderId] || []) : (saleItemsMap[orderId] || [])
+        return {
+          ...order,
+          items,
+        }
+      })
+    }
+
     const pendingReplacementsRes = await sql`
       SELECT COUNT(*)::int as count
       FROM replacement_shipments rs

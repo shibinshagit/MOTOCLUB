@@ -405,7 +405,7 @@ async function createStockHistoryEntry(
 
     await sql`
       INSERT INTO product_stock_history (
-        product_id, product_product_variant_id, batch_id, quantity, type, reference_id, reference_type, notes, created_by, device_id
+        product_id, product_variant_id, batch_id, quantity, type, reference_id, reference_type, notes, created_by, device_id
       ) VALUES (
         ${productId},
         ${resolvedVariantId || null},
@@ -1972,7 +1972,9 @@ export async function addSale(saleData: any) {
       }
     }
 
-    revalidatePath("/dashboard")
+    try {
+      revalidatePath("/dashboard")
+    } catch (_) {}
 
     console.log(`Sale ${saleId} created successfully with ${saleItems.length} items (${saleType} sale)`)
     console.log(`Sale financial summary: Total=${total}, Received=${receivedAmount}, Outstanding=${balanceAmount}, Status=${saleData.paymentStatus}`)

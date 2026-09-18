@@ -386,7 +386,7 @@ export function ProductDetailPanel({
 
   const costDisplay = () => {
     if (privacyMode) return "***"
-    const costValue = formatMoney(product.wholesale_price || 0)
+    const costValue = formatMoney(product.cost_price ?? product.wholesale_price ?? 0)
     const code = encodedWholesalePrice ? (
       <span className="ml-2 text-[11px] font-normal text-slate-500">Code: {encodedWholesalePrice}</span>
     ) : null

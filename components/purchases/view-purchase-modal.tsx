@@ -171,16 +171,31 @@ export default function ViewPurchaseModal({
   }, [isOpen, purchaseId])
 
   const calculateTotals = () => {
-    if (!purchaseData) return { subtotal: 0, total: 0, paid: 0, remaining: 0, courierCharge: 0 }
+    if (!purchaseData) return { subtotal: 0, taxTotal: 0, total: 0, paid: 0, remaining: 0, courierCharge: 0, discount: 0 }
 
     let subtotal = 0
+    let taxTotal = 0
     if (purchaseItems.length > 0) {
       subtotal = purchaseItems.reduce((sum: number, item: any) => {
-        return sum + (Number(item.line_total) || ((Number.parseFloat(item.price) || 0) * (Number.parseInt(item.quantity) || 0)))
+        const qty = Number(item.quantity) || 0
+        const prc = Number(item.price) || 0
+        return sum + (qty * prc)
+      }, 0)
+
+      taxTotal = purchaseItems.reduce((sum: number, item: any) => {
+        const taxAmt = Number(item.tax_amount)
+        if (!isNaN(taxAmt) && taxAmt > 0) return sum + taxAmt
+        const qty = Number(item.quantity) || 0
+        const prc = Number(item.price) || 0
+        const taxPct = Number(item.tax_percentage) || 0
+        return sum + (qty * prc * (taxPct / 100))
       }, 0)
     }
 
-    const total = Number.parseFloat(purchaseData.total_amount) || subtotal
+    let courierCharge = Number(purchaseData.courier_charge) || 0
+    let discount = Number(purchaseData.discount) || 0
+    const total = Number.parseFloat(purchaseData.total_amount) || (subtotal + taxTotal + courierCharge - discount)
+
     const status = purchaseData.status === "Partial" ? "Cancelled" : purchaseData.status
     let paid = 0
     if (status === "Credit") {
@@ -190,25 +205,10 @@ export default function ViewPurchaseModal({
     }
     const remaining = Math.max(0, total - paid)
 
-    let courierCharge = Number(purchaseData.courier_charge) || 0
-    if (courierCharge === 0) {
-      const lineTotalsSum = purchaseItems.reduce((sum: number, item: any) => {
-        const qty = Number(item.quantity) || 0
-        const prc = Number(item.price) || 0
-        const taxPct = Number(item.tax_percentage) || 0
-        const lineTax = qty * prc * (taxPct / 100)
-        return sum + (qty * prc) + lineTax
-      }, 0)
-      const diff = total - lineTotalsSum
-      if (diff > 0.01) {
-        courierCharge = diff
-      }
-    }
-
-    return { subtotal, total, paid, remaining, courierCharge }
+    return { subtotal, taxTotal, total, paid, remaining, courierCharge, discount }
   }
 
-  const { subtotal, total, paid, remaining, courierCharge } = calculateTotals()
+  const { subtotal, taxTotal, total, paid, remaining, courierCharge, discount } = calculateTotals()
 
   const getDisplayValue = (value: any, fallback = "—") => {
     if (value === null || value === undefined || value === "") return fallback
@@ -553,14 +553,24 @@ export default function ViewPurchaseModal({
                                 {formatCurrency(lineTotal)}
                               </td>
                             </tr>
-                            {Number(item.courier_charge) > 0 && (
+                            {(Number(item.courier_charge) > 0 || Number(item.discount) > 0 || Number(item.tax_amount) > 0) && (
                               <tr className="bg-purple-50/40 text-purple-900 text-xs">
                                 <td className="px-4 py-1 text-muted-foreground"></td>
                                 <td colSpan={5} className="px-4 py-1">
-                                  <div className="flex gap-4 items-center">
-                                    <span>Original Total: {formatCurrency(lineTotal)}</span>
-                                    <span>Courier Portion: +{formatCurrency(Number(item.courier_charge))}</span>
-                                    <span className="font-semibold">Final Cost: {formatCurrency(lineTotal + Number(item.courier_charge))}</span>
+                                  <div className="flex flex-wrap gap-4 items-center">
+                                    <span>Base Subtotal: {formatCurrency((Number(item.quantity) || 0) * (Number(item.price) || 0))}</span>
+                                    {Number(item.tax_amount) > 0 && (
+                                      <span>Tax: +{formatCurrency(Number(item.tax_amount))}</span>
+                                    )}
+                                    {Number(item.courier_charge) > 0 && (
+                                      <span>Courier: +{formatCurrency(Number(item.courier_charge))}</span>
+                                    )}
+                                    {Number(item.discount) > 0 && (
+                                      <span>Discount: -{formatCurrency(Number(item.discount))}</span>
+                                    )}
+                                    <span className="font-semibold">
+                                      Unit Cost: {formatCurrency(Number(item.unit_cost) || (Number(item.quantity) > 0 ? (lineTotal + Number(item.courier_charge || 0) - Number(item.discount || 0)) / Number(item.quantity) : item.price))}
+                                    </span>
                                   </div>
                                 </td>
                               </tr>
@@ -581,6 +591,19 @@ export default function ViewPurchaseModal({
                             {formatCurrency(subtotal)}
                           </td>
                         </tr>
+                        {purchaseData && taxTotal > 0 && (
+                          <tr className="border-t border-slate-100 bg-[#F1F4F9]">
+                            <td
+                              colSpan={5}
+                              className="px-4 py-2 text-right text-xs font-semibold uppercase text-blue-700"
+                            >
+                              Tax
+                            </td>
+                            <td className="whitespace-nowrap px-4 py-2 text-right text-sm font-semibold text-blue-700">
+                              +{formatCurrency(taxTotal)}
+                            </td>
+                          </tr>
+                        )}
                         {purchaseData && courierCharge > 0 && (
                           <tr className="border-t border-slate-100 bg-[#F1F4F9]">
                             <td
@@ -591,6 +614,19 @@ export default function ViewPurchaseModal({
                             </td>
                             <td className="whitespace-nowrap px-4 py-2 text-right text-sm font-semibold text-purple-700">
                               +{formatCurrency(courierCharge)}
+                            </td>
+                          </tr>
+                        )}
+                        {purchaseData && discount > 0 && (
+                          <tr className="border-t border-slate-100 bg-[#F1F4F9]">
+                            <td
+                              colSpan={5}
+                              className="px-4 py-2 text-right text-xs font-semibold uppercase text-emerald-700"
+                            >
+                              Discount
+                            </td>
+                            <td className="whitespace-nowrap px-4 py-2 text-right text-sm font-semibold text-emerald-700">
+                              -{formatCurrency(discount)}
                             </td>
                           </tr>
                         )}

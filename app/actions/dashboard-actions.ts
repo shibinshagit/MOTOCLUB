@@ -259,13 +259,19 @@ export async function getUserDashboardSummary(userId: number, deviceId: number) 
         WHERE transaction_type = 'expense' AND device_id = ${deviceId}
       `,
 
-      // Calculate COGS using quantity * wholesale_price
+      // Calculate COGS using batch allocations or item cost
       sql`
-        SELECT COALESCE(SUM(si.quantity * p.wholesale_price), 0) as total_cogs
+        SELECT COALESCE(SUM(
+          COALESCE(
+            (SELECT SUM(sba.quantity * sba.cost_price) FROM sale_batch_allocations sba WHERE sba.sale_item_id = si.id),
+            si.quantity * COALESCE(si.cost, pv.wholesale_price, p.wholesale_price, 0)
+          )
+        ), 0) as total_cogs
         FROM sale_items si
         JOIN sales s ON si.sale_id = s.id
-        JOIN products p ON si.product_id = p.id
-        WHERE s.status != 'Cancelled' AND s.created_by = ${userId}
+        LEFT JOIN products p ON si.product_id = p.id
+        LEFT JOIN product_variants pv ON si.product_variant_id = pv.id
+        WHERE LOWER(COALESCE(s.status, '')) NOT IN ('cancelled', 'returned') AND s.created_by = ${userId}
       `,
 
       // Get recent sales for this user (limited to 5)

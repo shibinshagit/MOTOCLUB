@@ -996,6 +996,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
       formData.append("items", JSON.stringify(items))
       formData.append("courier_charge", courierCharge.toString())
       formData.append("courier_charge_percentage", courierChargePercentage.toString())
+      formData.append("discount", discountAmount.toString())
 
       const result =
         isEditMode && editingPurchaseId ? await updatePurchase(formData) : await createPurchase(formData)

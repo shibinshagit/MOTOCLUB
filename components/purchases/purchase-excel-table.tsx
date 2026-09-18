@@ -55,6 +55,7 @@ type ColumnKey =
   | "status"
   | "date"
   | "supplier"
+  | "products"
   | "payment"
   | "total"
   | "paid"
@@ -146,6 +147,7 @@ export default function PurchaseExcelTable({
       },
       date: (purchase: any) => format(new Date(purchase.purchase_date), "yyyy-MM-dd"),
       supplier: (purchase: any) => purchase.supplier || "—",
+      products: (purchase: any) => purchase.items_summary || "—",
       payment: (purchase: any) => getPaymentMethodDisplay(purchase),
       total: (purchase: any) => formatCurrency(Number(purchase.total_amount)),
       paid: (purchase: any) => {
@@ -191,44 +193,40 @@ export default function PurchaseExcelTable({
   const totalAmount = displayPurchases.reduce((sum, p) => sum + Number(p.total_amount || 0), 0)
   const paidTotal = displayPurchases.reduce((sum, p) => sum + getPaidAmount(p), 0)
   const remainingTotal = displayPurchases.reduce((sum, p) => sum + getRemainingAmount(p), 0)
-  const deliveredCount = displayPurchases.filter((p) => (p.purchase_status || "Delivered") === "Delivered").length
+  const deliveredCount = displayPurchases.filter(
+    (p) => (p.purchase_status || "Delivered") === "Delivered",
+  ).length
 
-  const activeFilterCount = hasLoadedPurchases
-    ? (Object.keys(columnFilters) as ColumnKey[]).filter((key) =>
-        isColumnFilterActive(columnFilters[key], uniqueValues[key]),
-      ).length
-    : 0
-
-  const updateColumnContains = (key: ColumnKey, contains: string) => {
-    setColumnFilters((prev) => {
-      const current = prev[key] ?? createEmptyColumnFilter(uniqueValues[key] ?? [])
-      return {
-        ...prev,
-        [key]: { contains, selected: new Set(current.selected) },
-      }
-    })
-  }
-
-  const updateColumnSelection = (key: ColumnKey, selected: Set<string>) => {
-    setColumnFilters((prev) => {
-      const current = prev[key] ?? createEmptyColumnFilter(uniqueValues[key] ?? [])
-      return {
-        ...prev,
-        [key]: { contains: current.contains, selected: new Set(selected) },
-      }
-    })
-  }
+  const activeFilterCount = (Object.keys(columnFilters) as ColumnKey[]).filter((key) =>
+    isColumnFilterActive(columnFilters[key], uniqueValues[key]),
+  ).length
 
   const clearAllFilters = () => {
     setColumnFilters(buildInitialFilters(purchases, valueGetters))
   }
 
+  const updateColumnContains = (key: ColumnKey, contains: string) => {
+    setColumnFilters((prev) => ({
+      ...prev,
+      [key]: { ...prev[key], contains },
+    }))
+  }
+
+  const updateColumnSelection = (key: ColumnKey, selected: Set<string>) => {
+    setColumnFilters((prev) => ({
+      ...prev,
+      [key]: { ...prev[key], selected },
+    }))
+  }
+
   const headerCell = (key: ColumnKey, label: string, align: "left" | "right" = "left") => (
-    <th className={`whitespace-nowrap px-4 py-2.5 ${align === "right" ? "text-right" : "text-left"}`}>
+    <th
+      className={`whitespace-nowrap px-4 py-2.5 ${align === "right" ? "text-right" : "text-left"}`}
+    >
       <ExcelColumnFilterHeader
         columnLabel={label}
-        values={uniqueValues[key]}
-        filter={columnFilters[key] ?? createEmptyColumnFilter(uniqueValues[key] ?? [])}
+        values={uniqueValues[key] || []}
+        filter={columnFilters[key] || createEmptyColumnFilter(uniqueValues[key] || [])}
         onContainsChange={(contains) => updateColumnContains(key, contains)}
         onSelectionChange={(selected) => updateColumnSelection(key, selected)}
         align={align}
@@ -237,16 +235,18 @@ export default function PurchaseExcelTable({
   )
 
   const stickyActionHeaderClass =
-    "sticky right-0 z-20 min-w-[5.5rem] whitespace-nowrap border-l border-slate-200 bg-[#F1F4F9] px-4 py-2.5 text-right shadow-[-8px_0_12px_-8px_rgba(15,23,42,0.12)]"
-  const stickyActionCellClass = (rowBg: string) =>
-    `sticky right-0 z-10 min-w-[5.5rem] whitespace-nowrap border-l border-slate-200 px-4 py-2.5 text-right shadow-[-8px_0_12px_-8px_rgba(15,23,42,0.12)] group-hover:bg-violet-50/50 ${rowBg}`
+    "sticky right-0 z-20 whitespace-nowrap bg-[#F1F4F9] px-4 py-2.5 text-right font-semibold uppercase tracking-wide text-slate-600 shadow-[-8px_0_12px_-4px_rgba(0,0,0,0.08)] border-b border-slate-200"
+
+  const stickyActionCellClass = (bgClass: string) =>
+    `sticky right-0 z-10 whitespace-nowrap px-4 py-2.5 text-right font-medium shadow-[-8px_0_12px_-4px_rgba(0,0,0,0.08)] ${bgClass}`
 
   return (
-    <div className="space-y-3">
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-        <div className="rounded-lg border border-violet-100 bg-violet-50 px-3 py-2">
-          <p className="text-[11px] font-medium uppercase tracking-wide text-violet-600">Total</p>
-          <p className="text-sm font-bold text-violet-700">{formatCurrency(totalAmount)}</p>
+    <div className="space-y-4">
+      {/* KPI Cards Header */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="rounded-lg border border-purple-100 bg-purple-50 px-3 py-2">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-purple-600">Total</p>
+          <p className="text-sm font-bold text-purple-700">{formatCurrency(totalAmount)}</p>
         </div>
         <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2">
           <p className="text-[11px] font-medium uppercase tracking-wide text-emerald-600">Paid</p>
@@ -346,7 +346,7 @@ export default function PurchaseExcelTable({
                 {headerCell("status", "Payment")}
                 {headerCell("date", "Date")}
                 {headerCell("supplier", "Supplier")}
-                <th className="min-w-[13rem] whitespace-nowrap px-4 py-2.5 text-left">Products</th>
+                {headerCell("products", "Products")}
                 {headerCell("payment", "Method")}
                 {headerCell("total", "Total", "right")}
                 {headerCell("paid", "Paid", "right")}

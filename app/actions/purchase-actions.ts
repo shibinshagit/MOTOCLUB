@@ -7,6 +7,7 @@ import { revalidatePath } from "next/cache"
 import { recordPurchaseTransaction, recordPurchaseAdjustment, deletePurchaseTransaction } from "./simplified-accounting"
 import { getSupplierCreditSummary } from "./supplier-payment-actions"
 import { adjustDeviceProductStock } from "@/lib/inventory-service"
+import { allocatePurchaseCosts } from "@/lib/purchase-courier"
 
 export async function getPurchases() {
   try {
@@ -43,7 +44,27 @@ async function queryDevicePurchases(deviceId: number, options: GetUserPurchasesO
   const endExclusive = dateTo ? getExclusiveEndDate(dateTo) : null
 
   return sql`
-    SELECT DISTINCT p.*
+    SELECT 
+      p.*,
+      COALESCE(
+        (
+          SELECT STRING_AGG(
+            CONCAT(
+              pr2.name,
+              CASE 
+                WHEN pv2.name IS NOT NULL AND pv2.name != '' AND LOWER(pv2.name) != 'default' AND LOWER(pv2.name) != 'default variant' 
+                THEN CONCAT(' (', pv2.name, ')')
+                ELSE ''
+              END,
+              ' × ', pi2.quantity
+            ), ', '
+          )
+          FROM purchase_items pi2
+          LEFT JOIN products pr2 ON pr2.id = pi2.product_id
+          LEFT JOIN product_variants pv2 ON pv2.id = pi2.product_variant_id
+          WHERE pi2.purchase_id = p.id
+        ), '—'
+      ) AS items_summary
     FROM purchases p
     LEFT JOIN suppliers s
       ON LOWER(TRIM(s.name)) = LOWER(TRIM(p.supplier))
@@ -68,6 +89,7 @@ async function queryDevicePurchases(deviceId: number, options: GetUserPurchasesO
         OR p.notes ILIKE ${searchPattern}
         OR CAST(p.id AS TEXT) ILIKE ${purchaseNumberPattern}
       )
+    GROUP BY p.id
     ORDER BY p.purchase_date DESC, p.id DESC
     LIMIT ${limit ?? null}
   `
@@ -94,6 +116,49 @@ export async function getUserPurchases(
 
     if (Array.isArray(purchases) && purchases.length > 0) {
       const purchaseIds = purchases.map((p: any) => p.id)
+
+      try {
+        const itemsRows = await sql`
+          SELECT 
+            pi.*, 
+            p.name as product_name, 
+            p.category,
+            pv.name as variant_name,
+            pb.batch_no as batch_no
+          FROM purchase_items pi
+          JOIN products p ON pi.product_id = p.id
+          LEFT JOIN product_variants pv ON pi.product_variant_id = pv.id
+          LEFT JOIN product_batches pb ON pi.batch_id = pb.id
+          WHERE pi.purchase_id = ANY(${purchaseIds})
+          ORDER BY pi.id ASC
+        `
+        const itemsMap = new Map<number, any[]>()
+        for (const row of itemsRows) {
+          const list = itemsMap.get(row.purchase_id) || []
+          list.push(row)
+          itemsMap.set(row.purchase_id, list)
+        }
+        for (const p of purchases) {
+          p.items = itemsMap.get(p.id) || []
+          if (!p.items_summary || p.items_summary === "—") {
+            if (p.items.length > 0) {
+              p.items_summary = p.items
+                .map((item: any) => {
+                  const varName = item.variant_name && item.variant_name.toLowerCase() !== "default" && item.variant_name.toLowerCase() !== "default variant"
+                    ? ` (${item.variant_name})`
+                    : ""
+                  return `${item.product_name}${varName} × ${item.quantity}`
+                })
+                .join(", ")
+            } else {
+              p.items_summary = "—"
+            }
+          }
+        }
+      } catch (e) {
+        console.warn("Could not query purchase_items for purchases:", e)
+      }
+
       try {
         const tpRows = await sql`
           SELECT id, purchase_id, payment_method, amount, reference_number, notes
@@ -217,6 +282,7 @@ export async function createPurchase(formData: FormData) {
   const receivedAmount = Number.parseFloat(formData.get("received_amount") as string) || 0
   const courierCharge = Number.parseFloat(formData.get("courier_charge") as string) || 0
   const courierChargePercentage = Number.parseFloat(formData.get("courier_charge_percentage") as string) || 0
+  const discount = Number.parseFloat(formData.get("discount") as string) || Number.parseFloat(formData.get("discount_amount") as string) || 0
 
   // Parse optional payments array from JSON string
   const paymentsJson = formData.get("payments") as string
@@ -263,6 +329,8 @@ export async function createPurchase(formData: FormData) {
     return { success: false, message: "Supplier, total amount, at least one item, user ID, and device ID are required" }
   }
 
+  const costAllocations = allocatePurchaseCosts(items, courierCharge, discount)
+
   let finalReceivedAmount = receivedAmount
   if (paymentsList.length > 0) {
     finalReceivedAmount = paymentsList.reduce((s, p) => s + (Number(p.amount) || 0), 0)
@@ -295,12 +363,12 @@ export async function createPurchase(formData: FormData) {
         INSERT INTO purchases (
           supplier, total_amount, status, payment_method, purchase_status, 
           created_by, device_id, purchase_date, received_amount,
-          courier_charge, courier_charge_percentage
+          courier_charge, courier_charge_percentage, discount
         )
         VALUES (
           ${supplier}, ${totalAmount}, ${status}, ${primaryPaymentMethod}, ${purchaseStatus}, 
           ${userId}, ${deviceId}, ${purchaseDate}, ${finalReceivedAmount},
-          ${courierCharge}, ${courierChargePercentage}
+          ${courierCharge}, ${courierChargePercentage}, ${discount}
         )
         RETURNING *
       `
@@ -336,7 +404,12 @@ export async function createPurchase(formData: FormData) {
       // Add purchase items and handle stock...
       let itemIndex = 0;
       for (let item of items) {
+        const alloc = costAllocations[itemIndex]
+        const unitAcquisitionCost = alloc ? alloc.unitAcquisitionCost : item.price
+        const itemCourierCharge = alloc ? alloc.courierCharge : 0
+        const itemDiscountAmount = alloc ? alloc.discountAmount : 0
         itemIndex++;
+
         // Resolve variant: use provided variant_id, or fetch the default variant.
         // If no variant exists (legacy product), auto-create one so purchase never fails.
         let variantId = item.variant_id || null;
@@ -360,6 +433,22 @@ export async function createPurchase(formData: FormData) {
           }
         }
 
+        if (variantId) {
+          await tx`
+            UPDATE product_variants
+            SET cost_price = ${unitAcquisitionCost},
+                wholesale_price = ${unitAcquisitionCost}
+            WHERE id = ${variantId}
+          `
+        }
+
+        await tx`
+          UPDATE products
+          SET wholesale_price = ${unitAcquisitionCost},
+              updated_at = NOW()
+          WHERE id = ${item.product_id}
+        `
+
         // Every purchase MUST create a NEW BATCH — never reuse or merge.
         let batchId: number | null = null;
         if (isDelivered && !isCancelled) {
@@ -369,7 +458,7 @@ export async function createPurchase(formData: FormData) {
               product_id, product_variant_id, batch_no, cost_price, selling_price,
               quantity_purchased, remaining_quantity, status, purchase_id
             ) VALUES (
-              ${item.product_id}, ${variantId}, ${batchNo}, ${item.price}, ${item.price},
+              ${item.product_id}, ${variantId}, ${batchNo}, ${unitAcquisitionCost}, ${item.price},
               ${item.quantity}, ${item.quantity}, 'active', ${purchaseId}
             ) RETURNING id
           `;
@@ -379,8 +468,15 @@ export async function createPurchase(formData: FormData) {
         item.batch_id = batchId;
 
         await tx`
-          INSERT INTO purchase_items (purchase_id, product_id, product_variant_id, batch_id, quantity, price, tax_percentage, tax_amount, line_total)
-          VALUES (${purchaseId}, ${item.product_id}, ${item.variant_id || null}, ${item.batch_id || null}, ${item.quantity}, ${item.price}, ${item.tax_percentage}, ${item.tax_amount}, ${item.line_total})
+          INSERT INTO purchase_items (
+            purchase_id, product_id, product_variant_id, batch_id, quantity, price,
+            tax_percentage, tax_amount, line_total, courier_charge, discount, unit_cost
+          )
+          VALUES (
+            ${purchaseId}, ${item.product_id}, ${item.variant_id || null}, ${item.batch_id || null},
+            ${item.quantity}, ${item.price}, ${item.tax_percentage}, ${item.tax_amount},
+            ${item.line_total}, ${itemCourierCharge}, ${itemDiscountAmount}, ${unitAcquisitionCost}
+          )
         `
 
         // Only update stock when purchase status is Delivered AND not Cancelled
@@ -486,7 +582,9 @@ export async function createPurchase(formData: FormData) {
       return { success: true, message: "Purchase added successfully", data: purchaseResult[0] }
     })
 
-    revalidatePath("/dashboard", "layout")
+    try {
+      revalidatePath("/dashboard", "layout")
+    } catch (_) {}
     return result
   } catch (error) {
     console.error("Add purchase error:", error)
@@ -511,7 +609,7 @@ export async function markPurchaseDelivered(purchaseId: number, deviceId: number
       await tx`SET LOCAL statement_timeout = '15s'`
       await tx`SET LOCAL lock_timeout = '15s'`
       const purchases = await tx`
-        SELECT id, supplier, status, purchase_status, created_by
+        SELECT id, supplier, status, purchase_status, created_by, courier_charge, discount, total_amount
         FROM purchases WHERE id = ${purchaseId} AND device_id = ${deviceId}
         FOR UPDATE
       `
@@ -529,13 +627,33 @@ export async function markPurchaseDelivered(purchaseId: number, deviceId: number
 
       console.log("[receive purchase] loading items")
       const items = await tx`
-        SELECT id, product_id, product_variant_id, batch_id, quantity, price
+        SELECT id, product_id, product_variant_id, batch_id, quantity, price, tax_percentage, tax_amount, line_total
         FROM purchase_items WHERE purchase_id = ${purchaseId}
       `
-      for (const item of items) {
+
+      const costAllocations = allocatePurchaseCosts(items as any, Number(purchase.courier_charge) || 0, Number(purchase.discount) || 0)
+
+      for (let index = 0; index < items.length; index++) {
+        const item = items[index]
+        const alloc = costAllocations[index]
+        const unitAcquisitionCost = alloc ? alloc.unitAcquisitionCost : item.price
         const quantity = Number(item.quantity) || 0
         if (quantity <= 0) continue
         if (!item.product_variant_id) throw new Error(`Purchase item ${item.id} has no variant`)
+
+        // Update variant reference costs
+        await tx`
+          UPDATE product_variants
+          SET cost_price = ${unitAcquisitionCost}, wholesale_price = ${unitAcquisitionCost}
+          WHERE id = ${item.product_variant_id}
+        `
+
+        await tx`
+          UPDATE products
+          SET wholesale_price = ${unitAcquisitionCost},
+              updated_at = NOW()
+          WHERE id = ${item.product_id}
+        `
 
         let batchId = item.batch_id ? Number(item.batch_id) : null
         if (batchId) {
@@ -556,12 +674,32 @@ export async function markPurchaseDelivered(purchaseId: number, deviceId: number
               product_id, product_variant_id, batch_no, cost_price, selling_price,
               quantity_purchased, remaining_quantity, status, purchase_id
             ) VALUES (
-              ${item.product_id}, ${item.product_variant_id}, ${batchNo}, ${item.price}, ${item.price},
+              ${item.product_id}, ${item.product_variant_id}, ${batchNo}, ${unitAcquisitionCost}, ${item.price},
               ${quantity}, ${quantity}, 'active', ${purchaseId}
             ) RETURNING id
           `
           batchId = Number(batches[0].id)
-          await tx`UPDATE purchase_items SET batch_id = ${batchId} WHERE id = ${item.id}`
+          await tx`
+            UPDATE purchase_items
+            SET batch_id = ${batchId},
+                courier_charge = ${alloc ? alloc.courierCharge : 0},
+                discount = ${alloc ? alloc.discountAmount : 0},
+                unit_cost = ${unitAcquisitionCost}
+            WHERE id = ${item.id}
+          `
+        } else {
+          await tx`
+            UPDATE product_batches
+            SET cost_price = ${unitAcquisitionCost}
+            WHERE id = ${batchId}
+          `
+          await tx`
+            UPDATE purchase_items
+            SET courier_charge = ${alloc ? alloc.courierCharge : 0},
+                discount = ${alloc ? alloc.discountAmount : 0},
+                unit_cost = ${unitAcquisitionCost}
+            WHERE id = ${item.id}
+          `
         }
         await adjustDeviceProductStock(item.product_id, item.product_variant_id, batchId, deviceId, quantity, tx)
         await tx`
@@ -584,7 +722,9 @@ export async function markPurchaseDelivered(purchaseId: number, deviceId: number
       return { success: true, data: result[0], message: "Purchase marked as delivered" }
     })
     console.log("[receive purchase] response sent", outcome)
-    revalidatePath("/dashboard")
+    try {
+      revalidatePath("/dashboard")
+    } catch (_) {}
     return outcome
   } catch (error) {
     // postgres rolls back begin() automatically when this callback throws.
@@ -609,6 +749,7 @@ export async function updatePurchase(formData: FormData) {
   const receivedAmount = Number.parseFloat(formData.get("received_amount") as string) || 0
   const courierCharge = Number.parseFloat(formData.get("courier_charge") as string) || 0
   const courierChargePercentage = Number.parseFloat(formData.get("courier_charge_percentage") as string) || 0
+  const discount = Number.parseFloat(formData.get("discount") as string) || Number.parseFloat(formData.get("discount_amount") as string) || 0
 
   // Parse optional payments array from JSON string
   const paymentsJson = formData.get("payments") as string
@@ -665,6 +806,8 @@ export async function updatePurchase(formData: FormData) {
     }
   }
 
+  const costAllocations = allocatePurchaseCosts(items, courierCharge, discount)
+
   // Validate received amount
   if (receivedAmount > totalAmount) {
     return { success: false, message: "Received amount cannot be greater than total amount" }
@@ -707,7 +850,8 @@ export async function updatePurchase(formData: FormData) {
             purchase_status = ${purchaseStatus}, payment_method = ${paymentMethod},
             received_amount = ${finalReceivedAmount},
             courier_charge = ${courierCharge},
-            courier_charge_percentage = ${courierChargePercentage}
+            courier_charge_percentage = ${courierChargePercentage},
+            discount = ${discount}
         WHERE id = ${purchaseId} AND device_id = ${deviceId}
         RETURNING *
       `
@@ -805,7 +949,12 @@ export async function updatePurchase(formData: FormData) {
 
       let itemIndex = 0;
       for (let item of items) {
+        const alloc = costAllocations[itemIndex]
+        const unitAcquisitionCost = alloc ? alloc.unitAcquisitionCost : item.price
+        const itemCourierCharge = alloc ? alloc.courierCharge : 0
+        const itemDiscountAmount = alloc ? alloc.discountAmount : 0
         itemIndex++;
+
         let variantId = item.variant_id || null;
         if (!variantId) {
           const defaultVariant = await tx`
@@ -827,6 +976,21 @@ export async function updatePurchase(formData: FormData) {
           }
         }
 
+        if (variantId) {
+          await tx`
+            UPDATE product_variants
+            SET cost_price = ${unitAcquisitionCost}, wholesale_price = ${unitAcquisitionCost}
+            WHERE id = ${variantId}
+          `
+        }
+
+        await tx`
+          UPDATE products
+          SET wholesale_price = ${unitAcquisitionCost},
+              updated_at = NOW()
+          WHERE id = ${item.product_id}
+        `
+
         let batchId = item.batch_id || null;
         if (shouldAddStock) {
           const batchNo = `BATCH-PUR-${purchaseId}-${itemIndex}-${Date.now()}`;
@@ -835,7 +999,7 @@ export async function updatePurchase(formData: FormData) {
               product_id, product_variant_id, batch_no, cost_price, selling_price,
               quantity_purchased, remaining_quantity, status, purchase_id
             ) VALUES (
-              ${item.product_id}, ${variantId}, ${batchNo}, ${item.price}, ${item.price},
+              ${item.product_id}, ${variantId}, ${batchNo}, ${unitAcquisitionCost}, ${item.price},
               ${item.quantity}, ${item.quantity}, 'active', ${purchaseId}
             ) RETURNING id
           `;
@@ -855,9 +1019,11 @@ export async function updatePurchase(formData: FormData) {
 
         await tx`
           INSERT INTO purchase_items (
-            purchase_id, product_id, product_variant_id, batch_id, quantity, price, tax_percentage, tax_amount, line_total
+            purchase_id, product_id, product_variant_id, batch_id, quantity, price,
+            tax_percentage, tax_amount, line_total, courier_charge, discount, unit_cost
           ) VALUES (
-            ${purchaseId}, ${item.product_id}, ${pVariantId}, ${pBatchId}, ${pQty}, ${pPrice}, ${pTaxPct}, ${pTaxAmt}, ${pLineTotal}
+            ${purchaseId}, ${item.product_id}, ${pVariantId}, ${pBatchId}, ${pQty}, ${pPrice},
+            ${pTaxPct}, ${pTaxAmt}, ${pLineTotal}, ${itemCourierCharge}, ${itemDiscountAmount}, ${unitAcquisitionCost}
           )
         `
       }
@@ -879,7 +1045,9 @@ export async function updatePurchase(formData: FormData) {
       return { success: true, message: "Purchase updated successfully", data: purchaseResult[0] }
     })
 
-    revalidatePath("/dashboard", "layout")
+    try {
+      revalidatePath("/dashboard", "layout")
+    } catch (_) {}
     return result
   } catch (error) {
     console.error("Update purchase error:", error)
@@ -972,7 +1140,9 @@ export async function deletePurchase(purchaseId: number, deviceId: number) {
       return { success: true, message: "Purchase deleted successfully" }
     })
 
-    revalidatePath("/dashboard", "layout")
+    try {
+      revalidatePath("/dashboard", "layout")
+    } catch (_) {}
     return result
   } catch (error) {
     console.error("Delete purchase error:", error)

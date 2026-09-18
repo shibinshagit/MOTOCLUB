@@ -126,7 +126,7 @@ function ProductsExcelTable({
       company: (p: any) => p.company_name || "No Company",
       category: (p: any) => p.category || "Uncategorized",
       retail: (p: any) => formatMoney(p.mrp || p.price || p.msp || 0),
-      cost: (p: any) => formatMoney(p.wholesale_price || 0),
+      cost: (p: any) => formatMoney(p.cost_price ?? p.wholesale_price ?? 0),
       stock: (p: any) => String(Number(p.stock || 0)),
       other: (p: any) => String(Number(p.other_devices_stock || 0)),
       status: (p: any) => {
@@ -309,7 +309,7 @@ function ProductsExcelTable({
                       <td className="whitespace-nowrap px-4 py-2.5 align-top text-right text-slate-600">
                         <span className="group/cost relative inline-grid items-center justify-items-end">
                           <span className="col-start-1 row-start-1 group-hover/cost:opacity-0">****</span>
-                          <span className="col-start-1 row-start-1 opacity-0 group-hover/cost:opacity-100">{formatMoney(product.wholesale_price || 0)}</span>
+                          <span className="col-start-1 row-start-1 opacity-0 group-hover/cost:opacity-100">{formatMoney(product.cost_price ?? product.wholesale_price ?? 0)}</span>
                         </span>
                       </td>
                     )}
