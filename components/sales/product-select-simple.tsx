@@ -221,7 +221,7 @@ function ProductSelectSimple({
         setSelectedProduct(product)
         
         // Also update the parent with the correct product details
-        const finalPrice = usePriceType === "wholesale" && product.wholesale_price ? product.wholesale_price : product.price
+        const finalPrice = usePriceType === "wholesale" && product.wholesale_price ? product.wholesale_price : (product.mrp || product.price || product.msp || 0)
         onChange(Number(product.id), String(product.name), Number(finalPrice), product.wholesale_price != null ? Number(product.wholesale_price) : undefined, product.stock != null ? Number(product.stock) : undefined, product)
       }
     } catch (error) {
@@ -564,7 +564,7 @@ function ProductSelectSimple({
                         handleItemSelect(
                           item.id,
                           item.name,
-                          item.price ?? item.msp ?? 0,
+                          item.mrp || item.price || item.msp || 0,
                           isServiceMode ? 0 : (item.wholesale_price ?? item.cost_price ?? 0),
                           isServiceMode ? 999 : (item.stock ?? 0)
                         )
@@ -583,7 +583,7 @@ function ProductSelectSimple({
                           </span>
                           <span className="text-xs text-gray-500 truncate">
                             {!isServiceMode && item.company_name && `Company: ${item.company_name} • `}
-                            Price: {item.price ?? item.msp ?? 0}
+                            Price: {item.mrp || item.price || item.msp || 0}
                             {!isServiceMode && (item.wholesale_price || item.cost_price) && ` • Wholesale/Cost: ${item.wholesale_price ?? item.cost_price ?? 0}`}
                             {!isServiceMode && item.barcode && ` • Barcode: ${item.barcode}`}
                             {!isServiceMode && ` • Stock: ${item.stock ?? 0}`}

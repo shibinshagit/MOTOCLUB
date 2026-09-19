@@ -977,7 +977,7 @@ export async function getProducts(
 
       const finalMrp = mrpPriceVal > 0 ? mrpPriceVal : (Number(product.mrp) || 0)
       const finalMsp = mspPriceVal > 0 ? mspPriceVal : (Number(product.msp ?? product.price) || 0)
-      const finalPrice = finalMsp > 0 ? finalMsp : finalMrp
+      const finalPrice = finalMrp > 0 ? finalMrp : finalMsp
 
       return {
         ...product,
@@ -1738,7 +1738,7 @@ export async function getPaginatedProducts({
 
       const finalMrp = mrpPriceVal > 0 ? mrpPriceVal : (Number(product.mrp) || 0)
       const finalMsp = mspPriceVal > 0 ? mspPriceVal : (Number(product.msp ?? product.price) || 0)
-      const finalPrice = finalMsp > 0 ? finalMsp : finalMrp
+      const finalPrice = finalMrp > 0 ? finalMrp : finalMsp
 
       return {
         ...product,
@@ -2001,7 +2001,7 @@ export async function getProductSearchSuggestions(
       name: p.name,
       category: p.category || "",
       company_name: p.company_name || "",
-      price: Number(p.price || p.msp || p.mrp || 0),
+      price: Number(p.mrp || p.price || p.msp || 0),
     }))
 
     const catSuggestions = (categories || []).map((c: any) => ({
@@ -2072,6 +2072,7 @@ export async function getProductById(id: number, userId?: number) {
     // Include category from either category_id or legacy category field
     const product = {
       ...result[0],
+      price: Number(result[0].mrp || result[0].price || result[0].msp || 0),
       stock: resolvedStock,
       category: result[0].category_name || result[0].category || "",
     }
@@ -3556,6 +3557,7 @@ export async function getProductByBarcode(barcode: string, userId?: number) {
     // Include category from either category_id or legacy category field
     const product = {
       ...result[0],
+      price: Number(result[0].mrp || result[0].price || result[0].msp || 0),
       stock: resolvedStock,
       category: result[0].category_name || result[0].category || "",
     }
@@ -3625,6 +3627,7 @@ export async function getUserProducts(userId: number) {
     // Map the results to include category and device-specific stock
     const mappedProducts = products.map((product: any) => ({
       ...product,
+      price: Number(product.mrp || product.price || product.msp || 0),
       stock: resolveDeviceStock(product, stockMap),
       category: product.category_name || product.category || "",
     }))

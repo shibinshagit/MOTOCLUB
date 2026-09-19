@@ -749,7 +749,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
             batchId: b.id || b.batch_id, 
             quantity: allocQty, 
             costPrice: b.cost_price ? Number(b.cost_price) : product.cost, 
-            sellingPrice: b.selling_price ? Number(b.selling_price) : (product.variants?.find((v:any) => v.id === product.productVariantId)?.price || product.price) 
+            sellingPrice: (product.variants?.find((v:any) => v.id === product.productVariantId)?.mrp ? Number(product.variants?.find((v:any) => v.id === product.productVariantId)?.mrp) : product.price) 
           })
           remaining -= allocQty
         }
@@ -817,7 +817,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
 
     let allocations: any[] = []
     let autoAllocate = true
-    let updatedPrice = price
+    let updatedPrice = (productObj?.mrp ? Number(productObj.mrp) : price)
     let updatedCost = productObj?.cost_price ?? wholesalePrice ?? productObj?.wholesale_price ?? 0
 
     if (isBatchManaged && resolvedVariantId && batches.length > 0) {
@@ -829,7 +829,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
         const stockCount = b.stocks?.find((s: any) => Number(s.device_id) === Number(deviceId))?.stock || b.device_stock || b.stock || 0
         if (stockCount > 0) {
           const allocQty = Math.min(stockCount, remaining)
-          allocations.push({ batchId: b.id || b.batch_id, quantity: allocQty, costPrice: b.cost_price ? Number(b.cost_price) : updatedCost, sellingPrice: b.selling_price ? Number(b.selling_price) : updatedPrice })
+          allocations.push({ batchId: b.id || b.batch_id, quantity: allocQty, costPrice: b.cost_price ? Number(b.cost_price) : updatedCost, sellingPrice: updatedPrice })
           remaining -= allocQty
         }
       }
@@ -1887,7 +1887,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                             const v = product.variants?.find((vx: any) => String(vx.id) === vId)
                             if (v) {
                               let newAllocations: any[] = []
-                              let newPrice = v.price ? Number(v.price) : product.price
+                              let newPrice = v.mrp ? Number(v.mrp) : (v.price ? Number(v.price) : product.price)
                               let newCost = v.cost_price ? Number(v.cost_price) : product.cost
                               let newTotal = newPrice * product.quantity
 
@@ -2140,7 +2140,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                             const v = product.variants?.find((vx: any) => String(vx.id) === vId)
                             if (v) {
                               let newAllocations: any[] = []
-                              let newPrice = v.price ? Number(v.price) : product.price
+                              let newPrice = v.mrp ? Number(v.mrp) : (v.price ? Number(v.price) : product.price)
                               let newCost = v.cost_price ? Number(v.cost_price) : product.cost
                               let newTotal = newPrice * product.quantity
 
