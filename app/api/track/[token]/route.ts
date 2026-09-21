@@ -72,16 +72,20 @@ export async function GET(
     // Dates formatting
     const createdAt = sale.created_at ? new Date(sale.created_at) : new Date()
     const updatedAt = sale.updated_at ? new Date(sale.updated_at) : createdAt
-    const shippedAt = sale.shipped_at ? new Date(sale.shipped_at) : null
-    const deliveredAt = sale.delivered_at ? new Date(sale.delivered_at) : null
+
+    // Fetch real tracking events
+    const trackingEventsRows = await sql`
+      SELECT status, location, description, event_at
+      FROM tracking_events
+      WHERE sale_id = ${sale.id}
+      ORDER BY event_at ASC
+    `
 
     // Build normalized shipment timeline (matching the user's reference design)
     const deliveryStatus = sale.delivery_status || "Pending"
-    const statusLower = deliveryStatus.toLowerCase()
-
     const timeline = []
 
-    // 1. Created / Placed
+    // 1. Created / Placed (Always injected using real created_at)
     timeline.push({
       status: "Dispatched-",
       title: "Order Placed",
@@ -90,38 +94,67 @@ export async function GET(
       to: "Kochi-Hub",
     })
 
-    // 2. Processing / Packed
-    if (shippedAt || statusLower.includes("pack") || statusLower.includes("sent") || statusLower.includes("ship") || statusLower.includes("transit") || statusLower.includes("deliver")) {
+    // 2. Real Events from DB
+    const seenStatuses = new Set<string>()
+    seenStatuses.add("Order Placed")
+    seenStatuses.add("Pending")
+
+    for (const row of trackingEventsRows) {
+      if (seenStatuses.has(row.status) && !row.status.toLowerCase().includes("transit")) continue // prevent duplicates except transit scans
+      seenStatuses.add(row.status)
+      
+      const eventDate = row.event_at ? new Date(row.event_at) : new Date()
+      let mappedTitle = row.status
+      let mappedStatus = row.status + "-"
+      
+      if (row.status.toLowerCase().includes("transit") || row.status.toLowerCase().includes("ship")) {
+        mappedTitle = "In Transit"
+        mappedStatus = "Arrived-"
+      } else if (row.status.toLowerCase().includes("out")) {
+        mappedTitle = "Out for Delivery"
+        mappedStatus = "Out for Delivery-"
+      } else if (row.status.toLowerCase() === "delivered") {
+        mappedTitle = "Delivered"
+        mappedStatus = "Delivered-"
+      }
+
       timeline.push({
-        status: "Arrived-",
-        title: "In Transit",
-        date: format(shippedAt || createdAt, "dd MMM yyyy, hh:mm a"),
-        from: "Kochi-Hub",
-        to: sale.shipping_city ? `${sale.shipping_city}-Hub` : "Destination Hub",
+        status: mappedStatus,
+        title: mappedTitle,
+        date: format(eventDate, "dd MMM yyyy, hh:mm a"),
+        from: row.location || sale.shipping_city || "Hub",
+        to: sale.shipping_city || "Destination Hub",
+        contact: mappedTitle === "Delivered" && sale.customer_phone ? `( ${sale.customer_phone} )` : undefined,
       })
     }
 
-    // 3. Out for delivery
-    if (statusLower.includes("transit") || statusLower.includes("ship") || statusLower.includes("deliver") || statusLower.includes("out")) {
-      timeline.push({
-        status: "Out for Delivery-",
-        title: "Out for Delivery",
-        date: format(updatedAt, "dd MMM yyyy, hh:mm a"),
-        from: sale.shipping_city ? `${sale.shipping_city}-Branch` : "Local Branch",
-        to: sale.shipping_city || "Customer Address",
-      })
-    }
+    // 3. Fallbacks for Old Orders (No events in DB, but shipped_at/delivered_at exist)
+    if (trackingEventsRows.length === 0) {
+      const shippedAt = sale.shipped_at ? new Date(sale.shipped_at) : null
+      const deliveredAt = sale.delivered_at ? new Date(sale.delivered_at) : null
+      const statusLower = deliveryStatus.toLowerCase()
 
-    // 4. Delivered
-    if (deliveredAt || statusLower === "delivered" || statusLower === "complete" || statusLower === "completed") {
-      timeline.push({
-        status: "Delivered-",
-        title: "Delivered",
-        date: format(deliveredAt || updatedAt, "dd MMM yyyy, hh:mm a"),
-        from: sale.shipping_city ? `${sale.shipping_city}-Branch` : "Local Branch",
-        to: sale.shipping_city || "Customer Address",
-        contact: sale.customer_phone ? `( ${sale.customer_phone} )` : undefined,
-      })
+      if (shippedAt || statusLower.includes("pack") || statusLower.includes("sent") || statusLower.includes("ship") || statusLower.includes("transit") || statusLower.includes("deliver")) {
+        timeline.push({
+          status: "Arrived-",
+          title: "In Transit",
+          date: format(shippedAt || createdAt, "dd MMM yyyy, hh:mm a"),
+          from: "Kochi-Hub",
+          to: sale.shipping_city ? `${sale.shipping_city}-Hub` : "Destination Hub",
+        })
+      }
+
+      // 4. Delivered Fallback
+      if (deliveredAt || statusLower === "delivered" || statusLower === "complete" || statusLower === "completed") {
+        timeline.push({
+          status: "Delivered-",
+          title: "Delivered",
+          date: format(deliveredAt || updatedAt, "dd MMM yyyy, hh:mm a"),
+          from: sale.shipping_city ? `${sale.shipping_city}-Branch` : "Local Branch",
+          to: sale.shipping_city || "Customer Address",
+          contact: sale.customer_phone ? `( ${sale.customer_phone} )` : undefined,
+        })
+      }
     }
 
     // Reverse timeline so latest is first (matching screenshot: Delivered- on top)

@@ -519,8 +519,7 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
           AND transaction_date <= ${currEndStr}::timestamp
           AND (${effectiveDeviceId === 0} OR device_id = ${effectiveDeviceId})
           AND (
-            transaction_type IN ('expense', 'sale_shipping', 'salary')
-            OR (transaction_type = 'manual' AND debit_amount > 0)
+            (transaction_type = 'manual' AND debit_amount > 0)
           )
       `,
       sql`
@@ -530,8 +529,7 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
           AND transaction_date <= ${prevEndStr}::timestamp
           AND (${effectiveDeviceId === 0} OR device_id = ${effectiveDeviceId})
           AND (
-            transaction_type IN ('expense', 'sale_shipping', 'salary')
-            OR (transaction_type = 'manual' AND debit_amount > 0)
+            (transaction_type = 'manual' AND debit_amount > 0)
           )
       `,
     ])
@@ -804,8 +802,7 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
                 AND transaction_date <= ${currEndStr}::timestamp
                 AND (${effectiveDeviceId === 0} OR device_id = ${effectiveDeviceId})
                 AND (
-                  transaction_type IN ('expense', 'sale_shipping', 'salary')
-                  OR (transaction_type = 'manual' AND debit_amount > 0)
+                  (transaction_type = 'manual' AND debit_amount > 0)
                 )
               GROUP BY EXTRACT(HOUR FROM transaction_date)::int
               ORDER BY hour_val ASC
@@ -819,8 +816,7 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
                 AND transaction_date <= ${currEndStr}::timestamp
                 AND (${effectiveDeviceId === 0} OR device_id = ${effectiveDeviceId})
                 AND (
-                  transaction_type IN ('expense', 'sale_shipping', 'salary')
-                  OR (transaction_type = 'manual' AND debit_amount > 0)
+                  (transaction_type = 'manual' AND debit_amount > 0)
                 )
               GROUP BY DATE(transaction_date)
               ORDER BY day_date ASC
@@ -835,8 +831,7 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
                 AND transaction_date <= ${prevEndStr}::timestamp
                 AND (${effectiveDeviceId === 0} OR device_id = ${effectiveDeviceId})
                 AND (
-                  transaction_type IN ('expense', 'sale_shipping', 'salary')
-                  OR (transaction_type = 'manual' AND debit_amount > 0)
+                  (transaction_type = 'manual' AND debit_amount > 0)
                 )
               GROUP BY EXTRACT(HOUR FROM transaction_date)::int
               ORDER BY hour_val ASC
@@ -850,8 +845,7 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
                 AND transaction_date <= ${prevEndStr}::timestamp
                 AND (${effectiveDeviceId === 0} OR device_id = ${effectiveDeviceId})
                 AND (
-                  transaction_type IN ('expense', 'sale_shipping', 'salary')
-                  OR (transaction_type = 'manual' AND debit_amount > 0)
+                  (transaction_type = 'manual' AND debit_amount > 0)
                 )
               GROUP BY DATE(transaction_date)
               ORDER BY day_date ASC

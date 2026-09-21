@@ -47,11 +47,20 @@ interface PayrollRequestsTabProps {
   deviceId: number
   currency?: string
   initialSubTab?: "payroll" | "requests" | "history"
+  globalMonth?: string
 }
 
-export default function PayrollRequestsTab({ deviceId, currency = "INR", initialSubTab = "payroll" }: PayrollRequestsTabProps) {
+export default function PayrollRequestsTab({ deviceId, currency = "INR", initialSubTab = "payroll", globalMonth }: PayrollRequestsTabProps) {
   const [activeSubTab, setActiveSubTab] = useState<"payroll" | "requests" | "history">(initialSubTab)
-  const [selectedMonth, setSelectedMonth] = useState<string>(new Date().toISOString().slice(0, 7))
+  const [selectedMonth, setSelectedMonth] = useState<string>(globalMonth || new Date().toISOString().slice(0, 7))
+  
+  // Sync selectedMonth if globalMonth prop changes (e.g. from global date filter)
+  useEffect(() => {
+    if (globalMonth) {
+      setSelectedMonth(globalMonth)
+    }
+  }, [globalMonth])
+
   const [payrollSummary, setPayrollSummary] = useState<any>(null)
   const [isLoadingPayroll, setIsLoadingPayroll] = useState(true)
 

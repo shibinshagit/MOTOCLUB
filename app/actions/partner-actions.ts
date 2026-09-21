@@ -704,10 +704,25 @@ export async function updatePartnerDeliveryStatus(
           shipping_date = CASE WHEN ${isNewShipping} THEN COALESCE(shipping_date, NOW()) ELSE shipping_date END,
           updated_at = NOW()
       WHERE id = ${saleId}
-      RETURNING shipping_date
+      RETURNING shipping_date, shipping_city
     `
-
+    
     const finalShippingDate = updated[0]?.shipping_date || null
+    const shippingCity = updated[0]?.shipping_city || "Unknown Location"
+
+    if (existing[0].delivery_status !== deliveryStatus) {
+      try {
+        await sql`
+          INSERT INTO tracking_events (
+            sale_id, tracking_id, status, location, description, event_at, created_at
+          ) VALUES (
+            ${saleId}, ${targetTrackingId}, ${deliveryStatus}, ${shippingCity}, ${"Status updated to " + deliveryStatus}, NOW(), NOW()
+          )
+        `
+      } catch (eventErr) {
+        console.warn("Error inserting tracking event on updateDeliveryStatus:", eventErr)
+      }
+    }
 
     return {
       success: true,

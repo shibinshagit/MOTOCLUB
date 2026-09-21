@@ -221,7 +221,7 @@ export default function PurchaseExcelTable({
 
   const headerCell = (key: ColumnKey, label: string, align: "left" | "right" = "left") => (
     <th
-      className={`whitespace-nowrap px-4 py-2.5 ${align === "right" ? "text-right" : "text-left"}`}
+      className={`whitespace-nowrap px-3 py-1.5 ${align === "right" ? "text-right" : "text-left"}`}
     >
       <ExcelColumnFilterHeader
         columnLabel={label}
@@ -235,10 +235,10 @@ export default function PurchaseExcelTable({
   )
 
   const stickyActionHeaderClass =
-    "sticky right-0 z-20 whitespace-nowrap bg-[#F1F4F9] px-4 py-2.5 text-right font-semibold uppercase tracking-wide text-slate-600 shadow-[-8px_0_12px_-4px_rgba(0,0,0,0.08)] border-b border-slate-200"
+    "whitespace-nowrap bg-[#F1F4F9] px-3 py-1.5 text-right font-semibold uppercase tracking-wide text-slate-600 border-b border-slate-200"
 
   const stickyActionCellClass = (bgClass: string) =>
-    `sticky right-0 z-10 whitespace-nowrap px-4 py-2.5 text-right font-medium shadow-[-8px_0_12px_-4px_rgba(0,0,0,0.08)] ${bgClass}`
+    `whitespace-nowrap px-3 py-1.5 text-right font-medium ${bgClass}`
 
   return (
     <div className="space-y-4">
@@ -337,11 +337,11 @@ export default function PurchaseExcelTable({
           </div>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="hidden lg:block overflow-x-auto">
           <table className="min-w-full border-separate border-spacing-0 text-sm">
             <thead>
               <tr className="border-b border-slate-200 bg-[#F1F4F9] text-xs font-semibold uppercase tracking-wide text-slate-600">
-                <th className="w-12 whitespace-nowrap px-4 py-2.5 text-left">#</th>
+                <th className="w-12 whitespace-nowrap px-3 py-1.5 text-left">#</th>
                 {headerCell("purchaseId", "Purchase #")}
                 {headerCell("status", "Payment")}
                 {headerCell("date", "Date")}
@@ -390,33 +390,33 @@ export default function PurchaseExcelTable({
                         index % 2 === 0 ? "bg-white" : "bg-slate-50/60"
                       }`}
                     >
-                      <td className="whitespace-nowrap px-4 py-2.5 text-xs text-muted-foreground">{index + 1}</td>
-                      <td className="whitespace-nowrap px-4 py-2.5 font-semibold text-slate-800">#{purchase.id}</td>
-                      <td className="whitespace-nowrap px-4 py-2.5">
+                      <td className="whitespace-nowrap px-3 py-1.5 text-xs text-muted-foreground">{index + 1}</td>
+                      <td className="whitespace-nowrap px-3 py-1.5 font-semibold text-slate-800">#{purchase.id}</td>
+                      <td className="whitespace-nowrap px-3 py-1.5">
                         <PaymentStatusBadge status={paymentStatus} />
                       </td>
-                      <td className="whitespace-nowrap px-4 py-2.5 text-slate-700">
+                      <td className="whitespace-nowrap px-3 py-1.5 text-slate-700">
                         {format(new Date(purchase.purchase_date), "yyyy-MM-dd")}
                       </td>
-                      <td className="max-w-[180px] truncate px-4 py-2.5 text-slate-700">
+                      <td className="max-w-[180px] truncate px-3 py-1.5 text-slate-700">
                         {purchase.supplier || "—"}
                       </td>
-                      <td className="max-w-[300px] truncate px-4 py-2.5 text-slate-700" title={purchase.items_summary || undefined}>
+                      <td className="max-w-[300px] truncate px-3 py-1.5 text-slate-700" title={purchase.items_summary || undefined}>
                         {purchase.items_summary || "—"}
                       </td>
-                      <td className="whitespace-nowrap px-4 py-2.5 text-slate-600">
+                      <td className="whitespace-nowrap px-3 py-1.5 text-slate-600">
                         {getPaymentMethodDisplay(purchase)}
                       </td>
-                      <td className="whitespace-nowrap px-4 py-2.5 text-right font-medium text-slate-800">
+                      <td className="whitespace-nowrap px-3 py-1.5 text-right font-medium text-slate-800">
                         {formatCurrency(Number(purchase.total_amount))}
                       </td>
-                      <td className="whitespace-nowrap px-4 py-2.5 text-right text-emerald-700">
+                      <td className="whitespace-nowrap px-3 py-1.5 text-right text-emerald-700">
                         {paid > 0 ? formatCurrency(paid) : "—"}
                       </td>
-                      <td className="whitespace-nowrap px-4 py-2.5 text-right text-amber-700">
+                      <td className="whitespace-nowrap px-3 py-1.5 text-right text-amber-700">
                         {remaining > 0 ? formatCurrency(remaining) : "—"}
                       </td>
-                      <td className="whitespace-nowrap px-4 py-2.5">
+                      <td className="whitespace-nowrap px-3 py-1.5">
                         <DeliveryStatusBadge status={purchase.purchase_status || "Delivered"} />
                       </td>
                       <td className={stickyActionCellClass(index % 2 === 0 ? "bg-white" : "bg-slate-50/60")}>
@@ -437,6 +437,118 @@ export default function PurchaseExcelTable({
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* MOBILE & TABLET CARD LIST VIEW (< 1024px) */}
+        <div className="block lg:hidden divide-y divide-slate-200 bg-slate-50/50">
+          {isLoading && !hasLoadedPurchases ? (
+            <div className="p-4 space-y-3">
+              {[...Array(4)].map((_, i) => (
+                <div key={i} className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
+                  <div className="flex justify-between">
+                    <div className="h-5 w-24 bg-slate-200 animate-pulse rounded" />
+                    <div className="h-5 w-16 bg-slate-200 animate-pulse rounded" />
+                  </div>
+                  <div className="h-4 w-3/4 bg-slate-200 animate-pulse rounded" />
+                  <div className="h-8 w-full bg-slate-200 animate-pulse rounded" />
+                </div>
+              ))}
+            </div>
+          ) : error ? (
+            <div className="p-6 text-center text-sm text-rose-600 bg-white">{error}</div>
+          ) : displayPurchases.length === 0 ? (
+            <div className="p-8 text-center text-sm text-slate-500 bg-white">
+              {purchases.length === 0
+                ? `No purchases found for ${periodLabel}`
+                : "No purchases match the current column filters"}
+            </div>
+          ) : (
+            displayPurchases.map((purchase, index) => {
+              const remaining = getRemainingAmount(purchase)
+              const paid = getPaidAmount(purchase)
+              const paymentStatus = purchase.status === "Partial" ? "Cancelled" : purchase.status
+              const isEven = index % 2 === 0
+
+              return (
+                <div
+                  key={purchase.id}
+                  onClick={() => onViewPurchase(purchase)}
+                  className={`p-3.5 bg-white transition-colors space-y-2.5 cursor-pointer ${isEven ? "" : "bg-slate-50/60"}`}
+                >
+                  {/* TOP ROW: ID + PAYMENT BADGE + TOTAL */}
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex flex-col gap-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-extrabold text-blue-700 text-sm">#{purchase.id}</span>
+                      </div>
+                      <PaymentStatusBadge status={paymentStatus} />
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="text-sm font-extrabold text-slate-900 leading-tight">
+                        {formatCurrency(Number(purchase.total_amount))}
+                      </div>
+                      <div className="mt-0.5 text-[11px] font-medium text-emerald-700">
+                        Paid: {paid > 0 ? formatCurrency(paid) : "—"}
+                      </div>
+                      <div className="mt-0.5 text-[11px] font-medium text-amber-700">
+                        Bal: {remaining > 0 ? formatCurrency(remaining) : "—"}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* SUPPLIER & DATE */}
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="min-w-0">
+                      <span className="text-[10px] font-semibold text-slate-400 block uppercase tracking-wider">
+                        Supplier
+                      </span>
+                      <span className="font-bold text-slate-800 block truncate">
+                        {purchase.supplier || "—"}
+                      </span>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <span className="text-[10px] font-semibold text-slate-400 block uppercase tracking-wider">
+                        Date
+                      </span>
+                      <span className="font-semibold text-slate-700 block">
+                        {format(new Date(purchase.purchase_date), "dd MMM yyyy")}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* PRODUCTS SUMMARY */}
+                  <div className="text-xs bg-slate-50 p-2 rounded-lg border border-slate-100">
+                    <span className="text-[10px] font-semibold text-slate-400 block uppercase tracking-wider mb-0.5">
+                      Products
+                    </span>
+                    <span className="text-slate-600 block truncate">
+                      {purchase.items_summary || "—"}
+                    </span>
+                  </div>
+
+                  {/* BOTTOM ACTIONS */}
+                  <div className="flex items-center justify-between pt-1">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <DeliveryStatusBadge status={purchase.purchase_status || "Delivered"} />
+                      <span className="text-[10px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                        {getPaymentMethodDisplay(purchase)}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        onEditPurchase(purchase)
+                      }}
+                      className="text-xs font-semibold text-brand-blue hover:text-blue-700 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-md transition-colors"
+                    >
+                      Edit
+                    </button>
+                  </div>
+                </div>
+              )
+            })
+          )}
         </div>
       </div>
     </div>

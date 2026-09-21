@@ -613,14 +613,20 @@ export async function getUserSales(deviceId: number, options: GetUserSalesOption
 
     try {
       await sql`
-        UPDATE sales s
-        SET delivery_status = 'Returned',
-            status = 'Cancelled',
-            updated_at = NOW()
-        FROM return_requests rr
-        WHERE (rr.sale_id = s.id OR (s.external_order_id IS NOT NULL AND (rr.order_number = s.external_order_id OR rr.order_id = s.id)))
-          AND LOWER(rr.status) IN ('approved', 'completed', 'received', 'returned')
-          AND (s.delivery_status IS NULL OR s.delivery_status != 'Returned' OR s.status != 'Cancelled')
+        WITH updated AS (
+          UPDATE sales s
+          SET delivery_status = 'Returned',
+              status = 'Cancelled',
+              updated_at = NOW()
+          FROM return_requests rr
+          WHERE (rr.sale_id = s.id OR (s.external_order_id IS NOT NULL AND (rr.order_number = s.external_order_id OR rr.order_id = s.id)))
+            AND LOWER(rr.status) IN ('approved', 'completed', 'received', 'returned')
+            AND (s.delivery_status IS NULL OR s.delivery_status != 'Returned' OR s.status != 'Cancelled')
+          RETURNING s.id, s.tracking_id, s.shipping_city
+        )
+        INSERT INTO tracking_events (sale_id, tracking_id, status, location, description, event_at, created_at)
+        SELECT id, tracking_id, 'Returned', COALESCE(shipping_city, 'Unknown Location'), 'Order Returned', NOW(), NOW()
+        FROM updated
       `
     } catch (retSyncErr) {
       console.warn("Auto-sync return requests status to sales warning:", retSyncErr)
@@ -1666,6 +1672,19 @@ export async function addSale(saleData: any) {
     const sale = saleResult[0]
     saleId = sale.id
 
+    if (shipping.delivery_status) {
+      try {
+        await sql`
+          INSERT INTO tracking_events (
+            sale_id, tracking_id, status, location, description, event_at, created_at
+          ) VALUES (
+            ${saleId}, ${shipping.tracking_id || null}, ${shipping.delivery_status}, ${shipping.shipping_city || "Unknown Location"}, ${"Order " + shipping.delivery_status}, NOW(), NOW()
+          )
+        `
+      } catch (eventErr) {
+        console.warn("Could not insert tracking event on createSale:", eventErr)
+      }
+    }
     if (saleData.customerId && shipping) {
       try {
         await syncCustomerShippingAddress(saleData.customerId, shipping)
@@ -2415,6 +2434,20 @@ export async function updateSale(saleData: any) {
       }
 
       await updateSaleRecord(Boolean(saleData.deviceId))
+
+      if (origDelivery !== newDelivery && shipping.delivery_status) {
+        try {
+          await sql`
+            INSERT INTO tracking_events (
+              sale_id, tracking_id, status, location, description, event_at, created_at
+            ) VALUES (
+              ${saleData.id}, ${shipping.tracking_id || null}, ${shipping.delivery_status}, ${shipping.shipping_city || "Unknown Location"}, ${"Status updated to " + shipping.delivery_status}, NOW(), NOW()
+            )
+          `
+        } catch (eventErr) {
+          console.warn("Could not insert tracking event on updateSale:", eventErr)
+        }
+      }
 
       if (saleData.customerId && shipping) {
         try {

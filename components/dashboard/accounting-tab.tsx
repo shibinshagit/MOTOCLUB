@@ -92,6 +92,7 @@ import EditSupplierPaymentModal from "../suppliers/View-suplier-payment-edit"
 import PayrollRequestsTab from "@/components/admin/payroll-requests-tab"
 import ProfitBreakdownModal from "@/components/shared/profit-breakdown-modal"
 import ExpenseBreakdownModal from "@/components/shared/expense-breakdown-modal"
+import AccountingAIChat from "@/components/accounting/accounting-ai-chat"
 
 interface AccountingTabProps {
   userId: number
@@ -2506,11 +2507,11 @@ const renderTransactionList = (
           </div>
 
           <TabsContent value="requests" className="p-4">
-            <PayrollRequestsTab deviceId={deviceId} currency={currency} initialSubTab="requests" />
+            <PayrollRequestsTab deviceId={deviceId} currency={currency} initialSubTab="requests" globalMonth={format(dateFrom, "yyyy-MM")} />
           </TabsContent>
 
           <TabsContent value="payroll" className="p-4">
-            <PayrollRequestsTab deviceId={deviceId} currency={currency} initialSubTab="payroll" />
+            <PayrollRequestsTab deviceId={deviceId} currency={currency} initialSubTab="payroll" globalMonth={format(dateFrom, "yyyy-MM")} />
           </TabsContent>
 
           <TabsContent value="transactions" className="p-4">
@@ -3128,6 +3129,9 @@ const renderTransactionList = (
         currency={currency}
       />
       {ConfirmDialog}
+
+      {/* MOTO AI Floating Chatbot — fixed to viewport, Accounting page only */}
+      <AccountingAIChat deviceId={deviceId} />
     </div>
   )
 }

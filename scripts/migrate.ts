@@ -303,6 +303,21 @@ async function createTables() {
     `
   })
 
+  await run("tracking_events", async () => {
+    await sql`
+      CREATE TABLE IF NOT EXISTS tracking_events (
+        id SERIAL PRIMARY KEY,
+        sale_id INTEGER NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
+        tracking_id VARCHAR(255),
+        status VARCHAR(100) NOT NULL,
+        location VARCHAR(255),
+        description TEXT,
+        event_at TIMESTAMP DEFAULT NOW(),
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `
+  })
+
   await run("sale_items", async () => {
     await sql`
       CREATE TABLE IF NOT EXISTS sale_items (

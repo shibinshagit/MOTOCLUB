@@ -113,7 +113,7 @@ export async function getAuthoritativeProfitSummary(
     FROM filtered_sales fs
   `
 
-  // 2. Total Operating Expenses
+  // 2. Total Operating Expenses (strictly manual entries as confirmed by accountant)
   const expRes = await sql`
     SELECT COALESCE(SUM(debit_amount), 0)::numeric AS total_expenses
     FROM financial_transactions
@@ -121,10 +121,11 @@ export async function getAuthoritativeProfitSummary(
       AND (${endExclusive}::timestamp IS NULL OR transaction_date < ${endExclusive}::timestamp)
       AND (${deviceId === 0} OR device_id = ${deviceId} OR device_id = 0)
       AND (
-        transaction_type IN ('expense', 'sale_shipping', 'salary')
-        OR (transaction_type = 'manual' AND debit_amount > 0)
+        (transaction_type = 'manual' AND debit_amount > 0)
       )
   `
+
+  const actualPaidSalary = 0 // Not pulling from salary_payments to avoid double-counting manual entries
 
   // 3. Other Business Income
   const incomeRes = await sql`
@@ -150,25 +151,19 @@ export async function getAuthoritativeProfitSummary(
       AND (${endExclusive}::timestamp IS NULL OR transaction_date < ${endExclusive}::timestamp)
       AND (${deviceId === 0} OR device_id = ${deviceId} OR device_id = 0)
       AND (
-        transaction_type IN ('expense', 'sale_shipping', 'salary')
-        OR (transaction_type = 'manual' AND debit_amount > 0)
+        (transaction_type = 'manual' AND debit_amount > 0)
       )
   `
 
   const categoryMap: Record<string, number> = {}
+  
   expRows.forEach((r: any) => {
     const type = r.transaction_type
     const debit = Number(r.debit_amount) || 0
     if (debit <= 0) return
 
     let category = "Other Expenses"
-    if (type === "salary") {
-      category = "Salary & Wages"
-    } else if (type === "sale_shipping") {
-      category = "Courier & Delivery"
-    } else if (type === "expense") {
-      category = "Salary & Wages"
-    } else if (type === "manual") {
+    if (type === "manual") {
       const desc = r.description || ""
       const catMatch = desc.match(/Manual Entry - ([^-]+)/)
       if (catMatch) {
@@ -231,7 +226,7 @@ export async function getAuthoritativeProfitSummary(
   const pettyCashProfit = otherIncome
   const otherProfit = 0
 
-  const grossProfit = orderGrossProfit + otherIncome + otherProfit
+  const grossProfit = orderGrossProfit + otherIncome + otherProfit + netShippingDifference
   const netProfit = grossProfit - operatingExpenses
 
   return {

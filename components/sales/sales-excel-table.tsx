@@ -518,7 +518,7 @@ export default function SalesExcelTable({
   }
 
   const headerCell = (key: ColumnKey, label: string, align: "left" | "right" = "left") => (
-    <th className={`whitespace-nowrap px-4 py-2.5 ${align === "right" ? "text-right" : "text-left"}`}>
+    <th className={`whitespace-nowrap px-3 py-1.5 ${align === "right" ? "text-right" : "text-left"}`}>
       <ExcelColumnFilterHeader
         columnLabel={label}
         values={uniqueValues[key]}
@@ -640,10 +640,10 @@ export default function SalesExcelTable({
   }
 
   const stickyActionHeaderClass =
-    "sticky right-0 z-20 min-w-[5.5rem] whitespace-nowrap border-l border-slate-200 bg-[#F1F4F9] px-4 py-2.5 text-right shadow-[-8px_0_12px_-8px_rgba(15,23,42,0.12)]"
+    "min-w-[5.5rem] whitespace-nowrap border-l border-slate-200 bg-[#F1F4F9] px-3 py-1.5 text-right"
   const stickyActionCellClass = (rowBg: string, isPending: boolean) =>
-    `sticky right-0 z-10 min-w-[5.5rem] whitespace-nowrap border-l border-slate-200 px-4 py-2.5 text-right shadow-[-8px_0_12px_-8px_rgba(15,23,42,0.12)] ${
-      isPending ? "bg-amber-50/90 group-hover:bg-amber-100/90" : `group-hover:bg-violet-50/50 ${rowBg}`
+    `min-w-[5.5rem] whitespace-nowrap border-l border-slate-200 px-3 py-1.5 text-right ${
+      isPending ? "bg-amber-50 group-hover:bg-amber-100" : `group-hover:bg-violet-50 ${rowBg}`
     }`
 
   return (
@@ -1063,7 +1063,7 @@ export default function SalesExcelTable({
             <table className="w-full text-left text-xs text-slate-700">
               <thead className="bg-[#F1F4F9] text-[11px] font-bold uppercase tracking-wider text-slate-600 border-b border-slate-200">
                 <tr>
-                  <th className="whitespace-nowrap px-3 py-2.5 text-center w-10">
+                  <th className="whitespace-nowrap px-2 py-1.5 text-center w-10">
                     <input
                       type="checkbox"
                       className="h-4 w-4 rounded border-gray-300 text-violet-600 focus:ring-violet-600 cursor-pointer"
@@ -1078,8 +1078,8 @@ export default function SalesExcelTable({
                       title="Select all visible orders"
                     />
                   </th>
-                  <th className="whitespace-nowrap px-2 py-2.5 text-center w-8"></th>
-                  <th className="whitespace-nowrap px-3 py-2.5 text-xs font-bold text-slate-600 text-center">#</th>
+                  <th className="whitespace-nowrap px-1 py-1.5 text-center w-8"></th>
+                  <th className="whitespace-nowrap px-2 py-1.5 text-xs font-bold text-slate-600 text-center">#</th>
                   {headerCell("saleId", "Order #")}
                   {headerCell("status", "Status")}
                   {headerCell("delivery", "Delivery Status")}
@@ -1161,27 +1161,27 @@ export default function SalesExcelTable({
 
                     let baseBgClass =
                       index % 2 === 0
-                        ? "bg-white hover:bg-violet-50/50 text-slate-800"
-                        : "bg-slate-50/60 hover:bg-violet-50/50 text-slate-800"
+                        ? "bg-white hover:bg-violet-50 text-slate-800"
+                        : "bg-slate-50 hover:bg-violet-50 text-slate-800"
                     let borderLeftClass = ""
 
                     if (statusClass === "pending") {
-                      baseBgClass = "bg-amber-100/80 text-amber-950 hover:bg-amber-200/80 font-medium"
+                      baseBgClass = "bg-amber-100 text-amber-950 hover:bg-amber-200 font-medium"
                       borderLeftClass = "border-l-4 border-l-amber-500"
                     } else if (statusClass === "ship") {
-                      baseBgClass = "bg-blue-100/80 text-blue-950 hover:bg-blue-200/80 font-medium"
+                      baseBgClass = "bg-blue-100 text-blue-950 hover:bg-blue-200 font-medium"
                       borderLeftClass = "border-l-4 border-l-blue-500"
                     } else if (statusClass === "deliver") {
-                      baseBgClass = "bg-emerald-100/80 text-emerald-950 hover:bg-emerald-200/80 font-medium"
+                      baseBgClass = "bg-emerald-100 text-emerald-950 hover:bg-emerald-200 font-medium"
                       borderLeftClass = "border-l-4 border-l-emerald-500"
                     } else if (statusClass === "cancel") {
-                      baseBgClass = "bg-rose-100/80 text-rose-950 hover:bg-rose-200/80 font-medium"
+                      baseBgClass = "bg-rose-100 text-rose-950 hover:bg-rose-200 font-medium"
                       borderLeftClass = "border-l-4 border-l-rose-500"
                     }
 
                     const isSelected = selectedSales.includes(sale.id)
                     const isExpanded = expandedSaleId === sale.id
-                    const rowClass = `${baseBgClass} ${borderLeftClass} ${isSelected ? "bg-violet-100/80" : ""}`
+                    const rowClass = `${baseBgClass} ${borderLeftClass} ${isSelected ? "bg-violet-100" : ""}`
                     const isJobCard = isJobCardSale(sale)
                     const profitAmount = getSaleProfit(sale)
 
@@ -1191,7 +1191,7 @@ export default function SalesExcelTable({
                         onClick={() => onViewSale(sale)}
                         className={`group cursor-pointer border-b border-slate-200 transition-colors ${rowClass}`}
                       >
-                        <td className="whitespace-nowrap px-3 py-2.5 text-center" onClick={(e) => e.stopPropagation()}>
+                        <td className="whitespace-nowrap px-2 py-1.5 text-center" onClick={(e) => e.stopPropagation()}>
                           <input
                             type="checkbox"
                             className="h-4 w-4 rounded border-gray-300 text-violet-600 focus:ring-violet-600 cursor-pointer"
@@ -1203,7 +1203,7 @@ export default function SalesExcelTable({
                             }}
                           />
                         </td>
-                        <td className="whitespace-nowrap px-2 py-2.5 text-center" onClick={(e) => e.stopPropagation()}>
+                        <td className="whitespace-nowrap px-1 py-1.5 text-center" onClick={(e) => e.stopPropagation()}>
                           <button
                             type="button"
                             className="h-6 w-6 inline-flex items-center justify-center text-slate-400 hover:text-slate-700 rounded hover:bg-slate-200/60"
@@ -1217,10 +1217,10 @@ export default function SalesExcelTable({
                             )}
                           </button>
                         </td>
-                        <td className="whitespace-nowrap px-3 py-2.5 text-xs text-muted-foreground">
+                        <td className="whitespace-nowrap px-2 py-1.5 text-xs text-muted-foreground">
                           {(page - 1) * pageSize + index + 1}
                         </td>
-                        <td className="whitespace-nowrap px-4 py-2.5 font-semibold text-slate-800">
+                        <td className="whitespace-nowrap px-3 py-1.5 font-semibold text-slate-800">
                           <div className="flex flex-col gap-0.5">
                             <div className="flex items-center gap-1.5 flex-wrap">
                               <span className="font-bold text-blue-700">#{sale.id}</span>
@@ -1262,10 +1262,10 @@ export default function SalesExcelTable({
                             )}
                           </div>
                         </td>
-                        <td className="whitespace-nowrap px-4 py-2.5">
+                        <td className="whitespace-nowrap px-3 py-1.5">
                           <SaleStatusBadge status={getSaleStatusLabel(sale)} />
                         </td>
-                        <td className="whitespace-nowrap px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
+                        <td className="whitespace-nowrap px-3 py-1.5" onClick={(e) => e.stopPropagation()}>
                           {getSaleDeliveryLabel(sale) === "Pickup" ? (
                             <DeliveryStatusBadge status="Pickup" />
                           ) : (
@@ -1284,10 +1284,10 @@ export default function SalesExcelTable({
                             />
                           )}
                         </td>
-                        <td className="whitespace-nowrap px-4 py-2.5 text-slate-700">
+                        <td className="whitespace-nowrap px-3 py-1.5 text-slate-700">
                           {format(parseSaleDate(sale.sale_date), "yyyy-MM-dd")}
                         </td>
-                        <td className="max-w-[200px] px-4 py-2.5 text-slate-700">
+                        <td className="max-w-[200px] px-3 py-1.5 text-slate-700">
                           <div className="flex flex-col gap-0.5">
                             <span className="font-medium text-slate-800 truncate">
                               {sale.customer_name || "Walk-in"}
@@ -1299,7 +1299,7 @@ export default function SalesExcelTable({
                             ) : null}
                           </div>
                         </td>
-                        <td className="whitespace-nowrap px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
+                        <td className="whitespace-nowrap px-3 py-1.5" onClick={(e) => e.stopPropagation()}>
                           <StaffOwnerSelect
                             saleId={sale.id}
                             deviceId={sale.device_id || deviceId || 0}
@@ -1308,10 +1308,10 @@ export default function SalesExcelTable({
                             onUpdate={onRefreshSales}
                           />
                         </td>
-                        <td className="whitespace-nowrap px-4 py-2.5 text-slate-600">
+                        <td className="whitespace-nowrap px-3 py-1.5 text-slate-600">
                           {getPaymentMethodDisplay(sale)}
                         </td>
-                        <td className="whitespace-nowrap px-4 py-2.5 text-right font-medium text-slate-800">
+                        <td className="whitespace-nowrap px-3 py-1.5 text-right font-medium text-slate-800">
                           <div className="flex flex-col items-end">
                             <span className="font-bold text-slate-900">{formatCurrency(Number(sale.total_amount))}</span>
                             {!hideCogs && (
@@ -1321,10 +1321,10 @@ export default function SalesExcelTable({
                             )}
                           </div>
                         </td>
-                        <td className="whitespace-nowrap px-4 py-2.5 text-right text-emerald-700">
+                        <td className="whitespace-nowrap px-3 py-1.5 text-right text-emerald-700">
                           {received > 0 ? formatCurrency(received) : "—"}
                         </td>
-                        <td className="whitespace-nowrap px-4 py-2.5 text-right text-amber-700 font-semibold">
+                        <td className="whitespace-nowrap px-3 py-1.5 text-right text-amber-700 font-semibold">
                           {remaining > 0 ? formatCurrency(remaining) : "—"}
                         </td>
                         <td className={stickyActionCellClass(baseBgClass, isPending)}>

@@ -1399,16 +1399,17 @@ function getAccountType(transactionType: string): string {
 // FIXED: Get opening and closing balances based on actual transaction data with date range
 export async function getAccountingBalances(deviceId: number, fromDateStr: string, toDateStr?: string) {
   try {
-    const closingDateStr = toDateStr ?? fromDateStr
+    const cleanFromStr = fromDateStr ? fromDateStr.split("T")[0].trim() : format(new Date(), "yyyy-MM-dd")
+    const cleanToStr = toDateStr ? toDateStr.split("T")[0].trim() : cleanFromStr
 
-    console.log("Getting accounting balances for device:", deviceId, "from:", fromDateStr, "to:", closingDateStr)
+    console.log("Getting accounting balances for device:", deviceId, "from:", cleanFromStr, "to:", cleanToStr)
 
     // Precise exclusive date boundaries:
     // Opening cutoff: Start of fromDate (00:00:00)
     // Closing exclusive cutoff: Start of day after closing date (00:00:00)
     // Ensures: Today's Opening Balance === Yesterday's Closing Balance unconditionally
-    const openingCutoff = `${fromDateStr} 00:00:00`
-    const nextDay = addDays(parseISO(closingDateStr), 1)
+    const openingCutoff = `${cleanFromStr} 00:00:00`
+    const nextDay = addDays(parseISO(cleanToStr), 1)
     const closingExclusiveCutoff = `${format(nextDay, "yyyy-MM-dd")} 00:00:00`
 
     console.log("Date boundaries for balance calculation:", { openingCutoff, closingExclusiveCutoff })
@@ -1416,12 +1417,71 @@ export async function getAccountingBalances(deviceId: number, fromDateStr: strin
     // Single atomic scan to compute opening, period (Money In / Out), and closing balances
     const balanceResult = await sql`
       SELECT 
-        COALESCE(SUM(CASE WHEN transaction_date < ${openingCutoff}::timestamp THEN COALESCE(credit_amount, 0) ELSE 0 END), 0) as opening_credits,
-        COALESCE(SUM(CASE WHEN transaction_date < ${openingCutoff}::timestamp THEN CASE WHEN COALESCE(debit_amount, 0) > 0 THEN debit_amount WHEN transaction_type = 'expense' THEN COALESCE(amount, 0) ELSE 0 END ELSE 0 END), 0) as opening_debits,
-        COALESCE(SUM(CASE WHEN transaction_date >= ${openingCutoff}::timestamp AND transaction_date < ${closingExclusiveCutoff}::timestamp THEN COALESCE(credit_amount, 0) ELSE 0 END), 0) as period_credits,
-        COALESCE(SUM(CASE WHEN transaction_date >= ${openingCutoff}::timestamp AND transaction_date < ${closingExclusiveCutoff}::timestamp THEN CASE WHEN COALESCE(debit_amount, 0) > 0 THEN debit_amount WHEN transaction_type = 'expense' THEN COALESCE(amount, 0) ELSE 0 END ELSE 0 END), 0) as period_debits,
-        COALESCE(SUM(CASE WHEN transaction_date < ${closingExclusiveCutoff}::timestamp THEN COALESCE(credit_amount, 0) ELSE 0 END), 0) as closing_credits,
-        COALESCE(SUM(CASE WHEN transaction_date < ${closingExclusiveCutoff}::timestamp THEN CASE WHEN COALESCE(debit_amount, 0) > 0 THEN debit_amount WHEN transaction_type = 'expense' THEN COALESCE(amount, 0) ELSE 0 END ELSE 0 END), 0) as closing_debits
+        COALESCE(SUM(
+          CASE WHEN transaction_date < ${openingCutoff}::timestamp THEN 
+            CASE 
+              WHEN COALESCE(credit_amount, 0) > 0 THEN credit_amount 
+              WHEN transaction_type = 'sale' THEN COALESCE(received_amount, 0)
+              WHEN transaction_type = 'customer_payment' THEN COALESCE(received_amount, amount, 0)
+              ELSE COALESCE(credit_amount, 0)
+            END 
+          ELSE 0 END
+        ), 0) as opening_credits,
+
+        COALESCE(SUM(
+          CASE WHEN transaction_date < ${openingCutoff}::timestamp THEN 
+            CASE 
+              WHEN COALESCE(debit_amount, 0) > 0 THEN debit_amount 
+              WHEN transaction_type = 'purchase' THEN COALESCE(received_amount, 0)
+              WHEN transaction_type IN ('expense', 'supplier_payment', 'warehouse_payment') THEN COALESCE(amount, received_amount, 0)
+              ELSE COALESCE(debit_amount, 0)
+            END 
+          ELSE 0 END
+        ), 0) as opening_debits,
+
+        COALESCE(SUM(
+          CASE WHEN transaction_date >= ${openingCutoff}::timestamp AND transaction_date < ${closingExclusiveCutoff}::timestamp THEN 
+            CASE 
+              WHEN COALESCE(credit_amount, 0) > 0 THEN credit_amount 
+              WHEN transaction_type = 'sale' THEN COALESCE(received_amount, 0)
+              WHEN transaction_type = 'customer_payment' THEN COALESCE(received_amount, amount, 0)
+              ELSE COALESCE(credit_amount, 0)
+            END 
+          ELSE 0 END
+        ), 0) as period_credits,
+
+        COALESCE(SUM(
+          CASE WHEN transaction_date >= ${openingCutoff}::timestamp AND transaction_date < ${closingExclusiveCutoff}::timestamp THEN 
+            CASE 
+              WHEN COALESCE(debit_amount, 0) > 0 THEN debit_amount 
+              WHEN transaction_type = 'purchase' THEN COALESCE(received_amount, 0)
+              WHEN transaction_type IN ('expense', 'supplier_payment', 'warehouse_payment') THEN COALESCE(amount, received_amount, 0)
+              ELSE COALESCE(debit_amount, 0)
+            END 
+          ELSE 0 END
+        ), 0) as period_debits,
+
+        COALESCE(SUM(
+          CASE WHEN transaction_date < ${closingExclusiveCutoff}::timestamp THEN 
+            CASE 
+              WHEN COALESCE(credit_amount, 0) > 0 THEN credit_amount 
+              WHEN transaction_type = 'sale' THEN COALESCE(received_amount, 0)
+              WHEN transaction_type = 'customer_payment' THEN COALESCE(received_amount, amount, 0)
+              ELSE COALESCE(credit_amount, 0)
+            END 
+          ELSE 0 END
+        ), 0) as closing_credits,
+
+        COALESCE(SUM(
+          CASE WHEN transaction_date < ${closingExclusiveCutoff}::timestamp THEN 
+            CASE 
+              WHEN COALESCE(debit_amount, 0) > 0 THEN debit_amount 
+              WHEN transaction_type = 'purchase' THEN COALESCE(received_amount, 0)
+              WHEN transaction_type IN ('expense', 'supplier_payment', 'warehouse_payment') THEN COALESCE(amount, received_amount, 0)
+              ELSE COALESCE(debit_amount, 0)
+            END 
+          ELSE 0 END
+        ), 0) as closing_debits
       FROM financial_transactions
       WHERE device_id = ${deviceId}
         AND transaction_date < ${closingExclusiveCutoff}::timestamp
