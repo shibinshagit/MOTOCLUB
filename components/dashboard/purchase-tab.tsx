@@ -215,6 +215,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
     },
   ])
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const isSubmittingRef = useRef(false)
   const [formAlert, setFormAlert] = useState<{ type: "success" | "error" | "warning"; message: string } | null>(null)
 
   const [isNewProductModalOpen, setIsNewProductModalOpen] = useState(false)
@@ -908,9 +909,11 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
     }
   }
 
-  const handleSubmitPurchase = async (e: React.FormEvent) => {
+  const handleSubmitPurchase = (e: React.FormEvent) => {
     e.preventDefault()
     setFormAlert(null)
+
+    if (isSubmittingRef.current) return
 
     if (!deviceId) {
       setFormAlert({ type: "error", message: "Device ID not found. Please refresh the page." })
@@ -919,20 +922,6 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
 
     if (!supplier.trim()) {
       setFormAlert({ type: "error", message: "Please select a supplier" })
-      return
-    }
-
-    const supplierResult = await getRegisteredSuppliers(userId)
-    const registeredNames =
-      supplierResult.success && Array.isArray(supplierResult.data)
-        ? supplierResult.data.map((item: any) => String(item.name).trim())
-        : []
-
-    if (!registeredNames.includes(supplier.trim())) {
-      setFormAlert({
-        type: "error",
-        message: "Please select a registered supplier or add one from the Suppliers tab",
-      })
       return
     }
 
@@ -951,6 +940,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
       mfg_date: item.mfg_date || null,
       expiry_date: item.expiry_date || null,
     }))
+    
     if (items.length === 0) {
       setFormAlert({
         type: "error",
@@ -961,8 +951,8 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
 
     if (status === "Paid" && !paymentMethod) {
       setFormAlert({ type: "error", message: "Please select a payment method" })
-        return
-      }
+      return
+    }
 
     if (receivedAmount > totalAmount) {
       setFormAlert({ type: "error", message: "Received amount cannot be greater than total amount" })
@@ -970,60 +960,82 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
     }
 
     setIsSubmitting(true)
+    isSubmittingRef.current = true
 
-    try {
-      let finalReceivedAmount = receivedAmount
-      if (status === "Paid") {
-        finalReceivedAmount = totalAmount
-      } else if (status === "Cancelled") {
-        finalReceivedAmount = 0
-      }
+    const executePurchase = async () => {
+      try {
+        const supplierResult = await getRegisteredSuppliers(userId)
+        const registeredNames =
+          supplierResult.success && Array.isArray(supplierResult.data)
+            ? supplierResult.data.map((item: any) => String(item.name).trim())
+            : []
 
-      const formData = new FormData()
-      if (isEditMode && editingPurchaseId) {
-        formData.append("id", editingPurchaseId.toString())
-      }
-      formData.append("supplier", supplier.trim())
-      formData.append("purchase_date", date.toISOString())
-      formData.append("total_amount", totalAmount.toString())
-      formData.append("status", status)
-      formData.append("purchase_status", purchaseStatus)
-      formData.append("payment_method", paymentMethod)
-      formData.append("user_id", userId.toString())
-      formData.append("device_id", deviceId.toString())
-      formData.append("received_amount", finalReceivedAmount.toString())
+        if (!registeredNames.includes(supplier.trim())) {
+          setFormAlert({
+            type: "error",
+            message: "Please select a registered supplier or add one from the Suppliers tab",
+          })
+          setIsSubmitting(false)
+          isSubmittingRef.current = false
+          return
+        }
 
-      formData.append("items", JSON.stringify(items))
-      formData.append("courier_charge", courierCharge.toString())
-      formData.append("courier_charge_percentage", courierChargePercentage.toString())
-      formData.append("discount", discountAmount.toString())
+        let finalReceivedAmount = receivedAmount
+        if (status === "Paid") {
+          finalReceivedAmount = totalAmount
+        } else if (status === "Cancelled") {
+          finalReceivedAmount = 0
+        }
 
-      const result =
-        isEditMode && editingPurchaseId ? await updatePurchase(formData) : await createPurchase(formData)
+        const formData = new FormData()
+        if (isEditMode && editingPurchaseId) {
+          formData.append("id", editingPurchaseId.toString())
+        }
+        formData.append("supplier", supplier.trim())
+        formData.append("purchase_date", date.toISOString())
+        formData.append("total_amount", totalAmount.toString())
+        formData.append("status", status)
+        formData.append("purchase_status", purchaseStatus)
+        formData.append("payment_method", paymentMethod)
+        formData.append("user_id", userId.toString())
+        formData.append("device_id", deviceId.toString())
+        formData.append("received_amount", finalReceivedAmount.toString())
 
-      if (result.success) {
-        markInventoryStale(dispatch)
-        notifySuccess(toast, isEditMode ? "Purchase updated successfully" : "Purchase added successfully")
-        setFormAlert({
-          type: "success",
-          message: isEditMode ? "Purchase updated successfully" : "Purchase completed successfully",
-        })
-        setTimeout(() => {
+        formData.append("items", JSON.stringify(items))
+        formData.append("courier_charge", courierCharge.toString())
+        formData.append("courier_charge_percentage", courierChargePercentage.toString())
+        formData.append("discount", discountAmount.toString())
+
+        const result =
+          isEditMode && editingPurchaseId ? await updatePurchase(formData) : await createPurchase(formData)
+
+        if (result.success) {
+          markInventoryStale(dispatch)
+          notifySuccess(toast, isEditMode ? "Purchase updated successfully" : "Purchase added successfully")
+          setFormAlert({
+            type: "success",
+            message: isEditMode ? "Purchase updated successfully" : "Purchase completed successfully",
+          })
           finalizeDraftAfterSave()
           setIsSubmitting(false)
-        }, 1500)
-      } else {
+          isSubmittingRef.current = false
+        } else {
+          setIsSubmitting(false)
+          isSubmittingRef.current = false
+          setFormAlert({
+            type: "error",
+            message: result.message || `Failed to ${isEditMode ? "update" : "complete"} the purchase`,
+          })
+        }
+      } catch (submitError) {
         setIsSubmitting(false)
-        setFormAlert({
-          type: "error",
-          message: result.message || `Failed to ${isEditMode ? "update" : "complete"} the purchase`,
-        })
+        isSubmittingRef.current = false
+        console.error("Purchase submission error:", submitError)
+        setFormAlert({ type: "error", message: "An unexpected error occurred" })
       }
-    } catch (submitError) {
-      setIsSubmitting(false)
-      console.error("Purchase submission error:", submitError)
-      setFormAlert({ type: "error", message: "An unexpected error occurred" })
     }
+
+    executePurchase()
   }
 
   const handleViewPurchase = (purchase: any) => {
@@ -1231,6 +1243,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
       getPaidAmount={getPaidAmount}
       onViewPurchase={handleViewPurchase}
       onEditPurchase={handleEditPurchase}
+      onRefresh={() => fetchPurchasesForRange(globalDateRange.from, globalDateRange.to, debouncedPurchaseSearch)}
     />
   )
 

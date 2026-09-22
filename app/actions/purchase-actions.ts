@@ -349,6 +349,29 @@ export async function createPurchase(formData: FormData) {
 
   try {
     const result = await sql.begin(async (tx: any) => {
+      // Prevent double submission: Acquire transaction-level advisory lock
+      const lockKeyStr = `pur-${supplier}-${totalAmount}-${userId}-${deviceId}`
+      let lockKey = 0
+      for (let i = 0; i < lockKeyStr.length; i++) {
+        lockKey = ((lockKey << 5) - lockKey) + lockKeyStr.charCodeAt(i)
+        lockKey |= 0
+      }
+      await tx`SELECT pg_advisory_xact_lock(${lockKey})`
+
+      // Check if an identical purchase was created in the last 30 seconds
+      const duplicateCheck = await tx`
+        SELECT id FROM purchases
+        WHERE supplier = ${supplier}
+          AND total_amount = ${totalAmount}
+          AND created_by = ${userId}
+          AND device_id = ${deviceId}
+          AND created_at > NOW() - INTERVAL '30 seconds'
+        LIMIT 1
+      `
+      if (duplicateCheck.length > 0) {
+        throw new Error("Duplicate purchase detected. This exact purchase was just submitted.")
+      }
+
       console.log("Creating purchase with received amount:", finalReceivedAmount)
 
       const primaryPaymentMethod =

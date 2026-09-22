@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { format } from "date-fns"
-import { ChevronLeft, ChevronRight, Search, X } from "lucide-react"
+import { ChevronLeft, ChevronRight, Search, X, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -95,6 +95,7 @@ interface PurchaseExcelTableProps {
   getPaidAmount: (purchase: any) => number
   onViewPurchase: (purchase: any) => void
   onEditPurchase: (purchase: any) => void
+  onRefresh: () => void
 }
 
 function TableSkeleton() {
@@ -137,6 +138,7 @@ export default function PurchaseExcelTable({
   getPaidAmount,
   onViewPurchase,
   onEditPurchase,
+  onRefresh,
 }: PurchaseExcelTableProps) {
   const valueGetters = useMemo(
     () => ({
@@ -300,6 +302,16 @@ export default function PurchaseExcelTable({
           </div>
 
           <div className="w-full sm:w-auto flex min-h-[28px] items-center gap-2">
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-7 w-7 shrink-0 bg-white mr-1"
+              onClick={onRefresh}
+              disabled={isLoading}
+              title="Refresh purchases"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+            </Button>
             <div className="relative w-full sm:w-72">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
               <input

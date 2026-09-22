@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useToast } from "@/components/ui/use-toast"
 import { notifyError, notifySuccess } from "@/lib/notifications"
 import { adjustProductStock } from "@/app/actions/product-actions"
@@ -42,6 +43,7 @@ export default function AdjustStockModal({
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [currency, setCurrency] = useState(currencyProp || "AED")
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [selectedVariantId, setSelectedVariantId] = useState<string>("")
 
   const { toast } = useToast()
 
@@ -58,6 +60,11 @@ export default function AdjustStockModal({
       return
     }
 
+    if (product?.has_variants && product?.variants?.length > 1 && !selectedVariantId) {
+      setErrorMessage("Please select a variant to adjust stock")
+      return
+    }
+
     setIsSubmitting(true)
     setErrorMessage(null)
 
@@ -68,6 +75,12 @@ export default function AdjustStockModal({
       formData.append("type", adjustType)
       formData.append("notes", notes)
       formData.append("user_id", userId.toString())
+
+      if (selectedVariantId) {
+        formData.append("variant_id", selectedVariantId)
+      } else if (product?.variants?.length === 1) {
+        formData.append("variant_id", product.variants[0].id.toString())
+      }
 
       const result = await adjustProductStock(formData)
 
@@ -95,6 +108,7 @@ export default function AdjustStockModal({
     setQuantity("1")
     setAdjustType("increase")
     setNotes("")
+    setSelectedVariantId("")
   }
 
   useEffect(() => {
@@ -121,6 +135,14 @@ export default function AdjustStockModal({
 
     fetchCurrency()
   }, [isOpen, product?.id, userId, currencyProp])
+
+  useEffect(() => {
+    if (isOpen && product?.variants?.length === 1) {
+      setSelectedVariantId(product.variants[0].id.toString())
+    } else if (!isOpen) {
+      setSelectedVariantId("")
+    }
+  }, [isOpen, product])
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -160,6 +182,26 @@ export default function AdjustStockModal({
                 {currency} {typeof product.price === "number" ? product.price.toFixed(2) : product.price}
               </span>
             </div>
+
+            {product?.has_variants && product?.variants?.length > 1 && (
+              <div className="space-y-2">
+                <Label htmlFor="variant">
+                  Select Variant <span className="text-red-500">*</span>
+                </Label>
+                <Select value={selectedVariantId} onValueChange={setSelectedVariantId}>
+                  <SelectTrigger className="w-full bg-white">
+                    <SelectValue placeholder="Select a variant" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {product.variants.map((v: any) => (
+                      <SelectItem key={v.id} value={v.id.toString()}>
+                        {v.name} - Stock: {v.stock}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             <div className="space-y-2">
               <Label htmlFor="type">Adjustment Type</Label>

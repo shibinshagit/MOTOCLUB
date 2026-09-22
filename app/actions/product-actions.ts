@@ -3370,12 +3370,14 @@ export async function getProductStockByDevice(productId: number, userId: number)
 }
 
 export async function adjustProductStock(formData: FormData) {
-
   const productId = Number.parseInt(formData.get("product_id") as string)
   const quantity = Number.parseInt(formData.get("quantity") as string)
   const type = formData.get("type") as string // 'increase' or 'decrease'
   const notes = formData.get("notes") as string
   const userId = Number.parseInt(formData.get("user_id") as string)
+  
+  const variantIdStr = formData.get("variant_id") as string
+  const providedVariantId = variantIdStr ? Number.parseInt(variantIdStr) : null
 
   if (!productId || isNaN(quantity) || quantity <= 0 || !type) {
     return { success: false, message: "Product ID, valid quantity, and adjustment type are required" }
@@ -3406,15 +3408,32 @@ export async function adjustProductStock(formData: FormData) {
       return { success: false, message: "Product not found" }
     }
 
-    // Compute current stock from batch ledger
+    // Resolve variant logic
+    const variants = await sql`SELECT id FROM product_variants WHERE product_id = ${productId} ORDER BY id ASC`
+    let variantId = null;
+
+    if (providedVariantId) {
+      if (!variants.find((v: any) => Number(v.id) === providedVariantId)) {
+        return { success: false, message: "Selected variant is invalid for this product" }
+      }
+      variantId = providedVariantId;
+    } else {
+      if (product[0].has_variants && variants.length > 1) {
+        return { success: false, message: "This product has multiple variants. Please select a specific variant to adjust stock." }
+      } else if (variants.length > 0) {
+        variantId = variants[0].id;
+      } else {
+        return { success: false, message: "Product variant configuration is missing. Please configure the product variant before adjusting stock." }
+      }
+    }
+
+    // Compute current stock from batch ledger ONLY for this variant
     const existingDeviceStock = await sql`
       SELECT COALESCE(SUM(pbds.stock), 0) as stock
       FROM product_batch_device_stock pbds
       JOIN product_batches pb ON pb.id = pbds.batch_id
-      JOIN product_variants pv ON pv.id = pb.product_variant_id
-      WHERE pv.product_id = ${productId} AND pbds.device_id = ${userId}
+      WHERE pb.product_variant_id = ${variantId} AND pbds.device_id = ${userId}
     `
-
     const currentStock = Number(existingDeviceStock[0]?.stock || 0)
 
     // Calculate new stock
@@ -3426,74 +3445,76 @@ export async function adjustProductStock(formData: FormData) {
 
       // Check if we have enough stock
       if (newStock < 0) {
-        return { success: false, message: "Insufficient stock for adjustment" }
+        return { success: false, message: "Insufficient stock for adjustment on the selected variant" }
       }
     }
 
-    // For stock adjustments, create a new adjustment batch (increase) or
-    // deduct from oldest batch FIFO (decrease).
-    const defaultVariant = await sql`
-      SELECT id FROM product_variants WHERE product_id = ${productId} ORDER BY id ASC LIMIT 1
-    `
-    const variantId = defaultVariant.length > 0 ? defaultVariant[0].id : null
-
-    if (type === "increase") {
-      const adjBatchNo = `ADJ-${productId}-${Date.now().toString().slice(-6)}`
-      const adjBatch = await sql`
-        INSERT INTO product_batches (
-          product_id, product_variant_id, batch_no, cost_price, selling_price,
-          quantity_purchased, remaining_quantity, status
-        ) VALUES (
-          ${productId}, ${variantId}, ${adjBatchNo}, 0, 0,
-          ${quantity}, ${quantity}, 'active'
-        ) RETURNING id
-      `
-      const adjBatchId = adjBatch[0].id
-      await sql`
-        INSERT INTO product_batch_device_stock (batch_id, device_id, stock, updated_at)
-        VALUES (${adjBatchId}, ${userId}, ${quantity}, NOW())
-        ON CONFLICT (batch_id, device_id)
-        DO UPDATE SET stock = ${quantity}, updated_at = NOW()
-      `
-    } else {
-      // FIFO deduction across batches
-      const availableBatches = await sql`
-        SELECT pbds.batch_id, pbds.stock
-        FROM product_batch_device_stock pbds
-        JOIN product_batches pb ON pb.id = pbds.batch_id
-        JOIN product_variants pv ON pv.id = pb.product_variant_id
-        WHERE pv.product_id = ${productId} AND pbds.device_id = ${userId} AND pbds.stock > 0
-        ORDER BY pb.manufacture_date ASC NULLS LAST, pb.created_at ASC
-      `
-      let remaining = quantity
-      for (const batch of availableBatches) {
-        if (remaining <= 0) break
-        const take = Math.min(remaining, Number(batch.stock))
-        const nextStock = Number(batch.stock) - take
-        await sql`
-          UPDATE product_batch_device_stock
-          SET stock = ${nextStock}, updated_at = NOW()
-          WHERE batch_id = ${batch.batch_id} AND device_id = ${userId}
+    await sql.begin(async (tx: any) => {
+      if (type === "increase") {
+        const adjBatchNo = `ADJ-${productId}-${Date.now().toString().slice(-6)}`
+        const adjBatch = await tx`
+          INSERT INTO product_batches (
+            product_id, product_variant_id, batch_no, cost_price, selling_price,
+            quantity_purchased, remaining_quantity, status
+          ) VALUES (
+            ${productId}, ${variantId}, ${adjBatchNo}, 0, 0,
+            ${quantity}, ${quantity}, 'active'
+          ) RETURNING id
         `
-        remaining -= take
+        const adjBatchId = adjBatch[0].id
+        await tx`
+          INSERT INTO product_batch_device_stock (batch_id, device_id, stock, updated_at)
+          VALUES (${adjBatchId}, ${userId}, ${quantity}, NOW())
+          ON CONFLICT (batch_id, device_id)
+          DO UPDATE SET stock = ${quantity}, updated_at = NOW()
+        `
+      } else {
+        // FIFO deduction across batches for THIS variant only
+        const availableBatches = await tx`
+          SELECT pbds.batch_id, pbds.stock
+          FROM product_batch_device_stock pbds
+          JOIN product_batches pb ON pb.id = pbds.batch_id
+          WHERE pb.product_variant_id = ${variantId} AND pbds.device_id = ${userId} AND pbds.stock > 0
+          ORDER BY pb.manufacture_date ASC NULLS LAST, pb.created_at ASC
+        `
+        let remaining = quantity
+        for (const batch of availableBatches) {
+          if (remaining <= 0) break
+          const take = Math.min(remaining, Number(batch.stock))
+          const nextStock = Number(batch.stock) - take
+          await tx`
+            UPDATE product_batch_device_stock
+            SET stock = ${nextStock}, updated_at = NOW()
+            WHERE batch_id = ${batch.batch_id} AND device_id = ${userId}
+          `
+          remaining -= take
+        }
       }
-    }
 
-    const updatedProduct = { ...product[0], stock: newStock }
+      // Add stock history record
+      try {
+        await tx`
+          INSERT INTO product_stock_history (
+            product_id, product_variant_id, quantity, type, reference_type, notes, created_by, device_id
+          ) VALUES (
+            ${productId}, ${variantId}, ${quantity}, ${type === "increase" ? "adjustment" : "adjustment"}, 'manual', ${notes || "Manual stock adjustment"}, ${userId}, ${userId}
+          )
+        `
+      } catch (error) {
+        console.error("Stock history table might not exist:", error)
+        // Continue execution even if this fails
+      }
+    })
 
-    // Add stock history record
-    try {
-      await sql`
-        INSERT INTO product_stock_history (
-          product_id, product_variant_id, quantity, type, reference_type, notes, created_by, device_id
-        ) VALUES (
-          ${productId}, ${variantId || null}, ${quantity}, ${type === "increase" ? "adjustment" : "adjustment"}, 'manual', ${notes || "Manual stock adjustment"}, ${userId}, ${userId}
-        )
-      `
-    } catch (error) {
-      console.error("Stock history table might not exist:", error)
-      // Continue execution even if this fails
-    }
+    // Recalculate TOTAL product stock for UI consistency
+    const totalProductStockQuery = await sql`
+      SELECT COALESCE(SUM(pbds.stock), 0) as stock
+      FROM product_batch_device_stock pbds
+      JOIN product_batches pb ON pb.id = pbds.batch_id
+      JOIN product_variants pv ON pv.id = pb.product_variant_id
+      WHERE pv.product_id = ${productId} AND pbds.device_id = ${userId}
+    `
+    const updatedProduct = { ...product[0], stock: Number(totalProductStockQuery[0]?.stock || 0) }
 
     return {
       success: true,

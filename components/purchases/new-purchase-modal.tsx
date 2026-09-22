@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback, useMemo } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -104,6 +104,7 @@ export default function NewPurchaseModal({
   const [courierChargePercentage, setCourierChargePercentage] = useState<number>(0)
   const [isCourierRateLoading, setIsCourierRateLoading] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const isSubmittingRef = useRef(false)
   const [customCourierCharge, setCustomCourierCharge] = useState<number | null>(null)
   const [isEditingCourier, setIsEditingCourier] = useState(false)
   const [courierInputVal, setCourierInputVal] = useState("")
@@ -270,6 +271,8 @@ export default function NewPurchaseModal({
       setDiscountAmount(0)
       setCourierChargePercentage(0)
       setIsCourierRateLoading(false)
+      setIsSubmitting(false)
+      isSubmittingRef.current = false
       setFormAlert(null)
       setActiveProductRowId(null)
       setCustomCourierCharge(null)
@@ -456,6 +459,8 @@ export default function NewPurchaseModal({
   
   // Handle form submission
   const handleSubmit = async () => {
+    if (isSubmittingRef.current) return
+    
     setFormAlert(null) // Clear any previous alerts
     
     // Validate form
@@ -505,6 +510,7 @@ export default function NewPurchaseModal({
     }
 
     setIsSubmitting(true)
+    isSubmittingRef.current = true
 
     try {
       // Prepare form data
@@ -543,9 +549,11 @@ export default function NewPurchaseModal({
         setTimeout(() => {
           onClose()
           setIsSubmitting(false)
+          isSubmittingRef.current = false
         }, 500)
       } else {
         setIsSubmitting(false)
+        isSubmittingRef.current = false
         setFormAlert({
           type: "error",
           message: result.message || "Failed to add purchase",
@@ -554,6 +562,7 @@ export default function NewPurchaseModal({
       }
     } catch (error) {
       setIsSubmitting(false)
+      isSubmittingRef.current = false
       console.error("Add purchase error:", error)
       setFormAlert({
         type: "error",
