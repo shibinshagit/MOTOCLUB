@@ -8,7 +8,15 @@ import ProductsExcelTable from "@/components/products/products-excel-table"
 import { ProductDetailSlider } from "@/components/products/product-detail-slider"
 import EditProductModal from "@/components/products/edit-product-modal"
 import AdjustStockModal from "@/components/products/adjust-stock-modal"
-import { getTrendingProducts } from "@/app/actions/product-actions"
+import { getTrendingProducts, hideTrendingProducts } from "@/app/actions/product-actions"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { useToast } from "@/components/ui/use-toast"
 import { notifyError } from "@/lib/notifications"
 import { useSelector } from "react-redux"
@@ -29,6 +37,9 @@ export default function TrendingInlineView({ userId }: TrendingInlineViewProps) 
   const [selectedProduct, setSelectedProduct] = useState<any>(null)
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [isAdjustStockModalOpen, setIsAdjustStockModalOpen] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false)
+  const [isHiding, setIsHiding] = useState(false)
 
   const fetchTrendingProducts = useCallback(async () => {
     setLoading(true)
@@ -60,6 +71,43 @@ export default function TrendingInlineView({ userId }: TrendingInlineViewProps) 
       p.sku?.toLowerCase().includes(q)
     )
   })
+
+  const handleHideTrending = async () => {
+    if (selectedIds.size === 0) return
+    setIsHiding(true)
+    try {
+      const result = await hideTrendingProducts(Array.from(selectedIds), userId)
+      if (result.success) {
+        toast({ title: "Success", description: result.message })
+        setSelectedIds(new Set())
+        setIsConfirmModalOpen(false)
+        fetchTrendingProducts()
+      } else {
+        notifyError(toast, result.message || "Failed to remove products from trending")
+      }
+    } catch (err) {
+      console.error("Error hiding trending products:", err)
+      notifyError(toast, "Failed to remove products from trending")
+    } finally {
+      setIsHiding(false)
+    }
+  }
+
+  const bulkActionToolbar = (
+    <div className="flex items-center justify-between bg-violet-50/50 p-2 px-4 rounded-t-xl border-b border-violet-100">
+      <span className="text-sm font-medium text-violet-700">
+        {selectedIds.size} product{selectedIds.size === 1 ? "" : "s"} selected
+      </span>
+      <Button 
+        variant="destructive" 
+        size="sm" 
+        className="h-8"
+        onClick={() => setIsConfirmModalOpen(true)}
+      >
+        Hide from Trending
+      </Button>
+    </div>
+  )
 
   return (
     <div className="p-4 space-y-4">
@@ -112,6 +160,10 @@ export default function TrendingInlineView({ userId }: TrendingInlineViewProps) 
             hideCogs={false}
             hideStockCount={false}
             currency={currency || "INR"}
+            enableMultiSelect={true}
+            selectedIds={selectedIds}
+            onSelectionChange={setSelectedIds}
+            bulkActionToolbar={bulkActionToolbar}
             onViewProduct={(p: any) => setDetailProduct(p)}
             onEditProduct={(p: any) => {
               setSelectedProduct(p)
@@ -158,6 +210,26 @@ export default function TrendingInlineView({ userId }: TrendingInlineViewProps) 
           userId={userId}
         />
       )}
+
+      <Dialog open={isConfirmModalOpen} onOpenChange={setIsConfirmModalOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Hide {selectedIds.size} Products from Trending?</DialogTitle>
+            <DialogDescription>
+              These products will remain in your product inventory and sales system. They will only be removed from the Trending Products list.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsConfirmModalOpen(false)} disabled={isHiding}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleHideTrending} disabled={isHiding}>
+              {isHiding && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {isHiding ? "Hiding..." : "Hide from Trending"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

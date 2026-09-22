@@ -3667,4 +3667,33 @@ export async function getUserProducts(userId: number) {
   }
 }
 
+export async function hideTrendingProducts(productIds: number[], userId: number) {
+  if (!productIds || productIds.length === 0) return { success: false, message: "No products selected" }
+  if (!userId) return { success: false, message: "User ID is required" }
+
+  resetConnectionState()
+  try {
+    const result = await sql`
+      UPDATE products 
+      SET trending = false 
+      WHERE id = ANY(${productIds as any})
+      AND created_by IN (
+        SELECT d2.id
+        FROM devices d1
+        JOIN devices d2 ON d2.company_id = d1.company_id
+        WHERE d1.id = ${userId}
+      )
+      RETURNING id
+    `
+    return { success: true, count: result.length, message: `${result.length} products removed from Trending.` }
+  } catch (error: any) {
+    console.error("Bulk hide trending products error:", error)
+    return { 
+      success: false, 
+      message: `Database error: ${getLastError()?.message || error.message || "Unknown error"}. Please try again.` 
+    }
+  }
+}
+
+
 

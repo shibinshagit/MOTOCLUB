@@ -82,6 +82,10 @@ interface ProductsExcelTableProps {
   totalPages?: number
   onPageChange?: (page: number) => void
   onPageSizeChange?: (pageSize: number) => void
+  enableMultiSelect?: boolean
+  selectedIds?: Set<number>
+  onSelectionChange?: (selectedIds: Set<number>) => void
+  bulkActionToolbar?: React.ReactNode
 }
 
 function TableSkeleton({ cols }: { cols: number }) {
@@ -114,6 +118,10 @@ function ProductsExcelTable({
   totalPages = 1,
   onPageChange,
   onPageSizeChange,
+  enableMultiSelect = false,
+  selectedIds = new Set<number>(),
+  onSelectionChange,
+  bulkActionToolbar,
 }: ProductsExcelTableProps) {
   const formatMoney = (amount: number | string) => {
     const num = typeof amount === "number" ? amount : Number.parseFloat(String(amount || 0))
@@ -209,10 +217,31 @@ function ProductsExcelTable({
   const stickyActionCellClass = (rowBg: string) =>
     `sticky right-0 z-10 min-w-[5.5rem] whitespace-nowrap border-l border-slate-200 px-4 py-2.5 text-right shadow-[-8px_0_12px_-8px_rgba(15,23,42,0.12)] group-hover:bg-violet-50/50 ${rowBg}`
 
-  const colCount = 1 + 3 + (hideCogs ? 0 : 1) + (hideStockCount ? 0 : 3) + 1
+  const colCount = 1 + (enableMultiSelect ? 1 : 0) + 3 + (hideCogs ? 0 : 1) + (hideStockCount ? 0 : 3) + 1
   const startIndex = (page - 1) * pageSize
 
+  const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!onSelectionChange) return
+    if (e.target.checked) {
+      const allVisibleIds = new Set(selectedIds)
+      displayProducts.forEach(p => allVisibleIds.add(p.id))
+      onSelectionChange(allVisibleIds)
+    } else {
+      const remainingIds = new Set(selectedIds)
+      displayProducts.forEach(p => remainingIds.delete(p.id))
+      onSelectionChange(remainingIds)
+    }
+  }
+
+  const allVisibleSelected = displayProducts.length > 0 && displayProducts.every(p => selectedIds.has(p.id))
+
   return (
+    <div className="flex flex-col space-y-3">
+      {enableMultiSelect && bulkActionToolbar && selectedIds.size > 0 && (
+        <div className="w-full">
+          {bulkActionToolbar}
+        </div>
+      )}
     <div className="flex h-full flex-col overflow-hidden rounded-xl border border-slate-200 bg-card shadow-sm">
       <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-[#F1F4F9] px-4 py-2.5">
         <span className="text-xs font-medium text-slate-600">
@@ -242,6 +271,16 @@ function ProductsExcelTable({
         <table className="min-w-full border-separate border-spacing-0 text-sm">
           <thead className="sticky top-0 z-30">
             <tr className="border-b border-slate-200 bg-[#F1F4F9] text-xs font-semibold uppercase tracking-wide text-slate-600">
+              {enableMultiSelect && (
+                <th className="w-10 whitespace-nowrap px-4 py-2.5 text-center">
+                  <input 
+                    type="checkbox" 
+                    className="h-4 w-4 cursor-pointer rounded border-slate-300 text-violet-600 focus:ring-violet-500" 
+                    checked={allVisibleSelected}
+                    onChange={handleSelectAll}
+                  />
+                </th>
+              )}
               <th className="w-12 whitespace-nowrap px-4 py-2.5 text-left">#</th>
               {headerCell("name", "Product")}
               {headerCell("company", "Company")}
@@ -283,15 +322,39 @@ function ProductsExcelTable({
                 return (
                   <tr
                     key={product.id}
-                    onClick={() => {
+                    onClick={(e) => {
                       if (columnFilterOpen) return
+                      
+                      // Ignore click if clicking the checkbox cell specifically
+                      const target = e.target as HTMLElement;
+                      if (target.tagName.toLowerCase() === 'input' && target.getAttribute('type') === 'checkbox') {
+                        return;
+                      }
+                      
                       onViewProduct(product)
                     }}
                     className={cn(
                       "group cursor-pointer border-b border-slate-200 transition-colors hover:bg-violet-50/50",
                       index % 2 === 0 ? "bg-white" : "bg-slate-50/60",
+                      selectedIds.has(product.id) && "bg-violet-50/80"
                     )}
                   >
+                    {enableMultiSelect && (
+                      <td className="whitespace-nowrap px-4 py-2.5 align-top text-center" onClick={(e) => e.stopPropagation()}>
+                        <input 
+                          type="checkbox" 
+                          className="h-4 w-4 cursor-pointer rounded border-slate-300 text-violet-600 focus:ring-violet-500" 
+                          checked={selectedIds.has(product.id)}
+                          onChange={(e) => {
+                            if (!onSelectionChange) return
+                            const next = new Set(selectedIds)
+                            if (e.target.checked) next.add(product.id)
+                            else next.delete(product.id)
+                            onSelectionChange(next)
+                          }}
+                        />
+                      </td>
+                    )}
                     <td className="whitespace-nowrap px-4 py-2.5 align-top text-xs text-muted-foreground">{startIndex + index + 1}</td>
                     <td className="min-w-[200px] max-w-sm whitespace-normal break-words px-4 py-2.5 align-top font-medium leading-snug text-slate-800">
                       {product.name}
@@ -415,6 +478,7 @@ function ProductsExcelTable({
           </div>
         </div>
       ) : null}
+    </div>
     </div>
   )
 }
