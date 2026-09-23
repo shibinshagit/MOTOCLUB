@@ -3231,6 +3231,60 @@ export async function updateProductPlatformStatus(
   }
 }
 
+export async function updateProductTrendingStatus(
+  productId: number,
+  trending: boolean,
+  userId?: number,
+) {
+  if (!productId) {
+    return { success: false, message: "Product ID is required" }
+  }
+
+  resetConnectionState()
+
+  try {
+    let result
+    if (userId) {
+      result =
+        await sql`
+          SELECT *
+          FROM products
+          WHERE id = ${productId}
+          AND created_by IN (
+            SELECT d2.id
+            FROM devices d1
+            JOIN devices d2 ON d2.company_id = d1.company_id
+            WHERE d1.id = ${userId}
+          )
+        `
+    } else {
+      result = await sql`SELECT * FROM products WHERE id = ${productId}`
+    }
+
+    if (!result.length) {
+      return { success: false, message: "Product not found or unauthorized" }
+    }
+
+    result = await sql`UPDATE products SET trending = ${trending}, updated_at = NOW() WHERE id = ${productId} RETURNING *`
+
+    if (!result.length) {
+      return { success: false, message: "Failed to update trending status" }
+    }
+
+    return { 
+      success: true, 
+      data: result[0],
+      message: trending ? "Product marked as trending" : "Product removed from trending",
+    }
+  } catch (error) {
+    console.error("Update trending status error:", error)
+    return {
+      success: false,
+      message: `Database error: ${getLastError()?.message || "Unknown error"}. Please try again later.`,
+    }
+  }
+}
+
 // Add getProductStockHistory function
 export async function getProductStockHistory(productId: number, limit?: number) {
   if (!productId) {

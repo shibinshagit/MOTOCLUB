@@ -20,7 +20,7 @@ import { EXCEL_COLUMN_FILTER_POPOVER_ATTR } from "@/components/sales/excel-colum
 import { ProductDetailSlider } from "@/components/products/product-detail-slider"
 import EditProductModal from "@/components/products/edit-product-modal"
 import AdjustStockModal from "@/components/products/adjust-stock-modal"
-import { deleteProduct, getTrendingProducts } from "@/app/actions/product-actions"
+import { deleteProduct, getTrendingProducts, hideTrendingProducts } from "@/app/actions/product-actions"
 import { useToast } from "@/components/ui/use-toast"
 import { notifyError, notifySuccess } from "@/lib/notifications"
 import { useStaffRestrictions } from "@/hooks/use-staff-restrictions"
@@ -54,6 +54,9 @@ export default function TrendingDrawer({ open, onOpenChange, userId }: TrendingD
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [contentReady, setContentReady] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false)
+  const [isRemoving, setIsRemoving] = useState(false)
   const [, startTableTransition] = useTransition()
 
   useEffect(() => {
@@ -111,6 +114,7 @@ export default function TrendingDrawer({ open, onOpenChange, userId }: TrendingD
 
   const handleRefresh = () => {
     setHasLoaded(false)
+    setSelectedIds(new Set())
     fetchTrendingProducts()
   }
 
@@ -174,6 +178,44 @@ export default function TrendingDrawer({ open, onOpenChange, userId }: TrendingD
       setIsDeleteModalOpen(false)
     }
   }
+
+  const handleRemoveTrending = async () => {
+    if (selectedIds.size === 0) return
+    setIsRemoving(true)
+    try {
+      const result = await hideTrendingProducts(Array.from(selectedIds), userId)
+      if (result.success) {
+        const count = selectedIds.size
+        notifySuccess(toast, `${count} product${count === 1 ? "" : "s"} removed from Trending`)
+        setSelectedIds(new Set())
+        setIsConfirmModalOpen(false)
+        fetchTrendingProducts()
+      } else {
+        notifyError(toast, result.message || "Failed to remove products from trending")
+      }
+    } catch (err) {
+      console.error("Error hiding trending products:", err)
+      notifyError(toast, "Failed to remove products from trending")
+    } finally {
+      setIsRemoving(false)
+    }
+  }
+
+  const bulkActionToolbar = (
+    <div className="flex items-center justify-between bg-violet-50/50 p-2 px-4 rounded-t-xl border-b border-violet-100">
+      <span className="text-sm font-medium text-violet-700">
+        {selectedIds.size} product{selectedIds.size === 1 ? "" : "s"} selected
+      </span>
+      <Button 
+        variant="destructive" 
+        size="sm" 
+        className="h-8"
+        onClick={() => setIsConfirmModalOpen(true)}
+      >
+        Remove from Trending
+      </Button>
+    </div>
+  )
 
   const sheetOutsideGuard = (event: { preventDefault: () => void; target: EventTarget | null }) => {
     const target = event.target as HTMLElement | null
@@ -275,6 +317,10 @@ export default function TrendingDrawer({ open, onOpenChange, userId }: TrendingD
                     hideCogs={hideCogs}
                     hideStockCount={hideStockCount}
                     currency={currency}
+                    enableMultiSelect={true}
+                    selectedIds={selectedIds}
+                    onSelectionChange={setSelectedIds}
+                    bulkActionToolbar={selectedIds.size > 0 ? bulkActionToolbar : undefined}
                     onViewProduct={setDetailProduct}
                     onEditProduct={(product) => {
                       setSelectedProduct(product)
@@ -376,6 +422,29 @@ export default function TrendingDrawer({ open, onOpenChange, userId }: TrendingD
               className="bg-red-600 hover:bg-red-700"
             >
               {isDeleting ? "Deleting..." : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={isConfirmModalOpen} onOpenChange={setIsConfirmModalOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove {selectedIds.size} product{selectedIds.size === 1 ? "" : "s"} from Trending?</AlertDialogTitle>
+            <AlertDialogDescription>
+              You are about to remove {selectedIds.size} product{selectedIds.size === 1 ? "" : "s"} from Trending Products.
+              <br/><br/>
+              The selected product{selectedIds.size === 1 ? "" : "s"} will no longer appear in the Trending Products section.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isRemoving}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleRemoveTrending}
+              disabled={isRemoving}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {isRemoving ? "Removing..." : "Remove from Trending"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

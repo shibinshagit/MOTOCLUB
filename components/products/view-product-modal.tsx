@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { Button } from "@/components/ui/button"
 import { format } from "date-fns"
 import { Loader2, Printer, Copy, Settings, ChevronLeft, Link2, Barcode, ExternalLink } from "lucide-react"
-import { getProductStockHistory, getProductStockByDevice, updateProductPlatformStatus, type PlatformKey, type PlatformStatus } from "@/app/actions/product-actions"
+import { getProductStockHistory, getProductStockByDevice, updateProductPlatformStatus, updateProductTrendingStatus, type PlatformKey, type PlatformStatus } from "@/app/actions/product-actions"
 import { printBarcodeSticker, printMultipleBarcodeStickers, encodeNumberAsLetters, sendPrintJobToBarTender } from "@/lib/barcode-utils"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
@@ -169,6 +169,28 @@ export function ProductDetailPanel({
       notifyError(toast, "Failed to update platform status")
     } finally {
       setUpdatingPlatform(null)
+    }
+  }
+
+  const [isUpdatingTrending, setIsUpdatingTrending] = useState(false)
+  
+  const handleToggleTrending = async () => {
+    if (!currentProduct?.id) return
+    const nextStatus = !currentProduct.trending
+    setIsUpdatingTrending(true)
+    try {
+      const res = await updateProductTrendingStatus(currentProduct.id, nextStatus, userId)
+      if (res.success && res.data) {
+        setCurrentProduct(res.data)
+        dispatch(updateProduct(res.data))
+        notifySuccess(toast, res.message || (nextStatus ? "Product marked as trending" : "Product removed from trending"))
+      } else {
+        notifyError(toast, res.message || "Failed to update trending status")
+      }
+    } catch (err) {
+      notifyError(toast, "Failed to update trending status")
+    } finally {
+      setIsUpdatingTrending(false)
     }
   }
 
@@ -501,7 +523,33 @@ export function ProductDetailPanel({
               />
               <InfoCell label="Company" value={product.company_name || "—"} />
               <InfoCell label="Category" value={product.category || "—"} />
-              <InfoCell label="Trending" value={product.trending ? "Yes" : "No"} />
+              <div className="border-b border-slate-200 px-4 py-3 sm:col-span-2">
+                <div className="flex items-center justify-between h-full">
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Trending</p>
+                    <p className="mt-0.5 text-[11px] text-slate-500">
+                      {currentProduct.trending ? "This product appears in Trending Products" : "Mark this product as trending"}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Switch
+                      checked={Boolean(currentProduct.trending)}
+                      disabled={isUpdatingTrending}
+                      onCheckedChange={handleToggleTrending}
+                    />
+                    <span
+                      className={cn(
+                        "inline-flex w-[70px] justify-center items-center rounded-full border px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider",
+                        currentProduct.trending
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                          : "border-slate-200 bg-slate-50 text-slate-500",
+                      )}
+                    >
+                      {currentProduct.trending ? "ON ●" : "OFF ○"}
+                    </span>
+                  </div>
+                </div>
+              </div>
               {product.shelf ? <InfoCell label="Shelf" value={product.shelf} /> : null}
               {product.color ? <InfoCell label="Colour" value={product.color} /> : null}
               {product.size ? <InfoCell label="Size" value={product.size} /> : null}
