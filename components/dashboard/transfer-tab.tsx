@@ -150,22 +150,22 @@ export default function TransferTab({ userId }: TransferTabProps) {
     hasMeaningfulData: hasMeaningfulTransferData,
   })
 
-  const handleCancelModal = async () => {
-    if (!editingTransferId && (hasTransferDraft || hasMeaningfulTransferData(formData))) {
-      const shouldDiscard = await confirm({
-        title: "Discard this unfinished transfer?",
-        description: "You have unsaved transfer items. Discarding will clear the saved draft.",
-        confirmLabel: "Discard",
-        cancelLabel: "Continue Editing",
-        destructive: true,
-      })
-      if (!shouldDiscard) return
-      clearTransferDraft()
-      resetForm()
-      setIsModalOpen(false)
-    } else {
-      setIsModalOpen(false)
-    }
+  const handleCancelModal = () => {
+    setIsModalOpen(false)
+  }
+
+  const handleDiscardDraft = async () => {
+    const shouldDiscard = await confirm({
+      title: "Discard this unfinished transfer?",
+      description: "You have unsaved transfer items. Discarding will clear the saved draft.",
+      confirmLabel: "Discard",
+      cancelLabel: "Keep Draft",
+      destructive: true,
+    })
+    if (!shouldDiscard) return
+    clearTransferDraft()
+    resetForm()
+    setIsModalOpen(false)
   }
 
   const [devices, setDevices] = useState<Array<{ id: number; name: string }>>([])
@@ -2213,10 +2213,15 @@ export default function TransferTab({ userId }: TransferTabProps) {
                 ) : null}
               </div>
               <div className="flex items-center gap-2 ml-auto">
-                <Button variant="outline" onClick={handleCancelModal} disabled={isSaving}>
+                {!editingTransferId && hasTransferDraft && (
+                  <Button type="button" variant="ghost" className="text-red-600 hover:text-red-700 hover:bg-red-50" onClick={handleDiscardDraft} disabled={isSaving}>
+                    Discard Draft
+                  </Button>
+                )}
+                <Button type="button" variant="outline" onClick={handleCancelModal} disabled={isSaving}>
                   Cancel
                 </Button>
-                <Button onClick={handleSave} disabled={isSaving}>
+                <Button type="button" onClick={handleSave} disabled={isSaving}>
                   {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
                   {editingTransferId ? "Update Transfer" : "Create Transfer"}
                 </Button>

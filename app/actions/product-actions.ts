@@ -2641,12 +2641,17 @@ export async function updateProduct(formData: FormData) {
     const meeshoStatus = formData.has("meesho_status")
       ? normalizePlatformStatus(meeshoStatusRaw)
       : normalizePlatformStatus(currentProduct[0].meesho_status)
-    const ownEcomStatus = formData.has("own_ecom_status")
+    let ownEcomStatus = formData.has("own_ecom_status")
       ? normalizePlatformStatus(ownEcomStatusRaw)
       : normalizePlatformStatus(currentProduct[0].own_ecom_status)
     const trending = formData.has("trending")
       ? String(formData.get("trending") || "false") === "true"
       : Boolean(currentProduct[0].trending)
+
+    // Business rule: automatically list on e-commerce if trending changes from false -> true
+    if (trending && !currentProduct[0].trending) {
+      ownEcomStatus = "active"
+    }
 
     let parsedExistingImageUrls: string[] = []
     try {
@@ -3265,7 +3270,11 @@ export async function updateProductTrendingStatus(
       return { success: false, message: "Product not found or unauthorized" }
     }
 
-    result = await sql`UPDATE products SET trending = ${trending}, updated_at = NOW() WHERE id = ${productId} RETURNING *`
+    if (trending && !result[0].trending) {
+      result = await sql`UPDATE products SET trending = ${trending}, own_ecom_status = 'active', updated_at = NOW() WHERE id = ${productId} RETURNING *`
+    } else {
+      result = await sql`UPDATE products SET trending = ${trending}, updated_at = NOW() WHERE id = ${productId} RETURNING *`
+    }
 
     if (!result.length) {
       return { success: false, message: "Failed to update trending status" }

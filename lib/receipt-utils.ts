@@ -6,17 +6,27 @@ import { parseSaleDateTime, parseSaleDate, formatOrderId } from "@/lib/utils"
 export { formatOrderId }
 
 
+function getDeviceNameFromStore(): string | null {
+  try {
+    const { store } = require("@/store/store")
+    const state = store.getState()
+    return state?.device?.name || null
+  } catch (e) {
+    return null
+  }
+}
+
 // Function to get company info from the DOM
 const getCompanyInfoFromDOM = (): { name: string; address: string; phone: string } => {
   if (typeof document === "undefined") {
     return {
-      name: getCachedPlatformName(),
+      name: getDeviceNameFromStore() || getCachedPlatformName(),
       address: "",
       phone: "",
     }
   }
   return {
-    name: getCachedPlatformName(),
+    name: getDeviceNameFromStore() || getCachedPlatformName(),
     address: "",
     phone: "",
   }
@@ -27,16 +37,18 @@ export function printSalesReceipt(sale: any, items: any[], currency = "AED", bus
   if (!sale || !items.length) return
 
   let displayCurrency = currency
-  if (!displayCurrency || displayCurrency === "AED") {
-    try {
-      const { store } = require("@/store/store")
-      const state = store.getState()
-      if (state?.device?.currency) {
-        displayCurrency = state.device.currency
-      }
-    } catch (e) {
-      console.warn("Could not retrieve currency from store:", e)
+  let deviceName = ""
+  try {
+    const { store } = require("@/store/store")
+    const state = store.getState()
+    if (state?.device?.currency && (!displayCurrency || displayCurrency === "AED")) {
+      displayCurrency = state.device.currency
     }
+    if (state?.device?.name) {
+      deviceName = state.device.name
+    }
+  } catch (e) {
+    console.warn("Could not retrieve currency/device from store:", e)
   }
 
   // Check if we're in a browser environment
@@ -53,11 +65,15 @@ export function printSalesReceipt(sale: any, items: any[], currency = "AED", bus
 
   // Use the company info from the DOM or fallback to provided info
   const business = {
-    name: getCachedPlatformName(),
+    name: deviceName || getCachedPlatformName(),
     address: "",
     phone: "",
     logo: getDefaultDeviceLogoUrl() || "",
     ...businessInfo,
+  }
+  
+  if (businessInfo && !businessInfo.name && deviceName) {
+    business.name = deviceName;
   }
 
   const logoUrl =
@@ -770,11 +786,15 @@ export function printPurchaseReceipt(purchase: any, items: any[], currency = "AE
   }
 
   const business = {
-    name: getCachedPlatformName(),
+    name: getDeviceNameFromStore() || getCachedPlatformName(),
     address: "",
     phone: "",
     logo: getDefaultDeviceLogoUrl() || "",
     ...businessInfo,
+  }
+  
+  if (businessInfo && !businessInfo.name) {
+    business.name = getDeviceNameFromStore() || business.name || getCachedPlatformName();
   }
 
   const logoUrl =
@@ -1585,9 +1605,13 @@ export async function printJobCard(sale: any, currency = 'AED', businessInfo: an
   const { addressLines, pincode } = buildJobCardAddressLines(currentSale);
 
   const business = {
-    name: getCachedPlatformName(),
+    name: getDeviceNameFromStore() || getCachedPlatformName(),
     logo: getDefaultDeviceLogoUrl() || "",
     ...businessInfo,
+  }
+  
+  if (businessInfo && !businessInfo.name) {
+    business.name = getDeviceNameFromStore() || business.name || getCachedPlatformName();
   }
   
   let rawLogo = currentSale?.device_logo || currentSale?.logo_url || currentSale?.logo || business.device_logo || business.logo || business.logo_url || getDefaultDeviceLogoUrl() || "";
@@ -1722,9 +1746,13 @@ export async function printBatchJobCards(sales: any[], currency = 'AED', busines
   if (typeof window === 'undefined' || !sales || sales.length === 0) return;
   
   const business = {
-    name: getCachedPlatformName(),
+    name: getDeviceNameFromStore() || getCachedPlatformName(),
     logo: getDefaultDeviceLogoUrl() || "",
     ...businessInfo,
+  }
+  
+  if (businessInfo && !businessInfo.name) {
+    business.name = getDeviceNameFromStore() || business.name || getCachedPlatformName();
   }
   let baseLogo = business.device_logo || business.logo || business.logo_url || getDefaultDeviceLogoUrl() || "";
   if (baseLogo && typeof window !== "undefined" && baseLogo.startsWith("/")) {

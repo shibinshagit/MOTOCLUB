@@ -9,7 +9,7 @@ import { printSalesReceipt } from "@/lib/receipt-utils"
 import { BrandLogo } from "@/components/brand-logo"
 import { useBranding } from "@/components/branding-provider"
 import { useSelector } from "react-redux"
-import { selectDeviceCurrency } from "@/store/slices/deviceSlice"
+import { selectDeviceCurrency, selectDeviceName } from "@/store/slices/deviceSlice"
 import { parseSaleDateTime } from "@/lib/utils"
 
 export default function SaleInvoicePage() {
@@ -23,14 +23,15 @@ export default function SaleInvoicePage() {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const deviceCurrency = useSelector(selectDeviceCurrency)
+  const deviceName = useSelector(selectDeviceName)
   const currency = deviceCurrency || "AED"
   const companyInfo = useMemo(
     () => ({
-      name: platformName,
+      name: deviceName || platformName,
       address: "",
       phone: "",
     }),
-    [platformName],
+    [platformName, deviceName],
   )
 
   const [receivedAmount, setReceivedAmount] = useState(0)
