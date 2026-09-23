@@ -453,6 +453,14 @@ export function Dashboard({ onLogout }: DashboardProps) {
     handleTabChange("product")
   }, [handleTabChange])
 
+  const handleTrendingToggle = useCallback(() => {
+    if (activeTabRef.current === "trending") {
+      handleTabChange(lastContentTabRef.current)
+      return
+    }
+    handleTabChange("trending")
+  }, [handleTabChange])
+
   const handleLogout = useCallback(async () => {
     try {
       // Clear Redux store first
@@ -652,6 +660,21 @@ export function Dashboard({ onLogout }: DashboardProps) {
               </Button>
             )}
 
+            {canAccessTab("trending") && (
+              <Button
+                onClick={handleTrendingToggle}
+                variant="ghost"
+                size="sm"
+                className={cn(
+                  "h-9 w-9 rounded-full p-0 hover:bg-orange-50 text-orange-600 hover:text-orange-700",
+                  activeTab === "trending" && "bg-orange-100",
+                )}
+                title="Trending Products"
+              >
+                <Flame className="h-5 w-5" />
+              </Button>
+            )}
+
             {canAccessTab("accounting") && (
               <Button
                 onClick={() => handleTabChange("accounting")}
@@ -732,6 +755,20 @@ export function Dashboard({ onLogout }: DashboardProps) {
                 title="Inventory"
               >
                 <Package className="h-5 w-5" />
+              </Button>
+            )}
+            {canAccessTab("trending") && (
+              <Button
+                onClick={handleTrendingToggle}
+                variant="ghost"
+                size="sm"
+                className={cn(
+                  "h-9 w-9 rounded-full p-0 hover:bg-orange-50 text-orange-600",
+                  activeTab === "trending" && "bg-orange-100",
+                )}
+                title="Trending Products"
+              >
+                <Flame className="h-5 w-5" />
               </Button>
             )}
             {canAccessTab("accounting") && (
