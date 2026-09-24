@@ -1,4 +1,5 @@
 "use client"
+import { openWhatsApp } from "@/lib/whatsapp-utils"
 
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
@@ -100,8 +101,7 @@ Thank you for choosing us!
       toast({ title: "Warning", description: "Customer does not have a valid phone number.", variant: "destructive" })
       return
     }
-    const encodedText = encodeURIComponent(whatsappText)
-    window.open(`https://wa.me/${phoneNum}?text=${encodedText}`, "_blank")
+    openWhatsApp(phoneNum, whatsappText)
   }
 
   const handleMarkPaid = async () => {

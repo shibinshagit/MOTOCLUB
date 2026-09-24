@@ -51,6 +51,7 @@ interface EditSaleModalProps {
   onClose: () => void
   saleId: number
   userId: number
+  companyId?: number
   currency?: string
 }
 
@@ -74,7 +75,7 @@ interface ProductRow {
   isBatchManaged?: boolean
 }
 
-export default function EditSaleModal({ isOpen, onClose, saleId, userId, currency: propCurrency }: EditSaleModalProps) {
+export default function EditSaleModal({ isOpen, onClose, saleId, userId, companyId, currency: propCurrency }: EditSaleModalProps) {
   const deviceId = useSelector(selectDeviceId)
   const activeStaff = useSelector(selectActiveStaff)
 
@@ -1011,7 +1012,7 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
                                 onAddNew={() => setIsNewProductModalOpen(true)}
                                 onAddNewService={() => setIsNewServiceModalOpen(true)}
                                 userId={userId}
-                              />
+      />
                             )}
                           </div>
                           <div className="col-span-2">
@@ -1105,6 +1106,7 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
                             }}
                             onAddNew={() => setIsNewCustomerModalOpen(true)}
                             userId={userId}
+                            companyId={companyId}
                           />
                         </div>
 
@@ -1378,6 +1380,7 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, currenc
         onClose={() => setIsNewCustomerModalOpen(false)}
         onCustomerAdded={handleNewCustomer}
         userId={userId}
+        companyId={companyId}
       />
 
       {/* New Product Modal */}

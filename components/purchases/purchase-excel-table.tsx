@@ -96,6 +96,7 @@ interface PurchaseExcelTableProps {
   onViewPurchase: (purchase: any) => void
   onEditPurchase: (purchase: any) => void
   onRefresh: () => void
+  isRefreshing?: boolean
 }
 
 function TableSkeleton() {
@@ -139,6 +140,7 @@ export default function PurchaseExcelTable({
   onViewPurchase,
   onEditPurchase,
   onRefresh,
+  isRefreshing,
 }: PurchaseExcelTableProps) {
   const valueGetters = useMemo(
     () => ({
@@ -307,10 +309,10 @@ export default function PurchaseExcelTable({
               size="icon"
               className="h-7 w-7 shrink-0 bg-white mr-1"
               onClick={onRefresh}
-              disabled={isLoading}
+              disabled={isLoading || isRefreshing}
               title="Refresh purchases"
             >
-              <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`h-3.5 w-3.5 ${isLoading || isRefreshing ? 'animate-spin' : ''}`} />
             </Button>
             <div className="relative w-full sm:w-72">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />

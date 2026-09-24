@@ -16,9 +16,10 @@ interface ViewCustomerModalProps {
   isOpen: boolean
   onClose: () => void
   customer: any
+  companyId?: number
 }
 
-export default function ViewCustomerModal({ isOpen, onClose, customer }: ViewCustomerModalProps) {
+export default function ViewCustomerModal({ isOpen, onClose, customer, companyId }: ViewCustomerModalProps) {
   const [sales, setSales] = useState([])
   const [addresses, setAddresses] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
@@ -40,7 +41,7 @@ export default function ViewCustomerModal({ isOpen, onClose, customer }: ViewCus
     if (!customer?.id) return
     setLoadingAddresses(true)
     try {
-      const res = await getCustomerAddresses(customer.id)
+      const res = await getCustomerAddresses(customer.id, companyId)
       if (res.success && Array.isArray(res.data)) {
         setAddresses(res.data)
       }
@@ -66,7 +67,7 @@ export default function ViewCustomerModal({ isOpen, onClose, customer }: ViewCus
   const fetchCustomerSales = async () => {
     setLoading(true)
     try {
-      const result = await getCustomerSales(customer.id)
+      const result = await getCustomerSales(customer.id, companyId)
       if (result.success) {
         setSales(result.data)
 

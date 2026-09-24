@@ -1,9 +1,10 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback, useMemo } from "react"
 import { useRouter } from "next/navigation"
 import { getAllJobCards } from "@/app/actions/job-card-actions"
-import { deleteSale } from "@/app/actions/sale-actions"
+import { deleteSale, getSaleDetails } from "@/app/actions/sale-actions"
+import { getJobCardsSummary } from "@/app/actions/job-card-summary"
 import { DeliveryStatusSelect } from "@/components/sales/delivery-status-select"
 import { isPendingSale, isCriticalSale } from "@/lib/sale-shipping"
 import { TrackingCell } from "@/components/sales/tracking-cell"
@@ -17,7 +18,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { ChevronDown, ChevronUp, MapPin, Phone, User, Calendar, Layers, Printer, Edit, Trash2, Search, PlayCircle, Eye, Plus, Loader2, FileText, ExternalLink, ShoppingCart, Clock, AlertTriangle, Info } from "lucide-react"
+import { ChevronDown, ChevronUp, MapPin, Phone, User, Calendar, Layers, Printer, Edit, Trash2, Search, PlayCircle, Eye, Plus, Loader2, FileText, ExternalLink, ShoppingCart, Clock, AlertTriangle, Info, ChevronLeft, ChevronRight } from "lucide-react"
 import { SalesBreakdownModal } from "@/components/shared/sales-breakdown-modal"
 import { formatPhoneNumber, parseSaleDateTime, parseSaleDate, cn } from "@/lib/utils"
 import { useToast } from "@/components/ui/use-toast"
@@ -49,6 +50,22 @@ export default function SalesOrdersTab() {
   const [loading, setLoading] = useState(true)
   const [expandedSaleId, setExpandedSaleId] = useState<number | null>(null)
   const [searchTerm, setSearchTerm] = useState("")
+  const [debouncedSearch, setDebouncedSearch] = useState("")
+  
+  // Pagination State
+  const [page, setPage] = useState(1)
+  const limit = 25
+  const [hasMore, setHasMore] = useState(false)
+
+  // Summary State
+  const [summary, setSummary] = useState({
+    totalCount: 0,
+    totalSalesAmount: 0,
+    pendingCount: 0,
+    pendingSalesAmount: 0,
+    criticalCount: 0,
+    criticalSalesAmount: 0
+  })
   
   // Modal States
   const [editingSaleId, setEditingSaleId] = useState<number | null>(null)
@@ -58,16 +75,18 @@ export default function SalesOrdersTab() {
   
   const [selectedSales, setSelectedSales] = useState<number[]>([])
   const [staffList, setStaffList] = useState<any[]>([])
+  const [cardFilter, setCardFilter] = useState<"all" | "pending" | "critical">("all")
+  const [expandedDetailsLoading, setExpandedDetailsLoading] = useState<boolean>(false)
 
   const toggleSelectSale = (id: number) => {
     setSelectedSales(prev => prev.includes(id) ? prev.filter(sId => sId !== id) : [...prev, id])
   }
 
   const toggleSelectAll = () => {
-    if (selectedSales.length === filteredSales.length && filteredSales.length > 0) {
+    if (selectedSales.length === sales.length && sales.length > 0) {
       setSelectedSales([])
     } else {
-      setSelectedSales(filteredSales.map(s => s.id))
+      setSelectedSales(sales.map(s => s.id))
     }
   }
 
@@ -78,7 +97,20 @@ export default function SalesOrdersTab() {
   }
 
   useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearch(searchTerm)
+      setPage(1)
+    }, 300)
+    return () => clearTimeout(handler)
+  }, [searchTerm])
+
+  useEffect(() => {
+    setPage(1)
+  }, [dateRange.from, dateRange.to, cardFilter])
+
+  useEffect(() => {
     fetchSales()
+    fetchSummary()
     if (deviceId) {
       import("@/app/actions/staff-actions").then(({ getDeviceStaff }) => {
         getDeviceStaff(deviceId).then(res => {
@@ -86,25 +118,55 @@ export default function SalesOrdersTab() {
         })
       })
     }
-  }, [deviceId, dateRange.from, dateRange.to])
+  }, [deviceId, dateRange.from, dateRange.to, debouncedSearch, page, cardFilter])
+
+  const fetchSummary = async () => {
+    const res = await getJobCardsSummary(deviceId || 0, {
+      dateFrom: dateRange.from,
+      dateTo: dateRange.to,
+      searchTerm: debouncedSearch,
+    })
+    if (res.success && res.data) {
+      setSummary(res.data)
+    }
+  }
 
   const fetchSales = async () => {
-    setLoading(true)
+    if (page === 1) setLoading(true)
     const res = await getAllJobCards(deviceId || 0, {
       dateFrom: dateRange.from,
       dateTo: dateRange.to,
+      page,
+      limit,
+      searchTerm: debouncedSearch,
+      statusFilter: cardFilter
     })
     if (res.success && res.data) {
-      const sorted = [...res.data].sort((a, b) => {
-        return parseSaleDateTime(b).getTime() - parseSaleDateTime(a).getTime()
-      })
-      setSales(sorted)
+      setSales(res.data)
+      setHasMore(res.data.length === limit)
     }
     setLoading(false)
   }
 
-  const toggleExpand = (id: number) => {
-    setExpandedSaleId(expandedSaleId === id ? null : id)
+  const toggleExpand = async (id: number) => {
+    if (expandedSaleId === id) {
+      setExpandedSaleId(null)
+      return
+    }
+    setExpandedSaleId(id)
+
+    // Lazy load items if not already present
+    const sale = sales.find((s) => s.id === id)
+    if (sale && !sale.items) {
+      setExpandedDetailsLoading(true)
+      const res = await getSaleDetails(id)
+      if (res.success && res.data) {
+        setSales((prev) =>
+          prev.map((s) => (s.id === id ? { ...s, items: res.data.items } : s))
+        )
+      }
+      setExpandedDetailsLoading(false)
+    }
   }
 
   const handlePrint = (sale: any) => {
@@ -115,14 +177,12 @@ export default function SalesOrdersTab() {
     if (sale.items && sale.items.length > 0) {
       printSalesReceipt(sale, sale.items, currency, {}, false)
     } else {
-      import("@/app/actions/sale-actions").then(({ getSaleDetails }) => {
-        getSaleDetails(sale.id).then((res) => {
-          if (res.success && res.data) {
-            printSalesReceipt(res.data.sale, res.data.items, currency, {}, false)
-          } else {
-            toast({ title: "Error", description: "Failed to load invoice items", variant: "destructive" })
-          }
-        })
+      getSaleDetails(sale.id).then((res) => {
+        if (res.success && res.data) {
+          printSalesReceipt(res.data.sale, res.data.items, currency, {}, false)
+        } else {
+          toast({ title: "Error", description: "Failed to load invoice items", variant: "destructive" })
+        }
       })
     }
   }
@@ -165,36 +225,14 @@ export default function SalesOrdersTab() {
     }
   }
 
-  const [cardFilter, setCardFilter] = useState<"all" | "pending" | "critical">("all")
-
-  const baseFilteredSales = sales.filter((sale) => {
-    if (!searchTerm) return true
-    const term = searchTerm.toLowerCase()
-    return (
-      sale.tracking_id?.toLowerCase().includes(term) ||
-      sale.courier_service_name?.toLowerCase().includes(term) ||
-      sale.customer_name?.toLowerCase().includes(term) ||
-      sale.customer_phone?.toLowerCase().includes(term) ||
-      sale.id?.toString().includes(term)
-    )
-  })
-
-  const filteredSales = baseFilteredSales.filter((sale) => {
-    if (cardFilter === "pending") return isPendingSale(sale)
-    if (cardFilter === "critical") return isCriticalSale(sale)
-    return true
-  })
-
-  const totalCount = baseFilteredSales.length
-  const totalSalesAmount = baseFilteredSales.reduce((sum, sale) => sum + Number(sale.total_amount || 0), 0)
-
-  const pendingSalesList = baseFilteredSales.filter(isPendingSale)
-  const pendingCount = pendingSalesList.length
-  const pendingSalesAmount = pendingSalesList.reduce((sum, sale) => sum + Number(sale.total_amount || 0), 0)
-
-  const criticalSalesList = baseFilteredSales.filter(isCriticalSale)
-  const criticalCount = criticalSalesList.length
-  const criticalSalesAmount = criticalSalesList.reduce((sum, sale) => sum + Number(sale.total_amount || 0), 0)
+  const {
+    totalCount,
+    totalSalesAmount,
+    pendingCount,
+    pendingSalesAmount,
+    criticalCount,
+    criticalSalesAmount
+  } = summary
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat("en-IN", {
@@ -210,7 +248,7 @@ export default function SalesOrdersTab() {
     }
   }, [])
 
-  if (loading) {
+  if (loading && sales.length === 0) {
     return (
       <div className="flex items-center justify-center p-12">
         <div className="animate-spin rounded-full border-4 border-primary border-t-transparent h-8 w-8 mr-2" />
@@ -438,7 +476,7 @@ export default function SalesOrdersTab() {
         </button>
       </div>
 
-      {filteredSales.length === 0 ? (
+      {sales.length === 0 ? (
         <Card className="border-dashed border-gray-300">
           <CardContent className="flex flex-col items-center justify-center p-12 text-center">
             <Calendar className="h-12 w-12 text-gray-300 mb-4" />
@@ -458,7 +496,7 @@ export default function SalesOrdersTab() {
                     <input 
                       type="checkbox" 
                       className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600 cursor-pointer"
-                      checked={filteredSales.length > 0 && selectedSales.length === filteredSales.length}
+                      checked={sales.length > 0 && selectedSales.length === sales.length}
                       onChange={toggleSelectAll}
                     />
                   </th>
@@ -476,10 +514,10 @@ export default function SalesOrdersTab() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredSales.map((sale, index) => {
+                {sales.map((sale, index) => {
                   const isExpanded = expandedSaleId === sale.id
                   const isSelected = selectedSales.includes(sale.id)
-                  const itemQuantity = sale.items?.reduce((sum: number, i: any) => sum + i.quantity, 0) || 0
+                  const itemQuantity = Number(sale.total_quantity) || sale.items?.reduce((sum: number, i: any) => sum + i.quantity, 0) || 0
                   
                   const saleDate = parseSaleDate(sale.sale_date)
                   const dateFormatted = format(saleDate, "dd MMM yyyy")
@@ -727,7 +765,7 @@ export default function SalesOrdersTab() {
                                     </tr>
                                   </thead>
                                   <tbody className="divide-y divide-slate-100">
-                                    {sale.items?.map((item: any) => (
+                                    {sale.items ? sale.items.map((item: any) => (
                                       <tr key={item.id} className="hover:bg-slate-50/60">
                                         <td className="px-2.5 py-1 font-medium text-slate-800">{item.product_name || "Unknown Product"}</td>
                                         <td className="px-2.5 py-1 text-slate-500">{item.variant_name || "Default"}</td>
@@ -736,7 +774,14 @@ export default function SalesOrdersTab() {
                                         <td className="px-2.5 py-1 text-right text-slate-700">{currency} {Number(item.price).toFixed(2)}</td>
                                         <td className="px-2.5 py-1 text-right font-bold text-slate-900">{currency} {(Number(item.price) * item.quantity).toFixed(2)}</td>
                                       </tr>
-                                    ))}
+                                    )) : (
+                                      <tr>
+                                        <td colSpan={6} className="px-2.5 py-4 text-center">
+                                          <Loader2 className="h-4 w-4 animate-spin inline-block mr-2 text-slate-400" />
+                                          <span className="text-slate-500">Loading items...</span>
+                                        </td>
+                                      </tr>
+                                    )}
                                   </tbody>
                                 </table>
                               </div>
@@ -864,6 +909,36 @@ export default function SalesOrdersTab() {
                 })}
               </tbody>
             </table>
+          </div>
+          <div className="flex flex-col sm:flex-row items-center justify-between px-4 py-3 border-t border-slate-200 bg-slate-50 gap-4">
+            <div className="text-xs text-slate-500">
+              Showing <span className="font-medium text-slate-700">{totalCount > 0 ? (page - 1) * limit + 1 : 0}</span> to <span className="font-medium text-slate-700">{Math.min(page * limit, totalCount)}</span> of <span className="font-medium text-slate-700">{totalCount}</span> results
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page === 1 || loading}
+                className="h-8 text-xs px-3"
+              >
+                <ChevronLeft className="h-3.5 w-3.5 mr-1" />
+                Previous
+              </Button>
+              <div className="text-xs font-medium text-slate-600 min-w-[2rem] text-center">
+                {page}
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage((p) => p + 1)}
+                disabled={!hasMore || loading}
+                className="h-8 text-xs px-3"
+              >
+                Next
+                <ChevronRight className="h-3.5 w-3.5 ml-1" />
+              </Button>
+            </div>
           </div>
         </div>
       )}

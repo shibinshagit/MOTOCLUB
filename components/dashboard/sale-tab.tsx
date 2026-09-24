@@ -50,9 +50,11 @@ import {
   selectSalesCurrency,
   setSales,
   setLoading,
+  setSilentRefreshing,
   setError,
   setCurrency,
   removeSale,
+  addSale as addSaleToState,
   resetSalesState,
 } from "@/store/slices/salesSlice"
 import CustomerSelectSimple from "@/components/sales/customer-select-simple"
@@ -76,6 +78,7 @@ import { mapSaleShippingFromRecord, type SaleShippingInput } from "@/lib/sale-sh
 
 interface SaleTabProps {
   userId: number
+  companyId?: number
   isAddModalOpen?: boolean
   onModalClose?: () => void
   mode?: "entry" | "info"
@@ -170,7 +173,7 @@ function serializeSaleRecord(sale: any) {
   }
 }
 
-export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, mode = "entry" }: SaleTabProps) {
+export default function SaleTab({ userId, companyId, isAddModalOpen = false, onModalClose, mode = "entry" }: SaleTabProps) {
   // Redux state
   const dispatch = useDispatch()
   const deviceId = useSelector(selectDeviceId)
@@ -247,6 +250,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
   const [discountAmount, setDiscountAmount] = useState(0)
   const [totalAmount, setTotalAmount] = useState(0)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const isSubmittingRef = useRef(false)
   const [scanStatus, setScanStatus] = useState<"idle" | "processing" | "success" | "error">("idle")
   const [scanHistory, setScanHistory] = useState<ScanResult[]>([])
   const [barcodeInput, setBarcodeInput] = useState<string>("")
@@ -614,7 +618,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
   }, [])
 
   const fetchSalesForRange = useCallback(
-    async (fromDate?: string, toDate?: string) => {
+    async (fromDate?: string, toDate?: string, isBackgroundRefresh = false) => {
       if (!deviceId) {
         dispatch(setError("Device ID not found"))
         return
@@ -625,7 +629,11 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
 
       const requestId = ++salesFetchRequestRef.current
 
-      dispatch(setLoading(true))
+      if (!isBackgroundRefresh) {
+        dispatch(setLoading(true))
+      } else {
+        dispatch(setSilentRefreshing(true))
+      }
       dispatch(setError(null))
 
       try {
@@ -635,17 +643,26 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
         if (result.success) {
           dispatch(setSales(result.data.map(serializeSaleRecord)))
         } else {
-          dispatch(setSales([]))
+          // Only clear sales if it's not a background refresh
+          if (!isBackgroundRefresh) {
+            dispatch(setSales([]))
+          }
           dispatch(setError(result.message || "Failed to load sales"))
         }
       } catch (fetchError) {
         console.error("Fetch sales error:", fetchError)
         if (requestId !== salesFetchRequestRef.current) return
-        dispatch(setSales([]))
+        if (!isBackgroundRefresh) {
+          dispatch(setSales([]))
+        }
         dispatch(setError("An error occurred while loading sales"))
       } finally {
         if (requestId === salesFetchRequestRef.current) {
-          dispatch(setLoading(false))
+          if (!isBackgroundRefresh) {
+            dispatch(setLoading(false))
+          } else {
+            dispatch(setSilentRefreshing(false))
+          }
           setSalesListLoaded(true)
         }
       }
@@ -655,8 +672,11 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
 
   useEffect(() => {
     if (activeView !== "info" || !deviceId) return
-    setSalesListLoaded(false)
-    fetchSalesForRange(globalDateRange.from, globalDateRange.to)
+    if (!salesListLoaded) {
+      setSalesListLoaded(false)
+    }
+    fetchSalesForRange(globalDateRange.from, globalDateRange.to, salesListLoaded)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeView, deviceId, globalDateRange.from, globalDateRange.to, fetchSalesForRange])
 
     // Add Sale Form Functions
@@ -1251,6 +1271,8 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
   const handleSubmitSale = async (e: React.FormEvent) => {
     e.preventDefault()
 
+    if (isSubmittingRef.current) return
+
     if (!deviceId) {
       setFormAlert({
         type: "error",
@@ -1312,6 +1334,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
     }
 
     setIsSubmitting(true)
+    isSubmittingRef.current = true
 
     try {
       if (isEditMode && editingSaleId) {
@@ -1366,9 +1389,10 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
         // Run updateSale in the background
         updateSale(saleData).then((result) => {
           setIsSubmitting(false)
+          isSubmittingRef.current = false
           if (result.success) {
             markInventoryStale(dispatch)
-            fetchSalesForRange(globalDateRange.from, globalDateRange.to)
+            fetchSalesForRange(globalDateRange.from, globalDateRange.to, true)
             toast({
               title: "Success",
               description: "Sale updated successfully",
@@ -1385,6 +1409,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
           }
         }).catch((err) => {
           setIsSubmitting(false)
+          isSubmittingRef.current = false
           console.error("Error updating sale:", err)
           toast({
             title: "Error",
@@ -1436,7 +1461,10 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
 
         if (result.success) {
           markInventoryStale(dispatch)
-          fetchSalesForRange(globalDateRange.from, globalDateRange.to)
+          if (result.data && result.data.sale) {
+            dispatch(addSaleToState(serializeSaleRecord(result.data.sale)))
+          }
+          fetchSalesForRange(globalDateRange.from, globalDateRange.to, true)
           setFormAlert({
             type: "success",
             message: "Sale completed successfully",
@@ -1448,18 +1476,16 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
 
           if (result.data && result.data.sale) {
             setLastSaleResult(result.data)
+            switchView("info")
             if (autoPrint) {
-              setTimeout(() => {
-                printSalesReceipt(result.data.sale, result.data.items)
-                finalizeDraftAfterSave()
-              }, 500)
+              printSalesReceipt(result.data.sale, result.data.items)
+              finalizeDraftAfterSave()
             } else {
               setShowPrintConfirm(true)
             }
           } else {
-            setTimeout(() => {
-              finalizeDraftAfterSave()
-            }, 1500)
+            finalizeDraftAfterSave()
+            switchView("info")
           }
         } else {
           setFormAlert({
@@ -1476,6 +1502,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
       })
     } finally {
       setIsSubmitting(false)
+      isSubmittingRef.current = false
     }
   }
 
@@ -1608,7 +1635,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
         markInventoryStale(dispatch)
         notifySuccess(toast, "Sale deleted successfully")
         if (activeView === "info") {
-          fetchSalesForRange(globalDateRange.from, globalDateRange.to)
+          fetchSalesForRange(globalDateRange.from, globalDateRange.to, true)
         }
       } else {
         notifyError(toast, result.message || "Failed to delete sale")
@@ -1793,7 +1820,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
       onEditSale={handleEditSale}
       deviceId={deviceId || 0}
       globalDateRange={globalDateRange}
-      onRefreshSales={() => fetchSalesForRange(globalDateRange.from, globalDateRange.to)}
+      onRefreshSales={() => fetchSalesForRange(globalDateRange.from, globalDateRange.to, true)}
     />
   )
 
@@ -2512,6 +2539,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
                                   }}
                                   onAddNew={() => setIsNewCustomerModalOpen(true)}
                                   userId={userId}
+                                  companyId={companyId}
                                   showAddNewButton={false}
                                 />
                               </div>
@@ -2753,6 +2781,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose, 
         onClose={() => setIsNewCustomerModalOpen(false)}
         onCustomerAdded={handleNewCustomer}
         userId={userId}
+        companyId={companyId}
       />
 
       <NewProductModal

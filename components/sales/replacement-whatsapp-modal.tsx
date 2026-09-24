@@ -1,4 +1,5 @@
 "use client"
+import { openWhatsApp } from "@/lib/whatsapp-utils"
 
 import { useState } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
@@ -82,8 +83,7 @@ Thank you for shopping with us!
       })
       return
     }
-    const encodedText = encodeURIComponent(whatsappText)
-    window.open(`https://wa.me/${phoneNum}?text=${encodedText}`, "_blank")
+    openWhatsApp(phoneNum, whatsappText)
   }
 
   const handleCopyText = () => {

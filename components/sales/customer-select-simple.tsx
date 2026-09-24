@@ -19,6 +19,7 @@ interface CustomerSelectSimpleProps {
   onAddNew: () => void
   onCreateCustomer?: (name: string, phone: string) => Promise<{ success: boolean; data?: any; message?: string }>
   userId?: number
+  companyId?: number
   showAddNewButton?: boolean
 }
 
@@ -30,6 +31,7 @@ export default function CustomerSelectSimple({
   onAddNew,
   onCreateCustomer,
   userId = 1,
+  companyId,
   showAddNewButton = true,
 }: CustomerSelectSimpleProps) {
   const dispatch = useAppDispatch()
@@ -185,7 +187,7 @@ export default function CustomerSelectSimple({
   const fetchCustomers = async () => {
     try {
       setLoading(true)
-      const res = await getCustomers(userId)
+      const res = await getCustomers(companyId || userId)
       if (res.success) {
         setCustomers(res.data)
         setFilteredCustomers(res.data)

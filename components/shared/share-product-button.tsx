@@ -1,4 +1,5 @@
 "use client"
+import { openWhatsApp } from "@/lib/whatsapp-utils"
 
 import { useState } from "react"
 import { Share2, Check, Copy, MessageCircle, Send, Mail, Link2, Loader2 } from "lucide-react"
@@ -76,7 +77,7 @@ export function ShareProductButton({ product, currency = "AED", currentDeviceId,
 
   const handleWhatsApp = async () => {
     const text = await getShareText()
-    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank")
+    openWhatsApp("", text)
   }
 
   const handleTelegram = async () => {

@@ -67,7 +67,7 @@ interface Customer {
 }
 
 // Changed from default export to named export to match how it's imported
-export function CustomerTab({ userId }: { userId: number }) {
+export function CustomerTab({ userId, companyId }: { userId: number; companyId?: number }) {
   // Redux state
   const dispatch = useAppDispatch()
   const {
@@ -130,7 +130,7 @@ export function CustomerTab({ userId }: { userId: number }) {
     if (!userId) return
     try {
       setIsLoadingSettlements(true)
-      const result = await getCustomerSettlementSummaries(userId, userId)
+      const result = await getCustomerSettlementSummaries(userId, companyId || userId)
       if (result.success) {
         setSettlements(result.data || [])
       } else {
@@ -255,7 +255,7 @@ export function CustomerTab({ userId }: { userId: number }) {
 
       // Get customers with limit if not showing all and not searching
       const limit = showAll || searchTerm ? undefined : 5
-      const response = await getCustomers(userId, limit, searchTerm)
+      const response = await getCustomers(companyId || userId, limit, searchTerm)
 
       if (response.success) {
         dispatch(setCustomers(response.data))
@@ -322,7 +322,7 @@ export function CustomerTab({ userId }: { userId: number }) {
     if (!selectedCustomer) return
 
     try {
-      const result = await deleteCustomerAction(selectedCustomer.id)
+      const result = await deleteCustomerAction(selectedCustomer.id, companyId || userId)
 
       if (result.success) {
         dispatch(deleteCustomer(selectedCustomer.id))
@@ -806,6 +806,7 @@ return (
         isOpen={isViewModalOpen}
         onClose={() => setIsViewModalOpen(false)}
         customer={selectedCustomer}
+        companyId={companyId || userId}
       />
     )}
 

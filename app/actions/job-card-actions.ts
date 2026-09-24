@@ -593,7 +593,14 @@ function isEcomAllowedDevice(deviceId?: number): boolean {
 
 export async function getAllJobCards(
   deviceId?: number,
-  options?: { dateFrom?: string; dateTo?: string },
+  options?: { 
+    dateFrom?: string; 
+    dateTo?: string;
+    page?: number;
+    limit?: number;
+    searchTerm?: string;
+    statusFilter?: "all" | "pending" | "critical";
+  }
 ) {
   noStore()
   try {
@@ -603,115 +610,91 @@ export async function getAllJobCards(
     const endExclusive = options?.dateTo
       ? format(addDays(parseISO(options.dateTo), 1), "yyyy-MM-dd")
       : null
+    
+    const page = options?.page || 1
+    const limit = options?.limit || 25
+    const offset = (page - 1) * limit
+    const searchTerm = options?.searchTerm ? `%${options?.searchTerm.toLowerCase()}%` : null
+    const statusFilter = options?.statusFilter || "all"
 
-    if (deviceId && deviceId > 0) {
-      sales = await sql`
-        SELECT 
-          s.*,
-          COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name,
-          COALESCE(NULLIF(s.customer_phone_override, ''), c.phone) as customer_phone,
-          COALESCE(cp.name, md_partner.name, '') as courier_partner_name,
-          st.name as staff_name,
-          st.role as staff_role,
-          d.name as branch_name,
-          d.name as device_name,
-          d.logo_url as device_logo,
-          err.id as return_id,
-          err.ecommerce_return_request_id as return_request_ext_id,
-          err.status as return_status,
-          err.rejection_reason as return_rejection_reason
-        FROM sales s
-        LEFT JOIN customers c ON s.customer_id = c.id
-        LEFT JOIN devices d ON s.device_id = d.id
-        LEFT JOIN staff cp ON cp.id = s.courier_partner_id
-        LEFT JOIN master_data md_partner ON md_partner.id = s.courier_partner_id
-        LEFT JOIN staff st ON s.staff_id = st.id
-        LEFT JOIN return_requests err ON (err.sale_id = s.id OR (s.external_order_id IS NOT NULL AND (err.order_number = s.external_order_id OR err.order_id = s.id)))
-        WHERE s.device_id = ${deviceId}
-          AND (${allowEcom} OR s.source IS NULL OR s.source != 'ECOMMERCE')
-          AND (s.status != 'Cancelled' OR s.delivery_status = 'Returned')
-          AND (
-            s.sale_type = 'job_card' 
-            OR s.fulfillment_type = 'ship' 
-            OR s.tracking_id LIKE 'JC-%' 
-            OR s.tracking_id LIKE 'DOD-%'
-            OR (s.tracking_id IS NOT NULL AND s.tracking_id != '')
-          )
-          AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
-          AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
-        ORDER BY COALESCE(s.sale_date, s.created_at) DESC, s.id DESC
+    const baseWhere = sql`
+      (${deviceId && deviceId > 0 ? sql`s.device_id = ${deviceId}` : sql`1=1`})
+      AND (${allowEcom ? sql`1=1` : sql`(s.source IS NULL OR s.source != 'ECOMMERCE')`})
+      AND (s.status != 'Cancelled' OR s.delivery_status = 'Returned')
+      AND (
+        s.sale_type = 'job_card' 
+        OR s.fulfillment_type = 'ship' 
+        OR s.tracking_id LIKE 'JC-%' 
+        OR s.tracking_id LIKE 'DOD-%'
+        OR (s.tracking_id IS NOT NULL AND s.tracking_id != '')
+      )
+      AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
+      AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
+      AND (${searchTerm}::text IS NULL OR (
+        LOWER(s.tracking_id) LIKE ${searchTerm} OR
+        LOWER(COALESCE(NULLIF(s.customer_name_override, ''), c.name)) LIKE ${searchTerm} OR
+        LOWER(COALESCE(NULLIF(s.customer_phone_override, ''), c.phone)) LIKE ${searchTerm} OR
+        CAST(s.id AS TEXT) LIKE ${searchTerm} OR
+        LOWER(COALESCE(cp.name, md_partner.name, '')) LIKE ${searchTerm}
+      ))
+    `
+
+    let statusWhere = sql`1=1`
+    if (statusFilter === "pending") {
+      statusWhere = sql`
+        s.status NOT IN ('Cancelled', 'Returned')
+        AND (s.payment_status IS NULL OR LOWER(s.payment_status) != 'cancelled')
+        AND (s.delivery_status IS NULL OR LOWER(s.delivery_status) NOT IN ('returned', 'failed', 'delivered'))
       `
-    } else {
-      sales = await sql`
-        SELECT 
-          s.*,
-          COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name,
-          COALESCE(NULLIF(s.customer_phone_override, ''), c.phone) as customer_phone,
-          c.street as customer_street,
-          c.city as customer_city,
-          c.district as customer_district,
-          c.state as customer_state,
-          c.pincode as customer_pincode,
-          c.landmark as customer_landmark,
-          c.address as customer_address,
-          COALESCE(cp.name, md_partner.name, '') as courier_partner_name,
-          st.name as staff_name,
-          st.role as staff_role,
-          d.name as branch_name,
-          d.name as device_name,
-          d.logo_url as device_logo,
-          err.id as return_id,
-          err.ecommerce_return_request_id as return_request_ext_id,
-          err.status as return_status,
-          err.rejection_reason as return_rejection_reason
-        FROM sales s
-        LEFT JOIN customers c ON s.customer_id = c.id
-        LEFT JOIN devices d ON s.device_id = d.id
-        LEFT JOIN staff cp ON cp.id = s.courier_partner_id
-        LEFT JOIN master_data md_partner ON md_partner.id = s.courier_partner_id
-        LEFT JOIN staff st ON s.staff_id = st.id
-        LEFT JOIN return_requests err ON (err.sale_id = s.id OR (s.external_order_id IS NOT NULL AND (err.order_number = s.external_order_id OR err.order_id = s.id)))
-        WHERE (s.status != 'Cancelled' OR s.delivery_status = 'Returned')
-          AND (
-            s.sale_type = 'job_card' 
-            OR s.fulfillment_type = 'ship' 
-            OR s.tracking_id LIKE 'JC-%' 
-            OR s.tracking_id LIKE 'DOD-%'
-            OR (s.tracking_id IS NOT NULL AND s.tracking_id != '')
-          )
-          AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
-          AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
-        ORDER BY COALESCE(s.sale_date, s.created_at) DESC, s.id DESC
-        LIMIT 200
+    } else if (statusFilter === "critical") {
+      statusWhere = sql`
+        (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%' OR s.tracking_id LIKE 'DOD-%')
+        AND LOWER(COALESCE(s.fulfillment_type, 'pickup')) = 'ship'
+        AND s.status NOT IN ('Cancelled', 'Returned')
+        AND (s.payment_status IS NULL OR LOWER(s.payment_status) != 'cancelled')
+        AND (
+          LOWER(s.payment_status) IN ('paid', 'completed') OR (COALESCE(s.total_amount, 0) > 0 AND COALESCE(s.received_amount, 0) >= COALESCE(s.total_amount, 0))
+        )
+        AND (s.delivery_status IS NULL OR LOWER(s.delivery_status) NOT IN ('pickup', 'direct', 'shipping', 'delivered', 'returned', 'failed'))
       `
     }
 
-    // Fetch items for these sales
-    const saleIds = sales.map((s: any) => s.id)
-    let items: any[] = []
-    if (saleIds.length > 0) {
-      items = await sql`
-        SELECT 
-          si.*,
-          p.name as product_name,
-          pv.name as variant_name
-        FROM sale_items si
-        LEFT JOIN products p ON si.product_id = p.id
-        LEFT JOIN product_variants pv ON si.product_variant_id = pv.id
-        WHERE si.sale_id = ANY(${saleIds})
-      `
-    }
+    sales = await sql`
+      SELECT 
+        s.*,
+        COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name,
+        COALESCE(NULLIF(s.customer_phone_override, ''), c.phone) as customer_phone,
+        c.street as customer_street,
+        c.city as customer_city,
+        c.district as customer_district,
+        c.state as customer_state,
+        c.pincode as customer_pincode,
+        c.landmark as customer_landmark,
+        c.address as customer_address,
+        COALESCE(cp.name, md_partner.name, '') as courier_partner_name,
+        st.name as staff_name,
+        st.role as staff_role,
+        d.name as branch_name,
+        d.name as device_name,
+        d.logo_url as device_logo,
+        err.id as return_id,
+        err.ecommerce_return_request_id as return_request_ext_id,
+        err.status as return_status,
+        err.rejection_reason as return_rejection_reason,
+        COALESCE((SELECT SUM(quantity) FROM sale_items WHERE sale_id = s.id), 0) as total_quantity
+      FROM sales s
+      LEFT JOIN customers c ON s.customer_id = c.id
+      LEFT JOIN devices d ON s.device_id = d.id
+      LEFT JOIN staff cp ON cp.id = s.courier_partner_id
+      LEFT JOIN master_data md_partner ON md_partner.id = s.courier_partner_id
+      LEFT JOIN staff st ON s.staff_id = st.id
+      LEFT JOIN return_requests err ON (err.sale_id = s.id OR (s.external_order_id IS NOT NULL AND (err.order_number = s.external_order_id OR err.order_id = s.id)))
+      WHERE ${baseWhere} AND ${statusWhere}
+      ORDER BY COALESCE(s.sale_date, s.created_at) DESC, s.id DESC
+      LIMIT ${limit} OFFSET ${offset}
+    `
 
-    // Attach items to sales
-    const formattedSales = sales.map((sale: any) => {
-      const saleItems = items.filter((item: any) => item.sale_id === sale.id)
-      return {
-        ...sale,
-        items: saleItems
-      }
-    })
-
-    return { success: true, data: formattedSales }
+    return { success: true, data: sales }
   } catch (error: any) {
     console.error("getAllJobCards Error:", error)
     return { success: false, message: error.message || "Failed to fetch all Job Cards", data: [] }

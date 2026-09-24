@@ -4,7 +4,7 @@ import React, { useState, useEffect, type ReactNode } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Edit, Loader2, Package, Printer, Trash2 } from "lucide-react"
+import { Edit, Loader2, Package, Printer, Trash2, RotateCcw } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 import { notifyError, notifySuccess } from "@/lib/notifications"
 import {
@@ -21,6 +21,7 @@ import { printPurchaseReceipt } from "@/lib/receipt-utils"
 import { getPurchaseDetails, markPurchaseDelivered } from "@/app/actions/purchase-actions"
 import { getProductById } from "@/app/actions/product-actions"
 import { ProductDetailSlider } from "@/components/products/product-detail-slider"
+import ReturnPurchaseModal from "@/components/purchases/return-purchase-modal"
 
 interface ViewPurchaseModalProps {
   isOpen: boolean
@@ -55,6 +56,8 @@ function DeliveryStatusBadge({ status }: { status: string }) {
     Delivered: "bg-emerald-50 text-emerald-700 border-emerald-200",
     Pending: "bg-amber-50 text-amber-700 border-amber-200",
     Ordered: "bg-blue-50 text-blue-700 border-blue-200",
+    "Fully Returned": "bg-rose-50 text-rose-700 border-rose-200",
+    "Partially Returned": "bg-amber-50 text-amber-700 border-amber-200",
   }
 
   return (
@@ -118,6 +121,28 @@ export default function ViewPurchaseModal({
   const [detailProduct, setDetailProduct] = useState<any>(null)
   const [isItemLoading, setIsItemLoading] = useState(false)
   const [isDelivering, setIsDelivering] = useState(false)
+  const [isReturnModalOpen, setIsReturnModalOpen] = useState(false)
+
+  const handleReturn = () => {
+    if (!purchaseData || !purchaseId) return
+
+    if (purchaseData.status === "Cancelled" || purchaseData.purchase_status === "Cancelled") {
+      notifyError(toast, "Cannot return items for a cancelled purchase", "Cannot Return Purchase")
+      return
+    }
+
+    const hasReturnableItems = purchaseItems.some(
+      (item: any) => (Number(item.quantity) || 0) - (Number(item.returned_quantity) || 0) > 0
+    )
+
+    if (!hasReturnableItems) {
+      notifyError(toast, "All items in this purchase have already been fully returned", "No Returnable Items")
+      return
+    }
+
+    setIsReturnModalOpen(true)
+  }
+
   const { toast } = useToast()
   const { confirm, ConfirmDialog } = useConfirm()
 
@@ -376,6 +401,16 @@ export default function ViewPurchaseModal({
               >
                 <Printer className="mr-1.5 h-3.5 w-3.5" />
                 Print
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleReturn}
+                disabled={isLoading || !purchaseData || purchaseData.purchase_status === "Fully Returned"}
+                className="h-8 border-slate-200 bg-white px-3 text-xs"
+              >
+                <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+                Return
               </Button>
               <Button
                 variant="outline"
@@ -672,7 +707,21 @@ export default function ViewPurchaseModal({
         </DialogContent>
       </Dialog>
 
+      <ReturnPurchaseModal
+        isOpen={isReturnModalOpen}
+        onClose={() => setIsReturnModalOpen(false)}
+        purchaseId={purchaseId}
+        purchaseData={purchaseData}
+        purchaseItems={purchaseItems}
+        currency={deviceCurrency}
+        onSuccess={() => {
+          setIsReturnModalOpen(false)
+          onClose()
+        }}
+      />
+
       {ConfirmDialog}
     </>
   )
 }
+

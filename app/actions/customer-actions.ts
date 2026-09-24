@@ -27,8 +27,16 @@ export async function getCustomerById(customerId: number) {
   }
 }
 
-export async function getCustomerAddresses(customerId: number) {
+export async function getCustomerAddresses(customerId: number, companyId?: number) {
   if (!customerId) return { success: false, data: [] }
+  if (companyId) {
+    const verify = await sql`
+      SELECT id FROM customers
+      WHERE id = ${customerId}
+      AND (created_by = ${companyId} OR created_by IN (SELECT id FROM devices WHERE company_id = ${companyId}))
+    `;
+    if (verify.length === 0) return { success: false, data: [] };
+  }
   try {
     const addresses = await sql`
       SELECT * FROM customer_addresses
@@ -314,7 +322,7 @@ export async function updateCustomer(formData: FormData) {
   }
 }
 
-export async function getCustomerSales(customerId: number) {
+export async function getCustomerSales(customerId: number, companyId?: number) {
   if (!customerId) {
     return { success: false, message: "Customer ID is required", data: [] }
   }
@@ -335,6 +343,7 @@ export async function getCustomerSales(customerId: number) {
       FROM sales s
       LEFT JOIN sale_items si ON s.id = si.sale_id
       WHERE s.customer_id = ${customerId}
+      ${companyId ? sql`AND s.device_id IN (SELECT id FROM devices WHERE company_id = ${companyId})` : sql``}
       GROUP BY s.id, s.sale_date, s.total_amount, s.received_amount, s.payment_method, s.status, s.customer_id
       ORDER BY s.sale_date DESC
     `
@@ -359,9 +368,9 @@ export type CustomerSettlementSummary = {
   open_sale_count: number
 }
 
-export async function getCustomerSettlementSummaries(deviceId: number, userId: number) {
-  if (!deviceId || !userId) {
-    return { success: false, message: "Device ID and user ID are required", data: [] as CustomerSettlementSummary[] }
+export async function getCustomerSettlementSummaries(deviceId: number, companyId: number) {
+  if (!deviceId || !companyId) {
+    return { success: false, message: "Device ID and company ID are required", data: [] as CustomerSettlementSummary[] }
   }
 
   resetConnectionState()
@@ -379,8 +388,8 @@ export async function getCustomerSettlementSummaries(deviceId: number, userId: n
         )::int AS open_sale_count
       FROM customers c
       JOIN sales s ON s.customer_id = c.id
-      WHERE c.created_by = ${userId}
-        AND s.device_id = ${deviceId}
+      WHERE (c.created_by = ${companyId} OR c.created_by IN (SELECT id FROM devices WHERE company_id = ${companyId}))
+        AND s.device_id IN (SELECT id FROM devices WHERE company_id = ${companyId})
         AND LOWER(COALESCE(s.status, '')) != 'cancelled'
       GROUP BY c.id, c.name
       HAVING SUM(GREATEST(COALESCE(s.total_amount, 0) - COALESCE(s.received_amount, 0), 0)) > 0.01
@@ -407,7 +416,7 @@ export async function getCustomerSettlementSummaries(deviceId: number, userId: n
   }
 }
 
-export async function deleteCustomer(id: number) {
+export async function deleteCustomer(id: number, companyId?: number) {
   if (!id) {
     return { success: false, message: "Customer ID is required" }
   }

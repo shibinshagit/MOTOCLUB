@@ -1,4 +1,5 @@
 "use client"
+import { openWhatsApp } from "@/lib/whatsapp-utils"
 
 import { useState, useEffect } from "react"
 import { updateSaleDeliveryStatus, getSaleDetails } from "@/app/actions/sale-actions"
@@ -259,8 +260,7 @@ export function DeliveryStatusSelect({
     if (phone) {
       const trackingMsg = trackingId ? `\nTracking ID: ${trackingId}` : ''
       const trackUrl = trackingId ? `\nTrack shipment: https://ims.motoclub.in/track/${encodeURIComponent(trackingId)}` : ''
-      const text = encodeURIComponent(`Hello ${customerName || 'Customer'},\n\nHere are the photos and videos of your order #${orderNumber || saleId}.${trackingMsg}${trackUrl}\n\nThank you for choosing us!`)
-      window.open(`https://wa.me/${phone}?text=${text}`, '_blank')
+      openWhatsApp(phone, `Hello ${customerName || 'Customer'},\n\nHere are the photos and videos of your order #${orderNumber || saleId}.${trackingMsg}${trackUrl}\n\nThank you for choosing us!`)
     } else {
       toast({ title: "Error", description: "Customer does not have a valid phone number.", variant: "destructive" })
     }

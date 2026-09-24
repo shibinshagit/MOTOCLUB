@@ -16,9 +16,10 @@ interface NewCustomerModalProps {
   onClose: () => void
   onCustomerAdded: (customerId: number, customerName: string, customerObj?: any) => void
   userId: number
+  companyId?: number
 }
 
-export default function NewCustomerModal({ isOpen, onClose, onCustomerAdded, userId }: NewCustomerModalProps) {
+export default function NewCustomerModal({ isOpen, onClose, onCustomerAdded, userId, companyId }: NewCustomerModalProps) {
   const [name, setName] = useState("")
   const [email, setEmail] = useState("")
   const [phone, setPhone] = useState("")
@@ -64,7 +65,7 @@ export default function NewCustomerModal({ isOpen, onClose, onCustomerAdded, use
   const fetchExistingCustomers = async () => {
     try {
       setIsLoadingCustomers(true)
-      const result = await getCustomers(userId)
+      const result = await getCustomers(companyId || userId)
       if (result.success) {
         setExistingCustomers(result.data)
       } else {

@@ -541,6 +541,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
           return (
             <SaleTab
               userId={device?.id ?? 0}
+              companyId={companyId}
               isAddModalOpen={activeTab === "sale" && isAddModalOpen}
               onModalClose={() => setIsAddModalOpen(false)}
               mode={salesNavView === "entry" ? "entry" : "info"}
@@ -555,7 +556,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
           )
         case "customer":
           return (
-            <CustomerTab userId={device?.id ?? 0} />
+            <CustomerTab userId={device?.id ?? 0} companyId={companyId} />
           )
         case "attendance":
           return <AttendanceTab />

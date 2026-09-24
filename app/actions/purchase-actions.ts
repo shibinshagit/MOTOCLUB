@@ -247,7 +247,40 @@ export async function getPurchaseDetails(purchaseId: number) {
       notes: p.notes || undefined,
     }))
 
+    let returnsList: any[] = []
+    try {
+      const returnsRows = await sql`
+        SELECT pr.id, pr.return_number, pr.calculated_return_value, pr.refund_amount, pr.status, pr.created_at,
+          (
+            SELECT json_agg(json_build_object(
+              'productName', p.name,
+              'variantName', pv.name,
+              'returnedQuantity', pri.returned_quantity
+            ))
+            FROM purchase_return_items pri
+            LEFT JOIN products p ON p.id = pri.product_id
+            LEFT JOIN product_variants pv ON pv.id = pri.product_variant_id
+            WHERE pri.purchase_return_id = pr.id
+          ) as items
+        FROM purchase_returns pr
+        WHERE pr.purchase_id = ${purchaseId}
+        ORDER BY pr.created_at DESC
+      `
+      returnsList = returnsRows.map((r: any) => ({
+        id: r.id,
+        returnNumber: r.return_number,
+        calculatedReturnValue: Number(r.calculated_return_value) || 0,
+        refundAmount: Number(r.refund_amount) || 0,
+        status: r.status,
+        createdAt: r.created_at,
+        items: r.items || []
+      }))
+    } catch (e) {
+      // Table might not exist yet
+    }
+
     const purchaseData = {
+      returns: returnsList,
       ...purchase[0],
       payments: paymentsList.length > 0 ? paymentsList : [
         {

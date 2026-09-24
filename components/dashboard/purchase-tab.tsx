@@ -177,6 +177,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
 
   const [purchases, setPurchases] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(false)
+  const [isRefreshing, setIsRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [purchasesListLoaded, setPurchasesListLoaded] = useState(false)
   const globalDateRange = useSelector(selectDateRange)
@@ -538,7 +539,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
   }, [])
 
   const fetchPurchasesForRange = useCallback(
-    async (fromDate?: string, toDate?: string, searchTerm = "") => {
+    async (fromDate?: string, toDate?: string, searchTerm = "", isBackgroundRefresh = false) => {
       if (!deviceId) {
         setError("Device ID not found")
         return
@@ -549,7 +550,11 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
 
       const requestId = ++purchasesFetchRequestRef.current
 
-      setIsLoading(true)
+      if (!isBackgroundRefresh) {
+        setIsLoading(true)
+      } else {
+        setIsRefreshing(true)
+      }
       setError(null)
 
       try {
@@ -559,17 +564,25 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
         if (result.success) {
           setPurchases(result.data.map(serializePurchaseRecord))
         } else {
-          setPurchases([])
+          if (!isBackgroundRefresh) {
+            setPurchases([])
+          }
           setError(result.message || "Failed to load purchases")
         }
       } catch (fetchError) {
         console.error("Fetch purchases error:", fetchError)
         if (requestId !== purchasesFetchRequestRef.current) return
-        setPurchases([])
+        if (!isBackgroundRefresh) {
+          setPurchases([])
+        }
         setError("An error occurred while loading purchases")
       } finally {
         if (requestId === purchasesFetchRequestRef.current) {
-          setIsLoading(false)
+          if (!isBackgroundRefresh) {
+            setIsLoading(false)
+          } else {
+            setIsRefreshing(false)
+          }
           setPurchasesListLoaded(true)
         }
       }
@@ -579,8 +592,11 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
 
   useEffect(() => {
     if (activeView !== "info" || !deviceId) return
-    setPurchasesListLoaded(false)
-    fetchPurchasesForRange(globalDateRange.from, globalDateRange.to, debouncedPurchaseSearch)
+    if (!purchasesListLoaded) {
+      setPurchasesListLoaded(false)
+    }
+    fetchPurchasesForRange(globalDateRange.from, globalDateRange.to, debouncedPurchaseSearch, purchasesListLoaded)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeView, deviceId, globalDateRange.from, globalDateRange.to, debouncedPurchaseSearch, fetchPurchasesForRange])
 
   const addProductRow = useCallback(() => {
@@ -1011,12 +1027,16 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
 
         if (result.success) {
           markInventoryStale(dispatch)
+          if (!isEditMode && result.data) {
+            setPurchases(prev => [serializePurchaseRecord(result.data), ...prev])
+          }
           notifySuccess(toast, isEditMode ? "Purchase updated successfully" : "Purchase added successfully")
           setFormAlert({
             type: "success",
             message: isEditMode ? "Purchase updated successfully" : "Purchase completed successfully",
           })
           finalizeDraftAfterSave()
+          switchView("info")
           setIsSubmitting(false)
           isSubmittingRef.current = false
         } else {
@@ -1092,7 +1112,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
         setPurchases((prev) => prev.filter((p) => p.id !== purchaseId))
         notifySuccess(toast, "Purchase deleted successfully")
         if (activeView === "info") {
-          fetchPurchasesForRange(globalDateRange.from, globalDateRange.to, debouncedPurchaseSearch)
+          fetchPurchasesForRange(globalDateRange.from, globalDateRange.to, debouncedPurchaseSearch, true)
         }
       } else {
         notifyError(toast, result.message || "Failed to delete purchase")
@@ -1193,7 +1213,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
       resetAddPurchaseForm()
     }
     if (deviceId) {
-      fetchPurchasesForRange(globalDateRange.from, globalDateRange.to, debouncedPurchaseSearch)
+      fetchPurchasesForRange(globalDateRange.from, globalDateRange.to, debouncedPurchaseSearch, true)
     }
   }
 
@@ -1243,7 +1263,8 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
       getPaidAmount={getPaidAmount}
       onViewPurchase={handleViewPurchase}
       onEditPurchase={handleEditPurchase}
-      onRefresh={() => fetchPurchasesForRange(globalDateRange.from, globalDateRange.to, debouncedPurchaseSearch)}
+      onRefresh={() => fetchPurchasesForRange(globalDateRange.from, globalDateRange.to, debouncedPurchaseSearch, true)}
+      isRefreshing={isRefreshing}
     />
   )
 
@@ -1934,7 +1955,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
         onDelete={handleDeletePurchaseFromView}
         onDelivered={() => {
           markInventoryStale(dispatch)
-          fetchPurchasesForRange(globalDateRange.from, globalDateRange.to, debouncedPurchaseSearch)
+          fetchPurchasesForRange(globalDateRange.from, globalDateRange.to, debouncedPurchaseSearch, true)
         }}
       />
 

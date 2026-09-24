@@ -864,6 +864,46 @@ async function createTables() {
     `
   })
 
+  await run("purchase_returns", async () => {
+    await sql`
+      CREATE TABLE IF NOT EXISTS purchase_returns (
+        id SERIAL PRIMARY KEY,
+        purchase_id INTEGER NOT NULL REFERENCES purchases(id) ON DELETE CASCADE,
+        device_id INTEGER,
+        supplier_id INTEGER,
+        supplier_name VARCHAR(255),
+        return_number VARCHAR(50) NOT NULL,
+        calculated_return_value DECIMAL(12,2) NOT NULL DEFAULT 0,
+        refund_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+        refund_payment_method VARCHAR(50) DEFAULT 'Cash',
+        reason TEXT,
+        status VARCHAR(50) DEFAULT 'Completed',
+        created_by INTEGER,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `
+  })
+
+  await run("purchase_return_items", async () => {
+    await sql`
+      CREATE TABLE IF NOT EXISTS purchase_return_items (
+        id SERIAL PRIMARY KEY,
+        purchase_return_id INTEGER NOT NULL REFERENCES purchase_returns(id) ON DELETE CASCADE,
+        purchase_id INTEGER NOT NULL,
+        purchase_item_id INTEGER NOT NULL REFERENCES purchase_items(id) ON DELETE CASCADE,
+        product_id INTEGER NOT NULL,
+        product_variant_id INTEGER,
+        batch_id INTEGER,
+        returned_quantity INTEGER NOT NULL,
+        unit_price DECIMAL(10,2) NOT NULL,
+        tax_percentage DECIMAL(5,2) DEFAULT 0,
+        tax_amount DECIMAL(10,2) DEFAULT 0,
+        calculated_value DECIMAL(12,2) NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `
+  })
+
   await run("replacement_shipments", async () => {
     await sql`
       CREATE TABLE IF NOT EXISTS replacement_shipments (
@@ -1000,6 +1040,7 @@ async function upgradeLegacyColumns() {
     ["purchase_items.courier_charge", () => sql`ALTER TABLE purchase_items ADD COLUMN IF NOT EXISTS courier_charge DECIMAL(12,2) DEFAULT 0`],
     ["purchase_items.discount", () => sql`ALTER TABLE purchase_items ADD COLUMN IF NOT EXISTS discount DECIMAL(12,2) DEFAULT 0`],
     ["purchase_items.unit_cost", () => sql`ALTER TABLE purchase_items ADD COLUMN IF NOT EXISTS unit_cost DECIMAL(12,2) DEFAULT 0`],
+    ["purchase_items.returned_quantity", () => sql`ALTER TABLE purchase_items ADD COLUMN IF NOT EXISTS returned_quantity INTEGER DEFAULT 0`],
     ["purchases.courier_charge_percentage", () => sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS courier_charge_percentage DECIMAL(5,2) DEFAULT 0`],
     ["devices.default_courier_charge_pct", () => sql`ALTER TABLE devices ADD COLUMN IF NOT EXISTS default_courier_charge_pct DECIMAL(5,2) DEFAULT 0`],
     ["staff.staff_password_hash", () => sql`ALTER TABLE staff ADD COLUMN IF NOT EXISTS staff_password_hash TEXT`],
@@ -1449,3 +1490,6 @@ async function migrate() {
 }
 
 void migrate()
+
+
+
