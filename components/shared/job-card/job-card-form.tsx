@@ -213,7 +213,7 @@ export function JobCardForm({
     formId: "job-card",
     userId: deviceId,
     data: draftData,
-    enabled: !editSaleId,
+    enabled: !editSaleId && !isSuccess,
     hasMeaningfulData: hasMeaningfulJobCardData,
   })
 
