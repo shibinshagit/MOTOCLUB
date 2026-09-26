@@ -1106,38 +1106,6 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
     setPendingEditSaleId(null)
     setPendingEditDraftId("")
     clearEditSaleParamFromUrl()
-
-    if (activeView === "entry" && activeDraftId) {
-      setSaleDrafts((prev) =>
-        prev.map((draft) =>
-          draft.id === activeDraftId
-            ? {
-                ...draft,
-                name: "New Sale",
-                updatedAt: Date.now(),
-                date: resetDate.toISOString(),
-                customerId: null,
-                customerName: "",
-                customerPhone: "",
-                staffId: activeStaff?.id || null,
-                staffName: activeStaff?.name || "",
-                status: "Completed",
-                paymentStatus: "Paid",
-                paymentMethod: "Cash",
-                receivedAmount: 0,
-                discountAmount: 0,
-                notes: "",
-                shipping: { fulfillmentType: "pickup" },
-                products: resetProducts,
-                payments: [],
-                isEditMode: false,
-                editingSaleId: null,
-                originalSaleStatus: "",
-              }
-            : draft,
-        ),
-      )
-    }
   }
 
   // Load sale data for editing
@@ -1748,21 +1716,28 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
     setFormAlert(null)
     setShowPrintConfirm(false)
     setLastSaleResult(null)
-    if (activeView === "entry") {
-      // A completed sale must not leave stale entry tabs behind. Start the
-      // cashier on one clean draft so tabs cannot accumulate after checkout.
-      const freshDraft = createEmptyDraft("Draft 1")
-      draftSwitchingRef.current = true
-      setSaleDrafts([freshDraft])
-      setActiveDraftId(freshDraft.id)
-      setIsEditMode(false)
-      setEditingSaleId(null)
-      setOriginalSaleStatus("")
-      setPendingEditSaleId(null)
-      setPendingEditDraftId("")
-      clearEditSaleParamFromUrl()
-      return
+    
+    // A completed sale must not leave stale entry tabs behind. Start the
+    // cashier on one clean draft so tabs cannot accumulate after checkout.
+    const freshDraft = createEmptyDraft("Draft 1")
+    draftSwitchingRef.current = true
+    setSaleDrafts([freshDraft])
+    setActiveDraftId(freshDraft.id)
+    setIsEditMode(false)
+    setEditingSaleId(null)
+    setOriginalSaleStatus("")
+    setPendingEditSaleId(null)
+    setPendingEditDraftId("")
+    clearEditSaleParamFromUrl()
+    
+    // Explicitly update localStorage so it isn't skipped when activeView changes
+    try {
+      localStorage.setItem(saleDraftStorageKey, JSON.stringify([freshDraft]))
+      localStorage.setItem(`${saleDraftStorageKey}_active`, freshDraft.id)
+    } catch (e) {
+      console.error("Failed to clear sale draft from local storage:", e)
     }
+    
     resetAddSaleForm()
   }
 

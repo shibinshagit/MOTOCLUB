@@ -67,7 +67,7 @@ export default function ManualCategorySelect({
       <SelectTrigger>
         <SelectValue placeholder="Select category" />
       </SelectTrigger>
-      <SelectContent>
+      <SelectContent className="max-h-[min(320px,var(--radix-select-content-available-height))]">
         {categories.map((category) => (
           <SelectItem key={category.id} value={String(category.id)}>
             {category.name}

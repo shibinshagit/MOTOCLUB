@@ -306,7 +306,7 @@ export default function TrendingDrawer({ open, onOpenChange, userId }: TrendingD
               </div>
             </div>
 
-            <div className="relative z-0 min-h-0 flex-1 p-4">
+            <div className="relative z-0 flex min-h-0 flex-1 flex-col p-4">
               {contentReady ? (
                 searchedProducts.length > 0 || loading ? (
                   <ProductsExcelTable

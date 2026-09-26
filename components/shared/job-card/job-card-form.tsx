@@ -590,7 +590,6 @@ export function JobCardForm({
     }])
     setIsSuccess(false)
     setSuccessData(null)
-    if (onClose) onClose()
   }
 
   const handleCancel = async () => {

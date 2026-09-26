@@ -2912,11 +2912,11 @@ const renderTransactionList = (
 
       {/* Manual Transaction Dialog */}
       <Dialog open={isManualDialogOpen} onOpenChange={setIsManualDialogOpen}>
-        <DialogContent className="sm:max-w-[425px] max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
+        <DialogContent className="sm:max-w-[425px] max-h-[90dvh] overflow-hidden flex flex-col p-0 gap-0">
+          <DialogHeader className="px-6 py-4 border-b shrink-0">
             <DialogTitle>Add Manual Transaction</DialogTitle>
           </DialogHeader>
-          <div className="grid gap-4 py-4">
+          <div className="grid gap-4 p-6 overflow-y-auto flex-1 min-h-0">
             <div className="grid gap-2">
               <Label htmlFor="manual-type">Transaction Type</Label>
               <Select value={manualType} onValueChange={(value: "debit" | "credit") => setManualType(value)}>
@@ -2992,7 +2992,7 @@ const renderTransactionList = (
               />
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="px-6 py-4 border-t shrink-0">
             <Button variant="outline" onClick={() => setIsManualDialogOpen(false)}>
               Cancel
             </Button>

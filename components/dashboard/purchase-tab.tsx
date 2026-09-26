@@ -814,30 +814,6 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
     setCustomCourierCharge(null)
     setIsEditingCourier(false)
     setCourierInputVal("")
-
-    if (activeView === "entry" && activeDraftId) {
-      setPurchaseDrafts((prev) =>
-        prev.map((draft) =>
-          draft.id === activeDraftId
-            ? {
-                ...draft,
-                name: "New Purchase",
-                updatedAt: Date.now(),
-                date: resetDate.toISOString(),
-                supplier: "",
-                status: "Credit",
-                purchaseStatus: "Delivered",
-                paymentMethod: "Cash",
-                receivedAmount: 0,
-                discountAmount: 0,
-                products: resetProducts,
-                isEditMode: false,
-                editingPurchaseId: null,
-              }
-            : draft,
-        ),
-      )
-    }
   }
 
   const loadPurchaseForEdit = async (purchaseId: number) => {
@@ -1207,11 +1183,27 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
 
   const finalizeDraftAfterSave = () => {
     setFormAlert(null)
-    if (activeView === "entry" && activeDraftId) {
-      void handleRemoveDraftTab(activeDraftId, false)
-    } else {
-      resetAddPurchaseForm()
+    
+    // A completed purchase must not leave stale entry tabs behind. Start the
+    // user on one clean draft so tabs cannot accumulate after checkout.
+    const freshDraft = createEmptyDraft("Draft 1")
+    draftSwitchingRef.current = true
+    setPurchaseDrafts([freshDraft])
+    setActiveDraftId(freshDraft.id)
+    setIsEditMode(false)
+    setEditingPurchaseId(null)
+    setPendingEditPurchaseId(null)
+    setPendingEditDraftId("")
+    
+    // Explicitly update localStorage so it isn't skipped when activeView changes
+    try {
+      localStorage.setItem(purchaseDraftStorageKey, JSON.stringify([freshDraft]))
+      localStorage.setItem(`${purchaseDraftStorageKey}_active`, freshDraft.id)
+    } catch (e) {
+      console.error("Failed to clear purchase draft from local storage:", e)
     }
+    
+    resetAddPurchaseForm()
     if (deviceId) {
       fetchPurchasesForRange(globalDateRange.from, globalDateRange.to, debouncedPurchaseSearch, true)
     }

@@ -236,13 +236,13 @@ function ProductsExcelTable({
   const allVisibleSelected = displayProducts.length > 0 && displayProducts.every(p => selectedIds.has(p.id))
 
   return (
-    <div className="flex flex-col space-y-3">
+    <div className="flex h-full min-h-0 flex-col space-y-3">
       {enableMultiSelect && bulkActionToolbar && selectedIds.size > 0 && (
-        <div className="w-full">
+        <div className="w-full shrink-0">
           {bulkActionToolbar}
         </div>
       )}
-    <div className="flex h-full flex-col overflow-hidden rounded-xl border border-slate-200 bg-card shadow-sm">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-200 bg-card shadow-sm">
       <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-[#F1F4F9] px-4 py-2.5">
         <span className="text-xs font-medium text-slate-600">
           Showing {displayProducts.length} row{displayProducts.length === 1 ? "" : "s"}
