@@ -109,6 +109,7 @@ export function JobCardForm({
     state: "",
     pincode: "",
     street: "",
+    area: "",
     landmark: "",
     address_type: "Home",
     is_default: false
@@ -438,13 +439,14 @@ export function JobCardForm({
       setShippingDistrict(added.district || "")
       setShippingState(added.state || "")
       setShippingStreet(added.street || "")
+      setShippingArea(added.area || "")
       setShippingLandmark(added.landmark || "")
       setShippingAddressType(added.address_type || "Home")
       setShippingPincode(added.pincode || "")
       setShippingPhone(formatPhoneNumber(added.phone || customerPhone || ""))
       
       setIsAddAddressModalOpen(false)
-      setNewAddress({ phone: "", city: "", district: "", state: "", pincode: "", street: "", landmark: "", address_type: "Home", is_default: false })
+      setNewAddress({ phone: "", city: "", district: "", state: "", pincode: "", street: "", area: "", landmark: "", address_type: "Home", is_default: false })
     } else {
       toast({ title: "Error", description: res.message || "Failed to add address.", variant: "destructive" })
     }
@@ -711,6 +713,7 @@ export function JobCardForm({
                         setShippingDistrict(defaultAddr.district || "")
                         setShippingState(defaultAddr.state || "")
                         setShippingStreet(defaultAddr.street || "")
+                        setShippingArea(defaultAddr.area || "")
                         setShippingLandmark(defaultAddr.landmark || "")
                         setShippingAddressType(defaultAddr.address_type || "Home")
                         setShippingPincode(defaultAddr.pincode || "")
@@ -724,6 +727,7 @@ export function JobCardForm({
                     setShippingDistrict(customerObj.district || "")
                     setShippingState(customerObj.state || "")
                     setShippingStreet(customerObj.street || "")
+                    setShippingArea(customerObj.area || "")
                     setShippingLandmark(customerObj.landmark || "")
                     setShippingAddressType(customerObj.address_type || "Home")
                     setShippingPincode(customerObj.pincode || "")
@@ -1371,13 +1375,23 @@ export function JobCardForm({
             </div>
           </div>
 
-          <div className="space-y-1">
-            <Label className="text-xs font-medium text-gray-700">Street / Building / Area</Label>
-            <Input 
-              value={newAddress.street} 
-              onChange={(e) => setNewAddress({ ...newAddress, street: e.target.value })} 
-              placeholder="e.g. Flat 302, Sheikh Zayed Rd"
-            />
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <Label className="text-xs font-medium text-gray-700">Shopname / House name</Label>
+              <Input 
+                value={newAddress.street} 
+                onChange={(e) => setNewAddress({ ...newAddress, street: e.target.value })} 
+                placeholder="e.g. Flat 302, Sheikh Zayed Rd"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs font-medium text-gray-700">Area</Label>
+              <Input 
+                value={newAddress.area} 
+                onChange={(e) => setNewAddress({ ...newAddress, area: e.target.value })} 
+                placeholder="e.g. Al Qusais"
+              />
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-4">

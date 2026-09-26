@@ -27,6 +27,7 @@ export interface JobCardInput {
   shippingDistrict?: string
   shippingState?: string
   shippingStreet?: string
+  shippingArea?: string
   shippingLandmark?: string
   shippingAddressType?: string
   shippingPincode?: string
@@ -80,6 +81,7 @@ export async function createJobCard(input: JobCardInput) {
       formData.append("district", input.shippingDistrict || "")
       formData.append("state", input.shippingState || "")
       formData.append("street", input.shippingStreet || "")
+      formData.append("area", input.shippingArea || "")
       formData.append("landmark", input.shippingLandmark || "")
       formData.append("address_type", input.shippingAddressType || "Home")
       formData.append("pincode", input.shippingPincode || "")
@@ -98,6 +100,7 @@ export async function createJobCard(input: JobCardInput) {
         shippingDistrict: input.shippingDistrict,
         shippingState: input.shippingState,
         shippingStreet: input.shippingStreet,
+        shippingArea: input.shippingArea,
         shippingPincode: input.shippingPincode,
         shippingLandmark: input.shippingLandmark,
         shippingAddressType: input.shippingAddressType || "Home",
@@ -160,6 +163,7 @@ export async function createJobCard(input: JobCardInput) {
             shipping_district,
             shipping_state,
             shipping_street,
+            shipping_area,
             shipping_landmark,
             shipping_address_type,
             shipping_pincode,
@@ -187,6 +191,7 @@ export async function createJobCard(input: JobCardInput) {
             ${input.shippingDistrict || null},
             ${input.shippingState || null},
             ${input.shippingStreet || null},
+            ${input.shippingArea || null},
             ${input.shippingLandmark || null},
             ${input.shippingAddressType || 'Home'},
             ${input.shippingPincode || null},
@@ -290,6 +295,7 @@ export async function updateJobCard(id: number, input: any) {
       formData.append("district", input.shippingDistrict || "")
       formData.append("state", input.shippingState || "")
       formData.append("street", input.shippingStreet || "")
+      formData.append("area", input.shippingArea || "")
       formData.append("landmark", input.shippingLandmark || "")
       formData.append("address_type", input.shippingAddressType || "Home")
       formData.append("pincode", input.shippingPincode || "")
@@ -327,6 +333,7 @@ export async function updateJobCard(id: number, input: any) {
           shipping_district = ${input.shippingDistrict || null},
           shipping_state = ${input.shippingState || null},
           shipping_street = ${input.shippingStreet || null},
+          shipping_area = ${input.shippingArea || null},
           shipping_landmark = ${input.shippingLandmark || null},
           shipping_address_type = ${input.shippingAddressType || 'Home'},
           shipping_pincode = ${input.shippingPincode || null},
@@ -349,6 +356,7 @@ export async function updateJobCard(id: number, input: any) {
           shipping_district = ${input.shippingDistrict || null},
           shipping_state = ${input.shippingState || null},
           shipping_street = ${input.shippingStreet || null},
+          shipping_area = ${input.shippingArea || null},
           shipping_landmark = ${input.shippingLandmark || null},
           shipping_address_type = ${input.shippingAddressType || 'Home'},
           shipping_pincode = ${input.shippingPincode || null},
@@ -373,6 +381,7 @@ export async function updateJobCard(id: number, input: any) {
         shippingDistrict: input.shippingDistrict,
         shippingState: input.shippingState,
         shippingStreet: input.shippingStreet,
+        shippingArea: input.shippingArea,
         shippingPincode: input.shippingPincode,
         shippingLandmark: input.shippingLandmark,
         shippingAddressType: input.shippingAddressType || "Home",

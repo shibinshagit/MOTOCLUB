@@ -825,7 +825,7 @@ export default function SalesOrdersTab() {
                                       <span className="text-slate-700 font-normal">
                                         {sale.shipping_street || sale.shipping_address}
                                         {sale.shipping_landmark ? `, Near ${sale.shipping_landmark}` : ""}
-                                        {[sale.shipping_city, sale.shipping_district, sale.shipping_state].filter(Boolean).join(", ") ? `, ${[sale.shipping_city, sale.shipping_district, sale.shipping_state].filter(Boolean).join(", ")}` : ""}
+                                        {[sale.shipping_area, sale.shipping_city, sale.shipping_district, sale.shipping_state].filter(Boolean).join(", ") ? `, ${[sale.shipping_area, sale.shipping_city, sale.shipping_district, sale.shipping_state].filter(Boolean).join(", ")}` : ""}
                                         {sale.shipping_pincode ? ` - ${sale.shipping_pincode}` : ""}
                                         {sale.shipping_address_type && <span className="ml-1.5 px-1 py-0 bg-slate-200 text-slate-700 text-[9px] rounded font-semibold uppercase">{sale.shipping_address_type}</span>}
                                       </span>

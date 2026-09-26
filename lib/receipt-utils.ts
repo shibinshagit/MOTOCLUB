@@ -1375,6 +1375,15 @@ function buildJobCardAddressLines(sale: any) {
     ""
   ).trim();
 
+  const area = (
+    sale.shipping_area ||
+    sale.shippingArea ||
+    sale.area ||
+    sale.customer_area ||
+    sale.customer?.area ||
+    ""
+  ).trim();
+
   const landmark = (
     sale.shipping_landmark ||
     sale.landmark ||
@@ -1412,7 +1421,7 @@ function buildJobCardAddressLines(sale: any) {
   ).trim();
 
   if (!state) {
-    const combinedText = `${street} ${city} ${district} ${sale.shipping_address || ''} ${sale.customer_address || ''}`.toLowerCase();
+    const combinedText = `${street} ${area} ${city} ${district} ${sale.shipping_address || ''} ${sale.customer_address || ''}`.toLowerCase();
     const keralaDistricts = [
       "thiruvananthapuram", "trivandrum", "kollam", "quilon", "pathanamthitta",
       "alappuzha", "alleppey", "kottayam", "idukki", "ernakulam", "cochin", "kochi",
@@ -1445,6 +1454,9 @@ function buildJobCardAddressLines(sale: any) {
 
   const streetLower = street.toLowerCase();
   const locationParts: string[] = [];
+  if (area && !streetLower.includes(area.toLowerCase())) {
+    locationParts.push(area);
+  }
   if (city && !streetLower.includes(city.toLowerCase())) {
     locationParts.push(city);
   }

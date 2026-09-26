@@ -1425,7 +1425,7 @@ export default function SalesExcelTable({
                                     {[
                                       sale.shipping_street || sale.shipping_address || sale.customer_address,
                                       sale.shipping_landmark ? `Near ${sale.shipping_landmark}` : null,
-                                      [sale.shipping_city, sale.shipping_district, sale.shipping_state].filter(Boolean).join(", "),
+                                      [sale.shipping_area, sale.shipping_city, sale.shipping_district, sale.shipping_state].filter(Boolean).join(", "),
                                       sale.shipping_pincode,
                                     ]
                                       .filter(Boolean)
@@ -1846,7 +1846,7 @@ export default function SalesExcelTable({
                           {(sale.shipping_street || sale.shipping_address || sale.customer_address) && (
                             <p className="text-slate-600 text-[11px] pt-1">
                               <MapPin className="inline h-3 w-3 mr-1 text-slate-400" />
-                              {[sale.shipping_street || sale.shipping_address || sale.customer_address, sale.shipping_landmark ? `Near ${sale.shipping_landmark}` : null, [sale.shipping_city, sale.shipping_district, sale.shipping_state].filter(Boolean).join(", "), sale.shipping_pincode].filter(Boolean).join(", ")}
+                              {[sale.shipping_street || sale.shipping_address || sale.customer_address, sale.shipping_landmark ? `Near ${sale.shipping_landmark}` : null, [sale.shipping_area, sale.shipping_city, sale.shipping_district, sale.shipping_state].filter(Boolean).join(", "), sale.shipping_pincode].filter(Boolean).join(", ")}
                             </p>
                           )}
                         </div>

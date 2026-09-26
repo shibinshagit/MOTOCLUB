@@ -344,7 +344,7 @@ export function TodaySalesList({ onOpenCreateModal }: { onOpenCreateModal?: () =
                       {sale.tracking_id && <p className="font-mono"><span className="font-semibold text-slate-500">Tracking:</span> {sale.tracking_id}</p>}
                       {sale.courier_service_name && <p><span className="font-semibold text-slate-500">Courier:</span> {sale.courier_service_name}</p>}
                       {(sale.shipping_street || sale.shipping_address) && (
-                        <p><span className="font-semibold text-slate-500">Address:</span> {[sale.shipping_street || sale.shipping_address, sale.shipping_landmark ? `Near ${sale.shipping_landmark}` : null, [sale.shipping_city, sale.shipping_district, sale.shipping_state].filter(Boolean).join(", "), sale.shipping_pincode].filter(Boolean).join(", ")}</p>
+                        <p><span className="font-semibold text-slate-500">Address:</span> {[sale.shipping_street || sale.shipping_address, sale.shipping_landmark ? `Near ${sale.shipping_landmark}` : null, [sale.shipping_area, sale.shipping_city, sale.shipping_district, sale.shipping_state].filter(Boolean).join(", "), sale.shipping_pincode].filter(Boolean).join(", ")}</p>
                       )}
                     </div>
                     
@@ -554,9 +554,9 @@ export function TodaySalesList({ onOpenCreateModal }: { onOpenCreateModal?: () =
                                       <div className="space-y-0.5">
                                         <p className="text-slate-700">{sale.shipping_street || sale.shipping_address}</p>
                                         {sale.shipping_landmark && <p className="text-xs text-slate-500">Landmark: {sale.shipping_landmark}</p>}
-                                        {([sale.shipping_city, sale.shipping_district, sale.shipping_state].filter(Boolean).length > 0 || sale.shipping_pincode) && (
+                                        {([sale.shipping_area, sale.shipping_city, sale.shipping_district, sale.shipping_state].filter(Boolean).length > 0 || sale.shipping_pincode) && (
                                           <p className="font-medium text-slate-700">
-                                            {[sale.shipping_city, sale.shipping_district, sale.shipping_state].filter(Boolean).join(", ")}{sale.shipping_pincode ? ` - ${sale.shipping_pincode}` : ""}
+                                            {[sale.shipping_area, sale.shipping_city, sale.shipping_district, sale.shipping_state].filter(Boolean).join(", ")}{sale.shipping_pincode ? ` - ${sale.shipping_pincode}` : ""}
                                           </p>
                                         )}
                                       </div>

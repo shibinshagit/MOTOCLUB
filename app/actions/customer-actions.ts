@@ -193,6 +193,7 @@ export async function addCustomer(formData: FormData) {
   const district = (formData.get("district") as string) || null
   const state = (formData.get("state") as string) || null
   const street = (formData.get("street") as string) || null
+  const area = (formData.get("area") as string) || null
   const landmark = (formData.get("landmark") as string) || null
   const address_type = (formData.get("address_type") as string) || null
   const pincode = (formData.get("pincode") as string) || null
@@ -229,9 +230,9 @@ export async function addCustomer(formData: FormData) {
       if (city || street || landmark || pincode || district || state) {
         await sql`
           INSERT INTO customer_addresses (
-            customer_id, phone, city, district, state, pincode, street, landmark, address_type, is_default
+            customer_id, phone, city, district, state, pincode, street, area, landmark, address_type, is_default
           ) VALUES (
-            ${customerId}, ${phone || null}, ${city}, ${district}, ${state}, ${pincode}, ${street}, ${landmark}, ${address_type || 'Home'}, true
+            ${customerId}, ${phone || null}, ${city}, ${district}, ${state}, ${pincode}, ${street}, ${area || null}, ${landmark}, ${address_type || 'Home'}, true
           )
         `
       }
@@ -261,6 +262,7 @@ export async function updateCustomer(formData: FormData) {
 
   const city = (formData.get("city") as string) || null
   const street = (formData.get("street") as string) || null
+  const area = (formData.get("area") as string) || null
   const landmark = (formData.get("landmark") as string) || null
   const address_type = (formData.get("address_type") as string) || null
   const pincode = (formData.get("pincode") as string) || null
@@ -467,7 +469,7 @@ export async function addSecondaryCustomerAddress(customerId: number, data: any)
 
     const result = await sql`
       INSERT INTO customer_addresses (
-        customer_id, phone, city, district, state, pincode, street, landmark, address_type, is_default
+        customer_id, phone, city, district, state, pincode, street, area, landmark, address_type, is_default
       ) VALUES (
         ${customerId},
         ${data.phone || null},
@@ -476,6 +478,7 @@ export async function addSecondaryCustomerAddress(customerId: number, data: any)
         ${data.state || null},
         ${data.pincode || null},
         ${data.street || null},
+        ${data.area || null},
         ${data.landmark || null},
         ${data.address_type || 'Other'},
         ${data.is_default === true}
@@ -519,6 +522,7 @@ export async function syncCustomerShippingAddress(customerId: number, data: any)
     }
 
     const street = (data.shipping_street || data.shippingStreet || data.street || data.shipping_address || data.shippingAddress || data.address || "").trim() || null
+    const area = (data.shipping_area || data.shippingArea || data.area || "").trim() || null
     const city = (data.shipping_city || data.shippingCity || data.city || "").trim() || null
     const district = (data.shipping_district || data.shippingDistrict || data.district || "").trim() || null
     const state = (data.shipping_state || data.shippingState || data.state || "").trim() || null
@@ -547,6 +551,7 @@ export async function syncCustomerShippingAddress(customerId: number, data: any)
 
     const matching = existingAddresses.find((e: any) => {
       const eStreet = norm(e.street)
+      const eArea = norm(e.area)
       const eCity = norm(e.city)
       const eDistrict = norm(e.district)
       const eState = norm(e.state)
@@ -556,6 +561,7 @@ export async function syncCustomerShippingAddress(customerId: number, data: any)
       // Exact field match
       const exactMatch =
         eStreet === incomingStreetNorm &&
+        eArea === norm(area) &&
         eCity === incomingCityNorm &&
         eDistrict === incomingDistrictNorm &&
         eState === incomingStateNorm &&
@@ -587,7 +593,7 @@ export async function syncCustomerShippingAddress(customerId: number, data: any)
 
     const result = await sql`
       INSERT INTO customer_addresses (
-        customer_id, phone, city, district, state, pincode, street, landmark, address_type, is_default, created_at, updated_at
+        customer_id, phone, city, district, state, pincode, street, area, landmark, address_type, is_default, created_at, updated_at
       ) VALUES (
         ${customerId},
         ${phone},
@@ -596,6 +602,7 @@ export async function syncCustomerShippingAddress(customerId: number, data: any)
         ${state},
         ${pincode},
         ${street},
+        ${area},
         ${landmark},
         ${address_type},
         ${shouldBeDefault},
