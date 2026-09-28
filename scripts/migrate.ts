@@ -950,6 +950,67 @@ async function createTables() {
       )
     `
   })
+
+  await run("crm_agencies", async () => {
+    await sql`
+      CREATE TABLE IF NOT EXISTS crm_agencies (
+        id SERIAL PRIMARY KEY,
+        company_id INTEGER NOT NULL REFERENCES companies(id),
+        device_id INTEGER REFERENCES devices(id),
+        name VARCHAR(255) NOT NULL,
+        code VARCHAR(100),
+        status VARCHAR(50) DEFAULT 'active',
+        api_key_hash TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `
+  })
+
+  await run("crm_leads", async () => {
+    await sql`
+      CREATE TABLE IF NOT EXISTS crm_leads (
+        id SERIAL PRIMARY KEY,
+        lead_number VARCHAR(100),
+        agency_id INTEGER NOT NULL REFERENCES crm_agencies(id),
+        company_id INTEGER NOT NULL REFERENCES companies(id),
+        device_id INTEGER REFERENCES devices(id),
+        external_lead_id VARCHAR(255) NOT NULL,
+        name VARCHAR(255) NOT NULL,
+        phone VARCHAR(50),
+        email VARCHAR(255),
+        source VARCHAR(100),
+        campaign VARCHAR(255),
+        ad_name VARCHAR(255),
+        message TEXT,
+        status VARCHAR(50) DEFAULT 'New',
+        notes TEXT,
+        assigned_to INTEGER REFERENCES staff(id),
+        converted_customer_id INTEGER REFERENCES customers(id),
+        converted_sale_id INTEGER REFERENCES sales(id),
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        converted_at TIMESTAMP,
+        next_follow_up_at TIMESTAMP
+      )
+    `
+    await sql`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+          WHERE conname = 'crm_leads_agency_id_external_lead_id_key'
+            AND conrelid = 'crm_leads'::regclass
+        ) THEN
+          ALTER TABLE crm_leads
+          ADD CONSTRAINT crm_leads_agency_id_external_lead_id_key
+          UNIQUE (agency_id, external_lead_id);
+        END IF;
+      END;
+      $$
+    `
+  })
+
 }
 
 async function upgradeLegacyColumns() {
@@ -1319,6 +1380,20 @@ async function createIndexes() {
     ["idx_replacement_shipments_tracking_id", () => sql`CREATE INDEX IF NOT EXISTS idx_replacement_shipments_tracking_id ON replacement_shipments(tracking_id)`],
     ["idx_customers_phone", () => sql`CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone)`],
     ["idx_customers_name", () => sql`CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(name)`],
+
+    
+    ["idx_crm_lead_act_lead", () => sql`CREATE INDEX IF NOT EXISTS idx_crm_lead_act_lead ON crm_lead_activities(lead_id)`],
+    ["idx_crm_lead_act_comp", () => sql`CREATE INDEX IF NOT EXISTS idx_crm_lead_act_comp ON crm_lead_activities(company_id)`],
+    ["idx_crm_leads_company_id", () => sql`CREATE INDEX IF NOT EXISTS idx_crm_leads_company_id ON crm_leads(company_id)`],
+    ["idx_crm_leads_device_id", () => sql`CREATE INDEX IF NOT EXISTS idx_crm_leads_device_id ON crm_leads(device_id)`],
+    ["idx_crm_leads_agency_id", () => sql`CREATE INDEX IF NOT EXISTS idx_crm_leads_agency_id ON crm_leads(agency_id)`],
+    ["idx_crm_leads_status", () => sql`CREATE INDEX IF NOT EXISTS idx_crm_leads_status ON crm_leads(status)`],
+    ["idx_crm_leads_assigned_to", () => sql`CREATE INDEX IF NOT EXISTS idx_crm_leads_assigned_to ON crm_leads(assigned_to)`],
+    ["idx_crm_leads_created_at", () => sql`CREATE INDEX IF NOT EXISTS idx_crm_leads_created_at ON crm_leads(created_at)`],
+    ["idx_crm_leads_external_lead_id", () => sql`CREATE INDEX IF NOT EXISTS idx_crm_leads_external_lead_id ON crm_leads(external_lead_id)`],
+    ["idx_crm_agencies_company_id", () => sql`CREATE INDEX IF NOT EXISTS idx_crm_agencies_company_id ON crm_agencies(company_id)`],
+    ["idx_crm_agencies_device_id", () => sql`CREATE INDEX IF NOT EXISTS idx_crm_agencies_device_id ON crm_agencies(device_id)`],
+    ["idx_crm_agencies_status", () => sql`CREATE INDEX IF NOT EXISTS idx_crm_agencies_status ON crm_agencies(status)`],
   ]
 
   for (const [label, fn] of indexes) {

@@ -8,14 +8,15 @@ interface JobCardModalProps {
   onClose: () => void
   editSaleId?: number | null
   initialCustomer?: any
+  crmLeadId?: number
 }
 
-export function JobCardModal({ isOpen, onClose, editSaleId, initialCustomer }: JobCardModalProps) {
+export function JobCardModal({ isOpen, onClose, editSaleId, initialCustomer, crmLeadId }: JobCardModalProps) {
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="w-[95vw] sm:max-w-6xl max-h-[92vh] overflow-y-auto overflow-x-hidden p-0">
         <div className="p-3 sm:p-6 overflow-x-hidden w-full">
-          <JobCardForm onClose={onClose} editSaleId={editSaleId} initialCustomer={initialCustomer} />
+          <JobCardForm onClose={onClose} editSaleId={editSaleId} initialCustomer={initialCustomer} crmLeadId={crmLeadId} />
         </div>
       </DialogContent>
     </Dialog>

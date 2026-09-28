@@ -18,7 +18,8 @@ import {
   AlertTriangle,
   Calendar as CalendarIcon,
   TrendingUp,
-  Activity
+  Activity,
+  Briefcase
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { staffLogout } from "@/app/actions/staff-auth-actions"
@@ -35,8 +36,9 @@ import { JobCardModal } from "@/components/shared/job-card/job-card-modal"
 import { StaffCustomerTab } from "./customers/staff-customer-tab"
 import { StaffSalesChart } from "./staff-sales-chart"
 import StaffProfileTab from "./staff-profile-tab"
+import StaffLeadsTab from "./leads/staff-leads-tab"
 
-type Tab = "home" | "profile" | "customers" | "inventory"
+type Tab = "home" | "profile" | "customers" | "inventory" | "leads"
 
 export default function StaffDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>("home")
@@ -108,6 +110,15 @@ export default function StaffDashboard() {
       >
         <Users className="mr-3 h-5 w-5" />
         Customer List
+      </Button>
+
+      <Button
+        variant={activeTab === "leads" ? "secondary" : "ghost"}
+        className="w-full justify-start"
+        onClick={() => { setActiveTab("leads"); setIsMobileMenuOpen(false) }}
+      >
+        <Briefcase className="mr-3 h-5 w-5" />
+        CRM Leads
       </Button>
 
       <Button
@@ -348,6 +359,10 @@ export default function StaffDashboard() {
               <div className="h-[calc(100vh-2rem)] md:h-[calc(100vh-3rem)] -mx-3 -mt-3 sm:-mx-6 sm:-mt-6">
                 <StaffInventoryTab />
               </div>
+            )}
+
+            {activeTab === "leads" && (
+              <StaffLeadsTab />
             )}
           </div>
         </main>

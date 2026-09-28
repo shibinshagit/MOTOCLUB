@@ -45,10 +45,12 @@ export function JobCardForm({
   onClose,
   editSaleId,
   initialCustomer,
+  crmLeadId,
 }: {
   onClose?: () => void
   editSaleId?: number | null
   initialCustomer?: any
+  crmLeadId?: number
 }) {
   const deviceId = useSelector(selectDeviceId)
   const currency = useSelector(selectDeviceCurrency)
@@ -508,6 +510,7 @@ export function JobCardForm({
         customerId,
         deviceId,
         staffId: activeStaff?.id || null,
+        crmLeadId,
         shippingPhone,
         shippingCity,
         shippingDistrict,

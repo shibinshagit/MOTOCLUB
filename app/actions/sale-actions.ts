@@ -2068,17 +2068,31 @@ function calculateSaleChanges(
   let newReceivedAmount = 0
   let balanceAmount = 0
 
+  const totalAllocated = Array.isArray(newData.payments) && newData.payments.length > 0
+    ? newData.payments.reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0)
+    : (Number(newData.receivedAmount) || 0)
+
   if (Array.isArray(newData.payments) && newData.payments.length > 0) {
     newReceivedAmount = newData.payments.reduce((s: number, p: any) => {
-      // Only count COD as received if payment is explicitly marked Paid (e.g. COD collected)
-      if (isCodMethod(p.paymentMethod) && !isMarkedPaid) {
+      // If COD payment is uncollected (full amount selected as COD method but paymentStatus is not Paid)
+      if (isCodMethod(p.paymentMethod) && newTotal > 0 && totalAllocated >= newTotal && !isMarkedPaid) {
         return s
       }
       return s + (Number(p.amount) || 0)
     }, 0)
+    if (isCodMethod(newPaymentMethod)) {
+      advanceAmount = newReceivedAmount
+    }
   } else if (isCodMethod(newPaymentMethod) && !isMarkedPaid) {
-    advanceAmount = Number(newData.advanceAmount) || 0
-    newReceivedAmount = advanceAmount
+    const recAmt = Number(newData.receivedAmount) || 0
+    const advAmt = Number(newData.advanceAmount) || 0
+    if (newData.receivedAmount !== undefined) {
+      newReceivedAmount = recAmt
+      advanceAmount = recAmt
+    } else {
+      newReceivedAmount = advAmt
+      advanceAmount = advAmt
+    }
   } else {
     newReceivedAmount = Number(newData.receivedAmount) || 0
   }
@@ -2470,6 +2484,20 @@ export async function updateSale(saleData: any) {
               )
             `
           }
+        } else {
+          // Reconcile single payment if no payments array is provided (like in POS edit sale)
+          const pm = (saleData.paymentMethod || original.payment_method || "").toUpperCase().trim()
+          const isCod = pm === "COD" || pm === "CASH ON DELIVERY"
+          const tpAmount = isCod ? changes.newTotal : (changes.newReceived > 0 ? changes.newReceived : changes.newTotal)
+          
+          await sql`DELETE FROM transaction_payments WHERE sale_id = ${saleData.id}`
+          await sql`
+            INSERT INTO transaction_payments (
+              sale_id, payment_method, amount, payment_date
+            ) VALUES (
+              ${saleData.id}, ${saleData.paymentMethod || "Cash"}, ${tpAmount}, ${changes.newDate || new Date()}
+            )
+          `
         }
       } catch (tpUpdateErr) {
         console.warn("Could not sync transaction_payments on updateSale:", tpUpdateErr)

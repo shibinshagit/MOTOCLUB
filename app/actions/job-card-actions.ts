@@ -36,6 +36,7 @@ export interface JobCardInput {
   courierPaidExtra?: number
 
   products: JobCardProductInput[]
+  crmLeadId?: number
 }
 
 export async function createJobCard(input: JobCardInput) {
@@ -117,125 +118,178 @@ export async function createJobCard(input: JobCardInput) {
     }
     const totalAmount = itemsSubtotal + (Number(input.courierPaidExtra) || 0)
 
-    let trackingId = ""
-    let saleId = 0
-    let updateSuccess = false
-    let retries = 5
-
-    while (!updateSuccess && retries > 0) {
-      try {
-        // Find next available DOD ID
-        const activeIdsResult = await sql`
-          SELECT tracking_id 
-          FROM sales 
-          WHERE device_id = ${deviceId} 
-            AND tracking_id LIKE 'DOD%'
-            AND (delivery_status IS NULL OR delivery_status NOT IN ('Delivered', 'Returned', 'Failed'))
-            AND status != 'Cancelled'
+        const txResult = await sql.begin(async (tx: any) => {
+      // 1. CRM Lead Validation and Locking
+      if (input.crmLeadId && session) {
+        const leadRes = await tx`
+          SELECT converted_sale_id, converted_customer_id, company_id 
+          FROM crm_leads 
+          WHERE id = ${input.crmLeadId} AND company_id = ${session.companyId}
+          FOR UPDATE
         `
-        const activeIds = new Set(
-          activeIdsResult.map((r: any) => parseInt(String(r.tracking_id).replace('DOD', ''), 10) || 0)
-        )
-        let nextNum = 1
-        while (activeIds.has(nextNum)) {
-          nextNum++
+        if (leadRes.length === 0) {
+          throw new Error("Lead not found or unauthorized")
         }
-        trackingId = 'DOD' + String(nextNum).padStart(3, '0')
-
-    // 3. Calculate Totals
-        // Insert Sale (Status: Pending)
-        const saleRows = await sql`
-          INSERT INTO sales (
-            customer_id,
-            total_amount,
-            total_cost,
-            status,
-            payment_status,
-            device_id,
-            received_amount,
-            staff_id,
-            sale_type,
-            job_card_number,
-            tracking_id,
-            customer_name_override,
-            customer_phone_override,
-            shipping_city,
-            shipping_district,
-            shipping_state,
-            shipping_street,
-            shipping_area,
-            shipping_landmark,
-            shipping_address_type,
-            shipping_pincode,
-            courier_paid_extra,
-            created_by,
-            advance_amount,
-            balance_amount,
-            fulfillment_type,
-            delivery_status
-          ) VALUES (
-            ${resolvedCustomerId || null},
-            ${totalAmount},
-            ${totalCost},
-            'Pending',
-            'Pending',
-            ${deviceId},
-            0,
-            ${staffId},
-            'job_card',
-            ${trackingId},
-            ${trackingId},
-            ${customerNameOverride},
-            ${customerPhoneOverride},
-            ${input.shippingCity || null},
-            ${input.shippingDistrict || null},
-            ${input.shippingState || null},
-            ${input.shippingStreet || null},
-            ${input.shippingArea || null},
-            ${input.shippingLandmark || null},
-            ${input.shippingAddressType || 'Home'},
-            ${input.shippingPincode || null},
-            ${input.courierPaidExtra || 0},
-            ${createdBy},
-            0,
-            ${totalAmount},
-            'ship',
-            'Pending'
-          )
-          RETURNING id
-        `
-        saleId = saleRows[0].id
-        updateSuccess = true
-      } catch (err: any) {
-        if (err.message && (err.message.includes('idx_sales_active_dod_tracking') || err.message.includes('unique constraint'))) {
-          retries--
-          if (retries === 0) throw new Error("Could not allocate a unique DOD tracking ID after 5 attempts. Please try again.")
-          continue
+        
+        const lead = leadRes[0]
+        if (lead.converted_sale_id) {
+          return { alreadyConverted: true, saleId: lead.converted_sale_id }
         }
-        throw err
+        if (lead.converted_customer_id !== resolvedCustomerId) {
+          throw new Error("Customer mismatch for this CRM lead.")
+        }
       }
+
+      let trackingId = ""
+      let saleId = 0
+      let updateSuccess = false
+      let retries = 5
+
+      while (!updateSuccess && retries > 0) {
+        try {
+          await tx.savepoint(async (sp: any) => {
+            // Find next available DOD ID
+            const activeIdsResult = await sp`
+              SELECT tracking_id 
+              FROM sales 
+              WHERE device_id = ${deviceId} 
+                AND tracking_id LIKE 'DOD%'
+                AND (delivery_status IS NULL OR delivery_status NOT IN ('Delivered', 'Returned', 'Failed'))
+                AND status != 'Cancelled'
+            `
+            const activeIds = new Set(
+              activeIdsResult.map((r: any) => parseInt(String(r.tracking_id).replace('DOD', ''), 10) || 0)
+            )
+            let nextNum = 1
+            while (activeIds.has(nextNum)) {
+              nextNum++
+            }
+            trackingId = 'DOD' + String(nextNum).padStart(3, '0')
+
+            // Insert Sale (Status: Pending)
+            const saleRows = await sp`
+              INSERT INTO sales (
+                customer_id,
+                total_amount,
+                total_cost,
+                status,
+                payment_status,
+                device_id,
+                received_amount,
+                staff_id,
+                sale_type,
+                job_card_number,
+                tracking_id,
+                customer_name_override,
+                customer_phone_override,
+                shipping_city,
+                shipping_district,
+                shipping_state,
+                shipping_street,
+                shipping_area,
+                shipping_landmark,
+                shipping_address_type,
+                shipping_pincode,
+                courier_paid_extra,
+                created_by,
+                advance_amount,
+                balance_amount,
+                fulfillment_type,
+                delivery_status
+              ) VALUES (
+                ${resolvedCustomerId || null},
+                ${totalAmount},
+                ${totalCost},
+                'Pending',
+                'Pending',
+                ${deviceId},
+                0,
+                ${staffId},
+                'job_card',
+                ${trackingId},
+                ${trackingId},
+                ${customerNameOverride},
+                ${customerPhoneOverride},
+                ${input.shippingCity || null},
+                ${input.shippingDistrict || null},
+                ${input.shippingState || null},
+                ${input.shippingStreet || null},
+                ${input.shippingArea || null},
+                ${input.shippingLandmark || null},
+                ${input.shippingAddressType || 'Home'},
+                ${input.shippingPincode || null},
+                ${input.courierPaidExtra || 0},
+                ${createdBy},
+                0,
+                ${totalAmount},
+                'ship',
+                'Pending'
+              )
+              RETURNING id
+            `
+            saleId = saleRows[0].id
+          })
+          updateSuccess = true
+        } catch (err: any) {
+          if (err.message && (err.message.includes('idx_sales_active_dod_tracking') || err.message.includes('unique constraint'))) {
+            retries--
+            if (retries === 0) throw new Error("Could not allocate a unique DOD tracking ID after 5 attempts. Please try again.")
+            continue
+          }
+          throw err
+        }
+      }
+
+      // 5. Insert Sale Items
+      for (const p of input.products) {
+        await tx`
+          INSERT INTO sale_items (
+            sale_id,
+            product_id,
+            product_variant_id,
+            quantity,
+            price,
+            cost
+          ) VALUES (
+            ${saleId},
+            ${p.productId},
+            ${p.variantId || null},
+            ${p.quantity},
+            ${p.price},
+            ${p.costPrice}
+          )
+        `
+      }
+
+      if (input.crmLeadId && session) {
+        await tx`
+          UPDATE crm_leads
+          SET
+            converted_sale_id = ${saleId},
+            status = 'Converted',
+            updated_at = NOW()
+          WHERE id = ${input.crmLeadId}
+            AND company_id = ${session.companyId}
+        `
+        
+        const { logLeadActivity } = await import("./lead-actions")
+        await logLeadActivity(tx, {
+          lead_id: input.crmLeadId,
+          company_id: session.companyId,
+          staff_id: session.staffId,
+          activity_type: 'SALE_CREATED',
+          note: `Sale #${saleId} created from CRM lead.`
+        })
+      }
+
+      return { success: true, data: { saleId, trackingId } }
+    })
+
+    if (txResult && txResult.alreadyConverted) {
+      return { success: false, alreadyConverted: true, saleId: txResult.saleId, message: "A sale has already been created for this CRM lead." }
     }
 
-    // 5. Insert Sale Items
-    for (const p of input.products) {
-      await sql`
-        INSERT INTO sale_items (
-          sale_id,
-          product_id,
-          product_variant_id,
-          quantity,
-          price,
-          cost
-        ) VALUES (
-          ${saleId},
-          ${p.productId},
-          ${p.variantId || null},
-          ${p.quantity},
-          ${p.price},
-          ${p.costPrice}
-        )
-      `
-    }
+    const { saleId, trackingId } = txResult.data
 
     revalidatePath("/staff/dashboard")
     revalidatePath("/dashboard")
