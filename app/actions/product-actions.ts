@@ -13,7 +13,7 @@ import { parseProductLinksFromFormData, serializeProductLinks } from "@/lib/prod
 import { getDeviceProductStock, getDeviceVariantStock, adjustDeviceProductStock } from "@/lib/inventory-service"
 import { compareProductsByStockPriority } from "@/lib/product-search"
 import { revalidatePath } from "next/cache"
-import { getServerActor } from "@/lib/device-access"
+import { getServerActor, resolveAuthorizedDeviceId } from "@/lib/device-access"
 
 // Generate a unique barcode for a product
 async function generateProductBarcode(productId: number): Promise<string> {
@@ -1024,7 +1024,7 @@ export async function getProducts(
 }
 
 export async function getPaginatedProducts({
-  userId,
+  userId: requestedUserId,
   page = 1,
   pageSize = 10,
   searchTerm = "",
@@ -1041,6 +1041,25 @@ export async function getPaginatedProducts({
   skipRbac?: boolean
 }) {
   resetConnectionState()
+
+  // The device scope comes from the authenticated session. A client-supplied userId is only
+  // honoured for a platform admin (who may inspect any device); everyone else is pinned to their own.
+  const actor = await getServerActor()
+  let userId: number | undefined
+  if (!actor) {
+    return { success: false, message: "Unauthorized", data: [], totalCount: 0, page: 1, pageSize: Number(pageSize) || 10, totalPages: 0 }
+  }
+  if (actor.kind === "platform_admin") {
+    if (requestedUserId) {
+      const allowed = await resolveAuthorizedDeviceId(Number(requestedUserId))
+      if (!allowed) {
+        return { success: false, message: "Device not found", data: [], totalCount: 0, page: 1, pageSize: Number(pageSize) || 10, totalPages: 0 }
+      }
+      userId = allowed
+    }
+  } else {
+    userId = actor.deviceId
+  }
 
   const safePage = Math.max(1, Number(page) || 1)
   const safePageSize = Math.min(200, Math.max(5, Number(pageSize) || 10))
