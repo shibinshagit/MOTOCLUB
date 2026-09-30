@@ -24,6 +24,7 @@ import { collectCustomerCredit } from "@/app/actions/customer-payment-actions"
 import type { CustomerPaymentAllocation } from "@/app/actions/customer-payment-actions"
 import { useSelector } from "react-redux"
 import type { RootState } from "@/store/store"
+import { formatCurrency as formatMoney } from "@/lib/utils"
 
 interface PayCustomerCreditModalProps {
   isOpen: boolean
@@ -60,7 +61,7 @@ export default function PayCustomerCreditModal({
   } | null>(null)
 
   const currency = useSelector((state: RootState) => state.device.currency) || "AED"
-  const formatCurrency = (amount: number) => `${currency} ${amount.toFixed(2)}`
+  const formatCurrency = (amount: number) => formatMoney(amount, currency)
   const maxAmount = customer.still_to_collect
   const today = new Date().toISOString().split("T")[0]
 

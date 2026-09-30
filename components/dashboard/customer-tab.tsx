@@ -55,6 +55,7 @@ import {
 } from "@/store/slices/customerSlice"
 import { formatDistanceToNow } from "date-fns"
 import { Card, CardContent } from "@/components/ui/card"
+import { formatCurrency as formatMoney } from "@/lib/utils"
 
 interface Customer {
   id: number
@@ -107,7 +108,9 @@ export function CustomerTab({ userId, companyId }: { userId: number; companyId?:
   const { toast } = useToast()
   const { confirm, ConfirmDialog } = useConfirm()
   const currency = useSelector((state: RootState) => state.device.currency) || "AED"
-  const formatCurrency = (amount: number) => `${currency} ${Number(amount || 0).toFixed(2)}`
+  // Shared currency formatter, driven by the device/company currency (INR -> ₹, etc.)
+  const formatCurrency = (amount: number) => formatMoney(Number(amount || 0), currency)
+  const [activeView, setActiveView] = useState<"customers" | "payments">("customers")
 
   // Initial load and background refresh
   useEffect(() => {
@@ -416,9 +419,31 @@ return (
   <div className="space-y-4 sm:space-y-6 p-4 sm:p-0">
     {/* Header */}
     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-      <h1 className="text-xl sm:text-2xl font-bold">Customers</h1>
-      
+      <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-center">
+        <h1 className="text-xl sm:text-2xl font-bold">Customers</h1>
+        <div role="tablist" aria-label="Customers view" className="inline-flex w-full rounded-lg bg-gray-100 p-1 sm:w-auto">
+          {([
+            { id: "customers", label: "Customers" },
+            { id: "payments", label: "Customer Payments" },
+          ] as const).map((view) => (
+            <button
+              key={view.id}
+              type="button"
+              role="tab"
+              aria-selected={activeView === view.id}
+              onClick={() => setActiveView(view.id)}
+              className={`flex-1 whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-semibold transition-colors sm:flex-initial sm:text-sm ${
+                activeView === view.id ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900"
+              }`}
+            >
+              {view.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Action Buttons - Responsive Grid */}
+      {activeView === "customers" && (
       <div className="flex flex-wrap gap-2 w-full sm:w-auto">
         <Button
           onClick={exportToCSV}
@@ -488,8 +513,11 @@ return (
           <span className="sm:hidden">Add</span>
         </Button>
       </div>
+      )}
     </div>
 
+    {activeView === "customers" && (
+    <>
     {/* Last Updated - Mobile Responsive */}
     {lastUpdated && (
       <div className="text-xs text-gray-500 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-0">
@@ -653,7 +681,11 @@ return (
       </div>
     )}
 
+    </>
+    )}
+
     {/* Customer Payments */}
+    {activeView === "payments" && (
     <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
         <div>
@@ -730,6 +762,7 @@ return (
         </div>
       )}
     </div>
+    )}
 
     {/* Add Customer Modal - Responsive */}
     <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>

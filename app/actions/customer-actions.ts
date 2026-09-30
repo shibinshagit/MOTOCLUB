@@ -2,6 +2,42 @@
 
 import { sql, getLastError, resetConnectionState } from "@/lib/db"
 import { revalidatePath } from "next/cache"
+import { getServerActor } from "@/lib/device-access"
+
+/**
+ * Company the caller may see this customer under, derived from the server session (never from
+ * client input). Returns null when the caller is unknown or the customer is outside their company.
+ * A customer belongs to a company when a device of that company created it or sold to it.
+ */
+async function resolveCustomerCompanyScope(customerId: number): Promise<number | null> {
+  const actor = await getServerActor()
+  if (!actor) return null
+
+  if (actor.kind === "platform_admin") {
+    const rows = await sql`
+      SELECT d.company_id FROM customers c JOIN devices d ON d.id = c.created_by WHERE c.id = ${customerId}
+      UNION
+      SELECT d.company_id FROM sales s JOIN devices d ON d.id = s.device_id WHERE s.customer_id = ${customerId}
+      LIMIT 1
+    `
+    return rows.length > 0 && rows[0].company_id != null ? Number(rows[0].company_id) : null
+  }
+
+  const dev = await sql`SELECT company_id FROM devices WHERE id = ${actor.deviceId} LIMIT 1`
+  const companyId = dev[0]?.company_id != null ? Number(dev[0].company_id) : null
+  if (!companyId) return null
+
+  const owned = await sql`
+    SELECT 1 FROM customers c
+    WHERE c.id = ${customerId}
+      AND (
+        c.created_by IN (SELECT id FROM devices WHERE company_id = ${companyId})
+        OR EXISTS (SELECT 1 FROM sales s WHERE s.customer_id = c.id AND s.device_id IN (SELECT id FROM devices WHERE company_id = ${companyId}))
+      )
+    LIMIT 1
+  `
+  return owned.length > 0 ? companyId : null
+}
 
 export async function getCustomerById(customerId: number) {
   if (!customerId) {
@@ -29,13 +65,9 @@ export async function getCustomerById(customerId: number) {
 
 export async function getCustomerAddresses(customerId: number, companyId?: number) {
   if (!customerId) return { success: false, data: [] }
-  if (companyId) {
-    const verify = await sql`
-      SELECT id FROM customers
-      WHERE id = ${customerId}
-      AND (created_by = ${companyId} OR created_by IN (SELECT id FROM devices WHERE company_id = ${companyId}))
-    `;
-    if (verify.length === 0) return { success: false, data: [] };
+  // Callers that pass a companyId ask for a scoped read; the scope itself comes from the session
+  if (companyId !== undefined && (await resolveCustomerCompanyScope(customerId)) === null) {
+    return { success: false, data: [] }
   }
   try {
     const addresses = await sql`
@@ -333,8 +365,14 @@ export async function getCustomerSales(customerId: number, companyId?: number) {
   resetConnectionState()
 
   try {
+    // Scope comes from the session, not from the client-supplied companyId
+    const scopeCompanyId = await resolveCustomerCompanyScope(customerId)
+    if (scopeCompanyId === null) {
+      return { success: false, message: "Customer not found", data: [] }
+    }
+
     const sales = await sql`
-      SELECT s.id, 
+      SELECT s.id,
              s.sale_date, 
              s.total_amount,
              s.received_amount, 
@@ -345,7 +383,7 @@ export async function getCustomerSales(customerId: number, companyId?: number) {
       FROM sales s
       LEFT JOIN sale_items si ON s.id = si.sale_id
       WHERE s.customer_id = ${customerId}
-      ${companyId ? sql`AND s.device_id IN (SELECT id FROM devices WHERE company_id = ${companyId})` : sql``}
+        AND s.device_id IN (SELECT id FROM devices WHERE company_id = ${scopeCompanyId})
       GROUP BY s.id, s.sale_date, s.total_amount, s.received_amount, s.payment_method, s.status, s.customer_id
       ORDER BY s.sale_date DESC
     `

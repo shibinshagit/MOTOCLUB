@@ -8,7 +8,8 @@ import { Separator } from "@/components/ui/separator"
 import { format } from "date-fns"
 import { useEffect, useState } from "react"
 import { getCustomerSales, getCustomerAddresses, setDefaultCustomerAddress } from "@/app/actions/customer-actions"
-import { User, Mail, Phone, MapPin, Calendar, ShoppingBag, DollarSign, Package, Clock, TrendingUp, CheckCircle2 } from "lucide-react"
+import { User, Mail, Phone, MapPin, Calendar, ShoppingBag, Wallet, Package, Clock, TrendingUp, CheckCircle2 } from "lucide-react"
+import { formatCurrency as formatMoney } from "@/lib/utils"
 import { useSelector } from "react-redux"
 import { selectDeviceCurrency } from "@/store/slices/deviceSlice"
 
@@ -196,33 +197,33 @@ export default function ViewCustomerModal({ isOpen, onClose, customer, companyId
                     </div>
 
                     <div className="text-center p-3 bg-purple-50 rounded-lg border border-purple-100">
-                      <DollarSign className="h-5 w-5 text-purple-600 mx-auto mb-1" />
+                      <Wallet className="h-5 w-5 text-purple-600 mx-auto mb-1" />
                       <p className="text-lg font-bold text-purple-600">
-                        {currency} {totalAmount.toFixed(2)}
+                        {formatMoney(totalAmount, currency)}
                       </p>
                       <p className="text-xs text-purple-700">Total Amount</p>
                     </div>
 
                     <div className="text-center p-3 bg-green-50 rounded-lg border border-green-100">
-                      <DollarSign className="h-5 w-5 text-green-600 mx-auto mb-1" />
+                      <Wallet className="h-5 w-5 text-green-600 mx-auto mb-1" />
                       <p className="text-lg font-bold text-green-600">
-                        {currency} {totalSpent.toFixed(2)}
+                        {formatMoney(totalSpent, currency)}
                       </p>
                       <p className="text-xs text-green-700">Total Paid</p>
                     </div>
 
                     <div className="text-center p-3 bg-orange-50 rounded-lg border border-orange-100">
-                      <DollarSign className="h-5 w-5 text-orange-600 mx-auto mb-1" />
+                      <Wallet className="h-5 w-5 text-orange-600 mx-auto mb-1" />
                       <p className="text-lg font-bold text-orange-600">
-                        {currency} {totalCredit.toFixed(2)}
+                        {formatMoney(totalCredit, currency)}
                       </p>
                       <p className="text-xs text-orange-700">Total Credit</p>
                     </div>
 
                     <div className="text-center p-3 bg-red-50 rounded-lg border border-red-100">
-                      <DollarSign className="h-5 w-5 text-red-600 mx-auto mb-1" />
+                      <Wallet className="h-5 w-5 text-red-600 mx-auto mb-1" />
                       <p className="text-lg font-bold text-red-600">
-                        {currency} {totalBalance.toFixed(2)}
+                        {formatMoney(totalBalance, currency)}
                       </p>
                       <p className="text-xs text-red-700">Outstanding Balance</p>
                     </div>
@@ -393,7 +394,7 @@ export default function ViewCustomerModal({ isOpen, onClose, customer, companyId
                             </span>
                             {sale.payment_method && (
                               <span className="flex items-center gap-1">
-                                <DollarSign className="h-3 w-3" />
+                                <Wallet className="h-3 w-3" />
                                 {sale.payment_method}
                               </span>
                             )}
@@ -402,14 +403,14 @@ export default function ViewCustomerModal({ isOpen, onClose, customer, companyId
                         <div className="text-right">
                           <div className="space-y-1">
                             <p className="text-sm text-gray-600">
-                              Total: {currency} {totalAmount.toFixed(2)}
+                              Total: {formatMoney(totalAmount, currency)}
                             </p>
                             <p className="text-lg font-bold text-green-600">
-                              Paid: {currency} {receivedAmount.toFixed(2)}
+                              Paid: {formatMoney(receivedAmount, currency)}
                             </p>
                             {isCredit && (
                               <p className="text-sm font-semibold text-red-600">
-                                Balance: {currency} {balance.toFixed(2)}
+                                Balance: {formatMoney(balance, currency)}
                               </p>
                             )}
                           </div>
