@@ -20,6 +20,7 @@ import { ProductDetailSlider } from "@/components/products/product-detail-slider
 import EditProductModal from "@/components/products/edit-product-modal"
 import AdjustStockModal from "@/components/products/adjust-stock-modal"
 import { InventorySearchBox } from "@/components/products/inventory-search-box"
+import { InventorySummaryCards } from "@/components/products/inventory-summary-cards"
 import { getPaginatedProducts, getProducts, deleteProduct } from "@/app/actions/product-actions"
 import { useToast } from "@/components/ui/use-toast"
 import { notifyError, notifySuccess, notifyWarning } from "@/lib/notifications"
@@ -65,6 +66,7 @@ export default function ProductTab({
   const [debouncedSearch, setDebouncedSearch] = useState<string>("")
   const [selectedCategory, setSelectedCategory] = useState<{ id?: number | string | null; name: string } | null>(null)
   const [loading, setLoading] = useState<boolean>(true)
+  const [summaryRefreshKey, setSummaryRefreshKey] = useState(0)
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false)
   const [isExporting, setIsExporting] = useState<boolean>(false)
 
@@ -103,6 +105,7 @@ export default function ProductTab({
       if (fetchInFlightRef.current && !isRefresh) return
 
       fetchInFlightRef.current = true
+      if (isRefresh || silent) setSummaryRefreshKey((k) => k + 1)
       if (isRefresh) {
         setIsRefreshing(true)
       } else if (!silent) {
@@ -337,6 +340,8 @@ export default function ProductTab({
         </div>
       </div>
 
+      <InventorySummaryCards userId={userId} refreshKey={summaryRefreshKey} currency={currency} />
+
       {/* Table Container */}
       <div className="w-full overflow-hidden">
         <ProductsExcelTable
@@ -417,10 +422,11 @@ export default function ProductTab({
       <AlertDialog open={isDeleteModalOpen} onOpenChange={setIsDeleteModalOpen}>
         <AlertDialogContent overlayClassName="z-[70]" className="z-[70]">
           <AlertDialogHeader>
-            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+            <AlertDialogTitle>Delete this product permanently?</AlertDialogTitle>
             <AlertDialogDescription>
-              This action cannot be undone. This will permanently delete the product
-              {selectedProduct?.name ? ` "${selectedProduct.name}"` : ""} and remove it from our servers.
+              This cannot be undone. Products with sales, purchases, stock or other transaction history cannot be
+              deleted, and you will be told if that applies to
+              {selectedProduct?.name ? ` "${selectedProduct.name}"` : " this product"}.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

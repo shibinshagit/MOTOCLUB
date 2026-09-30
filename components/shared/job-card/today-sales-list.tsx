@@ -20,7 +20,13 @@ import { format } from "date-fns"
 import { formatPhoneNumber, parseSaleDateTime } from "@/lib/utils"
 import { getPublicTrackingUrl } from "@/lib/shipping/tracking-url"
 
-export function TodaySalesList({ onOpenCreateModal }: { onOpenCreateModal?: () => void }) {
+export function TodaySalesList({
+  onOpenCreateModal,
+  canCreateProducts = true,
+}: {
+  onOpenCreateModal?: () => void
+  canCreateProducts?: boolean
+}) {
   const currency = useSelector(selectDeviceCurrency)
   const deviceId = useSelector(selectDeviceId)
   const { toast } = useToast()
@@ -149,6 +155,7 @@ export function TodaySalesList({ onOpenCreateModal }: { onOpenCreateModal?: () =
             fetchSales()
           }}
           editSaleId={editingSaleId}
+          canCreateProducts={canCreateProducts}
         />
       )}
 

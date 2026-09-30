@@ -13,6 +13,7 @@ import { parseProductLinksFromFormData, serializeProductLinks } from "@/lib/prod
 import { getDeviceProductStock, getDeviceVariantStock, adjustDeviceProductStock } from "@/lib/inventory-service"
 import { compareProductsByStockPriority } from "@/lib/product-search"
 import { revalidatePath } from "next/cache"
+import { getServerActor } from "@/lib/device-access"
 
 // Generate a unique barcode for a product
 async function generateProductBarcode(productId: number): Promise<string> {
@@ -2218,6 +2219,12 @@ interface CreateProductParams {
 
 // Update the createProduct function to check for duplicates within user's products
 export async function createProduct(formData: FormData) {
+  // Staff (non-admin) sessions may only use existing products; enforce it here, not just in the UI
+  const actor = await getServerActor()
+  if (actor?.kind === "staff") {
+    const message = "You do not have permission to create products"
+    return { success: false, error: message, message }
+  }
   const name = formData.get("name") as string
   const companyName = formData.get("company_name") as string
   const category = formData.get("category") as string
@@ -3103,57 +3110,125 @@ export async function updateProduct(formData: FormData) {
 }
 
 // Update the deleteProduct function to check for active sales
+class ProductDeleteBlocked extends Error {
+  constructor(
+    public code: "NOT_FOUND" | "HAS_HISTORY" | "HAS_STOCK",
+    message: string,
+    public blockers: Record<string, number> = {},
+  ) {
+    super(message)
+  }
+}
+
+/**
+ * Hard-deletes a product only when it has no business footprint at all.
+ * Products with transaction history or stock are never deleted (their master data is needed by
+ * historical sales, purchases, returns, transfers, reports and CRM/ecommerce references), and
+ * cancelled sales still count as history. Runs as one SERIALIZABLE transaction so a concurrent
+ * transaction that starts using the product cannot slip in between the checks and the delete.
+ */
 export async function deleteProduct(id: number) {
   if (!id) {
     return { success: false, message: "Product ID is required" }
   }
 
-  // Reset connection state to allow a fresh attempt
   resetConnectionState()
 
   try {
-    // Check if product is used in any sales or purchases
-    const saleItems =
-      await sql`SELECT si.id, s.status FROM sale_items si JOIN sales s ON si.sale_id = s.id WHERE si.product_id = ${id}`
-    const purchaseItems = await sql`SELECT id FROM purchase_items WHERE product_id = ${id}`
+    const actor = await getServerActor()
+    if (!actor) return { success: false, message: "Not authorized to delete products" }
+    if (actor.kind === "staff") {
+      return { success: false, message: "Only administrators can delete products" }
+    }
 
-    // Check specifically for active sales (not cancelled)
-    const activeSales = saleItems.filter((item: any) => item.status !== "cancelled")
+    await sql.begin("isolation level serializable", async (tx: any) => {
+      // 1. Ownership: the product must belong to the actor's company (platform admins may act on any)
+      const owned =
+        actor.kind === "platform_admin"
+          ? await tx`SELECT id FROM products WHERE id = ${id} FOR UPDATE`
+          : await tx`
+              SELECT p.id FROM products p
+              WHERE p.id = ${id}
+                AND p.created_by IN (
+                  SELECT d2.id FROM devices d1 JOIN devices d2 ON d2.company_id = d1.company_id WHERE d1.id = ${actor.deviceId}
+                )
+              FOR UPDATE OF p
+            `
+      if (owned.length === 0) throw new ProductDeleteBlocked("NOT_FOUND", "Product not found")
 
-    if (activeSales.length > 0) {
-      return {
-        success: false,
-        message: "Cannot delete product that has active sales. Please cancel the sales first.",
+      // 2. Every place that references this product (most have no FK, so a delete would orphan them)
+      const [dep] = await tx`
+        WITH v AS (SELECT id FROM product_variants WHERE product_id = ${id}),
+             b AS (SELECT id FROM product_batches WHERE product_id = ${id} OR product_variant_id IN (SELECT id FROM v))
+        SELECT
+          (SELECT COUNT(DISTINCT sale_id) + COUNT(*) FILTER (WHERE sale_id IS NULL) FROM sale_items WHERE product_id = ${id})::int AS sales,
+          (SELECT COUNT(DISTINCT purchase_id) + COUNT(*) FILTER (WHERE purchase_id IS NULL) FROM purchase_items WHERE product_id = ${id})::int AS purchases,
+          (SELECT COUNT(DISTINCT purchase_return_id) + COUNT(*) FILTER (WHERE purchase_return_id IS NULL) FROM purchase_return_items WHERE product_id = ${id})::int AS purchase_returns,
+          (SELECT COUNT(DISTINCT sale_return_id) + COUNT(*) FILTER (WHERE sale_return_id IS NULL) FROM sale_return_items WHERE product_id = ${id})::int AS sale_returns,
+          (SELECT COUNT(DISTINCT transfer_id) + COUNT(*) FILTER (WHERE transfer_id IS NULL) FROM stock_transfer_items WHERE product_id = ${id})::int AS transfers,
+          (SELECT COUNT(DISTINCT replacement_shipment_id) + COUNT(*) FILTER (WHERE replacement_shipment_id IS NULL) FROM replacement_shipment_items WHERE product_id = ${id})::int AS replacements,
+          (SELECT COUNT(*) FROM return_request_items WHERE product_id = ${id})::int AS return_requests,
+          (SELECT COUNT(*) FROM crm_lead_products WHERE product_id = ${id})::int AS crm_leads,
+          (SELECT COUNT(*) FROM product_reviews WHERE product_id = ${id})::int AS reviews,
+          (SELECT COUNT(*) FROM wishlists WHERE product_id = ${id})::int AS wishlists,
+          (SELECT COUNT(DISTINCT order_id) + COUNT(*) FILTER (WHERE order_id IS NULL) FROM order_items WHERE menu_item_id = ${id} OR variant_id IN (SELECT id FROM v))::int AS ecommerce_orders,
+          (SELECT COUNT(*) FROM sale_batch_allocations WHERE batch_id IN (SELECT id FROM b))::int AS batch_allocations,
+          (SELECT COUNT(*) FROM product_stock_history WHERE product_id = ${id} AND COALESCE(quantity, 0) <> 0)::int AS stock_movements,
+          (SELECT COUNT(*) FROM product_device_stock WHERE product_id = ${id} AND stock <> 0)::int AS legacy_stock_rows,
+          (SELECT COUNT(*) FROM product_batch_device_stock WHERE batch_id IN (SELECT id FROM b) AND stock <> 0)::int AS batch_stock_rows
+      `
+      const stockRows = Number(dep.legacy_stock_rows) + Number(dep.batch_stock_rows)
+      const historyKeys = [
+        "sales", "purchases", "purchase_returns", "sale_returns", "transfers", "replacements",
+        "return_requests", "crm_leads", "reviews", "wishlists", "ecommerce_orders", "batch_allocations", "stock_movements",
+      ]
+      const blockers: Record<string, number> = {}
+      for (const key of historyKeys) if (Number(dep[key]) > 0) blockers[key] = Number(dep[key])
+
+      if (Object.keys(blockers).length > 0) {
+        throw new ProductDeleteBlocked(
+          "HAS_HISTORY",
+          "Product cannot be permanently deleted because it has historical business records. Its record must be retained so sales, purchases, inventory and reports remain accurate. " +
+            Object.entries(blockers)
+              .map(([k, n]) => `${k.charAt(0).toUpperCase()}${k.slice(1).replace(/_/g, " ")}: ${n}`)
+              .join(", "),
+          blockers,
+        )
       }
-    }
-
-    let stockHistory = []
-    try {
-      stockHistory = await sql`SELECT id FROM product_stock_history WHERE product_id = ${id}`
-    } catch (error) {
-      console.error("Stock history table might not exist:", error)
-      // Continue execution even if this fails
-    }
-
-    // Delete stock history first (if any)
-    if (stockHistory.length > 0) {
-      try {
-        await sql`DELETE FROM product_stock_history WHERE product_id = ${id}`
-      } catch (error) {
-        console.error("Failed to delete stock history:", error)
-        // Continue execution even if this fails
+      if (stockRows > 0) {
+        throw new ProductDeleteBlocked(
+          "HAS_STOCK",
+          "Product cannot be deleted while stock exists. Adjust or transfer the stock first.",
+          { stock: stockRows },
+        )
       }
+
+      // 3. Nothing depends on it: remove its own master data (all zero-stock / zero-movement rows)
+      await tx`DELETE FROM product_share_links WHERE product_id = ${id}`
+      await tx`DELETE FROM product_stock_history WHERE product_id = ${id}`
+      await tx`
+        DELETE FROM product_batch_device_stock WHERE batch_id IN (
+          SELECT id FROM product_batches
+          WHERE product_id = ${id} OR product_variant_id IN (SELECT id FROM product_variants WHERE product_id = ${id})
+        )
+      `
+      await tx`
+        DELETE FROM product_batches
+        WHERE product_id = ${id} OR product_variant_id IN (SELECT id FROM product_variants WHERE product_id = ${id})
+      `
+      await tx`DELETE FROM product_device_stock WHERE product_id = ${id}`
+      await tx`DELETE FROM product_variants WHERE product_id = ${id}`
+      await tx`DELETE FROM products WHERE id = ${id}`
+    })
+
+    return { success: true, message: "Product deleted successfully" }
+  } catch (error: any) {
+    if (error instanceof ProductDeleteBlocked) {
+      return { success: false, code: error.code, message: error.message, blockers: error.blockers }
     }
-
-    // Delete the product
-    const result = await sql`DELETE FROM products WHERE id = ${id} RETURNING id`
-
-    if (result.length > 0) {
-      return { success: true, message: "Product deleted successfully" }
+    if (error?.code === "40001") {
+      return { success: false, message: "The product was being used by another transaction. Please try again." }
     }
-
-    return { success: false, message: "Failed to delete product" }
-  } catch (error) {
     console.error("Delete product error:", error)
     return {
       success: false,

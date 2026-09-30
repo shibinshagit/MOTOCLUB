@@ -23,6 +23,8 @@ interface ProductSelectSimpleProps {
   onAddNew?: () => void
 
   onAddNewService?: () => void
+  /** Set false to hide the "Add New" footer (e.g. for staff, who may only pick existing products). */
+  allowAddNew?: boolean
   userId?: number
   refreshTrigger?: boolean
   onRefreshComplete?: () => void
@@ -63,6 +65,7 @@ function ProductSelectSimple({
   onChange,
   onAddNew,
   onAddNewService,
+  allowAddNew = true,
   userId = 1,
   refreshTrigger = false,
   onRefreshComplete,
@@ -598,16 +601,18 @@ function ProductSelectSimple({
             )}
           </div>
 
-          <div className="border-t border-gray-200 p-4 bg-gray-50">
-            <Button
-              variant="outline"
-              className="w-full border-gray-300 text-gray-700 hover:bg-gray-100 bg-transparent"
-              onClick={handleAddNew}
-            >
-              <Plus className="mr-2 h-4 w-4" />
-              Add New {isServiceMode ? "Service" : "Product"}
-            </Button>
-          </div>
+          {allowAddNew && (
+            <div className="border-t border-gray-200 p-4 bg-gray-50">
+              <Button
+                variant="outline"
+                className="w-full border-gray-300 text-gray-700 hover:bg-gray-100 bg-transparent"
+                onClick={handleAddNew}
+              >
+                <Plus className="mr-2 h-4 w-4" />
+                Add New {isServiceMode ? "Service" : "Product"}
+              </Button>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>
@@ -621,5 +626,6 @@ export default React.memo(ProductSelectSimple, (prev, next) => {
          prev.usePriceType === next.usePriceType &&
          prev.allowServices === next.allowServices &&
          prev.error === next.error &&
-         prev.hideServiceIcon === next.hideServiceIcon
+         prev.hideServiceIcon === next.hideServiceIcon &&
+         prev.allowAddNew === next.allowAddNew
 })

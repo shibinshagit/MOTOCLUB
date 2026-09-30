@@ -432,10 +432,11 @@ export default function InventoryDrawer({
       <AlertDialog open={isDeleteModalOpen} onOpenChange={setIsDeleteModalOpen}>
         <AlertDialogContent overlayClassName="z-[70]" className="z-[70]">
           <AlertDialogHeader>
-            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+            <AlertDialogTitle>Delete this product permanently?</AlertDialogTitle>
             <AlertDialogDescription>
-              This action cannot be undone. This will permanently delete the product
-              {selectedProduct?.name ? ` "${selectedProduct.name}"` : ""} and remove it from our servers.
+              This cannot be undone. Products with sales, purchases, stock or other transaction history cannot be
+              deleted, and you will be told if that applies to
+              {selectedProduct?.name ? ` "${selectedProduct.name}"` : " this product"}.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

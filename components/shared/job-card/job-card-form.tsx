@@ -48,12 +48,15 @@ export function JobCardForm({
   initialCustomer,
   crmLeadId,
   initialProducts,
+  canCreateProducts = true,
 }: {
   onClose?: () => void
   editSaleId?: number | null
   initialCustomer?: any
   crmLeadId?: number
   initialProducts?: any[]
+  /** Staff can only pick existing products; admins keep "Add New Product". */
+  canCreateProducts?: boolean
 }) {
   const deviceId = useSelector(selectDeviceId)
   const currency = useSelector(selectDeviceCurrency)
@@ -1025,6 +1028,7 @@ export function JobCardForm({
       <Card className="shadow-sm border-gray-200">
         <CardHeader className="border-b bg-gray-50/50 py-3 sm:py-4 flex flex-row items-center justify-between">
           <CardTitle className="text-base font-semibold text-gray-900">Product Line Items</CardTitle>
+          {canCreateProducts && (
           <Button
             type="button"
             variant="outline"
@@ -1058,6 +1062,7 @@ export function JobCardForm({
           >
             <Plus className="mr-1 h-3.5 w-3.5" /> Add New Product
           </Button>
+          )}
         </CardHeader>
         <CardContent className="pt-4 space-y-4">
           
@@ -1086,7 +1091,9 @@ export function JobCardForm({
                     value={product.productId}
                     initialProductName={product.productName}
                     onChange={(id, name, price, ws, stock, obj) => handleProductSelect(product.id, id, name, price, ws, stock, obj)}
+                    allowAddNew={canCreateProducts}
                     onAddNew={() => {
+                      if (!canCreateProducts) return
                       setActiveRowIdForNewProduct(product.id)
                       setIsNewProductModalOpen(true)
                     }}
@@ -1187,7 +1194,9 @@ export function JobCardForm({
                           value={product.productId}
                           initialProductName={product.productName}
                           onChange={(id, name, price, ws, stock, obj) => handleProductSelect(product.id, id, name, price, ws, stock, obj)}
+                          allowAddNew={canCreateProducts}
                           onAddNew={() => {
+                            if (!canCreateProducts) return
                             setActiveRowIdForNewProduct(product.id)
                             setIsNewProductModalOpen(true)
                           }}
@@ -1484,6 +1493,7 @@ export function JobCardForm({
     </Dialog>
 
     {/* Add New Product Modal */}
+    {canCreateProducts && (
     <NewProductModal
       isOpen={isNewProductModalOpen}
       onClose={() => {
@@ -1494,6 +1504,7 @@ export function JobCardForm({
       userId={deviceId || 1}
       elevated={true}
     />
+    )}
     {ConfirmDialog}
     </>
   )

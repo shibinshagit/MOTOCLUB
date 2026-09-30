@@ -665,6 +665,7 @@ export default function StaffLeadsTab() {
           } : null}
           crmLeadId={selectedLead?.id}
           initialProducts={leadProducts}
+          canCreateProducts={false}
         />
       )}
     </div>

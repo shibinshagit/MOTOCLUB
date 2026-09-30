@@ -93,6 +93,7 @@ import PayrollRequestsTab from "@/components/admin/payroll-requests-tab"
 import ProfitBreakdownModal from "@/components/shared/profit-breakdown-modal"
 import ExpenseBreakdownModal from "@/components/shared/expense-breakdown-modal"
 import AccountingAIChat from "@/components/accounting/accounting-ai-chat"
+import CapitalTab from "@/components/accounting/capital-tab"
 
 interface AccountingTabProps {
   userId: number
@@ -2479,7 +2480,7 @@ const renderTransactionList = (
       <div className="rounded-xl border border-border bg-card">
         <Tabs defaultValue="transactions" value={activeTab} onValueChange={setActiveTab} className="w-full">
           <div className="px-4 pt-4">
-            <TabsList className="grid w-full grid-cols-2 md:grid-cols-7 rounded-lg bg-muted p-1">
+            <TabsList className="grid w-full grid-cols-2 md:grid-cols-8 rounded-lg bg-muted p-1">
               <TabsTrigger value="transactions" className="rounded-md">
                 Transactions
               </TabsTrigger>
@@ -2493,6 +2494,9 @@ const renderTransactionList = (
               </TabsTrigger>
               <TabsTrigger value="petty-cash" className="rounded-md">
                 Petty cash
+              </TabsTrigger>
+              <TabsTrigger value="capital" className="rounded-md">
+                Capital
               </TabsTrigger>
               <TabsTrigger value="receivables" className="rounded-md">
                 Receivables
@@ -2518,6 +2522,12 @@ const renderTransactionList = (
             {renderTransactionList(
               filteredTransactions,
               "No transactions found for the selected period",
+            )}
+          </TabsContent>
+
+          <TabsContent value="capital" className="p-4">
+            {activeTab === "capital" && (
+              <CapitalTab deviceId={deviceId} currency={currency} dateFrom={dateFrom} dateTo={dateTo} />
             )}
           </TabsContent>
 

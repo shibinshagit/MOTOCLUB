@@ -1011,6 +1011,28 @@ async function createTables() {
     `
   })
 
+  // Standalone capital ledger: intentionally separate from financial_transactions so it can never
+  // feed sales, expense, profit, balance, receivable or payable totals.
+  await run("capital_transactions", async () => {
+    await sql`
+      CREATE TABLE IF NOT EXISTS capital_transactions (
+        id SERIAL PRIMARY KEY,
+        company_id INTEGER NOT NULL REFERENCES companies(id),
+        device_id INTEGER NOT NULL REFERENCES devices(id),
+        transaction_type VARCHAR(3) NOT NULL CHECK (transaction_type IN ('IN', 'OUT')),
+        amount DECIMAL(14,2) NOT NULL CHECK (amount > 0),
+        description TEXT,
+        payment_method VARCHAR(50),
+        transaction_date TIMESTAMP NOT NULL DEFAULT NOW(),
+        created_by INTEGER,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `
+    await sql`CREATE INDEX IF NOT EXISTS idx_capital_transactions_device_date ON capital_transactions(device_id, transaction_date)`
+    await sql`CREATE INDEX IF NOT EXISTS idx_capital_transactions_company ON capital_transactions(company_id)`
+  })
+
   await run("crm_lead_products", async () => {
     await sql`
       CREATE TABLE IF NOT EXISTS crm_lead_products (

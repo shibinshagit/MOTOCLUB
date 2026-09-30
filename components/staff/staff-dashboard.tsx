@@ -335,7 +335,7 @@ export default function StaffDashboard() {
                 </div>
 
                 <div className="w-full mt-8 border-t pt-8">
-                  <TodaySalesList onOpenCreateModal={() => setIsJobCardModalOpen(true)} />
+                  <TodaySalesList onOpenCreateModal={() => setIsJobCardModalOpen(true)} canCreateProducts={false} />
                 </div>
               </div>
             )}
@@ -374,6 +374,7 @@ export default function StaffDashboard() {
           setSelectedCustomerForJobCard(null)
         }} 
         initialCustomer={selectedCustomerForJobCard}
+        canCreateProducts={false}
       />
     </div>
   )
