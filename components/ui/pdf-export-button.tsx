@@ -124,7 +124,7 @@ export function PdfExportButton({
           <tr>
             <td>${index + 1}</td>
             <td>${sale.customer_name || "Walk-in Customer"}</td>
-            <td>${format(new Date(sale.sale_date), "yyyy-MM-dd")}</td>
+            <td>${format(new Date(sale.sale_date), "dd-MM-yyyy")}</td>
             <td>${formatCurrency(Number(sale.total_amount) || 0)}</td>
             <td>${formatCurrency(Number(sale.discount) || 0)}</td>
             <td>${sale.payment_method || "Cash"}</td>
@@ -150,7 +150,7 @@ export function PdfExportButton({
           <tr>
             <td>${index + 1}</td>
             <td>${purchase.supplier || "Unknown Supplier"}</td>
-            <td>${purchase.purchase_date ? format(new Date(purchase.purchase_date), "yyyy-MM-dd") : ""}</td>
+            <td>${purchase.purchase_date ? format(new Date(purchase.purchase_date), "dd-MM-yyyy") : ""}</td>
             <td>${formatCurrency(Number(purchase.total_amount) || 0)}</td>
             <td>${purchase.status || ""}</td>
             <td>${purchase.payment_method || "Cash"}</td>

@@ -4,6 +4,7 @@ import { sql } from "@/lib/db"
 import { revalidatePath, unstable_noStore as noStore } from "next/cache"
 import { resolveStaffSessionContext } from "@/lib/staff-restrictions-server"
 import { adjustDeviceProductStock } from "@/lib/inventory-service"
+import { getDeviceCompanyId } from "@/lib/device-company"
 
 export async function ensurePurchaseReturnTablesExist() {
   try {
@@ -308,7 +309,7 @@ export async function processPurchaseReturn(input: ProcessPurchaseReturnInput) {
           'Purchase Return', 'purchase_return', 'purchase', ${purchaseId},
           ${parsedRefundAmount}, ${parsedRefundAmount}, 0, 0, ${parsedRefundAmount}, 
           'Completed', ${paymentMethod},
-          ${description}, ${reason || null}, ${resolvedDeviceId}, 1,
+          ${description}, ${reason || null}, ${resolvedDeviceId}, ${await getDeviceCompanyId(resolvedDeviceId)},
           ${resolvedUserId || resolvedDeviceId}, NOW()
         )
       `

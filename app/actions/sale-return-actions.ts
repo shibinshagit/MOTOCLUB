@@ -4,6 +4,7 @@ import { sql } from "@/lib/db"
 import { revalidatePath, unstable_noStore as noStore } from "next/cache"
 import { resolveStaffSessionContext } from "@/lib/staff-restrictions-server"
 import { updateProductStock } from "@/app/actions/sale-actions"
+import { getDeviceCompanyId } from "@/lib/device-company"
 
 /**
  * Ensures table structures exist for Sale Returns.
@@ -313,7 +314,7 @@ export async function processSaleReturn(input: ProcessSaleReturnInput) {
           'Sale Return', 'sale_return', 'sale', ${saleId},
           ${parsedRefundAmount}, ${parsedRefundAmount}, ${-totalCogsRestored},
           ${parsedRefundAmount}, 0, 'Completed', ${paymentMethod},
-          ${description}, ${reason || null}, ${resolvedDeviceId}, 1,
+          ${description}, ${reason || null}, ${resolvedDeviceId}, ${await getDeviceCompanyId(resolvedDeviceId)},
           ${resolvedUserId || resolvedDeviceId}, NOW()
         )
       `

@@ -1011,6 +1011,24 @@ async function createTables() {
     `
   })
 
+  await run("crm_lead_products", async () => {
+    await sql`
+      CREATE TABLE IF NOT EXISTS crm_lead_products (
+        id SERIAL PRIMARY KEY,
+        lead_id INTEGER NOT NULL REFERENCES crm_leads(id) ON DELETE CASCADE,
+        product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+        product_variant_id INTEGER REFERENCES product_variants(id) ON DELETE CASCADE,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `
+    await sql`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_crm_lead_products_lead_product_variant
+      ON crm_lead_products (lead_id, product_id, COALESCE(product_variant_id, 0))
+    `
+    await sql`CREATE INDEX IF NOT EXISTS idx_crm_lead_products_lead ON crm_lead_products(lead_id)`
+    await sql`CREATE INDEX IF NOT EXISTS idx_crm_lead_products_product ON crm_lead_products(product_id)`
+  })
+
 }
 
 async function upgradeLegacyColumns() {

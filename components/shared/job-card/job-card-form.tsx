@@ -17,6 +17,7 @@ import { getCustomerAddresses, addSecondaryCustomerAddress, setDefaultCustomerAd
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 
 import CustomerSelectSimple from "@/components/sales/customer-select-simple"
+import { getProducts } from "@/app/actions/product-actions"
 import ProductSelectSimple from "@/components/sales/product-select-simple"
 import NewProductModal from "@/components/sales/new-product-modal"
 import { formatPhoneNumber } from "@/lib/utils"
@@ -46,11 +47,13 @@ export function JobCardForm({
   editSaleId,
   initialCustomer,
   crmLeadId,
+  initialProducts,
 }: {
   onClose?: () => void
   editSaleId?: number | null
   initialCustomer?: any
   crmLeadId?: number
+  initialProducts?: any[]
 }) {
   const deviceId = useSelector(selectDeviceId)
   const currency = useSelector(selectDeviceCurrency)
@@ -280,6 +283,39 @@ export function JobCardForm({
             setShippingAddressType(defaultAddr.address_type || "Home")
             setShippingPincode(defaultAddr.pincode || "")
             setShippingPhone(formatPhoneNumber(defaultAddr.phone || initialCustomer.phone || ""))
+          }
+        })
+      }
+      // CRM lead interest: preselect only. The salesperson can still edit or remove these rows.
+      if (crmLeadId && initialProducts && initialProducts.length > 0) {
+        const seeded: ProductRow[] = initialProducts.map((lp: any) => ({
+          id: crypto.randomUUID(),
+          productId: lp.product_id,
+          productName: lp.product_name || "",
+          productObj: null,
+          variantId: lp.variant_id || null,
+          variantName: lp.variant_name || "",
+          quantity: 1,
+          price: Number(lp.price) || 0,
+          msp: 0,
+          costPrice: 0,
+        }))
+        setProducts(seeded)
+        // Load full product details (variants, msp, cost) the same way the product picker does
+        seeded.forEach(async (row) => {
+          try {
+            const res = await getProducts(deviceId || 1, 1, String(row.productId))
+            const full = res.success ? res.data?.find((x: any) => Number(x.id) === row.productId) : null
+            if (!full) return
+            const variant = row.variantId ? full.variants?.find((v: any) => v.id === row.variantId) : null
+            setProducts((prev) => prev.map((p) => p.id === row.id ? {
+              ...p,
+              productObj: full,
+              msp: Number(variant?.msp ?? full.msp ?? 0),
+              costPrice: Number(variant?.cost_price ?? full.cost_price ?? full.variants?.[0]?.cost_price ?? 0),
+            } : p))
+          } catch (err) {
+            console.error("Failed to load CRM interest product:", err)
           }
         })
       }

@@ -5,6 +5,7 @@ import {
   getLeads, 
   getLeadSummary, 
   getLeadDetails, 
+  getLeadProducts,
   updateLeadStatus, 
   updateLeadNotes, 
   getCompanyStaff, 
@@ -45,6 +46,7 @@ export default function StaffLeadsTab() {
   // Modal State
   const [selectedLeadId, setSelectedLeadId] = useState<number | null>(null)
   const [selectedLead, setSelectedLead] = useState<any>(null)
+  const [leadProducts, setLeadProducts] = useState<any[]>([])
   const [activities, setActivities] = useState<any[]>([])
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [modalLoading, setModalLoading] = useState(false)
@@ -111,10 +113,12 @@ export default function StaffLeadsTab() {
   }, [fetchLeads])
 
   const loadLeadData = async (id: number) => {
-    const [leadRes, actRes] = await Promise.all([
+    const [leadRes, actRes, prodRes] = await Promise.all([
       getLeadDetails(id),
-      getLeadActivities(id)
+      getLeadActivities(id),
+      getLeadProducts(id)
     ])
+    setLeadProducts(prodRes.success ? prodRes.data : [])
     
     if (leadRes.success) {
       setSelectedLead(leadRes.data)
@@ -476,6 +480,32 @@ export default function StaffLeadsTab() {
                         {selectedLead.message || 'No message provided.'}
                       </div>
                     </div>
+                    {leadProducts.length > 0 && (
+                      <div className="space-y-2 md:col-span-2">
+                        <p className="text-sm text-muted-foreground">Interested Products</p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          {leadProducts.map((lp) => (
+                            <div key={lp.id} className="flex gap-3 rounded-md border p-3">
+                              {lp.image_url ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img src={lp.image_url} alt={lp.product_name} className="h-20 w-20 shrink-0 rounded object-cover bg-muted" />
+                              ) : (
+                                <div className="h-20 w-20 shrink-0 rounded bg-muted flex items-center justify-center text-[10px] text-muted-foreground">No image</div>
+                              )}
+                              <div className="min-w-0 space-y-0.5 text-sm">
+                                <p className="font-medium leading-tight break-words">{lp.product_name}</p>
+                                {lp.variant_name && <p className="text-xs text-muted-foreground">Variant: {lp.variant_name}</p>}
+                                {lp.sku && <p className="text-xs text-muted-foreground">SKU: {lp.sku}</p>}
+                                <p>₹{Number(lp.price).toLocaleString("en-IN")}</p>
+                                <p className={`text-xs ${lp.stock > 0 ? "text-green-700" : "text-red-600"}`}>Stock: {lp.stock}</p>
+                                <p className="text-xs text-muted-foreground">Reviews unavailable</p>
+                                <a href={lp.product_url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline">View Product</a>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div className="border-t pt-4 space-y-4">
@@ -634,6 +664,7 @@ export default function StaffLeadsTab() {
             phone: selectedLead.phone
           } : null}
           crmLeadId={selectedLead?.id}
+          initialProducts={leadProducts}
         />
       )}
     </div>

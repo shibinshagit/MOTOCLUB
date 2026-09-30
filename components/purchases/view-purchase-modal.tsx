@@ -346,7 +346,7 @@ export default function ViewPurchaseModal({
   const formatPurchaseDate = (dateValue: string | null | undefined) => {
     if (!dateValue) return "—"
     try {
-      return format(new Date(dateValue), "yyyy-MM-dd")
+      return format(new Date(dateValue), "dd-MM-yyyy")
     } catch {
       return "Invalid date"
     }

@@ -149,7 +149,7 @@ export default function PurchaseExcelTable({
         const s = purchase.status || ""
         return s === "Partial" ? "Cancelled" : s
       },
-      date: (purchase: any) => format(new Date(purchase.purchase_date), "yyyy-MM-dd"),
+      date: (purchase: any) => format(new Date(purchase.purchase_date), "dd-MM-yyyy"),
       supplier: (purchase: any) => purchase.supplier || "—",
       products: (purchase: any) => purchase.items_summary || "—",
       payment: (purchase: any) => getPaymentMethodDisplay(purchase),
@@ -410,7 +410,7 @@ export default function PurchaseExcelTable({
                         <PaymentStatusBadge status={paymentStatus} />
                       </td>
                       <td className="whitespace-nowrap px-3 py-1.5 text-slate-700">
-                        {format(new Date(purchase.purchase_date), "yyyy-MM-dd")}
+                        {format(new Date(purchase.purchase_date), "dd-MM-yyyy")}
                       </td>
                       <td className="max-w-[180px] truncate px-3 py-1.5 text-slate-700">
                         {purchase.supplier || "—"}

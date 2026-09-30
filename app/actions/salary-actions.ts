@@ -3,6 +3,7 @@
 import { sql } from "@/lib/db"
 import { getStaffSession } from "@/lib/staff-session"
 import { revalidatePath, unstable_noStore as noStore } from "next/cache"
+import { getDeviceCompanyId } from "@/lib/device-company"
 
 // Ensure necessary database tables exist
 export async function ensureSalaryTables() {
@@ -234,7 +235,7 @@ export async function createSalaryPayment(data: {
   await ensureSalaryTables()
   try {
     const status = data.status || "Approved"
-    const companyId = data.companyId || 1
+    const companyId = await getDeviceCompanyId(data.deviceId)
     const staffPurchaseDed = Math.max(0, Number(data.staffPurchaseDeduction) || 0)
 
     // Check if staff member exists

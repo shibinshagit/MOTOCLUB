@@ -250,7 +250,7 @@ export default function SalesExcelTable({
       saleId: (sale: any) => String(sale.id),
       status: (sale: any) => getSaleStatusLabel(sale),
       delivery: (sale: any) => getSaleDeliveryLabel(sale),
-      date: (sale: any) => format(parseSaleDate(sale.sale_date), "yyyy-MM-dd"),
+      date: (sale: any) => format(parseSaleDate(sale.sale_date), "dd-MM-yyyy"),
       customer: (sale: any) => sale.customer_name || "Walk-in",
       staff: (sale: any) => sale.staff_name || "Store / Admin",
       payment: (sale: any) => getPaymentMethodDisplay(sale),
@@ -1285,7 +1285,7 @@ export default function SalesExcelTable({
                           )}
                         </td>
                         <td className="whitespace-nowrap px-3 py-1.5 text-slate-700">
-                          {format(parseSaleDate(sale.sale_date), "yyyy-MM-dd")}
+                          {format(parseSaleDate(sale.sale_date), "dd-MM-yyyy")}
                         </td>
                         <td className="max-w-[200px] px-3 py-1.5 text-slate-700">
                           <div className="flex flex-col gap-0.5">

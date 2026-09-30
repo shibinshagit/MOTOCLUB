@@ -4,6 +4,7 @@ import { sql } from "@/lib/db"
 import { getStaffSession } from "@/lib/staff-session"
 import { ensureSalaryTables } from "./salary-actions"
 import { revalidatePath, unstable_noStore as noStore } from "next/cache"
+import { getDeviceCompanyId } from "@/lib/device-company"
 
 // Submit a staff request (Advance, Credit, Leave)
 export async function createStaffRequest(data: {
@@ -588,12 +589,12 @@ export async function recordStaffPurchaseDirectPayment(data: {
       INSERT INTO financial_transactions (
         transaction_date, transaction_type, transaction_name, category_name,
         reference_type, reference_id, amount, credit_amount, status, payment_method,
-        description, notes, device_id, created_by
+        description, notes, device_id, company_id, created_by
       )
       VALUES (
         NOW(), 'income', ${`Staff Purchase Payment - Order #${sale.id}`}, 'Staff Receivables',
         'staff_purchase_payment', ${sale.id}, ${data.amount}, ${data.amount}, 'Completed', ${data.paymentMethod || 'Cash'},
-        ${`Direct payment recorded for staff purchase #${sale.id}`}, ${data.notes || null}, ${deviceId}, ${session.staffId}
+        ${`Direct payment recorded for staff purchase #${sale.id}`}, ${data.notes || null}, ${deviceId}, ${await getDeviceCompanyId(deviceId)}, ${session.staffId}
       )
     `
 

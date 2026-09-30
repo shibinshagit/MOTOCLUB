@@ -1,6 +1,7 @@
 "use server"
 
 import { format, addDays, parseISO } from "date-fns"
+import { getDeviceCompanyId } from "@/lib/device-company"
 import { sql } from "@/lib/db"
 import { getAuthoritativeProfitSummary } from "@/lib/profit-calculation"
 
@@ -48,7 +49,7 @@ export async function recordSupplierPayment(paymentData: {
         'supplier_payment', 'supplier', ${paymentData.supplierId},
         ${paymentAmount}, ${paymentAmount}, 0, ${debitAmount}, ${creditAmount},
         'Completed', ${paymentData.paymentMethod}, ${description}, ${paymentData.notes || null}, 
-        ${paymentData.deviceId}, 1, ${paymentData.userId}, ${paymentData.paymentDate.toISOString()}
+        ${paymentData.deviceId}, ${await getDeviceCompanyId(paymentData.deviceId)}, ${paymentData.userId}, ${paymentData.paymentDate.toISOString()}
       ) RETURNING id
     `
 
@@ -83,10 +84,7 @@ export async function recordCustomerPayment(paymentData: {
       description += ` - Notes: ${paymentData.notes.trim()}`
     }
 
-    const companyRows = await sql`
-      SELECT company_id FROM devices WHERE id = ${paymentData.deviceId} LIMIT 1
-    `
-    const companyId = companyRows.length > 0 ? Number(companyRows[0].company_id) : 1
+    const companyId = await getDeviceCompanyId(paymentData.deviceId)
 
     const storedNotes = JSON.stringify({
       v: 1,
@@ -138,10 +136,7 @@ export async function recordWarehousePayment(paymentData: {
       description += ` - Notes: ${paymentData.notes.trim()}`
     }
 
-    const companyRows = await sql`
-      SELECT company_id FROM devices WHERE id = ${paymentData.deviceId} LIMIT 1
-    `
-    const companyId = companyRows.length > 0 ? Number(companyRows[0].company_id) : 1
+    const companyId = await getDeviceCompanyId(paymentData.deviceId)
 
     const storedNotes = JSON.stringify({
       v: 1,
@@ -316,7 +311,7 @@ export async function recordSaleTransaction(saleData: {
             'sale', 'sale', ${saleData.saleId},
             ${(productBillAmount * ratio).toFixed(2)}, ${pReceived.toFixed(2)}, ${pCostAmount.toFixed(2)}, ${pDebitAmount.toFixed(2)}, ${pCreditAmount.toFixed(2)},
             ${saleData.status}, ${p.paymentMethod || "Cash"}, ${pDesc}, 
-            ${saleData.deviceId}, 1, ${saleData.userId}, ${saleData.saleDate}
+            ${saleData.deviceId}, ${await getDeviceCompanyId(saleData.deviceId)}, ${saleData.userId}, ${saleData.saleDate}
           ) RETURNING id
         `
         lastInsertedId = res[0]?.id
@@ -332,7 +327,7 @@ export async function recordSaleTransaction(saleData: {
           'sale', 'sale', ${saleData.saleId},
           ${productBillAmount}, ${receivedAmountForRecord}, ${costAmount}, ${debitAmount}, ${creditAmount},
           ${saleData.status}, ${pm}, ${description}, 
-          ${saleData.deviceId}, 1, ${saleData.userId}, ${saleData.saleDate}
+          ${saleData.deviceId}, ${await getDeviceCompanyId(saleData.deviceId)}, ${saleData.userId}, ${saleData.saleDate}
         ) RETURNING id
       `
       lastInsertedId = res[0]?.id
@@ -565,7 +560,7 @@ export async function recordSaleAdjustment(adjustmentData: {
           'adjustment', 'sale', ${adjustmentData.saleId},
           ${amountDiff}, ${receivedDiff}, ${costAmount}, ${debitAmount}, ${creditAmount},
           ${status}, ${description}, 
-          ${adjustmentData.deviceId}, 1, ${adjustmentData.userId}, ${transactionDate}
+          ${adjustmentData.deviceId}, ${await getDeviceCompanyId(adjustmentData.deviceId)}, ${adjustmentData.userId}, ${transactionDate}
         ) RETURNING id
       `
 
@@ -642,7 +637,7 @@ export async function recordPurchaseTransaction(purchaseData: {
             'purchase', 'purchase', ${purchaseData.purchaseId},
             ${totalAmount}, ${pAmt}, ${costAmount}, ${pAmt}, 0,
             ${purchaseData.status}, ${p.paymentMethod}, ${pDesc}, 
-            ${purchaseData.deviceId}, 1, ${purchaseData.userId}, ${purchaseData.purchaseDate}
+            ${purchaseData.deviceId}, ${await getDeviceCompanyId(purchaseData.deviceId)}, ${purchaseData.userId}, ${purchaseData.purchaseDate}
           ) RETURNING id
         `
         lastInsertedId = res[0]?.id
@@ -658,7 +653,7 @@ export async function recordPurchaseTransaction(purchaseData: {
           'purchase', 'purchase', ${purchaseData.purchaseId},
           ${totalAmount}, ${receivedAmount}, ${costAmount}, ${debitAmount}, ${creditAmount},
           ${purchaseData.status}, ${pm}, ${description}, 
-          ${purchaseData.deviceId}, 1, ${purchaseData.userId}, ${purchaseData.purchaseDate}
+          ${purchaseData.deviceId}, ${await getDeviceCompanyId(purchaseData.deviceId)}, ${purchaseData.userId}, ${purchaseData.purchaseDate}
         ) RETURNING id
       `
       lastInsertedId = result[0]?.id
@@ -816,7 +811,7 @@ export async function recordPurchaseAdjustment(adjustmentData: {
           'adjustment', 'purchase', ${adjustmentData.purchaseId},
           ${amountDiff}, ${receivedDiff}, 0, ${debitAmount}, ${creditAmount},
           ${status}, ${description}, 
-          ${adjustmentData.deviceId}, 1, ${adjustmentData.userId}, ${transactionDate}
+          ${adjustmentData.deviceId}, ${await getDeviceCompanyId(adjustmentData.deviceId)}, ${adjustmentData.userId}, ${transactionDate}
         ) RETURNING id
       `
 
@@ -868,7 +863,7 @@ export async function recordManualTransaction(transactionData: {
         'manual', 'manual', ${transactionData.categoryId || 0},
         ${amount}, ${amount}, 0, ${debitAmount}, ${creditAmount},
         'Manual Entry', ${transactionData.paymentMethod}, ${description}, ${category},
-        ${transactionData.deviceId}, 1, ${transactionData.userId}, ${formattedTxDate}
+        ${transactionData.deviceId}, ${await getDeviceCompanyId(transactionData.deviceId)}, ${transactionData.userId}, ${formattedTxDate}
       ) RETURNING id
     `
 
@@ -897,6 +892,9 @@ export async function syncSaleShippingTransactions(shippingData: {
   productCreditAmount?: number
 }) {
   try {
+    // company_id comes from the device, never a fixed value
+    const companyId = await getDeviceCompanyId(shippingData.deviceId)
+
     await sql`
       DELETE FROM financial_transactions
       WHERE reference_type = 'sale'
@@ -961,7 +959,7 @@ export async function syncSaleShippingTransactions(shippingData: {
           ${courierCredit}, 0, 0, 0, ${courierCredit},
           ${shippingData.status}, ${shippingData.paymentMethod || "Cash"},
           ${`Sale #${shippingData.saleId} - Courier charge collected`},
-          ${shippingData.deviceId}, 1, ${shippingData.userId}, ${baseDate}
+          ${shippingData.deviceId}, ${companyId}, ${shippingData.userId}, ${baseDate}
         ) RETURNING id
       `
       transactionIds.push(Number(result[0]?.id))
@@ -978,7 +976,7 @@ export async function syncSaleShippingTransactions(shippingData: {
           ${expenseCourier}, 0, 0, ${expenseCourier}, 0,
           ${shippingData.status}, ${shippingData.paymentMethod || "Cash"},
           ${`Sale #${shippingData.saleId} - Courier expense`},
-          ${shippingData.deviceId}, 1, ${shippingData.userId}, ${baseDate}
+          ${shippingData.deviceId}, ${companyId}, ${shippingData.userId}, ${baseDate}
         ) RETURNING id
       `
       transactionIds.push(Number(result[0]?.id))
@@ -995,7 +993,7 @@ export async function syncSaleShippingTransactions(shippingData: {
           ${expensePacking}, 0, 0, ${expensePacking}, 0,
           ${shippingData.status}, ${shippingData.paymentMethod || "Cash"},
           ${`Sale #${shippingData.saleId} - Packing expense`},
-          ${shippingData.deviceId}, 1, ${shippingData.userId}, ${baseDate}
+          ${shippingData.deviceId}, ${companyId}, ${shippingData.userId}, ${baseDate}
         ) RETURNING id
       `
       transactionIds.push(Number(result[0]?.id))

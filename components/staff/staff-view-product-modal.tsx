@@ -496,8 +496,8 @@ export default function StaffViewProductModal({
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {product.batches.map((b: any, index: number) => {
-                        const mfg = b.mfg_date ? format(new Date(b.mfg_date), "yyyy-MM-dd") : "—"
-                        const exp = b.expiry_date ? format(new Date(b.expiry_date), "yyyy-MM-dd") : "—"
+                        const mfg = b.mfg_date ? format(new Date(b.mfg_date), "dd-MM-yyyy") : "—"
+                        const exp = b.expiry_date ? format(new Date(b.expiry_date), "dd-MM-yyyy") : "—"
                         const totalStock = Array.isArray(b.stocks) ? b.stocks.reduce((acc: number, cur: any) => acc + Number(cur.stock || 0), 0) : 0
                         
                         return (

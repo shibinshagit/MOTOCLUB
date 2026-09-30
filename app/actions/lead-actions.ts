@@ -3,6 +3,8 @@
 import { sql } from "@/lib/db"
 import { getStaffSession } from "@/lib/staff-session"
 import { revalidatePath } from "next/cache"
+import { getDeviceProductStock, getDeviceVariantStock } from "@/lib/inventory-service"
+import { getEcommerceProductUrl } from "@/lib/product-links"
 
 export async function logLeadActivity(tx: any, params: {
   lead_id: number;
@@ -125,6 +127,85 @@ export async function getLeadDetails(leadId: number) {
 
   if (lead.length === 0) return { success: false, message: "Lead not found" }
   return { success: true, data: lead[0] }
+}
+
+function firstImage(...sources: unknown[]): string | null {
+  for (const src of sources) {
+    let value = src
+    if (typeof value === "string" && value.trim().startsWith("[")) {
+      try { value = JSON.parse(value) } catch { value = null }
+    }
+    if (Array.isArray(value)) {
+      const first = value.find((u) => typeof u === "string" && u.trim())
+      if (first) return first
+    } else if (typeof value === "string" && value.trim()) {
+      return value
+    }
+  }
+  return null
+}
+
+// Products the customer enquired about. References only; details come from the live product tables.
+export async function getLeadProducts(leadId: number) {
+  const session = await getStaffSession()
+  if (!session) return { success: false, message: "Unauthorized", data: [] as any[] }
+
+  try {
+    const rows = await sql`
+      SELECT
+        lp.id,
+        p.id AS product_id,
+        p.name AS product_name,
+        p.price AS product_price,
+        p.image_url AS product_image_url,
+        p.image_urls AS product_image_urls,
+        v.id AS variant_id,
+        v.name AS variant_name,
+        v.sku AS variant_sku,
+        v.price AS variant_price,
+        v.mrp AS variant_mrp,
+        v.image_url AS variant_image_url,
+        v.image_urls AS variant_image_urls
+      FROM crm_lead_products lp
+      JOIN crm_leads l ON l.id = lp.lead_id
+      JOIN products p ON p.id = lp.product_id
+      LEFT JOIN product_variants v ON v.id = lp.product_variant_id
+      WHERE lp.lead_id = ${leadId}
+        AND l.company_id = ${session.companyId}
+        AND (l.device_id IS NULL OR l.device_id = ${session.deviceId})
+        AND p.created_by IN (SELECT d.id FROM devices d WHERE d.company_id = ${session.companyId})
+      ORDER BY lp.id ASC
+    `
+
+    const data = await Promise.all(rows.map(async (r: any) => {
+      const hasVariant = r.variant_id !== null
+      const price = hasVariant
+        ? Number(r.variant_mrp || r.variant_price || 0)
+        : Number(r.product_price || 0)
+      const stock = hasVariant
+        ? await getDeviceVariantStock(Number(r.variant_id), session.deviceId)
+        : await getDeviceProductStock(Number(r.product_id), session.deviceId)
+      return {
+        id: Number(r.id),
+        product_id: Number(r.product_id),
+        product_name: r.product_name as string,
+        variant_id: hasVariant ? Number(r.variant_id) : null,
+        variant_name: hasVariant ? (r.variant_name as string) : null,
+        sku: hasVariant ? (r.variant_sku as string | null) : null,
+        price,
+        stock,
+        image_url: firstImage(
+          r.variant_image_urls, r.variant_image_url, r.product_image_urls, r.product_image_url
+        ),
+        product_url: getEcommerceProductUrl(Number(r.product_id)),
+      }
+    }))
+
+    return { success: true, data }
+  } catch (error) {
+    console.error("getLeadProducts error:", error)
+    return { success: false, message: "Failed to load lead products", data: [] as any[] }
+  }
 }
 
 export async function getLeadSummary() {

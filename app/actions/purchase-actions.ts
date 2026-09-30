@@ -8,6 +8,7 @@ import { recordPurchaseTransaction, recordPurchaseAdjustment, deletePurchaseTran
 import { getSupplierCreditSummary } from "./supplier-payment-actions"
 import { adjustDeviceProductStock } from "@/lib/inventory-service"
 import { allocatePurchaseCosts } from "@/lib/purchase-courier"
+import { getDeviceCompanyId } from "@/lib/device-company"
 
 export async function getPurchases() {
   try {
@@ -610,7 +611,7 @@ export async function createPurchase(formData: FormData) {
                   'supplier_credit_use', 'supplier', ${supplierId},
                   ${creditToApply}, ${creditToApply}, 0, 0, 0,
                   'Completed', 'Supplier Credit', ${creditDescription}, ${creditNotes},
-                  ${deviceId}, 1, ${userId}, ${purchaseDate}
+                  ${deviceId}, ${await getDeviceCompanyId(deviceId)}, ${userId}, ${purchaseDate}
                 )
               `
 

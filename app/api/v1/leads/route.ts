@@ -62,6 +62,34 @@ export async function POST(req: NextRequest) {
       }, { status: 400 })
     }
 
+    // Optional product references (shape only; existence/tenancy checked in createCrmLead)
+    const products: { product_id: number; product_variant_id: number | null }[] = []
+    if (body.products !== undefined && body.products !== null) {
+      const isId = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v > 0
+      if (!Array.isArray(body.products) || body.products.length > 20) {
+        return NextResponse.json({
+          success: false,
+          message: "Invalid request",
+          errors: { products: "products must be an array of at most 20 items" }
+        }, { status: 400 })
+      }
+      const seen = new Set<string>()
+      for (const item of body.products) {
+        const variantGiven = item && item.product_variant_id !== undefined && item.product_variant_id !== null
+        if (!item || !isId(item.product_id) || (variantGiven && !isId(item.product_variant_id))) {
+          return NextResponse.json({
+            success: false,
+            message: "Invalid request",
+            errors: { products: "each product needs a positive integer product_id and optional product_variant_id" }
+          }, { status: 400 })
+        }
+        const key = `${item.product_id}:${variantGiven ? item.product_variant_id : ''}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        products.push({ product_id: item.product_id, product_variant_id: variantGiven ? item.product_variant_id : null })
+      }
+    }
+
     // Prepare validated payload
     const payload = {
       external_lead_id: external_lead_id.trim(),
@@ -71,7 +99,8 @@ export async function POST(req: NextRequest) {
       source: typeof body.source === 'string' ? body.source.trim() : null,
       campaign: typeof body.campaign === 'string' ? body.campaign.trim() : null,
       ad_name: typeof body.ad_name === 'string' ? body.ad_name.trim() : null,
-      message: typeof body.message === 'string' ? body.message.trim() : null
+      message: typeof body.message === 'string' ? body.message.trim() : null,
+      products
     }
 
     // 4. INSERT LEAD
@@ -83,7 +112,7 @@ export async function POST(req: NextRequest) {
     )
 
     if (!result.success) {
-      return NextResponse.json(result, { status: 500 })
+      return NextResponse.json(result, { status: (result as any).status ?? 500 })
     }
 
     // 5. RESPOND

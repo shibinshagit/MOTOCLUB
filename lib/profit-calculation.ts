@@ -226,7 +226,10 @@ export async function getAuthoritativeProfitSummary(
   const pettyCashProfit = otherIncome
   const otherProfit = 0
 
-  const grossProfit = orderGrossProfit + otherIncome + otherProfit + netShippingDifference
+  // sales.total_amount already includes the courier charge collected from the customer, and the
+  // courier cost is already part of operatingExpenses (manual "Courier & Delivery"), so shipping
+  // must not be added to gross profit again. netShippingDifference stays informational only.
+  const grossProfit = orderGrossProfit + otherIncome + otherProfit
   const netProfit = grossProfit - operatingExpenses
 
   return {

@@ -556,11 +556,11 @@ export function ProductDetailPanel({
               {product.suitable_for ? <InfoCell label="Suitable for" value={product.suitable_for} /> : null}
               <InfoCell
                 label="Created"
-                value={product.created_at ? format(new Date(product.created_at), "yyyy-MM-dd") : "—"}
+                value={product.created_at ? format(new Date(product.created_at), "dd-MM-yyyy") : "—"}
               />
               <InfoCell
                 label="Updated"
-                value={product.updated_at ? format(new Date(product.updated_at), "yyyy-MM-dd") : "—"}
+                value={product.updated_at ? format(new Date(product.updated_at), "dd-MM-yyyy") : "—"}
               />
               <div className="border-b border-slate-200 px-4 py-3 sm:col-span-2 lg:col-span-4 bg-slate-50/50">
                 <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">E-Commerce Store Listing</p>
@@ -777,8 +777,8 @@ export function ProductDetailPanel({
                   </thead>
                   <tbody>
                     {product.batches.map((b: any, index: number) => {
-                      const mfg = b.manufacture_date ? format(new Date(b.manufacture_date), "yyyy-MM-dd") : "—"
-                      const exp = b.expiry_date ? format(new Date(b.expiry_date), "yyyy-MM-dd") : "—"
+                      const mfg = b.manufacture_date ? format(new Date(b.manufacture_date), "dd-MM-yyyy") : "—"
+                      const exp = b.expiry_date ? format(new Date(b.expiry_date), "dd-MM-yyyy") : "—"
                       const totalStock = Array.isArray(b.stocks) ? b.stocks.reduce((acc: number, cur: any) => acc + Number(cur.stock || 0), 0) : 0
                       return (
                         <tr
@@ -922,7 +922,7 @@ export function ProductDetailPanel({
                             )}
                           >
                             <td className="whitespace-nowrap px-4 py-2.5 text-slate-700">
-                              {format(new Date(item.date), "yyyy-MM-dd")}
+                              {format(new Date(item.date), "dd-MM-yyyy")}
                             </td>
                             <td className="px-4 py-2.5">
                               <span

@@ -3,6 +3,7 @@
 import { sql, getLastError, resetConnectionState } from "@/lib/db"
 import { revalidatePath } from "next/cache"
 import { recordSupplierPayment } from "./simplified-accounting"
+import { getDeviceCompanyId } from "@/lib/device-company"
 
 interface PaymentAllocation {
   purchaseId: number
@@ -156,7 +157,7 @@ export async function paySupplierCredit(
             'supplier_credit_use', 'supplier', ${supplierId},
             ${actualCreditApplied}, ${actualCreditApplied}, 0, 0, 0,
             'Completed', 'Supplier Credit', ${`Supplier Credit Used - ${supplier.name} - Applied to purchase(s)`}, ${creditNotes},
-            ${deviceId}, 1, ${userId}, ${finalPaymentDate.toISOString()}
+            ${deviceId}, ${await getDeviceCompanyId(deviceId)}, ${userId}, ${finalPaymentDate.toISOString()}
           )
         `
       }
@@ -222,7 +223,7 @@ export async function paySupplierCredit(
             'supplier_payment', 'supplier', ${supplierId},
             ${safeCashAmount}, ${safeCashAmount}, 0, ${debitAmount}, 0,
             'Completed', ${paymentMethod}, ${description}, ${storedNotes}, 
-            ${deviceId}, 1, ${userId}, ${finalPaymentDate.toISOString()}
+            ${deviceId}, ${await getDeviceCompanyId(deviceId)}, ${userId}, ${finalPaymentDate.toISOString()}
           ) RETURNING id
         `
         cashTransactionId = insertResult[0]?.id
@@ -598,7 +599,7 @@ export async function refundSupplierCredit(
           'supplier_refund', 'supplier', ${supplierId},
           ${refundAmount}, ${refundAmount}, 0, 0, ${refundAmount},
           'Completed', ${paymentMethod}, ${description}, ${storedNotes},
-          ${deviceId}, 1, ${userId}, ${finalRefundDate.toISOString()}
+          ${deviceId}, ${await getDeviceCompanyId(deviceId)}, ${userId}, ${finalRefundDate.toISOString()}
         ) RETURNING id
       `
 
@@ -743,7 +744,7 @@ export async function applySupplierCredit(
           'supplier_credit_use', 'supplier', ${supplierId},
           ${amountToAllocate}, ${amountToAllocate}, 0, 0, 0,
           'Completed', 'Supplier Credit', ${description}, ${storedNotes},
-          ${deviceId}, 1, ${userId}, ${finalUseDate.toISOString()}
+          ${deviceId}, ${await getDeviceCompanyId(deviceId)}, ${userId}, ${finalUseDate.toISOString()}
         ) RETURNING id
       `
 
