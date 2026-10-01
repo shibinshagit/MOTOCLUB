@@ -8,7 +8,7 @@ import {
   RotateCcw,
   Check,
 } from "lucide-react"
-import { format, parseISO, isValid, subDays, startOfMonth, endOfMonth, subMonths } from "date-fns"
+import { format, parseISO, isValid, subDays, startOfMonth, endOfMonth, subMonths, startOfWeek, endOfWeek, subWeeks } from "date-fns"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
@@ -96,6 +96,15 @@ export default function GlobalDateFilter({ className, compact = false }: GlobalD
         case "yesterday":
           fromDate = subDays(today, 1)
           toDate = subDays(today, 1)
+          break
+        case "this_week":
+          fromDate = startOfWeek(today, { weekStartsOn: 1 })
+          toDate = endOfWeek(today, { weekStartsOn: 1 })
+          break
+        case "last_week":
+          const lastWeek = subWeeks(today, 1)
+          fromDate = startOfWeek(lastWeek, { weekStartsOn: 1 })
+          toDate = endOfWeek(lastWeek, { weekStartsOn: 1 })
           break
         case "last7days":
           fromDate = subDays(today, 6)
@@ -209,6 +218,8 @@ export default function GlobalDateFilter({ className, compact = false }: GlobalD
   const presetOptions: { id: DatePreset; label: string }[] = [
     { id: "today", label: "Today" },
     { id: "yesterday", label: "Yesterday" },
+    { id: "this_week", label: "This Week" },
+    { id: "last_week", label: "Last Week" },
     { id: "last7days", label: "Last 7 Days" },
     { id: "this_month", label: "This Month" },
     { id: "last_month", label: "Last Month" },
@@ -280,7 +291,7 @@ export default function GlobalDateFilter({ className, compact = false }: GlobalD
             <span className="text-[11px] font-semibold text-slate-500 block mb-1.5">
               Quick Presets
             </span>
-            <div className="grid grid-cols-3 gap-1.5">
+            <div className="grid grid-cols-4 gap-1.5">
               {presetOptions.map((opt) => {
                 const isSelected = localPreset === opt.id
                 return (

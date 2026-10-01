@@ -19,7 +19,8 @@ import {
   Calendar as CalendarIcon,
   TrendingUp,
   Activity,
-  Briefcase
+  Briefcase,
+  Loader2
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { staffLogout } from "@/app/actions/staff-auth-actions"
@@ -27,6 +28,7 @@ import { getStaffDashboardStats } from "@/app/actions/staff-actions"
 import { useAppDispatch, useAppSelector } from "@/store/hooks"
 import { clearDeviceData, selectDevice } from "@/store/slices/deviceSlice"
 import { clearStaff, selectActiveStaff } from "@/store/slices/staffSlice"
+import { selectDateRange } from "@/store/slices/dateRangeSlice"
 import { useToast } from "@/components/ui/use-toast"
 import { BrandLogo } from "@/components/brand-logo"
 import StaffAttendance from "./staff-attendance"
@@ -37,6 +39,7 @@ import { StaffCustomerTab } from "./customers/staff-customer-tab"
 import { StaffSalesChart } from "./staff-sales-chart"
 import StaffProfileTab from "./staff-profile-tab"
 import StaffLeadsTab from "./leads/staff-leads-tab"
+import GlobalDateFilter from "@/components/dashboard/global-date-filter"
 
 type Tab = "home" | "profile" | "customers" | "inventory" | "leads"
 
@@ -47,25 +50,40 @@ export default function StaffDashboard() {
   const [selectedCustomerForJobCard, setSelectedCustomerForJobCard] = useState<any>(null)
   const [chartSummary, setChartSummary] = useState({ sales: 0, orders: 0 })
   const [dashboardStats, setDashboardStats] = useState<any>(null)
+  const [isLoadingStats, setIsLoadingStats] = useState(false)
+  const [statsError, setStatsError] = useState<string | null>(null)
   const [fetchedStaffName, setFetchedStaffName] = useState<string>("")
   const router = useRouter()
   const { toast } = useToast()
   const dispatch = useAppDispatch()
   const device = useAppSelector(selectDevice)
   const activeStaff = useAppSelector(selectActiveStaff)
+  const dateRange = useAppSelector(selectDateRange)
 
+  // Fetch dashboard stats when tab changes to home, device changes, or date range changes
   useEffect(() => {
     if (activeTab === "home" && device?.id) {
-      getStaffDashboardStats(device.id).then(res => {
-        if (res.success && res.data) {
-          setDashboardStats(res.data)
-          if (res.data.staffName) {
-            setFetchedStaffName(res.data.staffName)
+      setIsLoadingStats(true)
+      setStatsError(null)
+      getStaffDashboardStats(device.id, dateRange.from, dateRange.to)
+        .then(res => {
+          if (res.success && res.data) {
+            setDashboardStats(res.data)
+            if (res.data.staffName) {
+              setFetchedStaffName(res.data.staffName)
+            }
+          } else {
+            setStatsError(res.message || "Failed to load stats")
           }
-        }
-      })
+        })
+        .catch(err => {
+          setStatsError(err.message || "Failed to load stats")
+        })
+        .finally(() => {
+          setIsLoadingStats(false)
+        })
     }
-  }, [activeTab, device?.id])
+  }, [activeTab, device?.id, dateRange.from, dateRange.to])
 
   const userName = fetchedStaffName || activeStaff?.name || device?.user?.name || ""
 
@@ -90,6 +108,27 @@ export default function StaffDashboard() {
       }
       router.replace("/")
     }
+  }
+
+  // Helper to format currency values
+  const formatCurrencyValue = (value: number) => {
+    return new Intl.NumberFormat("en-US", { 
+      style: "currency", 
+      currency: device?.currency || "INR", 
+      maximumFractionDigits: 0 
+    }).format(value).replace(/^[a-zA-Z]+/, (match) => match + " ")
+  }
+
+  // Determine dynamic label for the date period
+  const getDatePeriodLabel = () => {
+    if (dateRange.preset === "today") return "Today's"
+    if (dateRange.preset === "yesterday") return "Yesterday's"
+    if (dateRange.preset === "this_week") return "This Week's"
+    if (dateRange.preset === "last_week") return "Last Week's"
+    if (dateRange.preset === "last7days") return "Last 7 Days"
+    if (dateRange.preset === "this_month") return "This Month's"
+    if (dateRange.preset === "last_month") return "Last Month's"
+    return "Selected Period"
   }
 
   const NavigationMenu = () => (
@@ -139,6 +178,56 @@ export default function StaffDashboard() {
         My Profile
       </Button>
     </nav>
+  )
+
+  // Stat card with loading state
+  const StatCard = ({ 
+    label, 
+    value, 
+    subtitle, 
+    icon: Icon, 
+    gradientFrom, 
+    gradientTo, 
+    textColor, 
+    iconBgOpacity = "opacity-20",
+    isMonetary = false 
+  }: {
+    label: string
+    value: number | string
+    subtitle: string
+    icon: any
+    gradientFrom: string
+    gradientTo: string
+    textColor: string
+    iconBgOpacity?: string
+    isMonetary?: boolean
+  }) => (
+    <div className={`bg-gradient-to-br from-[${gradientFrom}] to-[${gradientTo}] p-4 rounded-xl shadow-md border-0 flex flex-col justify-between text-white relative overflow-hidden group`}>
+      <div className={`absolute -right-4 -top-4 ${iconBgOpacity} transform group-hover:scale-110 transition-transform duration-300`}>
+        <Icon className="h-20 w-20" />
+      </div>
+      <div className="relative z-10">
+        <div className="flex justify-between items-start">
+          <p className={`text-[11px] font-bold uppercase tracking-wider ${textColor}`}>{label}</p>
+          <Icon className={`h-5 w-5 ${textColor}`} />
+        </div>
+        {isLoadingStats ? (
+          <div className="mt-2 flex items-center gap-2">
+            <Loader2 className="h-5 w-5 animate-spin" />
+          </div>
+        ) : statsError ? (
+          <h3 className="mt-2 text-lg font-bold text-red-200 truncate">Error</h3>
+        ) : (
+          <h3 
+            className="mt-2 text-2xl sm:text-3xl font-extrabold truncate" 
+            title={isMonetary ? formatCurrencyValue(typeof value === 'number' ? value : 0) : String(value)}
+          >
+            {isMonetary ? formatCurrencyValue(typeof value === 'number' ? value : 0) : value}
+          </h3>
+        )}
+        <p className={`mt-2 text-[11px] font-medium ${textColor}`}>{subtitle}</p>
+      </div>
+    </div>
   )
 
   return (
@@ -243,9 +332,12 @@ export default function StaffDashboard() {
                   <h1 className="text-xl sm:text-2xl font-semibold text-gray-900">
                     Welcome{userName ? `, ${userName}` : ''} to Staff Portal
                   </h1>
-                  <Button onClick={() => setIsJobCardModalOpen(true)} className="w-full sm:w-auto whitespace-nowrap">
-                    <Plus className="mr-2 h-4 w-4" /> Create Job Card
-                  </Button>
+                  <div className="flex items-center gap-2 w-full sm:w-auto">
+                    <GlobalDateFilter className="flex-1 sm:flex-none" />
+                    <Button onClick={() => setIsJobCardModalOpen(true)} className="whitespace-nowrap">
+                      <Plus className="mr-2 h-4 w-4" /> Create Job Card
+                    </Button>
+                  </div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
                   {/* Total Orders */}
@@ -258,8 +350,14 @@ export default function StaffDashboard() {
                         <p className="text-[11px] font-bold uppercase tracking-wider text-blue-100">Total Orders</p>
                         <Package className="h-5 w-5 text-blue-200" />
                       </div>
-                      <h3 className="mt-2 text-2xl sm:text-3xl font-extrabold truncate">{dashboardStats?.totalOrders || 0}</h3>
-                      <p className="mt-2 text-[11px] font-medium text-blue-100">All time entries</p>
+                      {isLoadingStats ? (
+                        <div className="mt-2"><Loader2 className="h-6 w-6 animate-spin text-blue-200" /></div>
+                      ) : statsError ? (
+                        <h3 className="mt-2 text-lg font-bold text-red-200">Error</h3>
+                      ) : (
+                        <h3 className="mt-2 text-2xl sm:text-3xl font-extrabold truncate">{dashboardStats?.totalOrders || 0}</h3>
+                      )}
+                      <p className="mt-2 text-[11px] font-medium text-blue-100">{getDatePeriodLabel()} entries</p>
                     </div>
                   </div>
                   {/* Total Sale Amount */}
@@ -272,40 +370,58 @@ export default function StaffDashboard() {
                         <p className="text-[11px] font-bold uppercase tracking-wider text-pink-100">Total Sale Amount</p>
                         <Banknote className="h-5 w-5 text-pink-200" />
                       </div>
-                      <h3 className="mt-2 text-2xl sm:text-3xl font-extrabold truncate" title={new Intl.NumberFormat("en-US", { style: "currency", currency: device?.currency || "INR", maximumFractionDigits: 0 }).format(dashboardStats?.totalSaleAmount || 0)}>
-                        {new Intl.NumberFormat("en-US", { style: "currency", currency: device?.currency || "INR", maximumFractionDigits: 0 }).format(dashboardStats?.totalSaleAmount || 0).replace(/^[a-zA-Z]+/, (match) => match + " ")}
-                      </h3>
+                      {isLoadingStats ? (
+                        <div className="mt-2"><Loader2 className="h-6 w-6 animate-spin text-pink-200" /></div>
+                      ) : statsError ? (
+                        <h3 className="mt-2 text-lg font-bold text-red-200">Error</h3>
+                      ) : (
+                        <h3 className="mt-2 text-2xl sm:text-3xl font-extrabold truncate" title={formatCurrencyValue(dashboardStats?.totalSaleAmount || 0)}>
+                          {formatCurrencyValue(dashboardStats?.totalSaleAmount || 0)}
+                        </h3>
+                      )}
                       <p className="mt-2 text-[11px] font-medium text-pink-100">Sum of Total Paid</p>
                     </div>
                   </div>
-                  {/* Today's Sale */}
+                  {/* Sale in Selected Period */}
                   <div className="bg-gradient-to-br from-[#00c853] to-[#00b0ff] p-4 rounded-xl shadow-md border-0 flex flex-col justify-between text-white relative overflow-hidden group">
                     <div className="absolute -right-4 -top-4 opacity-20 transform group-hover:scale-110 transition-transform duration-300">
                       <TrendingUp className="h-20 w-20" />
                     </div>
                     <div className="relative z-10">
                       <div className="flex justify-between items-start">
-                        <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-100">Today's Sale</p>
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-100">Sale in Period</p>
                         <TrendingUp className="h-5 w-5 text-emerald-200" />
                       </div>
-                      <h3 className="mt-2 text-2xl sm:text-3xl font-extrabold truncate" title={new Intl.NumberFormat("en-US", { style: "currency", currency: device?.currency || "INR", maximumFractionDigits: 0 }).format(dashboardStats?.todaysSales || 0)}>
-                        {new Intl.NumberFormat("en-US", { style: "currency", currency: device?.currency || "INR", maximumFractionDigits: 0 }).format(dashboardStats?.todaysSales || 0).replace(/^[a-zA-Z]+/, (match) => match + " ")}
-                      </h3>
-                      <p className="mt-2 text-[11px] font-medium text-emerald-100">Today's total sales</p>
+                      {isLoadingStats ? (
+                        <div className="mt-2"><Loader2 className="h-6 w-6 animate-spin text-emerald-200" /></div>
+                      ) : statsError ? (
+                        <h3 className="mt-2 text-lg font-bold text-red-200">Error</h3>
+                      ) : (
+                        <h3 className="mt-2 text-2xl sm:text-3xl font-extrabold truncate" title={formatCurrencyValue(dashboardStats?.todaysSales || 0)}>
+                          {formatCurrencyValue(dashboardStats?.todaysSales || 0)}
+                        </h3>
+                      )}
+                      <p className="mt-2 text-[11px] font-medium text-emerald-100">{getDatePeriodLabel()} total sales</p>
                     </div>
                   </div>
-                  {/* Today's Activity */}
+                  {/* Activity in Selected Period */}
                   <div className="bg-gradient-to-br from-[#7c4dff] to-[#651fff] p-4 rounded-xl shadow-md border-0 flex flex-col justify-between text-white relative overflow-hidden group">
                     <div className="absolute -right-4 -top-4 opacity-20 transform group-hover:scale-110 transition-transform duration-300">
                       <Activity className="h-20 w-20" />
                     </div>
                     <div className="relative z-10">
                       <div className="flex justify-between items-start">
-                        <p className="text-[11px] font-bold uppercase tracking-wider text-violet-100">Today's Activity</p>
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-violet-100">Activity</p>
                         <CalendarIcon className="h-5 w-5 text-violet-200" />
                       </div>
-                      <h3 className="mt-2 text-2xl sm:text-3xl font-extrabold truncate">{dashboardStats?.todaysActivity || 0}</h3>
-                      <p className="mt-2 text-[11px] font-medium text-violet-100">Orders processing</p>
+                      {isLoadingStats ? (
+                        <div className="mt-2"><Loader2 className="h-6 w-6 animate-spin text-violet-200" /></div>
+                      ) : statsError ? (
+                        <h3 className="mt-2 text-lg font-bold text-red-200">Error</h3>
+                      ) : (
+                        <h3 className="mt-2 text-2xl sm:text-3xl font-extrabold truncate">{dashboardStats?.todaysActivity || 0}</h3>
+                      )}
+                      <p className="mt-2 text-[11px] font-medium text-violet-100">{getDatePeriodLabel()} orders processing</p>
                     </div>
                   </div>
                   {/* Pending Costs */}
@@ -318,7 +434,13 @@ export default function StaffDashboard() {
                         <p className="text-[11px] font-bold uppercase tracking-wider text-orange-100">Pending Costs</p>
                         <AlertTriangle className="h-5 w-5 text-orange-200" />
                       </div>
-                      <h3 className="mt-2 text-2xl sm:text-3xl font-extrabold truncate">{dashboardStats?.pendingCosts || 0}</h3>
+                      {isLoadingStats ? (
+                        <div className="mt-2"><Loader2 className="h-6 w-6 animate-spin text-orange-200" /></div>
+                      ) : statsError ? (
+                        <h3 className="mt-2 text-lg font-bold text-red-200">Error</h3>
+                      ) : (
+                        <h3 className="mt-2 text-2xl sm:text-3xl font-extrabold truncate">{dashboardStats?.pendingCosts || 0}</h3>
+                      )}
                       <p className="mt-2 text-[11px] font-medium text-orange-100">Needs attention</p>
                     </div>
                   </div>
@@ -329,13 +451,20 @@ export default function StaffDashboard() {
                     <StaffSalesChart 
                       deviceId={device.id}
                       currency={device?.currency || "INR"} 
+                      fromDate={dateRange.from}
+                      toDate={dateRange.to}
                       onSummaryUpdate={setChartSummary} 
                     />
                   )}
                 </div>
 
                 <div className="w-full mt-8 border-t pt-8">
-                  <TodaySalesList onOpenCreateModal={() => setIsJobCardModalOpen(true)} canCreateProducts={false} />
+                  <TodaySalesList 
+                    onOpenCreateModal={() => setIsJobCardModalOpen(true)} 
+                    canCreateProducts={false}
+                    globalFromDate={dateRange.from}
+                    globalToDate={dateRange.to}
+                  />
                 </div>
               </div>
             )}

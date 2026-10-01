@@ -165,10 +165,11 @@ export async function updateProductStock(
   quantityChange: number,
   operation: "subtract" | "add",
   deviceId: number,
+  query: any = sql, // pass a transaction handle to make the stock change part of that transaction
 ) {
   try {
     // First, verify this is actually a product (not a service)
-    const productCheck = await sql`
+    const productCheck = await query`
       SELECT id, name FROM products WHERE id = ${productId}
     `
 
@@ -184,7 +185,7 @@ export async function updateProductStock(
     let resolvedVariantId = variantId
     if (resolvedVariantId) {
       // Validate that the variant exists, belongs to this product, and is active
-      const variantCheck = await sql`
+      const variantCheck = await query`
         SELECT id FROM product_variants 
         WHERE id = ${resolvedVariantId} AND product_id = ${productId} AND status = 'active'
         LIMIT 1
@@ -195,7 +196,7 @@ export async function updateProductStock(
     }
 
     if (!resolvedVariantId) {
-      const defaultVariant = await sql`
+      const defaultVariant = await query`
         SELECT id FROM product_variants 
         WHERE product_id = ${productId} AND status = 'active'
         ORDER BY id ASC LIMIT 1
@@ -206,7 +207,7 @@ export async function updateProductStock(
     }
 
     // 1. Always update product_device_stock (legacy/device stock)
-    await sql`
+    await query`
       INSERT INTO product_device_stock (product_id, device_id, stock, updated_at)
       VALUES (${productId}, ${deviceId}, ${delta}, NOW())
       ON CONFLICT (product_id, device_id)
@@ -217,7 +218,7 @@ export async function updateProductStock(
     if (resolvedVariantId) {
       if (batchId) {
         // Specific batch provided
-        await sql`
+        await query`
           INSERT INTO product_batch_device_stock (batch_id, device_id, stock, updated_at)
           VALUES (${batchId}, ${deviceId}, ${delta}, NOW())
           ON CONFLICT (batch_id, device_id)
@@ -226,7 +227,7 @@ export async function updateProductStock(
       } else if (delta < 0) {
         // Subtracting stock without a specific batch: deduct FIFO from product's batches
         let remainingToDeduct = Math.abs(delta)
-        const availableBatches = await sql`
+        const availableBatches = await query`
           SELECT pb.id as batch_id, COALESCE(pbds.stock, pb.remaining_quantity, 0) as stock, pbds.id as pbds_id
           FROM product_batches pb
           JOIN product_variants pv ON pv.id = pb.product_variant_id
@@ -244,13 +245,13 @@ export async function updateProductStock(
           remainingToDeduct -= take
 
           if (batch.pbds_id) {
-            await sql`
+            await query`
               UPDATE product_batch_device_stock
               SET stock = ${nextStock}, updated_at = NOW()
               WHERE id = ${batch.pbds_id}
             `
           } else {
-            await sql`
+            await query`
               INSERT INTO product_batch_device_stock (batch_id, device_id, stock, updated_at)
               VALUES (${batch.batch_id}, ${deviceId}, ${nextStock}, NOW())
             `
@@ -258,7 +259,7 @@ export async function updateProductStock(
         }
 
         if (remainingToDeduct > 0 || availableBatches.length === 0) {
-          const defaultBatches = await sql`
+          const defaultBatches = await query`
             SELECT pb.id as batch_id, COALESCE(pbds.stock, pb.remaining_quantity, 0) as stock, pbds.id as pbds_id
             FROM product_batches pb
             JOIN product_variants pv ON pv.id = pb.product_variant_id
@@ -272,20 +273,20 @@ export async function updateProductStock(
             const nextStock = currentStock - remainingToDeduct
             
             if (defaultBatches[0].pbds_id) {
-              await sql`
+              await query`
                 UPDATE product_batch_device_stock
                 SET stock = ${nextStock}, updated_at = NOW()
                 WHERE id = ${defaultBatches[0].pbds_id}
               `
             } else {
-              await sql`
+              await query`
                 INSERT INTO product_batch_device_stock (batch_id, device_id, stock, updated_at)
                 VALUES (${defBatchId}, ${deviceId}, ${nextStock}, NOW())
               `
             }
           } else {
             const newBatchNo = `DEF-${productId}-${Date.now().toString().slice(-6)}`
-            const newB = await sql`
+            const newB = await query`
               INSERT INTO product_batches (
                 product_id, product_variant_id, batch_no, cost_price, selling_price, quantity_purchased, remaining_quantity, status
               ) VALUES (
@@ -294,7 +295,7 @@ export async function updateProductStock(
             `
             const defBatchId = newB[0].id
             
-            await sql`
+            await query`
               INSERT INTO product_batch_device_stock (batch_id, device_id, stock, updated_at)
               VALUES (${defBatchId}, ${deviceId}, ${delta}, NOW())
               ON CONFLICT (batch_id, device_id)
@@ -304,7 +305,7 @@ export async function updateProductStock(
         }
       } else if (delta > 0) {
         // Adding stock without a batch (returns / adjustments / sale edit restore)
-        const availableBatches = await sql`
+        const availableBatches = await query`
           SELECT pb.id as batch_id, COALESCE(pbds.stock, pb.remaining_quantity, 0) as stock, pbds.id as pbds_id
           FROM product_batches pb
           JOIN product_variants pv ON pv.id = pb.product_variant_id
@@ -318,20 +319,20 @@ export async function updateProductStock(
           const nextStock = currentStock + delta
           
           if (availableBatches[0].pbds_id) {
-            await sql`
+            await query`
               UPDATE product_batch_device_stock
               SET stock = ${nextStock}, updated_at = NOW()
               WHERE id = ${availableBatches[0].pbds_id}
             `
           } else {
-            await sql`
+            await query`
               INSERT INTO product_batch_device_stock (batch_id, device_id, stock, updated_at)
               VALUES (${bId}, ${deviceId}, ${nextStock}, NOW())
             `
           }
         } else {
           const adjBatchNo = `RET-${productId}-${Date.now().toString().slice(-6)}`
-          const adjBatch = await sql`
+          const adjBatch = await query`
             INSERT INTO product_batches (
               product_id, product_variant_id, batch_no, cost_price, selling_price, quantity_purchased, remaining_quantity, status
             ) VALUES (
@@ -340,7 +341,7 @@ export async function updateProductStock(
           `
           const adjBatchId = adjBatch[0].id
           
-          await sql`
+          await query`
             INSERT INTO product_batch_device_stock (batch_id, device_id, stock, updated_at)
             VALUES (${adjBatchId}, ${deviceId}, ${delta}, NOW())
             ON CONFLICT (batch_id, device_id)
@@ -352,7 +353,7 @@ export async function updateProductStock(
 
     // Log stock history
     try {
-      await sql`
+      await query`
         INSERT INTO product_stock_history (
           product_id, product_variant_id, batch_id, quantity, type, reference_type, notes, created_by, device_id
         ) VALUES (

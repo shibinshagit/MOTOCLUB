@@ -667,7 +667,7 @@ export async function clearStaffSession(deviceId: number) {
 }
 
 
-export async function getStaffDashboardStats(deviceId: number) {
+export async function getStaffDashboardStats(deviceId: number, fromDate?: string, toDate?: string) {
   noStore()
   try {
     const session = await getStaffSession()
@@ -675,50 +675,79 @@ export async function getStaffDashboardStats(deviceId: number) {
       return { success: false, message: "Unauthorized", data: null }
     }
 
-    const today = new Date().toISOString().split('T')[0];
+    // Calculate date boundaries
+    // Default to this month if not provided
+    const now = new Date()
+    const effectiveFrom = fromDate || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
+    
+    // Calculate exclusive upper bound: day AFTER toDate at 00:00:00
+    // This ensures the entire end date is included
+    let effectiveToExclusive: string
+    if (toDate) {
+      const endDate = new Date(toDate + 'T12:00:00')
+      endDate.setDate(endDate.getDate() + 1)
+      effectiveToExclusive = `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, '0')}-${String(endDate.getDate()).padStart(2, '0')}`
+    } else {
+      // Default: end of current month + 1 day
+      const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+      lastDay.setDate(lastDay.getDate() + 1)
+      effectiveToExclusive = `${lastDay.getFullYear()}-${String(lastDay.getMonth() + 1).padStart(2, '0')}-${String(lastDay.getDate()).padStart(2, '0')}`
+    }
 
     const [
       totalOrdersResult,
       totalSalesResult,
-      todaysSalesResult,
-      todaysActivityResult,
+      periodSalesResult,
+      periodActivityResult,
       pendingCostsResult,
       staffNameResult
     ] = await Promise.all([
-      // 1. Total Orders
+      // 1. Total Orders in date range
       sql`
         SELECT COUNT(*) as total
         FROM sales
         WHERE device_id = ${deviceId} AND staff_id = ${session.staffId} AND status != 'Cancelled'
+          AND sale_date >= ${effectiveFrom}::date
+          AND sale_date < ${effectiveToExclusive}::date
       `,
       
-      // 2. Total Sale Amount
+      // 2. Total Sale Amount in date range
       sql`
         SELECT COALESCE(SUM(total_amount), 0) as total
         FROM sales
         WHERE device_id = ${deviceId} AND staff_id = ${session.staffId} AND status != 'Cancelled'
+          AND sale_date >= ${effectiveFrom}::date
+          AND sale_date < ${effectiveToExclusive}::date
       `,
       
-      // 3. Today's Sale Amount
+      // 3. Period Sale Amount (same as total for date range)
       sql`
         SELECT COALESCE(SUM(total_amount), 0) as total
         FROM sales
-        WHERE device_id = ${deviceId} AND staff_id = ${session.staffId} AND DATE(sale_date) = ${today} AND status != 'Cancelled'
+        WHERE device_id = ${deviceId} AND staff_id = ${session.staffId} AND status != 'Cancelled'
+          AND sale_date >= ${effectiveFrom}::date
+          AND sale_date < ${effectiveToExclusive}::date
       `,
       
-      // 4. Today's Activity
+      // 4. Period Activity (orders processing in date range)
       sql`
         SELECT COUNT(*) as total
         FROM sales
-        WHERE device_id = ${deviceId} AND staff_id = ${session.staffId} AND DATE(sale_date) = ${today} AND status != 'Cancelled'
+        WHERE device_id = ${deviceId} AND staff_id = ${session.staffId} AND status != 'Cancelled'
+          AND sale_date >= ${effectiveFrom}::date
+          AND sale_date < ${effectiveToExclusive}::date
       `,
 
-      // 5. Pending Costs (Pending Payables/Expenses)
+      // 5. Pending Costs (filtered by date range where applicable)
       sql`
         SELECT 
-          (SELECT COUNT(*) FROM purchases WHERE status != 'Paid' AND status != 'Cancelled' AND device_id = ${deviceId} AND staff_id = ${session.staffId})
+          (SELECT COUNT(*) FROM purchases WHERE status != 'Paid' AND status != 'Cancelled' AND device_id = ${deviceId} AND staff_id = ${session.staffId}
+            AND created_at >= ${effectiveFrom}::date
+            AND created_at < ${effectiveToExclusive}::date)
           +
-          (SELECT COUNT(*) FROM financial_transactions WHERE transaction_type = 'expense' AND status = 'Pending' AND device_id = ${deviceId} AND staff_id = ${session.staffId})
+          (SELECT COUNT(*) FROM financial_transactions WHERE transaction_type = 'expense' AND status = 'Pending' AND device_id = ${deviceId} AND staff_id = ${session.staffId}
+            AND created_at >= ${effectiveFrom}::date
+            AND created_at < ${effectiveToExclusive}::date)
         as total
       `,
 
@@ -730,8 +759,8 @@ export async function getStaffDashboardStats(deviceId: number) {
 
     const totalOrders = Number(totalOrdersResult[0]?.total) || 0;
     const totalSales = Number(totalSalesResult[0]?.total) || 0;
-    const todaysSales = Number(todaysSalesResult[0]?.total) || 0;
-    const todaysActivity = Number(todaysActivityResult[0]?.total) || 0;
+    const periodSales = Number(periodSalesResult[0]?.total) || 0;
+    const periodActivity = Number(periodActivityResult[0]?.total) || 0;
     const pendingCosts = Number(pendingCostsResult[0]?.total) || 0;
     const staffName = staffNameResult[0]?.name || session.staffName || session.deviceName || "";
 
@@ -740,8 +769,8 @@ export async function getStaffDashboardStats(deviceId: number) {
       data: {
         totalOrders,
         totalSaleAmount: totalSales,
-        todaysSales,
-        todaysActivity,
+        todaysSales: periodSales,
+        todaysActivity: periodActivity,
         pendingCosts,
         staffName
       }

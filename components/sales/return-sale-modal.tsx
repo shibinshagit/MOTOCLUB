@@ -41,6 +41,8 @@ export default function ReturnSaleModal({
   const [returnQuantities, setReturnQuantities] = useState<Record<number, number>>({})
   const [refundAmount, setRefundAmount] = useState<string>("")
   const [isRefundManuallyEdited, setIsRefundManuallyEdited] = useState<boolean>(false)
+  const [extraAmount, setExtraAmount] = useState<string>("0")
+  const [requestId, setRequestId] = useState<string>("")
   const [refundPaymentMethod, setRefundPaymentMethod] = useState<string>("Cash")
   const [reason, setReason] = useState<string>("")
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false)
@@ -56,6 +58,8 @@ export default function ReturnSaleModal({
       setReturnQuantities(initialQtyMap)
       setRefundAmount("0")
       setIsRefundManuallyEdited(false)
+      setExtraAmount("0")
+      setRequestId(crypto.randomUUID())
       setRefundPaymentMethod(saleData?.payment_method || "Cash")
       setReason("")
       setStep("edit")
@@ -111,6 +115,16 @@ export default function ReturnSaleModal({
 
   const calculatedReturnValue = calculateTotalReturnValue()
   const parsedRefundAmount = Number.parseFloat(refundAmount) || 0
+  const parsedExtraAmount = Number.parseFloat(extraAmount) || 0
+  // Derived only; never stored or edited
+  const customerReceives = parsedRefundAmount + parsedExtraAmount
+
+  // Full return = every remaining quantity of every line is selected
+  const isFullReturn =
+    saleItems.length > 0 && saleItems.every((item) => (returnQuantities[item.id] || 0) >= getRemainingReturnableQty(item))
+  const customerPaid = Number(saleData?.received_amount ?? saleData?.total_amount ?? 0)
+  // Hint only: the server applies the exact cap (it also subtracts refunds already given on this sale)
+  const maxRefundHint = isFullReturn ? customerPaid : Math.min(calculatedReturnValue, customerPaid)
 
   // Count of total items selected for return
   const totalReturnedUnitsCount = Object.values(returnQuantities).reduce((a, b) => a + b, 0)
@@ -119,8 +133,9 @@ export default function ReturnSaleModal({
   const validateForm = (): boolean => {
     setErrorMessage(null)
 
-    if (totalReturnedUnitsCount <= 0) {
-      setErrorMessage("Please select at least 1 item unit to return.")
+    // Items are only optional for a standalone extra payment (no refund)
+    if (totalReturnedUnitsCount <= 0 && !(parsedRefundAmount === 0 && parsedExtraAmount > 0)) {
+      setErrorMessage("Please select at least 1 item unit to return, or enter an extra amount with a zero refund.")
       return false
     }
 
@@ -141,9 +156,21 @@ export default function ReturnSaleModal({
       return false
     }
 
-    if (parsedRefundAmount > calculatedReturnValue) {
+    if (isNaN(parsedExtraAmount) || parsedExtraAmount < 0) {
+      setErrorMessage("Extra amount cannot be negative.")
+      return false
+    }
+
+    if (isFullReturn) {
+      if (parsedRefundAmount > customerPaid) {
+        setErrorMessage(
+          `Refund amount (${formatCurrency(parsedRefundAmount)}) cannot exceed what the customer paid (${formatCurrency(customerPaid)}).`
+        )
+        return false
+      }
+    } else if (parsedRefundAmount > calculatedReturnValue) {
       setErrorMessage(
-        `Refund amount (${formatCurrency(parsedRefundAmount)}) cannot exceed total returned product value (${formatCurrency(calculatedReturnValue)}).`
+        `Refund amount (${formatCurrency(parsedRefundAmount)}) cannot exceed the returned product value (${formatCurrency(calculatedReturnValue)}) for a partial return.`
       )
       return false
     }
@@ -175,6 +202,8 @@ export default function ReturnSaleModal({
         saleId,
         items: itemsToSubmit,
         refundAmount: parsedRefundAmount,
+        extraAmount: parsedExtraAmount,
+        requestId,
         refundPaymentMethod,
         reason: reason.trim() || undefined,
         deviceId: reduxDeviceId || undefined,
@@ -405,19 +434,33 @@ export default function ReturnSaleModal({
 
                   <div>
                     <div className="flex justify-between items-center mb-1">
-                      <Label className="text-xs font-bold text-slate-800">Actual Refund Amount</Label>
-                      {isRefundManuallyEdited ? (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setRefundAmount(calculatedReturnValue.toString())
-                            setIsRefundManuallyEdited(false)
-                          }}
-                          className="text-[11px] font-medium text-amber-700 underline hover:text-amber-800"
-                        >
-                          Reset to Calculated
-                        </button>
-                      ) : null}
+                      <Label className="text-xs font-bold text-slate-800">Refund Amount</Label>
+                      <div className="flex items-center gap-3">
+                        {isFullReturn && customerPaid > calculatedReturnValue ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setRefundAmount(customerPaid.toString())
+                              setIsRefundManuallyEdited(true)
+                            }}
+                            className="text-[11px] font-medium text-emerald-700 underline hover:text-emerald-800"
+                          >
+                            Use full paid amount
+                          </button>
+                        ) : null}
+                        {isRefundManuallyEdited ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setRefundAmount(calculatedReturnValue.toString())
+                              setIsRefundManuallyEdited(false)
+                            }}
+                            className="text-[11px] font-medium text-amber-700 underline hover:text-amber-800"
+                          >
+                            Reset to Calculated
+                          </button>
+                        ) : null}
+                      </div>
                     </div>
                     <div className="relative">
                       <span className="absolute left-3 top-2 text-xs font-bold text-slate-500">
@@ -427,7 +470,7 @@ export default function ReturnSaleModal({
                         type="number"
                         step="0.01"
                         min={0}
-                        max={calculatedReturnValue}
+                        max={maxRefundHint}
                         value={refundAmount}
                         onChange={(e) => {
                           setRefundAmount(e.target.value)
@@ -443,6 +486,29 @@ export default function ReturnSaleModal({
                         Refunding {formatCurrency(calculatedReturnValue - parsedRefundAmount)} less than calculated product value.
                       </p>
                     ) : null}
+                  </div>
+
+                  <div className="rounded-lg border border-sky-200 bg-sky-50/60 p-3">
+                    <Label className="mb-1 block text-xs font-bold text-slate-800">Extra Amount Given to Customer</Label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-2 text-xs font-bold text-slate-500">{reduxCurrency}</span>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min={0}
+                        value={extraAmount}
+                        onChange={(e) => setExtraAmount(e.target.value)}
+                        className="h-9 pl-12 font-bold text-sm text-slate-900 border-sky-300"
+                      />
+                    </div>
+                    <p className="mt-1 text-[11px] text-slate-600">
+                      Additional amount paid to the customer. This is recorded separately as Petty Cash Money Out
+                      (source: Petty Cash), not as part of the refund.
+                    </p>
+                    <div className="mt-2 flex justify-between border-t border-sky-200 pt-2 text-xs">
+                      <span className="font-semibold text-slate-700">Customer Receives</span>
+                      <span className="font-bold text-slate-900">{formatCurrency(customerReceives)}</span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -501,7 +567,7 @@ export default function ReturnSaleModal({
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
                 <div className="rounded-lg border border-slate-200 bg-white p-3 text-center">
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Customer Paid</p>
                   <p className="mt-1 text-sm font-bold text-emerald-700">{formatCurrency(saleData?.received_amount ?? saleData?.total_amount ?? 0)}</p>
@@ -518,10 +584,46 @@ export default function ReturnSaleModal({
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-700">Actual Refund</p>
                   <p className="mt-1 text-base font-bold text-amber-900">{formatCurrency(parsedRefundAmount)}</p>
                 </div>
+                <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-center">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-sky-700">Extra Amount</p>
+                  <p className="mt-1 text-base font-bold text-sky-900">{formatCurrency(parsedExtraAmount)}</p>
+                </div>
                 <div className="rounded-lg border border-slate-200 bg-white p-3 text-center col-span-2 sm:col-span-1">
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Payment Method</p>
                   <p className="mt-1 text-sm font-bold text-slate-800">{refundPaymentMethod}</p>
                 </div>
+              </div>
+
+              <div className="rounded-lg border border-slate-200 bg-white p-4 text-xs space-y-1.5">
+                <div className="flex justify-between text-slate-600">
+                  <span>Original Sale Total</span>
+                  <span className="font-semibold text-slate-800">{formatCurrency(saleData?.total_amount || 0)}</span>
+                </div>
+                <div className="flex justify-between text-slate-600">
+                  <span>Customer Paid Amount</span>
+                  <span className="font-semibold text-slate-800">{formatCurrency(customerPaid)}</span>
+                </div>
+                <div className="flex justify-between text-slate-600">
+                  <span>Calculated Return Value</span>
+                  <span className="font-semibold text-slate-800">{formatCurrency(calculatedReturnValue)}</span>
+                </div>
+                <div className="flex justify-between text-slate-600 border-t border-slate-100 pt-1.5">
+                  <span>Refund Amount ({refundPaymentMethod})</span>
+                  <span className="font-semibold text-slate-800">{formatCurrency(parsedRefundAmount)}</span>
+                </div>
+                <div className="flex justify-between text-slate-600">
+                  <span>Extra Amount Given</span>
+                  <span className="font-semibold text-slate-800">{formatCurrency(parsedExtraAmount)}</span>
+                </div>
+                <div className="flex justify-between border-t border-slate-200 pt-1.5 text-sm font-bold text-slate-900">
+                  <span>Customer Receives</span>
+                  <span>{formatCurrency(customerReceives)}</span>
+                </div>
+                {parsedExtraAmount > 0 ? (
+                  <p className="pt-1 text-[11px] text-sky-700">
+                    {formatCurrency(parsedExtraAmount)} extra payment will be recorded as Petty Cash Money Out.
+                  </p>
+                ) : null}
               </div>
             </div>
           )}

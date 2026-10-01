@@ -23,9 +23,13 @@ import { getPublicTrackingUrl } from "@/lib/shipping/tracking-url"
 export function TodaySalesList({
   onOpenCreateModal,
   canCreateProducts = true,
+  globalFromDate,
+  globalToDate,
 }: {
   onOpenCreateModal?: () => void
   canCreateProducts?: boolean
+  globalFromDate?: string
+  globalToDate?: string
 }) {
   const currency = useSelector(selectDeviceCurrency)
   const deviceId = useSelector(selectDeviceId)
@@ -73,11 +77,14 @@ export function TodaySalesList({
 
   useEffect(() => {
     fetchSales()
-  }, [debouncedSearch, monthStr])
+  }, [debouncedSearch, monthStr, globalFromDate, globalToDate])
 
   const fetchSales = async () => {
     setLoading(true)
-    const res = await getTodayJobCards(monthStr, debouncedSearch)
+    // When global date range is provided, use it; otherwise use internal monthStr
+    const res = globalFromDate && globalToDate 
+      ? await getTodayJobCards(undefined, debouncedSearch, globalFromDate, globalToDate)
+      : await getTodayJobCards(monthStr, debouncedSearch)
     if (res.success && res.data) {
       const sorted = [...res.data].sort((a, b) => {
         return parseSaleDateTime(b).getTime() - parseSaleDateTime(a).getTime()
@@ -161,8 +168,8 @@ export function TodaySalesList({
 
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h2 className="text-xl font-bold tracking-tight text-gray-900">Monthly Sales / Job Cards</h2>
-          <p className="text-sm text-gray-500">All pending orders created in the selected month</p>
+          <h2 className="text-xl font-bold tracking-tight text-gray-900">Sales / Job Cards</h2>
+          <p className="text-sm text-gray-500">All pending orders in the selected period</p>
         </div>
         <div className="flex flex-col sm:flex-row flex-wrap sm:flex-nowrap gap-3 w-full sm:w-auto items-stretch sm:items-center">
           <div className="relative w-full sm:w-64">
@@ -185,17 +192,27 @@ export function TodaySalesList({
               </Button>
             )}
           </div>
-          <div className="flex gap-2 w-full sm:w-auto">
-            <Input
-              type="month"
-              className="flex-1 sm:w-auto"
-              value={monthStr}
-              onChange={(e) => setMonthStr(e.target.value)}
-            />
-            <Button variant="outline" size="icon" onClick={fetchSales} title="Refresh" className="shrink-0">
-              <Layers className="h-4 w-4" />
-            </Button>
-          </div>
+          {/* Only show the month picker when no global date range is provided */}
+          {!(globalFromDate && globalToDate) && (
+            <div className="flex gap-2 w-full sm:w-auto">
+              <Input
+                type="month"
+                className="flex-1 sm:w-auto"
+                value={monthStr}
+                onChange={(e) => setMonthStr(e.target.value)}
+              />
+              <Button variant="outline" size="icon" onClick={fetchSales} title="Refresh" className="shrink-0">
+                <Layers className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
+          {(globalFromDate && globalToDate) && (
+            <div className="flex gap-2 w-full sm:w-auto">
+              <Button variant="outline" size="icon" onClick={fetchSales} title="Refresh" className="shrink-0">
+                <Layers className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
           <div className="flex gap-2 w-full sm:w-auto">
             {selectedSales.length > 0 && (
               <Button variant="default" onClick={handleBatchPrint} className="flex-1 sm:flex-none bg-indigo-600 hover:bg-indigo-700 text-white gap-2 px-3">

@@ -526,7 +526,7 @@ export async function updateSaleCustomerPhone(saleId: number, phone: string, dev
   }
 }
 
-export async function getTodayJobCards(monthStr?: string, searchTerm?: string) {
+export async function getTodayJobCards(monthStr?: string, searchTerm?: string, fromDate?: string, toDate?: string) {
   noStore()
   try {
     const session = await getStaffSession()
@@ -536,15 +536,32 @@ export async function getTodayJobCards(monthStr?: string, searchTerm?: string) {
 
     const deviceId = session.deviceId
 
-    // Retrieve today's sales with status='Pending' (Job Cards)
-    // We want the sale items as well.
     // Handle search pattern
     const searchPattern = searchTerm ? `%${searchTerm.toLowerCase()}%` : null;
-    const startDate = (monthStr && monthStr.match(/^\d{4}-\d{2}$/)) ? monthStr + '-01' : null;
+    
+    // Determine date boundaries
+    let dateStart: string | null = null;
+    let dateEndExclusive: string | null = null;
+
+    if (fromDate && toDate) {
+      // Use explicit date range (takes priority over monthStr)
+      dateStart = fromDate;
+      // Exclusive upper bound: day AFTER toDate
+      const endD = new Date(toDate + 'T12:00:00');
+      endD.setDate(endD.getDate() + 1);
+      dateEndExclusive = `${endD.getFullYear()}-${String(endD.getMonth() + 1).padStart(2, '0')}-${String(endD.getDate()).padStart(2, '0')}`;
+    } else if (monthStr && monthStr.match(/^\d{4}-\d{2}$/)) {
+      dateStart = monthStr + '-01';
+      // Use interval '1 month' approach via explicit calculation
+      const mDate = new Date(dateStart + 'T12:00:00');
+      const nextMonth = mDate.getMonth() === 11 ? 0 : mDate.getMonth() + 1;
+      const nextYear = mDate.getMonth() === 11 ? mDate.getFullYear() + 1 : mDate.getFullYear();
+      dateEndExclusive = `${nextYear}-${String(nextMonth + 1).padStart(2, '0')}-01`;
+    }
 
     let sales;
 
-    if (startDate && searchPattern) {
+    if (dateStart && dateEndExclusive && searchPattern) {
       sales = await sql`
         SELECT s.*, COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name, COALESCE(NULLIF(s.customer_phone_override, ''), c.phone) as customer_phone, c.street as customer_street, c.city as customer_city, c.district as customer_district, c.state as customer_state, c.pincode as customer_pincode, c.landmark as customer_landmark, c.address as customer_address, d.name as branch_name, d.name as device_name, d.logo_url as device_logo
         FROM sales s 
@@ -552,8 +569,8 @@ export async function getTodayJobCards(monthStr?: string, searchTerm?: string) {
         LEFT JOIN devices d ON s.device_id = d.id
         WHERE s.device_id = ${deviceId}
           AND s.staff_id = ${session.staffId}
-          AND s.sale_date >= ${startDate}::date
-          AND s.sale_date < (${startDate}::date + interval '1 month')
+          AND s.sale_date >= ${dateStart}::date
+          AND s.sale_date < ${dateEndExclusive}::date
           AND (s.status != 'Cancelled' OR s.delivery_status = 'Returned')
           AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%')
           AND (
@@ -564,7 +581,7 @@ export async function getTodayJobCards(monthStr?: string, searchTerm?: string) {
           )
         ORDER BY COALESCE(s.sale_date, s.created_at) DESC, s.id DESC
       `
-    } else if (startDate && !searchPattern) {
+    } else if (dateStart && dateEndExclusive && !searchPattern) {
       sales = await sql`
         SELECT s.*, COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name, COALESCE(NULLIF(s.customer_phone_override, ''), c.phone) as customer_phone, c.street as customer_street, c.city as customer_city, c.district as customer_district, c.state as customer_state, c.pincode as customer_pincode, c.landmark as customer_landmark, c.address as customer_address, d.name as branch_name, d.name as device_name, d.logo_url as device_logo
         FROM sales s 
@@ -572,13 +589,13 @@ export async function getTodayJobCards(monthStr?: string, searchTerm?: string) {
         LEFT JOIN devices d ON s.device_id = d.id
         WHERE s.device_id = ${deviceId}
           AND s.staff_id = ${session.staffId}
-          AND s.sale_date >= ${startDate}::date
-          AND s.sale_date < (${startDate}::date + interval '1 month')
+          AND s.sale_date >= ${dateStart}::date
+          AND s.sale_date < ${dateEndExclusive}::date
           AND (s.status != 'Cancelled' OR s.delivery_status = 'Returned')
           AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%')
         ORDER BY COALESCE(s.sale_date, s.created_at) DESC, s.id DESC
       `
-    } else if (!startDate && searchPattern) {
+    } else if (!dateStart && searchPattern) {
       sales = await sql`
         SELECT s.*, COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name, COALESCE(NULLIF(s.customer_phone_override, ''), c.phone) as customer_phone, c.street as customer_street, c.city as customer_city, c.district as customer_district, c.state as customer_state, c.pincode as customer_pincode, c.landmark as customer_landmark, c.address as customer_address, d.name as branch_name, d.name as device_name, d.logo_url as device_logo
         FROM sales s 
@@ -764,7 +781,7 @@ export async function getAllJobCards(
   }
 }
 
-export async function getStaffSalesAnalytics(deviceId: number, targetMonthStr?: string) {
+export async function getStaffSalesAnalytics(deviceId: number, targetMonthStr?: string, fromDate?: string, toDate?: string) {
   noStore()
   try {
     const session = await getStaffSession()
@@ -772,17 +789,27 @@ export async function getStaffSalesAnalytics(deviceId: number, targetMonthStr?: 
       return { success: false, message: "Unauthorized", data: [] }
     }
 
-    // Define the date boundaries
-    // Add time component to prevent timezone shift when parsing YYYY-MM-DD
-    const date = targetMonthStr ? new Date(targetMonthStr + 'T12:00:00') : new Date()
-    const year = date.getFullYear()
-    const month = date.getMonth() + 1 // 1-12
-    const startDate = `${year}-${String(month).padStart(2, '0')}-01`
-    
-    // Calculate next month to get exclusive upper bound
-    const nextMonth = month === 12 ? 1 : month + 1
-    const nextYear = month === 12 ? year + 1 : year
-    const endDate = `${nextYear}-${String(nextMonth).padStart(2, '0')}-01`
+    let startDate: string
+    let endDate: string
+
+    if (fromDate && toDate) {
+      // Use explicit date range
+      startDate = fromDate
+      // Exclusive upper bound: day AFTER toDate
+      const endD = new Date(toDate + 'T12:00:00')
+      endD.setDate(endD.getDate() + 1)
+      endDate = `${endD.getFullYear()}-${String(endD.getMonth() + 1).padStart(2, '0')}-${String(endD.getDate()).padStart(2, '0')}`
+    } else {
+      // Fall back to month-based (backward compatible)
+      const date = targetMonthStr ? new Date(targetMonthStr + 'T12:00:00') : new Date()
+      const year = date.getFullYear()
+      const month = date.getMonth() + 1 // 1-12
+      startDate = `${year}-${String(month).padStart(2, '0')}-01`
+      
+      const nextMonth = month === 12 ? 1 : month + 1
+      const nextYear = month === 12 ? year + 1 : year
+      endDate = `${nextYear}-${String(nextMonth).padStart(2, '0')}-01`
+    }
 
     // Query for total amounts grouped by day
     const analytics = await sql`

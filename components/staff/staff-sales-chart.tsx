@@ -13,8 +13,8 @@ import {
   ResponsiveContainer,
   Legend
 } from "recharts"
-import { format, parseISO, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay } from "date-fns"
-import { ChevronLeft, ChevronRight, BarChart2, LineChart as LineChartIcon, Loader2, TrendingUp } from "lucide-react"
+import { format, parseISO, eachDayOfInterval } from "date-fns"
+import { BarChart2, LineChart as LineChartIcon, Loader2, TrendingUp } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { getStaffSalesAnalytics } from "@/app/actions/job-card-actions"
@@ -22,11 +22,12 @@ import { getStaffSalesAnalytics } from "@/app/actions/job-card-actions"
 interface StaffSalesChartProps {
   deviceId: number
   currency: string
+  fromDate: string  // yyyy-MM-dd
+  toDate: string    // yyyy-MM-dd
   onSummaryUpdate?: (totals: { sales: number; orders: number }) => void
 }
 
-export function StaffSalesChart({ deviceId, currency = "INR", onSummaryUpdate }: StaffSalesChartProps) {
-  const [currentMonth, setCurrentMonth] = useState(startOfMonth(new Date()))
+export function StaffSalesChart({ deviceId, currency = "INR", fromDate, toDate, onSummaryUpdate }: StaffSalesChartProps) {
   const [chartType, setChartType] = useState<"bar" | "line">("bar")
   const [data, setData] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -39,8 +40,7 @@ export function StaffSalesChart({ deviceId, currency = "INR", onSummaryUpdate }:
       setIsLoading(true)
       setError(null)
       try {
-        const monthStr = format(currentMonth, 'yyyy-MM-dd')
-        const result = await getStaffSalesAnalytics(deviceId, monthStr)
+        const result = await getStaffSalesAnalytics(deviceId, undefined, fromDate, toDate)
         
         if (!mounted) return
 
@@ -51,17 +51,15 @@ export function StaffSalesChart({ deviceId, currency = "INR", onSummaryUpdate }:
 
         const rawData = result.data || []
         
-        // Generate continuous days for the current month
-        const daysInMonth = eachDayOfInterval({
-          start: startOfMonth(currentMonth),
-          end: endOfMonth(currentMonth)
-        })
+        // Generate continuous days for the selected date range
+        const from = parseISO(fromDate)
+        const to = parseISO(toDate)
+        const daysInRange = eachDayOfInterval({ start: from, end: to })
 
         let totalSales = 0
         let totalOrders = 0
 
-        const formattedData = daysInMonth.map(day => {
-          // Find matching row from DB using safe string matching
+        const formattedData = daysInRange.map(day => {
           const dayString = format(day, 'yyyy-MM-dd')
           const row = rawData.find((r: any) => r.date === dayString)
           const salesAmount = row ? Number(row.sales_amount) : 0
@@ -98,10 +96,7 @@ export function StaffSalesChart({ deviceId, currency = "INR", onSummaryUpdate }:
     return () => {
       mounted = false
     }
-  }, [currentMonth, onSummaryUpdate])
-
-  const nextMonth = () => setCurrentMonth(prev => startOfMonth(new Date(prev.getFullYear(), prev.getMonth() + 1, 1)))
-  const prevMonth = () => setCurrentMonth(prev => startOfMonth(new Date(prev.getFullYear(), prev.getMonth() - 1, 1)))
+  }, [fromDate, toDate, deviceId, onSummaryUpdate])
 
   const formatCurrency = (val: number) => {
     return new Intl.NumberFormat("en-US", {
@@ -135,6 +130,17 @@ export function StaffSalesChart({ deviceId, currency = "INR", onSummaryUpdate }:
 
   const hasData = useMemo(() => data.some(d => d.orderCount > 0), [data])
 
+  // Formatted date range for display
+  const dateRangeLabel = useMemo(() => {
+    try {
+      const from = parseISO(fromDate)
+      const to = parseISO(toDate)
+      return `${format(from, "M/d/yyyy")} - ${format(to, "M/d/yyyy")}`
+    } catch {
+      return ""
+    }
+  }, [fromDate, toDate])
+
   return (
     <Card className="w-full border-0 shadow-sm rounded-xl overflow-hidden">
       <CardHeader className="flex flex-col sm:flex-row items-center justify-between pb-6 gap-4 bg-white">
@@ -143,7 +149,10 @@ export function StaffSalesChart({ deviceId, currency = "INR", onSummaryUpdate }:
             <div className="p-2 bg-blue-50 rounded-lg">
               <TrendingUp className="h-5 w-5 text-blue-600" />
             </div>
-            <CardTitle className="text-lg font-bold text-slate-800">Sales Trend</CardTitle>
+            <div className="flex flex-col">
+              <CardTitle className="text-lg font-bold text-slate-800">Sales Trend</CardTitle>
+              <span className="text-[11px] font-semibold text-slate-400">{dateRangeLabel}</span>
+            </div>
           </div>
         </div>
         <div className="flex flex-wrap items-center justify-center sm:justify-end gap-3 w-full sm:w-auto">
@@ -165,17 +174,6 @@ export function StaffSalesChart({ deviceId, currency = "INR", onSummaryUpdate }:
             >
               <LineChartIcon className="w-4 h-4 mr-2" />
               Line
-            </Button>
-          </div>
-          <div className="flex items-center gap-2 bg-slate-50 rounded-full border border-slate-200 p-1">
-            <Button variant="ghost" size="icon" onClick={prevMonth} className="h-6 w-6 rounded-full hover:bg-white hover:shadow-sm">
-              <ChevronLeft className="h-3 w-3" />
-            </Button>
-            <span className="text-[11px] font-semibold text-slate-600 min-w-[120px] text-center">
-              {format(startOfMonth(currentMonth), "M/d/yyyy")} - {format(endOfMonth(currentMonth), "M/d/yyyy")}
-            </span>
-            <Button variant="ghost" size="icon" onClick={nextMonth} className="h-6 w-6 rounded-full hover:bg-white hover:shadow-sm">
-              <ChevronRight className="h-3 w-3" />
             </Button>
           </div>
         </div>

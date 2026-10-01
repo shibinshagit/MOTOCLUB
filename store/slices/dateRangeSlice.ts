@@ -2,7 +2,7 @@ import { createSlice, type PayloadAction } from "@reduxjs/toolkit"
 import { format, isValid, parseISO, startOfMonth, endOfMonth } from "date-fns"
 import type { RootState } from "../store"
 
-export type DatePreset = "today" | "yesterday" | "last7days" | "this_month" | "last_month" | "custom"
+export type DatePreset = "today" | "yesterday" | "this_week" | "last_week" | "last7days" | "this_month" | "last_month" | "custom"
 
 export interface DateRangeState {
   from: string // "yyyy-MM-dd"
