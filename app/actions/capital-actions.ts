@@ -17,6 +17,8 @@ export interface CapitalTransaction {
   description: string | null
   payment_method: string | null
   transaction_date: string
+  /** yyyy-MM-dd exactly as stored, used to pre-fill the edit form */
+  date_key: string
   running_balance: number
 }
 
@@ -28,6 +30,8 @@ export interface CapitalSummary {
 }
 
 class CapitalError extends Error {}
+
+const ALLOWED_PAYMENT_METHODS = ["Cash", "Bank Transfer", "UPI", "Card", "Check", "Other"]
 
 /** Server-side gate: resolves the device from the session and enforces Accounting page access. */
 async function authorize(
@@ -71,6 +75,7 @@ export async function getCapitalSummary(
     const rows = await sql`
       WITH ledger AS (
         SELECT id, transaction_type, amount, description, payment_method, transaction_date,
+               to_char(transaction_date, 'YYYY-MM-DD') AS date_key,
                SUM(CASE WHEN transaction_type = 'IN' THEN amount ELSE -amount END)
                  OVER (ORDER BY transaction_date, id) AS running_balance
         FROM capital_transactions
@@ -93,6 +98,7 @@ export async function getCapitalSummary(
       description: r.description,
       payment_method: r.payment_method,
       transaction_date: new Date(r.transaction_date).toISOString(),
+      date_key: r.date_key,
       running_balance: money(r.running_balance),
     }))
 
@@ -171,5 +177,91 @@ export async function addCapitalTransaction(input: {
     if (error instanceof CapitalError) return { success: false, message: error.message }
     console.error("addCapitalTransaction error:", error)
     return { success: false, message: "Failed to save capital transaction" }
+  }
+}
+
+/**
+ * Edits one capital_transactions row in place (same id, same row). Only capital_transactions is
+ * touched: no financial_transactions rows are read or written.
+ */
+export async function updateCapitalTransaction(input: {
+  id: number
+  deviceId: number
+  type: "IN" | "OUT"
+  amount: number
+  description?: string
+  paymentMethod?: string
+  transactionDate?: string
+}): Promise<{ success: boolean; message?: string; balance?: number }> {
+  try {
+    const auth = await authorize(input.deviceId)
+    if ("error" in auth) return { success: false, message: auth.error }
+
+    const id = Number(input.id)
+    const type = input.type === "IN" || input.type === "OUT" ? input.type : null
+    const amount = money(input.amount)
+    if (!Number.isInteger(id) || id <= 0) return { success: false, message: "Invalid transaction" }
+    if (!type) return { success: false, message: "Invalid transaction type" }
+    if (!Number.isFinite(amount) || amount <= 0) return { success: false, message: "Amount must be greater than zero" }
+    const date = input.transactionDate && /^\d{4}-\d{2}-\d{2}$/.test(input.transactionDate) ? input.transactionDate : null
+    if (!date || Number.isNaN(Date.parse(date))) return { success: false, message: "Invalid transaction date" }
+    const method = input.paymentMethod?.trim() || null
+
+    const balance = await sql.begin(async (tx: any) => {
+      // Same device-row lock as add, so edits and adds for this ledger are serialised
+      const dev = await tx`SELECT company_id, currency FROM devices WHERE id = ${auth.deviceId} FOR UPDATE`
+      if (dev.length === 0 || dev[0].company_id == null) throw new CapitalError("Device not found")
+      const currency = dev[0].currency || "INR"
+
+      // Ownership comes from the session device and company, never from the id alone
+      const existing = await tx`
+        SELECT id, payment_method FROM capital_transactions
+        WHERE id = ${id} AND device_id = ${auth.deviceId} AND company_id = ${dev[0].company_id}
+      `
+      if (existing.length === 0) throw new CapitalError("Capital transaction not found")
+
+      // A method outside the standard list is only accepted if the row already had it
+      if (method && !ALLOWED_PAYMENT_METHODS.includes(method) && method !== existing[0].payment_method) {
+        throw new CapitalError("Invalid payment method")
+      }
+
+      // Keep the stored time of day when the date is unchanged; otherwise move the date, keep the time
+      await tx`
+        UPDATE capital_transactions
+        SET transaction_type = ${type},
+            amount = ${amount},
+            description = ${input.description?.trim() || null},
+            payment_method = ${method},
+            transaction_date = CASE
+              WHEN transaction_date::date = ${date}::date THEN transaction_date
+              ELSE ${date}::date::timestamp + transaction_date::time
+            END,
+            updated_at = NOW()
+        WHERE id = ${id} AND device_id = ${auth.deviceId} AND company_id = ${dev[0].company_id}
+      `
+
+      // The pool must never go negative at any point in time after the change
+      const check = await tx`
+        SELECT
+          (SELECT MIN(bal) FROM (
+            SELECT SUM(CASE WHEN transaction_type = 'IN' THEN amount ELSE -amount END) OVER (ORDER BY transaction_date, id) AS bal
+            FROM capital_transactions WHERE device_id = ${auth.deviceId}
+          ) x) AS min_balance,
+          (SELECT COALESCE(SUM(CASE WHEN transaction_type = 'IN' THEN amount ELSE -amount END), 0)
+             FROM capital_transactions WHERE device_id = ${auth.deviceId}) AS balance
+      `
+      if (Number(check[0].min_balance) < 0) {
+        throw new CapitalError(
+          `This change would make the capital balance negative (lowest point ${formatAmount(money(check[0].min_balance), currency)}). Other entries depend on this transaction.`,
+        )
+      }
+      return money(check[0].balance)
+    })
+
+    return { success: true, balance }
+  } catch (error) {
+    if (error instanceof CapitalError) return { success: false, message: error.message }
+    console.error("updateCapitalTransaction error:", error)
+    return { success: false, message: "Failed to update capital transaction" }
   }
 }

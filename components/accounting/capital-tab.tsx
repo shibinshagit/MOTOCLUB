@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { format } from "date-fns"
-import { ArrowDownCircle, ArrowUpCircle, Loader2 } from "lucide-react"
+import { ArrowDownCircle, ArrowUpCircle, Loader2, Pencil } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -14,7 +14,9 @@ import { notifyError, notifySuccess } from "@/lib/notifications"
 import {
   addCapitalTransaction,
   getCapitalSummary,
+  updateCapitalTransaction,
   type CapitalSummary,
+  type CapitalTransaction,
 } from "@/app/actions/capital-actions"
 
 interface CapitalTabProps {
@@ -36,6 +38,7 @@ export default function CapitalTab({ deviceId, currency, dateFrom, dateTo }: Cap
   const [paymentMethod, setPaymentMethod] = useState("Cash")
   const [date, setDate] = useState(format(new Date(), "yyyy-MM-dd"))
   const [saving, setSaving] = useState(false)
+  const [editing, setEditing] = useState<CapitalTransaction | null>(null)
 
   const fromKey = format(dateFrom, "yyyy-MM-dd")
   const toKey = format(dateTo, "yyyy-MM-dd")
@@ -55,7 +58,17 @@ export default function CapitalTab({ deviceId, currency, dateFrom, dateTo }: Cap
     load()
   }, [load])
 
+  const openEdit = (t: CapitalTransaction) => {
+    setEditing(t)
+    setDialogType(t.transaction_type)
+    setAmount(String(t.amount))
+    setDescription(t.description || "")
+    setPaymentMethod(t.payment_method || "Cash")
+    setDate(t.date_key)
+  }
+
   const openDialog = (type: "IN" | "OUT") => {
+    setEditing(null)
     setDialogType(type)
     setAmount("")
     setDescription("")
@@ -66,11 +79,33 @@ export default function CapitalTab({ deviceId, currency, dateFrom, dateTo }: Cap
   const numericAmount = Number(amount)
   const available = summary?.currentBalance ?? 0
   const validAmount = Number.isFinite(numericAmount) && numericAmount > 0
-  const insufficient = dialogType === "OUT" && validAmount && numericAmount > available + 0.001
+  const insufficient = !editing && dialogType === "OUT" && validAmount && numericAmount > available + 0.001
 
   const submit = async () => {
-    if (!dialogType || !validAmount || insufficient) return
+    if (!dialogType || !validAmount || insufficient || saving) return
     setSaving(true)
+    if (editing) {
+      const upd = await updateCapitalTransaction({
+        id: editing.id,
+        deviceId,
+        type: dialogType,
+        amount: numericAmount,
+        description,
+        paymentMethod,
+        transactionDate: date,
+      })
+      setSaving(false)
+      if (upd.success) {
+        notifySuccess(toast, "Capital transaction updated successfully.")
+        setDialogType(null)
+        setEditing(null)
+        load()
+      } else {
+        // keep the modal open so the reason is visible and nothing is lost
+        notifyError(toast, upd.message || "Failed to update capital transaction")
+      }
+      return
+    }
     const res = await addCapitalTransaction({
       deviceId,
       type: dialogType,
@@ -133,12 +168,15 @@ export default function CapitalTab({ deviceId, currency, dateFrom, dateTo }: Cap
               <th className="px-3 py-2 text-right">Amount</th>
               <th className="px-3 py-2">Payment Method</th>
               <th className="px-3 py-2 text-right">Balance</th>
+              <th className="px-3 py-2 text-right">
+                <span className="sr-only">Actions</span>
+              </th>
             </tr>
           </thead>
           <tbody>
             {loading && !summary ? (
               <tr>
-                <td colSpan={6} className="px-3 py-6 text-center text-muted-foreground">
+                <td colSpan={7} className="px-3 py-6 text-center text-muted-foreground">
                   <Loader2 className="mx-auto h-4 w-4 animate-spin" />
                 </td>
               </tr>
@@ -159,11 +197,23 @@ export default function CapitalTab({ deviceId, currency, dateFrom, dateTo }: Cap
                   <td className="px-3 py-2 text-right whitespace-nowrap">{money(t.amount)}</td>
                   <td className="px-3 py-2">{t.payment_method || "—"}</td>
                   <td className="px-3 py-2 text-right whitespace-nowrap font-medium">{money(t.running_balance)}</td>
+                  <td className="px-3 py-2 text-right">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 w-8 p-0"
+                      aria-label="Edit capital transaction"
+                      onClick={() => openEdit(t)}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                  </td>
                 </tr>
               ))
             ) : (
               <tr>
-                <td colSpan={6} className="px-3 py-6 text-center text-muted-foreground">
+                <td colSpan={7} className="px-3 py-6 text-center text-muted-foreground">
                   No capital transactions for the selected period
                 </td>
               </tr>
@@ -172,16 +222,40 @@ export default function CapitalTab({ deviceId, currency, dateFrom, dateTo }: Cap
         </table>
       </div>
 
-      <Dialog open={dialogType !== null} onOpenChange={(open) => !open && !saving && setDialogType(null)}>
+      <Dialog
+        open={dialogType !== null}
+        onOpenChange={(open) => {
+          if (!open && !saving) {
+            setDialogType(null)
+            setEditing(null)
+          }
+        }}
+      >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>{dialogType === "IN" ? "Capital Money In" : "Capital Money Out"}</DialogTitle>
+            <DialogTitle>
+              {editing ? "Edit Capital Transaction" : dialogType === "IN" ? "Capital Money In" : "Capital Money Out"}
+            </DialogTitle>
             <DialogDescription>
               This only changes the standalone Capital balance. It is not an income or an expense.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
-            {dialogType === "OUT" && (
+            {editing && (
+              <div className="grid gap-1.5">
+                <Label>Transaction Type</Label>
+                <Select value={dialogType ?? "IN"} onValueChange={(v) => setDialogType(v as "IN" | "OUT")}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="IN">Capital Money In</SelectItem>
+                    <SelectItem value="OUT">Capital Money Out</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {!editing && dialogType === "OUT" && (
               <div className="rounded-md bg-muted p-2 text-xs">
                 Available Capital: <strong>{money(available)}</strong>
                 {validAmount && (
@@ -215,7 +289,10 @@ export default function CapitalTab({ deviceId, currency, dateFrom, dateTo }: Cap
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {PAYMENT_METHODS.map((m) => (
+                    {(editing?.payment_method && !PAYMENT_METHODS.includes(editing.payment_method)
+                      ? [...PAYMENT_METHODS, editing.payment_method]
+                      : PAYMENT_METHODS
+                    ).map((m) => (
                       <SelectItem key={m} value={m}>
                         {m}
                       </SelectItem>
@@ -235,7 +312,7 @@ export default function CapitalTab({ deviceId, currency, dateFrom, dateTo }: Cap
             </Button>
             <Button onClick={submit} disabled={saving || !validAmount || insufficient || !date}>
               {saving ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : null}
-              {dialogType === "IN" ? "Add Capital" : "Withdraw Capital"}
+              {editing ? "Update" : dialogType === "IN" ? "Add Capital" : "Withdraw Capital"}
             </Button>
           </DialogFooter>
         </DialogContent>
