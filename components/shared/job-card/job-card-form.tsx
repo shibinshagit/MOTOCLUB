@@ -588,10 +588,14 @@ export function JobCardForm({
         }
         if (editSaleId && originalDeliveryStatus?.toLowerCase() === "pending") {
           setSuccessData({ ...res.data, showWhatsappConfirmation: true, saleData: input })
+          setIsSuccess(true)
+        } else if (editSaleId && onClose) {
+          // After an update, go straight back to the sales list (the owner of this modal reloads it on close)
+          onClose()
         } else {
           setSuccessData(res.data)
+          setIsSuccess(true)
         }
-        setIsSuccess(true)
         toast({ title: "Success", description: editSaleId ? "Job Card updated successfully" : "Job Card created successfully" })
       } else {
         toast({ title: "Error", description: res.message || "Failed to save Job Card", variant: "destructive" })
@@ -697,7 +701,7 @@ export function JobCardForm({
           shippingAddress={addressParts.join(", ")}
           products={successData.saleData.products}
           totalAmount={calculateSubtotal() + (Number(courierPaidExtra) || 0)}
-          onComplete={resetForm}
+          onComplete={editSaleId && onClose ? onClose : resetForm}
         />
       )
     }
