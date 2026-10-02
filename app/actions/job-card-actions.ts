@@ -5,11 +5,53 @@ import { revalidatePath, unstable_noStore as noStore } from "next/cache"
 import { format, addDays, parseISO } from "date-fns"
 import { getStaffSession } from "@/lib/staff-session"
 import { addCustomer, syncCustomerShippingAddress } from "./customer-actions"
+import { isSaleStockDeducted } from "./sale-actions"
+import { applyStockTransition, getSaleStockLines, applyStockDelta } from "@/lib/sale-stock"
+
+/**
+ * Validates one job card line against the database and returns the identifiers that are stored on the
+ * sale line and used for stock: the product must belong to the device's company, the variant must belong
+ * to the product (the product's first variant when none is sent) and a batch, if given, must belong to
+ * that variant. Nothing the browser sends for product/variant/batch is trusted.
+ */
+async function resolveJobCardLine(tx: any, deviceId: number, p: JobCardProductInput) {
+  const qty = Number(p.quantity)
+  if (!Number.isInteger(qty) || qty <= 0) throw new Error("Quantity must be a whole number greater than zero")
+
+  const product = await tx`
+    SELECT id FROM products
+    WHERE id = ${p.productId}
+      AND created_by IN (
+        SELECT d2.id FROM devices d1 JOIN devices d2 ON d2.company_id = d1.company_id WHERE d1.id = ${deviceId}
+      )
+  `
+  if (product.length === 0) throw new Error(`Product ${p.productId} not found`)
+
+  let variantId: number | null = p.variantId ? Number(p.variantId) : null
+  if (variantId) {
+    const v = await tx`SELECT id FROM product_variants WHERE id = ${variantId} AND product_id = ${p.productId}`
+    if (v.length === 0) throw new Error("Selected variant does not belong to the selected product")
+  } else {
+    const d = await tx`SELECT id FROM product_variants WHERE product_id = ${p.productId} ORDER BY id ASC LIMIT 1`
+    variantId = d.length > 0 ? Number(d[0].id) : null
+  }
+
+  let batchId: number | null = p.batchId ? Number(p.batchId) : null
+  if (batchId) {
+    const b = await tx`
+      SELECT id FROM product_batches WHERE id = ${batchId} AND product_variant_id = ${variantId}
+    `
+    if (b.length === 0) throw new Error("Selected batch does not belong to the selected product variant")
+  }
+
+  return { variantId, batchId, quantity: qty }
+}
 
 export interface JobCardProductInput {
   productId: number
   productName?: string
   variantId?: number
+  batchId?: number
   quantity: number
   price: number // Editable selling price
   costPrice: number // Read-only cost price from inventory
@@ -240,21 +282,24 @@ export async function createJobCard(input: JobCardInput) {
         }
       }
 
-      // 5. Insert Sale Items
+      // 5. Insert Sale Items (validated; variant and batch are stored so stock moves against the right rows)
       for (const p of input.products) {
+        const line = await resolveJobCardLine(tx, deviceId, p)
         await tx`
           INSERT INTO sale_items (
             sale_id,
             product_id,
             product_variant_id,
+            batch_id,
             quantity,
             price,
             cost
           ) VALUES (
             ${saleId},
             ${p.productId},
-            ${p.variantId || null},
-            ${p.quantity},
+            ${line.variantId},
+            ${line.batchId},
+            ${line.quantity},
             ${p.price},
             ${p.costPrice}
           )
@@ -443,29 +488,49 @@ export async function updateJobCard(id: number, input: any) {
       })
     }
 
-    // 4. Delete existing sale items
-    await sql`DELETE FROM sale_items WHERE sale_id = ${id}`
-
-    // 5. Insert new sale items
-    for (const p of input.products) {
-      await sql`
-        INSERT INTO sale_items (
-          sale_id,
-          product_id,
-          product_variant_id,
-          quantity,
-          price,
-          cost
-        ) VALUES (
-          ${id},
-          ${p.productId},
-          ${p.variantId || null},
-          ${p.quantity},
-          ${p.price},
-          ${p.costPrice}
-        )
+    // 4./5. Replace the sale items atomically. When the sale's stock is currently deducted, the stock
+    // difference between the old and new lines is applied in the same transaction (edit 5 -> 3 returns 2).
+    const saleDeviceId = Number(existingSale[0].device_id) || deviceId
+    await sql.begin(async (tx: any) => {
+      const cur = await tx`
+        SELECT status, delivery_status, fulfillment_type FROM sales WHERE id = ${id} FOR UPDATE
       `
-    }
+      const stockDeducted = await isSaleStockDeducted(cur[0]?.status, cur[0]?.delivery_status, cur[0]?.fulfillment_type)
+
+      // Snapshot of what is currently deducted, taken before the lines are replaced
+      const beforeLines = stockDeducted ? await getSaleStockLines(id, tx) : null
+
+      await tx`DELETE FROM sale_items WHERE sale_id = ${id}`
+
+      for (const p of input.products) {
+        const line = await resolveJobCardLine(tx, saleDeviceId, p)
+        await tx`
+          INSERT INTO sale_items (
+            sale_id,
+            product_id,
+            product_variant_id,
+            batch_id,
+            quantity,
+            price,
+            cost
+          ) VALUES (
+            ${id},
+            ${p.productId},
+            ${line.variantId},
+            ${line.batchId},
+            ${line.quantity},
+            ${p.price},
+            ${p.costPrice}
+          )
+        `
+      }
+
+      // Only the difference moves: extra units are deducted, removed units restored, unchanged lines untouched
+      if (stockDeducted && beforeLines) {
+        const afterLines = await getSaleStockLines(id, tx)
+        await applyStockDelta(id, saleDeviceId, beforeLines, afterLines, `Job Card #${id} edited`, tx)
+      }
+    })
 
     revalidatePath("/dashboard")
     revalidatePath("/staff/dashboard")
@@ -837,27 +902,48 @@ export async function getStaffSalesAnalytics(deviceId: number, targetMonthStr?: 
 export async function markJobCardPaid(saleId: number, deviceId: number) {
   try {
     const session = await getStaffSession()
-    if (session) {
-      await sql`
-        UPDATE sales 
-        SET 
+
+    await sql.begin(async (tx: any) => {
+      // Lock the sale so a double click cannot move the stock twice
+      const rows = session
+        ? await tx`
+            SELECT status, delivery_status, fulfillment_type, device_id FROM sales
+            WHERE id = ${saleId} AND staff_id = ${session.staffId} FOR UPDATE
+          `
+        : await tx`
+            SELECT status, delivery_status, fulfillment_type, device_id FROM sales
+            WHERE id = ${saleId} FOR UPDATE
+          `
+      if (rows.length === 0) throw new Error("Job Card not found or unauthorized")
+      const cur = rows[0]
+      const newDelivery =
+        !cur.delivery_status || cur.delivery_status === "Pending" ? "Paid" : cur.delivery_status
+
+      const wasDeducted = await isSaleStockDeducted(cur.status, cur.delivery_status || "Pending", cur.fulfillment_type)
+      const nowDeducted = await isSaleStockDeducted(cur.status, newDelivery, cur.fulfillment_type)
+
+      await tx`
+        UPDATE sales
+        SET
           payment_status = 'Paid',
-          delivery_status = CASE WHEN delivery_status IS NULL OR delivery_status = 'Pending' THEN 'Paid' ELSE delivery_status END,
-          received_amount = total_amount,
-          balance_amount = 0
-        WHERE id = ${saleId} AND staff_id = ${session.staffId}
-      `
-    } else {
-      await sql`
-        UPDATE sales 
-        SET 
-          payment_status = 'Paid',
-          delivery_status = CASE WHEN delivery_status IS NULL OR delivery_status = 'Pending' THEN 'Paid' ELSE delivery_status END,
+          delivery_status = ${newDelivery},
           received_amount = total_amount,
           balance_amount = 0
         WHERE id = ${saleId}
       `
-    }
+
+      if (wasDeducted !== nowDeducted) {
+        await applyStockTransition(
+          saleId,
+          Number(cur.device_id) || deviceId,
+          nowDeducted,
+          nowDeducted ? "sale_delivery_deducted" : "sale_delivery_restored",
+          `Job Card #${saleId} marked paid - stock ${nowDeducted ? "deducted" : "restored"}`,
+          tx,
+        )
+      }
+    })
+
     revalidatePath("/staff/dashboard")
     revalidatePath("/dashboard")
     return { success: true }

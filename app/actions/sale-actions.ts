@@ -11,6 +11,7 @@ import { ensureReturnTablesExist } from "./sale-return-actions"
 import { getReplacementShipmentsForSale } from "./replacement-actions"
 import { syncCustomerShippingAddress } from "./customer-actions"
 import { getAuthoritativeProfitSummary, type AuthoritativeProfitSummary } from "@/lib/profit-calculation"
+import { applyStockTransition, getSaleStockLines, applyStockDelta } from "@/lib/sale-stock"
 
 function getShippingAmounts(shipping: ReturnType<typeof normalizeSaleShippingInput>) {
   if (shipping.fulfillment_type !== "ship") {
@@ -382,10 +383,11 @@ async function createStockHistoryEntry(
   referenceType: string,
   deviceId: number,
   notes?: string,
+  query: any = sql,
 ) {
   try {
     // Check if it's actually a product (not a service)
-    const productCheck = await sql`
+    const productCheck = await query`
       SELECT id, name FROM products WHERE id = ${productId}
     `
 
@@ -396,7 +398,7 @@ async function createStockHistoryEntry(
 
     let resolvedVariantId = variantId
     if (!resolvedVariantId) {
-      const defaultVariant = await sql`
+      const defaultVariant = await query`
         SELECT id FROM product_variants WHERE product_id = ${productId} ORDER BY id ASC LIMIT 1
       `
       if (defaultVariant.length > 0) {
@@ -404,7 +406,7 @@ async function createStockHistoryEntry(
       }
     }
 
-    await sql`
+    await query`
       INSERT INTO product_stock_history (
         product_id, product_variant_id, batch_id, quantity, type, reference_id, reference_type, notes, created_by, device_id
       ) VALUES (
@@ -430,6 +432,7 @@ async function createStockHistoryEntry(
     return { success: false, message: error instanceof Error ? error.message : String(error) }
   }
 }
+
 
 // Calculate COGS for sale items using actual sale item costs (including services)
 async function calculateCOGS(items: any[], saleId?: number) {
@@ -2532,6 +2535,12 @@ export async function updateSale(saleData: any) {
         WHERE si.sale_id = ${saleData.id}
       `
 
+      // Lines with no allocation rows (job cards, non-batch lines) are not covered by the allocation logic
+      // below. Snapshot them now so the stock difference can be applied after the lines are rewritten.
+      const unallocatedBefore = wasDeducted && !wasCancelled
+        ? await getSaleStockLines(saleData.id, sql, true)
+        : new Map()
+
       // RESTORE STOCK: If the sale WAS deducted, we restore all allocated stock back to inventory
       if (wasDeducted) {
         console.log("Restoring stock from previous allocations...")
@@ -2670,6 +2679,25 @@ export async function updateSale(saleData: any) {
         if (!processedItemIds.has(item.id)) {
           await sql`DELETE FROM sale_items WHERE id = ${item.id}`
         }
+      }
+
+      // Apply the stock change for allocation-less lines: deducted -> deducted moves only the quantity
+      // difference, pending -> deducted deducts the lines once, deducted -> pending/cancelled restores them.
+      {
+        const unallocatedAfter = isNowDeducted && !isNowCancelled
+          ? await getSaleStockLines(saleData.id, sql, true)
+          : new Map()
+        const stockDeviceId = Number(original.device_id) || saleData.deviceId
+        await sql.begin(async (tx: any) => {
+          await applyStockDelta(
+            saleData.id,
+            stockDeviceId,
+            unallocatedBefore,
+            unallocatedAfter,
+            `Sale #${saleData.id} updated`,
+            tx,
+          )
+        })
       }
 
       console.log("Sale items and batch allocations updated successfully")
@@ -3003,39 +3031,20 @@ export async function updateSaleDeliveryStatus(
     }
 
     // ===== NORMAL DELIVERY STATUS TRANSITIONS =====
-    // If there is a transition in deduction state, we need to fetch items and allocations
+    // If there is a transition in deduction state, move the stock (atomic, per sale line / allocation).
+    // Uses the sale's own device so a client-supplied device id can never move another device's stock.
     if (wasStockDeducted !== shouldDeductStock) {
-      const existingAllocations = await sql`
-        SELECT sba.*, si.product_id, si.product_variant_id 
-        FROM sale_batch_allocations sba 
-        JOIN sale_items si ON sba.sale_item_id = si.id 
-        WHERE si.sale_id = ${saleId}
-      `
-
-      for (const alloc of existingAllocations) {
-        const operation = shouldDeductStock ? "subtract" : "add"
-        const stockResult = await updateProductStock(
-          alloc.product_id, 
-          alloc.product_variant_id, 
-          alloc.batch_id, 
-          alloc.quantity, 
-          operation, 
-          deviceId
+      const stockDeviceId = Number(rows[0].device_id) || deviceId
+      await sql.begin(async (tx: any) => {
+        await applyStockTransition(
+          saleId,
+          stockDeviceId,
+          shouldDeductStock,
+          shouldDeductStock ? "sale_delivery_deducted" : "sale_delivery_restored",
+          `Sale #${saleId} delivery status changed to ${deliveryStatus} - stock ${shouldDeductStock ? "deducted" : "restored"}`,
+          tx,
         )
-        if (stockResult.success) {
-          await createStockHistoryEntry(
-            alloc.product_id,
-            alloc.product_variant_id,
-            alloc.batch_id,
-            shouldDeductStock ? "sale_delivery_deducted" : "sale_delivery_restored",
-            shouldDeductStock ? -alloc.quantity : alloc.quantity,
-            saleId,
-            "sale",
-            deviceId,
-            `Sale #${saleId} delivery status changed to ${deliveryStatus} - stock ${shouldDeductStock ? "deducted" : "restored"}`
-          )
-        }
-      }
+      })
     }
 
     // Now update the sales table

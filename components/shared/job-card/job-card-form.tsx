@@ -35,6 +35,7 @@ interface ProductRow {
   productName: string
   productObj: any // To hold the full product object for variants
   variantId: number | null
+  batchId?: number | null // kept from an existing line so an edit does not move stock between batches
   variantName: string
   quantity: number
   price: number // Selling price (editable, MRP)
@@ -364,6 +365,7 @@ export function JobCardForm({
           productName: item.service_name || item.product_name || "",
           productObj: null,
           variantId: item.product_variant_id,
+          batchId: item.batch_id || null,
           variantName: item.variant_name || "",
           quantity: item.quantity,
           price: item.price || item.wholesale_price,
@@ -453,6 +455,7 @@ export function JobCardForm({
           msp: initialMsp,
           costPrice: defaultCostPrice,
           variantId: productObj?.variant_id || null, // Reset variant when product changes
+          batchId: null,
           variantName: "",
         }
       }
@@ -565,6 +568,7 @@ export function JobCardForm({
           productId: p.productId!,
           productName: p.productName,
           variantId: p.variantId || undefined,
+          batchId: p.batchId || undefined,
           quantity: p.quantity,
           price: p.price,
           costPrice: p.costPrice || 0,
@@ -1111,6 +1115,7 @@ export function JobCardForm({
                       value={product.variantId || undefined}
                       onChange={(vId, vName) => {
                         updateProductRow(product.id, "variantId", vId)
+                        updateProductRow(product.id, "batchId", null)
                         updateProductRow(product.id, "variantName", vName)
                         
                         const variant = product.productObj?.variants?.find((v: any) => v.id === vId)
@@ -1211,6 +1216,7 @@ export function JobCardForm({
                           value={product.variantId || undefined}
                           onChange={(vId, vName) => {
                             updateProductRow(product.id, "variantId", vId)
+                            updateProductRow(product.id, "batchId", null)
                             updateProductRow(product.id, "variantName", vName)
                             
                             const variant = product.productObj?.variants?.find((v: any) => v.id === vId)
