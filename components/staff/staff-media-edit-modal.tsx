@@ -189,9 +189,9 @@ export default function StaffMediaEditModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && !isUploadingImage && !isUploadingVideo && !isPending && onClose()}>
-      <DialogContent className="w-[95vw] sm:max-w-2xl p-0 overflow-hidden bg-slate-50">
+      <DialogContent className="flex w-[95vw] max-h-[90dvh] flex-col gap-0 p-0 overflow-hidden bg-slate-50 sm:max-w-2xl">
         {/* Header */}
-        <DialogHeader className="px-4 sm:px-6 py-4 border-b bg-white">
+        <DialogHeader className="shrink-0 px-4 sm:px-6 py-4 border-b bg-white">
           <DialogTitle className="text-base font-bold text-slate-800 flex items-center gap-2">
             <Package className="h-5 w-5 text-indigo-600" />
             Manage Product Media - {product.name}
@@ -202,11 +202,11 @@ export default function StaffMediaEditModal({
         </DialogHeader>
 
         {/* Content Body */}
-        <div className="p-4 sm:p-6 space-y-6 max-h-[75vh] overflow-y-auto">
+        <div className="min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-contain p-4 sm:p-6">
           {/* Photos Section */}
           <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <div>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
                 <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
                   <ImageIcon className="h-4 w-4 text-violet-600" />
                   Product Photos ({imageUrls.length}/4)
@@ -222,7 +222,7 @@ export default function StaffMediaEditModal({
                   variant="outline"
                   disabled={isUploadingImage || isPending}
                   onClick={() => imageInputRef.current?.click()}
-                  className="h-8 border-violet-200 text-violet-700 hover:bg-violet-50"
+                  className="h-10 w-full shrink-0 border-violet-200 text-violet-700 hover:bg-violet-50 sm:h-8 sm:w-auto"
                 >
                   {isUploadingImage ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
@@ -298,8 +298,8 @@ export default function StaffMediaEditModal({
 
           {/* Video Section */}
           <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <div>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
                 <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
                   <Film className="h-4 w-4 text-indigo-600" />
                   Product Video
@@ -315,7 +315,7 @@ export default function StaffMediaEditModal({
                   variant="outline"
                   disabled={isUploadingVideo || isPending}
                   onClick={() => videoInputRef.current?.click()}
-                  className="h-8 border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                  className="h-10 w-full shrink-0 border-indigo-200 text-indigo-700 hover:bg-indigo-50 sm:h-8 sm:w-auto"
                 >
                   {isUploadingVideo ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
@@ -376,12 +376,13 @@ export default function StaffMediaEditModal({
         </div>
 
         {/* Footer Actions */}
-        <div className="border-t bg-slate-50 px-6 py-4 flex items-center justify-end gap-3">
+        <div className="shrink-0 flex flex-col-reverse gap-2 border-t bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-end sm:gap-3 sm:px-6 sm:py-4">
           <Button
             type="button"
             variant="outline"
             disabled={isUploadingImage || isUploadingVideo || isPending}
             onClick={onClose}
+            className="w-full sm:w-auto"
           >
             Cancel
           </Button>
@@ -389,7 +390,7 @@ export default function StaffMediaEditModal({
             type="button"
             disabled={isUploadingImage || isUploadingVideo || isPending}
             onClick={handleSave}
-            className="bg-indigo-600 text-white hover:bg-indigo-700"
+            className="w-full bg-indigo-600 text-white hover:bg-indigo-700 sm:w-auto"
           >
             {isPending ? (
               <>
