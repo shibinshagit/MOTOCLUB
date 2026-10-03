@@ -28,9 +28,11 @@ import {
   X,
   AlertCircle,
   TrendingUp,
-  Briefcase
+  Briefcase,
+  Trash2
 } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
+import { useConfirm } from "@/hooks/use-confirm"
 import { notifyError, notifySuccess } from "@/lib/notifications"
 import {
   getStaffPayrollSummary,
@@ -40,7 +42,8 @@ import {
 } from "@/app/actions/salary-actions"
 import {
   getStaffRequests,
-  updateStaffRequestStatus
+  updateStaffRequestStatus,
+  deleteSalaryAdvanceRequest
 } from "@/app/actions/staff-request-actions"
 
 interface PayrollRequestsTabProps {
@@ -106,6 +109,7 @@ export default function PayrollRequestsTab({ deviceId, currency = "INR", initial
   const [isLoadingHistory, setIsLoadingHistory] = useState(false)
 
   const { toast } = useToast()
+  const { confirm, ConfirmDialog } = useConfirm()
 
   // Load Payroll Summary
   const fetchPayroll = async () => {
@@ -229,6 +233,34 @@ export default function PayrollRequestsTab({ deviceId, currency = "INR", initial
     }
   }
 
+  const [deletingRequestId, setDeletingRequestId] = useState<number | null>(null)
+
+  const handleDeleteAdvance = async (req: any) => {
+    if (deletingRequestId !== null) return
+    const ok = await confirm({
+      title: "Delete Salary Advance?",
+      description: `${req.staff_name} - ${currency} ${Number(req.amount || 0).toFixed(2)} - Reason: ${req.reason || "-"} - Status: ${req.status}. Are you sure you want to delete this Salary Advance request? This cannot be undone.`,
+      confirmLabel: "Delete",
+      cancelLabel: "Cancel",
+      destructive: true,
+    })
+    if (!ok) return
+    setDeletingRequestId(req.id)
+    try {
+      const res = await deleteSalaryAdvanceRequest(req.id)
+      if (res.success) {
+        notifySuccess(toast, res.message, "Deleted")
+      } else {
+        notifyError(toast, res.message, "Cannot delete")
+      }
+      fetchRequests()
+    } catch (err: any) {
+      notifyError(toast, err.message || "Failed to delete request", "Error")
+    } finally {
+      setDeletingRequestId(null)
+    }
+  }
+
   // Submit Request Approval/Rejection
   const handleRequestActionSubmit = async () => {
     if (!actionModal.request) return
@@ -275,6 +307,7 @@ export default function PayrollRequestsTab({ deviceId, currency = "INR", initial
 
   return (
     <div className="space-y-6">
+      {ConfirmDialog}
       {/* Top Header Controls */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-4 rounded-xl shadow-sm border">
         <div>
@@ -560,8 +593,9 @@ export default function PayrollRequestsTab({ deviceId, currency = "INR", initial
                           )}
                         </td>
                         <td className="p-3 text-right">
+                          <div className="flex flex-wrap items-center justify-end gap-1.5 sm:flex-nowrap">
                           {req.status === "Pending" && (
-                            <div className="flex items-center justify-end gap-1.5">
+                            <>
                               <Button
                                 size="sm"
                                 variant="outline"
@@ -578,7 +612,7 @@ export default function PayrollRequestsTab({ deviceId, currency = "INR", initial
                               >
                                 <X className="h-3.5 w-3.5 mr-1" /> Reject
                               </Button>
-                            </div>
+                            </>
                           )}
                           {req.status === "Approved" && req.request_type === "salary_advance" && (
                             <Button
@@ -589,6 +623,23 @@ export default function PayrollRequestsTab({ deviceId, currency = "INR", initial
                               <Banknote className="h-3.5 w-3.5 mr-1" /> Mark Paid
                             </Button>
                           )}
+                          {req.request_type === "salary_advance" && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={deletingRequestId === req.id || !["Pending", "Rejected"].includes(req.status)}
+                              title={
+                                ["Pending", "Rejected"].includes(req.status)
+                                  ? "Delete this Salary Advance request"
+                                  : `A ${req.status} Salary Advance has accounting records and cannot be deleted`
+                              }
+                              className="h-7 text-xs border-red-300 text-red-700 hover:bg-red-50"
+                              onClick={() => handleDeleteAdvance(req)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete
+                            </Button>
+                          )}
+                          </div>
                         </td>
                       </tr>
                     ))}

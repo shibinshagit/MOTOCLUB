@@ -5,6 +5,7 @@ import { getStaffSession } from "@/lib/staff-session"
 import { ensureSalaryTables } from "./salary-actions"
 import { revalidatePath, unstable_noStore as noStore } from "next/cache"
 import { getDeviceCompanyId } from "@/lib/device-company"
+import { getServerActor } from "@/lib/device-access"
 
 // Submit a staff request (Advance, Credit, Leave)
 export async function createStaffRequest(data: {
@@ -218,6 +219,72 @@ export async function updateStaffRequestStatus(
   } catch (error: any) {
     console.error("updateStaffRequestStatus error:", error)
     return { success: false, message: error.message || "Failed to update request status" }
+  }
+}
+
+class RequestDeleteError extends Error {}
+
+/**
+ * Deletes a Salary Advance request that has had no accounting effect.
+ *
+ * Approving or paying an advance writes an expense row to financial_transactions (reference_type
+ * 'salary_advance', reference_id = request id) and counts toward salary deductions, so only requests
+ * that are still Pending or Rejected AND have no such ledger row can be removed. Approved and Paid
+ * requests are kept for the payroll and accounting history. Admin-level sessions only, within the
+ * request's own company, and the whole check-and-delete runs in one locked transaction.
+ */
+export async function deleteSalaryAdvanceRequest(requestId: number) {
+  try {
+    const actor = await getServerActor()
+    if (!actor) return { success: false, message: "Not authorized" }
+    if (actor.kind === "staff") return { success: false, message: "Only administrators can delete requests" }
+    const id = Number(requestId)
+    if (!Number.isInteger(id) || id <= 0) return { success: false, message: "Invalid request" }
+
+    await sql.begin(async (tx: any) => {
+      const rows = await tx`SELECT id, staff_id, device_id, request_type, status FROM staff_requests WHERE id = ${id} FOR UPDATE`
+      if (rows.length === 0) throw new RequestDeleteError("Request not found. It may already have been deleted.")
+      const req = rows[0]
+
+      // Scope: the request's device must belong to the caller's company (platform admins: any)
+      if (actor.kind !== "platform_admin") {
+        const scope = await tx`
+          SELECT 1 FROM devices rd JOIN devices ad ON ad.company_id = rd.company_id
+          WHERE rd.id = ${req.device_id} AND ad.id = ${actor.deviceId}
+        `
+        if (scope.length === 0) throw new RequestDeleteError("Request not found")
+      }
+
+      if (req.request_type !== "salary_advance") {
+        throw new RequestDeleteError("Only Salary Advance requests can be deleted here")
+      }
+      if (!["Pending", "Rejected"].includes(String(req.status))) {
+        throw new RequestDeleteError(
+          `A ${req.status} Salary Advance cannot be deleted because it is part of payroll and accounting history.`,
+        )
+      }
+
+      // Any ledger row means money was already recorded for this request
+      const ledger = await tx`
+        SELECT 1 FROM financial_transactions
+        WHERE reference_type = 'salary_advance' AND reference_id = ${id}
+        LIMIT 1
+      `
+      if (ledger.length > 0) {
+        throw new RequestDeleteError("This Salary Advance already has accounting records and cannot be deleted.")
+      }
+
+      const deleted = await tx`DELETE FROM staff_requests WHERE id = ${id} AND request_type = 'salary_advance' RETURNING id`
+      if (deleted.length === 0) throw new RequestDeleteError("Request not found. It may already have been deleted.")
+    })
+
+    revalidatePath("/dashboard")
+    revalidatePath("/staff/dashboard")
+    return { success: true, message: "Salary Advance request deleted" }
+  } catch (error: any) {
+    if (error instanceof RequestDeleteError) return { success: false, message: error.message }
+    console.error("deleteSalaryAdvanceRequest error:", error)
+    return { success: false, message: "Failed to delete request" }
   }
 }
 
