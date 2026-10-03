@@ -5,7 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/components/ui/use-toast"
 import { notifyError, notifySuccess } from "@/lib/notifications"
-import { updateStaffProductMedia } from "@/app/actions/staff-inventory-actions"
+import { updateStaffProductMedia, getStaffProductMedia } from "@/app/actions/staff-inventory-actions"
 import { uploadProductFileFromClient } from "@/lib/blob-client-upload"
 import {
   compressImageForUpload,
@@ -71,7 +71,19 @@ export default function StaffMediaEditModal({
 
     const vUrl = typeof product.video_url === "string" && product.video_url.trim() ? product.video_url.trim() : null
     setVideoUrl(vUrl)
-  }, [product, isOpen])
+
+    // The product object can be stale list state (another user may have saved media since it was loaded),
+    // and saving writes the whole media set, so always start from what the database holds now.
+    let cancelled = false
+    getStaffProductMedia(product.id).then((res) => {
+      if (cancelled || !res.success) return
+      setImageUrls(res.media.image_urls)
+      setVideoUrl(res.media.video_url)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [product?.id, isOpen])
 
   const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || [])
@@ -209,7 +221,7 @@ export default function StaffMediaEditModal({
               <div className="min-w-0">
                 <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
                   <ImageIcon className="h-4 w-4 text-violet-600" />
-                  Product Photos ({imageUrls.length}/4)
+                  Product Photos ({imageUrls.length} of 4 added)
                 </h4>
                 <p className="text-[11px] text-slate-500 mt-0.5">
                   Upload up to 4 high quality photos (PNG, JPG, WebP)

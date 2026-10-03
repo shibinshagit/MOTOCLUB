@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { useDispatch } from "react-redux"
 import { updateProduct } from "@/store/slices/productSlice"
+import StaffMediaEditModal from "@/components/staff/staff-media-edit-modal"
 
 import { ShareProductButton } from "@/components/shared/share-product-button"
 import { getDeviceCurrency } from "@/app/actions/dashboard-actions"
@@ -142,6 +143,7 @@ export function ProductDetailPanel({
   const { toast } = useToast()
 
   const [currentProduct, setCurrentProduct] = useState(product)
+  const [isMediaManageOpen, setIsMediaManageOpen] = useState(false)
   const [updatingPlatform, setUpdatingPlatform] = useState<string | null>(null)
   const dispatch = useDispatch()
 
@@ -636,8 +638,21 @@ export function ProductDetailPanel({
             </div>
           </PanelSection>
 
-          {(mediaImageUrls.length > 0 || mediaVideoUrl) && (
-            <PanelSection title="Media">
+          <PanelSection title="Media">
+              <div className="flex items-center justify-between gap-2 px-4 pt-3">
+                <p className="text-xs text-slate-500">
+                  {mediaImageUrls.length} of 4 photos{mediaVideoUrl ? " + video" : ""}
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-9 shrink-0 border-slate-200 bg-white px-3 text-xs"
+                  onClick={() => setIsMediaManageOpen(true)}
+                >
+                  Manage Media
+                </Button>
+              </div>
               <div className="grid grid-cols-2 gap-3 p-4 md:grid-cols-4">
                 {mediaImageUrls.map((url, index) => (
                   <div key={`${url}-${index}`} className="overflow-hidden rounded-lg border border-slate-200 bg-white">
@@ -656,8 +671,7 @@ export function ProductDetailPanel({
                   </div>
                 ) : null}
               </div>
-            </PanelSection>
-          )}
+          </PanelSection>
 
           <PanelSection title="Marketplace & Store Listing">
             <div className="grid grid-cols-2 gap-px bg-slate-200 md:grid-cols-4">
@@ -1019,6 +1033,18 @@ export function ProductDetailPanel({
           copies={printCopies}
           currency={currency}
         />
+        {isMediaManageOpen && (
+          <StaffMediaEditModal
+            isOpen={isMediaManageOpen}
+            onClose={() => setIsMediaManageOpen(false)}
+            product={currentProduct}
+            onSuccess={(updated) => {
+              const merged = { ...currentProduct, ...updated }
+              setCurrentProduct(merged)
+              dispatch(updateProduct(merged))
+            }}
+          />
+        )}
       </div>
     )
 }
