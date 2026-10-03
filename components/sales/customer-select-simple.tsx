@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input"
 
 import { useAppDispatch } from "@/store/hooks"
 import { addCustomer as addCustomerAction } from "@/store/slices/customerSlice"
+import { smartCapChange } from "@/lib/text-format"
 
 interface CustomerSelectSimpleProps {
   id?: string
@@ -411,7 +412,7 @@ export default function CustomerSelectSimple({
                       ref={nameInputRef}
                       placeholder="Customer Name"
                       value={formData.name}
-                      onChange={(e) => handleFormInputChange("name", e.target.value)}
+                      onChange={(e) => smartCapChange(e, formData.name, (v) => handleFormInputChange("name", v))}
                       className={cn("h-9", formErrors.name && "border-red-500 focus-visible:ring-red-500")}
                       disabled={formLoading}
                       onKeyDown={(e) => {

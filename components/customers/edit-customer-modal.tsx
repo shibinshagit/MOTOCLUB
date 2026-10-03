@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { useToast } from "@/components/ui/use-toast"
 import { updateCustomer } from "@/app/actions/customer-actions"
 import { FormAlert } from "@/components/ui/form-alert"
+import { smartCapChange } from "@/lib/text-format"
 
 interface EditCustomerModalProps {
   isOpen: boolean
@@ -143,7 +144,7 @@ export default function EditCustomerModal({ isOpen, onClose, customer, userId }:
             <Input
               id="name"
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => smartCapChange(e, name, setName)}
               placeholder="Customer name"
               className={errors.name ? "border-red-500" : ""}
               required
@@ -184,7 +185,7 @@ export default function EditCustomerModal({ isOpen, onClose, customer, userId }:
             <Textarea
               id="address"
               value={address}
-              onChange={(e) => setAddress(e.target.value)}
+              onChange={(e) => smartCapChange(e, address, setAddress)}
               placeholder="Customer address"
               rows={3}
               className={errors.address ? "border-red-500" : ""}

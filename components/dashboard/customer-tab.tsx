@@ -56,6 +56,7 @@ import {
 import { formatDistanceToNow } from "date-fns"
 import { Card, CardContent } from "@/components/ui/card"
 import { formatCurrency as formatMoney } from "@/lib/utils"
+import { smartCapUncontrolled } from "@/lib/text-format"
 
 interface Customer {
   id: number
@@ -782,7 +783,7 @@ return (
               <label htmlFor="name" className="text-sm font-medium">
                 Name
               </label>
-              <Input id="name" name="name" required className="text-sm sm:text-base" />
+              <Input id="name" name="name" required className="text-sm sm:text-base" onChange={smartCapUncontrolled} />
             </div>
             <div className="grid gap-2">
               <label htmlFor="phone" className="text-sm font-medium">
@@ -800,7 +801,7 @@ return (
               <label htmlFor="address" className="text-sm font-medium">
                 Address
               </label>
-              <Input id="address" name="address" className="text-sm sm:text-base" />
+              <Input id="address" name="address" className="text-sm sm:text-base" onChange={smartCapUncontrolled} />
             </div>
           </div>
           <DialogFooter className="flex-col sm:flex-row gap-2">

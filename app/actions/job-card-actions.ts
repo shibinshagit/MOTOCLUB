@@ -81,6 +81,7 @@ export interface JobCardInput {
   crmLeadId?: number
 }
 
+
 export async function createJobCard(input: JobCardInput) {
   try {
     let deviceId: number

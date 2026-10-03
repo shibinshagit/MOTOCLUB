@@ -33,7 +33,11 @@ const getCompanyInfoFromDOM = (): { name: string; address: string; phone: string
 }
 
 // Enhanced function to print a sales receipt - works for both new sales and reprints
-export function printSalesReceipt(sale: any, items: any[], currency = "AED", businessInfo: any = {}, autoprint = true) {
+/**
+ * Prints the invoice in a new window. With returnHtml = true nothing is opened or printed and the very
+ * same invoice HTML is returned instead, so the PDF/share workflow reuses the existing invoice design.
+ */
+export function printSalesReceipt(sale: any, items: any[], currency = "AED", businessInfo: any = {}, autoprint = true, returnHtml = false): string | undefined {
   if (!sale || !items.length) return
 
   let displayCurrency = currency
@@ -84,9 +88,9 @@ export function printSalesReceipt(sale: any, items: any[], currency = "AED", bus
     ""
 
   // Create a new window for printing
-  const printWindow = window.open("", "_blank", "width=800,height=900,scrollbars=yes")
+  const printWindow = returnHtml ? null : window.open("", "_blank", "width=800,height=900,scrollbars=yes")
 
-  if (!printWindow) {
+  if (!returnHtml && !printWindow) {
     alert("Please allow pop-ups to print receipts")
     return
   }
@@ -171,7 +175,7 @@ export function printSalesReceipt(sale: any, items: any[], currency = "AED", bus
   }
 
   // Create receipt content with ultra-compact professional design
-  printWindow.document.write(`
+  const receiptHtml = `
     <!DOCTYPE html>
     <html lang="en">
     <head>
@@ -758,9 +762,11 @@ export function printSalesReceipt(sale: any, items: any[], currency = "AED", bus
       </script>
     </body>
     </html>
-  `)
+  `
 
-  printWindow.document.close()
+  if (returnHtml) return receiptHtml
+  printWindow!.document.write(receiptHtml)
+  printWindow!.document.close()
 }
 
 export function printPurchaseReceipt(purchase: any, items: any[], currency = "AED", businessInfo: any = {}) {
@@ -1754,7 +1760,8 @@ export async function printJobCard(sale: any, currency = 'AED', businessInfo: an
   }
 }
 
-export async function printBatchJobCards(sales: any[], currency = 'AED', businessInfo: any = {}) {
+/** Prints the delivery label / job card pages. With returnHtml = true it returns the same HTML without printing. */
+export async function printBatchJobCards(sales: any[], currency = 'AED', businessInfo: any = {}, returnHtml = false): Promise<string | undefined> {
   if (typeof window === 'undefined' || !sales || sales.length === 0) return;
   
   const business = {
@@ -1890,6 +1897,8 @@ export async function printBatchJobCards(sales: any[], currency = 'AED', busines
     </body>
     </html>
   `;
+
+  if (returnHtml) return html;
 
   try {
     let iframe = document.getElementById('job-card-batch-print-iframe') as HTMLIFrameElement;

@@ -28,6 +28,7 @@ import { useFormDraft } from "@/hooks/use-form-draft"
 import { DraftIndicator } from "@/components/shared/draft-indicator"
 import { useConfirm } from "@/hooks/use-confirm"
 import { useCallback, useMemo, useRef } from "react"
+import { smartCapChange } from "@/lib/text-format"
 
 interface ProductRow {
   id: string
@@ -796,7 +797,7 @@ export function JobCardForm({
                 <Label className="text-xs font-medium text-gray-700">Full Name <span className="text-red-500">*</span></Label>
                 <Input 
                   value={customerName} 
-                  onChange={(e) => setCustomerName(e.target.value)} 
+                  onChange={(e) => smartCapChange(e, customerName, setCustomerName)} 
                   placeholder="e.g. John Doe"
                   required
                 />
@@ -950,7 +951,7 @@ export function JobCardForm({
                 </Label>
                 <Input 
                   value={shippingStreet} 
-                  onChange={(e) => setShippingStreet(e.target.value)} 
+                  onChange={(e) => smartCapChange(e, shippingStreet, setShippingStreet)} 
                   placeholder="e.g. Al Madina Supermarket / Villa 34"
                 />
               </div>
@@ -958,7 +959,7 @@ export function JobCardForm({
                 <Label className="text-xs font-medium text-gray-700">Area</Label>
                 <Input 
                   value={shippingArea} 
-                  onChange={(e) => setShippingArea(e.target.value)} 
+                  onChange={(e) => smartCapChange(e, shippingArea, setShippingArea)} 
                   placeholder="e.g. Al Qusais"
                 />
               </div>
@@ -970,7 +971,7 @@ export function JobCardForm({
                   </Label>
                   <Input 
                     value={shippingCity} 
-                    onChange={(e) => setShippingCity(e.target.value)} 
+                    onChange={(e) => smartCapChange(e, shippingCity, setShippingCity)} 
                     placeholder="e.g. Dubai"
                   />
                 </div>
@@ -992,7 +993,7 @@ export function JobCardForm({
                   <Label className="text-xs font-medium text-gray-700">District</Label>
                   <Input 
                     value={shippingDistrict} 
-                    onChange={(e) => setShippingDistrict(e.target.value)} 
+                    onChange={(e) => smartCapChange(e, shippingDistrict, setShippingDistrict)} 
                     placeholder="e.g. Deira"
                   />
                 </div>
@@ -1000,7 +1001,7 @@ export function JobCardForm({
                   <Label className="text-xs font-medium text-gray-700">State</Label>
                   <Input 
                     value={shippingState} 
-                    onChange={(e) => setShippingState(e.target.value)} 
+                    onChange={(e) => smartCapChange(e, shippingState, setShippingState)} 
                     placeholder="e.g. Dubai"
                   />
                 </div>
@@ -1010,7 +1011,7 @@ export function JobCardForm({
                 <Label className="text-xs font-medium text-gray-700">Landmark</Label>
                 <Input 
                   value={shippingLandmark} 
-                  onChange={(e) => setShippingLandmark(e.target.value)} 
+                  onChange={(e) => smartCapChange(e, shippingLandmark, setShippingLandmark)} 
                   placeholder="e.g. Near Mall of Emirates"
                 />
               </div>

@@ -56,6 +56,7 @@ import { useToast } from "@/components/ui/use-toast"
 import { notifyWarning, notifySuccess, notifyError } from "@/lib/notifications"
 import { downloadSalesSummaryPDF, printSalesSummaryReport, downloadSalesSummaryExcel } from "@/lib/sales-summary-utils"
 import { JobCardModal } from "@/components/shared/job-card/job-card-modal"
+import SaleDocumentActions from "@/components/sales/sale-document-actions"
 
 function getSaleStatusLabel(sale: any): string {
   if (sale.status === "Returned") {
@@ -1467,22 +1468,7 @@ export default function SalesExcelTable({
                                   >
                                     <Eye className="h-3 w-3 mr-1 text-slate-600" /> View Modal
                                   </Button>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    className="h-7 text-xs px-2.5"
-                                    onClick={() => printSalesReceipt(sale, sale.items || [], "INR", {}, false)}
-                                  >
-                                    <Printer className="h-3 w-3 mr-1 text-slate-600" /> Invoice
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    className="h-7 text-xs px-2.5"
-                                    onClick={() => printBatchJobCards([sale], "INR")}
-                                  >
-                                    <Printer className="h-3 w-3 mr-1 text-slate-600" /> Label
-                                  </Button>
+                                  <SaleDocumentActions sale={sale} size="row" />
                                 </div>
                               </div>
                             </div>
@@ -1700,25 +1686,7 @@ export default function SalesExcelTable({
                     {/* ACTION BUTTONS TOOLBAR */}
                     <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100">
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-8 text-xs px-2.5 font-medium gap-1 bg-white border-slate-200"
-                          onClick={() => printSalesReceipt(sale, sale.items || [], "INR", {}, false)}
-                        >
-                          <Printer className="h-3.5 w-3.5 text-slate-600" />
-                          Invoice
-                        </Button>
-
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-8 text-xs px-2.5 font-medium gap-1 bg-white border-slate-200"
-                          onClick={() => printBatchJobCards([sale], "INR")}
-                        >
-                          <Printer className="h-3.5 w-3.5 text-slate-600" />
-                          Label
-                        </Button>
+                        <SaleDocumentActions sale={sale} size="card" />
 
                         <Button
                           size="sm"
