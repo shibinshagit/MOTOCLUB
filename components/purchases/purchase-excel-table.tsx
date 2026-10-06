@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { format } from "date-fns"
 import { ChevronLeft, ChevronRight, Search, X, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -9,9 +9,14 @@ import {
   ExcelColumnFilterHeader,
   createEmptyColumnFilter,
   isColumnFilterActive,
-  passesColumnFilter,
   type ExcelColumnFilterValue,
 } from "@/components/sales/excel-column-filter"
+import {
+  getPaginatedUserPurchases,
+  getPurchaseSummary,
+  getPurchaseFilterOptions,
+  type PurchaseColumnFilters,
+} from "@/app/actions/purchase-actions"
 
 function PaymentStatusBadge({ status }: { status: string }) {
   const normalized = status === "Partial" ? "Cancelled" : status
@@ -64,20 +69,48 @@ type ColumnKey =
 
 type ColumnFilters = Record<ColumnKey, ExcelColumnFilterValue>
 
-function buildInitialFilters(
-  purchases: any[],
-  getters: Record<ColumnKey, (purchase: any) => string>,
-): ColumnFilters {
+const PAGE_SIZE = 25
+const DASH = "\u2014"
+const COLUMN_KEYS: ColumnKey[] = [
+  "purchaseId",
+  "status",
+  "date",
+  "supplier",
+  "products",
+  "payment",
+  "total",
+  "paid",
+  "balance",
+  "delivery",
+]
+const MONEY_COLUMNS: ColumnKey[] = ["total", "paid", "balance"]
+
+function serializePurchaseRecord(purchase: any) {
+  const iso = (value: any) =>
+    value && typeof value === "object" ? value.toISOString() : value || ""
+  return {
+    ...purchase,
+    purchase_date: iso(purchase.purchase_date),
+    created_at: iso(purchase.created_at),
+    updated_at: iso(purchase.updated_at),
+  }
+}
+
+function buildInitialFilters(): ColumnFilters {
   const filters = {} as ColumnFilters
-  ;(Object.keys(getters) as ColumnKey[]).forEach((key) => {
-    const values = [...new Set(purchases.map(getters[key]))]
-    filters[key] = createEmptyColumnFilter(values)
+  COLUMN_KEYS.forEach((key) => {
+    filters[key] = createEmptyColumnFilter()
   })
   return filters
 }
 
 interface PurchaseExcelTableProps {
-  purchases: any[]
+  deviceId: number
+  isActive?: boolean
+  dateFrom?: string
+  dateTo?: string
+  debouncedSearchTerm: string
+  refreshKey?: number
   periodLabel: string
   isCurrentMonth: boolean
   canGoNextMonth: boolean
@@ -86,17 +119,12 @@ interface PurchaseExcelTableProps {
   onPreviousMonth: () => void
   onNextMonth: () => void
   onCurrentMonth: () => void
-  isLoading: boolean
-  error: string | null
-  hasLoadedPurchases: boolean
   formatCurrency: (amount: number) => string
   getPaymentMethodDisplay: (purchase: any) => string
   getRemainingAmount: (purchase: any) => number
   getPaidAmount: (purchase: any) => number
   onViewPurchase: (purchase: any) => void
   onEditPurchase: (purchase: any) => void
-  onRefresh: () => void
-  isRefreshing?: boolean
 }
 
 function TableSkeleton() {
@@ -121,7 +149,12 @@ function TableSkeleton() {
 }
 
 export default function PurchaseExcelTable({
-  purchases,
+  deviceId,
+  isActive = true,
+  dateFrom,
+  dateTo,
+  debouncedSearchTerm,
+  refreshKey = 0,
   periodLabel,
   isCurrentMonth,
   canGoNextMonth,
@@ -130,83 +163,230 @@ export default function PurchaseExcelTable({
   onPreviousMonth,
   onNextMonth,
   onCurrentMonth,
-  isLoading,
-  error,
-  hasLoadedPurchases,
   formatCurrency,
   getPaymentMethodDisplay,
   getRemainingAmount,
   getPaidAmount,
   onViewPurchase,
   onEditPurchase,
-  onRefresh,
-  isRefreshing,
 }: PurchaseExcelTableProps) {
-  const valueGetters = useMemo(
-    () => ({
-      purchaseId: (purchase: any) => String(purchase.id),
-      status: (purchase: any) => {
-        const s = purchase.status || ""
-        return s === "Partial" ? "Cancelled" : s
-      },
-      date: (purchase: any) => format(new Date(purchase.purchase_date), "dd-MM-yyyy"),
-      supplier: (purchase: any) => purchase.supplier || "—",
-      products: (purchase: any) => purchase.items_summary || "—",
-      payment: (purchase: any) => getPaymentMethodDisplay(purchase),
-      total: (purchase: any) => formatCurrency(Number(purchase.total_amount)),
-      paid: (purchase: any) => {
-        const paid = getPaidAmount(purchase)
-        return paid > 0 ? formatCurrency(paid) : "—"
-      },
-      balance: (purchase: any) => {
-        const remaining = getRemainingAmount(purchase)
-        return remaining > 0 ? formatCurrency(remaining) : "—"
-      },
-      delivery: (purchase: any) => purchase.purchase_status || "Delivered",
-    }),
-    [formatCurrency, getPaymentMethodDisplay, getRemainingAmount, getPaidAmount],
+  // Plain value of a row for a column; matches the SQL expressions used by the server-side filters.
+  const rawValue = useCallback(
+    (key: ColumnKey, purchase: any): string => {
+      switch (key) {
+        case "purchaseId":
+          return String(purchase.id)
+        case "status": {
+          const s = purchase.status || ""
+          return s === "Partial" ? "Cancelled" : s
+        }
+        case "date":
+          return format(new Date(purchase.purchase_date), "dd-MM-yyyy")
+        case "supplier":
+          return purchase.supplier || DASH
+        case "products":
+          return purchase.items_summary || DASH
+        case "payment":
+          return getPaymentMethodDisplay(purchase)
+        case "total":
+          return (Number(purchase.total_amount) || 0).toFixed(2)
+        case "paid":
+          return getPaidAmount(purchase).toFixed(2)
+        case "balance":
+          return getRemainingAmount(purchase).toFixed(2)
+        case "delivery":
+          return purchase.purchase_status || "Delivered"
+      }
+    },
+    [getPaymentMethodDisplay, getPaidAmount, getRemainingAmount],
   )
 
+  // Text shown for a plain value (money columns are formatted for display).
+  const labelOf = useCallback(
+    (key: ColumnKey, raw: string): string => {
+      if (key === "total") return formatCurrency(Number(raw))
+      if (key === "paid" || key === "balance") return Number(raw) > 0 ? formatCurrency(Number(raw)) : DASH
+      return raw
+    },
+    [formatCurrency],
+  )
+
+  // ---- server-side list state ----
+  const [rows, setRows] = useState<any[]>([])
+  const [totalCount, setTotalCount] = useState(0)
+  const [totalPages, setTotalPages] = useState(0)
+  const [summary, setSummary] = useState<{
+    count: number
+    total: number
+    paid: number
+    remaining: number
+    delivered: number
+  } | null>(null)
+  const [isFetching, setIsFetching] = useState(false)
+  const [hasFetched, setHasFetched] = useState(false)
+  const [fetchError, setFetchError] = useState<string | null>(null)
+  const [refreshTick, setRefreshTick] = useState(0)
+  const listFetchIdRef = useRef(0)
+  const summaryFetchIdRef = useRef(0)
+
+  const [columnFilters, setColumnFilters] = useState<ColumnFilters>(() => buildInitialFilters())
+  const [appliedFilters, setAppliedFilters] = useState<PurchaseColumnFilters>({})
+  const [facets, setFacets] = useState<{
+    key: string
+    options: Partial<Record<ColumnKey, string[]>>
+    truncated: Partial<Record<ColumnKey, boolean>>
+  } | null>(null)
+  const [facetsLoading, setFacetsLoading] = useState(false)
+  // Accumulates label -> plain values for money columns so a selection survives list/option reloads.
+  const labelRawRef = useRef<Record<string, Map<string, Set<string>>>>({})
+
+  const rememberLabel = useCallback(
+    (key: ColumnKey, raw: string) => {
+      if (!MONEY_COLUMNS.includes(key)) return
+      const map = (labelRawRef.current[key] ||= new Map())
+      const label = labelOf(key, raw)
+      const set = map.get(label) || new Set<string>()
+      set.add(raw)
+      map.set(label, set)
+    },
+    [labelOf],
+  )
+
+  const facetsKey = JSON.stringify([deviceId, dateFrom, dateTo, debouncedSearchTerm, refreshKey, refreshTick])
+  const currentFacets = facets && facets.key === facetsKey ? facets : null
+
+  // Options for each column dropdown: server values once loaded, otherwise the values on the current page.
   const uniqueValues = useMemo(() => {
     const values = {} as Record<ColumnKey, string[]>
-    ;(Object.keys(valueGetters) as ColumnKey[]).forEach((key) => {
-      values[key] = [...new Set(purchases.map(valueGetters[key]))]
+    COLUMN_KEYS.forEach((key) => {
+      const raws = currentFacets?.options[key] ?? rows.map((row) => rawValue(key, row))
+      values[key] = [...new Set(raws.map((raw) => labelOf(key, raw)))]
     })
     return values
-  }, [purchases, valueGetters])
+  }, [currentFacets, rows, rawValue, labelOf])
 
-  const [columnFilters, setColumnFilters] = useState<ColumnFilters>(() =>
-    buildInitialFilters(purchases, valueGetters),
-  )
+  // Selected labels -> plain values for the server. Omitted when everything is selected (no filtering).
+  const buildServerFilters = useCallback((): PurchaseColumnFilters => {
+    const out: PurchaseColumnFilters = {}
+    COLUMN_KEYS.forEach((key) => {
+      const filter = columnFilters[key]
+      if (!filter) return
+      let contains = filter.contains.trim()
+      if (MONEY_COLUMNS.includes(key)) contains = contains.replace(/[^0-9.]/g, "")
+      const all = uniqueValues[key] || []
+      const truncated = !!currentFacets?.truncated[key]
+      let selected: string[] | undefined
+      if (filter.selected.size > 0 && (truncated || filter.selected.size < all.length)) {
+        selected = [...filter.selected].flatMap((label) =>
+          MONEY_COLUMNS.includes(key) ? [...(labelRawRef.current[key]?.get(label) ?? [])] : [label],
+        )
+      }
+      if (contains || (selected && selected.length > 0)) {
+        out[key] = { ...(contains ? { contains } : {}), ...(selected && selected.length > 0 ? { selected } : {}) }
+      }
+    })
+    return out
+  }, [columnFilters, uniqueValues, currentFacets])
+
+  // Column filters hit the server, so apply them after a short pause (same 400 ms as the search box).
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const next = buildServerFilters()
+      setAppliedFilters((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next))
+    }, 400)
+    return () => window.clearTimeout(timer)
+  }, [buildServerFilters])
+
+  // Any change to the query returns to page 1 without an extra request.
+  const queryKey = JSON.stringify([deviceId, dateFrom, dateTo, debouncedSearchTerm, appliedFilters])
+  const [pageState, setPageState] = useState({ key: queryKey, page: 1 })
+  const page = pageState.key === queryKey ? pageState.page : 1
+  const setPage = (next: number) => setPageState({ key: queryKey, page: next })
 
   useEffect(() => {
-    if (!hasLoadedPurchases) return
-    setColumnFilters(buildInitialFilters(purchases, valueGetters))
-  }, [periodLabel, hasLoadedPurchases, purchases, valueGetters])
+    if (!deviceId || !isActive) return
+    const fetchId = ++listFetchIdRef.current
+    setIsFetching(true)
+    getPaginatedUserPurchases(deviceId, {
+      page,
+      pageSize: PAGE_SIZE,
+      dateFrom,
+      dateTo,
+      searchTerm: debouncedSearchTerm,
+      columnFilters: appliedFilters,
+    })
+      .then((res) => {
+        if (fetchId !== listFetchIdRef.current) return
+        if (res.success) {
+          setRows(res.data.map(serializePurchaseRecord))
+          setTotalCount(res.totalCount)
+          setTotalPages(res.totalPages)
+          setFetchError(null)
+          res.data.forEach((row: any) => MONEY_COLUMNS.forEach((key) => rememberLabel(key, rawValue(key, row))))
+        } else {
+          setFetchError(res.message || "Failed to load purchases")
+        }
+      })
+      .catch((err) => {
+        console.error("Fetch purchases error:", err)
+        if (fetchId !== listFetchIdRef.current) return
+        setFetchError("An error occurred while loading purchases")
+      })
+      .finally(() => {
+        if (fetchId !== listFetchIdRef.current) return
+        setIsFetching(false)
+        setHasFetched(true)
+      })
+    // appliedFilters is part of queryKey
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deviceId, isActive, page, queryKey, refreshKey, refreshTick])
 
-  const displayPurchases = useMemo(() => {
-    if (!hasLoadedPurchases) return purchases
+  // KPI cards are aggregates over the whole filtered range; they do not depend on the page.
+  useEffect(() => {
+    if (!deviceId || !isActive) return
+    const fetchId = ++summaryFetchIdRef.current
+    getPurchaseSummary(deviceId, {
+      dateFrom,
+      dateTo,
+      searchTerm: debouncedSearchTerm,
+      columnFilters: appliedFilters,
+    })
+      .then((res) => {
+        if (fetchId !== summaryFetchIdRef.current) return
+        if (res.success) setSummary(res.summary)
+      })
+      .catch((err) => console.error("Fetch purchase summary error:", err))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deviceId, isActive, queryKey, refreshKey, refreshTick])
 
-    return purchases.filter((purchase) =>
-      (Object.keys(valueGetters) as ColumnKey[]).every((key) =>
-        passesColumnFilter(valueGetters[key](purchase), columnFilters[key], uniqueValues[key]),
-      ),
-    )
-  }, [purchases, columnFilters, uniqueValues, valueGetters, hasLoadedPurchases])
+  // Dropdown options are loaded the first time a filter dropdown opens for the current range/search.
+  const ensureFacets = useCallback(() => {
+    if (!deviceId || facetsLoading || (facets && facets.key === facetsKey)) return
+    const key = facetsKey
+    setFacetsLoading(true)
+    getPurchaseFilterOptions(deviceId, { dateFrom, dateTo, searchTerm: debouncedSearchTerm })
+      .then((res) => {
+        if (!res.success) return
+        const options = res.options as Partial<Record<ColumnKey, string[]>>
+        MONEY_COLUMNS.forEach((col) => (options[col] || []).forEach((raw) => rememberLabel(col, raw)))
+        setFacets({ key, options, truncated: res.truncated as Partial<Record<ColumnKey, boolean>> })
+      })
+      .catch((err) => console.error("Fetch purchase filter options error:", err))
+      .finally(() => setFacetsLoading(false))
+  }, [deviceId, facetsLoading, facets, facetsKey, dateFrom, dateTo, debouncedSearchTerm, rememberLabel])
 
-  const totalAmount = displayPurchases.reduce((sum, p) => sum + Number(p.total_amount || 0), 0)
-  const paidTotal = displayPurchases.reduce((sum, p) => sum + getPaidAmount(p), 0)
-  const remainingTotal = displayPurchases.reduce((sum, p) => sum + getRemainingAmount(p), 0)
-  const deliveredCount = displayPurchases.filter(
-    (p) => (p.purchase_status || "Delivered") === "Delivered",
-  ).length
+  const displayPurchases = rows
+  const showInitialSkeleton = !hasFetched
+  const hasActiveQuery = !!debouncedSearchTerm.trim() || Object.keys(appliedFilters).length > 0
+  const retry = () => setRefreshTick((t) => t + 1)
 
-  const activeFilterCount = (Object.keys(columnFilters) as ColumnKey[]).filter((key) =>
+  const activeFilterCount = COLUMN_KEYS.filter((key) =>
     isColumnFilterActive(columnFilters[key], uniqueValues[key]),
   ).length
 
   const clearAllFilters = () => {
-    setColumnFilters(buildInitialFilters(purchases, valueGetters))
+    setColumnFilters(buildInitialFilters())
+    setAppliedFilters({})
   }
 
   const updateColumnContains = (key: ColumnKey, contains: string) => {
@@ -233,6 +413,16 @@ export default function PurchaseExcelTable({
         filter={columnFilters[key] || createEmptyColumnFilter(uniqueValues[key] || [])}
         onContainsChange={(contains) => updateColumnContains(key, contains)}
         onSelectionChange={(selected) => updateColumnSelection(key, selected)}
+        onOpenChange={(open) => {
+          if (open) ensureFacets()
+        }}
+        valuesNote={
+          currentFacets?.truncated[key]
+            ? "Showing the first 300 values. Use Contains to narrow the list."
+            : facetsLoading && !currentFacets
+              ? "Loading values..."
+              : undefined
+        }
         align={align}
       />
     </th>
@@ -250,20 +440,20 @@ export default function PurchaseExcelTable({
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <div className="rounded-lg border border-purple-100 bg-purple-50 px-3 py-2">
           <p className="text-[11px] font-medium uppercase tracking-wide text-purple-600">Total</p>
-          <p className="text-sm font-bold text-purple-700">{formatCurrency(totalAmount)}</p>
+          <p className="text-sm font-bold text-purple-700">{summary ? formatCurrency(summary.total) : DASH}</p>
         </div>
         <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2">
           <p className="text-[11px] font-medium uppercase tracking-wide text-emerald-600">Paid</p>
-          <p className="text-sm font-bold text-emerald-700">{formatCurrency(paidTotal)}</p>
+          <p className="text-sm font-bold text-emerald-700">{summary ? formatCurrency(summary.paid) : DASH}</p>
         </div>
         <div className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2">
           <p className="text-[11px] font-medium uppercase tracking-wide text-amber-600">Remaining</p>
-          <p className="text-sm font-bold text-amber-700">{formatCurrency(remainingTotal)}</p>
+          <p className="text-sm font-bold text-amber-700">{summary ? formatCurrency(summary.remaining) : DASH}</p>
         </div>
         <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2">
           <p className="text-[11px] font-medium uppercase tracking-wide text-blue-600">Delivered</p>
           <p className="text-sm font-bold text-blue-700">
-            {deliveredCount} of {displayPurchases.length}
+            {summary ? `${summary.delivered} of ${summary.count}` : DASH}
           </p>
         </div>
       </div>
@@ -271,8 +461,8 @@ export default function PurchaseExcelTable({
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-card">
         <div className="flex flex-col sm:flex-row items-center justify-between gap-2 border-b border-slate-200 bg-[#F1F4F9] px-3 py-2.5 sm:px-4">
           <span className="text-xs font-medium text-slate-600">
-            {displayPurchases.length} of {purchases.length}{" "}
-            {purchases.length === 1 ? "purchase" : "purchases"}
+            Showing {displayPurchases.length > 0 ? (page - 1) * PAGE_SIZE + 1 : 0}-
+            {Math.min(page * PAGE_SIZE, totalCount)} of {totalCount} {totalCount === 1 ? "purchase" : "purchases"}
           </span>
 
           <div className="flex items-center gap-1">
@@ -308,11 +498,11 @@ export default function PurchaseExcelTable({
               variant="outline"
               size="icon"
               className="h-7 w-7 shrink-0 bg-white mr-1"
-              onClick={onRefresh}
-              disabled={isLoading || isRefreshing}
+              onClick={retry}
+              disabled={isFetching}
               title="Refresh purchases"
             >
-              <RefreshCw className={`h-3.5 w-3.5 ${isLoading || isRefreshing ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? 'animate-spin' : ''}`} />
             </Button>
             <div className="relative w-full sm:w-72">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
@@ -351,6 +541,15 @@ export default function PurchaseExcelTable({
           </div>
         </div>
 
+        {fetchError && displayPurchases.length > 0 ? (
+          <div className="flex items-center justify-between gap-2 border-b border-rose-200 bg-rose-50 px-3 py-1.5 text-xs text-rose-700">
+            <span>{fetchError}. Showing previously loaded rows.</span>
+            <Button variant="outline" size="sm" className="h-6 text-xs" onClick={retry}>
+              Retry
+            </Button>
+          </div>
+        ) : null}
+
         <div className="hidden lg:block overflow-x-auto">
           <table className="min-w-full border-separate border-spacing-0 text-sm">
             <thead>
@@ -369,25 +568,28 @@ export default function PurchaseExcelTable({
                 <th className={stickyActionHeaderClass}>Action</th>
               </tr>
             </thead>
-            <tbody>
-              {isLoading && !hasLoadedPurchases ? (
+            <tbody className={isFetching && hasFetched ? "opacity-60 transition-opacity" : "transition-opacity"}>
+              {showInitialSkeleton ? (
                 <tr>
                   <td colSpan={12}>
                     <TableSkeleton />
                   </td>
                 </tr>
-              ) : error ? (
+              ) : fetchError && displayPurchases.length === 0 ? (
                 <tr>
                   <td colSpan={12} className="px-4 py-8 text-center text-sm text-rose-600">
-                    {error}
+                    {fetchError}
+                    <Button variant="outline" size="sm" className="ml-3 h-7 text-xs" onClick={retry}>
+                      Retry
+                    </Button>
                   </td>
                 </tr>
               ) : displayPurchases.length === 0 ? (
                 <tr>
                   <td colSpan={12} className="px-4 py-12 text-center text-sm text-muted-foreground">
-                    {purchases.length === 0
-                      ? `No purchases found for ${periodLabel}`
-                      : "No purchases match the current column filters"}
+                    {hasActiveQuery
+                      ? "No purchases match the current search or column filters"
+                      : `No purchases found for ${periodLabel}`}
                   </td>
                 </tr>
               ) : (
@@ -404,7 +606,7 @@ export default function PurchaseExcelTable({
                         index % 2 === 0 ? "bg-white" : "bg-slate-50/60"
                       }`}
                     >
-                      <td className="whitespace-nowrap px-3 py-1.5 text-xs text-muted-foreground">{index + 1}</td>
+                      <td className="whitespace-nowrap px-3 py-1.5 text-xs text-muted-foreground">{(page - 1) * PAGE_SIZE + index + 1}</td>
                       <td className="whitespace-nowrap px-3 py-1.5 font-semibold text-slate-800">#{purchase.id}</td>
                       <td className="whitespace-nowrap px-3 py-1.5">
                         <PaymentStatusBadge status={paymentStatus} />
@@ -454,8 +656,8 @@ export default function PurchaseExcelTable({
         </div>
 
         {/* MOBILE & TABLET CARD LIST VIEW (< 1024px) */}
-        <div className="block lg:hidden divide-y divide-slate-200 bg-slate-50/50">
-          {isLoading && !hasLoadedPurchases ? (
+        <div className={`block lg:hidden divide-y divide-slate-200 bg-slate-50/50 ${isFetching && hasFetched ? "opacity-60" : ""} transition-opacity`}>
+          {showInitialSkeleton ? (
             <div className="p-4 space-y-3">
               {[...Array(4)].map((_, i) => (
                 <div key={i} className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
@@ -468,13 +670,18 @@ export default function PurchaseExcelTable({
                 </div>
               ))}
             </div>
-          ) : error ? (
-            <div className="p-6 text-center text-sm text-rose-600 bg-white">{error}</div>
+          ) : fetchError && displayPurchases.length === 0 ? (
+            <div className="p-6 text-center text-sm text-rose-600 bg-white">
+              {fetchError}
+              <Button variant="outline" size="sm" className="ml-3 h-7 text-xs" onClick={retry}>
+                Retry
+              </Button>
+            </div>
           ) : displayPurchases.length === 0 ? (
             <div className="p-8 text-center text-sm text-slate-500 bg-white">
-              {purchases.length === 0
-                ? `No purchases found for ${periodLabel}`
-                : "No purchases match the current column filters"}
+              {hasActiveQuery
+                ? "No purchases match the current search or column filters"
+                : `No purchases found for ${periodLabel}`}
             </div>
           ) : (
             displayPurchases.map((purchase, index) => {
@@ -563,6 +770,38 @@ export default function PurchaseExcelTable({
               )
             })
           )}
+        </div>
+
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-slate-200 bg-[#F1F4F9] px-4 py-3 text-xs font-medium text-slate-600">
+          <div>
+            Showing {displayPurchases.length > 0 ? (page - 1) * PAGE_SIZE + 1 : 0} to{" "}
+            {Math.min(page * PAGE_SIZE, totalCount)} of {totalCount} purchases
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 px-3 text-xs bg-white border-slate-200"
+              disabled={page <= 1 || isFetching}
+              onClick={() => setPage(Math.max(1, page - 1))}
+            >
+              <ChevronLeft className="h-3.5 w-3.5 mr-1" />
+              Previous
+            </Button>
+            <span className="px-2 text-slate-700 font-semibold">
+              Page {page} of {totalPages || 1}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 px-3 text-xs bg-white border-slate-200"
+              disabled={page >= totalPages || isFetching}
+              onClick={() => setPage(Math.min(totalPages, page + 1))}
+            >
+              Next
+              <ChevronRight className="h-3.5 w-3.5 ml-1" />
+            </Button>
+          </div>
         </div>
       </div>
     </div>

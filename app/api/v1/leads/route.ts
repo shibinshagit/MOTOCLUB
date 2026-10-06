@@ -44,6 +44,14 @@ export async function POST(req: NextRequest) {
     }
 
     // 3. VALIDATE
+    if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({
+        success: false,
+        message: "Invalid request",
+        errors: { body: "Request body must be a JSON object" }
+      }, { status: 400 })
+    }
+
     const { external_lead_id, name } = body
 
     if (!external_lead_id || typeof external_lead_id !== 'string' || !external_lead_id.trim()) {
@@ -60,6 +68,21 @@ export async function POST(req: NextRequest) {
         message: "Invalid request", 
         errors: { name: "name is required" } 
       }, { status: 400 })
+    }
+
+    // Field lengths mirror the database columns; longer values would otherwise fail the insert with a 500
+    const MAX_LENGTHS: Record<string, number> = {
+      external_lead_id: 255, name: 255, phone: 50, email: 255, source: 100, campaign: 255, ad_name: 255
+    }
+    const tooLong: Record<string, string> = {}
+    for (const [field, max] of Object.entries(MAX_LENGTHS)) {
+      const value = body[field]
+      if (typeof value === 'string' && value.trim().length > max) {
+        tooLong[field] = `${field} must be at most ${max} characters`
+      }
+    }
+    if (Object.keys(tooLong).length > 0) {
+      return NextResponse.json({ success: false, message: "Invalid request", errors: tooLong }, { status: 400 })
     }
 
     // Optional product references (shape only; existence/tenancy checked in createCrmLead)
@@ -112,7 +135,9 @@ export async function POST(req: NextRequest) {
     )
 
     if (!result.success) {
-      return NextResponse.json(result, { status: (result as any).status ?? 500 })
+      // the HTTP status travels in the response status line, not in the body
+      const { status, ...errorBody } = result as any
+      return NextResponse.json(errorBody, { status: status ?? 500 })
     }
 
     // 5. RESPOND

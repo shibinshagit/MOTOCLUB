@@ -22,7 +22,6 @@ import {
   ChevronsUpDown,
 } from "lucide-react"
 import {
-  getUserPurchases,
   getPurchaseDetails,
   createPurchase,
   updatePurchase,
@@ -148,24 +147,6 @@ function getMonthRange(month: Date) {
   }
 }
 
-function serializePurchaseRecord(purchase: any) {
-  return {
-    ...purchase,
-    purchase_date:
-      purchase.purchase_date && typeof purchase.purchase_date === "object" && purchase.purchase_date !== null
-        ? purchase.purchase_date.toISOString()
-        : purchase.purchase_date || "",
-    created_at:
-      purchase.created_at && typeof purchase.created_at === "object" && purchase.created_at !== null
-        ? purchase.created_at.toISOString()
-        : purchase.created_at || "",
-    updated_at:
-      purchase.updated_at && typeof purchase.updated_at === "object" && purchase.updated_at !== null
-        ? purchase.updated_at.toISOString()
-        : purchase.updated_at || "",
-  }
-}
-
 function normalizePaymentStatus(status: string) {
   return status === "Partial" ? "Cancelled" : status
 }
@@ -175,11 +156,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
   const deviceId = useSelector(selectDeviceId)
   const deviceCurrency = useSelector(selectDeviceCurrency)
 
-  const [purchases, setPurchases] = useState<any[]>([])
-  const [isLoading, setIsLoading] = useState(false)
-  const [isRefreshing, setIsRefreshing] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [purchasesListLoaded, setPurchasesListLoaded] = useState(false)
+  const [purchasesRefreshKey, setPurchasesRefreshKey] = useState(0)
   const globalDateRange = useSelector(selectDateRange)
   const [purchasesViewMonth, setPurchasesViewMonth] = useState(() => startOfMonth(new Date()))
   const [purchaseSearch, setPurchaseSearch] = useState("")
@@ -231,7 +208,6 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
   const [pendingEditDraftId, setPendingEditDraftId] = useState("")
 
   const activeDeviceIdRef = useRef<number | null>(null)
-  const purchasesFetchRequestRef = useRef(0)
   const editLoadRequestRef = useRef(0)
   const draftSwitchingRef = useRef(false)
   const lastClosedEditPurchaseIdRef = useRef<number | null>(null)
@@ -309,8 +285,6 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
   useEffect(() => {
     if (deviceId && deviceId !== activeDeviceIdRef.current) {
       activeDeviceIdRef.current = deviceId
-      setPurchasesListLoaded(false)
-      setPurchases([])
       getDeviceDefaultCourierPct(deviceId).then((pct) => {
         setCourierChargePercentage(pct)
       })
@@ -538,66 +512,13 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
     setPurchasesViewMonth(startOfMonth(month))
   }, [])
 
+  // The list is server-paginated inside PurchaseExcelTable; this asks it to reload after a change.
   const fetchPurchasesForRange = useCallback(
-    async (fromDate?: string, toDate?: string, searchTerm = "", isBackgroundRefresh = false) => {
-      if (!deviceId) {
-        setError("Device ID not found")
-        return
-      }
-
-      const from = fromDate || globalDateRange.from
-      const to = toDate || globalDateRange.to
-
-      const requestId = ++purchasesFetchRequestRef.current
-
-      if (!isBackgroundRefresh) {
-        setIsLoading(true)
-      } else {
-        setIsRefreshing(true)
-      }
-      setError(null)
-
-      try {
-        const result = await getUserPurchases(deviceId, { dateFrom: from, dateTo: to, searchTerm })
-        if (requestId !== purchasesFetchRequestRef.current) return
-
-        if (result.success) {
-          setPurchases(result.data.map(serializePurchaseRecord))
-        } else {
-          if (!isBackgroundRefresh) {
-            setPurchases([])
-          }
-          setError(result.message || "Failed to load purchases")
-        }
-      } catch (fetchError) {
-        console.error("Fetch purchases error:", fetchError)
-        if (requestId !== purchasesFetchRequestRef.current) return
-        if (!isBackgroundRefresh) {
-          setPurchases([])
-        }
-        setError("An error occurred while loading purchases")
-      } finally {
-        if (requestId === purchasesFetchRequestRef.current) {
-          if (!isBackgroundRefresh) {
-            setIsLoading(false)
-          } else {
-            setIsRefreshing(false)
-          }
-          setPurchasesListLoaded(true)
-        }
-      }
+    (_fromDate?: string, _toDate?: string, _searchTerm = "", _isBackgroundRefresh = false) => {
+      setPurchasesRefreshKey((k) => k + 1)
     },
-    [deviceId, globalDateRange.from, globalDateRange.to],
+    [],
   )
-
-  useEffect(() => {
-    if (activeView !== "info" || !deviceId) return
-    if (!purchasesListLoaded) {
-      setPurchasesListLoaded(false)
-    }
-    fetchPurchasesForRange(globalDateRange.from, globalDateRange.to, debouncedPurchaseSearch, purchasesListLoaded)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeView, deviceId, globalDateRange.from, globalDateRange.to, debouncedPurchaseSearch, fetchPurchasesForRange])
 
   const addProductRow = useCallback(() => {
     setProducts((current) => [...current, createEmptyProductRow()])
@@ -1003,9 +924,6 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
 
         if (result.success) {
           markInventoryStale(dispatch)
-          if (!isEditMode && result.data) {
-            setPurchases(prev => [serializePurchaseRecord(result.data), ...prev])
-          }
           notifySuccess(toast, isEditMode ? "Purchase updated successfully" : "Purchase added successfully")
           setFormAlert({
             type: "success",
@@ -1085,7 +1003,6 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
 
       if (result.success) {
         markInventoryStale(dispatch)
-        setPurchases((prev) => prev.filter((p) => p.id !== purchaseId))
         notifySuccess(toast, "Purchase deleted successfully")
         if (activeView === "info") {
           fetchPurchasesForRange(globalDateRange.from, globalDateRange.to, debouncedPurchaseSearch, true)
@@ -1237,7 +1154,12 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
   const purchasesListView = (
     <PurchaseExcelTable
       key={periodLabel}
-      purchases={purchases}
+      deviceId={deviceId || 0}
+      isActive={activeView === "info"}
+      dateFrom={globalDateRange.from}
+      dateTo={globalDateRange.to}
+      debouncedSearchTerm={debouncedPurchaseSearch}
+      refreshKey={purchasesRefreshKey}
       periodLabel={periodLabel}
       isCurrentMonth={isCurrentMonth}
       canGoNextMonth={canGoNextMonth}
@@ -1246,17 +1168,12 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
       onPreviousMonth={goToPreviousMonth}
       onNextMonth={goToNextMonth}
       onCurrentMonth={goToCurrentMonth}
-      isLoading={isLoading}
-      error={error}
-      hasLoadedPurchases={purchasesListLoaded}
       formatCurrency={formatCurrency}
       getPaymentMethodDisplay={getPaymentMethodDisplay}
       getRemainingAmount={getRemainingAmount}
       getPaidAmount={getPaidAmount}
       onViewPurchase={handleViewPurchase}
       onEditPurchase={handleEditPurchase}
-      onRefresh={() => fetchPurchasesForRange(globalDateRange.from, globalDateRange.to, debouncedPurchaseSearch, true)}
-      isRefreshing={isRefreshing}
     />
   )
 

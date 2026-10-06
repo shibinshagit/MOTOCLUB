@@ -42,6 +42,7 @@ interface ExcelColumnFilterProps {
   onSelectionChange: (selected: Set<string>) => void
   align?: "left" | "right"
   onOpenChange?: (open: boolean) => void
+  valuesNote?: string
 }
 
 export function ExcelColumnFilterHeader({
@@ -52,6 +53,7 @@ export function ExcelColumnFilterHeader({
   onSelectionChange,
   align = "left",
   onOpenChange,
+  valuesNote,
 }: ExcelColumnFilterProps) {
   const [open, setOpen] = useState(false)
   const [localContains, setLocalContains] = useState(filter.contains)
@@ -201,6 +203,8 @@ export function ExcelColumnFilterHeader({
             ))
           )}
         </div>
+
+        {valuesNote ? <p className="mt-2 text-[11px] text-muted-foreground">{valuesNote}</p> : null}
 
         <div className="mt-3 flex justify-end gap-2">
           <Button

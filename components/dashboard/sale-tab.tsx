@@ -30,7 +30,7 @@ import {
   X,
 } from "lucide-react"
 import { JobCardWhatsappConfirmation } from "@/components/shared/job-card/job-card-whatsapp-confirmation"
-import { getUserSales, deleteSale, addSale, getSaleDetails, updateSale } from "@/app/actions/sale-actions"
+import { syncSalesReadSideEffects, deleteSale, addSale, getSaleDetails, updateSale } from "@/app/actions/sale-actions"
 import { useToast } from "@/components/ui/use-toast"
 import { notifyError, notifySuccess, notifyWarning } from "@/lib/notifications"
 import { markInventoryStale } from "@/lib/inventory-sync"
@@ -44,14 +44,7 @@ import { useSelector, useDispatch } from "react-redux"
 import { selectDeviceId, selectDeviceCurrency } from "@/store/slices/deviceSlice"
 import { selectDateRange } from "@/store/slices/dateRangeSlice"
 import {
-  selectSales,
-  selectSalesLoading,
-  selectSalesError,
   selectSalesCurrency,
-  setSales,
-  setLoading,
-  setSilentRefreshing,
-  setError,
   setCurrency,
   removeSale,
   addSale as addSaleToState,
@@ -189,15 +182,12 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
     }
   }, [])
 
-  // Sales data from Redux
-  const sales = useSelector(selectSales)
-  const isLoading = useSelector(selectSalesLoading)
-  const error = useSelector(selectSalesError)
+  // Sales currency from Redux (the list itself is server-paginated inside SalesExcelTable)
   const currency = useSelector(selectSalesCurrency)
   const globalDateRange = useSelector(selectDateRange)
 
   const [salesViewMonth, setSalesViewMonth] = useState(() => startOfMonth(new Date()))
-  const [salesListLoaded, setSalesListLoaded] = useState(false)
+  const [salesRefreshKey, setSalesRefreshKey] = useState(0)
   const [activeView, setActiveView] = useState<SalesViewMode>(mode === "info" ? "info" : "entry")
 
   // Edit mode state
@@ -278,7 +268,6 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
   const [isMobile, setIsMobile] = useState(false)
   // Use refs to track device changes and in-flight list requests
   const activeDeviceIdRef = useRef<number | null>(null)
-  const salesFetchRequestRef = useRef(0)
 
   const { toast } = useToast()
   const { confirm, ConfirmDialog } = useConfirm()
@@ -538,7 +527,6 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
     if (deviceId && deviceId !== activeDeviceIdRef.current) {
       activeDeviceIdRef.current = deviceId
       dispatch(resetSalesState())
-      setSalesListLoaded(false)
     }
   }, [deviceId, dispatch])
 
@@ -617,67 +605,32 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
     setSalesViewMonth(startOfMonth(month))
   }, [])
 
+  // Runs ecommerce/return reconciliation in the background (never blocks the list) and refreshes the
+  // visible page only if it may have changed something.
+  const runSalesSideEffects = useCallback(async () => {
+    if (!deviceId) return
+    try {
+      const res = await syncSalesReadSideEffects(deviceId)
+      if (res.changed) setSalesRefreshKey((k) => k + 1)
+    } catch (syncError) {
+      console.warn("Sales background sync failed:", syncError)
+    }
+  }, [deviceId])
+
+  // Refresh the visible (server-paginated) list after a mutation or manual refresh.
   const fetchSalesForRange = useCallback(
-    async (fromDate?: string, toDate?: string, isBackgroundRefresh = false) => {
-      if (!deviceId) {
-        dispatch(setError("Device ID not found"))
-        return
-      }
-
-      const from = fromDate || globalDateRange.from
-      const to = toDate || globalDateRange.to
-
-      const requestId = ++salesFetchRequestRef.current
-
-      if (!isBackgroundRefresh) {
-        dispatch(setLoading(true))
-      } else {
-        dispatch(setSilentRefreshing(true))
-      }
-      dispatch(setError(null))
-
-      try {
-        const result = await getUserSales(deviceId, { dateFrom: from, dateTo: to })
-        if (requestId !== salesFetchRequestRef.current) return
-
-        if (result.success) {
-          dispatch(setSales(result.data.map(serializeSaleRecord)))
-        } else {
-          // Only clear sales if it's not a background refresh
-          if (!isBackgroundRefresh) {
-            dispatch(setSales([]))
-          }
-          dispatch(setError(result.message || "Failed to load sales"))
-        }
-      } catch (fetchError) {
-        console.error("Fetch sales error:", fetchError)
-        if (requestId !== salesFetchRequestRef.current) return
-        if (!isBackgroundRefresh) {
-          dispatch(setSales([]))
-        }
-        dispatch(setError("An error occurred while loading sales"))
-      } finally {
-        if (requestId === salesFetchRequestRef.current) {
-          if (!isBackgroundRefresh) {
-            dispatch(setLoading(false))
-          } else {
-            dispatch(setSilentRefreshing(false))
-          }
-          setSalesListLoaded(true)
-        }
-      }
+    async (_fromDate?: string, _toDate?: string, _isBackgroundRefresh = false) => {
+      if (!deviceId) return
+      setSalesRefreshKey((k) => k + 1)
+      void runSalesSideEffects()
     },
-    [deviceId, dispatch, globalDateRange.from, globalDateRange.to],
+    [deviceId, runSalesSideEffects],
   )
 
   useEffect(() => {
     if (activeView !== "info" || !deviceId) return
-    if (!salesListLoaded) {
-      setSalesListLoaded(false)
-    }
-    fetchSalesForRange(globalDateRange.from, globalDateRange.to, salesListLoaded)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeView, deviceId, globalDateRange.from, globalDateRange.to, fetchSalesForRange])
+    void runSalesSideEffects()
+  }, [activeView, deviceId, globalDateRange.from, globalDateRange.to, runSalesSideEffects])
 
     // Add Sale Form Functions
   const addProductRow = useCallback(() => {
@@ -1777,16 +1730,13 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
   const salesListView = (
     <SalesExcelTable
       key={periodLabel}
-      sales={sales}
       periodLabel={periodLabel}
       isCurrentMonth={isCurrentMonth}
       canGoNextMonth={canGoNextMonth}
       onPreviousMonth={goToPreviousMonth}
       onNextMonth={goToNextMonth}
       onCurrentMonth={goToCurrentMonth}
-      isLoading={isLoading}
-      error={error}
-      hasLoadedSales={salesListLoaded}
+      refreshKey={salesRefreshKey}
       hideCogs={hideCogs}
       formatCurrency={formatCurrency}
       getPaymentMethodDisplay={getPaymentMethodDisplay}

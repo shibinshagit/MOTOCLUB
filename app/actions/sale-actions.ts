@@ -598,6 +598,53 @@ async function queryDeviceSales(deviceId: number, options: GetUserSalesOptions =
   `
 }
 
+/**
+ * Maintenance work that used to run inside getUserSales(): ecommerce order sync (eligible devices) and
+ * return-request -> sale status reconciliation. Kept separate so list rendering never waits on it.
+ * Returns whether any sale row may have changed so callers can refresh the visible page.
+ */
+export async function syncSalesReadSideEffects(deviceId: number) {
+  if (!deviceId) return { success: false, changed: false }
+
+  resetConnectionState()
+  let changed = false
+
+  if (isEcomAllowedDevice(deviceId)) {
+    try {
+      const { autoSyncPendingEcommerceOrders } = await import("./ecommerce-sync-actions")
+      const syncResult = await autoSyncPendingEcommerceOrders()
+      if (syncResult?.syncedCount) changed = true
+    } catch (ecomErr) {
+      console.error("Auto-sync pending ecommerce orders error:", ecomErr)
+    }
+  }
+
+  try {
+    const updated = await sql`
+      WITH updated AS (
+        UPDATE sales s
+        SET delivery_status = 'Returned',
+            status = 'Cancelled',
+            updated_at = NOW()
+        FROM return_requests rr
+        WHERE (rr.sale_id = s.id OR (s.external_order_id IS NOT NULL AND (rr.order_number = s.external_order_id OR rr.order_id = s.id)))
+          AND LOWER(rr.status) IN ('approved', 'completed', 'received', 'returned')
+          AND (s.delivery_status IS NULL OR s.delivery_status != 'Returned' OR s.status != 'Cancelled')
+        RETURNING s.id, s.tracking_id, s.shipping_city
+      )
+      INSERT INTO tracking_events (sale_id, tracking_id, status, location, description, event_at, created_at)
+      SELECT id, tracking_id, 'Returned', COALESCE(shipping_city, 'Unknown Location'), 'Order Returned', NOW(), NOW()
+      FROM updated
+      RETURNING sale_id
+    `
+    if (Array.isArray(updated) && updated.length > 0) changed = true
+  } catch (retSyncErr) {
+    console.warn("Auto-sync return requests status to sales warning:", retSyncErr)
+  }
+
+  return { success: true, changed }
+}
+
 export async function getUserSales(deviceId: number, options: GetUserSalesOptions = {}) {
   if (!deviceId) {
     return { success: false, message: "Device ID is required", data: [] }
@@ -606,35 +653,7 @@ export async function getUserSales(deviceId: number, options: GetUserSalesOption
   resetConnectionState()
 
   try {
-    if (isEcomAllowedDevice(deviceId)) {
-      try {
-        const { autoSyncPendingEcommerceOrders } = await import("./ecommerce-sync-actions")
-        await autoSyncPendingEcommerceOrders()
-      } catch (ecomErr) {
-        console.error("Auto-sync pending ecommerce orders error:", ecomErr)
-      }
-    }
-
-    try {
-      await sql`
-        WITH updated AS (
-          UPDATE sales s
-          SET delivery_status = 'Returned',
-              status = 'Cancelled',
-              updated_at = NOW()
-          FROM return_requests rr
-          WHERE (rr.sale_id = s.id OR (s.external_order_id IS NOT NULL AND (rr.order_number = s.external_order_id OR rr.order_id = s.id)))
-            AND LOWER(rr.status) IN ('approved', 'completed', 'received', 'returned')
-            AND (s.delivery_status IS NULL OR s.delivery_status != 'Returned' OR s.status != 'Cancelled')
-          RETURNING s.id, s.tracking_id, s.shipping_city
-        )
-        INSERT INTO tracking_events (sale_id, tracking_id, status, location, description, event_at, created_at)
-        SELECT id, tracking_id, 'Returned', COALESCE(shipping_city, 'Unknown Location'), 'Order Returned', NOW(), NOW()
-        FROM updated
-      `
-    } catch (retSyncErr) {
-      console.warn("Auto-sync return requests status to sales warning:", retSyncErr)
-    }
+    await syncSalesReadSideEffects(deviceId)
 
     const sales = await executeWithRetry(async () => queryDeviceSales(deviceId, options))
 

@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState, useCallback } from "react"
+import { useEffect, useMemo, useState, useCallback, useRef } from "react"
 import { format } from "date-fns"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -19,7 +19,6 @@ import { StaffOwnerSelect } from "@/components/sales/staff-owner-select"
 import { parseSaleDate, cn } from "@/lib/utils"
 import { printJobCard, printBatchJobCards, printSalesReceipt } from "@/lib/receipt-utils"
 import { getSaleDetails, getPaginatedUserSales, getSalesSummaryCards } from "@/app/actions/sale-actions"
-import { filterSalesSemantic } from "@/lib/sale-search"
 import {
   Search,
   X,
@@ -156,7 +155,6 @@ function buildInitialFilters(sales: any[], getters: Record<ColumnKey, (sale: any
 }
 
 interface SalesExcelTableProps {
-  sales: any[]
   searchTerm?: string
   onSearchTermChange?: (term: string) => void
   periodLabel: string
@@ -165,9 +163,7 @@ interface SalesExcelTableProps {
   onPreviousMonth: () => void
   onNextMonth: () => void
   onCurrentMonth: () => void
-  isLoading: boolean
-  error: string | null
-  hasLoadedSales: boolean
+  refreshKey?: number
   hideCogs: boolean
   formatCurrency: (amount: number) => string
   getPaymentMethodDisplay: (sale: any) => string
@@ -200,7 +196,6 @@ function TableSkeleton() {
 }
 
 export default function SalesExcelTable({
-  sales,
   searchTerm: externalSearchTerm,
   onSearchTermChange,
   periodLabel,
@@ -209,9 +204,7 @@ export default function SalesExcelTable({
   onPreviousMonth,
   onNextMonth,
   onCurrentMonth,
-  isLoading,
-  error,
-  hasLoadedSales,
+  refreshKey = 0,
   hideCogs,
   formatCurrency,
   getPaymentMethodDisplay,
@@ -277,15 +270,6 @@ export default function SalesExcelTable({
     [formatCurrency, getPaymentMethodDisplay, getRemainingAmount],
   )
 
-  const uniqueValues = useMemo(() => {
-    const values = {} as Record<ColumnKey, string[]>
-    ;(Object.keys(valueGetters) as ColumnKey[]).forEach((key) => {
-      values[key] = [...new Set(sales.map(valueGetters[key]))]
-    })
-    return values
-  }, [sales, valueGetters])
-
-  const [columnFilters, setColumnFilters] = useState<ColumnFilters>(() => buildInitialFilters(sales, valueGetters))
   const [cardFilter, setCardFilter] = useState<"all" | "pending" | "critical">("all")
   const [typeFilter, setTypeFilter] = useState<"all" | "normal" | "job_card">("all")
   const [selectedSales, setSelectedSales] = useState<number[]>([])
@@ -305,6 +289,20 @@ export default function SalesExcelTable({
   const [isFetchingServer, setIsFetchingServer] = useState(false)
   const [expandedCache, setExpandedCache] = useState<Record<number, any>>({})
   const [loadingExpandedId, setLoadingExpandedId] = useState<number | null>(null)
+  const [hasFetchedServer, setHasFetchedServer] = useState(false)
+  const [serverError, setServerError] = useState<string | null>(null)
+  const latestFetchIdRef = useRef(0)
+
+  // Column dropdown options come from the rows of the current page (the list is server-paginated).
+  const uniqueValues = useMemo(() => {
+    const values = {} as Record<ColumnKey, string[]>
+    ;(Object.keys(valueGetters) as ColumnKey[]).forEach((key) => {
+      values[key] = [...new Set(serverSales.map(valueGetters[key]))]
+    })
+    return values
+  }, [serverSales, valueGetters])
+
+  const [columnFilters, setColumnFilters] = useState<ColumnFilters>(() => buildInitialFilters([], valueGetters))
 
   // 250ms search debounce
   useEffect(() => {
@@ -315,9 +313,10 @@ export default function SalesExcelTable({
     return () => clearTimeout(timer)
   }, [activeSearchTerm])
 
-  // Fetch paginated sales and card aggregates
+  // Fetch paginated sales and card aggregates. Only the latest request may update state.
   const fetchServerSales = useCallback(async () => {
     if (!deviceId) return
+    const fetchId = ++latestFetchIdRef.current
     setIsFetchingServer(true)
     try {
       const [salesRes, cardsRes] = await Promise.all([
@@ -337,25 +336,40 @@ export default function SalesExcelTable({
           searchTerm: debouncedSearch,
         }),
       ])
+      if (fetchId !== latestFetchIdRef.current) return
 
       if (salesRes.success && salesRes.data) {
         setServerSales(salesRes.data)
         setTotalServerCount(salesRes.totalCount)
         setTotalServerPages(salesRes.totalPages)
+        setServerError(null)
+      } else {
+        setServerError(salesRes.message || "Failed to load sales")
       }
       if (cardsRes.success && cardsRes.counts) {
         setServerCardCounts(cardsRes.counts)
       }
     } catch (err) {
       console.error("Error fetching server sales:", err)
+      if (fetchId !== latestFetchIdRef.current) return
+      setServerError("An error occurred while loading sales")
     } finally {
-      setIsFetchingServer(false)
+      if (fetchId === latestFetchIdRef.current) {
+        setIsFetchingServer(false)
+        setHasFetchedServer(true)
+      }
     }
   }, [deviceId, page, pageSize, globalDateRange?.from, globalDateRange?.to, typeFilter, cardFilter, debouncedSearch])
 
+  // A new date range starts again from the first page.
+  useEffect(() => {
+    setPage(1)
+  }, [globalDateRange?.from, globalDateRange?.to])
+
+  // Re-run when query inputs change or the parent signals a mutation (refreshKey).
   useEffect(() => {
     fetchServerSales()
-  }, [fetchServerSales, sales])
+  }, [fetchServerSales, refreshKey])
 
   const handleDeliveryStatusChange = useCallback(
     (saleId: number, newStatus: string) => {
@@ -363,38 +377,9 @@ export default function SalesExcelTable({
         prev.map((s) => (s.id === saleId ? { ...s, delivery_status: newStatus } : s))
       )
       fetchServerSales()
-      if (onRefreshSales) {
-        onRefreshSales()
-      }
     },
-    [fetchServerSales, onRefreshSales]
+    [fetchServerSales]
   )
-
-  // Prefetch next page silently
-  useEffect(() => {
-    if (deviceId && page < totalServerPages && !isFetchingServer) {
-      getPaginatedUserSales(deviceId, {
-        page: page + 1,
-        pageSize,
-        dateFrom: globalDateRange?.from,
-        dateTo: globalDateRange?.to,
-        typeFilter,
-        cardFilter,
-        searchTerm: debouncedSearch,
-      }).catch(() => {})
-    }
-  }, [
-    deviceId,
-    page,
-    totalServerPages,
-    pageSize,
-    globalDateRange?.from,
-    globalDateRange?.to,
-    typeFilter,
-    cardFilter,
-    debouncedSearch,
-    isFetchingServer,
-  ])
 
   const toggleExpandRow = async (saleId: number) => {
     if (expandedSaleId === saleId) {
@@ -421,47 +406,16 @@ export default function SalesExcelTable({
     }
   }
 
-  const baseFilteredSales = useMemo(() => {
-    if (deviceId) return serverSales
-    if (!hasLoadedSales) return sales
-
-    const semanticallyFiltered = filterSalesSemantic(sales, activeSearchTerm)
-    return semanticallyFiltered.filter((sale) =>
-      (Object.keys(valueGetters) as ColumnKey[]).every((key) =>
-        passesColumnFilter(valueGetters[key](sale), columnFilters[key], uniqueValues[key]),
-      ),
-    )
-  }, [deviceId, serverSales, sales, activeSearchTerm, columnFilters, uniqueValues, valueGetters, hasLoadedSales])
-
-  const typeFilteredSales = useMemo(() => {
-    if (deviceId) return serverSales
-    if (typeFilter === "job_card") {
-      return baseFilteredSales.filter(isJobCardSale)
-    }
-    if (typeFilter === "normal") {
-      return baseFilteredSales.filter(isNormalSale)
-    }
-    return baseFilteredSales
-  }, [deviceId, serverSales, baseFilteredSales, typeFilter])
-
-  const displaySales = useMemo(() => {
-    if (deviceId) return serverSales
-    let result = typeFilteredSales
-    if (cardFilter === "pending") {
-      result = result.filter(isPendingSale)
-    } else if (cardFilter === "critical") {
-      result = result.filter(isCriticalSale)
-    }
-    return [...result].sort((a, b) => Number(b.id) - Number(a.id))
-  }, [deviceId, serverSales, typeFilteredSales, cardFilter])
+  // The list is always server-paginated/filtered; rows are already the current page.
+  const displaySales = serverSales
 
   const selectedSalesList = useMemo(() => {
     return displaySales.filter((s) => selectedSales.includes(s.id))
   }, [displaySales, selectedSales])
 
-  const totalCount = serverCardCounts ? serverCardCounts.total : typeFilteredSales.length
-  const pendingCount = serverCardCounts ? serverCardCounts.pending : typeFilteredSales.filter(isPendingSale).length
-  const criticalCount = serverCardCounts ? serverCardCounts.critical : typeFilteredSales.filter(isCriticalSale).length
+  const totalCount = serverCardCounts ? serverCardCounts.total : totalServerCount
+  const pendingCount = serverCardCounts ? serverCardCounts.pending : 0
+  const criticalCount = serverCardCounts ? serverCardCounts.critical : 0
   const pendingSalesCount = pendingCount
 
   const totalSalesAmount = useMemo(
@@ -479,7 +433,7 @@ export default function SalesExcelTable({
     [displaySales],
   )
 
-  const activeFilterCount = hasLoadedSales
+  const activeFilterCount = hasFetchedServer
     ? (Object.keys(columnFilters) as ColumnKey[]).filter((key) =>
         isColumnFilterActive(columnFilters[key], uniqueValues[key]),
       ).length
@@ -512,9 +466,10 @@ export default function SalesExcelTable({
   }
 
   const clearAllFilters = () => {
-    setColumnFilters(buildInitialFilters(sales, valueGetters))
+    setColumnFilters(buildInitialFilters([], valueGetters))
     setCardFilter("all")
     setTypeFilter("all")
+    setPage(1)
     setSelectedSales([])
   }
 
@@ -850,7 +805,7 @@ export default function SalesExcelTable({
               variant="outline"
               className="h-8 text-xs gap-1.5 bg-white border-violet-300 hover:bg-violet-100 text-violet-900 font-medium flex-1 sm:flex-initial"
               onClick={handleBulkPrintInvoices}
-              disabled={isLoading || isGeneratingReport}
+              disabled={isFetchingServer || isGeneratingReport}
             >
               <Printer className="h-3.5 w-3.5 text-violet-600" />
               Print Invoices ({selectedSales.length})
@@ -861,7 +816,7 @@ export default function SalesExcelTable({
               variant="outline"
               className="h-8 text-xs gap-1.5 bg-white border-violet-300 hover:bg-violet-100 text-violet-900 font-medium flex-1 sm:flex-initial"
               onClick={handleBulkPrintLabels}
-              disabled={isLoading || isGeneratingReport}
+              disabled={isFetchingServer || isGeneratingReport}
             >
               <Printer className="h-3.5 w-3.5 text-violet-600" />
               Print Labels ({selectedSales.length})
@@ -872,7 +827,7 @@ export default function SalesExcelTable({
                 size="sm"
                 className="h-8 text-xs gap-1.5 bg-violet-600 hover:bg-violet-700 text-white font-medium flex-1 sm:flex-initial"
                 onClick={handleBulkPrintJobCards}
-                disabled={isLoading || isGeneratingReport}
+                disabled={isFetchingServer || isGeneratingReport}
               >
                 <Printer className="h-3.5 w-3.5" />
                 Print Job Cards ({selectedSalesList.filter(isJobCardSale).length})
@@ -942,6 +897,15 @@ export default function SalesExcelTable({
             </div>
           </div>
 
+          {serverError && displaySales.length > 0 && (
+            <div className="flex items-center justify-between gap-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs text-rose-700">
+              <span>{serverError}. Showing previously loaded rows.</span>
+              <Button variant="outline" size="sm" className="h-6 text-xs" onClick={() => fetchServerSales()}>
+                Retry
+              </Button>
+            </div>
+          )}
+
           {/* ACTION BUTTONS ROW */}
           <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-200/60">
             <div className="flex items-center gap-2">
@@ -952,7 +916,7 @@ export default function SalesExcelTable({
                     totalCount,
                   )} of ${totalCount}`
                 ) : (
-                  `${displaySales.length} of ${sales.length}`
+                  `${displaySales.length} of ${totalCount}`
                 )}
               </span>
               {pendingSalesCount > 0 && (
@@ -971,12 +935,11 @@ export default function SalesExcelTable({
                   className="h-7 gap-1.5 px-2.5 text-xs font-medium bg-white hover:bg-slate-50 border-slate-200 text-slate-700 shadow-2xs"
                   onClick={() => {
                     fetchServerSales()
-                    onRefreshSales()
                   }}
-                  disabled={isLoading || isFetchingServer}
+                  disabled={isFetchingServer}
                   title="Refresh sales list"
                 >
-                  <RotateCcw className={`h-3.5 w-3.5 ${isLoading || isFetchingServer ? "animate-spin" : ""}`} />
+                  <RotateCcw className={`h-3.5 w-3.5 ${isFetchingServer ? "animate-spin" : ""}`} />
                   <span>Refresh</span>
                 </Button>
               )}
@@ -986,7 +949,7 @@ export default function SalesExcelTable({
                 size="sm"
                 className="h-7 gap-1.5 px-2.5 text-xs font-medium bg-white hover:bg-slate-50 border-slate-200 text-slate-700 shadow-2xs"
                 onClick={handlePrintSummary}
-                disabled={isLoading || isGeneratingReport}
+                disabled={isFetchingServer || isGeneratingReport}
                 title="View and print Sales Summary Report"
               >
                 {isGeneratingReport ? (
@@ -1002,7 +965,7 @@ export default function SalesExcelTable({
                 size="sm"
                 className="h-7 gap-1.5 px-2.5 text-xs font-medium bg-white hover:bg-slate-50 border-slate-200 text-slate-700 shadow-2xs"
                 onClick={handleDownloadPDF}
-                disabled={isLoading || isGeneratingReport}
+                disabled={isFetchingServer || isGeneratingReport}
                 title="Download Sales Summary PDF Report"
               >
                 {isGeneratingReport ? (
@@ -1018,7 +981,7 @@ export default function SalesExcelTable({
                 size="sm"
                 className="h-7 gap-1.5 px-2.5 text-xs font-medium bg-white hover:bg-slate-50 border-slate-200 text-slate-700 shadow-2xs"
                 onClick={handleDownloadExcel}
-                disabled={isLoading || isGeneratingReport}
+                disabled={isFetchingServer || isGeneratingReport}
                 title="Download Sales Summary Excel / CSV Report"
               >
                 <Download className="h-3.5 w-3.5 text-emerald-600" />
@@ -1094,23 +1057,28 @@ export default function SalesExcelTable({
                   <th className={stickyActionHeaderClass}>Action</th>
                 </tr>
               </thead>
-              <tbody>
-                {isLoading && !hasLoadedSales ? (
+              <tbody className={isFetchingServer && hasFetchedServer ? "opacity-60 transition-opacity" : "transition-opacity"}>
+                {!hasFetchedServer ? (
                   <tr>
                     <td colSpan={14}>
                       <TableSkeleton />
                     </td>
                   </tr>
-                ) : error ? (
+                ) : serverError && displaySales.length === 0 ? (
                   <tr>
                     <td colSpan={14} className="px-4 py-8 text-center text-sm text-rose-600">
-                      {error}
+                      {serverError}
+                      <Button variant="outline" size="sm" className="ml-3 h-7 text-xs" onClick={() => fetchServerSales()}>
+                        Retry
+                      </Button>
                     </td>
                   </tr>
                 ) : displaySales.length === 0 ? (
                   <tr>
                     <td colSpan={14} className="px-4 py-12 text-center text-sm text-muted-foreground">
-                      {sales.length === 0 ? `No sales found for ${periodLabel}` : "No sales match the current filters"}
+                      {debouncedSearch || cardFilter !== "all" || typeFilter !== "all"
+                        ? "No sales match the current filters"
+                        : `No sales found for ${periodLabel}`}
                     </td>
                   </tr>
                 ) : (
@@ -1486,7 +1454,7 @@ export default function SalesExcelTable({
 
           {/* MOBILE & TABLET CARD LIST VIEW (< 1024px) */}
           <div className="block lg:hidden divide-y divide-slate-200 bg-slate-50/50">
-            {isLoading && !hasLoadedSales ? (
+            {!hasFetchedServer ? (
               <div className="p-4 space-y-3">
                 {[...Array(4)].map((_, i) => (
                   <div key={i} className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
@@ -1499,11 +1467,18 @@ export default function SalesExcelTable({
                   </div>
                 ))}
               </div>
-            ) : error ? (
-              <div className="p-6 text-center text-sm text-rose-600 bg-white">{error}</div>
+            ) : serverError && displaySales.length === 0 ? (
+              <div className="p-6 text-center text-sm text-rose-600 bg-white">
+                {serverError}
+                <Button variant="outline" size="sm" className="ml-3 h-7 text-xs" onClick={() => fetchServerSales()}>
+                  Retry
+                </Button>
+              </div>
             ) : displaySales.length === 0 ? (
               <div className="p-8 text-center text-sm text-slate-500 bg-white">
-                {sales.length === 0 ? `No sales found for ${periodLabel}` : "No sales match the current filters"}
+                {debouncedSearch || cardFilter !== "all" || typeFilter !== "all"
+                        ? "No sales match the current filters"
+                        : `No sales found for ${periodLabel}`}
               </div>
             ) : (
               displaySales.map((rawSale, index) => {

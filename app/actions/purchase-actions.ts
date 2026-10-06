@@ -67,22 +67,29 @@ async function queryDevicePurchases(deviceId: number, options: GetUserPurchasesO
         ), '—'
       ) AS items_summary
     FROM purchases p
-    LEFT JOIN suppliers s
-      ON LOWER(TRIM(s.name)) = LOWER(TRIM(p.supplier))
-    LEFT JOIN purchase_items pi ON pi.purchase_id = p.id
-    LEFT JOIN products pr ON pr.id = pi.product_id
-    LEFT JOIN product_variants pv ON pv.id = pi.product_variant_id
-    LEFT JOIN product_batches b ON b.id = pi.batch_id
     WHERE p.device_id = ${deviceId}
       AND (${dateFrom}::date IS NULL OR p.purchase_date >= ${dateFrom}::date)
       AND (${endExclusive}::date IS NULL OR p.purchase_date < ${endExclusive}::date)
       AND (
         ${searchPattern}::text IS NULL
         OR p.supplier ILIKE ${searchPattern}
-        OR s.name ILIKE ${searchPattern}
-        OR pr.name ILIKE ${searchPattern}
-        OR pv.name ILIKE ${searchPattern}
-        OR b.batch_no ILIKE ${searchPattern}
+        OR EXISTS (
+          SELECT 1 FROM suppliers s
+          WHERE LOWER(TRIM(s.name)) = LOWER(TRIM(p.supplier))
+            AND s.name ILIKE ${searchPattern}
+        )
+        OR EXISTS (
+          SELECT 1 FROM purchase_items pi
+          LEFT JOIN products pr ON pr.id = pi.product_id
+          LEFT JOIN product_variants pv ON pv.id = pi.product_variant_id
+          LEFT JOIN product_batches b ON b.id = pi.batch_id
+          WHERE pi.purchase_id = p.id
+            AND (
+              pr.name ILIKE ${searchPattern}
+              OR pv.name ILIKE ${searchPattern}
+              OR b.batch_no ILIKE ${searchPattern}
+            )
+        )
         OR p.invoice_number ILIKE ${searchPattern}
         OR p.supplier_invoice_number ILIKE ${searchPattern}
         OR p.status ILIKE ${searchPattern}
@@ -90,10 +97,314 @@ async function queryDevicePurchases(deviceId: number, options: GetUserPurchasesO
         OR p.notes ILIKE ${searchPattern}
         OR CAST(p.id AS TEXT) ILIKE ${purchaseNumberPattern}
       )
-    GROUP BY p.id
     ORDER BY p.purchase_date DESC, p.id DESC
     LIMIT ${limit ?? null}
   `
+}
+
+// ---------------------------------------------------------------------------
+// Server-side paginated Purchase list, KPI summary and column-filter options.
+// All three share the same WHERE builder so list, KPIs and filters can never disagree.
+// ---------------------------------------------------------------------------
+
+export type PurchaseColumnKey =
+  | "purchaseId"
+  | "status"
+  | "date"
+  | "supplier"
+  | "products"
+  | "payment"
+  | "total"
+  | "paid"
+  | "balance"
+  | "delivery"
+
+export type PurchaseColumnFilters = Partial<Record<PurchaseColumnKey, { contains?: string; selected?: string[] }>>
+
+const PURCHASE_COLUMN_KEYS: PurchaseColumnKey[] = [
+  "purchaseId",
+  "status",
+  "date",
+  "supplier",
+  "products",
+  "payment",
+  "total",
+  "paid",
+  "balance",
+  "delivery",
+]
+
+function purchaseItemsSummarySql(alias: string) {
+  return `COALESCE((
+    SELECT STRING_AGG(
+      CONCAT(
+        pr2.name,
+        CASE
+          WHEN pv2.name IS NOT NULL AND pv2.name != '' AND LOWER(pv2.name) != 'default' AND LOWER(pv2.name) != 'default variant'
+          THEN CONCAT(' (', pv2.name, ')')
+          ELSE ''
+        END,
+        ' × ', pi2.quantity
+      ), ', '
+    )
+    FROM purchase_items pi2
+    LEFT JOIN products pr2 ON pr2.id = pi2.product_id
+    LEFT JOIN product_variants pv2 ON pv2.id = pi2.product_variant_id
+    WHERE pi2.purchase_id = ${alias}.id
+  ), '—')`
+}
+
+// Mirrors the browser helpers in purchase-tab.tsx (normalizePaymentStatus / getPaidAmount / getRemainingAmount).
+const P_NORM_STATUS = `(CASE WHEN COALESCE(p.status, '') = 'Partial' THEN 'Cancelled' ELSE COALESCE(p.status, '') END)`
+const P_TOTAL = `COALESCE(p.total_amount, 0)::numeric`
+const P_RECEIVED = `COALESCE(p.received_amount, 0)::numeric`
+const P_PAID = `(CASE WHEN ${P_NORM_STATUS} = 'Cancelled' THEN 0 WHEN ${P_NORM_STATUS} = 'Paid' THEN ${P_TOTAL} ELSE ${P_RECEIVED} END)`
+const P_REMAINING = `(CASE WHEN ${P_NORM_STATUS} IN ('Cancelled', 'Paid') THEN 0 ELSE GREATEST(0, ${P_TOTAL} - ${P_RECEIVED}) END)`
+const P_DELIVERED = `(COALESCE(NULLIF(p.purchase_status, ''), 'Delivered') = 'Delivered')`
+const numText = (expr: string) => `TRIM(TO_CHAR(ROUND(${expr}, 2), 'FM999999999990.00'))`
+
+// SQL expression producing the same cell value the table's Excel filters used in the browser.
+// Money columns use a plain 2-decimal number; the browser formats it for display.
+const PURCHASE_COLUMN_EXPR: Record<PurchaseColumnKey, string> = {
+  purchaseId: `p.id::text`,
+  status: P_NORM_STATUS,
+  date: `TO_CHAR(p.purchase_date, 'DD-MM-YYYY')`,
+  supplier: `COALESCE(NULLIF(p.supplier, ''), '—')`,
+  products: purchaseItemsSummarySql("p"),
+  payment: `(CASE WHEN ${P_NORM_STATUS} IN ('Credit', 'Cancelled') THEN '—' ELSE COALESCE(NULLIF(p.payment_method, ''), 'Cash') END)`,
+  total: numText(P_TOTAL),
+  paid: numText(P_PAID),
+  balance: numText(P_REMAINING),
+  delivery: `COALESCE(NULLIF(p.purchase_status, ''), 'Delivered')`,
+}
+
+// Newest-first ordering for dropdown options of high-cardinality columns (others sort by value).
+const PURCHASE_FACET_ORDER: Partial<Record<PurchaseColumnKey, string>> = {
+  purchaseId: `MAX(p.id) DESC`,
+  date: `MAX(p.purchase_date) DESC`,
+  total: `MAX(${P_TOTAL}) DESC`,
+  paid: `MAX(${P_PAID}) DESC`,
+  balance: `MAX(${P_REMAINING}) DESC`,
+}
+
+const PURCHASE_FACET_LIMIT = 300
+
+// $1 device, $2 dateFrom, $3 dateToExclusive, $4 search pattern, $5 purchase-number pattern
+const PURCHASE_BASE_WHERE = `
+  p.device_id = $1
+  AND ($2::date IS NULL OR p.purchase_date >= $2::date)
+  AND ($3::date IS NULL OR p.purchase_date < $3::date)
+  AND (
+    $4::text IS NULL
+    OR p.supplier ILIKE $4
+    OR EXISTS (
+      SELECT 1 FROM suppliers s
+      WHERE LOWER(TRIM(s.name)) = LOWER(TRIM(p.supplier))
+        AND s.name ILIKE $4
+    )
+    OR EXISTS (
+      SELECT 1 FROM purchase_items pi
+      LEFT JOIN products pr ON pr.id = pi.product_id
+      LEFT JOIN product_variants pv ON pv.id = pi.product_variant_id
+      LEFT JOIN product_batches b ON b.id = pi.batch_id
+      WHERE pi.purchase_id = p.id
+        AND (
+          pr.name ILIKE $4
+          OR pv.name ILIKE $4
+          OR b.batch_no ILIKE $4
+        )
+    )
+    OR p.invoice_number ILIKE $4
+    OR p.supplier_invoice_number ILIKE $4
+    OR p.status ILIKE $4
+    OR p.purchase_status ILIKE $4
+    OR p.notes ILIKE $4
+    OR CAST(p.id AS TEXT) ILIKE $5
+  )`
+
+// $6..$15 contains (one per column), $16..$25 selected values as a JSON array (NULL = no filter)
+const PURCHASE_COLUMN_WHERE = PURCHASE_COLUMN_KEYS.map((key, i) => {
+  const c = 6 + i
+  const sel = 16 + i
+  const expr = PURCHASE_COLUMN_EXPR[key]
+  // The selected-values parameter is cast through text so the driver binds a plain string, then parsed as JSON.
+  return `($${c}::text IS NULL OR POSITION(LOWER($${c}) IN LOWER(${expr})) > 0)
+  AND ($${sel}::text IS NULL OR ${expr} IN (SELECT jsonb_array_elements_text(($${sel}::text)::jsonb)))`
+}).join("\n  AND ")
+
+function buildPurchaseFilterParams(
+  deviceId: number,
+  options: { dateFrom?: string; dateTo?: string; searchTerm?: string; columnFilters?: PurchaseColumnFilters },
+) {
+  const search = options.searchTerm?.trim() || null
+  const endExclusive = options.dateTo ? getExclusiveEndDate(options.dateTo) : null
+  const params: any[] = [
+    deviceId,
+    options.dateFrom || null,
+    endExclusive,
+    search ? `%${search}%` : null,
+    search ? `%${search.replace(/^#/, "")}%` : null,
+  ]
+  for (const key of PURCHASE_COLUMN_KEYS) {
+    const contains = options.columnFilters?.[key]?.contains?.trim()
+    params.push(contains ? contains : null)
+  }
+  for (const key of PURCHASE_COLUMN_KEYS) {
+    const selected = options.columnFilters?.[key]?.selected
+    params.push(Array.isArray(selected) && selected.length > 0 ? JSON.stringify(selected) : null)
+  }
+  return params
+}
+
+// Runs parameterised SQL through the shared `sql` client by splitting at $n placeholders, which is
+// exactly what a tagged template call does. Every value stays a bound parameter.
+function runPurchaseSql(text: string, params: any[]) {
+  const strings: string[] = []
+  const values: any[] = []
+  let last = 0
+  for (const match of text.matchAll(/\$(\d+)/g)) {
+    strings.push(text.slice(last, match.index))
+    values.push(params[Number(match[1]) - 1])
+    last = (match.index as number) + match[0].length
+  }
+  strings.push(text.slice(last))
+  const template = Object.assign(strings, { raw: strings }) as unknown as TemplateStringsArray
+  return (sql as any)(template, ...values)
+}
+
+interface GetPaginatedPurchasesOptions {
+  page?: number
+  pageSize?: number
+  dateFrom?: string
+  dateTo?: string
+  searchTerm?: string
+  columnFilters?: PurchaseColumnFilters
+}
+
+export async function getPaginatedUserPurchases(deviceId: number, options: GetPaginatedPurchasesOptions = {}) {
+  if (!deviceId) {
+    return { success: false, message: "Device ID is required", data: [], totalCount: 0, page: 1, totalPages: 0 }
+  }
+
+  resetConnectionState()
+
+  const page = Math.max(1, Math.floor(options.page || 1))
+  const pageSize = Math.max(1, Math.min(100, Math.floor(options.pageSize || 25)))
+  const offset = (page - 1) * pageSize
+
+  try {
+    const filterParams = buildPurchaseFilterParams(deviceId, options)
+    const params = [...filterParams, pageSize, offset]
+    const text = `
+      SELECT q.*, ${purchaseItemsSummarySql("q")} AS items_summary
+      FROM (
+        SELECT p.*, COUNT(*) OVER() AS total_count
+        FROM purchases p
+        WHERE ${PURCHASE_BASE_WHERE}
+          AND ${PURCHASE_COLUMN_WHERE}
+        ORDER BY p.purchase_date DESC, p.id DESC
+        LIMIT $26 OFFSET $27
+      ) q
+      ORDER BY q.purchase_date DESC, q.id DESC`
+    const rows: any[] = await runPurchaseSql(text, params)
+
+    let totalCount = rows.length > 0 ? Number(rows[0].total_count) : 0
+    if (rows.length === 0 && page > 1) {
+      const countRows = await runPurchaseSql(
+        `SELECT COUNT(*)::int AS n FROM purchases p WHERE ${PURCHASE_BASE_WHERE} AND ${PURCHASE_COLUMN_WHERE}`,
+        filterParams,
+      )
+      totalCount = Number(countRows[0]?.n || 0)
+    }
+    const data = rows.map(({ total_count: _total, ...rest }) => rest)
+
+    return { success: true, data, totalCount, page, totalPages: Math.ceil(totalCount / pageSize) }
+  } catch (error) {
+    console.error("Get paginated purchases error:", error)
+    return {
+      success: false,
+      message: `Database error: ${getLastError()?.message || "Unknown error"}.`,
+      data: [],
+      totalCount: 0,
+      page: 1,
+      totalPages: 0,
+    }
+  }
+}
+
+export async function getPurchaseSummary(
+  deviceId: number,
+  options: Omit<GetPaginatedPurchasesOptions, "page" | "pageSize"> = {},
+) {
+  const empty = { count: 0, total: 0, paid: 0, remaining: 0, delivered: 0 }
+  if (!deviceId) return { success: false, summary: empty }
+
+  resetConnectionState()
+
+  try {
+    const rows = await runPurchaseSql(
+      `SELECT
+         COUNT(*)::int AS count,
+         COALESCE(SUM(${P_TOTAL}), 0)::float8 AS total,
+         COALESCE(SUM(${P_PAID}), 0)::float8 AS paid,
+         COALESCE(SUM(${P_REMAINING}), 0)::float8 AS remaining,
+         (COUNT(*) FILTER (WHERE ${P_DELIVERED}))::int AS delivered
+       FROM purchases p
+       WHERE ${PURCHASE_BASE_WHERE}
+         AND ${PURCHASE_COLUMN_WHERE}`,
+      buildPurchaseFilterParams(deviceId, options),
+    )
+    const r = rows[0] || {}
+    return {
+      success: true,
+      summary: {
+        count: Number(r.count || 0),
+        total: Number(r.total || 0),
+        paid: Number(r.paid || 0),
+        remaining: Number(r.remaining || 0),
+        delivered: Number(r.delivered || 0),
+      },
+    }
+  } catch (error) {
+    console.error("Get purchase summary error:", error)
+    return { success: false, summary: empty }
+  }
+}
+
+// Distinct values for the Excel column-filter dropdowns. Like the old browser behaviour, options reflect the
+// selected date range and search only (not the other column filters). Loaded lazily when a dropdown opens.
+export async function getPurchaseFilterOptions(
+  deviceId: number,
+  options: { dateFrom?: string; dateTo?: string; searchTerm?: string } = {},
+) {
+  if (!deviceId) return { success: false, options: {}, truncated: {} }
+
+  resetConnectionState()
+
+  try {
+    const selects = PURCHASE_COLUMN_KEYS.map((key) => {
+      const expr = PURCHASE_COLUMN_EXPR[key]
+      const order = PURCHASE_FACET_ORDER[key] || expr
+      return `(SELECT '${key}' AS k, v FROM (
+        SELECT ${expr} AS v FROM purchases p WHERE ${PURCHASE_BASE_WHERE} GROUP BY ${expr} ORDER BY ${order} LIMIT ${PURCHASE_FACET_LIMIT + 1}
+      ) x_${key})`
+    })
+    const rows: { k: PurchaseColumnKey; v: string }[] = await runPurchaseSql(
+      selects.join("\nUNION ALL\n"),
+      buildPurchaseFilterParams(deviceId, options).slice(0, 5),
+    )
+    const out: Partial<Record<PurchaseColumnKey, string[]>> = {}
+    const truncated: Partial<Record<PurchaseColumnKey, boolean>> = {}
+    for (const key of PURCHASE_COLUMN_KEYS) {
+      const values = rows.filter((r) => r.k === key).map((r) => r.v)
+      truncated[key] = values.length > PURCHASE_FACET_LIMIT
+      out[key] = values.slice(0, PURCHASE_FACET_LIMIT)
+    }
+    return { success: true, options: out, truncated }
+  } catch (error) {
+    console.error("Get purchase filter options error:", error)
+    return { success: false, options: {}, truncated: {} }
+  }
 }
 
 export async function getUserPurchases(
@@ -113,89 +424,9 @@ export async function getUserPurchases(
   resetConnectionState()
 
   try {
+    // The list only needs the row summary (items_summary is built in SQL). Items and payments are loaded
+    // on demand by getPurchaseDetails when a purchase is viewed or edited.
     const purchases = await queryDevicePurchases(deviceId, options)
-
-    if (Array.isArray(purchases) && purchases.length > 0) {
-      const purchaseIds = purchases.map((p: any) => p.id)
-
-      try {
-        const itemsRows = await sql`
-          SELECT 
-            pi.*, 
-            p.name as product_name, 
-            p.category,
-            pv.name as variant_name,
-            pb.batch_no as batch_no
-          FROM purchase_items pi
-          JOIN products p ON pi.product_id = p.id
-          LEFT JOIN product_variants pv ON pi.product_variant_id = pv.id
-          LEFT JOIN product_batches pb ON pi.batch_id = pb.id
-          WHERE pi.purchase_id = ANY(${purchaseIds})
-          ORDER BY pi.id ASC
-        `
-        const itemsMap = new Map<number, any[]>()
-        for (const row of itemsRows) {
-          const list = itemsMap.get(row.purchase_id) || []
-          list.push(row)
-          itemsMap.set(row.purchase_id, list)
-        }
-        for (const p of purchases) {
-          p.items = itemsMap.get(p.id) || []
-          if (!p.items_summary || p.items_summary === "—") {
-            if (p.items.length > 0) {
-              p.items_summary = p.items
-                .map((item: any) => {
-                  const varName = item.variant_name && item.variant_name.toLowerCase() !== "default" && item.variant_name.toLowerCase() !== "default variant"
-                    ? ` (${item.variant_name})`
-                    : ""
-                  return `${item.product_name}${varName} × ${item.quantity}`
-                })
-                .join(", ")
-            } else {
-              p.items_summary = "—"
-            }
-          }
-        }
-      } catch (e) {
-        console.warn("Could not query purchase_items for purchases:", e)
-      }
-
-      try {
-        const tpRows = await sql`
-          SELECT id, purchase_id, payment_method, amount, reference_number, notes
-          FROM transaction_payments
-          WHERE purchase_id = ANY(${purchaseIds})
-          ORDER BY id ASC
-        `
-        const tpMap = new Map<number, any[]>()
-        for (const row of tpRows) {
-          const list = tpMap.get(row.purchase_id) || []
-          list.push({
-            id: row.id,
-            paymentMethod: row.payment_method,
-            amount: Number(row.amount) || 0,
-            referenceNumber: row.reference_number || undefined,
-            notes: row.notes || undefined,
-          })
-          tpMap.set(row.purchase_id, list)
-        }
-        for (const p of purchases) {
-          const plist = tpMap.get(p.id)
-          if (plist && plist.length > 0) {
-            p.payments = plist
-          } else {
-            p.payments = [
-              {
-                paymentMethod: p.payment_method || "Cash",
-                amount: Number(p.received_amount) || 0,
-              },
-            ]
-          }
-        }
-      } catch (e) {
-        console.warn("Could not query transaction_payments for purchases:", e)
-      }
-    }
 
     return { success: true, data: purchases }
   } catch (error) {
