@@ -1454,10 +1454,6 @@ function buildJobCardAddressLines(sale: any) {
     addressLines.push(street);
   }
 
-  if (landmark) {
-    addressLines.push(`Landmark: ${landmark}`);
-  }
-
   const streetLower = street.toLowerCase();
   const locationParts: string[] = [];
   if (area && !streetLower.includes(area.toLowerCase())) {
@@ -1475,6 +1471,10 @@ function buildJobCardAddressLines(sale: any) {
 
   if (locationParts.length > 0) {
     addressLines.push(locationParts.join(', '));
+  }
+
+  if (landmark) {
+    addressLines.push(`Landmark: ${landmark}`);
   }
 
   return { addressLines, pincode };
@@ -1674,14 +1674,14 @@ export async function printJobCard(sale: any, currency = 'AED', businessInfo: an
         .header { display: flex; justify-content: flex-end; align-items: flex-start; margin-bottom: 15px; }
         .logo { max-width: 320px; max-height: 130px; object-fit: contain; }
         .section { margin-bottom: 20px; }
-        .to-section { font-size: 32px; font-weight: 900; margin-top: 10px; margin-bottom: 22px; }
-        .to-title { text-decoration: underline; font-size: 42px; font-weight: 900; margin-bottom: 12px; display: inline-block; }
-        .customer-name { font-size: 35px; font-weight: 900; text-transform: uppercase; margin-bottom: 10px; letter-spacing: 0.5px; }
-        .from-section { font-size: 26px; font-weight: 900; margin-top: 18px; }
-        .from-title { text-decoration: underline; font-size: 32px; font-weight: 900; margin-bottom: 10px; display: inline-block; }
+        .to-section { font-size: 30px; font-weight: 900; margin-top: 10px; margin-bottom: 22px; }
+        .to-title { text-decoration: underline; font-size: 38px; font-weight: 900; margin-bottom: 12px; display: inline-block; }
+        .customer-name { font-size: 30px; font-weight: 900; text-transform: uppercase; margin-bottom: 10px; letter-spacing: 0.5px; }
+        .from-section { font-size: 30px; font-weight: 900; margin-top: 18px; }
+        .from-title { text-decoration: underline; font-size: 38px; font-weight: 900; margin-bottom: 10px; display: inline-block; }
         .exec-name { font-size: 20px; font-weight: 400; color: #4b5563; margin-top: 4px; margin-bottom: 4px; }
-        .products-text { font-size: 22px; text-align: center; color: #000; margin-top: 25px; margin-bottom: 8px; font-weight: 800; }
-        .order-id { font-size: 30px; text-align: center; color: #000; font-weight: 900; }
+        .products-text { font-size: 18px; text-align: center; color: #000; margin-top: 25px; margin-bottom: 8px; font-weight: 800; }
+        .footer-info { font-size: 14px; text-align: center; color: #000; font-weight: 500; opacity: 0.5; margin-top: 30px; }
         p { margin: 6px 0; }
         hr { border: none; border-top: 3px dashed #000; margin: 22px 0; }
       </style>
@@ -1690,20 +1690,22 @@ export async function printJobCard(sale: any, currency = 'AED', businessInfo: an
       ${logoUrl ? `<div class="header"><img src="${logoUrl}" alt="Logo" class="logo" /></div>` : ''}
       
       <div class="section to-section">
-        <p class="to-title">To,</p>
+        <p class="to-title">To</p>
         <p class="customer-name">${currentSale.customer_name || 'N/A'}</p>
         ${addressLines.map(line => `<p>${line}</p>`).join('')}
-        ${pincode ? `<p>Pin:- ${pincode}</p>` : ''}
-        <p>Ph:- ${currentSale.customer_phone || 'N/A'}</p>
+        ${pincode ? `<p>Pin: ${pincode}</p>` : ''}
+        <p>Ph: ${currentSale.customer_phone || 'N/A'}</p>
       </div>
 
       <hr />
 
       <div class="section from-section">
-        <p class="from-title">From,</p>
-        <p>${fromName}</p>
-        <p>Pin:- 676503</p>
-        <p>Ph:- 9995442239</p>
+        <p class="from-title">From</p>
+        <!-- <p>${fromName}</p> -->
+        <p>Moto Cart Online</p>
+        <p>Kottakkal, Malappuram</p>
+        <p>Pin: 676503</p>
+        <p>Ph: +91 8089872576</p>
       </div>
 
       <hr />
@@ -1711,7 +1713,8 @@ export async function printJobCard(sale: any, currency = 'AED', businessInfo: an
       <div class="products-text">
         ${itemsText}
       </div>
-      <div class="order-id">
+      <div class="footer-info">
+        ${currentSale.staff_name || 'N/A'}<br/>
         Order ID: ${formattedOrderId}
       </div>
     </body>
@@ -1823,20 +1826,21 @@ export async function printBatchJobCards(sales: any[], currency = 'AED', busines
         ${logoUrl ? `<div class="header"><img src="${logoUrl}" alt="Logo" class="logo" /></div>` : ''}
 
         <div class="section to-section">
-          <p class="to-title">To,</p>
+          <p class="to-title">To</p>
           <p class="customer-name">${sale.customer_name || 'N/A'}</p>
           ${addressLines.map(line => `<p>${line}</p>`).join('')}
-          ${pincode ? `<p>Pin:- ${pincode}</p>` : ''}
-          <p>Ph:- ${sale.customer_phone || 'N/A'}</p>
+          ${pincode ? `<p>Pin: ${pincode}</p>` : ''}
+          <p>Ph: ${sale.customer_phone || 'N/A'}</p>
         </div>
 
         <hr />
 
         <div class="section from-section">
-          <p class="from-title">From,</p>
-          <p>${fromName}</p>
-          <p>Pin:- 676503</p>
-          <p>Ph:- 9995442239</p>
+          <p class="from-title">From</p>
+          <p>Moto Cart Online</p>
+          <p>Kottakkal, Malappuram</p>
+          <p>Pin: 676503</p>
+          <p>Ph: +91 8089872576</p>
         </div>
 
         <hr />
@@ -1844,7 +1848,8 @@ export async function printBatchJobCards(sales: any[], currency = 'AED', busines
         <div class="products-text">
           ${itemsText}
         </div>
-        <div class="order-id">
+        <div class="footer-info">
+          ${sale.staff_name || 'N/A'}<br/>
           Order ID: ${formattedOrderId}
         </div>
       </div>
@@ -1880,14 +1885,14 @@ export async function printBatchJobCards(sales: any[], currency = 'AED', busines
         .header { display: flex; justify-content: flex-end; align-items: flex-start; margin-bottom: 15px; }
         .logo { max-width: 320px; max-height: 130px; object-fit: contain; }
         .section { margin-bottom: 20px; }
-        .to-section { font-size: 32px; font-weight: 900; margin-top: 10px; margin-bottom: 22px; }
-        .to-title { text-decoration: underline; font-size: 42px; font-weight: 900; margin-bottom: 12px; display: inline-block; }
-        .customer-name { font-size: 35px; font-weight: 900; text-transform: uppercase; margin-bottom: 10px; letter-spacing: 0.5px; }
-        .from-section { font-size: 26px; font-weight: 900; margin-top: 18px; }
-        .from-title { text-decoration: underline; font-size: 32px; font-weight: 900; margin-bottom: 10px; display: inline-block; }
+        .to-section { font-size: 30px; font-weight: 900; margin-top: 10px; margin-bottom: 22px; }
+        .to-title { text-decoration: underline; font-size: 38px; font-weight: 900; margin-bottom: 12px; display: inline-block; }
+        .customer-name { font-size: 30px; font-weight: 900; text-transform: uppercase; margin-bottom: 10px; letter-spacing: 0.5px; }
+        .from-section { font-size: 30px; font-weight: 900; margin-top: 18px; }
+        .from-title { text-decoration: underline; font-size: 38px; font-weight: 900; margin-bottom: 10px; display: inline-block; }
         .exec-name { font-size: 20px; font-weight: 400; color: #4b5563; margin-top: 4px; margin-bottom: 4px; }
-        .products-text { font-size: 22px; text-align: center; color: #000; margin-top: 25px; margin-bottom: 8px; font-weight: 800; }
-        .order-id { font-size: 30px; text-align: center; color: #000; font-weight: 900; }
+        .products-text { font-size: 18px; text-align: center; color: #000; margin-top: 25px; margin-bottom: 8px; font-weight: 800; }
+        .footer-info { font-size: 14px; text-align: center; color: #000; font-weight: 500; opacity: 0.5; margin-top: 30px; }
         p { margin: 6px 0; }
         hr { border: none; border-top: 3px dashed #000; margin: 22px 0; }
       </style>
