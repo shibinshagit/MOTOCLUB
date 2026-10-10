@@ -715,6 +715,7 @@ export interface GetPaginatedSalesOptions {
   typeFilter?: "all" | "normal" | "job_card"
   cardFilter?: "all" | "pending" | "critical"
   searchTerm?: string
+  onlyPosUpdated?: boolean
 }
 
 export async function getPaginatedUserSales(deviceId: number, options: GetPaginatedSalesOptions = {}) {
@@ -736,6 +737,7 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
   const dateFrom = options.dateFrom || null
   const typeFilter = options.typeFilter || "all"
   const cardFilter = options.cardFilter || "all"
+  const onlyPosUpdated = options.onlyPosUpdated || false
 
   try {
     const result = await executeWithRetry(async () => {
@@ -831,6 +833,7 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
             OR (${cardFilter} = 'pending' AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned') AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled' AND LOWER(COALESCE(s.delivery_status, '')) NOT IN ('returned', 'failed') AND LOWER(COALESCE(s.delivery_status, 'pending')) != 'delivered')
             OR (${cardFilter} = 'critical' AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%') AND LOWER(COALESCE(s.fulfillment_type, '')) = 'ship' AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned') AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'pending') AND (LOWER(COALESCE(s.payment_status, '')) IN ('paid', 'completed') OR (s.total_amount > 0 AND s.received_amount >= s.total_amount)) AND LOWER(COALESCE(s.delivery_status, 'pending')) NOT IN ('pickup', 'direct', 'shipping', 'shipped', 'in transit', 'delivered', 'returned', 'failed'))
           )
+          AND (${onlyPosUpdated} = false OR s.is_pos_updated = true)
           AND (
             ${searchPattern}::text IS NULL
             OR LOWER(COALESCE(s.customer_name_override, c.name, '')) LIKE ${searchPattern}

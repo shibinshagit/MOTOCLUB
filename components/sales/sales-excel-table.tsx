@@ -173,6 +173,7 @@ interface SalesExcelTableProps {
   deviceId?: number
   onRefreshSales?: () => void
   globalDateRange?: { from?: string; to?: string }
+  onlyPosUpdated?: boolean
 }
 
 function TableSkeleton() {
@@ -214,6 +215,7 @@ export default function SalesExcelTable({
   deviceId,
   onRefreshSales,
   globalDateRange,
+  onlyPosUpdated,
 }: SalesExcelTableProps) {
   const { toast } = useToast()
   const [internalSearchTerm, setInternalSearchTerm] = useState("")
@@ -328,6 +330,7 @@ export default function SalesExcelTable({
           typeFilter,
           cardFilter,
           searchTerm: debouncedSearch,
+          onlyPosUpdated,
         }),
         getSalesSummaryCards(deviceId!, {
           dateFrom: globalDateRange?.from,

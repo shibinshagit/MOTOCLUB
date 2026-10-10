@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Loader2 } from "lucide-react"
-import { PurchaseManagerDashboard } from "@/components/purchase-manager/purchase-manager-dashboard"
+import Dashboard from "@/components/dashboard/dashboard"
 import { useAppDispatch, useAppSelector } from "@/store/hooks"
 import { selectDevice, loadFromStorage, clearDeviceData } from "@/store/slices/deviceSlice"
 import { clearStaff, selectActiveStaff, setStaff, activateStaff } from "@/store/slices/staffSlice"
@@ -99,9 +99,9 @@ function PurchaseManagerPageContent() {
   }
 
   return (
-    <PurchaseManagerDashboard 
-      staffName={activeStaff.name} 
-      onLogout={handleLogout} 
+    <Dashboard 
+      onLogout={handleLogout}
+      onlyPosUpdatedSales={true}
     />
   )
 }

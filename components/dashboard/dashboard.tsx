@@ -80,6 +80,7 @@ const DEFAULT_CONTENT_TAB: TabType = "sale"
 
 interface DashboardProps {
   onLogout?: () => void
+  onlyPosUpdatedSales?: boolean
 }
 
 // Fallback component for when a tab fails to load
@@ -104,7 +105,7 @@ function LoadingTab() {
   )
 }
 
-export function Dashboard({ onLogout }: DashboardProps) {
+export function Dashboard({ onLogout, onlyPosUpdatedSales }: DashboardProps) {
   const searchParams = useSearchParams()
   const tabParam = searchParams?.get("tab") as TabType | "home" | null
   const resolveTab = (param: TabType | "stock" | "home" | "sales-orders" | null): TabType => {
@@ -545,6 +546,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
               isAddModalOpen={activeTab === "sale" && isAddModalOpen}
               onModalClose={() => setIsAddModalOpen(false)}
               mode={salesNavView === "entry" ? "entry" : "info"}
+              onlyPosUpdatedSales={onlyPosUpdatedSales}
             />
           )
         case "purchase":

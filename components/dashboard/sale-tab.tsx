@@ -75,6 +75,7 @@ interface SaleTabProps {
   isAddModalOpen?: boolean
   onModalClose?: () => void
   mode?: "entry" | "info"
+  onlyPosUpdatedSales?: boolean
 }
 
 interface ProductRow {
@@ -166,7 +167,7 @@ function serializeSaleRecord(sale: any) {
   }
 }
 
-export default function SaleTab({ userId, companyId, isAddModalOpen = false, onModalClose, mode = "entry" }: SaleTabProps) {
+export default function SaleTab({ userId, companyId, isAddModalOpen = false, onModalClose, mode = "entry", onlyPosUpdatedSales = false }: SaleTabProps) {
   // Redux state
   const dispatch = useDispatch()
   const deviceId = useSelector(selectDeviceId)
@@ -1745,6 +1746,7 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
       onEditSale={handleEditSale}
       deviceId={deviceId || 0}
       globalDateRange={globalDateRange}
+      onlyPosUpdated={onlyPosUpdatedSales}
       onRefreshSales={() => fetchSalesForRange(globalDateRange.from, globalDateRange.to, true)}
     />
   )
