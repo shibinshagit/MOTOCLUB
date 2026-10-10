@@ -24,6 +24,7 @@ import {
   FileText,
   RotateCcw,
   LayoutDashboard,
+  ClipboardList,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/components/ui/use-toast"
@@ -56,6 +57,7 @@ import ReturnsTab from "./returns-tab"
 import AdminDashboardView from "@/components/admin/dashboard/admin-dashboard-view"
 import GlobalDateFilter from "./global-date-filter"
 import StaffAuthModal from "../staff/staff-auth-modal"
+import ProductsToPurchaseTab from "@/components/purchase-manager/products-to-purchase-tab"
 import { BrandLogo } from "@/components/brand-logo"
 import { useStaffRestrictions } from "@/hooks/use-staff-restrictions"
 import { type StaffPageId } from "@/lib/staff-restrictions"
@@ -74,7 +76,7 @@ import { activateStaff, clearStaff, selectActiveStaff, setStaff } from "@/store/
 import { getStaffForAuthentication } from "@/app/actions/staff-actions"
 import { selectDateRange } from "@/store/slices/dateRangeSlice"
 
-type TabType = "sale" | "sales" | "sales-orders" | "purchase" | "product" | "trending" | "customer" | "transfer" | "accounting" | "supplier" | "platform" | "master" | "attendance" | "requests" | "returns" | "admin-dashboard"
+type TabType = "sale" | "sales" | "sales-orders" | "purchase" | "product" | "trending" | "customer" | "transfer" | "accounting" | "supplier" | "platform" | "master" | "attendance" | "requests" | "returns" | "admin-dashboard" | "products-to-purchase"
 
 const DEFAULT_CONTENT_TAB: TabType = "sale"
 
@@ -113,7 +115,7 @@ export function Dashboard({ onLogout, onlyPosUpdatedSales }: DashboardProps) {
     if (param === "sales" || param === "sales-orders" || param === "home") return "sale"
     if (
       param &&
-      ["sale", "sales", "purchase", "product", "trending", "customer", "transfer", "accounting", "supplier", "platform", "master", "attendance", "requests", "returns", "admin-dashboard"].includes(
+      ["sale", "sales", "purchase", "product", "trending", "customer", "transfer", "accounting", "supplier", "platform", "master", "attendance", "requests", "returns", "admin-dashboard", "products-to-purchase"].includes(
         param,
       )
     ) {
@@ -162,6 +164,11 @@ export function Dashboard({ onLogout, onlyPosUpdatedSales }: DashboardProps) {
       if (tabId === "admin-dashboard") {
         return Boolean(isAdminSession)
       }
+      
+      // Allow products-to-purchase if onlyPosUpdatedSales is true
+      if (tabId === "products-to-purchase") {
+        return true
+      }
 
       // 1. Device level check (Super Admin restrictions)
       const deviceAllowedPagesStr = isAdminSession
@@ -187,6 +194,7 @@ export function Dashboard({ onLogout, onlyPosUpdatedSales }: DashboardProps) {
   // Navigation items configuration
   const navItems = [
     { id: "sale", icon: <Receipt className="h-4 w-4" />, label: "Sales" },
+    ...(onlyPosUpdatedSales ? [{ id: "products-to-purchase", icon: <ClipboardList className="h-4 w-4" />, label: "Products to Purchase" }] : []),
     { id: "purchase", icon: <Receipt className="h-4 w-4" />, label: "Purchase" },
     { id: "customer", icon: <User className="h-4 w-4" />, label: "Customers" },
     { id: "attendance", icon: <CalendarDays className="h-4 w-4" />, label: "Attendance" },
@@ -198,7 +206,7 @@ export function Dashboard({ onLogout, onlyPosUpdatedSales }: DashboardProps) {
   ]
 
   // Primary tabs for bottom navigation (most used)
-  const primaryTabs = ["sale", "purchase", "master"]
+  const primaryTabs = ["sale", ...(onlyPosUpdatedSales ? ["products-to-purchase"] : []), "purchase", "master"]
   const secondaryTabs = ["customer", "attendance", "supplier", "transfer", "platform", "admin-dashboard"]
 
   // Filtered navigation items based on permission
@@ -547,6 +555,13 @@ export function Dashboard({ onLogout, onlyPosUpdatedSales }: DashboardProps) {
               onModalClose={() => setIsAddModalOpen(false)}
               mode={salesNavView === "entry" ? "entry" : "info"}
               onlyPosUpdatedSales={onlyPosUpdatedSales}
+            />
+          )
+        case "products-to-purchase":
+          return (
+            <ProductsToPurchaseTab
+              deviceId={deviceId!}
+              globalDateRange={dateRangeRef.current}
             />
           )
         case "purchase":

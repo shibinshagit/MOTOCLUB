@@ -3367,3 +3367,60 @@ export async function getOrCreateTrackingToken(saleId: number) {
     return { success: false, message: error.message || "Failed to generate tracking token", trackingToken: null }
   }
 }
+
+export async function getProductsToPurchase(deviceId: number, options: { dateFrom?: string, dateTo?: string } = {}) {
+  try {
+    resetConnectionState()
+    const endExclusive = options.dateTo ? getExclusiveEndDate(options.dateTo) : null;
+    const dateFrom = options.dateFrom || null;
+
+    const data = await sql`
+      WITH RequiredItems AS (
+        SELECT 
+          si.product_id,
+          si.product_variant_id,
+          SUM(si.quantity) as required_quantity
+        FROM sale_items si
+        JOIN sales s ON si.sale_id = s.id
+        WHERE s.device_id = ${deviceId}
+          AND s.is_pos_updated = true
+          AND s.status NOT IN ('Cancelled', 'Returned')
+          AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
+          AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
+          AND si.product_id IS NOT NULL
+        GROUP BY si.product_id, si.product_variant_id
+      )
+      SELECT 
+        r.product_id,
+        r.product_variant_id,
+        p.name as product_name,
+        p.image_url,
+        pv.name as variant_name,
+        pv.sku as variant_sku,
+        r.required_quantity,
+        CASE 
+          WHEN r.product_variant_id IS NOT NULL THEN
+            COALESCE((
+              SELECT SUM(pbds.stock)
+              FROM product_batch_device_stock pbds
+              JOIN product_batches pb ON pb.id = pbds.batch_id
+              WHERE pb.product_variant_id = r.product_variant_id AND pbds.device_id = ${deviceId}
+            ), 0)
+          ELSE
+            COALESCE((
+              SELECT SUM(pds.stock)
+              FROM product_device_stock pds
+              WHERE pds.product_id = r.product_id AND pds.device_id = ${deviceId}
+            ), 0)
+        END as current_stock
+      FROM RequiredItems r
+      JOIN products p ON r.product_id = p.id
+      LEFT JOIN product_variants pv ON r.product_variant_id = pv.id
+      ORDER BY p.name ASC, pv.name ASC
+    `
+    return { success: true, data: data as any[] }
+  } catch (error: any) {
+    console.error("Failed to get products to purchase:", error)
+    return { success: false, message: error.message }
+  }
+}
