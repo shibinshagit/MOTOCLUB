@@ -18,9 +18,10 @@ async function generatePasswordHash(password: string): Promise<string> {
   return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("")
 }
 
-function normalizeStaffRole(role?: string): "admin" | "staff" | "partner" {
+function normalizeStaffRole(role?: string): "admin" | "staff" | "partner" | "purchase_manager" {
   if (role === "admin") return "admin"
   if (role === "partner") return "partner"
+  if (role === "purchase_manager") return "purchase_manager"
   return "staff"
 }
 
@@ -29,19 +30,19 @@ function normalizeRestrictedPages(pages?: StaffPageId[]): StaffPageId[] {
 }
 
 function normalizeRestrictedValues(
-  role: "admin" | "staff" | "partner",
+  role: "admin" | "staff" | "partner" | "purchase_manager",
   values?: StaffValueRestriction[],
 ): StaffValueRestriction[] {
-  if (role === "admin" || role === "partner") return []
+  if (role === "admin" || role === "partner" || role === "purchase_manager") return []
   const parsed = parseStringArray<StaffValueRestriction>(values)
   return parsed.length > 0 ? parsed : [...DEFAULT_STAFF_VALUE_RESTRICTIONS]
 }
 
 function normalizeRestrictedValuesForUpdate(
-  role: "admin" | "staff" | "partner",
+  role: "admin" | "staff" | "partner" | "purchase_manager",
   values?: StaffValueRestriction[],
 ): StaffValueRestriction[] {
-  if (role === "admin" || role === "partner") return []
+  if (role === "admin" || role === "partner" || role === "purchase_manager") return []
   return parseStringArray<StaffValueRestriction>(values)
 }
 
@@ -110,7 +111,7 @@ export async function updateStaff(
     name: string
     phone: string
     email?: string
-    role?: "admin" | "staff" | "partner"
+    role?: "admin" | "staff" | "partner" | "purchase_manager"
     restrictedPages?: StaffPageId[]
     restrictedValues?: StaffValueRestriction[]
     position: string
@@ -257,7 +258,7 @@ export async function addStaff(staffData: {
   name: string
   phone: string
   email?: string
-  role?: "admin" | "staff" | "partner"
+  role?: "admin" | "staff" | "partner" | "purchase_manager"
   restrictedPages?: StaffPageId[]
   restrictedValues?: StaffValueRestriction[]
   position: string

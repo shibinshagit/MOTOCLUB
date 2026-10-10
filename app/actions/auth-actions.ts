@@ -176,8 +176,8 @@ export async function login(formData: FormData) {
         `
       }
 
-      const role = staff.role === "admin" ? "ADMIN" : staff.role === "partner" ? "PARTNER" : "STAFF"
-      const redirect = staff.role === "partner" ? "/partner/dashboard" : role === "STAFF" ? "/staff/dashboard" : "/dashboard"
+      const role = staff.role === "admin" ? "ADMIN" : staff.role === "partner" ? "PARTNER" : staff.role === "purchase_manager" ? "PURCHASE_MANAGER" : "STAFF"
+      const redirect = staff.role === "partner" ? "/partner/dashboard" : staff.role === "purchase_manager" ? "/purchase-manager/dashboard" : role === "STAFF" ? "/staff/dashboard" : "/dashboard"
       const deviceLogo = staff.device_logo?.trim() || null
 
       return {
