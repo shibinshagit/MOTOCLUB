@@ -2536,17 +2536,7 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
                                 />
                               </div>
 
-                                <SaleShippingSection
-                                  deviceId={saleDrafts.find(d => d.id === activeDraftId)?.saleDeviceId || deviceId}
-                                  value={shipping}
-                                  onChange={setShipping}
-                                  customerAddress={customerAddress}
-                                  currency={deviceCurrencyState}
-                                  className="mt-2"
-                                  isJobCard={originalSaleStatus === "Pending" || (shipping.trackingId || "").startsWith("JC-")}
-                                  customerName={customerName}
-                                  customerPhone={customerPhone}
-                                />
+
                             </div>
                           </div>
 

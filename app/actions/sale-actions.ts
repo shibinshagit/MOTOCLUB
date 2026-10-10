@@ -742,6 +742,7 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
       const sales = await sql`
         SELECT 
           s.id,
+          s.is_pos_updated,
           COALESCE(s.sale_date, s.created_at) as sale_date,
           s.status,
           s.payment_status,
@@ -1645,7 +1646,7 @@ export async function addSale(saleData: any) {
         packaging_type_id, packaging_type_name,
         tracking_id, shipping_address, shipping_city, shipping_district, shipping_state, shipping_street, shipping_landmark, shipping_address_type, shipping_pincode, weight_kg, length_cm, width_cm, height_cm,
         courier_paid_extra, expense_courier, expense_packing, shipped_at, delivered_at, shipping_notes,
-        advance_amount, balance_amount
+        advance_amount, balance_amount, is_pos_updated
       )
       VALUES (
         ${saleData.customerId || null},
@@ -1687,7 +1688,8 @@ export async function addSale(saleData: any) {
         ${shipping.delivered_at},
         ${shipping.shipping_notes},
         ${advanceAmount},
-        ${balanceAmount}
+        ${balanceAmount},
+        true
       )
       RETURNING id
     `
@@ -2388,6 +2390,7 @@ export async function updateSale(saleData: any) {
                 payment_status = ${changes.newPaymentStatus},
                 sale_date = ${changes.newDate},
                 updated_at = ${new Date()},
+                is_pos_updated = true,
                 payment_method = ${saleData.paymentMethod || "Cash"},
                 discount = ${changes.newDiscount},
                 received_amount = ${changes.newReceived},
@@ -2432,6 +2435,7 @@ export async function updateSale(saleData: any) {
                 payment_status = ${changes.newPaymentStatus},
                 sale_date = ${changes.newDate},
                 updated_at = ${new Date()},
+                is_pos_updated = true,
                 payment_method = ${saleData.paymentMethod || "Cash"},
                 discount = ${changes.newDiscount},
                 received_amount = ${changes.newReceived},

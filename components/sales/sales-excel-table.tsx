@@ -1186,13 +1186,18 @@ export default function SalesExcelTable({
                             )}
                           </button>
                         </td>
-                        <td className="whitespace-nowrap px-2 py-1.5 text-xs text-muted-foreground">
+                        <td className="whitespace-nowrap px-2 py-1.5 text-xs text-muted-foreground text-center">
+                          {!sale.is_pos_updated && (
+                            <span className="text-red-600 font-bold mr-1 text-base leading-none" title="POS Not Updated">!</span>
+                          )}
                           {(page - 1) * pageSize + index + 1}
                         </td>
                         <td className="whitespace-nowrap px-3 py-1.5 font-semibold text-slate-800">
                           <div className="flex flex-col gap-0.5">
                             <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="font-bold text-blue-700">#{sale.id}</span>
+                              <span className="font-bold text-blue-700 flex items-center">
+                                #{sale.id}
+                              </span>
                               {isJobCard ? (
                                 <span className="inline-flex items-center rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold text-blue-800 border border-blue-200">
                                   JOB CARD
@@ -1528,7 +1533,12 @@ export default function SalesExcelTable({
                           }}
                         />
                         <div className="flex items-center gap-1.5 flex-wrap min-w-0">
-                          <span className="font-extrabold text-blue-700 text-sm">#{sale.id}</span>
+                          <span className="font-extrabold text-blue-700 text-sm flex items-center">
+                            {!sale.is_pos_updated && (
+                              <span className="text-red-600 font-bold mr-1 text-base leading-none" title="POS Not Updated">!</span>
+                            )}
+                            #{sale.id}
+                          </span>
                           {isJobCard ? (
                             <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold text-blue-800 border border-blue-200">
                               JOB CARD

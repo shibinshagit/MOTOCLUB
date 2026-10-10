@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useTransition } from "react"
+import React, { useState, useEffect, useTransition } from "react"
 import { format } from "date-fns"
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import Link from "next/link"
@@ -10,10 +10,13 @@ import {
   updatePartnerSaleDetails,
   updatePartnerReplacementDeliveryStatus,
   getFilteredPartnerOrders,
+  updatePartnerFullShippingDetails,
 } from "@/app/actions/partner-actions"
+import { mapSaleShippingFromRecord, type SaleShippingInput } from "@/lib/sale-shipping"
+import SaleShippingSection from "@/components/sales/sale-shipping-section"
 import { notifySuccess, notifyError } from "@/lib/notifications"
 import { useToast } from "@/components/ui/use-toast"
-import { Loader2, Phone, RefreshCw, FileText, Printer, Package, ArrowRight, FilterX, Info, ExternalLink } from "lucide-react"
+import { Loader2, Phone, RefreshCw, FileText, Printer, Package, ArrowRight, FilterX, Info, ExternalLink, ChevronDown, ChevronRight, Save } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 
@@ -33,6 +36,7 @@ interface PartnerSalesTableProps {
   pendingReplacementsCount?: number
   hideOrderTypeFilter?: boolean
   onlyReplacements?: boolean
+  deviceId?: number | null
 }
 
 export function PartnerSalesTable({
@@ -46,6 +50,7 @@ export function PartnerSalesTable({
   pendingReplacementsCount = 0,
   hideOrderTypeFilter = false,
   onlyReplacements = false,
+  deviceId,
 }: PartnerSalesTableProps) {
   const router = useRouter()
   const pathname = usePathname()
@@ -68,6 +73,15 @@ export function PartnerSalesTable({
   const [loadingMap, setLoadingMap] = useState<Record<string, boolean>>({})
   const [directConfirmSaleId, setDirectConfirmSaleId] = useState<number | null>(null)
   const [selectedReplacementModal, setSelectedReplacementModal] = useState<any | null>(null)
+  const [fulfillmentModal, setFulfillmentModal] = useState<{
+    isOpen: boolean
+    itemKey: string
+    orderId: number
+    isReplacement: boolean
+    order: any
+    shippingData: SaleShippingInput
+  } | null>(null)
+  const [savingFulfillmentId, setSavingFulfillmentId] = useState<string | null>(null)
 
   // Initialize filter state from URL search params
   const [filters, setFilters] = useState<PartnerFilterState>({
@@ -215,6 +229,41 @@ export function PartnerSalesTable({
     setPage(1)
     pushQueryParams(resetState, 1)
     executeFilterFetch(resetState, 1)
+  }
+
+  const openFulfillmentModal = (itemKey: string, order: any, isReplacement: boolean) => {
+    setFulfillmentModal({
+      isOpen: true,
+      itemKey,
+      orderId: order.id,
+      isReplacement,
+      order,
+      shippingData: mapSaleShippingFromRecord(order)
+    })
+  }
+
+  const handleCloseFulfillmentModal = () => {
+    setFulfillmentModal(null)
+  }
+
+  const handleSaveFulfillment = async () => {
+    if (!fulfillmentModal) return
+    
+    const { itemKey, orderId, isReplacement, shippingData } = fulfillmentModal
+    setSavingFulfillmentId(itemKey)
+    try {
+      const result = await updatePartnerFullShippingDetails(orderId, isReplacement, shippingData)
+      if (result.success) {
+        notifySuccess(toast, "Fulfillment details saved successfully", "Success")
+        handleCloseFulfillmentModal()
+      } else {
+        notifyError(toast, result.message || "Failed to save fulfillment details")
+      }
+    } catch (err) {
+      notifyError(toast, "An error occurred while saving fulfillment details")
+    } finally {
+      setSavingFulfillmentId(null)
+    }
   }
 
   const handleRefresh = () => {
@@ -625,6 +674,17 @@ export function PartnerSalesTable({
                         </div>
                       )}
                     </div>
+
+                    {/* Fulfillment Details Toggle */}
+                    <div className="pt-2 border-t border-purple-100">
+                      <button
+                        onClick={() => openFulfillmentModal(itemKey, order, isReplacement)}
+                        className="w-full flex items-center justify-center gap-1 py-1.5 text-xs font-bold text-purple-700 bg-purple-100 hover:bg-purple-200 rounded-lg transition-colors"
+                      >
+                        <Package className="h-4 w-4" />
+                        Edit Fulfillment Details
+                      </button>
+                    </div>
                   </div>
                 )
               }
@@ -776,6 +836,17 @@ export function PartnerSalesTable({
                       />
                     </div>
                   </div>
+
+                  {/* Fulfillment Details Toggle */}
+                  <div className="pt-2 border-t border-gray-100">
+                    <button
+                      onClick={() => openFulfillmentModal(itemKey, order, isReplacement)}
+                      className="w-full flex items-center justify-center gap-1 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+                    >
+                      <Package className="h-4 w-4" />
+                      Edit Fulfillment Details
+                    </button>
+                  </div>
                 </div>
               )
             })}
@@ -804,9 +875,10 @@ export function PartnerSalesTable({
                   const itemKey = isReplacement ? `rs-${order.id}` : `sale-${order.id}`
 
                   return (
+                    <React.Fragment key={itemKey}>
                     <tr
-                      key={itemKey}
-                      className={isReplacement ? "bg-purple-50/25 hover:bg-purple-50/50 transition-colors" : "hover:bg-gray-50/50 transition-colors"}
+                      onClick={() => openFulfillmentModal(itemKey, order, isReplacement)}
+                      className={`cursor-pointer ${isReplacement ? "bg-purple-50/25 hover:bg-purple-50/50" : "hover:bg-gray-50/50"} transition-colors`}
                     >
                       {/* Order / Date */}
                       <td className="px-3 py-3 lg:px-4 text-gray-600 font-medium whitespace-nowrap">
@@ -1020,6 +1092,8 @@ export function PartnerSalesTable({
                         </div>
                       </td>
                     </tr>
+
+                    </React.Fragment>
                   )
                 })}
               </tbody>
@@ -1151,6 +1225,52 @@ export function PartnerSalesTable({
               className="bg-indigo-600 hover:bg-indigo-700 text-white"
             >
               Confirm Direct Delivery
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!fulfillmentModal} onOpenChange={(open) => !open && handleCloseFulfillmentModal()}>
+        <DialogContent className="max-w-4xl p-0 overflow-hidden bg-slate-50 sm:rounded-xl">
+          <DialogHeader className="bg-white border-b border-slate-200 px-6 py-4 flex flex-row items-center justify-between sticky top-0 z-10">
+            <div>
+              <DialogTitle className="text-lg font-bold text-slate-800">
+                Fulfillment Details
+              </DialogTitle>
+              <DialogDescription className="text-xs text-slate-500 mt-1">
+                {fulfillmentModal?.isReplacement ? "Replacement Shipment" : "Normal Order"} 
+                <span className="font-semibold text-slate-700 ml-1">#{fulfillmentModal?.order?.replacement_number || fulfillmentModal?.orderId}</span>
+              </DialogDescription>
+            </div>
+          </DialogHeader>
+          <div className="p-6 max-h-[70vh] overflow-y-auto">
+            {fulfillmentModal && (
+              <SaleShippingSection
+                deviceId={deviceId}
+                value={fulfillmentModal.shippingData}
+                onChange={(val) => setFulfillmentModal(prev => prev ? { ...prev, shippingData: val } : null)}
+                customerAddress={fulfillmentModal.order.customer_address}
+                customerName={fulfillmentModal.order.customer_name}
+                customerPhone={fulfillmentModal.order.customer_phone}
+                isJobCard={false}
+              />
+            )}
+          </div>
+          <DialogFooter className="bg-white border-t border-slate-200 px-6 py-4 flex flex-row justify-end gap-2 sticky bottom-0 z-10">
+            <Button 
+              variant="outline" 
+              onClick={handleCloseFulfillmentModal}
+              disabled={!!savingFulfillmentId}
+            >
+              Back
+            </Button>
+            <Button 
+              onClick={handleSaveFulfillment}
+              disabled={!!savingFulfillmentId}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white gap-2"
+            >
+              {savingFulfillmentId ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              Save Details
             </Button>
           </DialogFooter>
         </DialogContent>

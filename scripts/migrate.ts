@@ -1188,6 +1188,7 @@ async function upgradeLegacyColumns() {
     ["sales.sync_attempts", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS sync_attempts INTEGER DEFAULT 1`],
     ["sales.last_sync_error", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS last_sync_error TEXT`],
     ["sales.tracking_token", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS tracking_token VARCHAR(255)`],
+    ["sales.is_pos_updated", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS is_pos_updated BOOLEAN DEFAULT false`],
     ["orders.sync_status", () => sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS sync_status VARCHAR(50) DEFAULT 'PENDING'`],
     ["orders.synced_at", () => sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS synced_at TIMESTAMP`],
     ["orders.synced_sale_id", () => sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS synced_sale_id INTEGER`],

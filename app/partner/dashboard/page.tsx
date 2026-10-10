@@ -25,6 +25,7 @@ export default async function PartnerDashboardPage({
       s.name as partner_name,
       d.name as device_name,
       c.name as company_name,
+      d.id as device_id,
       d.logo_url as device_logo_url,
       s.linked_partner_id
     FROM staff s
@@ -188,6 +189,7 @@ export default async function PartnerDashboardPage({
             initialPageSize={20}
             initialTotalPages={totalPages}
             pendingReplacementsCount={pendingReplacementsCount}
+            deviceId={data.device_id}
           />
         </div>
       </div>

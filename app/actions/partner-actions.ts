@@ -979,3 +979,59 @@ export async function updatePartnerReplacementDeliveryStatus(
     }
   }
 }
+
+export async function updatePartnerFullShippingDetails(orderId: number, isReplacement: boolean, shippingData: any) {
+  try {
+    const table = isReplacement ? sql`replacement_shipments` : sql`sales`;
+    
+    // Convert to DB snake_case fields
+    // shippingData has: courierPartnerId, courierServiceId, courierServiceName, trackingId, 
+    // packagingTypeId, weightKg, lengthCm, widthCm, heightCm, 
+    // courierPaidExtra, expenseCourier, expensePacking, shippingNotes, shippingAddress, etc.
+    
+    const addressPatch = shippingData.shippingAddress ? sql`, shipping_address = ${shippingData.shippingAddress}` : sql``;
+    
+    // Let's do a dynamic update. It's safer to just specify all known fields.
+    if (isReplacement) {
+      await sql`
+        UPDATE replacement_shipments
+        SET 
+          courier_partner_id = ${shippingData.courierPartnerId || null},
+          courier_service_id = ${shippingData.courierServiceId || null},
+          courier_service_name = ${shippingData.courierServiceName || null},
+          tracking_id = ${shippingData.trackingId || null},
+          status = COALESCE(${shippingData.deliveryStatus}, status),
+          updated_at = NOW()
+        WHERE id = ${orderId}
+      `;
+    } else {
+      await sql`
+        UPDATE sales
+        SET 
+          courier_partner_id = ${shippingData.courierPartnerId || null},
+          courier_service_id = ${shippingData.courierServiceId || null},
+          courier_service_name = ${shippingData.courierServiceName || null},
+          tracking_id = ${shippingData.trackingId || null},
+          packaging_type_id = ${shippingData.packagingTypeId || null},
+          weight_kg = ${shippingData.weightKg || null},
+          length_cm = ${shippingData.lengthCm || null},
+          width_cm = ${shippingData.widthCm || null},
+          height_cm = ${shippingData.heightCm || null},
+          courier_paid_extra = ${shippingData.courierPaidExtra || 0},
+          expense_courier = ${shippingData.expenseCourier || 0},
+          expense_packing = ${shippingData.expensePacking || 0},
+          shipping_notes = ${shippingData.shippingNotes || null},
+          shipping_address = ${shippingData.shippingAddress || null},
+          fulfillment_type = ${shippingData.fulfillmentType || 'ship'},
+          delivery_status = COALESCE(${shippingData.deliveryStatus}, delivery_status),
+          updated_at = NOW()
+        WHERE id = ${orderId}
+      `;
+    }
+    
+    return { success: true, message: "Fulfillment details saved successfully" };
+  } catch (err) {
+    console.error("updatePartnerFullShippingDetails error", err);
+    return { success: false, message: "Failed to save fulfillment details" };
+  }
+}

@@ -118,8 +118,18 @@ export function SplitPaymentInput({
     }
   }, [hasCod, isEditMode, paymentStatus, onPaymentStatusChange])
 
+  const prevPaymentStatus = React.useRef(paymentStatus)
+
   useEffect(() => {
-    if (paymentStatus === "Pending" || paymentStatus === "Cancelled") {
+    const statusChangedToPaid = 
+      (paymentStatus === "Paid" || paymentStatus === "Completed") && 
+      (prevPaymentStatus.current !== "Paid" && prevPaymentStatus.current !== "Completed")
+      
+    const statusChangedToPending = 
+      (paymentStatus === "Pending" || paymentStatus === "Cancelled") && 
+      (prevPaymentStatus.current !== "Pending" && prevPaymentStatus.current !== "Cancelled")
+
+    if (statusChangedToPending) {
       const allZero = rows.every((r) => Number(r.amount) === 0)
       if (!allZero) {
         const updated = rows.map((r) => ({ ...r, amount: 0 }))
@@ -127,7 +137,7 @@ export function SplitPaymentInput({
         // eslint-disable-next-line react-hooks/exhaustive-deps
         notifyParent(updated)
       }
-    } else if ((paymentStatus === "Paid" || paymentStatus === "Completed") && (!hasCod || isEditMode)) {
+    } else if (statusChangedToPaid && (!hasCod || isEditMode)) {
       const totalAllocatedVal = rows.reduce((sum, r) => sum + (Number(r.amount) || 0), 0)
       if (totalAllocatedVal !== totalAmount && totalAmount > 0) {
         const updated = [
@@ -143,6 +153,7 @@ export function SplitPaymentInput({
         notifyParent(updated)
       }
     }
+    prevPaymentStatus.current = paymentStatus
   }, [paymentStatus, totalAmount, hasCod, isEditMode])
 
   // Total amount allocated across all payment methods (including COD)
@@ -280,7 +291,7 @@ export function SplitPaymentInput({
                 Method #{index + 1}
               </Label>
               <select
-                disabled={disabled || isPendingOrCancelled}
+                disabled={disabled}
                 className="flex h-8 w-full items-center justify-between rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-900 focus:outline-none focus:ring-1 focus:ring-slate-400 disabled:opacity-50"
                 value={row.paymentMethod}
                 onChange={(e) =>
@@ -301,15 +312,14 @@ export function SplitPaymentInput({
               </Label>
               <div className="relative">
                 <Input
-                  disabled={disabled || isPendingOrCancelled}
+                  disabled={disabled}
                   type="number"
                   min="0"
                   step="0.01"
                   placeholder="0.00"
-                  value={row.amount === 0 && row.amount.toString() === "0" ? "" : row.amount}
+                  value={row.amount === 0 ? "" : row.amount}
                   onChange={(e) => {
-                    const val = e.target.value === "" ? 0 : Number.parseFloat(e.target.value)
-                    handleRowChange(row.rowId, "amount", isNaN(val) ? 0 : val)
+                    handleRowChange(row.rowId, "amount", e.target.value)
                   }}
                   className="h-8 text-xs bg-white border-gray-300 text-gray-900 pr-2 focus-visible:ring-1"
                 />
@@ -321,7 +331,7 @@ export function SplitPaymentInput({
                 Reference No. (Optional)
               </Label>
               <Input
-                disabled={disabled || isPendingOrCancelled}
+                disabled={disabled}
                 type="text"
                 placeholder="Ref / Transaction ID"
                 value={row.referenceNumber || ""}
@@ -332,7 +342,7 @@ export function SplitPaymentInput({
               />
             </div>
 
-            {rows.length > 1 && !disabled && !isPendingOrCancelled && (
+            {rows.length > 1 && !disabled && (
               <Button
                 type="button"
                 variant="ghost"
@@ -348,7 +358,7 @@ export function SplitPaymentInput({
         ))}
       </div>
 
-      {!disabled && !isPendingOrCancelled && (
+      {!disabled && (
         <Button
           type="button"
           variant="outline"
