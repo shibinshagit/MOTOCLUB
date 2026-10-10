@@ -83,6 +83,7 @@ const DEFAULT_CONTENT_TAB: TabType = "sale"
 interface DashboardProps {
   onLogout?: () => void
   onlyPosUpdatedSales?: boolean
+  hideProductsToPurchaseTab?: boolean
 }
 
 // Fallback component for when a tab fails to load
@@ -107,7 +108,7 @@ function LoadingTab() {
   )
 }
 
-export function Dashboard({ onLogout, onlyPosUpdatedSales }: DashboardProps) {
+export function Dashboard({ onLogout, onlyPosUpdatedSales, hideProductsToPurchaseTab }: DashboardProps) {
   const searchParams = useSearchParams()
   const tabParam = searchParams?.get("tab") as TabType | "home" | null
   const resolveTab = (param: TabType | "stock" | "home" | "sales-orders" | null): TabType => {
@@ -165,9 +166,9 @@ export function Dashboard({ onLogout, onlyPosUpdatedSales }: DashboardProps) {
         return Boolean(isAdminSession)
       }
       
-      // Allow products-to-purchase if onlyPosUpdatedSales is true
+      // Allow products-to-purchase if onlyPosUpdatedSales is true and not explicitly hidden
       if (tabId === "products-to-purchase") {
-        return true
+        return Boolean(onlyPosUpdatedSales && !hideProductsToPurchaseTab)
       }
 
       // 1. Device level check (Super Admin restrictions)
@@ -194,7 +195,7 @@ export function Dashboard({ onLogout, onlyPosUpdatedSales }: DashboardProps) {
   // Navigation items configuration
   const navItems = [
     { id: "sale", icon: <Receipt className="h-4 w-4" />, label: "Sales" },
-    ...(onlyPosUpdatedSales ? [{ id: "products-to-purchase", icon: <ClipboardList className="h-4 w-4" />, label: "Products to Purchase" }] : []),
+    ...(onlyPosUpdatedSales && !hideProductsToPurchaseTab ? [{ id: "products-to-purchase", icon: <ClipboardList className="h-4 w-4" />, label: "Products to Purchase" }] : []),
     { id: "purchase", icon: <Receipt className="h-4 w-4" />, label: "Purchase" },
     { id: "customer", icon: <User className="h-4 w-4" />, label: "Customers" },
     { id: "attendance", icon: <CalendarDays className="h-4 w-4" />, label: "Attendance" },
@@ -206,7 +207,7 @@ export function Dashboard({ onLogout, onlyPosUpdatedSales }: DashboardProps) {
   ]
 
   // Primary tabs for bottom navigation (most used)
-  const primaryTabs = ["sale", ...(onlyPosUpdatedSales ? ["products-to-purchase"] : []), "purchase", "master"]
+  const primaryTabs = ["sale", ...(onlyPosUpdatedSales && !hideProductsToPurchaseTab ? ["products-to-purchase"] : []), "purchase", "master"]
   const secondaryTabs = ["customer", "attendance", "supplier", "transfer", "platform", "admin-dashboard"]
 
   // Filtered navigation items based on permission

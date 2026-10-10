@@ -367,10 +367,12 @@ export function StaffProfileModal({
                         ? "border-amber-300 bg-amber-100 text-amber-800 font-semibold"
                         : staffMember.role === "purchase_manager"
                         ? "border-indigo-300 bg-indigo-100 text-indigo-800 font-semibold"
+                        : staffMember.role === "logistics"
+                        ? "border-emerald-300 bg-emerald-100 text-emerald-800 font-semibold"
                         : "border-blue-300 bg-blue-100 text-blue-800 font-semibold"
                     }
                   >
-                    {staffMember.role === "purchase_manager" ? "Purchase Manager" : staffMember.role || "Staff"}
+                    {staffMember.role === "purchase_manager" ? "Purchase Manager" : staffMember.role === "logistics" ? "Logistics" : staffMember.role || "Staff"}
                   </Badge>
                   {staffMember.status && (
                     <Badge
