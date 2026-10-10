@@ -32,6 +32,8 @@ export default function LoginForm() {
         router.replace("/staff/dashboard")
       } else if (device.user.role === "PARTNER") {
         router.replace("/partner/dashboard")
+      } else if (device.user.role === "PURCHASE_MANAGER") {
+        router.replace("/purchase-manager/dashboard")
       } else {
         router.replace("/dashboard")
       }

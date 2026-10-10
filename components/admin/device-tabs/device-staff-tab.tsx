@@ -32,7 +32,7 @@ type StaffMember = {
   name: string
   phone: string
   email?: string
-  role?: "admin" | "staff" | "partner"
+  role?: "admin" | "staff" | "partner" | "purchase_manager"
   restricted_pages?: StaffPageId[] | string[] | null
   restricted_values?: StaffValueRestriction[] | string[] | null
   position: string
@@ -52,7 +52,7 @@ type StaffFormState = {
   name: string
   phone: string
   email: string
-  role: "admin" | "staff" | "partner"
+  role: "admin" | "staff" | "partner" | "purchase_manager"
   restrictedPages: StaffPageId[]
   restrictedValues: StaffValueRestriction[]
   position: string
@@ -202,10 +202,10 @@ export default function DeviceStaffTab({ deviceId }: DeviceStaffTabProps) {
       name: member.name || "",
       phone: member.phone || "",
       email: member.email || "",
-      role: member.role === "partner" ? "partner" : member.role === "admin" ? "admin" : "staff",
+      role: member.role === "partner" ? "partner" : member.role === "admin" ? "admin" : member.role === "purchase_manager" ? "purchase_manager" : "staff",
       restrictedPages: parseStringArray<StaffPageId>(member.restricted_pages),
       restrictedValues:
-        (member.role === "admin" || member.role === "partner")
+        (member.role === "admin" || member.role === "partner" || member.role === "purchase_manager")
           ? []
           : parseStringArray<StaffValueRestriction>(member.restricted_values),
       position: member.position || "",
@@ -399,10 +399,12 @@ export default function DeviceStaffTab({ deviceId }: DeviceStaffTabProps) {
                           ? "border-purple-300 bg-purple-100 text-purple-700"
                           : member.role === "admin"
                             ? "border-gray-300 bg-gray-100 text-gray-700"
-                            : "border-gray-200 bg-white text-gray-600"
+                            : member.role === "purchase_manager"
+                              ? "border-blue-300 bg-blue-100 text-blue-700"
+                              : "border-gray-200 bg-white text-gray-600"
                       }
                     >
-                      {member.role === "partner" ? "Partner" : member.role === "admin" ? "Admin" : "Normal Staff"}
+                      {member.role === "partner" ? "Partner" : member.role === "admin" ? "Admin" : member.role === "purchase_manager" ? "Purchase Manager" : "Normal Staff"}
                     </Badge>
                     {member.is_active && (
                       <Badge variant="outline" className="border-green-200 bg-green-50 text-green-700">
@@ -505,7 +507,7 @@ export default function DeviceStaffTab({ deviceId }: DeviceStaffTabProps) {
               <select
                 value={form.role}
                 onChange={(e) => {
-                  const role = e.target.value as "admin" | "staff" | "partner"
+                  const role = e.target.value as "admin" | "staff" | "partner" | "purchase_manager"
                   setForm((prev) => ({
                     ...prev,
                     role,
@@ -523,6 +525,7 @@ export default function DeviceStaffTab({ deviceId }: DeviceStaffTabProps) {
                 <option value="staff">Normal Staff</option>
                 <option value="admin">Admin Staff</option>
                 <option value="partner">Partner</option>
+                <option value="purchase_manager">Purchase Manager</option>
               </select>
             </div>
             <div>
