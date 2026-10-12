@@ -1058,7 +1058,7 @@ export default function SalesExcelTable({
                   {headerCell("customer", "Customer")}
                   {headerCell("staff", "Staff Member")}
                   {headerCell("payment", "Payment")}
-                  {headerCell("total", "Total / Profit", "right")}
+                  {headerCell("total", "Total", "right")}
                   {headerCell("received", "Received", "right")}
                   {headerCell("balance", "Balance", "right")}
                   {showActions && <th className={stickyActionHeaderClass}>Action</th>}
@@ -1297,11 +1297,11 @@ export default function SalesExcelTable({
                           {getPaymentMethodDisplay(sale)}
                         </td>
                         <td className="whitespace-nowrap px-3 py-1.5 text-right font-medium text-slate-800">
-                          <div className="flex flex-col items-end">
+                          <div className="group/total inline-flex flex-col items-end cursor-default">
                             <span className="font-bold text-slate-900">{formatCurrency(Number(sale.total_amount))}</span>
                             {!hideCogs && (
-                              <span className="text-[11px] font-semibold text-emerald-700">
-                                Profit: {formatCurrency(profitAmount)}
+                              <span className="text-[11px] font-semibold text-emerald-700 opacity-0 group-hover/total:opacity-100 transition-opacity select-none">
+                                {formatCurrency(profitAmount)}
                               </span>
                             )}
                           </div>
@@ -1583,8 +1583,15 @@ export default function SalesExcelTable({
                       </div>
 
                       <div className="text-right shrink-0">
-                        <div className="text-sm font-extrabold text-slate-900 leading-tight">
-                          {formatCurrency(Number(sale.total_amount))}
+                        <div className="group/total inline-flex flex-col items-end cursor-default">
+                          <div className="text-sm font-extrabold text-slate-900 leading-tight">
+                            {formatCurrency(Number(sale.total_amount))}
+                          </div>
+                          {!hideCogs && (
+                            <span className="text-[11px] font-semibold text-emerald-700 opacity-0 group-hover/total:opacity-100 transition-opacity select-none">
+                              {formatCurrency(profitAmount)}
+                            </span>
+                          )}
                         </div>
                         <div className="mt-0.5">
                           <SaleStatusBadge status={statusLabel} />

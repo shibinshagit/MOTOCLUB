@@ -508,7 +508,7 @@ export default function SalesOrdersTab() {
                   <th className="whitespace-nowrap px-3 py-2.5 text-left">Phone</th>
                   <th className="whitespace-nowrap px-3 py-2.5 text-left">Tracking ID</th>
                   <th className="whitespace-nowrap px-2 py-2.5 text-center">Items</th>
-                  <th className="whitespace-nowrap px-3 py-2.5 text-right">Total / Profit</th>
+                  <th className="whitespace-nowrap px-3 py-2.5 text-right">Total</th>
                   <th className="whitespace-nowrap px-3 py-2.5 text-center">Delivery Status</th>
                   <th className="whitespace-nowrap px-3 py-2.5 text-right">Actions</th>
                 </tr>
@@ -669,11 +669,13 @@ export default function SalesOrdersTab() {
                         </td>
                         <td className="whitespace-nowrap px-2 py-2.5 text-center font-medium text-slate-700">{itemQuantity}</td>
                         <td className="whitespace-nowrap px-3 py-2.5 text-right">
-                          <div className="font-bold text-slate-900">
-                            {currency} {Number(sale.total_amount).toFixed(2)}
-                          </div>
-                          <div className="text-[11px] font-semibold text-emerald-700 mt-0.5" title="Net Profit">
-                            Profit: {currency} {saleProfit.toFixed(2)}
+                          <div className="group/total inline-flex flex-col items-end cursor-default">
+                            <div className="font-bold text-slate-900">
+                              {currency} {Number(sale.total_amount).toFixed(2)}
+                            </div>
+                            <div className="text-[11px] font-semibold text-emerald-700 mt-0.5 opacity-0 group-hover/total:opacity-100 transition-opacity select-none">
+                              {currency} {saleProfit.toFixed(2)}
+                            </div>
                           </div>
                         </td>
                         <td className="whitespace-nowrap px-3 py-2.5 text-center" onClick={(e) => e.stopPropagation()}>
