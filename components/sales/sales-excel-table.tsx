@@ -16,7 +16,7 @@ import { DeliveryStatusSelect } from "@/components/sales/delivery-status-select"
 import { PhoneCell } from "@/components/sales/phone-cell"
 import { TrackingCell } from "@/components/sales/tracking-cell"
 import { StaffOwnerSelect } from "@/components/sales/staff-owner-select"
-import { parseSaleDate, cn } from "@/lib/utils"
+import { parseSaleDate, parseSaleDateTime, cn } from "@/lib/utils"
 import { printJobCard, printBatchJobCards, printSalesReceipt } from "@/lib/receipt-utils"
 import { getSaleDetails, getPaginatedUserSales, getSalesSummaryCards } from "@/app/actions/sale-actions"
 import {
@@ -250,7 +250,7 @@ export default function SalesExcelTable({
       saleId: (sale: any) => String(sale.id),
       status: (sale: any) => getSaleStatusLabel(sale),
       delivery: (sale: any) => getSaleDeliveryLabel(sale),
-      date: (sale: any) => format(parseSaleDate(sale.sale_date), "dd-MM-yyyy"),
+      date: (sale: any) => format(parseSaleDateTime(sale), "dd-MM-yyyy, hh:mm a"),
       customer: (sale: any) => sale.customer_name || "Walk-in",
       staff: (sale: any) => sale.staff_name || "Store / Admin",
       payment: (sale: any) => getPaymentMethodDisplay(sale),
@@ -1271,7 +1271,10 @@ export default function SalesExcelTable({
                           )}
                         </td>
                         <td className="whitespace-nowrap px-3 py-1.5 text-slate-700">
-                          {format(parseSaleDate(sale.sale_date), "dd-MM-yyyy")}
+                          <div className="flex flex-col">
+                            <span className="font-medium text-slate-800">{format(parseSaleDateTime(sale), "dd-MM-yyyy")}</span>
+                            <span className="text-[11px] text-slate-500 font-normal">{format(parseSaleDateTime(sale), "hh:mm a")}</span>
+                          </div>
                         </td>
                         <td className="max-w-[200px] px-3 py-1.5 text-slate-700">
                           <div className="flex flex-col gap-0.5">
@@ -1361,7 +1364,7 @@ export default function SalesExcelTable({
                                 )}
                               </div>
                               <span className="text-xs text-slate-500">
-                                Date: {format(parseSaleDate(sale.sale_date), "dd MMM yyyy, hh:mm a")}
+                                Date: {format(parseSaleDateTime(sale), "dd MMM yyyy, hh:mm a")}
                               </span>
                             </div>
 
@@ -1620,10 +1623,10 @@ export default function SalesExcelTable({
                           Date & Time
                         </span>
                         <span className="font-semibold text-slate-700 block">
-                          {format(parseSaleDate(sale.sale_date), "dd MMM yyyy")}
+                          {format(parseSaleDateTime(sale), "dd MMM yyyy")}
                         </span>
                         <span className="text-[11px] text-slate-500 block">
-                          {format(parseSaleDate(sale.sale_date), "hh:mm a")}
+                          {format(parseSaleDateTime(sale), "hh:mm a")}
                         </span>
                       </div>
                     </div>
@@ -1765,7 +1768,7 @@ export default function SalesExcelTable({
                         <div className="font-bold text-slate-900 border-b border-slate-200 pb-1.5 flex justify-between items-center">
                           <span>Order #{sale.id} Details</span>
                           <span className="text-[11px] font-normal text-slate-500">
-                            {format(parseSaleDate(sale.sale_date), "dd/MM/yyyy, hh:mm a")}
+                            {format(parseSaleDateTime(sale), "dd/MM/yyyy, hh:mm a")}
                           </span>
                         </div>
 

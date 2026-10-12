@@ -519,8 +519,9 @@ export default function SalesOrdersTab() {
                   const isSelected = selectedSales.includes(sale.id)
                   const itemQuantity = Number(sale.total_quantity) || sale.items?.reduce((sum: number, i: any) => sum + i.quantity, 0) || 0
                   
-                  const saleDate = parseSaleDate(sale.sale_date)
-                  const dateFormatted = format(saleDate, "dd MMM yyyy")
+                  const saleDateTime = parseSaleDateTime(sale)
+                  const dateFormatted = format(saleDateTime, "dd MMM yyyy")
+                  const timeFormatted = format(saleDateTime, "hh:mm a")
   
                   const statusLower = (sale.delivery_status || "Pending").toLowerCase()
                   let rowBg = index % 2 === 0 ? "bg-white text-slate-800" : "bg-slate-50/50 text-slate-800"
@@ -621,7 +622,10 @@ export default function SalesOrdersTab() {
                           </div>
                         </td>
                         <td className="whitespace-nowrap px-3 py-2.5">
-                          <span className="font-medium text-slate-800 text-xs">{dateFormatted}</span>
+                          <div className="flex flex-col">
+                            <span className="font-medium text-slate-800 text-xs">{dateFormatted}</span>
+                            <span className="text-[11px] text-slate-500 font-normal">{timeFormatted}</span>
+                          </div>
                         </td>
                         <td className="max-w-[150px] px-3 py-2.5">
                           <div className="font-semibold text-slate-800 truncate" title={sale.customer_name || "N/A"}>

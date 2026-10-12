@@ -30,7 +30,7 @@ import { CreateReplacementModal } from "@/components/sales/create-replacement-mo
 import { ReplacementShipmentCard } from "@/components/sales/replacement-shipment-card"
 import { buildTrackingUrl, mapSaleShippingFromRecord } from "@/lib/sale-shipping"
 import { StaffOwnerSelect } from "@/components/sales/staff-owner-select"
-import { cn, formatCurrency as formatMoney } from "@/lib/utils"
+import { cn, formatCurrency as formatMoney, parseSaleDateTime } from "@/lib/utils"
 
 interface ViewSaleModalProps {
   isOpen: boolean
@@ -392,10 +392,11 @@ export default function ViewSaleModal({
     }
   }
 
-  const formatSaleDate = (dateValue: string | null | undefined) => {
-    if (!dateValue) return "—"
+  const formatSaleDate = (dateValue: string | null | undefined, saleObj?: any) => {
+    if (!dateValue && !saleObj?.created_at) return "—"
     try {
-      return format(new Date(dateValue), "dd-MM-yyyy")
+      const parsed = parseSaleDateTime(saleObj || dateValue)
+      return format(parsed, "dd-MM-yyyy, hh:mm a")
     } catch {
       return "Invalid date"
     }
@@ -525,7 +526,7 @@ export default function ViewSaleModal({
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
                   <InfoCell label="Sale #" value={`#${saleData.id}`} />
-                  <InfoCell label="Date" value={formatSaleDate(saleData.sale_date)} />
+                  <InfoCell label="Date & Time" value={formatSaleDate(saleData.sale_date, saleData)} />
                   <InfoCell label="Status" value={<SaleStatusBadge status={status} />} />
                   <InfoCell
                     label="Fulfillment"

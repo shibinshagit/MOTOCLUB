@@ -746,6 +746,7 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
           s.id,
           s.is_pos_updated,
           COALESCE(s.sale_date, s.created_at) as sale_date,
+          s.created_at,
           s.status,
           s.payment_status,
           s.payment_method,

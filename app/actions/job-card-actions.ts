@@ -238,7 +238,9 @@ export async function createJobCard(input: JobCardInput) {
                 advance_amount,
                 balance_amount,
                 fulfillment_type,
-                delivery_status
+                delivery_status,
+                sale_date,
+                created_at
               ) VALUES (
                 ${resolvedCustomerId || null},
                 ${totalAmount},
@@ -266,7 +268,9 @@ export async function createJobCard(input: JobCardInput) {
                 0,
                 ${totalAmount},
                 'ship',
-                'Pending'
+                'Pending',
+                NOW(),
+                NOW()
               )
               RETURNING id
             `

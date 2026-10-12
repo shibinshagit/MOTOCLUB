@@ -44,7 +44,7 @@ import { format } from "date-fns"
 import { CalendarIcon } from "lucide-react"
 import { Calendar } from "@/components/ui/calendar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { cn } from "@/lib/utils"
+import { cn, parseSaleDateTime } from "@/lib/utils"
 
 interface EditSaleModalProps {
   isOpen: boolean
@@ -180,8 +180,8 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, company
         if (result.success && result.data) {
           const { sale, items } = result.data
 
-          // Set sale data
-          setDate(new Date(sale.sale_date))
+          // Set sale data with accurate date and entry time
+          setDate(parseSaleDateTime(sale))
           setCustomerId(sale.customer_id)
           setCustomerName(sale.customer_name || "")
           setDiscountAmount(Number(sale.discount) || 0)

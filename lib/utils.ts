@@ -90,74 +90,112 @@ export function parseSaleDate(dateInput: any): Date {
 }
 
 export function parseSaleDateTime(sale: any): Date {
-  const saleDateVal = sale?.sale_date || sale?.created_at
-  const createdAtVal = sale?.created_at
+  if (!sale) return new Date()
 
-  if (!saleDateVal) return new Date()
+  let saleDateVal = sale?.sale_date ?? sale?.created_at
+  let createdAtVal = sale?.created_at
 
-  let saleDate = saleDateVal
-  if (typeof saleDate === "string") {
-    const trimmed = saleDate.trim()
-    const match = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/)
-    if (match) {
-      const [, y, m, d] = match
-      const year = Number(y)
-      const month = Number(m) - 1
-      const day = Number(d)
-
-      let hours = 0
-      let minutes = 0
-      let seconds = 0
-
-      const timeSource = (trimmed.includes("T") && !trimmed.split("T")[1].startsWith("00:00:00"))
-        ? saleDate
-        : createdAtVal
-
-      if (timeSource) {
-        const tsDate = new Date(timeSource)
-        if (!isNaN(tsDate.getTime())) {
-          hours = tsDate.getHours()
-          minutes = tsDate.getMinutes()
-          seconds = tsDate.getSeconds()
-        }
-      }
-      return new Date(year, month, day, hours, minutes, seconds)
-    }
-    saleDate = new Date(trimmed)
+  if (sale instanceof Date || typeof sale === "string" || typeof sale === "number") {
+    saleDateVal = sale
+    createdAtVal = undefined
   }
 
-  if (saleDate instanceof Date && !isNaN(saleDate.getTime())) {
-    const isUtcMidnight =
-      saleDate.getUTCHours() === 0 &&
-      saleDate.getUTCMinutes() === 0 &&
-      saleDate.getUTCSeconds() === 0 &&
-      saleDate.getUTCMilliseconds() === 0
+  if (!saleDateVal && !createdAtVal) return new Date()
 
-    if (isUtcMidnight) {
-      const year = saleDate.getUTCFullYear()
-      const month = saleDate.getUTCMonth()
-      const day = saleDate.getUTCDate()
-
-      let hours = 0
-      let minutes = 0
-      let seconds = 0
-
-      if (createdAtVal) {
-        const createdAt = new Date(createdAtVal)
-        if (!isNaN(createdAt.getTime())) {
-          hours = createdAt.getHours()
-          minutes = createdAt.getMinutes()
-          seconds = createdAt.getSeconds()
+  // Helper to extract calendar date components [y, m, d]
+  const extractYMD = (val: any): { year: number; month: number; day: number } | null => {
+    if (!val) return null
+    if (typeof val === "string") {
+      const match = val.trim().match(/^(\d{4})-(\d{2})-(\d{2})/)
+      if (match) {
+        return {
+          year: Number(match[1]),
+          month: Number(match[2]) - 1,
+          day: Number(match[3]),
         }
       }
-
-      return new Date(year, month, day, hours, minutes, seconds)
     }
-
-    return saleDate
+    if (val instanceof Date && !isNaN(val.getTime())) {
+      return {
+        year: val.getFullYear(),
+        month: val.getMonth(),
+        day: val.getDate(),
+      }
+    }
+    return null
   }
 
-  return new Date()
+  // Helper to safely parse any date/time string or Date
+  const parseSafe = (input: any): Date | null => {
+    if (!input) return null
+    if (input instanceof Date) {
+      return isNaN(input.getTime()) ? null : input
+    }
+    if (typeof input === "string") {
+      const trimmed = input.trim()
+      if (!trimmed) return null
+      if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+        const [y, m, d] = trimmed.split("-").map(Number)
+        return new Date(y, m - 1, d, 0, 0, 0)
+      }
+      const isoCandidate = trimmed.includes(" ") && !trimmed.includes("T")
+        ? trimmed.replace(" ", "T")
+        : trimmed
+      const d = new Date(isoCandidate)
+      return isNaN(d.getTime()) ? null : d
+    }
+    const d = new Date(input)
+    return isNaN(d.getTime()) ? null : d
+  }
+
+  // Helper to check if a value is midnight / zero time (i.e. missing entry time)
+  const isMidnight = (d: Date | null, rawVal: any): boolean => {
+    if (!d) return true
+    if (typeof rawVal === "string") {
+      const trimmed = rawVal.trim()
+      if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return true
+      if (/(?:T|\s)00:00(?::00(?:\.000)?)?(?:Z|[+-]\d{2}:?\d{2})?$/i.test(trimmed)) return true
+    }
+    const isLocalMidnight = d.getHours() === 0 && d.getMinutes() === 0 && d.getSeconds() === 0
+    const isUtcMidnight = d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0
+    return isLocalMidnight || isUtcMidnight
+  }
+
+  const sDate = parseSafe(saleDateVal)
+  const cDate = parseSafe(createdAtVal)
+
+  // 1. If sale_date has a real (non-midnight) time, use it
+  if (sDate && !isMidnight(sDate, saleDateVal)) {
+    return sDate
+  }
+
+  // 2. If sale_date was midnight or date-only, but created_at has a real time
+  if (cDate && !isMidnight(cDate, createdAtVal)) {
+    const ymd = extractYMD(saleDateVal) || extractYMD(sDate)
+    if (ymd) {
+      return new Date(
+        ymd.year,
+        ymd.month,
+        ymd.day,
+        cDate.getHours(),
+        cDate.getMinutes(),
+        cDate.getSeconds()
+      )
+    }
+    return cDate
+  }
+
+  // 3. If sDate exists with pure date, preserve calendar date at 00:00:00
+  if (sDate) {
+    const ymd = extractYMD(saleDateVal)
+    if (ymd) {
+      return new Date(ymd.year, ymd.month, ymd.day, 0, 0, 0)
+    }
+    return sDate
+  }
+
+  // 4. Fallback to cDate or now
+  return cDate || new Date()
 }
 
 export function formatOrderId(id: any): string {

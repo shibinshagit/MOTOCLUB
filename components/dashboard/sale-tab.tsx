@@ -64,7 +64,7 @@ import { selectActiveStaff } from "@/store/slices/staffSlice"
 import { useStaffRestrictions } from "@/hooks/use-staff-restrictions"
 import { useConfirm } from "@/hooks/use-confirm"
 import { printSalesReceipt } from "@/lib/receipt-utils"
-import { formatCurrency as formatMoney } from "@/lib/utils"
+import { formatCurrency as formatMoney, parseSaleDateTime } from "@/lib/utils"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import SaleShippingSection from "@/components/sales/sale-shipping-section"
 import { getCustomerById } from "@/app/actions/customer-actions"
@@ -228,6 +228,35 @@ export default function SaleTab({
   const [balanceAmount, setBalanceAmount] = useState(0)
   const [deviceCurrencyState, setDeviceCurrencyState] = useState(deviceCurrency || "QAR")
   const [date, setDate] = useState<Date>(new Date())
+
+  const getEntrySaleDate = (pickedDate?: Date, isEdit?: boolean): string => {
+    const now = new Date()
+    if (!pickedDate || isNaN(pickedDate.getTime())) return now.toISOString()
+    if (isEdit) {
+      const hasTime = !(pickedDate.getHours() === 0 && pickedDate.getMinutes() === 0 && pickedDate.getSeconds() === 0)
+      if (hasTime) return pickedDate.toISOString()
+    } else {
+      const isToday =
+        pickedDate.getFullYear() === now.getFullYear() &&
+        pickedDate.getMonth() === now.getMonth() &&
+        pickedDate.getDate() === now.getDate()
+      if (isToday) return now.toISOString()
+    }
+    const isMidnight =
+      pickedDate.getHours() === 0 && pickedDate.getMinutes() === 0 && pickedDate.getSeconds() === 0
+    const hours = isMidnight ? now.getHours() : pickedDate.getHours()
+    const minutes = isMidnight ? now.getMinutes() : pickedDate.getMinutes()
+    const seconds = isMidnight ? now.getSeconds() : pickedDate.getSeconds()
+    return new Date(
+      pickedDate.getFullYear(),
+      pickedDate.getMonth(),
+      pickedDate.getDate(),
+      hours,
+      minutes,
+      seconds
+    ).toISOString()
+  }
+
   const [customerId, setCustomerId] = useState<number | null>(null)
   const [customerName, setCustomerName] = useState<string>("")
   const [customerPhone, setCustomerPhone] = useState<string>("")
@@ -1152,7 +1181,7 @@ export default function SaleTab({
             draft.id === targetDraftId
               ? {
                 ...draft,
-                date: new Date(sale.sale_date).toISOString(),
+                date: parseSaleDateTime(sale).toISOString(),
                 customerId: sale.customer_id,
                 customerName: sale.customer_name || sale.customer_name_override || "",
                 customerPhone: sale.customer_phone || sale.customer_phone_override || "",
@@ -1288,7 +1317,7 @@ export default function SaleTab({
           paymentStatus: paymentStatus,
           paymentMethod: paymentMethod,
           payments: payments,
-          saleDate: date?.toISOString() || new Date().toISOString(),
+          saleDate: getEntrySaleDate(date, true),
           status: status,
           originalStatus: originalSaleStatus,
           discount: discountAmount,
@@ -1380,7 +1409,7 @@ export default function SaleTab({
           paymentStatus: finalPaymentStatus,
           paymentMethod: paymentMethod,
           payments: payments,
-          saleDate: date?.toISOString() || new Date().toISOString(),
+          saleDate: getEntrySaleDate(date, false),
           notes: notes,
           discount: discountAmount,
           receivedAmount: finalReceivedAmount,
