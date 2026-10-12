@@ -30,7 +30,7 @@ import { CreateReplacementModal } from "@/components/sales/create-replacement-mo
 import { ReplacementShipmentCard } from "@/components/sales/replacement-shipment-card"
 import { buildTrackingUrl, mapSaleShippingFromRecord } from "@/lib/sale-shipping"
 import { StaffOwnerSelect } from "@/components/sales/staff-owner-select"
-import { cn } from "@/lib/utils"
+import { cn, formatCurrency as formatMoney } from "@/lib/utils"
 
 interface ViewSaleModalProps {
   isOpen: boolean
@@ -172,8 +172,7 @@ export default function ViewSaleModal({
 
   const formatCurrency = (amount: number | string) => {
     const numAmount = typeof amount === "string" ? Number.parseFloat(amount) : amount
-    if (isNaN(numAmount)) return `${deviceCurrency} 0.00`
-    return `${deviceCurrency} ${numAmount.toFixed(2)}`
+    return formatMoney(isNaN(numAmount) ? 0 : numAmount, deviceCurrency)
   }
 
   useEffect(() => {
@@ -426,16 +425,18 @@ export default function ViewSaleModal({
           <DialogHeader className="space-y-0 border-b border-slate-200 bg-[#F1F4F9] px-4 py-3 text-left">
             <DialogTitle className="sr-only">Sale {saleId ? `#${saleId}` : "details"}</DialogTitle>
             <div className="flex flex-wrap items-center gap-2 pr-10">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleEdit}
-                disabled={isLoading || !saleData}
-                className="h-8 border-slate-200 bg-white px-3 text-xs"
-              >
-                <Edit className="mr-1.5 h-3.5 w-3.5" />
-                Edit
-              </Button>
+              {Boolean(onEdit) && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleEdit}
+                  disabled={isLoading || !saleData}
+                  className="h-8 border-slate-200 bg-white px-3 text-xs"
+                >
+                  <Edit className="mr-1.5 h-3.5 w-3.5" />
+                  Edit
+                </Button>
+              )}
               <Button
                 variant="outline"
                 size="sm"

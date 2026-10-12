@@ -102,6 +102,9 @@ function PurchaseManagerPageContent() {
     <Dashboard 
       onLogout={handleLogout}
       onlyPosUpdatedSales={true}
+      showSalesActions={false}
+      showSalesViewModal={false}
+      hideAttendanceTab={true}
     />
   )
 }

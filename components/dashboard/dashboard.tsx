@@ -84,6 +84,9 @@ interface DashboardProps {
   onLogout?: () => void
   onlyPosUpdatedSales?: boolean
   hideProductsToPurchaseTab?: boolean
+  hideAttendanceTab?: boolean
+  showSalesActions?: boolean
+  showSalesViewModal?: boolean
 }
 
 // Fallback component for when a tab fails to load
@@ -108,7 +111,7 @@ function LoadingTab() {
   )
 }
 
-export function Dashboard({ onLogout, onlyPosUpdatedSales, hideProductsToPurchaseTab }: DashboardProps) {
+export function Dashboard({ onLogout, onlyPosUpdatedSales, hideProductsToPurchaseTab, hideAttendanceTab, showSalesActions = true, showSalesViewModal }: DashboardProps) {
   const searchParams = useSearchParams()
   const tabParam = searchParams?.get("tab") as TabType | "home" | null
   const resolveTab = (param: TabType | "stock" | "home" | "sales-orders" | null): TabType => {
@@ -138,6 +141,8 @@ export function Dashboard({ onLogout, onlyPosUpdatedSales, hideProductsToPurchas
   const device = useAppSelector(selectDevice)
   const deviceLogo = useAppSelector(selectDeviceLogo)
   const activeStaff = useAppSelector(selectActiveStaff)
+  const isPurchaseManager = activeStaff?.role === "purchase_manager"
+  const resolvedShowSalesViewModal = showSalesViewModal ?? !isPurchaseManager
   const dateRange = useAppSelector(selectDateRange)
   const dateRangeRef = useRef(dateRange)
   useEffect(() => {
@@ -169,6 +174,11 @@ export function Dashboard({ onLogout, onlyPosUpdatedSales, hideProductsToPurchas
       // Allow products-to-purchase if onlyPosUpdatedSales is true and not explicitly hidden
       if (tabId === "products-to-purchase") {
         return Boolean(onlyPosUpdatedSales && !hideProductsToPurchaseTab)
+      }
+
+      // Disallow attendance if hideAttendanceTab is true or if user is purchase manager
+      if (tabId === "attendance" && (hideAttendanceTab || activeStaff?.role === "purchase_manager")) {
+        return false
       }
 
       // 1. Device level check (Super Admin restrictions)
@@ -552,10 +562,12 @@ export function Dashboard({ onLogout, onlyPosUpdatedSales, hideProductsToPurchas
             <SaleTab
               userId={device?.id ?? 0}
               companyId={companyId}
-              isAddModalOpen={activeTab === "sale" && isAddModalOpen}
+              isAddModalOpen={activeTab === "sale" && isAddModalOpen && showSalesActions}
               onModalClose={() => setIsAddModalOpen(false)}
-              mode={salesNavView === "entry" ? "entry" : "info"}
+              mode={salesNavView === "entry" && showSalesActions ? "entry" : "info"}
               onlyPosUpdatedSales={onlyPosUpdatedSales}
+              showActions={showSalesActions}
+              showViewModal={resolvedShowSalesViewModal}
             />
           )
         case "products-to-purchase":
@@ -577,6 +589,9 @@ export function Dashboard({ onLogout, onlyPosUpdatedSales, hideProductsToPurchas
             <CustomerTab userId={device?.id ?? 0} companyId={companyId} />
           )
         case "attendance":
+          if (hideAttendanceTab || isPurchaseManager) {
+            return null
+          }
           return <AttendanceTab />
         case "supplier":
           return (
@@ -972,6 +987,19 @@ export function Dashboard({ onLogout, onlyPosUpdatedSales, hideProductsToPurchas
                 }
 
                 if (tabId === "sale") {
+                  if (!showSalesActions) {
+                    const item = navItems.find((nav) => nav.id === tabId)
+                    return (
+                      <MobileNavItem
+                        key="sale"
+                        icon={item?.icon || <Receipt className="h-4 w-4" />}
+                        label={item?.label || "Sales"}
+                        iconOnly={Boolean((item as any)?.iconOnly)}
+                        isActive={activeTab === "sale"}
+                        onClick={() => handleTabChange("sale")}
+                      />
+                    )
+                  }
                   return (
                     <SalesNavSegment
                       key="sale"
@@ -1040,6 +1068,18 @@ export function Dashboard({ onLogout, onlyPosUpdatedSales, hideProductsToPurchas
             }
 
             if (item.id === "sale") {
+              if (!showSalesActions) {
+                return (
+                  <NavItem
+                    key={item.id}
+                    icon={item.icon}
+                    label={item.label}
+                    iconOnly={Boolean((item as any).iconOnly)}
+                    isActive={activeTab === item.id}
+                    onClick={() => handleTabChange(item.id as TabType)}
+                  />
+                )
+              }
               return (
                 <SalesNavSegment
                   key={item.id}

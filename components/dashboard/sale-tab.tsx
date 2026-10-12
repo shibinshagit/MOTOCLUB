@@ -64,6 +64,7 @@ import { selectActiveStaff } from "@/store/slices/staffSlice"
 import { useStaffRestrictions } from "@/hooks/use-staff-restrictions"
 import { useConfirm } from "@/hooks/use-confirm"
 import { printSalesReceipt } from "@/lib/receipt-utils"
+import { formatCurrency as formatMoney } from "@/lib/utils"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import SaleShippingSection from "@/components/sales/sale-shipping-section"
 import { getCustomerById } from "@/app/actions/customer-actions"
@@ -76,6 +77,8 @@ interface SaleTabProps {
   onModalClose?: () => void
   mode?: "entry" | "info"
   onlyPosUpdatedSales?: boolean
+  showActions?: boolean
+  showViewModal?: boolean
 }
 
 interface ProductRow {
@@ -167,12 +170,23 @@ function serializeSaleRecord(sale: any) {
   }
 }
 
-export default function SaleTab({ userId, companyId, isAddModalOpen = false, onModalClose, mode = "entry", onlyPosUpdatedSales = false }: SaleTabProps) {
+export default function SaleTab({
+  userId,
+  companyId,
+  isAddModalOpen = false,
+  onModalClose,
+  mode = "entry",
+  onlyPosUpdatedSales = false,
+  showActions = true,
+  showViewModal,
+}: SaleTabProps) {
   // Redux state
   const dispatch = useDispatch()
   const deviceId = useSelector(selectDeviceId)
   const deviceCurrency = useSelector(selectDeviceCurrency)
   const activeStaff = useSelector(selectActiveStaff)
+  const isPurchaseManager = activeStaff?.role === "purchase_manager"
+  const canShowViewModal = showViewModal !== undefined ? showViewModal : !isPurchaseManager
   const { isValueHidden } = useStaffRestrictions()
   const hideCogs = isValueHidden("cogs")
   const hideStockCount = isValueHidden("stock_count")
@@ -456,30 +470,30 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
         prev.map((draft) =>
           draft.id === activeDraftId
             ? {
-                ...draft,
-                name: computedName,
-                updatedAt: Date.now(),
-                date: date?.toISOString() || new Date().toISOString(),
-                customerId,
-                customerName,
-                customerPhone,
-                staffId,
-                staffName,
-                status,
-                paymentStatus,
-                paymentMethod,
-                receivedAmount,
-                advanceAmount,
-                balanceAmount,
-                discountAmount,
-                notes,
-                shipping,
-                products,
-                payments,
-                isEditMode,
-                editingSaleId,
-                originalSaleStatus,
-              }
+              ...draft,
+              name: computedName,
+              updatedAt: Date.now(),
+              date: date?.toISOString() || new Date().toISOString(),
+              customerId,
+              customerName,
+              customerPhone,
+              staffId,
+              staffName,
+              status,
+              paymentStatus,
+              paymentMethod,
+              receivedAmount,
+              advanceAmount,
+              balanceAmount,
+              discountAmount,
+              notes,
+              shipping,
+              products,
+              payments,
+              isEditMode,
+              editingSaleId,
+              originalSaleStatus,
+            }
             : draft,
         ),
       )
@@ -595,11 +609,7 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
   }, [paymentStatus, paymentMethod, totalAmount, advanceAmount, receivedAmount, payments, isEditMode])
 
   const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: currency || "AED",
-      minimumFractionDigits: 2,
-    }).format(amount)
+    return formatMoney(amount, currency || "AED")
   }
 
   const applySalesMonth = useCallback((month: Date) => {
@@ -633,7 +643,7 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
     void runSalesSideEffects()
   }, [activeView, deviceId, globalDateRange.from, globalDateRange.to, runSalesSideEffects])
 
-    // Add Sale Form Functions
+  // Add Sale Form Functions
   const addProductRow = useCallback(() => {
     setProducts(prev => [
       ...prev,
@@ -719,11 +729,11 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
         const stockCount = b.stocks?.find((s: any) => Number(s.device_id) === Number(deviceId))?.stock || b.device_stock || b.stock || 0
         if (stockCount > 0) {
           const allocQty = Math.min(stockCount, remaining)
-          allocations.push({ 
-            batchId: b.id || b.batch_id, 
-            quantity: allocQty, 
-            costPrice: b.cost_price ? Number(b.cost_price) : product.cost, 
-            sellingPrice: (product.variants?.find((v:any) => v.id === product.productVariantId)?.mrp ? Number(product.variants?.find((v:any) => v.id === product.productVariantId)?.mrp) : product.price) 
+          allocations.push({
+            batchId: b.id || b.batch_id,
+            quantity: allocQty,
+            costPrice: b.cost_price ? Number(b.cost_price) : product.cost,
+            sellingPrice: (product.variants?.find((v: any) => v.id === product.productVariantId)?.mrp ? Number(product.variants?.find((v: any) => v.id === product.productVariantId)?.mrp) : product.price)
           })
           remaining -= allocQty
         }
@@ -742,7 +752,7 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
       // Alternatively, the user can open the allocator to adjust.
     }
 
-    updateProductRow(product.id, { 
+    updateProductRow(product.id, {
       quantity: safeRequested,
       allocations: allocations,
       price: updatedPrice,
@@ -807,7 +817,7 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
           remaining -= allocQty
         }
       }
-      
+
       if (allocations.length > 0) {
         updatedCost = allocations[0].costPrice || updatedCost
         updatedPrice = allocations[0].sellingPrice || updatedPrice
@@ -845,7 +855,7 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
     setCustomerId(customerId)
     setCustomerName(customerName)
     setCustomerPhone(customerObj?.phone || "")
-    
+
     // Automatically populate the address fields if the created customer has them
     if (customerObj) {
       setShipping((prev) => ({
@@ -857,7 +867,7 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
         shippingAddressType: customerObj.address_type || prev.shippingAddressType,
       }))
     }
-    
+
     setIsNewCustomerModalOpen(false)
   }
 
@@ -1117,7 +1127,7 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
 
         let parsedReceivedAmount = Number(sale.received_amount) || 0
         let parsedBalanceAmount = Number(sale.balance_amount) || 0
-        
+
         const isPaidStatus =
           (sale.payment_status === "Paid" ||
             sale.payment_status === "Completed" ||
@@ -1130,7 +1140,7 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
           parsedReceivedAmount = 0
           parsedBalanceAmount = Number(sale.total_amount)
         }
-        
+
         const parsedAdvanceAmount = Number(sale.advance_amount) || 0
         const mappedShipping = mapSaleShippingFromRecord(sale)
 
@@ -1141,30 +1151,30 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
           prev.map((draft) =>
             draft.id === targetDraftId
               ? {
-                  ...draft,
-                  date: new Date(sale.sale_date).toISOString(),
-                  customerId: sale.customer_id,
-                  customerName: sale.customer_name || sale.customer_name_override || "",
-                  customerPhone: sale.customer_phone || sale.customer_phone_override || "",
-                  status: sale.status || "Completed",
-                  paymentStatus: sale.payment_status || "Paid",
-                  originalSaleStatus: sale.status || "Completed",
-                  staffId: resolvedStaffId,
-                  staffName: resolvedStaffName,
-                  paymentMethod: resolvedPaymentMethod,
-                  discountAmount: Number(sale.discount) || 0,
-                  products: finalProducts,
-                  payments: sale.payments || [],
-                  receivedAmount: parsedReceivedAmount,
-                  advanceAmount: parsedAdvanceAmount,
-                  balanceAmount: parsedBalanceAmount,
-                  shipping: mappedShipping,
-                  isEditMode: true,
-                  editingSaleId: saleId,
-                  name: `Edit #${saleId}`,
-                  isLoadingEdit: false,
-                  saleDeviceId: sale.device_id,
-                }
+                ...draft,
+                date: new Date(sale.sale_date).toISOString(),
+                customerId: sale.customer_id,
+                customerName: sale.customer_name || sale.customer_name_override || "",
+                customerPhone: sale.customer_phone || sale.customer_phone_override || "",
+                status: sale.status || "Completed",
+                paymentStatus: sale.payment_status || "Paid",
+                originalSaleStatus: sale.status || "Completed",
+                staffId: resolvedStaffId,
+                staffName: resolvedStaffName,
+                paymentMethod: resolvedPaymentMethod,
+                discountAmount: Number(sale.discount) || 0,
+                products: finalProducts,
+                payments: sale.payments || [],
+                receivedAmount: parsedReceivedAmount,
+                advanceAmount: parsedAdvanceAmount,
+                balanceAmount: parsedBalanceAmount,
+                shipping: mappedShipping,
+                isEditMode: true,
+                editingSaleId: saleId,
+                name: `Edit #${saleId}`,
+                isLoadingEdit: false,
+                saleDeviceId: sale.device_id,
+              }
               : draft
           )
         )
@@ -1352,11 +1362,11 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
           : (Number(receivedAmount) || 0)
         const finalReceivedAmount = (Array.isArray(payments) && payments.length > 0)
           ? payments.reduce((s, p) => {
-              if (hasCodOnCreate && isCodMethod(p.paymentMethod) && totalAmount > 0 && totalAlloc >= totalAmount) {
-                return s
-              }
-              return s + (Number(p.amount) || 0)
-            }, 0)
+            if (hasCodOnCreate && isCodMethod(p.paymentMethod) && totalAmount > 0 && totalAlloc >= totalAmount) {
+              return s
+            }
+            return s + (Number(p.amount) || 0)
+          }, 0)
           : (hasCodOnCreate ? (totalAmount > 0 && receivedAmount >= totalAmount ? 0 : receivedAmount) : receivedAmount)
         const finalBalanceAmount = Math.max(0, totalAmount - finalReceivedAmount)
 
@@ -1430,6 +1440,7 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
 
   // Handle view sale - now called when clicking on a sale row
   const handleViewSale = (sale: any) => {
+    if (!canShowViewModal) return
     setSelectedSaleId(sale.id)
     setIsViewSaleModalOpen(true)
   }
@@ -1438,7 +1449,7 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
   const handleEditSale = (sale: any) => {
     // User explicitly requested edit again; clear last closed guard.
     lastClosedEditSaleIdRef.current = null
-    
+
     let targetDraftId = activeDraftId
     const existingDraft = saleDrafts.find((draft) => draft.isEditMode && draft.editingSaleId === sale.id)
     if (existingDraft) {
@@ -1550,7 +1561,7 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
       dispatch(removeSale(saleId))
       setIsViewSaleModalOpen(false)
       setSelectedSaleId(null)
-      
+
       const result = await deleteSale(saleId, targetDeviceId)
 
       if (result.success) {
@@ -1592,7 +1603,7 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
     ) {
       return 0
     }
-    
+
     // Use explicit balance_amount from DB if available and > 0
     if (sale.balance_amount !== undefined && sale.balance_amount !== null) {
       const balance = Number(sale.balance_amount)
@@ -1670,7 +1681,7 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
     setFormAlert(null)
     setShowPrintConfirm(false)
     setLastSaleResult(null)
-    
+
     // A completed sale must not leave stale entry tabs behind. Start the
     // cashier on one clean draft so tabs cannot accumulate after checkout.
     const freshDraft = createEmptyDraft("Draft 1")
@@ -1683,7 +1694,7 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
     setPendingEditSaleId(null)
     setPendingEditDraftId("")
     clearEditSaleParamFromUrl()
-    
+
     // Explicitly update localStorage so it isn't skipped when activeView changes
     try {
       localStorage.setItem(saleDraftStorageKey, JSON.stringify([freshDraft]))
@@ -1691,7 +1702,7 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
     } catch (e) {
       console.error("Failed to clear sale draft from local storage:", e)
     }
-    
+
     resetAddSaleForm()
   }
 
@@ -1747,6 +1758,8 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
       deviceId={deviceId || 0}
       globalDateRange={globalDateRange}
       onlyPosUpdated={onlyPosUpdatedSales}
+      showActions={showActions}
+      showViewModal={canShowViewModal}
       onRefreshSales={() => fetchSalesForRange(globalDateRange.from, globalDateRange.to, true)}
     />
   )
@@ -1780,9 +1793,8 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
         {products.map((product, index) => (
           <div
             key={product.id}
-            className={`grid grid-cols-12 gap-1 p-2 items-center border-b border-gray-200 ${
-              index % 2 === 0 ? "bg-white" : "bg-gray-50"
-            } hover:bg-gray-100 transition-colors duration-150`}
+            className={`grid grid-cols-12 gap-1 p-2 items-center border-b border-gray-200 ${index % 2 === 0 ? "bg-white" : "bg-gray-50"
+              } hover:bg-gray-100 transition-colors duration-150`}
           >
             <div className="col-span-3">
               {product.productId && product.productName ? (
@@ -1853,11 +1865,11 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
                                   const stockCount = b.stocks?.find((s: any) => Number(s.device_id) === Number(deviceId))?.stock || b.device_stock || b.stock || 0
                                   if (stockCount > 0) {
                                     const allocQty = Math.min(stockCount, remaining)
-                                    newAllocations.push({ 
-                                      batchId: b.id || b.batch_id, 
-                                      quantity: allocQty, 
-                                      costPrice: b.cost_price ? Number(b.cost_price) : newCost, 
-                                      sellingPrice: b.selling_price ? Number(b.selling_price) : newPrice 
+                                    newAllocations.push({
+                                      batchId: b.id || b.batch_id,
+                                      quantity: allocQty,
+                                      costPrice: b.cost_price ? Number(b.cost_price) : newCost,
+                                      sellingPrice: b.selling_price ? Number(b.selling_price) : newPrice
                                     })
                                     remaining -= allocQty
                                   }
@@ -1997,7 +2009,7 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
                     <div className="cursor-help w-full">
                       <span className="text-gray-400 tracking-widest group-hover:hidden">••••••</span>
                       <span className="hidden group-hover:inline-block font-medium">
-                        {deviceCurrencyState} {formatCurrency(product.cost || 0)}
+                        {formatCurrency(product.cost || 0)}
                       </span>
                     </div>
                   )}
@@ -2007,7 +2019,7 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
             <div className="col-span-1 text-right font-medium text-xs text-gray-900">
               {product.productId ? (
                 <>
-                  {deviceCurrencyState} {formatCurrency(product.total)}
+                  {formatCurrency(product.total)}
                 </>
               ) : null}
             </div>
@@ -2032,9 +2044,8 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
         {products.map((product, index) => (
           <div
             key={product.id}
-            className={`flex flex-col p-3 border-b border-gray-200 ${
-              index % 2 === 0 ? "bg-white" : "bg-gray-50"
-            }`}
+            className={`flex flex-col p-3 border-b border-gray-200 ${index % 2 === 0 ? "bg-white" : "bg-gray-50"
+              }`}
           >
             <div className="mb-2">
               <Label className="text-[10px] text-gray-500 mb-1 block">Product/Service</Label>
@@ -2106,11 +2117,11 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
                                   const stockCount = b.stocks?.find((s: any) => Number(s.device_id) === Number(deviceId))?.stock || b.device_stock || b.stock || 0
                                   if (stockCount > 0) {
                                     const allocQty = Math.min(stockCount, remaining)
-                                    newAllocations.push({ 
-                                      batchId: b.id || b.batch_id, 
-                                      quantity: allocQty, 
-                                      costPrice: b.cost_price ? Number(b.cost_price) : newCost, 
-                                      sellingPrice: b.selling_price ? Number(b.selling_price) : newPrice 
+                                    newAllocations.push({
+                                      batchId: b.id || b.batch_id,
+                                      quantity: allocQty,
+                                      costPrice: b.cost_price ? Number(b.cost_price) : newCost,
+                                      sellingPrice: b.selling_price ? Number(b.selling_price) : newPrice
                                     })
                                     remaining -= allocQty
                                   }
@@ -2256,7 +2267,7 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
                     <div className="text-xs text-gray-700 bg-gray-100 p-1.5 rounded relative group cursor-help w-full">
                       <span className="text-gray-400 tracking-widest group-hover:hidden">••••••</span>
                       <span className="hidden group-hover:inline-block font-medium">
-                        {deviceCurrencyState} {formatCurrency(product.cost || 0)}
+                        {formatCurrency(product.cost || 0)}
                       </span>
                     </div>
                   )}
@@ -2270,7 +2281,7 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
                 <div className="font-medium text-sm text-gray-900">
                   {product.productId ? (
                     <>
-                      {deviceCurrencyState} {formatCurrency(product.total)}
+                      {formatCurrency(product.total)}
                     </>
                   ) : (
                     "—"
@@ -2304,78 +2315,76 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
     <div className="min-h-[calc(100vh-100px)] bg-gray-50 text-gray-900 p-2 sm:p-3">
       <div className="mb-4">
         <div className="mt-4">
-            {activeView === "entry" && (
-              <div className="mb-2 rounded-lg border border-gray-200 bg-white p-2">
-                <div className="flex items-center gap-2 overflow-x-auto">
-                  {saleDrafts.map((draft, index) => (
-                    <div
-                      key={draft.id}
-                      className={`h-8 shrink-0 inline-flex items-center rounded-md border ${
-                        draft.id === activeDraftId
-                          ? draft.isEditMode
-                            ? "bg-orange-500 text-white border-orange-500"
-                            : "bg-primary text-primary-foreground border-primary"
-                          : draft.isEditMode
-                            ? "bg-orange-50 text-orange-700 border-orange-200"
-                            : "bg-background text-foreground border-input"
+          {activeView === "entry" && (
+            <div className="mb-2 rounded-lg border border-gray-200 bg-white p-2">
+              <div className="flex items-center gap-2 overflow-x-auto">
+                {saleDrafts.map((draft, index) => (
+                  <div
+                    key={draft.id}
+                    className={`h-8 shrink-0 inline-flex items-center rounded-md border ${draft.id === activeDraftId
+                        ? draft.isEditMode
+                          ? "bg-orange-500 text-white border-orange-500"
+                          : "bg-primary text-primary-foreground border-primary"
+                        : draft.isEditMode
+                          ? "bg-orange-50 text-orange-700 border-orange-200"
+                          : "bg-background text-foreground border-input"
                       }`}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => handleSwitchDraftTab(draft.id)}
-                        className="px-3 h-8 text-xs font-medium whitespace-nowrap"
-                      >
-                        {draft.name?.trim() ? draft.name : `Draft ${index + 1}`}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleRemoveDraftTab(draft.id)
-                        }}
-                        className={`mr-1 inline-flex h-5 w-5 items-center justify-center rounded-sm ${
-                          draft.id === activeDraftId
-                            ? draft.isEditMode
-                              ? "hover:bg-white/20"
-                              : "hover:bg-primary-foreground/20"
-                            : draft.isEditMode
-                              ? "hover:bg-orange-100"
-                              : "hover:bg-black/10"
-                        }`}
-                        aria-label={`Remove ${(draft.name?.trim() ? draft.name : `Draft ${index + 1}`)}`}
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </div>
-                  ))}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={handleCreateDraftTab}
-                    className="h-8 shrink-0 text-xs border-dashed"
                   >
-                    <Plus className="h-3.5 w-3.5 mr-1" />
-                    New Tab
-                  </Button>
-                </div>
+                    <button
+                      type="button"
+                      onClick={() => handleSwitchDraftTab(draft.id)}
+                      className="px-3 h-8 text-xs font-medium whitespace-nowrap"
+                    >
+                      {draft.name?.trim() ? draft.name : `Draft ${index + 1}`}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleRemoveDraftTab(draft.id)
+                      }}
+                      className={`mr-1 inline-flex h-5 w-5 items-center justify-center rounded-sm ${draft.id === activeDraftId
+                          ? draft.isEditMode
+                            ? "hover:bg-white/20"
+                            : "hover:bg-primary-foreground/20"
+                          : draft.isEditMode
+                            ? "hover:bg-orange-100"
+                            : "hover:bg-black/10"
+                        }`}
+                      aria-label={`Remove ${(draft.name?.trim() ? draft.name : `Draft ${index + 1}`)}`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleCreateDraftTab}
+                  className="h-8 shrink-0 text-xs border-dashed"
+                >
+                  <Plus className="h-3.5 w-3.5 mr-1" />
+                  New Tab
+                </Button>
               </div>
-            )}
-            {/* Sales Tab Content - FIXED SCROLL LAYOUT */}
-            <div className="flex flex-col xl:flex-row gap-3 h-full">
-              {/* Main Sale Form Section - FIXED SCROLL */}
-              <div className="flex-1 xl:w-3/4 flex flex-col min-h-0">
-                <Card className="flex-1 overflow-hidden bg-white border-gray-200 shadow-sm flex flex-col">
-                  {isDraftLoading ? (
-                    <div className="flex-1 flex flex-col items-center justify-center p-12 bg-white">
-                      <Loader2 className="h-8 w-8 animate-spin text-blue-600 mb-4" />
-                      <p className="text-gray-500 font-medium">Loading sale details...</p>
-                    </div>
-                  ) : (
-                    <CardContent className="p-0 h-full flex flex-col">
-                      
-                      {/* Fixed Header Section */}
-                      <div className="flex-shrink-0">
+            </div>
+          )}
+          {/* Sales Tab Content - FIXED SCROLL LAYOUT */}
+          <div className="flex flex-col xl:flex-row gap-3 h-full">
+            {/* Main Sale Form Section - FIXED SCROLL */}
+            <div className="flex-1 xl:w-3/4 flex flex-col min-h-0">
+              <Card className="flex-1 overflow-hidden bg-white border-gray-200 shadow-sm flex flex-col">
+                {isDraftLoading ? (
+                  <div className="flex-1 flex flex-col items-center justify-center p-12 bg-white">
+                    <Loader2 className="h-8 w-8 animate-spin text-blue-600 mb-4" />
+                    <p className="text-gray-500 font-medium">Loading sale details...</p>
+                  </div>
+                ) : (
+                  <CardContent className="p-0 h-full flex flex-col">
+
+                    {/* Fixed Header Section */}
+                    <div className="flex-shrink-0">
                       {/* Edit mode indicator */}
                       {isEditMode && (
                         <div className="p-2 bg-orange-50 border-b border-orange-200">
@@ -2568,7 +2577,7 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
                                 </div>
 
                                 {(shipping.fulfillmentType === "ship" || (originalSaleStatus === "Pending" || (shipping.trackingId || "").startsWith("JC-"))) &&
-                                Number(shipping.courierPaidExtra) > 0 ? (
+                                  Number(shipping.courierPaidExtra) > 0 ? (
                                   <div className="flex justify-between items-center py-1 border-t border-gray-200">
                                     <span className="font-medium text-xs text-gray-900">Courier charge:</span>
                                     <span className="text-sm text-emerald-700">
@@ -2579,8 +2588,8 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
                                 ) : null}
 
                                 {(shipping.fulfillmentType === "ship" || (originalSaleStatus === "Pending" || (shipping.trackingId || "").startsWith("JC-"))) &&
-                                (Number(shipping.expenseCourier) > 0 ||
-                                  Number(shipping.expensePacking) > 0) ? (
+                                  (Number(shipping.expenseCourier) > 0 ||
+                                    Number(shipping.expensePacking) > 0) ? (
                                   <div className="rounded-md border border-amber-100 bg-amber-50/60 px-2 py-1.5 text-[11px] text-amber-800">
                                     Shipping costs (expense): courier{" "}
                                     {deviceCurrencyState} {Number(shipping.expenseCourier || 0).toFixed(2)}
@@ -2604,9 +2613,8 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
                               <Button
                                 onClick={handleSubmitSale}
                                 disabled={isSubmitting}
-                                className={`w-full text-white h-auto py-2.5 font-semibold shadow-sm transition-all ${
-                                  isEditMode ? "bg-green-600 hover:bg-green-700" : "bg-blue-600 hover:bg-blue-700"
-                                }`}
+                                className={`w-full text-white h-auto py-2.5 font-semibold shadow-sm transition-all ${isEditMode ? "bg-green-600 hover:bg-green-700" : "bg-blue-600 hover:bg-blue-700"
+                                  }`}
                               >
                                 {isSubmitting ? (
                                   <span className="flex items-center justify-center">
@@ -2640,49 +2648,49 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
                         </div>
                       </div>
                     </div>
-                  
-      {allocatorRowId && (() => {
-        const row = products.find(p => p.id === allocatorRowId)
-        if (!row) return null
-        return (
-          <BatchAllocator
-            isOpen={true}
-            onClose={() => setAllocatorRowId(null)}
-            productName={row.productName}
-            requiredQty={row.quantity}
-            batches={row.batches || []}
-            initialAllocations={row.allocations || []}
-            deviceId={deviceId || 0}
-            onSave={(allocations, autoAllocate) => {
-              const totalAllocatedQty = allocations.reduce((sum: any, a: any) => sum + a.quantity, 0)
-              let newCost = row.cost
-              let newPrice = row.price
-              
-              if (allocations.length > 0 && totalAllocatedQty > 0) {
-                const totalCost = allocations.reduce((sum: any, a: any) => sum + (a.costPrice || row.cost) * a.quantity, 0)
-                newCost = totalCost / totalAllocatedQty
-                
-                const totalPrice = allocations.reduce((sum: any, a: any) => sum + (a.sellingPrice || row.price) * a.quantity, 0)
-                newPrice = totalPrice / totalAllocatedQty
-              }
 
-              updateProductRow(row.id, { 
-                allocations, 
-                autoAllocate,
-                cost: newCost,
-                price: newPrice,
-                total: newPrice * row.quantity
-              })
-            }}
-          />
-        )
-      })()}
-    
-                    </CardContent>
-                  )}
-                </Card>
-              </div>
+                    {allocatorRowId && (() => {
+                      const row = products.find(p => p.id === allocatorRowId)
+                      if (!row) return null
+                      return (
+                        <BatchAllocator
+                          isOpen={true}
+                          onClose={() => setAllocatorRowId(null)}
+                          productName={row.productName}
+                          requiredQty={row.quantity}
+                          batches={row.batches || []}
+                          initialAllocations={row.allocations || []}
+                          deviceId={deviceId || 0}
+                          onSave={(allocations, autoAllocate) => {
+                            const totalAllocatedQty = allocations.reduce((sum: any, a: any) => sum + a.quantity, 0)
+                            let newCost = row.cost
+                            let newPrice = row.price
+
+                            if (allocations.length > 0 && totalAllocatedQty > 0) {
+                              const totalCost = allocations.reduce((sum: any, a: any) => sum + (a.costPrice || row.cost) * a.quantity, 0)
+                              newCost = totalCost / totalAllocatedQty
+
+                              const totalPrice = allocations.reduce((sum: any, a: any) => sum + (a.sellingPrice || row.price) * a.quantity, 0)
+                              newPrice = totalPrice / totalAllocatedQty
+                            }
+
+                            updateProductRow(row.id, {
+                              allocations,
+                              autoAllocate,
+                              cost: newCost,
+                              price: newPrice,
+                              total: newPrice * row.quantity
+                            })
+                          }}
+                        />
+                      )
+                    })()}
+
+                  </CardContent>
+                )}
+              </Card>
             </div>
+          </div>
         </div>
       </div>
     </div>
@@ -2717,21 +2725,23 @@ export default function SaleTab({ userId, companyId, isAddModalOpen = false, onM
         userId={userId}
       />
 
-      <ViewSaleModal
-        isOpen={isViewSaleModalOpen}
-        onClose={() => {
-          setIsViewSaleModalOpen(false)
-          setSelectedSaleId(null)
-        }}
-        saleId={selectedSaleId}
-        currency={currency || "AED"}
-        onEdit={(saleData) => {
-          setIsViewSaleModalOpen(false)
-          handleEditSale({ id: saleData.id })
-        }}
-        onDelete={handleDeleteSaleFromView}
-        onPrintInvoice={handlePrintInvoiceFromView}
-      />
+      {canShowViewModal && (
+        <ViewSaleModal
+          isOpen={isViewSaleModalOpen}
+          onClose={() => {
+            setIsViewSaleModalOpen(false)
+            setSelectedSaleId(null)
+          }}
+          saleId={selectedSaleId}
+          currency={currency || "AED"}
+          onEdit={showActions ? (saleData) => {
+            setIsViewSaleModalOpen(false)
+            handleEditSale({ id: saleData.id })
+          } : undefined}
+          onDelete={handleDeleteSaleFromView}
+          onPrintInvoice={handlePrintInvoiceFromView}
+        />
+      )}
 
       {/* Print Receipt Confirmation Dialog */}
       {showPrintConfirm && lastSaleResult && (

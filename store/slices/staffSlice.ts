@@ -6,7 +6,7 @@ interface Staff {
   name: string
   phone: string
   email?: string
-  role?: "admin" | "staff"
+  role?: "admin" | "staff" | "partner" | "purchase_manager" | "logistics"
   restricted_pages?: StaffPageId[] | string[] | null
   restricted_values?: StaffValueRestriction[] | string[] | null
   position: string

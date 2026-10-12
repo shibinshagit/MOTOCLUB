@@ -82,6 +82,7 @@ export function canStaffAccessPage(
   page: StaffPageId,
 ): boolean {
   if (!staff) return true
+  if (staff.role === "purchase_manager" && page === "attendance") return false
   return !getRestrictedPages(staff).includes(page)
 }
 

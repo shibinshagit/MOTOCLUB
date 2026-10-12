@@ -174,6 +174,8 @@ interface SalesExcelTableProps {
   onRefreshSales?: () => void
   globalDateRange?: { from?: string; to?: string }
   onlyPosUpdated?: boolean
+  showActions?: boolean
+  showViewModal?: boolean
 }
 
 function TableSkeleton() {
@@ -216,6 +218,8 @@ export default function SalesExcelTable({
   onRefreshSales,
   globalDateRange,
   onlyPosUpdated,
+  showActions = true,
+  showViewModal = true,
 }: SalesExcelTableProps) {
   const { toast } = useToast()
   const [internalSearchTerm, setInternalSearchTerm] = useState("")
@@ -1057,19 +1061,19 @@ export default function SalesExcelTable({
                   {headerCell("total", "Total / Profit", "right")}
                   {headerCell("received", "Received", "right")}
                   {headerCell("balance", "Balance", "right")}
-                  <th className={stickyActionHeaderClass}>Action</th>
+                  {showActions && <th className={stickyActionHeaderClass}>Action</th>}
                 </tr>
               </thead>
               <tbody className={isFetchingServer && hasFetchedServer ? "opacity-60 transition-opacity" : "transition-opacity"}>
                 {!hasFetchedServer ? (
                   <tr>
-                    <td colSpan={14}>
+                    <td colSpan={showActions ? 14 : 13}>
                       <TableSkeleton />
                     </td>
                   </tr>
                 ) : serverError && displaySales.length === 0 ? (
                   <tr>
-                    <td colSpan={14} className="px-4 py-8 text-center text-sm text-rose-600">
+                    <td colSpan={showActions ? 14 : 13} className="px-4 py-8 text-center text-sm text-rose-600">
                       {serverError}
                       <Button variant="outline" size="sm" className="ml-3 h-7 text-xs" onClick={() => fetchServerSales()}>
                         Retry
@@ -1078,7 +1082,7 @@ export default function SalesExcelTable({
                   </tr>
                 ) : displaySales.length === 0 ? (
                   <tr>
-                    <td colSpan={14} className="px-4 py-12 text-center text-sm text-muted-foreground">
+                    <td colSpan={showActions ? 14 : 13} className="px-4 py-12 text-center text-sm text-muted-foreground">
                       {debouncedSearch || cardFilter !== "all" || typeFilter !== "all"
                         ? "No sales match the current filters"
                         : `No sales found for ${periodLabel}`}
@@ -1160,8 +1164,12 @@ export default function SalesExcelTable({
                     const mainRow = (
                       <tr
                         key={sale.id}
-                        onClick={() => onViewSale(sale)}
-                        className={`group cursor-pointer border-b border-slate-200 transition-colors ${rowClass}`}
+                        onClick={() => {
+                          if (showViewModal) {
+                            onViewSale(sale)
+                          }
+                        }}
+                        className={`group ${showViewModal ? "cursor-pointer" : ""} border-b border-slate-200 transition-colors ${rowClass}`}
                       >
                         <td className="whitespace-nowrap px-2 py-1.5 text-center" onClick={(e) => e.stopPropagation()}>
                           <input
@@ -1304,33 +1312,35 @@ export default function SalesExcelTable({
                         <td className="whitespace-nowrap px-3 py-1.5 text-right text-amber-700 font-semibold">
                           {remaining > 0 ? formatCurrency(remaining) : "—"}
                         </td>
-                        <td className={stickyActionCellClass(baseBgClass, isPending)}>
-                          <div className="flex items-center justify-end gap-1.5">
-                            <Button
-                              type="button"
-                              size="sm"
-                              onClick={(event) => {
-                                event.stopPropagation()
-                                onEditSale(sale)
-                              }}
-                              className="h-6 px-2 text-[11px] font-bold bg-green-600 hover:bg-green-700 text-white shadow-2xs gap-1 cursor-pointer"
-                              title="Open and edit in POS mode"
-                            >
-                              <ShoppingCart className="h-3 w-3" />
-                              POS
-                            </Button>
-                            <button
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation()
-                                handleRowEdit(sale)
-                              }}
-                              className="text-xs font-medium text-brand-blue hover:text-blue-700 hover:underline cursor-pointer"
-                            >
-                              Edit
-                            </button>
-                          </div>
-                        </td>
+                        {showActions && (
+                          <td className={stickyActionCellClass(baseBgClass, isPending)}>
+                            <div className="flex items-center justify-end gap-1.5">
+                              <Button
+                                type="button"
+                                size="sm"
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  onEditSale(sale)
+                                }}
+                                className="h-6 px-2 text-[11px] font-bold bg-green-600 hover:bg-green-700 text-white shadow-2xs gap-1 cursor-pointer"
+                                title="Open and edit in POS mode"
+                              >
+                                <ShoppingCart className="h-3 w-3" />
+                                POS
+                              </Button>
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  handleRowEdit(sale)
+                                }}
+                                className="text-xs font-medium text-brand-blue hover:text-blue-700 hover:underline cursor-pointer"
+                              >
+                                Edit
+                              </button>
+                            </div>
+                          </td>
+                        )}
                       </tr>
                     )
 
@@ -1338,7 +1348,7 @@ export default function SalesExcelTable({
 
                     const expandedRow = (
                       <tr key={`expand-${sale.id}`} className="bg-slate-50 border-b border-slate-200">
-                        <td colSpan={14} className="p-3" onClick={(e) => e.stopPropagation()}>
+                        <td colSpan={showActions ? 14 : 13} className="p-3" onClick={(e) => e.stopPropagation()}>
                           <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs space-y-3">
                             <div className="flex flex-wrap items-center justify-between border-b border-slate-100 pb-2 gap-2">
                               <div className="flex items-center gap-2">
@@ -1428,22 +1438,26 @@ export default function SalesExcelTable({
                                 />
 
                                 <div className="pt-2 flex flex-wrap gap-1.5">
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    className="h-7 text-xs px-2.5"
-                                    onClick={() => handleRowEdit(sale)}
-                                  >
-                                    <Edit className="h-3 w-3 mr-1 text-slate-600" /> Edit
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    className="h-7 text-xs px-2.5"
-                                    onClick={() => onViewSale(sale)}
-                                  >
-                                    <Eye className="h-3 w-3 mr-1 text-slate-600" /> View Modal
-                                  </Button>
+                                  {showActions && (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-7 text-xs px-2.5"
+                                      onClick={() => handleRowEdit(sale)}
+                                    >
+                                      <Edit className="h-3 w-3 mr-1 text-slate-600" /> Edit
+                                    </Button>
+                                  )}
+                                  {showViewModal && (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-7 text-xs px-2.5"
+                                      onClick={() => onViewSale(sale)}
+                                    >
+                                      <Eye className="h-3 w-3 mr-1 text-slate-600" /> View Modal
+                                    </Button>
+                                  )}
                                   <SaleDocumentActions sale={sale} size="row" />
                                 </div>
                               </div>
@@ -1702,19 +1716,25 @@ export default function SalesExcelTable({
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-48">
-                          <DropdownMenuItem onClick={() => onViewSale(sale)}>
-                            <Eye className="h-4 w-4 mr-2 text-slate-500" /> View Modal
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => onEditSale(sale)}>
-                            <ShoppingCart className="h-4 w-4 mr-2 text-green-600" /> Open in POS
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleRowEdit(sale)}>
-                            <Edit className="h-4 w-4 mr-2 text-slate-500" /> Edit Sale
-                          </DropdownMenuItem>
-                          {isJobCard && (
-                            <DropdownMenuItem onClick={() => setEditingJobCardId(sale.id)}>
-                              <Layers className="h-4 w-4 mr-2 text-blue-600" /> Edit Job Card
+                          {showViewModal && (
+                            <DropdownMenuItem onClick={() => onViewSale(sale)}>
+                              <Eye className="h-4 w-4 mr-2 text-slate-500" /> View Modal
                             </DropdownMenuItem>
+                          )}
+                          {showActions && (
+                            <>
+                              <DropdownMenuItem onClick={() => onEditSale(sale)}>
+                                <ShoppingCart className="h-4 w-4 mr-2 text-green-600" /> Open in POS
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => handleRowEdit(sale)}>
+                                <Edit className="h-4 w-4 mr-2 text-slate-500" /> Edit Sale
+                              </DropdownMenuItem>
+                              {isJobCard && (
+                                <DropdownMenuItem onClick={() => setEditingJobCardId(sale.id)}>
+                                  <Layers className="h-4 w-4 mr-2 text-blue-600" /> Edit Job Card
+                                </DropdownMenuItem>
+                              )}
+                            </>
                           )}
                           <DropdownMenuItem onClick={() => printSalesReceipt(sale, sale.items || [], "INR", {}, false)}>
                             <Printer className="h-4 w-4 mr-2 text-slate-500" /> Print Invoice

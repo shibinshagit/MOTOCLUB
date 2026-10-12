@@ -34,7 +34,7 @@ export function formatPhoneNumber(phone: string | null | undefined): string {
   if (!phone) return ""
   let digits = phone.replace(/\D/g, "")
   if (!digits) return ""
-  
+
   if (digits.length === 10 && /^[6-9]/.test(digits)) {
     return "+91 " + digits
   }
@@ -51,7 +51,7 @@ export function formatPhoneNumber(phone: string | null | undefined): string {
     // 0971 is 4 chars, wait digits is 12, so 971 is 3 chars.
     return "+971 " + digits.substring(3)
   }
-  
+
   if (phone.includes(" ")) return phone;
 
   // Fallback for unknown country codes
@@ -60,7 +60,7 @@ export function formatPhoneNumber(phone: string | null | undefined): string {
 
 export function parseSaleDate(dateInput: any): Date {
   if (!dateInput) return new Date()
-  
+
   let dt = dateInput
   if (typeof dt === "string") {
     const trimmed = dt.trim()
@@ -71,9 +71,9 @@ export function parseSaleDate(dateInput: any): Date {
     }
     dt = new Date(trimmed)
   }
-  
+
   if (dt instanceof Date && !isNaN(dt.getTime())) {
-    const isUtcMidnight = 
+    const isUtcMidnight =
       dt.getUTCHours() === 0 &&
       dt.getUTCMinutes() === 0 &&
       dt.getUTCSeconds() === 0 &&
@@ -85,7 +85,7 @@ export function parseSaleDate(dateInput: any): Date {
       return new Date(dt.getFullYear(), dt.getMonth(), dt.getDate())
     }
   }
-  
+
   return new Date()
 }
 
@@ -104,11 +104,11 @@ export function parseSaleDateTime(sale: any): Date {
       const year = Number(y)
       const month = Number(m) - 1
       const day = Number(d)
-      
+
       let hours = 0
       let minutes = 0
       let seconds = 0
-      
+
       const timeSource = (trimmed.includes("T") && !trimmed.split("T")[1].startsWith("00:00:00"))
         ? saleDate
         : createdAtVal
@@ -127,7 +127,7 @@ export function parseSaleDateTime(sale: any): Date {
   }
 
   if (saleDate instanceof Date && !isNaN(saleDate.getTime())) {
-    const isUtcMidnight = 
+    const isUtcMidnight =
       saleDate.getUTCHours() === 0 &&
       saleDate.getUTCMinutes() === 0 &&
       saleDate.getUTCSeconds() === 0 &&
