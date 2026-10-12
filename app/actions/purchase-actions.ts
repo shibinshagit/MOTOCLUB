@@ -606,7 +606,7 @@ export async function createPurchase(formData: FormData) {
   }
 
   if (finalReceivedAmount > totalAmount) {
-    return { success: false, message: "Received amount cannot be greater than total amount" }
+    return { success: false, message: "Paid amount cannot be greater than total amount" }
   }
 
   // Reset connection state to allow a fresh attempt
@@ -1096,9 +1096,9 @@ export async function updatePurchase(formData: FormData) {
 
   const costAllocations = allocatePurchaseCosts(items, courierCharge, discount)
 
-  // Validate received amount
+  // Validate paid amount
   if (receivedAmount > totalAmount) {
-    return { success: false, message: "Received amount cannot be greater than total amount" }
+    return { success: false, message: "Paid amount cannot be greater than total amount" }
   }
 
   // Reset connection state to allow a fresh attempt

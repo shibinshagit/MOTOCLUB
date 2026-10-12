@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Card, CardContent } from "@/components/ui/card"
 import { useToast } from "@/components/ui/use-toast"
 import { Button } from "@/components/ui/button"
+import PurchaseManagerKpiCards from "@/components/purchase-manager/purchase-manager-kpi-cards"
 
 interface ProductsToPurchaseTabProps {
   deviceId: number
@@ -60,6 +61,11 @@ export default function ProductsToPurchaseTab({ deviceId, globalDateRange }: Pro
           Refresh
         </Button>
       </div>
+
+      <PurchaseManagerKpiCards
+        deviceId={deviceId}
+        globalDateRange={globalDateRange}
+      />
 
       <div className="flex items-center space-x-2">
         <div className="relative flex-1 max-w-sm">

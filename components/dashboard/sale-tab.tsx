@@ -1787,6 +1787,7 @@ export default function SaleTab({
       deviceId={deviceId || 0}
       globalDateRange={globalDateRange}
       onlyPosUpdated={onlyPosUpdatedSales}
+      isPurchaseManager={isPurchaseManager}
       showActions={showActions}
       showViewModal={canShowViewModal}
       onRefreshSales={() => fetchSalesForRange(globalDateRange.from, globalDateRange.to, true)}

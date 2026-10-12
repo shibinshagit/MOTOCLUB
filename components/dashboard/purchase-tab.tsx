@@ -868,7 +868,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
     }
 
     if (receivedAmount > totalAmount) {
-      setFormAlert({ type: "error", message: "Received amount cannot be greater than total amount" })
+      setFormAlert({ type: "error", message: "Paid amount cannot be greater than total amount" })
       return
     }
 
@@ -1699,7 +1699,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
                       {status === "Credit" && (
                         <div className="space-y-1">
                           <Label htmlFor="received_amount" className="text-xs font-medium text-gray-900">
-                            Received Amount
+                            Paid Amount
                           </Label>
                           <Input
                             id="received_amount"

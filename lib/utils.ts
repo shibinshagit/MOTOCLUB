@@ -22,7 +22,8 @@ export const formatCurrency = (amount: number, currency = "QAR") => {
   }
 
   // Get format options for the specified currency, or default to QAR
-  const format = currencyFormats[currency] || currencyFormats.QAR
+  const normalized = (currency || "QAR").trim().toUpperCase()
+  const format = currencyFormats[normalized] || { locale: "en-US", currency: normalized }
 
   return new Intl.NumberFormat(format.locale, {
     style: "currency",

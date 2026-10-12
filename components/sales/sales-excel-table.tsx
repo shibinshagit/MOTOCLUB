@@ -1,9 +1,13 @@
 "use client"
 
 import { useEffect, useMemo, useState, useCallback, useRef } from "react"
+import { usePathname } from "next/navigation"
 import { format } from "date-fns"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useAppSelector } from "@/store/hooks"
+import { selectActiveStaff } from "@/store/slices/staffSlice"
+import PurchaseManagerKpiCards from "@/components/purchase-manager/purchase-manager-kpi-cards"
 import {
   ExcelColumnFilterHeader,
   createEmptyColumnFilter,
@@ -157,6 +161,7 @@ function buildInitialFilters(sales: any[], getters: Record<ColumnKey, (sale: any
 interface SalesExcelTableProps {
   searchTerm?: string
   onSearchTermChange?: (term: string) => void
+  isPurchaseManager?: boolean
   periodLabel: string
   isCurrentMonth: boolean
   canGoNextMonth: boolean
@@ -201,6 +206,7 @@ function TableSkeleton() {
 export default function SalesExcelTable({
   searchTerm: externalSearchTerm,
   onSearchTermChange,
+  isPurchaseManager: propIsPurchaseManager,
   periodLabel,
   isCurrentMonth,
   canGoNextMonth,
@@ -221,6 +227,13 @@ export default function SalesExcelTable({
   showActions = true,
   showViewModal = true,
 }: SalesExcelTableProps) {
+  const pathname = usePathname()
+  const activeStaff = useAppSelector(selectActiveStaff)
+  const isPurchaseManager =
+    propIsPurchaseManager !== undefined
+      ? propIsPurchaseManager
+      : activeStaff?.role === "purchase_manager" || Boolean(pathname?.startsWith("/purchase-manager"))
+
   const { toast } = useToast()
   const [internalSearchTerm, setInternalSearchTerm] = useState("")
   const [isGeneratingReport, setIsGeneratingReport] = useState(false)
@@ -671,8 +684,15 @@ export default function SalesExcelTable({
       </div>
 
       {/* OPERATIONAL CARDS */}
-      <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
-        {/* CARD 1 — TOTAL SALES */}
+      {isPurchaseManager ? (
+        <PurchaseManagerKpiCards
+          deviceId={deviceId}
+          globalDateRange={globalDateRange}
+          formatCurrency={formatCurrency}
+        />
+      ) : (
+        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+          {/* CARD 1 — TOTAL SALES */}
         <button
           type="button"
           onClick={() => {
@@ -790,6 +810,7 @@ export default function SalesExcelTable({
           </div>
         </button>
       </div>
+      )}
 
       {/* BULK ACTION TOOLBAR */}
       {selectedSales.length > 0 && (
