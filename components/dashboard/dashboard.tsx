@@ -1,4 +1,4 @@
-import { useRouter, useSearchParams } from "next/navigation"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import Image from "next/image"
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import {
@@ -114,7 +114,12 @@ function LoadingTab() {
 export function Dashboard({ onLogout, onlyPosUpdatedSales, hideProductsToPurchaseTab, hideAttendanceTab, showSalesActions = true, showSalesViewModal }: DashboardProps) {
   const searchParams = useSearchParams()
   const tabParam = searchParams?.get("tab") as TabType | "home" | null
-  const resolveTab = (param: TabType | "stock" | "home" | "sales-orders" | null): TabType => {
+  const pathname = usePathname()
+  const activeStaff = useAppSelector(selectActiveStaff)
+  const isPurchaseManager = activeStaff?.role === "purchase_manager" || Boolean(pathname?.startsWith("/purchase-manager"))
+  const defaultContentTab: TabType = isPurchaseManager && onlyPosUpdatedSales && !hideProductsToPurchaseTab ? "products-to-purchase" : DEFAULT_CONTENT_TAB
+
+  const resolveTab = useCallback((param: TabType | "stock" | "home" | "sales-orders" | null): TabType => {
     if (param === "stock") return "product"
     if (param === "sales" || param === "sales-orders" || param === "home") return "sale"
     if (
@@ -125,13 +130,14 @@ export function Dashboard({ onLogout, onlyPosUpdatedSales, hideProductsToPurchas
     ) {
       return param as TabType
     }
-    return "sale"
-  }
+    return defaultContentTab
+  }, [defaultContentTab])
+
   const initialTab = resolveTab(tabParam)
 
   const [activeTab, setActiveTab] = useState<TabType>(initialTab)
   const [lastContentTab, setLastContentTab] = useState<TabType>(
-    initialTab === "product" || initialTab === "trending" ? DEFAULT_CONTENT_TAB : initialTab,
+    initialTab === "product" || initialTab === "trending" ? defaultContentTab : initialTab,
   )
   const activeTabRef = useRef(activeTab)
   const lastContentTabRef = useRef(lastContentTab)
@@ -140,8 +146,6 @@ export function Dashboard({ onLogout, onlyPosUpdatedSales, hideProductsToPurchas
   const company = useAppSelector(selectCompany)
   const device = useAppSelector(selectDevice)
   const deviceLogo = useAppSelector(selectDeviceLogo)
-  const activeStaff = useAppSelector(selectActiveStaff)
-  const isPurchaseManager = activeStaff?.role === "purchase_manager"
   const resolvedShowSalesViewModal = showSalesViewModal ?? !isPurchaseManager
   const dateRange = useAppSelector(selectDateRange)
   const dateRangeRef = useRef(dateRange)
@@ -204,8 +208,13 @@ export function Dashboard({ onLogout, onlyPosUpdatedSales, hideProductsToPurchas
 
   // Navigation items configuration
   const navItems = [
+    ...(isPurchaseManager && onlyPosUpdatedSales && !hideProductsToPurchaseTab
+      ? [{ id: "products-to-purchase", icon: <ClipboardList className="h-4 w-4" />, label: "Products to Purchase" }]
+      : []),
     { id: "sale", icon: <Receipt className="h-4 w-4" />, label: "Sales" },
-    ...(onlyPosUpdatedSales && !hideProductsToPurchaseTab ? [{ id: "products-to-purchase", icon: <ClipboardList className="h-4 w-4" />, label: "Products to Purchase" }] : []),
+    ...(!isPurchaseManager && onlyPosUpdatedSales && !hideProductsToPurchaseTab
+      ? [{ id: "products-to-purchase", icon: <ClipboardList className="h-4 w-4" />, label: "Products to Purchase" }]
+      : []),
     { id: "purchase", icon: <Receipt className="h-4 w-4" />, label: "Purchase" },
     { id: "customer", icon: <User className="h-4 w-4" />, label: "Customers" },
     { id: "attendance", icon: <CalendarDays className="h-4 w-4" />, label: "Attendance" },
@@ -217,7 +226,10 @@ export function Dashboard({ onLogout, onlyPosUpdatedSales, hideProductsToPurchas
   ]
 
   // Primary tabs for bottom navigation (most used)
-  const primaryTabs = ["sale", ...(onlyPosUpdatedSales && !hideProductsToPurchaseTab ? ["products-to-purchase"] : []), "purchase", "master"]
+  const primaryTabs =
+    isPurchaseManager && onlyPosUpdatedSales && !hideProductsToPurchaseTab
+      ? ["products-to-purchase", "sale", "purchase", "master"]
+      : ["sale", ...(onlyPosUpdatedSales && !hideProductsToPurchaseTab ? ["products-to-purchase"] : []), "purchase", "master"]
   const secondaryTabs = ["customer", "attendance", "supplier", "transfer", "platform", "admin-dashboard"]
 
   // Filtered navigation items based on permission
@@ -352,19 +364,23 @@ export function Dashboard({ onLogout, onlyPosUpdatedSales, hideProductsToPurchas
     }
     setLastContentTab(tab)
     setActiveTab(tab)
-  }, [tabParam])
+  }, [tabParam, resolveTab])
 
   // Enforce page restrictions: redirect if active tab is restricted
   useEffect(() => {
     if (mounted && !canAccessTab(activeTab)) {
-      const fallbackTab = (["sales-orders", "sale", "purchase", "returns", "customer", "attendance", "supplier", "transfer", "platform", "master"] as TabType[]).find(
+      const fallbackList =
+        isPurchaseManager && onlyPosUpdatedSales && !hideProductsToPurchaseTab
+          ? (["products-to-purchase", "sale", "purchase", "sales-orders", "returns", "customer", "attendance", "supplier", "transfer", "platform", "master"] as TabType[])
+          : (["sales-orders", "sale", "purchase", "returns", "customer", "attendance", "supplier", "transfer", "platform", "master"] as TabType[])
+      const fallbackTab = fallbackList.find(
         (tabId) => canAccessTab(tabId),
       )
       if (fallbackTab) {
         setActiveTab(fallbackTab)
       }
     }
-  }, [activeStaff, activeTab, canAccessTab, mounted])
+  }, [activeStaff, activeTab, canAccessTab, mounted, isPurchaseManager, onlyPosUpdatedSales, hideProductsToPurchaseTab])
 
   const salesViewParam = searchParams?.get("salesView")
   const salesNavView = salesViewParam === "entry" ? "entry" : "list"
@@ -640,7 +656,7 @@ export function Dashboard({ onLogout, onlyPosUpdatedSales, hideProductsToPurchas
             {deviceLogo ? (
               <Image
                 src={deviceLogo}
-                alt={`${device?.name || "Device"} logo`}
+                alt={`${isPurchaseManager ? (company?.name || "Company") : (device?.name || "Device")} logo`}
                 fill
                 className="object-contain"
                 priority
@@ -650,14 +666,16 @@ export function Dashboard({ onLogout, onlyPosUpdatedSales, hideProductsToPurchas
               <BrandLogo variant="icon" width={40} height={40} className="h-full w-full" priority />
             )}
           </div>
-          <div className="hidden sm:flex flex-col min-w-0 flex-1">
-            <span className="text-sm sm:text-xl font-bold text-gray-800 truncate max-w-[130px] sm:max-w-none">
+          <div className={cn(isPurchaseManager ? "flex" : "hidden sm:flex", "flex-col min-w-0 flex-1")}>
+            <span className="text-xs sm:text-xl font-bold text-gray-800 truncate max-w-[110px] sm:max-w-none">
               {company?.name || "Company"}
             </span>
             <div className="flex items-center">
-              <div className="w-2 h-2 bg-green-500 rounded-full mr-1.5 sm:mr-2 animate-pulse flex-shrink-0"></div>
-              <span className="text-[10px] sm:text-xs text-gray-500 truncate max-w-[120px] sm:max-w-none">
-                {device?.name || "Device"} - {device?.currency || "AED"}
+              <div className="w-1.5 h-1.5 sm:w-2 sm:h-2 bg-green-500 rounded-full mr-1 sm:mr-2 animate-pulse flex-shrink-0"></div>
+              <span className="text-[10px] sm:text-xs text-gray-500 truncate max-w-[100px] sm:max-w-none">
+                {isPurchaseManager
+                  ? (activeStaff?.name || "Purchase Manager")
+                  : `${device?.name || "Device"} - ${device?.currency || "AED"}`}
               </span>
             </div>
           </div>
@@ -756,7 +774,15 @@ export function Dashboard({ onLogout, onlyPosUpdatedSales, hideProductsToPurchas
                     <div className="px-2 py-2">
                       <p className="text-sm font-medium text-gray-900">{activeStaff.name}</p>
                       <p className="text-xs text-gray-500">
-                        {activeStaff.role === "admin" ? "Admin role" : "Normal staff role"}
+                        {activeStaff.role === "admin"
+                          ? "Admin role"
+                          : activeStaff.role === "purchase_manager"
+                            ? "Purchase Manager role"
+                            : activeStaff.role === "partner"
+                              ? "Partner role"
+                              : activeStaff.role === "logistics"
+                                ? "Logistics role"
+                                : "Normal staff role"}
                       </p>
                     </div>
                     <DropdownMenuSeparator className="bg-gray-200" />
@@ -838,7 +864,15 @@ export function Dashboard({ onLogout, onlyPosUpdatedSales, hideProductsToPurchas
                     <div className="px-2 py-2">
                       <p className="text-sm font-medium text-gray-900">{activeStaff.name}</p>
                       <p className="text-xs text-gray-500">
-                        {activeStaff.role === "admin" ? "Admin role" : "Normal staff role"}
+                        {activeStaff.role === "admin"
+                          ? "Admin role"
+                          : activeStaff.role === "purchase_manager"
+                            ? "Purchase Manager role"
+                            : activeStaff.role === "partner"
+                              ? "Partner role"
+                              : activeStaff.role === "logistics"
+                                ? "Logistics role"
+                                : "Normal staff role"}
                       </p>
                     </div>
                     <DropdownMenuSeparator className="bg-gray-200" />

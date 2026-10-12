@@ -185,7 +185,8 @@ export default function SaleTab({
   const deviceId = useSelector(selectDeviceId)
   const deviceCurrency = useSelector(selectDeviceCurrency)
   const activeStaff = useSelector(selectActiveStaff)
-  const isPurchaseManager = activeStaff?.role === "purchase_manager"
+  const pathname = usePathname()
+  const isPurchaseManager = activeStaff?.role === "purchase_manager" || Boolean(pathname?.startsWith("/purchase-manager"))
   const canShowViewModal = showViewModal !== undefined ? showViewModal : !isPurchaseManager
   const { isValueHidden } = useStaffRestrictions()
   const hideCogs = isValueHidden("cogs")
@@ -317,7 +318,6 @@ export default function SaleTab({
   const { confirm, ConfirmDialog } = useConfirm()
   const router = useRouter()
   const searchParams = useSearchParams()
-  const pathname = usePathname()
 
   useEffect(() => {
     setActiveView(mode === "info" ? "info" : "entry")

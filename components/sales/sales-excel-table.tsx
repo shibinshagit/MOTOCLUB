@@ -1017,15 +1017,17 @@ export default function SalesExcelTable({
                 <span>Excel</span>
               </Button>
 
-              <Button
-                size="sm"
-                className="h-7 gap-1.5 px-3 text-xs font-semibold bg-violet-600 hover:bg-violet-700 text-white shadow-2xs"
-                onClick={() => setIsCreateJobCardOpen(true)}
-                title="Create a new Job Card"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                <span>Job Card</span>
-              </Button>
+              {!isPurchaseManager && (
+                <Button
+                  size="sm"
+                  className="h-7 gap-1.5 px-3 text-xs font-semibold bg-violet-600 hover:bg-violet-700 text-white shadow-2xs"
+                  onClick={() => setIsCreateJobCardOpen(true)}
+                  title="Create a new Job Card"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  <span>Job Card</span>
+                </Button>
+              )}
 
               {activeFilterCount > 0 || cardFilter !== "all" || typeFilter !== "all" ? (
                 <Button
@@ -1903,7 +1905,7 @@ export default function SalesExcelTable({
         ) : null}
       </div>
 
-      {isCreateJobCardOpen && (
+      {!isPurchaseManager && isCreateJobCardOpen && (
         <JobCardModal
           isOpen={true}
           onClose={() => {
