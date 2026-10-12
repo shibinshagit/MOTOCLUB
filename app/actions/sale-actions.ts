@@ -885,6 +885,7 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
             OR (${cardFilter} = 'pending' AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned') AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled' AND LOWER(COALESCE(s.delivery_status, '')) NOT IN ('returned', 'failed') AND LOWER(COALESCE(s.delivery_status, 'pending')) != 'delivered')
             OR (${cardFilter} = 'critical' AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%') AND LOWER(COALESCE(s.fulfillment_type, '')) = 'ship' AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned') AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'pending') AND (LOWER(COALESCE(s.payment_status, '')) IN ('paid', 'completed') OR (s.total_amount > 0 AND s.received_amount >= s.total_amount)) AND LOWER(COALESCE(s.delivery_status, 'pending')) NOT IN ('pickup', 'direct', 'shipping', 'shipped', 'in transit', 'delivered', 'returned', 'failed'))
           )
+          AND (${onlyPosUpdated} = false OR s.is_pos_updated = true)
           AND (
             ${searchPattern}::text IS NULL
             OR LOWER(COALESCE(s.customer_name_override, c.name, '')) LIKE ${searchPattern}
@@ -948,7 +949,7 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
   }
 }
 
-export async function getSalesSummaryCards(deviceId: number, options: { dateFrom?: string; dateTo?: string; typeFilter?: string; searchTerm?: string } = {}) {
+export async function getSalesSummaryCards(deviceId: number, options: { dateFrom?: string; dateTo?: string; typeFilter?: string; searchTerm?: string; onlyPosUpdated?: boolean } = {}) {
   if (!deviceId) {
     return { success: false, counts: { total: 0, pending: 0, critical: 0 } }
   }
@@ -961,6 +962,7 @@ export async function getSalesSummaryCards(deviceId: number, options: { dateFrom
   const allowEcom = isEcomAllowedDevice(deviceId)
   const dateFrom = options.dateFrom || null
   const typeFilter = options.typeFilter || "all"
+  const onlyPosUpdated = options.onlyPosUpdated || false
 
   try {
     const cardCounts = await executeWithRetry(async () => {
@@ -992,6 +994,7 @@ export async function getSalesSummaryCards(deviceId: number, options: { dateFrom
           AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
           AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
           AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
+          AND (${onlyPosUpdated} = false OR s.is_pos_updated = true)
           AND (
             ${typeFilter} = 'all'
             OR (${typeFilter} = 'job_card' AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%'))

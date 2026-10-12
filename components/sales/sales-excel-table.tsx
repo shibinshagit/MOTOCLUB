@@ -341,6 +341,7 @@ export default function SalesExcelTable({
           dateTo: globalDateRange?.to,
           typeFilter,
           searchTerm: debouncedSearch,
+          onlyPosUpdated,
         }),
       ])
       if (fetchId !== latestFetchIdRef.current) return
@@ -420,7 +421,7 @@ export default function SalesExcelTable({
     return displaySales.filter((s) => selectedSales.includes(s.id))
   }, [displaySales, selectedSales])
 
-  const totalCount = serverCardCounts ? serverCardCounts.total : totalServerCount
+  const totalCount = onlyPosUpdated ? totalServerCount : (serverCardCounts ? serverCardCounts.total : totalServerCount)
   const pendingCount = serverCardCounts ? serverCardCounts.pending : 0
   const criticalCount = serverCardCounts ? serverCardCounts.critical : 0
   const pendingSalesCount = pendingCount
@@ -926,7 +927,7 @@ export default function SalesExcelTable({
                   `${displaySales.length} of ${totalCount}`
                 )}
               </span>
-              {pendingSalesCount > 0 && (
+              {!onlyPosUpdated && pendingSalesCount > 0 && (
                 <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800">
                   <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
                   {pendingSalesCount} Pending
