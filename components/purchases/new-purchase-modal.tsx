@@ -500,11 +500,11 @@ export default function NewPurchaseModal({
       return
     }
 
-    // Validate received amount
+    // Validate paid amount
     if (receivedAmount > totalAmount) {
       setFormAlert({
         type: "error",
-        message: "Received amount cannot be greater than total amount",
+        message: "Paid amount cannot be greater than total amount",
       })
       return
     }
@@ -679,10 +679,10 @@ export default function NewPurchaseModal({
                   </div>
                 )}
 
-                {/* Received Amount - only show for Credit */}
+                {/* Paid Amount - only show for Credit */}
                 {status === "Credit" && (
                   <div>
-                    <Label className="text-sm font-medium text-gray-700">Received Amount</Label>
+                    <Label className="text-sm font-medium text-gray-700">Paid Amount</Label>
                     <Input
                       type="number"
                       min="0"

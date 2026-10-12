@@ -260,7 +260,7 @@ export default function EditPurchaseModal({
     }
 
     if (receivedAmount > totalAmount) {
-      return "Received amount cannot be greater than total amount"
+      return "Paid amount cannot be greater than total amount"
     }
 
     return null
@@ -577,10 +577,10 @@ export default function EditPurchaseModal({
                       </div>
                     )}
 
-                    {/* Received Amount - only show for Credit */}
+                    {/* Paid Amount - only show for Credit */}
                     {status === "Credit" && (
                       <div>
-                        <Label className="text-sm font-medium text-gray-700">Received Amount</Label>
+                        <Label className="text-sm font-medium text-gray-700">Paid Amount</Label>
                         <Input
                           type="number"
                           min="0"
