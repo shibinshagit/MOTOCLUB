@@ -267,7 +267,7 @@ export default function ProductsToPurchaseTab({
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState("")
   const [debouncedSearch, setDebouncedSearch] = useState("")
-  const [stockFilter, setStockFilter] = useState<"all" | "out_of_stock" | "in_stock">("all")
+  const [activeTab, setActiveTab] = useState<"all" | "redeemed" | "order" | "postponed" | "reject">("all")
   const [page, setPage] = useState(1)
   const pageSize = 25
 
@@ -520,12 +520,12 @@ export default function ProductsToPurchaseTab({
       next[k] = createEmptyColumnFilter()
     })
     setColumnFilters(next)
-    setStockFilter("all")
+    setActiveTab("all")
     setSearchTerm("")
     setPage(1)
   }
 
-  // Summary counts
+  // Summary counts for out of stock badge
   const { outOfStockCount, inStockCount } = useMemo(() => {
     let outCount = 0
     let inCount = 0
@@ -541,6 +541,23 @@ export default function ProductsToPurchaseTab({
     return { outOfStockCount: outCount, inStockCount: inCount }
   }, [products])
 
+  // Action tab counts
+  const tabCounts = useMemo(() => {
+    let redeemed = 0
+    let order = 0
+    let postponed = 0
+    let reject = 0
+    for (const p of products) {
+      const key = getRowKey(p)
+      const action = itemActions[key]
+      if (action === "redeemed") redeemed++
+      else if (action === "order") order++
+      else if (action === "postponed") postponed++
+      else if (action === "reject") reject++
+    }
+    return { redeemed, order, postponed, reject }
+  }, [products, itemActions])
+
   // Filtered products list
   const filteredProducts = useMemo(() => {
     return products.filter((p) => {
@@ -548,9 +565,12 @@ export default function ProductsToPurchaseTab({
       const current = Number(p.current_stock) || 0
       const isOutOfStock = current < required || current <= 0
 
-      // Stock status quick filter
-      if (stockFilter === "out_of_stock" && !isOutOfStock) return false
-      if (stockFilter === "in_stock" && isOutOfStock) return false
+      // Quick action tab filter: all, redeemed, order, postponed, reject
+      if (activeTab !== "all") {
+        const rowKey = getRowKey(p)
+        const action = itemActions[rowKey]
+        if (action !== activeTab) return false
+      }
 
       // Global search term with debounce
       if (debouncedSearch.trim()) {
@@ -575,7 +595,7 @@ export default function ProductsToPurchaseTab({
 
       return true
     })
-  }, [products, stockFilter, debouncedSearch, columnFilters, uniqueValues, valueGetters])
+  }, [products, activeTab, itemActions, debouncedSearch, columnFilters, uniqueValues, valueGetters])
 
   // Sort products:
   // 1. Regular unhandled products (out of stock items first, then alphabetically)
@@ -1911,54 +1931,146 @@ export default function ProductsToPurchaseTab({
         globalDateRange={globalDateRange}
       />
 
-      {/* QUICK STATUS FILTER TABS */}
+      {/* ACTION STATUS FILTER TABS */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-        <div className="inline-flex items-center gap-1 p-1 bg-slate-100 rounded-lg border border-slate-200">
+        <div className="flex flex-wrap items-center gap-1.5 p-1 bg-slate-100 rounded-lg border border-slate-200">
+          {/* 1. All Products */}
           <button
             type="button"
             onClick={() => {
-              setStockFilter("all")
-              setPage(1)
-            }}
-            className={cn(
-              "px-3 py-1.5 text-xs font-semibold rounded-md transition-all cursor-pointer whitespace-nowrap shrink-0",
-              stockFilter === "all"
-                ? "bg-white text-slate-900 shadow-2xs font-extrabold"
-                : "text-slate-600 hover:text-slate-900",
-            )}
-          >
-            All Products ({products.length})
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setStockFilter("out_of_stock")
+              setActiveTab("all")
               setPage(1)
             }}
             className={cn(
               "px-3 py-1.5 text-xs font-semibold rounded-md transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1.5",
-              stockFilter === "out_of_stock"
-                ? "bg-white text-rose-900 shadow-2xs font-extrabold"
-                : "text-slate-600 hover:text-slate-900",
+              activeTab === "all"
+                ? "bg-white text-slate-900 shadow-2xs font-bold border border-slate-200/80"
+                : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/50",
             )}
           >
-            <span className="h-2 w-2 rounded-full bg-rose-500 animate-pulse" />
-            Out of Stock ({outOfStockCount})
+            <span>All Products</span>
+            <span
+              className={cn(
+                "px-1.5 py-0.5 rounded-full text-[10px] font-bold leading-none",
+                activeTab === "all"
+                  ? "bg-slate-900 text-white"
+                  : "bg-slate-200 text-slate-700",
+              )}
+            >
+              {products.length}
+            </span>
           </button>
+
+          {/* 2. Redeem */}
           <button
             type="button"
             onClick={() => {
-              setStockFilter("in_stock")
+              setActiveTab("redeemed")
               setPage(1)
             }}
             className={cn(
-              "px-3 py-1.5 text-xs font-semibold rounded-md transition-all cursor-pointer whitespace-nowrap shrink-0",
-              stockFilter === "in_stock"
-                ? "bg-white text-emerald-900 shadow-2xs font-extrabold"
-                : "text-slate-600 hover:text-slate-900",
+              "px-3 py-1.5 text-xs font-semibold rounded-md transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1.5",
+              activeTab === "redeemed"
+                ? "bg-emerald-50 text-emerald-900 border border-emerald-300 shadow-2xs font-bold"
+                : "text-slate-600 hover:text-emerald-800 hover:bg-emerald-50/60",
             )}
           >
-            In Stock ({inStockCount})
+            <PackageCheck className="h-3.5 w-3.5 text-emerald-600" />
+            <span>Redeem</span>
+            <span
+              className={cn(
+                "px-1.5 py-0.5 rounded-full text-[10px] font-bold leading-none",
+                activeTab === "redeemed"
+                  ? "bg-emerald-600 text-white"
+                  : "bg-emerald-100 text-emerald-800",
+              )}
+            >
+              {tabCounts.redeemed}
+            </span>
+          </button>
+
+          {/* 3. Ordered */}
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab("order")
+              setPage(1)
+            }}
+            className={cn(
+              "px-3 py-1.5 text-xs font-semibold rounded-md transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1.5",
+              activeTab === "order"
+                ? "bg-blue-50 text-blue-900 border border-blue-300 shadow-2xs font-bold"
+                : "text-slate-600 hover:text-blue-800 hover:bg-blue-50/60",
+            )}
+          >
+            <Truck className="h-3.5 w-3.5 text-blue-600" />
+            <span>Ordered</span>
+            <span
+              className={cn(
+                "px-1.5 py-0.5 rounded-full text-[10px] font-bold leading-none",
+                activeTab === "order"
+                  ? "bg-blue-600 text-white"
+                  : "bg-blue-100 text-blue-800",
+              )}
+            >
+              {tabCounts.order}
+            </span>
+          </button>
+
+          {/* 4. Postpone */}
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab("postponed")
+              setPage(1)
+            }}
+            className={cn(
+              "px-3 py-1.5 text-xs font-semibold rounded-md transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1.5",
+              activeTab === "postponed"
+                ? "bg-amber-50 text-amber-900 border border-amber-300 shadow-2xs font-bold"
+                : "text-slate-600 hover:text-amber-800 hover:bg-amber-50/60",
+            )}
+          >
+            <Clock className="h-3.5 w-3.5 text-amber-600" />
+            <span>Postpone</span>
+            <span
+              className={cn(
+                "px-1.5 py-0.5 rounded-full text-[10px] font-bold leading-none",
+                activeTab === "postponed"
+                  ? "bg-amber-600 text-white"
+                  : "bg-amber-100 text-amber-800",
+              )}
+            >
+              {tabCounts.postponed}
+            </span>
+          </button>
+
+          {/* 5. Rejected */}
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab("reject")
+              setPage(1)
+            }}
+            className={cn(
+              "px-3 py-1.5 text-xs font-semibold rounded-md transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1.5",
+              activeTab === "reject"
+                ? "bg-rose-50 text-rose-900 border border-rose-300 shadow-2xs font-bold"
+                : "text-slate-600 hover:text-rose-800 hover:bg-rose-50/60",
+            )}
+          >
+            <Ban className="h-3.5 w-3.5 text-rose-600" />
+            <span>Rejected</span>
+            <span
+              className={cn(
+                "px-1.5 py-0.5 rounded-full text-[10px] font-bold leading-none",
+                activeTab === "reject"
+                  ? "bg-rose-600 text-white"
+                  : "bg-rose-100 text-rose-800",
+              )}
+            >
+              {tabCounts.reject}
+            </span>
           </button>
         </div>
 
@@ -2099,12 +2211,12 @@ export default function ProductsToPurchaseTab({
                 <span>Excel</span>
               </Button>
 
-              {activeFilterCount > 0 || stockFilter !== "all" ? (
+              {activeFilterCount > 0 || activeTab !== "all" || searchTerm ? (
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={clearAllFilters}
-                  className="h-7 px-2 text-xs text-rose-600 hover:text-rose-800"
+                  className="h-7 px-2 text-xs text-rose-600 hover:text-rose-800 cursor-pointer"
                 >
                   Clear Filters
                 </Button>
@@ -2184,7 +2296,7 @@ export default function ProductsToPurchaseTab({
                     <td colSpan={8} className="px-4 py-12 text-center text-sm text-muted-foreground">
                       <div className="flex flex-col items-center justify-center">
                         <Package className="h-8 w-8 text-gray-300 mb-2" />
-                        {searchTerm || stockFilter !== "all" || activeFilterCount > 0
+                        {searchTerm || activeTab !== "all" || activeFilterCount > 0
                           ? "No products match the selected filters"
                           : "No products found for the selected period"}
                       </div>
