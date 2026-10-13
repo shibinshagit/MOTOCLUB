@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { 
   LayoutDashboard, 
@@ -53,6 +53,7 @@ export default function StaffDashboard() {
   const [isLoadingStats, setIsLoadingStats] = useState(false)
   const [statsError, setStatsError] = useState<string | null>(null)
   const [fetchedStaffName, setFetchedStaffName] = useState<string>("")
+  const [refreshKey, setRefreshKey] = useState(0)
   const [mounted, setMounted] = useState(false)
   const router = useRouter()
   const { toast } = useToast()
@@ -65,9 +66,8 @@ export default function StaffDashboard() {
     setMounted(true)
   }, [])
 
-  // Fetch dashboard stats when tab changes to home, device changes, or date range changes
-  useEffect(() => {
-    if (activeTab === "home" && device?.id) {
+  const fetchStats = useCallback(() => {
+    if (device?.id) {
       setIsLoadingStats(true)
       setStatsError(null)
       getStaffDashboardStats(device.id, dateRange.from, dateRange.to)
@@ -88,7 +88,19 @@ export default function StaffDashboard() {
           setIsLoadingStats(false)
         })
     }
-  }, [activeTab, device?.id, dateRange.from, dateRange.to])
+  }, [device?.id, dateRange.from, dateRange.to])
+
+  // Fetch dashboard stats when tab changes to home, device changes, or date range changes
+  useEffect(() => {
+    if (activeTab === "home") {
+      fetchStats()
+    }
+  }, [activeTab, fetchStats])
+
+  const refreshDashboard = useCallback(() => {
+    fetchStats()
+    setRefreshKey(prev => prev + 1)
+  }, [fetchStats])
 
   const userName = fetchedStaffName || activeStaff?.name || device?.user?.name || ""
 
@@ -470,6 +482,7 @@ export default function StaffDashboard() {
                       fromDate={dateRange.from}
                       toDate={dateRange.to}
                       onSummaryUpdate={setChartSummary} 
+                      refreshKey={refreshKey}
                     />
                   )}
                 </div>
@@ -480,6 +493,8 @@ export default function StaffDashboard() {
                     canCreateProducts={false}
                     globalFromDate={dateRange.from}
                     globalToDate={dateRange.to}
+                    refreshKey={refreshKey}
+                    onSaleChanged={refreshDashboard}
                   />
                 </div>
               </div>
@@ -517,7 +532,11 @@ export default function StaffDashboard() {
         onClose={() => {
           setIsJobCardModalOpen(false)
           setSelectedCustomerForJobCard(null)
+          refreshDashboard()
         }} 
+        onSuccess={() => {
+          refreshDashboard()
+        }}
         initialCustomer={selectedCustomerForJobCard}
         canCreateProducts={false}
       />

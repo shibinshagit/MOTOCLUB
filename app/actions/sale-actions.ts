@@ -762,6 +762,7 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
           s.advance_amount,
           s.balance_amount,
           s.sale_type,
+          s.type_of_sale,
           s.source,
           s.external_order_id,
           s.customer_id,
@@ -1787,7 +1788,7 @@ export async function addSale(saleData: any) {
         packaging_type_id, packaging_type_name,
         tracking_id, shipping_address, shipping_city, shipping_district, shipping_state, shipping_street, shipping_landmark, shipping_address_type, shipping_pincode, weight_kg, length_cm, width_cm, height_cm,
         courier_paid_extra, expense_courier, expense_packing, shipped_at, delivered_at, shipping_notes,
-        advance_amount, balance_amount, is_pos_updated
+        advance_amount, balance_amount, is_pos_updated, type_of_sale
       )
       VALUES (
         ${saleData.customerId || null},
@@ -1832,7 +1833,8 @@ export async function addSale(saleData: any) {
         ${shipping.shipping_notes},
         ${advanceAmount},
         ${balanceAmount},
-        false
+        false,
+        ${saleData.typeOfSale || 'walk in'}
       )
       RETURNING id
     `
@@ -2631,7 +2633,8 @@ export async function updateSale(saleData: any) {
                 delivered_at = ${shipping.delivered_at},
                 shipping_notes = ${shipping.shipping_notes},
                 advance_amount = ${changes.advanceAmount},
-                balance_amount = ${changes.balanceAmount}
+                balance_amount = ${changes.balanceAmount},
+                type_of_sale = COALESCE(${saleData.typeOfSale || null}, type_of_sale)
             WHERE id = ${saleData.id} AND device_id = ${saleData.deviceId}
           `
         } else {
@@ -2678,7 +2681,8 @@ export async function updateSale(saleData: any) {
                 delivered_at = ${shipping.delivered_at},
                 shipping_notes = ${shipping.shipping_notes},
                 advance_amount = ${changes.advanceAmount},
-                balance_amount = ${changes.balanceAmount}
+                balance_amount = ${changes.balanceAmount},
+                type_of_sale = COALESCE(${saleData.typeOfSale || null}, type_of_sale)
             WHERE id = ${saleData.id}
           `
         }

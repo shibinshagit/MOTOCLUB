@@ -658,6 +658,13 @@ export default function StaffLeadsTab() {
               fetchSummary()
             }
           }}
+          onSuccess={() => {
+            if (selectedLeadId) {
+              loadLeadData(selectedLeadId)
+              fetchLeads()
+              fetchSummary()
+            }
+          }}
           initialCustomer={selectedLead?.converted_customer_id ? {
             id: selectedLead.converted_customer_id,
             name: selectedLead.name,

@@ -77,6 +77,8 @@ export interface JobCardInput {
 
   courierPaidExtra?: number
 
+  typeOfSale?: string
+
   products: JobCardProductInput[]
   crmLeadId?: number
 }
@@ -221,6 +223,7 @@ export async function createJobCard(input: JobCardInput) {
                 received_amount,
                 staff_id,
                 sale_type,
+                type_of_sale,
                 job_card_number,
                 tracking_id,
                 customer_name_override,
@@ -252,6 +255,7 @@ export async function createJobCard(input: JobCardInput) {
                 0,
                 ${staffId},
                 'job_card',
+                ${input.typeOfSale || 'walk in'},
                 ${trackingId},
                 ${trackingId},
                 ${customerNameOverride},
@@ -446,7 +450,8 @@ export async function updateJobCard(id: number, input: any) {
           courier_paid_extra = ${input.courierPaidExtra || 0},
           balance_amount = ${balanceAmount},
           fulfillment_type = COALESCE(fulfillment_type, 'ship'),
-          delivery_status = COALESCE(delivery_status, 'Pending')
+          delivery_status = COALESCE(delivery_status, 'Pending'),
+          type_of_sale = COALESCE(${input.typeOfSale || null}, type_of_sale)
         WHERE id = ${id} AND staff_id = ${staffId}
         RETURNING tracking_id
       `
@@ -469,7 +474,8 @@ export async function updateJobCard(id: number, input: any) {
           courier_paid_extra = ${input.courierPaidExtra || 0},
           balance_amount = ${balanceAmount},
           fulfillment_type = COALESCE(fulfillment_type, 'ship'),
-          delivery_status = COALESCE(delivery_status, 'Pending')
+          delivery_status = COALESCE(delivery_status, 'Pending'),
+          type_of_sale = COALESCE(${input.typeOfSale || null}, type_of_sale)
         WHERE id = ${id}
         RETURNING tracking_id
       `

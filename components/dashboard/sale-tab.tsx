@@ -1552,6 +1552,7 @@ export default function SaleTab({
           receivedAmount: finalReceivedAmount,
           advanceAmount: hasCodOnCreate ? finalReceivedAmount : advanceAmount,
           balanceAmount: finalBalanceAmount,
+          typeOfSale: "walk in",
           ...shipping,
         }
 
