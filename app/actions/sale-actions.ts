@@ -2985,7 +2985,8 @@ export async function updateSaleDeliveryStatus(
 
   try {
     const staffSession = await getStaffSession()
-    const isAdmin = !staffSession || staffSession.role === "admin" || staffSession.role === "logistics"
+    const userRole = (staffSession?.role || "").toLowerCase()
+    const isPrivileged = !staffSession || userRole === "admin" || userRole === "logistics" || userRole === "purchase_manager"
 
     const rows = await sql`
       SELECT delivery_status, status, fulfillment_type, shipped_at, delivered_at, payment_status, tracking_id, sale_type, source, external_order_id, staff_id, device_id, shipping_date
@@ -2998,7 +2999,7 @@ export async function updateSaleDeliveryStatus(
       return { success: false as const, message: "Sale not found" }
     }
 
-    if (!isAdmin && rows[0].staff_id !== staffSession.staffId) {
+    if (!isPrivileged && rows[0].staff_id !== staffSession.staffId) {
       return { success: false as const, message: "Unauthorized. You can only update your own sales." }
     }
 
@@ -3193,6 +3194,7 @@ export async function updateSaleDeliveryStatus(
     revalidatePath("/dashboard")
     revalidatePath("/staff/dashboard")
     revalidatePath("/logistics/dashboard")
+    revalidatePath("/purchase-manager/dashboard")
     return { 
       success: true as const, 
       message: "Delivery status updated", 
@@ -3270,8 +3272,9 @@ export async function updateSaleFulfillmentDetails(saleId: number, shippingData:
 
   try {
     const staffSession = await getStaffSession()
-    const isAdmin = !staffSession || staffSession.role === "admin" || staffSession.role === "logistics"
-    if (!isAdmin) {
+    const userRole = (staffSession?.role || "").toLowerCase()
+    const isPrivileged = !staffSession || userRole === "admin" || userRole === "logistics" || userRole === "purchase_manager"
+    if (!isPrivileged) {
       const rows = await sql`SELECT staff_id FROM sales WHERE id = ${saleId} LIMIT 1`
       if (rows.length === 0 || rows[0].staff_id !== staffSession.staffId) {
         return { success: false, message: "Unauthorized. You can only update your own sales." }
@@ -3359,6 +3362,7 @@ export async function updateSaleFulfillmentDetails(saleId: number, shippingData:
     revalidatePath("/dashboard")
     revalidatePath("/staff/dashboard")
     revalidatePath("/logistics/dashboard")
+    revalidatePath("/purchase-manager/dashboard")
     return { success: true, message: "Fulfillment details saved successfully" }
   } catch (err) {
     console.error("updateSaleFulfillmentDetails error:", err)
