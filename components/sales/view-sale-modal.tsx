@@ -45,11 +45,23 @@ interface ViewSaleModalProps {
 
 function SaleStatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
+    Paid: "bg-emerald-50 text-emerald-700 border-emerald-200",
     Completed: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    Partial: "bg-blue-50 text-blue-700 border-blue-200",
     Credit: "bg-amber-50 text-amber-700 border-amber-200",
     Cancelled: "bg-rose-50 text-rose-700 border-rose-200",
     Returned: "bg-purple-50 text-purple-700 border-purple-200",
-    Pending: "bg-amber-50 text-amber-700 border-amber-200",
+    Pending: "bg-slate-50 text-slate-700 border-slate-200",
+  }
+
+  const labelMap: Record<string, string> = {
+    Paid: "Paid",
+    Completed: "Paid",
+    Partial: "Partial",
+    Credit: "Credit",
+    Pending: "Pending",
+    Cancelled: "Cancelled",
+    Returned: "Returned",
   }
 
   return (
@@ -58,7 +70,7 @@ function SaleStatusBadge({ status }: { status: string }) {
         styles[status] || "border-border bg-muted text-muted-foreground"
       }`}
     >
-      {status}
+      {labelMap[status] || status}
     </span>
   )
 }
@@ -254,8 +266,13 @@ export default function ViewSaleModal({
     if (sale.status === "Cancelled") return "Cancelled"
     if (sale.status === "Returned") return "Returned"
     const pStatus = sale.payment_status?.toLowerCase()
-    if (pStatus === "paid" || pStatus === "completed") return "Completed"
-    if (pStatus === "credit" || pStatus === "partial") return "Credit"
+    if (pStatus === "paid" || pStatus === "completed") return "Paid"
+    if (pStatus === "partial") return "Partial"
+    if (pStatus === "credit") return "Credit"
+    const total = Number(sale.total_amount) || 0
+    const received = Number(sale.received_amount) || 0
+    if (total > 0 && received >= total) return "Paid"
+    if (received > 0 && received < total) return "Partial"
     return "Pending"
   }
 

@@ -60,11 +60,12 @@ export function SplitPaymentInput({
         referenceNumber: p.referenceNumber || "",
       }))
     }
+    const isPendingOrCredit = paymentStatus === "Pending" || paymentStatus === "Credit" || paymentStatus === "Cancelled" || !paymentStatus
     return [
       {
         rowId: `row-0-${Date.now()}`,
         paymentMethod: "Cash",
-        amount: totalAmount > 0 ? totalAmount : 0,
+        amount: isPendingOrCredit ? 0 : (totalAmount > 0 ? totalAmount : 0),
         referenceNumber: "",
       },
     ]
@@ -125,11 +126,15 @@ export function SplitPaymentInput({
       (paymentStatus === "Paid" || paymentStatus === "Completed") && 
       (prevPaymentStatus.current !== "Paid" && prevPaymentStatus.current !== "Completed")
       
-    const statusChangedToPending = 
-      (paymentStatus === "Pending" || paymentStatus === "Cancelled") && 
-      (prevPaymentStatus.current !== "Pending" && prevPaymentStatus.current !== "Cancelled")
+    const statusChangedToPendingOrCredit = 
+      (paymentStatus === "Pending" || paymentStatus === "Credit" || paymentStatus === "Cancelled") && 
+      (prevPaymentStatus.current !== "Pending" && prevPaymentStatus.current !== "Credit" && prevPaymentStatus.current !== "Cancelled")
 
-    if (statusChangedToPending) {
+    const statusChangedToPartialFromPaid =
+      paymentStatus === "Partial" &&
+      (prevPaymentStatus.current === "Paid" || prevPaymentStatus.current === "Completed")
+
+    if (statusChangedToPendingOrCredit) {
       const allZero = rows.every((r) => Number(r.amount) === 0)
       if (!allZero) {
         const updated = rows.map((r) => ({ ...r, amount: 0 }))
@@ -152,6 +157,11 @@ export function SplitPaymentInput({
         // eslint-disable-next-line react-hooks/exhaustive-deps
         notifyParent(updated)
       }
+    } else if (statusChangedToPartialFromPaid) {
+      const updated = rows.map((r) => ({ ...r, amount: 0 }))
+      setRows(updated)
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      notifyParent(updated)
     }
     prevPaymentStatus.current = paymentStatus
   }, [paymentStatus, totalAmount, hasCod, isEditMode])
@@ -209,6 +219,19 @@ export function SplitPaymentInput({
       const willHaveCod = isCodMethod(value) || updated.some((r) => isCodMethod(r.paymentMethod))
       if (willHaveCod) {
         onPaymentStatusChange?.("Credit")
+      }
+    }
+
+    if (field === "amount") {
+      const totalAlloc = updated.reduce((sum, r) => sum + (Number(r.amount) || 0), 0)
+      if (totalAlloc >= totalAmount && totalAmount > 0) {
+        onPaymentStatusChange?.("Paid")
+      } else if (totalAlloc > 0 && totalAlloc < totalAmount) {
+        onPaymentStatusChange?.("Partial")
+      } else if (totalAlloc === 0) {
+        if (paymentStatus !== "Credit") {
+          onPaymentStatusChange?.("Pending")
+        }
       }
     }
   }
@@ -417,33 +440,57 @@ export function SplitPaymentInput({
           {onPaymentStatusChange ? (
             <select
               disabled={disabled}
-              value={paymentStatus === "Credit" || paymentStatus === "Partial" ? "Credit" : (paymentStatus || (hasCod && !isEditMode ? "Credit" : "Paid"))}
+              value={paymentStatus || (hasCod && !isEditMode ? "Credit" : "Pending")}
               onChange={(e) => {
                 const nextVal = e.target.value
                 if (!isEditMode && hasCod && (nextVal === "Paid" || nextVal === "Completed")) {
                   return
                 }
-                onPaymentStatusChange(nextVal)
+                onPaymentStatusChange?.(nextVal)
+                if (nextVal === "Paid") {
+                  const updated = [
+                    {
+                      rowId: rows[0]?.rowId || `row-0-${Date.now()}`,
+                      paymentMethod: rows[0]?.paymentMethod || "Cash",
+                      amount: totalAmount > 0 ? totalAmount : 0,
+                      referenceNumber: rows[0]?.referenceNumber || "",
+                    },
+                  ]
+                  setRows(updated)
+                  notifyParent(updated)
+                } else if (nextVal === "Pending" || nextVal === "Credit") {
+                  const updated = rows.map((r) => ({ ...r, amount: 0 }))
+                  setRows(updated)
+                  notifyParent(updated)
+                } else if (nextVal === "Partial") {
+                  const totalAlloc = rows.reduce((sum, r) => sum + (Number(r.amount) || 0), 0)
+                  if (totalAlloc >= totalAmount && totalAmount > 0) {
+                    const updated = rows.map((r) => ({ ...r, amount: 0 }))
+                    setRows(updated)
+                    notifyParent(updated)
+                  }
+                }
               }}
               className="h-7 text-xs font-semibold rounded border border-gray-300 bg-white px-2 py-0.5 text-gray-900 focus:outline-none"
             >
+              <option value="Pending">Pending</option>
+              <option value="Credit">Credit</option>
+              <option value="Partial">Partial</option>
               <option value="Paid" disabled={!isEditMode && hasCod}>
                 Paid {!isEditMode && hasCod ? "(Disabled for COD)" : ""}
               </option>
-              <option value="Credit">Credit / Partial</option>
-              <option value="Pending">Pending</option>
             </select>
           ) : (
             <span className={`font-semibold px-2 py-0.5 rounded text-xs ${
               paymentStatus === "Paid" || paymentStatus === "Completed"
                 ? "bg-emerald-100 text-emerald-800"
-                : paymentStatus === "Credit" || paymentStatus === "Partial"
+                : paymentStatus === "Credit"
                 ? "bg-amber-100 text-amber-800"
-                : "bg-gray-100 text-gray-800"
+                : paymentStatus === "Partial"
+                ? "bg-blue-100 text-blue-800"
+                : "bg-slate-100 text-slate-800"
             }`}>
-              {paymentStatus === "Credit" || paymentStatus === "Partial"
-                ? "Credit / Partial"
-                : (paymentStatus || "Paid")}
+              {paymentStatus || "Pending"}
             </span>
           )}
         </div>

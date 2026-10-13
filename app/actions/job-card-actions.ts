@@ -239,6 +239,7 @@ export async function createJobCard(input: JobCardInput) {
                 balance_amount,
                 fulfillment_type,
                 delivery_status,
+                is_pos_updated,
                 sale_date,
                 created_at
               ) VALUES (
@@ -269,6 +270,7 @@ export async function createJobCard(input: JobCardInput) {
                 ${totalAmount},
                 'ship',
                 'Pending',
+                false,
                 NOW(),
                 NOW()
               )
@@ -798,14 +800,12 @@ export async function getAllJobCards(
       `
     } else if (statusFilter === "critical") {
       statusWhere = sql`
-        (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%' OR s.tracking_id LIKE 'DOD-%')
-        AND LOWER(COALESCE(s.fulfillment_type, 'pickup')) = 'ship'
-        AND s.status NOT IN ('Cancelled', 'Returned')
+        s.status NOT IN ('Cancelled', 'Returned')
         AND (s.payment_status IS NULL OR LOWER(s.payment_status) != 'cancelled')
         AND (
           LOWER(s.payment_status) IN ('paid', 'completed') OR (COALESCE(s.total_amount, 0) > 0 AND COALESCE(s.received_amount, 0) >= COALESCE(s.total_amount, 0))
         )
-        AND (s.delivery_status IS NULL OR LOWER(s.delivery_status) NOT IN ('pickup', 'direct', 'shipping', 'delivered', 'returned', 'failed'))
+        AND (s.delivery_status IS NULL OR LOWER(COALESCE(s.delivery_status, 'pending')) NOT IN ('direct', 'delivered', 'failed', 'returned'))
       `
     }
 

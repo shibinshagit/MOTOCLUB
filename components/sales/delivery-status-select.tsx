@@ -294,7 +294,7 @@ export function DeliveryStatusSelect({
   }
 
   // Enable all standard delivery status options for full flexibility
-  const ALL_STATUS_OPTIONS = ["Pending", "Paid", "Packed", "Sent", "Direct", "Courier", "Shipping", "Delivered", "Returned", "Failed"]
+  const ALL_STATUS_OPTIONS = ["Pending", "Paid", "Packed", "Sent", "Direct", "Courier", "Shipping", "Delivered", "Returned", "Failed", "Pickup"]
   const uniqueOptions = Array.from(new Set([status, currentStatus, ...ALL_STATUS_OPTIONS]))
     .filter((opt): opt is string => Boolean(opt) && opt !== "Shipped" && opt !== "shipped" && opt !== "In transit" && opt !== "in transit")
 

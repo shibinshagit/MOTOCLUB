@@ -574,7 +574,27 @@ export default function SalesOrdersTab() {
                                   ECOMMERCE
                                 </Badge>
                               )}
-                              {sale.status === "Pending" && (
+                              {sale.payment_status === "Paid" && (
+                                <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-emerald-50 text-emerald-700 border-emerald-200 font-semibold">
+                                  Paid
+                                </Badge>
+                              )}
+                              {sale.payment_status === "Partial" && (
+                                <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-blue-50 text-blue-700 border-blue-200 font-semibold">
+                                  Partial
+                                </Badge>
+                              )}
+                              {sale.payment_status === "Credit" && (
+                                <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-amber-50 text-amber-700 border-amber-200 font-semibold">
+                                  Credit
+                                </Badge>
+                              )}
+                              {sale.payment_status === "Pending" && (
+                                <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-slate-50 text-slate-700 border-slate-200 font-semibold">
+                                  Pending
+                                </Badge>
+                              )}
+                              {sale.status === "Pending" && !sale.is_pos_updated && (
                                 <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-amber-100 text-amber-800 border-amber-300 font-semibold">
                                   Not Updated
                                 </Badge>
@@ -729,13 +749,13 @@ export default function SalesOrdersTab() {
                               <Button 
                                 variant="ghost" 
                                 size="icon" 
-                                className={`h-7 w-7 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 ${sale.status === "Pending" ? "bg-amber-50 ring-1 ring-amber-300" : ""}`} 
+                                className={`h-7 w-7 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 ${sale.status === "Pending" && !sale.is_pos_updated ? "bg-amber-50 ring-1 ring-amber-300" : ""}`} 
                                 onClick={() => handleOpenInPOS(sale.id)} 
-                                title={sale.status === "Pending" ? "Open in POS (Sale Not Updated Yet)" : "Open in POS"}
+                                title={sale.status === "Pending" && !sale.is_pos_updated ? "Open in POS (Sale Not Updated Yet)" : "Open in POS"}
                               >
                                 <PlayCircle className="h-4 w-4" />
                               </Button>
-                              {sale.status === "Pending" && (
+                              {sale.status === "Pending" && !sale.is_pos_updated && (
                                 <span className="absolute -top-0.5 -right-0.5 flex h-2 w-2">
                                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
                                   <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>

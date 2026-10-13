@@ -53,12 +53,17 @@ export default function StaffDashboard() {
   const [isLoadingStats, setIsLoadingStats] = useState(false)
   const [statsError, setStatsError] = useState<string | null>(null)
   const [fetchedStaffName, setFetchedStaffName] = useState<string>("")
+  const [mounted, setMounted] = useState(false)
   const router = useRouter()
   const { toast } = useToast()
   const dispatch = useAppDispatch()
   const device = useAppSelector(selectDevice)
   const activeStaff = useAppSelector(selectActiveStaff)
   const dateRange = useAppSelector(selectDateRange)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
   // Fetch dashboard stats when tab changes to home, device changes, or date range changes
   useEffect(() => {
@@ -229,6 +234,17 @@ export default function StaffDashboard() {
       </div>
     </div>
   )
+
+  if (!mounted) {
+    return (
+      <div className="flex min-h-screen w-full items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <Loader2 className="mx-auto mb-4 h-8 w-8 animate-spin text-gray-400" />
+          <p className="text-gray-500">Loading dashboard...</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="flex h-full w-full">

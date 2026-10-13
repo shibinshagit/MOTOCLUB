@@ -110,17 +110,25 @@ function getSaleStatusLabel(sale: any): string {
   const received = Number(sale.received_amount) || 0
 
   if (pStatus === "paid" || pStatus === "completed" || (total > 0 && received >= total)) {
-    return "Completed"
+    return "Paid"
   }
-  if (pStatus === "credit" || pStatus === "partial" || (received > 0 && received < total)) {
+  if (pStatus === "partial") {
+    return "Partial"
+  }
+  if (pStatus === "credit") {
     return "Credit"
+  }
+  if (received > 0 && received < total) {
+    return "Partial"
   }
   return "Pending"
 }
 
 function SaleStatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
+    Paid: "bg-emerald-50 text-emerald-700 border-emerald-200",
     Completed: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    Partial: "bg-blue-50 text-blue-700 border-blue-200",
     Credit: "bg-amber-50 text-amber-700 border-amber-200",
     Cancelled: "bg-rose-50 text-rose-700 border-rose-200",
     Returned: "bg-rose-50 text-rose-700 border-rose-200",
@@ -128,8 +136,10 @@ function SaleStatusBadge({ status }: { status: string }) {
   }
 
   const labelMap: Record<string, string> = {
+    Paid: "Paid",
     Completed: "Paid",
-    Credit: "Partially Paid",
+    Partial: "Partial",
+    Credit: "Credit",
     Pending: "Pending",
     Cancelled: "Cancelled",
     Returned: "Returned",
@@ -1568,23 +1578,19 @@ export default function SalesExcelTable({
                           <SaleStatusBadge status={getSaleStatusLabel(sale)} />
                         </td>
                         <td className="whitespace-nowrap px-3 py-1.5" onClick={(e) => e.stopPropagation()}>
-                          {getSaleDeliveryLabel(sale) === "Pickup" ? (
-                            <DeliveryStatusBadge status="Pickup" />
-                          ) : (
-                            <DeliveryStatusSelect
-                              saleId={sale.id}
-                              deviceId={sale.device_id || deviceId || 0}
-                              currentStatus={sale.delivery_status || "Pending"}
-                              customerName={sale.customer_name}
-                              customerPhone={sale.customer_phone || sale.customer_phone_override}
-                              trackingId={sale.tracking_id}
-                              orderNumber={sale.id}
-                              paymentStatus={sale.payment_status}
-                              isJobCard={isJobCard}
-                              userRole="admin"
-                              onStatusChange={(newStatus) => handleDeliveryStatusChange(sale.id, newStatus)}
-                            />
-                          )}
+                          <DeliveryStatusSelect
+                            saleId={sale.id}
+                            deviceId={sale.device_id || deviceId || 0}
+                            currentStatus={sale.delivery_status || "Pending"}
+                            customerName={sale.customer_name}
+                            customerPhone={sale.customer_phone || sale.customer_phone_override}
+                            trackingId={sale.tracking_id}
+                            orderNumber={sale.id}
+                            paymentStatus={sale.payment_status}
+                            isJobCard={isJobCard}
+                            userRole="admin"
+                            onStatusChange={(newStatus) => handleDeliveryStatusChange(sale.id, newStatus)}
+                          />
                         </td>
                         <td className="whitespace-nowrap px-3 py-1.5 text-slate-700">
                           <div className="flex flex-col">
@@ -1993,25 +1999,19 @@ export default function SalesExcelTable({
                     {/* DELIVERY STATUS & TRACKING CONTROLS */}
                     <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pt-0.5">
                       <div className="flex-1">
-                        {getSaleDeliveryLabel(sale) === "Pickup" ? (
-                          <div className="inline-flex items-center gap-1 text-xs font-medium text-slate-600 bg-slate-100 px-2.5 py-1 rounded-md">
-                            Delivery: Pickup
-                          </div>
-                        ) : (
-                          <DeliveryStatusSelect
-                            saleId={sale.id}
-                            deviceId={sale.device_id || deviceId || 0}
-                            currentStatus={sale.delivery_status || "Pending"}
-                            customerName={sale.customer_name}
-                            customerPhone={sale.customer_phone || sale.customer_phone_override}
-                            trackingId={sale.tracking_id}
-                            orderNumber={sale.id}
-                            paymentStatus={sale.payment_status}
-                            isJobCard={isJobCard}
-                            userRole="admin"
-                            onStatusChange={(newStatus) => handleDeliveryStatusChange(sale.id, newStatus)}
-                          />
-                        )}
+                        <DeliveryStatusSelect
+                          saleId={sale.id}
+                          deviceId={sale.device_id || deviceId || 0}
+                          currentStatus={sale.delivery_status || "Pending"}
+                          customerName={sale.customer_name}
+                          customerPhone={sale.customer_phone || sale.customer_phone_override}
+                          trackingId={sale.tracking_id}
+                          orderNumber={sale.id}
+                          paymentStatus={sale.payment_status}
+                          isJobCard={isJobCard}
+                          userRole="admin"
+                          onStatusChange={(newStatus) => handleDeliveryStatusChange(sale.id, newStatus)}
+                        />
                       </div>
 
                       {sale.tracking_id && (

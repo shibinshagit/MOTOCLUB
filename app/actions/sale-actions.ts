@@ -851,8 +851,16 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
           AND (
             ${cardFilter} = 'all'
             OR (${cardFilter} = 'today' AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned') AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled' AND LOWER(COALESCE(s.delivery_status, '')) NOT IN ('returned', 'failed') AND COALESCE(s.sale_date, s.created_at)::date = CURRENT_DATE)
-            OR (${cardFilter} = 'pending' AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned') AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled' AND LOWER(COALESCE(s.delivery_status, '')) NOT IN ('returned', 'failed') AND LOWER(COALESCE(s.delivery_status, 'pending')) != 'delivered')
-            OR (${cardFilter} = 'critical' AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%') AND LOWER(COALESCE(s.fulfillment_type, '')) = 'ship' AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned') AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'pending') AND (LOWER(COALESCE(s.payment_status, '')) IN ('paid', 'completed') OR (s.total_amount > 0 AND s.received_amount >= s.total_amount)) AND LOWER(COALESCE(s.delivery_status, 'pending')) NOT IN ('pickup', 'direct', 'shipping', 'shipped', 'in transit', 'delivered', 'returned', 'failed'))
+            OR (
+              ${cardFilter} = 'critical'
+              AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
+              AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled'
+              AND (
+                LOWER(COALESCE(s.payment_status, '')) IN ('paid', 'completed')
+                OR (s.total_amount > 0 AND s.received_amount >= s.total_amount)
+              )
+              AND LOWER(COALESCE(s.delivery_status, 'pending')) NOT IN ('direct', 'delivered', 'failed', 'returned')
+            )
           )
           AND (${onlyPosUpdated} = false OR s.is_pos_updated = true)
           AND (
@@ -916,8 +924,16 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
           AND (
             ${cardFilter} = 'all'
             OR (${cardFilter} = 'today' AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned') AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled' AND LOWER(COALESCE(s.delivery_status, '')) NOT IN ('returned', 'failed') AND COALESCE(s.sale_date, s.created_at)::date = CURRENT_DATE)
-            OR (${cardFilter} = 'pending' AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned') AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled' AND LOWER(COALESCE(s.delivery_status, '')) NOT IN ('returned', 'failed') AND LOWER(COALESCE(s.delivery_status, 'pending')) != 'delivered')
-            OR (${cardFilter} = 'critical' AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%') AND LOWER(COALESCE(s.fulfillment_type, '')) = 'ship' AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned') AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'pending') AND (LOWER(COALESCE(s.payment_status, '')) IN ('paid', 'completed') OR (s.total_amount > 0 AND s.received_amount >= s.total_amount)) AND LOWER(COALESCE(s.delivery_status, 'pending')) NOT IN ('pickup', 'direct', 'shipping', 'shipped', 'in transit', 'delivered', 'returned', 'failed'))
+            OR (
+              ${cardFilter} = 'critical'
+              AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
+              AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled'
+              AND (
+                LOWER(COALESCE(s.payment_status, '')) IN ('paid', 'completed')
+                OR (s.total_amount > 0 AND s.received_amount >= s.total_amount)
+              )
+              AND LOWER(COALESCE(s.delivery_status, 'pending')) NOT IN ('direct', 'delivered', 'failed', 'returned')
+            )
           )
           AND (${onlyPosUpdated} = false OR s.is_pos_updated = true)
           AND (
@@ -1042,12 +1058,13 @@ export async function getSalesSummaryCards(
               AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
           )::int as pending_count,
           COUNT(*) FILTER (
-            WHERE (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%')
-              AND LOWER(COALESCE(s.fulfillment_type, '')) = 'ship'
-              AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
-              AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'pending')
-              AND (LOWER(COALESCE(s.payment_status, '')) IN ('paid', 'completed') OR (s.total_amount > 0 AND s.received_amount >= s.total_amount))
-              AND LOWER(COALESCE(s.delivery_status, 'pending')) NOT IN ('pickup', 'direct', 'shipping', 'shipped', 'in transit', 'delivered', 'returned', 'failed')
+            WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
+              AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled'
+              AND (
+                LOWER(COALESCE(s.payment_status, '')) IN ('paid', 'completed')
+                OR (s.total_amount > 0 AND s.received_amount >= s.total_amount)
+              )
+              AND LOWER(COALESCE(s.delivery_status, 'pending')) NOT IN ('direct', 'delivered', 'failed', 'returned')
               AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
               AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
           )::int as critical_count
@@ -1679,49 +1696,92 @@ export async function addSale(saleData: any) {
 
     // 1. Ensure Payment Status and amounts are consistent based on total vs received
     if (newOrderStatus.toLowerCase() !== "cancelled") {
-      if (hasCodPayment) {
+      if (hasCodPayment && (newPaymentStatus.toLowerCase() === "paid" || newPaymentStatus.toLowerCase() === "completed")) {
         // COD rule: Payment Status must NEVER be Paid during sale creation.
         // COD should initially be treated as Credit / Partial (balance due).
         newPaymentStatus = "Credit"
-      } else if (total > 0 && receivedAmount >= total) {
+      } else if (newPaymentStatus.toLowerCase() === "pending") {
+        newPaymentStatus = "Pending"
+        receivedAmount = 0
+        balanceAmount = total
+      } else if (newPaymentStatus.toLowerCase() === "credit") {
+        newPaymentStatus = "Credit"
+        receivedAmount = 0
+        balanceAmount = total
+      } else if (newPaymentStatus.toLowerCase() === "paid") {
         newPaymentStatus = "Paid"
         receivedAmount = total
         balanceAmount = 0
-      } else if (receivedAmount > 0 && receivedAmount < total) {
-        newPaymentStatus = "Credit"
-      } else if (receivedAmount === 0) {
-        newPaymentStatus = (saleData.paymentStatus === "Credit" || saleData.paymentStatus === "Partial")
-          ? "Credit"
-          : "Pending"
+      } else if (newPaymentStatus.toLowerCase() === "partial") {
+        newPaymentStatus = "Partial"
+        if (receivedAmount >= total && total > 0) {
+          newPaymentStatus = "Paid"
+          receivedAmount = total
+          balanceAmount = 0
+        } else if (receivedAmount <= 0) {
+          newPaymentStatus = "Pending"
+          receivedAmount = 0
+          balanceAmount = total
+        } else {
+          balanceAmount = Math.max(0, total - receivedAmount)
+        }
+      } else {
+        if (total > 0 && receivedAmount >= total) {
+          newPaymentStatus = "Paid"
+          receivedAmount = total
+          balanceAmount = 0
+        } else if (receivedAmount > 0 && receivedAmount < total) {
+          newPaymentStatus = "Partial"
+          balanceAmount = Math.max(0, total - receivedAmount)
+        } else {
+          newPaymentStatus = "Pending"
+          receivedAmount = 0
+          balanceAmount = total
+        }
       }
     }
 
-    // If Credit, validate customer (skip for COD orders as customer is captured via shipping/address or walk-in)
-    if (!hasCodPayment && (newPaymentStatus.toLowerCase() === "credit" || newPaymentStatus.toLowerCase() === "partial") && !saleData.customerId) {
-      return { success: false, message: "Please select a customer for a credit sale." }
+    // Validate customer: customer is required for all sales orders
+    const hasCustomer = Boolean(
+      (saleData.customerId && Number(saleData.customerId) > 0) ||
+      (typeof saleData.customerNameOverride === "string" && saleData.customerNameOverride.trim().length > 0) ||
+      (typeof saleData.customerName === "string" && saleData.customerName.trim().length > 0)
+    )
+    if (!hasCustomer) {
+      let errorMsg = "Please select a customer for the sale."
+      if (newPaymentStatus.toLowerCase() === "credit") {
+        errorMsg = "Please select a customer for a credit sale."
+      } else if (newPaymentStatus.toLowerCase() === "partial") {
+        errorMsg = "Please select a customer for a partial sale."
+      } else if (newPaymentStatus.toLowerCase() === "pending") {
+        errorMsg = "Please select a customer for a pending sale."
+      } else if (newPaymentStatus.toLowerCase() === "paid" || newPaymentStatus.toLowerCase() === "completed") {
+        errorMsg = "Please select a customer for a paid sale."
+      }
+      return { success: false, message: errorMsg }
     }
 
     // 2. Automatically derive Sales Status from actual payment state
     if (newOrderStatus.toLowerCase() !== "cancelled") {
       if (newPaymentStatus.toLowerCase() === "paid") {
         newOrderStatus = "Completed"
-      } else if (newPaymentStatus.toLowerCase() === "credit" || newPaymentStatus.toLowerCase() === "partial") {
+      } else if (newPaymentStatus.toLowerCase() === "credit") {
         newOrderStatus = "Credit"
+      } else if (newPaymentStatus.toLowerCase() === "partial") {
+        newOrderStatus = "Partial"
       } else {
         newOrderStatus = "Pending"
       }
     }
 
-    // Ensure default delivery_status is Paid if payment status is Paid, otherwise Pending
-    if (newPaymentStatus.toLowerCase() === "paid" && (!shipping.delivery_status || shipping.delivery_status === "Pending")) {
-      shipping.delivery_status = "Paid";
-    } else if (!shipping.delivery_status) {
+    // Whenever creating an order the Delivery status will be in Pending by default
+    if (!shipping.delivery_status || shipping.delivery_status === "Paid" || shipping.delivery_status === "Pickup") {
       shipping.delivery_status = "Pending";
     }
 
     const saleResult = await sql`
       INSERT INTO sales (
-        customer_id, created_by, total_amount, status, payment_status, sale_date,
+        customer_id, customer_name_override, customer_phone_override, created_by, total_amount, status, payment_status, sale_date,
         device_id, payment_method, discount, received_amount, staff_id, sale_type,
         fulfillment_type, delivery_status, courier_partner_id, courier_service_id, courier_service_name,
         packaging_type_id, packaging_type_name,
@@ -1731,6 +1791,8 @@ export async function addSale(saleData: any) {
       )
       VALUES (
         ${saleData.customerId || null},
+        ${saleData.customerName || saleData.customerNameOverride || null},
+        ${saleData.customerPhone || saleData.customerPhoneOverride || null},
         ${saleData.userId},
         ${total},
         ${newOrderStatus},
@@ -1770,7 +1832,7 @@ export async function addSale(saleData: any) {
         ${shipping.shipping_notes},
         ${advanceAmount},
         ${balanceAmount},
-        true
+        false
       )
       RETURNING id
     `
@@ -1799,26 +1861,34 @@ export async function addSale(saleData: any) {
       }
     }
 
-    // Save payment records into transaction_payments
+    // Save payment records into transaction_payments (only when money was actually received)
     try {
-      if (Array.isArray(saleData.payments) && saleData.payments.length > 0) {
-        for (const p of saleData.payments) {
-          await sql`
-            INSERT INTO transaction_payments (
-              sale_id, payment_method, amount, reference_number, notes, payment_date
-            ) VALUES (
-              ${saleId}, ${p.paymentMethod || "Cash"}, ${Number(p.amount) || 0}, ${p.referenceNumber || null}, ${p.notes || null}, ${saleData.saleDate || new Date()}
-            )
-          `
+      if (newPaymentStatus !== "Pending" && newPaymentStatus !== "Credit") {
+        if (Array.isArray(saleData.payments) && saleData.payments.length > 0) {
+          for (const p of saleData.payments) {
+            const amt = Number(p.amount) || 0
+            if (amt > 0) {
+              await sql`
+                INSERT INTO transaction_payments (
+                  sale_id, payment_method, amount, reference_number, notes, payment_date
+                ) VALUES (
+                  ${saleId}, ${p.paymentMethod || "Cash"}, ${amt}, ${p.referenceNumber || null}, ${p.notes || null}, ${saleData.saleDate || new Date()}
+                )
+              `
+            }
+          }
+        } else {
+          const amt = hasCodPayment ? total : (receivedAmount > 0 ? receivedAmount : total)
+          if (amt > 0) {
+            await sql`
+              INSERT INTO transaction_payments (
+                sale_id, payment_method, amount, payment_date
+              ) VALUES (
+                ${saleId}, ${newPaymentMethod}, ${amt}, ${saleData.saleDate || new Date()}
+              )
+            `
+          }
         }
-      } else {
-        await sql`
-          INSERT INTO transaction_payments (
-            sale_id, payment_method, amount, payment_date
-          ) VALUES (
-            ${saleId}, ${newPaymentMethod}, ${hasCodPayment ? total : (receivedAmount > 0 ? receivedAmount : total)}, ${saleData.saleDate || new Date()}
-          )
-        `
       }
     } catch (tpErr) {
       console.warn("Could not insert transaction_payments for sale:", tpErr)
@@ -2110,6 +2180,7 @@ export async function addSale(saleData: any) {
       data: {
         sale: {
           ...sale,
+          is_pos_updated: false,
           discount: discountAmount,
           received_amount: receivedAmount,
           outstanding_amount: balanceAmount,
@@ -2216,14 +2287,26 @@ function calculateSaleChanges(
       newOrderStatus = "Completed"
       newReceivedAmount = newTotal
       balanceAmount = 0
-    } else if (newReceivedAmount > 0 && newReceivedAmount < newTotal) {
+    } else if (newPaymentStatus.toLowerCase() === "pending") {
+      newPaymentStatus = "Pending"
+      newOrderStatus = "Pending"
+      newReceivedAmount = 0
+      balanceAmount = newTotal
+    } else if (newPaymentStatus.toLowerCase() === "credit") {
       newPaymentStatus = "Credit"
       newOrderStatus = "Credit"
+      newReceivedAmount = 0
+      balanceAmount = newTotal
+    } else if (newPaymentStatus.toLowerCase() === "partial") {
+      newPaymentStatus = "Partial"
+      newOrderStatus = "Partial"
+      balanceAmount = Math.max(0, newTotal - newReceivedAmount)
+    } else if (newReceivedAmount > 0 && newReceivedAmount < newTotal) {
+      newPaymentStatus = "Partial"
+      newOrderStatus = "Partial"
     } else if (newReceivedAmount === 0) {
-      newPaymentStatus = (newData.paymentStatus === "Credit" || newData.paymentStatus === "Partial" || hasCodPayment)
-        ? "Credit"
-        : "Pending"
-      newOrderStatus = (newPaymentStatus === "Credit" || newPaymentStatus === "Partial") ? "Credit" : "Pending"
+      newPaymentStatus = "Pending"
+      newOrderStatus = "Pending"
     }
   }
 
@@ -2255,27 +2338,50 @@ function calculateSaleChanges(
       outstandingAmount = 0
       balanceAmount = 0
     }
-  } else if (newPaymentStatus.toLowerCase() !== "credit" && newPaymentStatus.toLowerCase() !== "partial") {
+  } else if (newPaymentStatus.toLowerCase() === "pending") {
     newPaymentStatus = "Pending"
+    newReceivedAmount = 0
+    outstandingAmount = newTotal
+    balanceAmount = newTotal
+  } else if (newPaymentStatus.toLowerCase() === "credit") {
+    newPaymentStatus = "Credit"
+    newReceivedAmount = 0
+    outstandingAmount = newTotal
+    balanceAmount = newTotal
+  } else if (newPaymentStatus.toLowerCase() === "partial") {
+    newPaymentStatus = "Partial"
+    if (newReceivedAmount >= newTotal && newTotal > 0) {
+      newPaymentStatus = "Paid"
+      newReceivedAmount = newTotal
+      outstandingAmount = 0
+      balanceAmount = 0
+    } else if (newReceivedAmount <= 0) {
+      newPaymentStatus = "Pending"
+      newReceivedAmount = 0
+      outstandingAmount = newTotal
+      balanceAmount = newTotal
+    } else {
+      outstandingAmount = Math.max(0, newTotal - newReceivedAmount)
+      balanceAmount = Math.max(0, newTotal - newReceivedAmount)
+    }
   }
 
   // 2. Automatically derive Sales Status from actual payment state
   if (newOrderStatus.toLowerCase() !== "cancelled") {
     if (newPaymentStatus.toLowerCase() === "paid") {
       newOrderStatus = "Completed"
-    } else if (newPaymentStatus.toLowerCase() === "credit" || newPaymentStatus.toLowerCase() === "partial") {
+    } else if (newPaymentStatus.toLowerCase() === "credit") {
       newOrderStatus = "Credit"
+    } else if (newPaymentStatus.toLowerCase() === "partial") {
+      newOrderStatus = "Partial"
     } else {
       newOrderStatus = "Pending"
     }
   }
 
-  // Delivery Status sync logic: automatically set delivery_status to Paid if payment is Paid and delivery is Pending/null
   if (shipping) {
-    if (newPaymentStatus.toLowerCase() === "paid" && (!shipping.delivery_status || shipping.delivery_status === "Pending")) {
-      shipping.delivery_status = "Paid";
-    } else if (!shipping.delivery_status) {
-      shipping.delivery_status = "Pending";
+    if (!shipping.delivery_status) {
+      shipping.delivery_status = original.delivery_status || "Pending";
     }
   }
 
@@ -2434,20 +2540,39 @@ export async function updateSale(saleData: any) {
       }
     }
 
-    // 4. CORRECTED: Validate received amount for credit sales with proper logic
-    const isCredit = changes.newPaymentStatus.toLowerCase() === "credit"
+    // 4. CORRECTED: Validate received amount for credit/partial sales with proper logic
+    const isCreditOrPartial = changes.newPaymentStatus.toLowerCase() === "credit" || changes.newPaymentStatus.toLowerCase() === "partial"
 
-    if (isCredit && changes.newReceived > changes.newTotal) {
+    if (isCreditOrPartial && changes.newReceived > changes.newTotal) {
       return {
         success: false,
         message: `Received amount (${changes.newReceived}) cannot be greater than total amount (${changes.newTotal})`,
       }
     }
     
-    if (!saleData.customerId) {
+    const isJobCard = original.sale_type === "job_card" || String(original.tracking_id || "").startsWith("JC-") || String(original.tracking_id || "").startsWith("DOD")
+    const hasUpdateCustomer = Boolean(
+      (saleData.customerId && Number(saleData.customerId) > 0) ||
+      (typeof saleData.customerNameOverride === "string" && saleData.customerNameOverride.trim().length > 0) ||
+      (typeof saleData.customerName === "string" && saleData.customerName.trim().length > 0) ||
+      (typeof original.customer_name_override === "string" && original.customer_name_override.trim().length > 0)
+    )
+    if (!hasUpdateCustomer) {
+      let errorMsg = "Please select a customer before updating the sale."
+      if (isJobCard) {
+        errorMsg = "Please select a customer for the job card."
+      } else if (changes.newPaymentStatus.toLowerCase() === "credit") {
+        errorMsg = "Please select a customer before updating a credit sale."
+      } else if (changes.newPaymentStatus.toLowerCase() === "partial") {
+        errorMsg = "Please select a customer before updating a partial sale."
+      } else if (changes.newPaymentStatus.toLowerCase() === "pending") {
+        errorMsg = "Please select a customer before updating a pending sale."
+      } else if (changes.newPaymentStatus.toLowerCase() === "paid" || changes.newPaymentStatus.toLowerCase() === "completed") {
+        errorMsg = "Please select a customer before updating a paid sale."
+      }
       return {
         success: false,
-        message: "Please select a customer before updating this sale.",
+        message: errorMsg,
       }
     }
 
@@ -2466,6 +2591,8 @@ export async function updateSale(saleData: any) {
           await sql`
             UPDATE sales 
             SET customer_id = ${saleData.customerId || null},
+                customer_name_override = ${saleData.customerName || saleData.customerNameOverride || original.customer_name_override || null},
+                customer_phone_override = ${saleData.customerPhone || saleData.customerPhoneOverride || original.customer_phone_override || null},
                 total_amount = ${changes.newTotal},
                 status = ${changes.newStatus},
                 payment_status = ${changes.newPaymentStatus},
@@ -2511,6 +2638,8 @@ export async function updateSale(saleData: any) {
           await sql`
             UPDATE sales 
             SET customer_id = ${saleData.customerId || null},
+                customer_name_override = ${saleData.customerName || saleData.customerNameOverride || original.customer_name_override || null},
+                customer_phone_override = ${saleData.customerPhone || saleData.customerPhoneOverride || original.customer_phone_override || null},
                 total_amount = ${changes.newTotal},
                 status = ${changes.newStatus},
                 payment_status = ${changes.newPaymentStatus},
@@ -2581,31 +2710,36 @@ export async function updateSale(saleData: any) {
 
       // Sync transaction_payments if payments provided
       try {
-        if (Array.isArray(saleData.payments) && saleData.payments.length > 0) {
-          await sql`DELETE FROM transaction_payments WHERE sale_id = ${saleData.id}`
-          for (const p of saleData.payments) {
-            await sql`
-              INSERT INTO transaction_payments (
-                sale_id, payment_method, amount, reference_number, notes, payment_date
-              ) VALUES (
-                ${saleData.id}, ${p.paymentMethod || "Cash"}, ${Number(p.amount) || 0}, ${p.referenceNumber || null}, ${p.notes || null}, ${changes.newDate || new Date()}
-              )
-            `
+        await sql`DELETE FROM transaction_payments WHERE sale_id = ${saleData.id}`
+        if (changes.newPaymentStatus !== "Pending" && changes.newPaymentStatus !== "Credit") {
+          if (Array.isArray(saleData.payments) && saleData.payments.length > 0) {
+            for (const p of saleData.payments) {
+              const pAmt = Number(p.amount) || 0
+              if (pAmt > 0) {
+                await sql`
+                  INSERT INTO transaction_payments (
+                    sale_id, payment_method, amount, reference_number, notes, payment_date
+                  ) VALUES (
+                    ${saleData.id}, ${p.paymentMethod || "Cash"}, ${pAmt}, ${p.referenceNumber || null}, ${p.notes || null}, ${changes.newDate || new Date()}
+                  )
+                `
+              }
+            }
+          } else {
+            // Reconcile single payment if no payments array is provided (like in POS edit sale)
+            const pm = (saleData.paymentMethod || original.payment_method || "").toUpperCase().trim()
+            const isCod = pm === "COD" || pm === "CASH ON DELIVERY"
+            const tpAmount = isCod ? changes.newTotal : (changes.newReceived > 0 ? changes.newReceived : changes.newTotal)
+            if (tpAmount > 0) {
+              await sql`
+                INSERT INTO transaction_payments (
+                  sale_id, payment_method, amount, payment_date
+                ) VALUES (
+                  ${saleData.id}, ${saleData.paymentMethod || "Cash"}, ${tpAmount}, ${changes.newDate || new Date()}
+                )
+              `
+            }
           }
-        } else {
-          // Reconcile single payment if no payments array is provided (like in POS edit sale)
-          const pm = (saleData.paymentMethod || original.payment_method || "").toUpperCase().trim()
-          const isCod = pm === "COD" || pm === "CASH ON DELIVERY"
-          const tpAmount = isCod ? changes.newTotal : (changes.newReceived > 0 ? changes.newReceived : changes.newTotal)
-          
-          await sql`DELETE FROM transaction_payments WHERE sale_id = ${saleData.id}`
-          await sql`
-            INSERT INTO transaction_payments (
-              sale_id, payment_method, amount, payment_date
-            ) VALUES (
-              ${saleData.id}, ${saleData.paymentMethod || "Cash"}, ${tpAmount}, ${changes.newDate || new Date()}
-            )
-          `
         }
       } catch (tpUpdateErr) {
         console.warn("Could not sync transaction_payments on updateSale:", tpUpdateErr)

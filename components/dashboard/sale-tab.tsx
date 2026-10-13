@@ -140,6 +140,7 @@ interface SaleDraftSnapshot {
   isEditMode: boolean
   editingSaleId: number | null
   originalSaleStatus: string
+  saleType?: string
   isLoadingEdit?: boolean
   saleDeviceId?: number | null
 }
@@ -214,6 +215,7 @@ export default function SaleTab({
   const [editingSaleId, setEditingSaleId] = useState<number | null>(null)
   const [allocatorRowId, setAllocatorRowId] = useState<string | null>(null)
   const [originalSaleStatus, setOriginalSaleStatus] = useState<string>("")
+  const [saleType, setSaleType] = useState<string>("product")
 
   // WhatsApp Confirmation state
   const [whatsappModalData, setWhatsappModalData] = useState<{
@@ -266,8 +268,8 @@ export default function SaleTab({
   const [customerPhone, setCustomerPhone] = useState<string>("")
   const [staffId, setStaffId] = useState<number | null>(null)
   const [staffName, setStaffName] = useState<string>("")
-  const [status, setStatus] = useState<string>("Completed")
-  const [paymentStatus, setPaymentStatus] = useState<string>("Paid")
+  const [status, setStatus] = useState<string>("Pending")
+  const [paymentStatus, setPaymentStatus] = useState<string>("Pending")
   const [paymentMethod, setPaymentMethod] = useState<string>("Cash")
   const [payments, setPayments] = useState<PaymentRecordInput[]>([])
   const [isPaymentValid, setIsPaymentValid] = useState<boolean>(true)
@@ -289,13 +291,14 @@ export default function SaleTab({
   const [totalAmount, setTotalAmount] = useState(0)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const isSubmittingRef = useRef(false)
+  const lastHydratedDraftIdRef = useRef<string | null>(null)
   const [scanStatus, setScanStatus] = useState<"idle" | "processing" | "success" | "error">("idle")
   const [scanHistory, setScanHistory] = useState<ScanResult[]>([])
   const [barcodeInput, setBarcodeInput] = useState<string>("")
   const [isBarcodeProcessing, setIsBarcodeProcessing] = useState<boolean>(false)
   const [lastBarcodeProcessed, setLastBarcodeProcessed] = useState<string>("")
   const [notes, setNotes] = useState<string>("")
-  const [shipping, setShipping] = useState<SaleShippingInput>({ fulfillmentType: "pickup" })
+  const [shipping, setShipping] = useState<SaleShippingInput>({ fulfillmentType: "pickup", deliveryStatus: "Pending" })
   const [customerAddress, setCustomerAddress] = useState("")
   const [formAlert, setFormAlert] = useState<{ type: "success" | "error" | "warning"; message: string } | null>(null)
   const [barcodeAlert, setBarcodeAlert] = useState<{ type: "success" | "error" | "warning"; message: string } | null>(
@@ -332,6 +335,9 @@ export default function SaleTab({
       const params = new URLSearchParams(searchParams?.toString() || "")
       params.set("tab", "sale")
       params.set("salesView", view === "info" ? "list" : "entry")
+      if (view === "info") {
+        params.delete("editSaleId")
+      }
       const nextQuery = params.toString()
       const path = pathname || ""
       router.replace(nextQuery ? `${path}?${nextQuery}` : path)
@@ -359,12 +365,15 @@ export default function SaleTab({
   const [rememberChoice, setRememberChoice] = useState(false)
   const [saleDrafts, setSaleDrafts] = useState<SaleDraftSnapshot[]>([])
   const [activeDraftId, setActiveDraftId] = useState<string>("")
+  const activeDraftIdRef = useRef<string>("")
   const [draftsHydrated, setDraftsHydrated] = useState(false)
-  const [pendingEditSaleId, setPendingEditSaleId] = useState<number | null>(null)
-  const [pendingEditDraftId, setPendingEditDraftId] = useState<string>("")
   const lastClosedEditSaleIdRef = useRef<number | null>(null)
   const editLoadRequestRef = useRef(0)
   const draftSwitchingRef = useRef(false)
+
+  useEffect(() => {
+    activeDraftIdRef.current = activeDraftId
+  }, [activeDraftId])
 
   const createEmptyProductRow = useCallback(
     (): ProductRow => ({
@@ -392,20 +401,21 @@ export default function SaleTab({
       customerPhone: "",
       staffId: activeStaff?.id || null,
       staffName: activeStaff?.name || "",
-      status: "Completed",
-      paymentStatus: "Paid",
+      status: "Pending",
+      paymentStatus: "Pending",
       paymentMethod: "Cash",
       receivedAmount: 0,
       advanceAmount: 0,
       balanceAmount: 0,
       discountAmount: 0,
       notes: "",
-      shipping: { fulfillmentType: "pickup" },
+      shipping: { fulfillmentType: "pickup", deliveryStatus: "Pending" },
       products: [createEmptyProductRow()],
       payments: [],
       isEditMode: false,
       editingSaleId: null,
       originalSaleStatus: "",
+      saleType: "product",
       isLoadingEdit: false,
       saleDeviceId: null,
     }),
@@ -456,6 +466,17 @@ export default function SaleTab({
     const activeDraft = saleDrafts.find((d) => d.id === activeDraftId)
     if (!activeDraft) return
 
+    // If draft is currently loading from server, do not hydrate placeholder
+    if (activeDraft.isLoadingEdit) {
+      return
+    }
+
+    // Prevent re-hydrating and wiping formAlert when updates happen within the current active draft
+    if (lastHydratedDraftIdRef.current === activeDraftId) {
+      return
+    }
+    lastHydratedDraftIdRef.current = activeDraftId
+
     draftSwitchingRef.current = true
     setDate(new Date(activeDraft.date || new Date().toISOString()))
     setCustomerId(activeDraft.customerId)
@@ -463,15 +484,15 @@ export default function SaleTab({
     setCustomerPhone(activeDraft.customerPhone || "")
     setStaffId(activeDraft.staffId)
     setStaffName(activeDraft.staffName || "")
-    setStatus(activeDraft.status || "Completed")
-    setPaymentStatus(activeDraft.paymentStatus || "Paid")
+    setStatus(activeDraft.status || "Pending")
+    setPaymentStatus(activeDraft.paymentStatus || "Pending")
     setPaymentMethod(activeDraft.paymentMethod || "Cash")
     setReceivedAmount(Number(activeDraft.receivedAmount) || 0)
     setAdvanceAmount(Number(activeDraft.advanceAmount) || 0)
     setBalanceAmount(Number(activeDraft.balanceAmount) || 0)
     setDiscountAmount(Number(activeDraft.discountAmount) || 0)
     setNotes(activeDraft.notes || "")
-    setShipping(activeDraft.shipping || { fulfillmentType: "pickup" })
+    setShipping(activeDraft.shipping || { fulfillmentType: "pickup", deliveryStatus: "Pending" })
     setProducts(
       Array.isArray(activeDraft.products) && activeDraft.products.length > 0 ? activeDraft.products : [createEmptyProductRow()],
     )
@@ -479,6 +500,7 @@ export default function SaleTab({
     setIsEditMode(Boolean(activeDraft.isEditMode))
     setEditingSaleId(activeDraft.editingSaleId || null)
     setOriginalSaleStatus(activeDraft.originalSaleStatus || "")
+    setSaleType(activeDraft.saleType || "product")
     setFormAlert(null)
     setBarcodeAlert(null)
 
@@ -525,6 +547,7 @@ export default function SaleTab({
               isEditMode,
               editingSaleId,
               originalSaleStatus,
+              saleType,
             }
             : draft,
         ),
@@ -556,6 +579,7 @@ export default function SaleTab({
     isEditMode,
     editingSaleId,
     originalSaleStatus,
+    saleType,
   ])
 
   useEffect(() => {
@@ -614,12 +638,15 @@ export default function SaleTab({
     }, 0)
     setSubtotal(newSubtotal)
     const discount = typeof discountAmount === "number" ? discountAmount : 0
-    const isJobCard = originalSaleStatus === "Pending" || (shipping.trackingId || "").startsWith("JC-")
+    const isJobCard =
+      saleType === "job_card" ||
+      (shipping.trackingId || "").startsWith("JC-") ||
+      (shipping.trackingId || "").startsWith("DOD")
     const courierExtra =
       (shipping.fulfillmentType === "ship" || isJobCard) ? Number(shipping.courierPaidExtra) || 0 : 0
     const finalTotal = Math.max(0, newSubtotal - discount + courierExtra)
     setTotalAmount(finalTotal)
-  }, [products, discountAmount, shipping.fulfillmentType, shipping.courierPaidExtra, originalSaleStatus, shipping.trackingId])
+  }, [products, discountAmount, shipping.fulfillmentType, shipping.courierPaidExtra, saleType, shipping.trackingId])
 
   // Auto-calculate received amount and balance amount based on paymentStatus and paymentMethod
   useEffect(() => {
@@ -635,7 +662,10 @@ export default function SaleTab({
     } else if (paymentStatus === "Cancelled" || paymentStatus === "Pending") {
       setReceivedAmount(0)
       setBalanceAmount(totalAmount)
-    } else if (paymentStatus === "Credit" || paymentStatus === "Partial") {
+    } else if (paymentStatus === "Credit") {
+      setReceivedAmount(0)
+      setBalanceAmount(totalAmount)
+    } else if (paymentStatus === "Partial") {
       setBalanceAmount(Math.max(0, totalAmount - receivedAmount))
     }
   }, [paymentStatus, paymentMethod, totalAmount, advanceAmount, receivedAmount, payments, isEditMode])
@@ -1084,23 +1114,23 @@ export default function SaleTab({
       setStaffId(activeStaff.id)
       setStaffName(activeStaff.name)
     }
-    setStatus("Completed")
-    setPaymentStatus("Paid")
+    setStatus("Pending")
+    setPaymentStatus("Pending")
     setPaymentMethod("Cash")
     setProducts(resetProducts)
     setPayments([])
     setDiscountAmount(0)
     setReceivedAmount(0)
     setNotes("")
-    setShipping({ fulfillmentType: "pickup" })
+    setShipping({ fulfillmentType: "pickup", deliveryStatus: "Pending" })
     setCustomerAddress("")
     setFormAlert(null)
     setBarcodeAlert(null)
+    lastHydratedDraftIdRef.current = null
     setIsEditMode(false)
     setEditingSaleId(null)
     setOriginalSaleStatus("")
-    setPendingEditSaleId(null)
-    setPendingEditDraftId("")
+    setSaleType("product")
     clearEditSaleParamFromUrl()
   }
 
@@ -1177,6 +1207,15 @@ export default function SaleTab({
         const mappedShipping = mapSaleShippingFromRecord(sale)
 
         const finalProducts = productRows.length > 0 ? productRows : [createEmptyProductRow()]
+        const parsedSaleDate = parseSaleDateTime(sale)
+        const resolvedCustomerName = sale.customer_name || sale.customer_name_override || ""
+        const resolvedCustomerPhone = sale.customer_phone || sale.customer_phone_override || ""
+        const resolvedStatus = sale.status || "Completed"
+        const resolvedPaymentStatus = sale.payment_status || "Paid"
+        const resolvedDiscount = Number(sale.discount) || 0
+        const resolvedNotes = sale.notes || ""
+        const resolvedSaleType = sale.sale_type || "product"
+        const resolvedPayments = sale.payments || []
 
         // Force update the draft to prevent hydration loop from resetting it to empty
         setSaleDrafts((prev) =>
@@ -1184,26 +1223,28 @@ export default function SaleTab({
             draft.id === targetDraftId
               ? {
                 ...draft,
-                date: parseSaleDateTime(sale).toISOString(),
+                date: parsedSaleDate.toISOString(),
                 customerId: sale.customer_id,
-                customerName: sale.customer_name || sale.customer_name_override || "",
-                customerPhone: sale.customer_phone || sale.customer_phone_override || "",
-                status: sale.status || "Completed",
-                paymentStatus: sale.payment_status || "Paid",
-                originalSaleStatus: sale.status || "Completed",
+                customerName: resolvedCustomerName,
+                customerPhone: resolvedCustomerPhone,
+                status: resolvedStatus,
+                paymentStatus: resolvedPaymentStatus,
+                originalSaleStatus: resolvedStatus,
                 staffId: resolvedStaffId,
                 staffName: resolvedStaffName,
                 paymentMethod: resolvedPaymentMethod,
-                discountAmount: Number(sale.discount) || 0,
+                discountAmount: resolvedDiscount,
                 products: finalProducts,
-                payments: sale.payments || [],
+                payments: resolvedPayments,
                 receivedAmount: parsedReceivedAmount,
                 advanceAmount: parsedAdvanceAmount,
                 balanceAmount: parsedBalanceAmount,
+                notes: resolvedNotes,
                 shipping: mappedShipping,
                 isEditMode: true,
                 editingSaleId: saleId,
                 name: `Edit #${saleId}`,
+                saleType: resolvedSaleType,
                 isLoadingEdit: false,
                 saleDeviceId: sale.device_id,
               }
@@ -1211,12 +1252,49 @@ export default function SaleTab({
           )
         )
 
+        // If target draft is currently active, populate the active form state immediately
+        if (targetDraftId === activeDraftIdRef.current) {
+          draftSwitchingRef.current = true
+          setDate(parsedSaleDate)
+          setCustomerId(sale.customer_id)
+          setCustomerName(resolvedCustomerName)
+          setCustomerPhone(resolvedCustomerPhone)
+          setStaffId(resolvedStaffId)
+          setStaffName(resolvedStaffName)
+          setStatus(resolvedStatus)
+          setPaymentStatus(resolvedPaymentStatus)
+          setPaymentMethod(resolvedPaymentMethod)
+          setReceivedAmount(parsedReceivedAmount)
+          setAdvanceAmount(parsedAdvanceAmount)
+          setBalanceAmount(parsedBalanceAmount)
+          setDiscountAmount(resolvedDiscount)
+          setNotes(resolvedNotes)
+          setShipping(mappedShipping)
+          setProducts(finalProducts)
+          setPayments(resolvedPayments)
+          setIsEditMode(true)
+          setEditingSaleId(saleId)
+          setOriginalSaleStatus(resolvedStatus)
+          setSaleType(resolvedSaleType)
+          lastHydratedDraftIdRef.current = targetDraftId
+          setTimeout(() => {
+            draftSwitchingRef.current = false
+          }, 100)
+        }
+
         setFormAlert({
           type: "success",
           message: `Loaded sale #${saleId} for editing`,
         })
       } else {
         if (requestId !== editLoadRequestRef.current) return
+        setSaleDrafts((prev) =>
+          prev.map((draft) =>
+            draft.id === targetDraftId
+              ? { ...draft, isLoadingEdit: false }
+              : draft
+          )
+        )
         setFormAlert({
           type: "error",
           message: result.message || "Failed to load sale details",
@@ -1225,6 +1303,13 @@ export default function SaleTab({
     } catch (error) {
       if (requestId !== editLoadRequestRef.current) return
       console.error("Error loading sale for edit:", error)
+      setSaleDrafts((prev) =>
+        prev.map((draft) =>
+          draft.id === targetDraftId
+            ? { ...draft, isLoadingEdit: false }
+            : draft
+        )
+      )
       setFormAlert({
         type: "error",
         message: "An error occurred while loading sale details",
@@ -1288,11 +1373,24 @@ export default function SaleTab({
       return
     }
 
-    const hasCodCurrent = isCodMethod(paymentMethod) || (Array.isArray(payments) && payments.some(p => isCodMethod(p.paymentMethod)))
-    if (!hasCodCurrent && (paymentStatus === "Credit" || paymentStatus === "Partial") && !customerId) {
+    const hasCustomer = Boolean(
+      (customerId && Number(customerId) > 0) ||
+      (customerName && typeof customerName === "string" && customerName.trim().length > 0)
+    )
+    if (!hasCustomer) {
+      let errorMsg = "Please select a customer for the sale."
+      if (paymentStatus === "Credit") {
+        errorMsg = "Please select a customer for a credit sale."
+      } else if (paymentStatus === "Partial") {
+        errorMsg = "Please select a customer for a partial sale."
+      } else if (paymentStatus === "Pending") {
+        errorMsg = "Please select a customer for a pending sale."
+      } else if (paymentStatus === "Paid" || paymentStatus === "Completed") {
+        errorMsg = "Please select a customer for a paid sale."
+      }
       setFormAlert({
         type: "error",
-        message: "Please select a customer for a credit sale.",
+        message: errorMsg,
       })
       return
     }
@@ -1305,15 +1403,26 @@ export default function SaleTab({
         // Update existing sale
         const effectiveReceived = (paymentStatus === "Paid" || paymentStatus === "Completed")
           ? totalAmount
-          : (paymentMethod === "COD" ? advanceAmount : receivedAmount)
+          : (paymentStatus === "Pending" || paymentStatus === "Credit" ? 0 : (paymentMethod === "COD" ? advanceAmount : receivedAmount))
 
         const effectiveBalance = (paymentStatus === "Paid" || paymentStatus === "Completed")
           ? 0
           : Math.max(0, totalAmount - effectiveReceived)
 
+        const derivedEditStatus =
+          paymentStatus === "Paid" || paymentStatus === "Completed"
+            ? "Completed"
+            : paymentStatus === "Credit"
+            ? "Credit"
+            : paymentStatus === "Partial"
+            ? "Partial"
+            : "Pending"
+
         const saleData = {
           id: editingSaleId,
           customerId: customerId || null,
+          customerName: customerName || null,
+          customerPhone: customerPhone || null,
           userId: userId,
           deviceId: deviceId,
           items: validItems,
@@ -1321,7 +1430,7 @@ export default function SaleTab({
           paymentMethod: paymentMethod,
           payments: payments,
           saleDate: getEntrySaleDate(date, true),
-          status: status,
+          status: derivedEditStatus,
           originalStatus: originalSaleStatus,
           discount: discountAmount,
           receivedAmount: effectiveReceived,
@@ -1339,16 +1448,22 @@ export default function SaleTab({
         ].filter(Boolean)
         const finalAddress = shipping.shippingAddress || addressParts.join(", ")
 
-        // Show modal INSTANTLY (0ms delay) so update works in background
+        // Show WhatsApp modal
         setWhatsappModalData({
           saleId: editingSaleId,
           trackingId: shipping.trackingId || "",
           customerName: customerName || "",
           customerPhone: customerPhone || "",
           shippingAddress: finalAddress,
-          products: products.filter(p => p.productId !== null),
-          totalAmount: Number(totalAmount)
+          products: products
+            .filter((p) => p.productId !== null)
+            .map((p) => ({ productName: p.productName || "Product" })),
+          totalAmount: Number(totalAmount),
         })
+
+        // In the background, rerotate and take to sales page directly
+        finalizeDraftAfterSave()
+        switchView("info")
 
         // Run updateSale in the background
         updateSale(saleData).then((result) => {
@@ -1357,6 +1472,7 @@ export default function SaleTab({
           if (result.success) {
             markInventoryStale(dispatch)
             fetchSalesForRange(globalDateRange.from, globalDateRange.to, true)
+            setSalesRefreshKey((k) => k + 1)
             toast({
               title: "Success",
               description: "Sale updated successfully",
@@ -1388,30 +1504,48 @@ export default function SaleTab({
         const hasCodOnCreate =
           isCodMethod(paymentMethod) ||
           (Array.isArray(payments) && payments.some((p) => isCodMethod(p.paymentMethod)))
-        const finalPaymentStatus = hasCodOnCreate ? "Credit" : (paymentStatus === "Partial" ? "Credit" : paymentStatus)
-        const totalAlloc = (Array.isArray(payments) && payments.length > 0)
-          ? payments.reduce((s, p) => s + (Number(p.amount) || 0), 0)
-          : (Number(receivedAmount) || 0)
-        const finalReceivedAmount = (Array.isArray(payments) && payments.length > 0)
-          ? payments.reduce((s, p) => {
-            if (hasCodOnCreate && isCodMethod(p.paymentMethod) && totalAmount > 0 && totalAlloc >= totalAmount) {
-              return s
-            }
-            return s + (Number(p.amount) || 0)
-          }, 0)
-          : (hasCodOnCreate ? (totalAmount > 0 && receivedAmount >= totalAmount ? 0 : receivedAmount) : receivedAmount)
+        const finalPaymentStatus = hasCodOnCreate && (paymentStatus === "Paid" || paymentStatus === "Completed")
+          ? "Credit"
+          : (paymentStatus || "Pending")
+
+        let finalReceivedAmount = 0
+        if (finalPaymentStatus === "Paid" || finalPaymentStatus === "Completed") {
+          finalReceivedAmount = totalAmount
+        } else if (finalPaymentStatus === "Pending" || finalPaymentStatus === "Credit") {
+          finalReceivedAmount = 0
+        } else if (finalPaymentStatus === "Partial") {
+          const totalAlloc = (Array.isArray(payments) && payments.length > 0)
+            ? payments.reduce((s, p) => s + (Number(p.amount) || 0), 0)
+            : (Number(receivedAmount) || 0)
+          finalReceivedAmount = Math.min(Math.max(0, totalAlloc), totalAmount)
+        }
         const finalBalanceAmount = Math.max(0, totalAmount - finalReceivedAmount)
+
+        const finalPayments = (finalPaymentStatus === "Pending" || finalPaymentStatus === "Credit")
+          ? (payments || []).map((p) => ({ ...p, amount: 0 }))
+          : payments
+
+        const derivedCreateStatus =
+          finalPaymentStatus === "Paid" || finalPaymentStatus === "Completed"
+            ? "Completed"
+            : finalPaymentStatus === "Credit"
+            ? "Credit"
+            : finalPaymentStatus === "Partial"
+            ? "Partial"
+            : "Pending"
 
         const saleData = {
           customerId: customerId || null,
+          customerName: customerName || null,
+          customerPhone: customerPhone || null,
           staffId: finalStaffId || null,
           userId: userId,
           deviceId: deviceId,
           items: validItems,
-          status: status,
+          status: derivedCreateStatus,
           paymentStatus: finalPaymentStatus,
           paymentMethod: paymentMethod,
-          payments: payments,
+          payments: finalPayments,
           saleDate: getEntrySaleDate(date, false),
           notes: notes,
           discount: discountAmount,
@@ -1482,14 +1616,13 @@ export default function SaleTab({
     // User explicitly requested edit again; clear last closed guard.
     lastClosedEditSaleIdRef.current = null
 
-    let targetDraftId = activeDraftId
+    let targetDraftId = activeDraftIdRef.current
     const existingDraft = saleDrafts.find((draft) => draft.isEditMode && draft.editingSaleId === sale.id)
     if (existingDraft) {
       targetDraftId = existingDraft.id
       draftSwitchingRef.current = true
+      activeDraftIdRef.current = existingDraft.id
       setActiveDraftId(existingDraft.id)
-      setPendingEditSaleId(sale.id)
-      setPendingEditDraftId(existingDraft.id)
     } else {
       const newEditDraft = createEmptyDraft(`Edit #${sale.id}`)
       newEditDraft.isEditMode = true
@@ -1499,12 +1632,11 @@ export default function SaleTab({
       targetDraftId = newEditDraft.id
       draftSwitchingRef.current = true
       setSaleDrafts((prev) => [...prev, newEditDraft])
+      activeDraftIdRef.current = newEditDraft.id
       setActiveDraftId(newEditDraft.id)
-      setPendingEditSaleId(sale.id)
-      setPendingEditDraftId(newEditDraft.id)
     }
 
-    if (activeView === "info") {
+    if (activeView !== "entry") {
       switchView("entry")
     }
     loadSaleForEdit(sale.id, targetDraftId)
@@ -1538,11 +1670,12 @@ export default function SaleTab({
     }
 
     const existingDraft = saleDrafts.find((draft) => draft.isEditMode && draft.editingSaleId === editSaleId)
+    let targetDraftId = ""
     if (existingDraft) {
       draftSwitchingRef.current = true
+      targetDraftId = existingDraft.id
+      activeDraftIdRef.current = existingDraft.id
       setActiveDraftId(existingDraft.id)
-      setPendingEditSaleId(editSaleId)
-      setPendingEditDraftId(existingDraft.id)
     } else {
       const newEditDraft = createEmptyDraft(`Edit #${editSaleId}`)
       newEditDraft.isEditMode = true
@@ -1550,23 +1683,17 @@ export default function SaleTab({
       newEditDraft.originalSaleStatus = "Completed"
       newEditDraft.isLoadingEdit = true
       draftSwitchingRef.current = true
+      targetDraftId = newEditDraft.id
       setSaleDrafts((prev) => [...prev, newEditDraft])
+      activeDraftIdRef.current = newEditDraft.id
       setActiveDraftId(newEditDraft.id)
-      setPendingEditSaleId(editSaleId)
-      setPendingEditDraftId(newEditDraft.id)
     }
 
-    const params = new URLSearchParams(searchParams?.toString() || "")
-    params.delete("editSaleId")
-    const nextQuery = params.toString()
-    const path = pathname || ""
-    router.replace(nextQuery ? `${path}?${nextQuery}` : path)
     clearEditSaleParamFromUrl()
+    loadSaleForEdit(editSaleId, targetDraftId)
   }, [
     activeView,
     searchParams,
-    router,
-    pathname,
     draftsHydrated,
     saleDrafts,
     createEmptyDraft,
@@ -1574,15 +1701,6 @@ export default function SaleTab({
     editingSaleId,
     clearEditSaleParamFromUrl,
   ])
-
-  useEffect(() => {
-    if (pendingEditSaleId && pendingEditDraftId && draftsHydrated) {
-      loadSaleForEdit(pendingEditSaleId, pendingEditDraftId)
-      setPendingEditSaleId(null)
-      setPendingEditDraftId("")
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingEditSaleId, pendingEditDraftId, draftsHydrated])
 
   // Handle delete sale from view modal
   const handleDeleteSaleFromView = async (saleId: number) => {
@@ -1675,8 +1793,6 @@ export default function SaleTab({
       setIsEditMode(false)
       setEditingSaleId(null)
       setOriginalSaleStatus("")
-      setPendingEditSaleId(null)
-      setPendingEditDraftId("")
       clearEditSaleParamFromUrl()
     }
     setSaleDrafts((prev) => {
@@ -1690,8 +1806,6 @@ export default function SaleTab({
         setIsEditMode(false)
         setEditingSaleId(null)
         setOriginalSaleStatus("")
-        setPendingEditSaleId(null)
-        setPendingEditDraftId("")
         clearEditSaleParamFromUrl()
         return [replacement]
       }
@@ -1713,6 +1827,7 @@ export default function SaleTab({
     setFormAlert(null)
     setShowPrintConfirm(false)
     setLastSaleResult(null)
+    lastHydratedDraftIdRef.current = null
 
     // A completed sale must not leave stale entry tabs behind. Start the
     // cashier on one clean draft so tabs cannot accumulate after checkout.
@@ -1723,8 +1838,6 @@ export default function SaleTab({
     setIsEditMode(false)
     setEditingSaleId(null)
     setOriginalSaleStatus("")
-    setPendingEditSaleId(null)
-    setPendingEditDraftId("")
     clearEditSaleParamFromUrl()
 
     // Explicitly update localStorage so it isn't skipped when activeView changes
@@ -2497,7 +2610,7 @@ export default function SaleTab({
                               <div className="space-y-1">
                                 <Label className="text-xs font-medium flex items-center text-gray-900">
                                   <User className="h-3 w-3 mr-1 text-blue-500" />
-                                  Customer
+                                  Customer <span className="text-red-500 ml-0.5 font-bold">*</span>
                                 </Label>
                                 <CustomerSelectSimple
                                   value={customerId}
@@ -2506,6 +2619,9 @@ export default function SaleTab({
                                     setCustomerId(value)
                                     if (name) setCustomerName(name)
                                     if (obj?.phone) setCustomerPhone(obj.phone)
+                                    if (formAlert?.message.includes("customer")) {
+                                      setFormAlert(null)
+                                    }
                                   }}
                                   onAddNew={() => setIsNewCustomerModalOpen(true)}
                                   userId={userId}
@@ -2610,7 +2726,7 @@ export default function SaleTab({
                                   </div>
                                 </div>
 
-                                {(shipping.fulfillmentType === "ship" || (originalSaleStatus === "Pending" || (shipping.trackingId || "").startsWith("JC-"))) &&
+                                {(shipping.fulfillmentType === "ship" || (saleType === "job_card" || (shipping.trackingId || "").startsWith("JC-") || (shipping.trackingId || "").startsWith("DOD"))) &&
                                   Number(shipping.courierPaidExtra) > 0 ? (
                                   <div className="flex justify-between items-center py-1 border-t border-gray-200">
                                     <span className="font-medium text-xs text-gray-900">Courier charge:</span>
@@ -2621,7 +2737,7 @@ export default function SaleTab({
                                   </div>
                                 ) : null}
 
-                                {(shipping.fulfillmentType === "ship" || (originalSaleStatus === "Pending" || (shipping.trackingId || "").startsWith("JC-"))) &&
+                                {(shipping.fulfillmentType === "ship" || (saleType === "job_card" || (shipping.trackingId || "").startsWith("JC-") || (shipping.trackingId || "").startsWith("DOD"))) &&
                                   (Number(shipping.expenseCourier) > 0 ||
                                     Number(shipping.expensePacking) > 0) ? (
                                   <div className="rounded-md border border-amber-100 bg-amber-50/60 px-2 py-1.5 text-[11px] text-amber-800">

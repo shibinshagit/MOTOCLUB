@@ -109,7 +109,8 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, company
 
   const [receivedAmount, setReceivedAmount] = useState(0)
   const [advanceAmount, setAdvanceAmount] = useState(0)
-  const [paymentStatus, setPaymentStatus] = useState<string>("Paid")
+  const [paymentStatus, setPaymentStatus] = useState<string>("Pending")
+  const [saleType, setSaleType] = useState<string>("")
 
   // Shipping state
   const [shipping, setShipping] = useState<SaleShippingInput>(DEFAULT_SALE_SHIPPING)
@@ -183,11 +184,15 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, company
           // Set sale data with accurate date and entry time
           setDate(parseSaleDateTime(sale))
           setCustomerId(sale.customer_id)
-          setCustomerName(sale.customer_name || "")
+          setCustomerName(sale.customer_name || sale.customer_name_override || "")
           setDiscountAmount(Number(sale.discount) || 0)
           setReceivedAmount(Number(sale.received_amount) || 0)
           setAdvanceAmount(Number(sale.advance_amount) || 0)
-          setPaymentStatus(sale.payment_status || "Paid")
+          setSaleType(sale.sale_type || "")
+          const rawPs = sale.payment_status || "Pending"
+          const capPs = rawPs.charAt(0).toUpperCase() + rawPs.slice(1).toLowerCase()
+          const validPs = ["Pending", "Credit", "Partial", "Paid"].includes(capPs) ? capPs : "Pending"
+          setPaymentStatus(validPs)
           setStatus(sale.status || "Completed")
           setOriginalStatus(sale.status || "Completed")
           setSaleDeviceId(sale.device_id || null)
@@ -323,7 +328,7 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, company
       setReceivedAmount(totalAmount)
     } else if (paymentStatus === "Pending") {
       setReceivedAmount(0)
-    } else if (paymentStatus === "Credit") {
+    } else if (paymentStatus === "Credit" || paymentStatus === "Partial") {
       if (receivedAmount > totalAmount) {
         setReceivedAmount(totalAmount)
       }
@@ -701,8 +706,8 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, company
       return
     }
 
-    // Validate received amount for credit sales
-    if (status === "Credit" && receivedAmount > totalAmount) {
+    // Validate received amount for credit/partial sales
+    if ((status === "Credit" || paymentStatus === "Credit" || paymentStatus === "Partial") && receivedAmount > totalAmount) {
       setFormAlert({
         type: "error",
         message: `Received amount (${receivedAmount}) cannot be greater than total amount (${totalAmount})`,
@@ -718,18 +723,34 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, company
       return
     }
 
-    const isJobCard = originalStatus === "Pending"
+    const isJobCard =
+      saleType === "job_card" ||
+      String(shipping?.trackingId || "").startsWith("JC-") ||
+      String(shipping?.trackingId || "").startsWith("DOD")
 
-    if (isJobCard) {
-      if (!customerId) {
-        setFormAlert({
-          type: "error",
-          message: "Please select a customer for the job card",
-        })
-        return
+    const hasCustomer = Boolean(
+      (customerId && Number(customerId) > 0) ||
+      (customerName && typeof customerName === "string" && customerName.trim().length > 0)
+    )
+    if (!hasCustomer) {
+      let errorMsg = "Please select a customer for the sale."
+      if (isJobCard) {
+        errorMsg = "Please select a customer for the job card."
+      } else if (paymentStatus === "Credit") {
+        errorMsg = "Please select a customer for a credit sale."
+      } else if (paymentStatus === "Partial") {
+        errorMsg = "Please select a customer for a partial sale."
+      } else if (paymentStatus === "Pending") {
+        errorMsg = "Please select a customer for a pending sale."
+      } else if (paymentStatus === "Paid" || paymentStatus === "Completed") {
+        errorMsg = "Please select a customer for a paid sale."
       }
+      setFormAlert({
+        type: "error",
+        message: errorMsg,
+      })
+      return
     }
-
 
     setIsSubmitting(true)
 
@@ -740,14 +761,38 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, company
       // Determine payment status strictly based on selected paymentStatus
       let newPaymentStatus = paymentStatus
 
+      if (newPaymentStatus === "Paid") {
+        finalReceivedAmount = totalAmount
+      } else if (newPaymentStatus === "Pending" || newPaymentStatus === "Credit") {
+        finalReceivedAmount = 0
+      } else if (newPaymentStatus === "Partial") {
+        if (finalReceivedAmount >= totalAmount && totalAmount > 0) {
+          newPaymentStatus = "Paid"
+          finalReceivedAmount = totalAmount
+        } else if (finalReceivedAmount <= 0) {
+          newPaymentStatus = "Pending"
+          finalReceivedAmount = 0
+        }
+      }
+
+      const derivedEditStatus =
+        newPaymentStatus === "Paid"
+          ? "Completed"
+          : newPaymentStatus === "Credit"
+          ? "Credit"
+          : newPaymentStatus === "Partial"
+          ? "Partial"
+          : "Pending"
+
       // Prepare the sale data with payment method
       const saleData = {
         id: saleId,
         customerId: customerId || null,
+        customerName: customerName || null,
         userId: userId,
         deviceId: deviceId,
         items: validItems,
-        status: status, // Map dropdown directly to fulfillment status
+        status: derivedEditStatus, // Map dropdown directly to fulfillment status
         paymentStatus: newPaymentStatus,
         paymentMethod: paymentMethod,
         saleDate: date?.toISOString() || new Date().toISOString(),
@@ -763,15 +808,11 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, company
       const result = await updateSale(saleData)
 
       if (result.success) {
-        setFormAlert({
-          type: "success",
-          message: "Sale updated successfully",
+        toast({
+          title: "Success",
+          description: "Sale updated successfully",
         })
-
-        // Close after a short delay
-        setTimeout(() => {
-          onClose()
-        }, 1500)
+        onClose()
       } else {
         setFormAlert({
           type: "error",
@@ -1103,6 +1144,9 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, company
                             onChange={(value, name) => {
                               setCustomerId(value)
                               if (name) setCustomerName(name)
+                              if (formAlert?.message.includes("customer")) {
+                                setFormAlert(null)
+                              }
                             }}
                             onAddNew={() => setIsNewCustomerModalOpen(true)}
                             userId={userId}
@@ -1130,13 +1174,17 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, company
                               Payment Status
                             </Label>
                             <Select
-                              value={paymentStatus === "Credit" || paymentStatus === "Partial" ? "Credit" : (paymentStatus || "Paid")}
+                              value={paymentStatus || "Pending"}
                               onValueChange={(val) => {
                                 setPaymentStatus(val)
                                 if (val === "Paid") {
                                   setReceivedAmount(totalAmount)
-                                } else if (val === "Pending") {
+                                } else if (val === "Pending" || val === "Credit") {
                                   setReceivedAmount(0)
+                                } else if (val === "Partial") {
+                                  if (receivedAmount >= totalAmount) {
+                                    setReceivedAmount(0)
+                                  }
                                 }
                               }}
                             >
@@ -1144,9 +1192,10 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, company
                                 <SelectValue placeholder="Select payment status" />
                               </SelectTrigger>
                               <SelectContent className="bg-white border-gray-200">
-                                <SelectItem value="Paid">Paid</SelectItem>
-                                <SelectItem value="Credit">Credit / Partial</SelectItem>
                                 <SelectItem value="Pending">Pending</SelectItem>
+                                <SelectItem value="Credit">Credit</SelectItem>
+                                <SelectItem value="Partial">Partial</SelectItem>
+                                <SelectItem value="Paid">Paid</SelectItem>
                               </SelectContent>
                             </Select>
                           </div>
@@ -1198,16 +1247,18 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, company
                             max={totalAmount}
                             step="0.01"
                             value={receivedAmount}
-                            disabled={paymentStatus === "Pending" || paymentStatus === "Paid"}
+                            disabled={paymentStatus !== "Partial"}
                             onChange={(e) => {
                               const val = Number.parseFloat(e.target.value) || 0
                               setReceivedAmount(val)
                               if (val >= totalAmount && totalAmount > 0) {
                                 setPaymentStatus("Paid")
                               } else if (val > 0) {
-                                setPaymentStatus("Credit")
+                                setPaymentStatus("Partial")
                               } else {
-                                setPaymentStatus("Pending")
+                                if (paymentStatus !== "Credit") {
+                                  setPaymentStatus("Pending")
+                                }
                               }
                             }}
                             className="h-9 bg-white border-gray-300 text-gray-900"
@@ -1297,7 +1348,11 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, company
                       customerAddress={""}
                       currency={currency}
                       className="mt-2"
-                      isJobCard={originalStatus === "Pending"}
+                      isJobCard={
+                        saleType === "job_card" ||
+                        String(shipping?.trackingId || "").startsWith("JC-") ||
+                        String(shipping?.trackingId || "").startsWith("DOD")
+                      }
                       customerName={customerName}
                       customerPhone={""}
                     />
