@@ -87,6 +87,7 @@ interface DashboardProps {
   hideAttendanceTab?: boolean
   showSalesActions?: boolean
   showSalesViewModal?: boolean
+  isLogistics?: boolean
 }
 
 // Fallback component for when a tab fails to load
@@ -111,12 +112,21 @@ function LoadingTab() {
   )
 }
 
-export function Dashboard({ onLogout, onlyPosUpdatedSales, hideProductsToPurchaseTab, hideAttendanceTab, showSalesActions = true, showSalesViewModal }: DashboardProps) {
+export function Dashboard({
+  onLogout,
+  onlyPosUpdatedSales,
+  hideProductsToPurchaseTab,
+  hideAttendanceTab,
+  showSalesActions = true,
+  showSalesViewModal,
+  isLogistics: isLogisticsProp,
+}: DashboardProps) {
   const searchParams = useSearchParams()
   const tabParam = searchParams?.get("tab") as TabType | "home" | null
   const pathname = usePathname()
   const activeStaff = useAppSelector(selectActiveStaff)
   const isPurchaseManager = activeStaff?.role === "purchase_manager" || Boolean(pathname?.startsWith("/purchase-manager"))
+  const isLogistics = isLogisticsProp ?? (activeStaff?.role === "logistics" || Boolean(pathname?.startsWith("/logistics")))
   const defaultContentTab: TabType = isPurchaseManager && onlyPosUpdatedSales && !hideProductsToPurchaseTab ? "products-to-purchase" : DEFAULT_CONTENT_TAB
 
   const resolveTab = useCallback((param: TabType | "stock" | "home" | "sales-orders" | null): TabType => {
@@ -146,7 +156,7 @@ export function Dashboard({ onLogout, onlyPosUpdatedSales, hideProductsToPurchas
   const company = useAppSelector(selectCompany)
   const device = useAppSelector(selectDevice)
   const deviceLogo = useAppSelector(selectDeviceLogo)
-  const resolvedShowSalesViewModal = showSalesViewModal ?? !isPurchaseManager
+  const resolvedShowSalesViewModal = showSalesViewModal ?? (!isPurchaseManager && !isLogistics)
   const dateRange = useAppSelector(selectDateRange)
   const dateRangeRef = useRef(dateRange)
   useEffect(() => {
@@ -584,6 +594,7 @@ export function Dashboard({ onLogout, onlyPosUpdatedSales, hideProductsToPurchas
               onlyPosUpdatedSales={onlyPosUpdatedSales}
               showActions={showSalesActions}
               showViewModal={resolvedShowSalesViewModal}
+              isLogistics={isLogistics}
             />
           )
         case "products-to-purchase":
@@ -656,7 +667,7 @@ export function Dashboard({ onLogout, onlyPosUpdatedSales, hideProductsToPurchas
             {deviceLogo ? (
               <Image
                 src={deviceLogo}
-                alt={`${isPurchaseManager ? (company?.name || "Company") : (device?.name || "Device")} logo`}
+                alt={`${isPurchaseManager || isLogistics ? (company?.name || "Company") : (device?.name || "Device")} logo`}
                 fill
                 className="object-contain"
                 priority
@@ -666,7 +677,7 @@ export function Dashboard({ onLogout, onlyPosUpdatedSales, hideProductsToPurchas
               <BrandLogo variant="icon" width={40} height={40} className="h-full w-full" priority />
             )}
           </div>
-          <div className={cn(isPurchaseManager ? "flex" : "hidden sm:flex", "flex-col min-w-0 flex-1")}>
+          <div className={cn(isPurchaseManager || isLogistics ? "flex" : "hidden sm:flex", "flex-col min-w-0 flex-1")}>
             <span className="text-xs sm:text-xl font-bold text-gray-800 truncate max-w-[110px] sm:max-w-none">
               {company?.name || "Company"}
             </span>
@@ -675,7 +686,9 @@ export function Dashboard({ onLogout, onlyPosUpdatedSales, hideProductsToPurchas
               <span className="text-[10px] sm:text-xs text-gray-500 truncate max-w-[100px] sm:max-w-none">
                 {isPurchaseManager
                   ? (activeStaff?.name || "Purchase Manager")
-                  : `${device?.name || "Device"} - ${device?.currency || "AED"}`}
+                  : isLogistics
+                    ? (activeStaff?.name || "Logistics Staff")
+                    : `${device?.name || "Device"} - ${device?.currency || "AED"}`}
               </span>
             </div>
           </div>

@@ -86,7 +86,7 @@ async function buildShippingFieldsForSave(saleData: any, deviceId: number, exist
     }
 
     if (
-      ["Shipped", "In transit", "Delivered"].includes(String(normalized.delivery_status)) &&
+      ["Shipped", "In transit", "Courier", "Shipping", "Delivered"].includes(String(normalized.delivery_status)) &&
       !normalized.shipped_at
     ) {
       normalized.shipped_at = new Date().toISOString()
@@ -713,9 +713,10 @@ export interface GetPaginatedSalesOptions {
   dateFrom?: string
   dateTo?: string
   typeFilter?: "all" | "normal" | "job_card"
-  cardFilter?: "all" | "pending" | "critical"
+  cardFilter?: "all" | "today" | "pending" | "critical"
   searchTerm?: string
   onlyPosUpdated?: boolean
+  excludePendingAndPickup?: boolean
 }
 
 export async function getPaginatedUserSales(deviceId: number, options: GetPaginatedSalesOptions = {}) {
@@ -738,6 +739,7 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
   const typeFilter = options.typeFilter || "all"
   const cardFilter = options.cardFilter || "all"
   const onlyPosUpdated = options.onlyPosUpdated || false
+  const excludePendingAndPickup = options.excludePendingAndPickup || false
 
   try {
     const result = await executeWithRetry(async () => {
@@ -783,6 +785,18 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
           s.shipping_notes,
           s.courier_paid_extra,
           s.expense_courier,
+          s.expense_packing,
+          s.courier_partner_id,
+          s.courier_service_id,
+          s.packaging_type_id,
+          s.packaging_type_name,
+          s.weight_kg,
+          s.length_cm,
+          s.width_cm,
+          s.height_cm,
+          s.shipping_date,
+          s.shipped_at,
+          s.delivered_at,
           COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name,
           COALESCE(NULLIF(s.customer_phone_override, ''), c.phone, '') as customer_phone,
           st.name as staff_name,
@@ -822,8 +836,13 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
         LEFT JOIN master_data md ON s.courier_partner_id = md.id
         WHERE (s.device_id = ${deviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
           AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
-          AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
-          AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
+          AND (
+            ${cardFilter} = 'today'
+            OR (
+              (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
+              AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
+            )
+          )
           AND (
             ${typeFilter} = 'all'
             OR (${typeFilter} = 'job_card' AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%'))
@@ -831,10 +850,18 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
           )
           AND (
             ${cardFilter} = 'all'
+            OR (${cardFilter} = 'today' AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned') AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled' AND LOWER(COALESCE(s.delivery_status, '')) NOT IN ('returned', 'failed') AND COALESCE(s.sale_date, s.created_at)::date = CURRENT_DATE)
             OR (${cardFilter} = 'pending' AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned') AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled' AND LOWER(COALESCE(s.delivery_status, '')) NOT IN ('returned', 'failed') AND LOWER(COALESCE(s.delivery_status, 'pending')) != 'delivered')
             OR (${cardFilter} = 'critical' AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%') AND LOWER(COALESCE(s.fulfillment_type, '')) = 'ship' AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned') AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'pending') AND (LOWER(COALESCE(s.payment_status, '')) IN ('paid', 'completed') OR (s.total_amount > 0 AND s.received_amount >= s.total_amount)) AND LOWER(COALESCE(s.delivery_status, 'pending')) NOT IN ('pickup', 'direct', 'shipping', 'shipped', 'in transit', 'delivered', 'returned', 'failed'))
           )
           AND (${onlyPosUpdated} = false OR s.is_pos_updated = true)
+          AND (
+            ${excludePendingAndPickup} = false
+            OR (
+              LOWER(COALESCE(s.delivery_status, 'pending')) != 'pending'
+              AND LOWER(COALESCE(s.delivery_status, '')) != 'pickup'
+            )
+          )
           AND (
             ${searchPattern}::text IS NULL
             OR LOWER(COALESCE(s.customer_name_override, c.name, '')) LIKE ${searchPattern}
@@ -874,8 +901,13 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
         LEFT JOIN staff st ON s.staff_id = st.id
         WHERE (s.device_id = ${deviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
           AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
-          AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
-          AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
+          AND (
+            ${cardFilter} = 'today'
+            OR (
+              (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
+              AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
+            )
+          )
           AND (
             ${typeFilter} = 'all'
             OR (${typeFilter} = 'job_card' AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%'))
@@ -883,10 +915,18 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
           )
           AND (
             ${cardFilter} = 'all'
+            OR (${cardFilter} = 'today' AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned') AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled' AND LOWER(COALESCE(s.delivery_status, '')) NOT IN ('returned', 'failed') AND COALESCE(s.sale_date, s.created_at)::date = CURRENT_DATE)
             OR (${cardFilter} = 'pending' AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned') AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled' AND LOWER(COALESCE(s.delivery_status, '')) NOT IN ('returned', 'failed') AND LOWER(COALESCE(s.delivery_status, 'pending')) != 'delivered')
             OR (${cardFilter} = 'critical' AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%') AND LOWER(COALESCE(s.fulfillment_type, '')) = 'ship' AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned') AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'pending') AND (LOWER(COALESCE(s.payment_status, '')) IN ('paid', 'completed') OR (s.total_amount > 0 AND s.received_amount >= s.total_amount)) AND LOWER(COALESCE(s.delivery_status, 'pending')) NOT IN ('pickup', 'direct', 'shipping', 'shipped', 'in transit', 'delivered', 'returned', 'failed'))
           )
           AND (${onlyPosUpdated} = false OR s.is_pos_updated = true)
+          AND (
+            ${excludePendingAndPickup} = false
+            OR (
+              LOWER(COALESCE(s.delivery_status, 'pending')) != 'pending'
+              AND LOWER(COALESCE(s.delivery_status, '')) != 'pickup'
+            )
+          )
           AND (
             ${searchPattern}::text IS NULL
             OR LOWER(COALESCE(s.customer_name_override, c.name, '')) LIKE ${searchPattern}
@@ -950,9 +990,19 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
   }
 }
 
-export async function getSalesSummaryCards(deviceId: number, options: { dateFrom?: string; dateTo?: string; typeFilter?: string; searchTerm?: string; onlyPosUpdated?: boolean } = {}) {
+export async function getSalesSummaryCards(
+  deviceId: number,
+  options: {
+    dateFrom?: string
+    dateTo?: string
+    typeFilter?: string
+    searchTerm?: string
+    onlyPosUpdated?: boolean
+    excludePendingAndPickup?: boolean
+  } = {}
+) {
   if (!deviceId) {
-    return { success: false, counts: { total: 0, pending: 0, critical: 0 } }
+    return { success: false, counts: { total: 0, today: 0, pending: 0, critical: 0 } }
   }
 
   resetConnectionState()
@@ -964,6 +1014,7 @@ export async function getSalesSummaryCards(deviceId: number, options: { dateFrom
   const dateFrom = options.dateFrom || null
   const typeFilter = options.typeFilter || "all"
   const onlyPosUpdated = options.onlyPosUpdated || false
+  const excludePendingAndPickup = options.excludePendingAndPickup || false
 
   try {
     const cardCounts = await executeWithRetry(async () => {
@@ -973,12 +1024,22 @@ export async function getSalesSummaryCards(deviceId: number, options: { dateFrom
             WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
               AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled'
               AND LOWER(COALESCE(s.delivery_status, '')) NOT IN ('returned', 'failed')
+              AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
+              AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
           )::int as total_count,
           COUNT(*) FILTER (
             WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
               AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled'
               AND LOWER(COALESCE(s.delivery_status, '')) NOT IN ('returned', 'failed')
+              AND COALESCE(s.sale_date, s.created_at)::date = CURRENT_DATE
+          )::int as today_count,
+          COUNT(*) FILTER (
+            WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
+              AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled'
+              AND LOWER(COALESCE(s.delivery_status, '')) NOT IN ('returned', 'failed')
               AND LOWER(COALESCE(s.delivery_status, 'pending')) != 'delivered'
+              AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
+              AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
           )::int as pending_count,
           COUNT(*) FILTER (
             WHERE (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%')
@@ -987,15 +1048,27 @@ export async function getSalesSummaryCards(deviceId: number, options: { dateFrom
               AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'pending')
               AND (LOWER(COALESCE(s.payment_status, '')) IN ('paid', 'completed') OR (s.total_amount > 0 AND s.received_amount >= s.total_amount))
               AND LOWER(COALESCE(s.delivery_status, 'pending')) NOT IN ('pickup', 'direct', 'shipping', 'shipped', 'in transit', 'delivered', 'returned', 'failed')
+              AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
+              AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
           )::int as critical_count
         FROM sales s
         LEFT JOIN customers c ON s.customer_id = c.id
         LEFT JOIN staff st ON s.staff_id = st.id
         WHERE (s.device_id = ${deviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
           AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
-          AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
-          AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
+          AND (
+            (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
+            AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
+            OR COALESCE(s.sale_date, s.created_at)::date = CURRENT_DATE
+          )
           AND (${onlyPosUpdated} = false OR s.is_pos_updated = true)
+          AND (
+            ${excludePendingAndPickup} = false
+            OR (
+              LOWER(COALESCE(s.delivery_status, 'pending')) != 'pending'
+              AND LOWER(COALESCE(s.delivery_status, '')) != 'pickup'
+            )
+          )
           AND (
             ${typeFilter} = 'all'
             OR (${typeFilter} = 'job_card' AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%'))
@@ -1017,13 +1090,14 @@ export async function getSalesSummaryCards(deviceId: number, options: { dateFrom
             OR CAST(s.total_amount AS TEXT) LIKE ${searchPattern}
           )
       `
-      return rows[0] || { total_count: 0, pending_count: 0, critical_count: 0 }
+      return rows[0] || { total_count: 0, today_count: 0, pending_count: 0, critical_count: 0 }
     })
 
     return {
       success: true,
       counts: {
         total: Number(cardCounts.total_count || 0),
+        today: Number(cardCounts.today_count || 0),
         pending: Number(cardCounts.pending_count || 0),
         critical: Number(cardCounts.critical_count || 0),
       },
@@ -1032,7 +1106,7 @@ export async function getSalesSummaryCards(deviceId: number, options: { dateFrom
     console.error("Get sales summary cards error:", error)
     return {
       success: false,
-      counts: { total: 0, pending: 0, critical: 0 },
+      counts: { total: 0, today: 0, pending: 0, critical: 0 },
     }
   }
 }
@@ -2911,7 +2985,7 @@ export async function updateSaleDeliveryStatus(
 
   try {
     const staffSession = await getStaffSession()
-    const isAdmin = !staffSession || staffSession.role === "admin"
+    const isAdmin = !staffSession || staffSession.role === "admin" || staffSession.role === "logistics"
 
     const rows = await sql`
       SELECT delivery_status, status, fulfillment_type, shipped_at, delivered_at, payment_status, tracking_id, sale_type, source, external_order_id, staff_id, device_id, shipping_date
@@ -2930,7 +3004,7 @@ export async function updateSaleDeliveryStatus(
 
     const shippedAt =
       rows[0].shipped_at ||
-      (["Shipping", "In transit", "Delivered"].includes(deliveryStatus) ? new Date() : null)
+      (["Shipping", "Courier", "In transit", "Delivered"].includes(deliveryStatus) ? new Date() : null)
     const deliveredAt =
       rows[0].delivered_at || (deliveryStatus === "Delivered" ? new Date() : null)
 
@@ -2940,7 +3014,7 @@ export async function updateSaleDeliveryStatus(
     const isJobCard = rows[0].sale_type === 'job_card'
     const isEcommerce = rows[0].source === 'ECOMMERCE' || rows[0].external_order_id != null
 
-    const allowedStatuses = ["Pending", "Paid", "Packed", "Sent", "Direct", "Shipping", "Delivered", "Returned", "Failed"]
+    const allowedStatuses = ["Pending", "Paid", "Packed", "Sent", "Direct", "Courier", "Shipping", "Delivered", "Returned", "Failed"]
 
     if (!allowedStatuses.includes(deliveryStatus)) {
       return { success: false as const, message: `Invalid delivery status: ${deliveryStatus}` }
@@ -3118,6 +3192,7 @@ export async function updateSaleDeliveryStatus(
 
     revalidatePath("/dashboard")
     revalidatePath("/staff/dashboard")
+    revalidatePath("/logistics/dashboard")
     return { 
       success: true as const, 
       message: "Delivery status updated", 
@@ -3185,6 +3260,109 @@ export async function updateSaleTracking(
       success: false as const,
       message: `Database error: ${error instanceof Error ? error.message : "Unknown error"}`,
     }
+  }
+}
+
+export async function updateSaleFulfillmentDetails(saleId: number, shippingData: any) {
+  if (!saleId) {
+    return { success: false, message: "Sale ID is required" }
+  }
+
+  try {
+    const staffSession = await getStaffSession()
+    const isAdmin = !staffSession || staffSession.role === "admin" || staffSession.role === "logistics"
+    if (!isAdmin) {
+      const rows = await sql`SELECT staff_id FROM sales WHERE id = ${saleId} LIMIT 1`
+      if (rows.length === 0 || rows[0].staff_id !== staffSession.staffId) {
+        return { success: false, message: "Unauthorized. You can only update your own sales." }
+      }
+    }
+
+    const currentSale = await sql`SELECT status, delivery_status, fulfillment_type, device_id FROM sales WHERE id = ${saleId} LIMIT 1`
+    if (currentSale.length === 0) {
+      return { success: false, message: "Sale not found" }
+    }
+
+    const origStatus = currentSale[0].status || "Completed"
+    const origDelivery = currentSale[0].delivery_status || "Pending"
+    const origFulfillment = currentSale[0].fulfillment_type || "ship"
+    const newDelivery = shippingData.deliveryStatus || origDelivery
+    const newFulfillment = shippingData.fulfillmentType || origFulfillment
+
+    const wasDeducted = await isSaleStockDeducted(origStatus, origDelivery, origFulfillment)
+    const shouldDeduct = await isSaleStockDeducted(origStatus, newDelivery, newFulfillment)
+
+    if (wasDeducted !== shouldDeduct) {
+      const stockDeviceId = Number(currentSale[0].device_id)
+      await sql.begin(async (tx: any) => {
+        await applyStockTransition(
+          saleId,
+          stockDeviceId,
+          shouldDeduct,
+          shouldDeduct ? "sale_delivery_deducted" : "sale_delivery_restored",
+          `Sale #${saleId} delivery status changed to ${newDelivery} - stock ${shouldDeduct ? "deducted" : "restored"}`,
+          tx,
+        )
+      })
+    }
+
+    const shippedAt = (["Shipping", "Courier", "In transit", "Delivered"].includes(String(shippingData.deliveryStatus)) ? new Date() : null)
+    const deliveredAt = (shippingData.deliveryStatus === "Delivered" ? new Date() : null)
+
+    await sql`
+      UPDATE sales
+      SET 
+        courier_partner_id = ${shippingData.courierPartnerId || null},
+        courier_service_id = ${shippingData.courierServiceId || null},
+        courier_service_name = ${shippingData.courierServiceName || null},
+        tracking_id = ${shippingData.trackingId || null},
+        packaging_type_id = ${shippingData.packagingTypeId || null},
+        packaging_type_name = ${shippingData.packagingTypeName || null},
+        weight_kg = ${shippingData.weightKg || null},
+        length_cm = ${shippingData.lengthCm || null},
+        width_cm = ${shippingData.widthCm || null},
+        height_cm = ${shippingData.heightCm || null},
+        courier_paid_extra = ${shippingData.courierPaidExtra || 0},
+        expense_courier = ${shippingData.expenseCourier || 0},
+        expense_packing = ${shippingData.expensePacking || 0},
+        shipping_notes = ${shippingData.shippingNotes || null},
+        shipping_address = ${shippingData.shippingAddress || null},
+        shipping_city = ${shippingData.shippingCity || null},
+        shipping_district = ${shippingData.shippingDistrict || null},
+        shipping_state = ${shippingData.shippingState || null},
+        shipping_street = ${shippingData.shippingStreet || null},
+        shipping_landmark = ${shippingData.shippingLandmark || null},
+        shipping_address_type = ${shippingData.shippingAddressType || null},
+        shipping_pincode = ${shippingData.shippingPincode || null},
+        fulfillment_type = ${shippingData.fulfillmentType || 'ship'},
+        delivery_status = COALESCE(${shippingData.deliveryStatus}, delivery_status),
+        shipped_at = COALESCE(shipped_at, ${shippedAt}),
+        delivered_at = COALESCE(delivered_at, ${deliveredAt}),
+        shipping_date = COALESCE(shipping_date, ${shippingData.shippingDate ? new Date(shippingData.shippingDate) : null}),
+        updated_at = NOW()
+      WHERE id = ${saleId}
+    `
+
+    try {
+      if (shippingData.deliveryStatus) {
+        await sql`
+          UPDATE orders
+          SET status = ${shippingData.deliveryStatus.toLowerCase()},
+              updated_at = NOW()
+          WHERE synced_sale_id = ${saleId}
+        `
+      }
+    } catch (syncErr) {
+      console.error("Error syncing status back to orders table:", syncErr)
+    }
+
+    revalidatePath("/dashboard")
+    revalidatePath("/staff/dashboard")
+    revalidatePath("/logistics/dashboard")
+    return { success: true, message: "Fulfillment details saved successfully" }
+  } catch (err) {
+    console.error("updateSaleFulfillmentDetails error:", err)
+    return { success: false, message: `Failed to save fulfillment details: ${err instanceof Error ? err.message : "Unknown error"}` }
   }
 }
 

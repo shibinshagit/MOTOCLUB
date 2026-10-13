@@ -102,7 +102,10 @@ function LogisticsPageContent() {
     <Dashboard 
       onLogout={handleLogout}
       onlyPosUpdatedSales={true}
+      showSalesActions={false}
+      showSalesViewModal={false}
       hideProductsToPurchaseTab={true}
+      isLogistics={true}
     />
   )
 }

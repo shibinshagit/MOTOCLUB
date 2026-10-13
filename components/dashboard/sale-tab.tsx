@@ -79,6 +79,7 @@ interface SaleTabProps {
   onlyPosUpdatedSales?: boolean
   showActions?: boolean
   showViewModal?: boolean
+  isLogistics?: boolean
 }
 
 interface ProductRow {
@@ -179,6 +180,7 @@ export default function SaleTab({
   onlyPosUpdatedSales = false,
   showActions = true,
   showViewModal,
+  isLogistics: propIsLogistics,
 }: SaleTabProps) {
   // Redux state
   const dispatch = useDispatch()
@@ -187,7 +189,8 @@ export default function SaleTab({
   const activeStaff = useSelector(selectActiveStaff)
   const pathname = usePathname()
   const isPurchaseManager = activeStaff?.role === "purchase_manager" || Boolean(pathname?.startsWith("/purchase-manager"))
-  const canShowViewModal = showViewModal !== undefined ? showViewModal : !isPurchaseManager
+  const isLogistics = propIsLogistics ?? (activeStaff?.role === "logistics" || Boolean(pathname?.startsWith("/logistics")))
+  const canShowViewModal = showViewModal !== undefined ? showViewModal : (!isPurchaseManager && !isLogistics)
   const { isValueHidden } = useStaffRestrictions()
   const hideCogs = isValueHidden("cogs")
   const hideStockCount = isValueHidden("stock_count")
@@ -1788,6 +1791,7 @@ export default function SaleTab({
       globalDateRange={globalDateRange}
       onlyPosUpdated={onlyPosUpdatedSales}
       isPurchaseManager={isPurchaseManager}
+      isLogistics={isLogistics}
       showActions={showActions}
       showViewModal={canShowViewModal}
       onRefreshSales={() => fetchSalesForRange(globalDateRange.from, globalDateRange.to, true)}

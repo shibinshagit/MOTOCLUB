@@ -15,14 +15,36 @@ import {
   passesColumnFilter,
   type ExcelColumnFilterValue,
 } from "@/components/sales/excel-column-filter"
-import { getSaleDeliveryLabel, isPendingSale, isCriticalSale, isJobCardSale, isNormalSale } from "@/lib/sale-shipping"
+import {
+  getSaleDeliveryLabel,
+  isPendingSale,
+  isCriticalSale,
+  isJobCardSale,
+  isNormalSale,
+  mapSaleShippingFromRecord,
+  type SaleShippingInput,
+} from "@/lib/sale-shipping"
 import { DeliveryStatusSelect } from "@/components/sales/delivery-status-select"
 import { PhoneCell } from "@/components/sales/phone-cell"
 import { TrackingCell } from "@/components/sales/tracking-cell"
 import { StaffOwnerSelect } from "@/components/sales/staff-owner-select"
 import { parseSaleDate, parseSaleDateTime, cn } from "@/lib/utils"
 import { printJobCard, printBatchJobCards, printSalesReceipt } from "@/lib/receipt-utils"
-import { getSaleDetails, getPaginatedUserSales, getSalesSummaryCards } from "@/app/actions/sale-actions"
+import {
+  getSaleDetails,
+  getPaginatedUserSales,
+  getSalesSummaryCards,
+  updateSaleFulfillmentDetails,
+} from "@/app/actions/sale-actions"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog"
+import SaleShippingSection from "@/components/sales/sale-shipping-section"
 import {
   Search,
   X,
@@ -47,6 +69,10 @@ import {
   ExternalLink,
   Share2,
   Info,
+  Calendar,
+  Package,
+  ArrowRight,
+  Save,
 } from "lucide-react"
 import { SalesBreakdownModal } from "@/components/shared/sales-breakdown-modal"
 import {
@@ -128,6 +154,7 @@ function DeliveryStatusBadge({ status }: { status: string }) {
     Packed: "bg-blue-50 text-blue-700 border-blue-200",
     Sent: "bg-purple-50 text-purple-700 border-purple-200",
     Direct: "bg-blue-50 text-blue-700 border-blue-200",
+    Courier: "bg-indigo-50 text-indigo-700 border-indigo-200",
     Shipping: "bg-cyan-50 text-cyan-700 border-cyan-200",
     Delivered: "bg-emerald-50 text-emerald-700 border-emerald-200",
     Returned: "bg-rose-50 text-rose-700 border-rose-200",
@@ -162,6 +189,7 @@ interface SalesExcelTableProps {
   searchTerm?: string
   onSearchTermChange?: (term: string) => void
   isPurchaseManager?: boolean
+  isLogistics?: boolean
   periodLabel: string
   isCurrentMonth: boolean
   canGoNextMonth: boolean
@@ -207,6 +235,7 @@ export default function SalesExcelTable({
   searchTerm: externalSearchTerm,
   onSearchTermChange,
   isPurchaseManager: propIsPurchaseManager,
+  isLogistics: propIsLogistics,
   periodLabel,
   isCurrentMonth,
   canGoNextMonth,
@@ -233,12 +262,91 @@ export default function SalesExcelTable({
     propIsPurchaseManager !== undefined
       ? propIsPurchaseManager
       : activeStaff?.role === "purchase_manager" || Boolean(pathname?.startsWith("/purchase-manager"))
+  const isLogistics =
+    propIsLogistics !== undefined
+      ? propIsLogistics
+      : activeStaff?.role === "logistics" || Boolean(pathname?.startsWith("/logistics"))
 
   const { toast } = useToast()
   const [internalSearchTerm, setInternalSearchTerm] = useState("")
   const [isGeneratingReport, setIsGeneratingReport] = useState(false)
   const [isCreateJobCardOpen, setIsCreateJobCardOpen] = useState(false)
   const [editingJobCardId, setEditingJobCardId] = useState<number | null>(null)
+  const [fulfillmentModal, setFulfillmentModal] = useState<{
+    isOpen: boolean
+    sale: any
+    shippingData: SaleShippingInput
+  } | null>(null)
+  const [isSavingFulfillment, setIsSavingFulfillment] = useState(false)
+
+  const openFulfillmentModal = useCallback(async (sale: any) => {
+    const initialShipping = mapSaleShippingFromRecord(sale)
+    initialShipping.fulfillmentType = "ship"
+    if (!initialShipping.shippingAddress) {
+      initialShipping.shippingAddress = sale.shipping_address || sale.customer_address || ""
+    }
+    setFulfillmentModal({
+      isOpen: true,
+      sale,
+      shippingData: initialShipping,
+    })
+
+    try {
+      const res = await getSaleDetails(sale.id)
+      if (res.success && res.data) {
+        const fullSale = res.data.sale ? { ...res.data.sale, items: res.data.items, payments: res.data.payments } : res.data
+        const updatedShipping = mapSaleShippingFromRecord(fullSale)
+        updatedShipping.fulfillmentType = "ship"
+        if (!updatedShipping.shippingAddress) {
+          updatedShipping.shippingAddress = fullSale.shipping_address || fullSale.customer_address || ""
+        }
+        setFulfillmentModal((prev) => {
+          if (!prev || prev.sale.id !== sale.id) return prev
+          return {
+            ...prev,
+            sale: { ...prev.sale, ...fullSale },
+            shippingData: updatedShipping,
+          }
+        })
+      }
+    } catch (err) {
+      console.warn("Could not fetch extra details for fulfillment modal:", err)
+    }
+  }, [])
+
+  const handleCloseFulfillmentModal = () => {
+    setFulfillmentModal(null)
+  }
+
+  const handleSaveFulfillment = async () => {
+    if (!fulfillmentModal) return
+    setIsSavingFulfillment(true)
+    try {
+      const res = await updateSaleFulfillmentDetails(fulfillmentModal.sale.id, fulfillmentModal.shippingData)
+      if (res.success) {
+        toast({
+          title: "Success",
+          description: "Fulfillment details saved successfully",
+        })
+        handleCloseFulfillmentModal()
+        fetchServerSales()
+      } else {
+        toast({
+          title: "Error",
+          description: res.message || "Failed to save fulfillment details",
+          variant: "destructive",
+        })
+      }
+    } catch (err) {
+      toast({
+        title: "Error",
+        description: "An error occurred while saving fulfillment details",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSavingFulfillment(false)
+    }
+  }
 
   const handleRowEdit = (sale: any) => {
     if (isJobCardSale(sale)) {
@@ -289,7 +397,7 @@ export default function SalesExcelTable({
     [formatCurrency, getPaymentMethodDisplay, getRemainingAmount],
   )
 
-  const [cardFilter, setCardFilter] = useState<"all" | "pending" | "critical">("all")
+  const [cardFilter, setCardFilter] = useState<"all" | "today" | "pending" | "critical">("all")
   const [typeFilter, setTypeFilter] = useState<"all" | "normal" | "job_card">("all")
   const [selectedSales, setSelectedSales] = useState<number[]>([])
   const [expandedSaleId, setExpandedSaleId] = useState<number | null>(null)
@@ -302,7 +410,7 @@ export default function SalesExcelTable({
   const [serverSales, setServerSales] = useState<any[]>([])
   const [totalServerCount, setTotalServerCount] = useState(0)
   const [totalServerPages, setTotalServerPages] = useState(0)
-  const [serverCardCounts, setServerCardCounts] = useState<{ total: number; pending: number; critical: number } | null>(
+  const [serverCardCounts, setServerCardCounts] = useState<{ total: number; today?: number; pending: number; critical: number } | null>(
     null,
   )
   const [isFetchingServer, setIsFetchingServer] = useState(false)
@@ -348,6 +456,7 @@ export default function SalesExcelTable({
           cardFilter,
           searchTerm: debouncedSearch,
           onlyPosUpdated,
+          excludePendingAndPickup: isLogistics,
         }),
         getSalesSummaryCards(deviceId!, {
           dateFrom: globalDateRange?.from,
@@ -355,6 +464,7 @@ export default function SalesExcelTable({
           typeFilter,
           searchTerm: debouncedSearch,
           onlyPosUpdated,
+          excludePendingAndPickup: isLogistics,
         }),
       ])
       if (fetchId !== latestFetchIdRef.current) return
@@ -380,7 +490,7 @@ export default function SalesExcelTable({
         setHasFetchedServer(true)
       }
     }
-  }, [deviceId, page, pageSize, globalDateRange?.from, globalDateRange?.to, typeFilter, cardFilter, debouncedSearch])
+  }, [deviceId, page, pageSize, globalDateRange?.from, globalDateRange?.to, typeFilter, cardFilter, debouncedSearch, onlyPosUpdated, isLogistics])
 
   // A new date range starts again from the first page.
   useEffect(() => {
@@ -428,13 +538,35 @@ export default function SalesExcelTable({
   }
 
   // The list is always server-paginated/filtered; rows are already the current page.
-  const displaySales = serverSales
+  const displaySales = useMemo(() => {
+    if (!isLogistics) return serverSales
+    return serverSales.filter((s: any) => {
+      const dStatus = (s.delivery_status || "pending").toLowerCase()
+      return dStatus !== "pending" && dStatus !== "pickup"
+    })
+  }, [serverSales, isLogistics])
 
   const selectedSalesList = useMemo(() => {
     return displaySales.filter((s) => selectedSales.includes(s.id))
   }, [displaySales, selectedSales])
 
+  const isTodaySale = useCallback((sale: any) => {
+    if (!sale) return false
+    try {
+      const dt = parseSaleDateTime(sale)
+      const now = new Date()
+      return (
+        dt.getFullYear() === now.getFullYear() &&
+        dt.getMonth() === now.getMonth() &&
+        dt.getDate() === now.getDate()
+      )
+    } catch {
+      return false
+    }
+  }, [])
+
   const totalCount = onlyPosUpdated ? totalServerCount : (serverCardCounts ? serverCardCounts.total : totalServerCount)
+  const todayCount = serverCardCounts?.today ?? displaySales.filter(isTodaySale).length
   const pendingCount = serverCardCounts ? serverCardCounts.pending : 0
   const criticalCount = serverCardCounts ? serverCardCounts.critical : 0
   const pendingSalesCount = pendingCount
@@ -442,6 +574,11 @@ export default function SalesExcelTable({
   const totalSalesAmount = useMemo(
     () => displaySales.reduce((sum, sale) => sum + Number(sale.total_amount || 0), 0),
     [displaySales],
+  )
+  const todaySalesAmount = useMemo(
+    () =>
+      displaySales.filter(isTodaySale).reduce((sum, sale) => sum + Number(sale.total_amount || 0), 0),
+    [displaySales, isTodaySale],
   )
   const pendingSalesAmount = useMemo(
     () =>
@@ -690,6 +827,161 @@ export default function SalesExcelTable({
           globalDateRange={globalDateRange}
           formatCurrency={formatCurrency}
         />
+      ) : isLogistics ? (
+        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+          {/* LOGISTICS CARD 1 — TOTAL ORDERS */}
+          <button
+            type="button"
+            onClick={() => {
+              setCardFilter("all")
+              setPage(1)
+            }}
+            className={cn(
+              "flex flex-col justify-between rounded-xl border p-3.5 text-left transition-all cursor-pointer shadow-xs hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-400 min-w-0",
+              cardFilter === "all"
+                ? "border-violet-500 bg-violet-50/90 ring-2 ring-violet-400/30"
+                : "border-slate-200 bg-white hover:border-violet-300 hover:bg-slate-50/50",
+            )}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-violet-700">Total Orders</span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setIsBreakdownModalOpen(true)
+                  }}
+                  title="View sales breakdown"
+                  className="p-0.5 rounded-full hover:bg-violet-200/60 text-violet-600 hover:text-violet-800 transition-colors cursor-pointer"
+                >
+                  <Info className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              <Package className="h-4 w-4 text-violet-600 shrink-0" />
+            </div>
+            <div className="mt-2 flex items-baseline justify-between gap-2 min-w-0">
+              <div className="min-w-0">
+                <div className="text-xl font-extrabold text-slate-900 leading-tight">
+                  {totalCount} <span className="text-xs font-normal text-slate-500">{totalCount === 1 ? "Order" : "Orders"}</span>
+                </div>
+                <div className="text-xs font-semibold text-violet-700 mt-0.5 truncate">
+                  {formatCurrency(totalSalesAmount)}
+                </div>
+              </div>
+              {cardFilter === "all" && (
+                <span className="text-[10px] font-bold text-violet-700 bg-violet-100 px-2 py-0.5 rounded-full border border-violet-200 shrink-0">
+                  All Orders
+                </span>
+              )}
+            </div>
+          </button>
+
+          {/* LOGISTICS CARD 2 — TODAY'S ORDERS */}
+          <button
+            type="button"
+            onClick={() => {
+              setCardFilter((prev) => (prev === "today" ? "all" : "today"))
+              setPage(1)
+            }}
+            className={cn(
+              "flex flex-col justify-between rounded-xl border p-3.5 text-left transition-all cursor-pointer shadow-xs hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400 min-w-0",
+              cardFilter === "today"
+                ? "border-blue-500 bg-blue-50/90 ring-2 ring-blue-400/30"
+                : "border-slate-200 bg-white hover:border-blue-300 hover:bg-slate-50/50",
+            )}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-blue-700">Today&apos;s Orders</span>
+              <Calendar className="h-4 w-4 text-blue-600 shrink-0" />
+            </div>
+            <div className="mt-2 flex items-baseline justify-between gap-2 min-w-0">
+              <div className="min-w-0">
+                <div className="text-xl font-extrabold text-slate-900 leading-tight">
+                  {todayCount} <span className="text-xs font-normal text-slate-500">{todayCount === 1 ? "Order" : "Orders"}</span>
+                </div>
+                <div className="text-xs font-semibold text-blue-700 mt-0.5 truncate">
+                  {formatCurrency(todaySalesAmount)}
+                </div>
+              </div>
+              {cardFilter === "today" && (
+                <span className="text-[10px] font-bold text-blue-800 bg-blue-100 px-2 py-0.5 rounded-full border border-blue-200 shrink-0">
+                  Active Filter
+                </span>
+              )}
+            </div>
+          </button>
+
+          {/* LOGISTICS CARD 3 — PENDING ORDERS */}
+          <button
+            type="button"
+            onClick={() => {
+              setCardFilter((prev) => (prev === "pending" ? "all" : "pending"))
+              setPage(1)
+            }}
+            className={cn(
+              "flex flex-col justify-between rounded-xl border p-3.5 text-left transition-all cursor-pointer shadow-xs hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-amber-400 min-w-0",
+              cardFilter === "pending"
+                ? "border-amber-500 bg-amber-50/90 ring-2 ring-amber-400/30"
+                : "border-slate-200 bg-white hover:border-amber-300 hover:bg-slate-50/50",
+            )}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-amber-700">Pending Orders</span>
+              <Clock className="h-4 w-4 text-amber-600 shrink-0" />
+            </div>
+            <div className="mt-2 flex items-baseline justify-between gap-2 min-w-0">
+              <div className="min-w-0">
+                <div className="text-xl font-extrabold text-slate-900 leading-tight">
+                  {pendingCount} <span className="text-xs font-normal text-slate-500">{pendingCount === 1 ? "Order" : "Orders"}</span>
+                </div>
+                <div className="text-xs font-semibold text-amber-700 mt-0.5 truncate">
+                  {formatCurrency(pendingSalesAmount)}
+                </div>
+              </div>
+              {cardFilter === "pending" && (
+                <span className="text-[10px] font-bold text-amber-800 bg-amber-200 px-2 py-0.5 rounded-full border border-amber-300 shrink-0">
+                  Active Filter
+                </span>
+              )}
+            </div>
+          </button>
+
+          {/* LOGISTICS CARD 4 — CRITICAL ORDERS */}
+          <button
+            type="button"
+            onClick={() => {
+              setCardFilter((prev) => (prev === "critical" ? "all" : "critical"))
+              setPage(1)
+            }}
+            className={cn(
+              "flex flex-col justify-between rounded-xl border p-3.5 text-left transition-all cursor-pointer shadow-xs hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-rose-400 min-w-0",
+              cardFilter === "critical"
+                ? "border-rose-500 bg-rose-50/90 ring-2 ring-rose-400/30"
+                : "border-slate-200 bg-white hover:border-rose-300 hover:bg-slate-50/50",
+            )}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-rose-700">Critical Orders</span>
+              <AlertTriangle className="h-4 w-4 text-rose-600 shrink-0" />
+            </div>
+            <div className="mt-2 flex items-baseline justify-between gap-2 min-w-0">
+              <div className="min-w-0">
+                <div className="text-xl font-extrabold text-slate-900 leading-tight">
+                  {criticalCount} <span className="text-xs font-normal text-slate-500">{criticalCount === 1 ? "Order" : "Orders"}</span>
+                </div>
+                <div className="text-xs font-semibold text-rose-700 mt-0.5 truncate">
+                  {formatCurrency(criticalSalesAmount)}
+                </div>
+              </div>
+              {cardFilter === "critical" && (
+                <span className="text-[10px] font-bold text-rose-800 bg-rose-200 px-2 py-0.5 rounded-full border border-rose-300 shrink-0">
+                  Active Filter
+                </span>
+              )}
+            </div>
+          </button>
+        </div>
       ) : (
         <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
           {/* CARD 1 — TOTAL SALES */}
@@ -948,7 +1240,7 @@ export default function SalesExcelTable({
                   `${displaySales.length} of ${totalCount}`
                 )}
               </span>
-              {!onlyPosUpdated && pendingSalesCount > 0 && (
+              {!onlyPosUpdated && !isLogistics && pendingSalesCount > 0 && (
                 <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800">
                   <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
                   {pendingSalesCount} Pending
@@ -1017,7 +1309,7 @@ export default function SalesExcelTable({
                 <span>Excel</span>
               </Button>
 
-              {!isPurchaseManager && (
+              {!isPurchaseManager && !isLogistics && (
                 <Button
                   size="sm"
                   className="h-7 gap-1.5 px-3 text-xs font-semibold bg-violet-600 hover:bg-violet-700 text-white shadow-2xs"
@@ -1085,19 +1377,19 @@ export default function SalesExcelTable({
                   {headerCell("total", "Total", "right")}
                   {headerCell("received", "Received", "right")}
                   {headerCell("balance", "Balance", "right")}
-                  {showActions && <th className={stickyActionHeaderClass}>Action</th>}
+                  {(showActions || isLogistics) && <th className={stickyActionHeaderClass}>Action</th>}
                 </tr>
               </thead>
               <tbody className={isFetchingServer && hasFetchedServer ? "opacity-60 transition-opacity" : "transition-opacity"}>
                 {!hasFetchedServer ? (
                   <tr>
-                    <td colSpan={showActions ? 14 : 13}>
+                    <td colSpan={showActions || isLogistics ? 14 : 13}>
                       <TableSkeleton />
                     </td>
                   </tr>
                 ) : serverError && displaySales.length === 0 ? (
                   <tr>
-                    <td colSpan={showActions ? 14 : 13} className="px-4 py-8 text-center text-sm text-rose-600">
+                    <td colSpan={showActions || isLogistics ? 14 : 13} className="px-4 py-8 text-center text-sm text-rose-600">
                       {serverError}
                       <Button variant="outline" size="sm" className="ml-3 h-7 text-xs" onClick={() => fetchServerSales()}>
                         Retry
@@ -1106,7 +1398,7 @@ export default function SalesExcelTable({
                   </tr>
                 ) : displaySales.length === 0 ? (
                   <tr>
-                    <td colSpan={showActions ? 14 : 13} className="px-4 py-12 text-center text-sm text-muted-foreground">
+                    <td colSpan={showActions || isLogistics ? 14 : 13} className="px-4 py-12 text-center text-sm text-muted-foreground">
                       {debouncedSearch || cardFilter !== "all" || typeFilter !== "all"
                         ? "No sales match the current filters"
                         : `No sales found for ${periodLabel}`}
@@ -1149,6 +1441,7 @@ export default function SalesExcelTable({
                       deliveryStatusLower.includes("paid") ||
                       deliveryStatusLower.includes("pack") ||
                       deliveryStatusLower.includes("sent") ||
+                      deliveryStatusLower.includes("courier") ||
                       deliveryStatusLower.includes("ship") ||
                       deliveryStatusLower.includes("transit") ||
                       deliveryStatusLower.includes("out for delivery") ||
@@ -1339,33 +1632,50 @@ export default function SalesExcelTable({
                         <td className="whitespace-nowrap px-3 py-1.5 text-right text-amber-700 font-semibold">
                           {remaining > 0 ? formatCurrency(remaining) : "—"}
                         </td>
-                        {showActions && (
+                        {(showActions || isLogistics) && (
                           <td className={stickyActionCellClass(baseBgClass, isPending)}>
-                            <div className="flex items-center justify-end gap-1.5">
-                              <Button
-                                type="button"
-                                size="sm"
-                                onClick={(event) => {
-                                  event.stopPropagation()
-                                  onEditSale(sale)
-                                }}
-                                className="h-6 px-2 text-[11px] font-bold bg-green-600 hover:bg-green-700 text-white shadow-2xs gap-1 cursor-pointer"
-                                title="Open and edit in POS mode"
-                              >
-                                <ShoppingCart className="h-3 w-3" />
-                                POS
-                              </Button>
-                              <button
-                                type="button"
-                                onClick={(event) => {
-                                  event.stopPropagation()
-                                  handleRowEdit(sale)
-                                }}
-                                className="text-xs font-medium text-brand-blue hover:text-blue-700 hover:underline cursor-pointer"
-                              >
-                                Edit
-                              </button>
-                            </div>
+                            {isLogistics ? (
+                              <div className="flex items-center justify-center">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    openFulfillmentModal(sale)
+                                  }}
+                                  className="h-7 w-7 p-0 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white shadow-2xs hover:shadow-xs transition-transform hover:scale-105 active:scale-95 flex items-center justify-center cursor-pointer"
+                                  title="Fulfillment Details"
+                                >
+                                  <ArrowRight className="h-3.5 w-3.5" />
+                                </Button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center justify-end gap-1.5">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    onEditSale(sale)
+                                  }}
+                                  className="h-6 px-2 text-[11px] font-bold bg-green-600 hover:bg-green-700 text-white shadow-2xs gap-1 cursor-pointer"
+                                  title="Open and edit in POS mode"
+                                >
+                                  <ShoppingCart className="h-3 w-3" />
+                                  POS
+                                </Button>
+                                <button
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    handleRowEdit(sale)
+                                  }}
+                                  className="text-xs font-medium text-brand-blue hover:text-blue-700 hover:underline cursor-pointer"
+                                >
+                                  Edit
+                                </button>
+                              </div>
+                            )}
                           </td>
                         )}
                       </tr>
@@ -1375,7 +1685,7 @@ export default function SalesExcelTable({
 
                     const expandedRow = (
                       <tr key={`expand-${sale.id}`} className="bg-slate-50 border-b border-slate-200">
-                        <td colSpan={showActions ? 14 : 13} className="p-3" onClick={(e) => e.stopPropagation()}>
+                        <td colSpan={showActions || isLogistics ? 14 : 13} className="p-3" onClick={(e) => e.stopPropagation()}>
                           <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs space-y-3">
                             <div className="flex flex-wrap items-center justify-between border-b border-slate-100 pb-2 gap-2">
                               <div className="flex items-center gap-2">
@@ -1724,6 +2034,18 @@ export default function SalesExcelTable({
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <SaleDocumentActions sale={sale} size="card" />
 
+                        {isLogistics && (
+                          <Button
+                            size="sm"
+                            onClick={() => openFulfillmentModal(sale)}
+                            className="h-8 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white gap-1.5 rounded-lg px-2.5 shadow-2xs cursor-pointer"
+                            title="Open Fulfillment Details"
+                          >
+                            <span>Fulfillment</span>
+                            <ArrowRight className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+
                         <Button
                           size="sm"
                           variant="ghost"
@@ -1753,6 +2075,11 @@ export default function SalesExcelTable({
                           {showViewModal && (
                             <DropdownMenuItem onClick={() => onViewSale(sale)}>
                               <Eye className="h-4 w-4 mr-2 text-slate-500" /> View Modal
+                            </DropdownMenuItem>
+                          )}
+                          {isLogistics && (
+                            <DropdownMenuItem onClick={() => openFulfillmentModal(sale)}>
+                              <Package className="h-4 w-4 mr-2 text-indigo-600" /> Fulfillment Details
                             </DropdownMenuItem>
                           )}
                           {showActions && (
@@ -1905,7 +2232,7 @@ export default function SalesExcelTable({
         ) : null}
       </div>
 
-      {!isPurchaseManager && isCreateJobCardOpen && (
+      {!isPurchaseManager && !isLogistics && isCreateJobCardOpen && (
         <JobCardModal
           isOpen={true}
           onClose={() => {
@@ -1943,6 +2270,58 @@ export default function SalesExcelTable({
           }
         }}
       />
+
+      {/* FULFILLMENT MODAL (LOGISTICS) */}
+      <Dialog open={!!fulfillmentModal} onOpenChange={(open) => !open && handleCloseFulfillmentModal()}>
+        <DialogContent className="max-w-4xl p-0 overflow-hidden bg-slate-50 sm:rounded-xl">
+          <DialogHeader className="bg-white border-b border-slate-200 px-6 py-4 flex flex-row items-center justify-between sticky top-0 z-10">
+            <div>
+              <DialogTitle className="text-lg font-bold text-slate-800">
+                Fulfillment Details
+              </DialogTitle>
+              <DialogDescription className="text-xs text-slate-500 mt-1">
+                {isJobCardSale(fulfillmentModal?.sale) ? "Job Card Order" : "Normal Order"}{" "}
+                <span className="font-semibold text-slate-700 ml-1">#{fulfillmentModal?.sale?.id}</span>
+                {fulfillmentModal?.sale?.customer_name && (
+                  <span className="ml-2 text-slate-600 font-medium">({fulfillmentModal.sale.customer_name})</span>
+                )}
+              </DialogDescription>
+            </div>
+          </DialogHeader>
+          <div className="p-6 max-h-[70vh] overflow-y-auto">
+            {fulfillmentModal && (
+              <SaleShippingSection
+                deviceId={deviceId || fulfillmentModal.sale?.device_id || 0}
+                value={fulfillmentModal.shippingData}
+                onChange={(val) => setFulfillmentModal((prev) => (prev ? { ...prev, shippingData: val } : null))}
+                customerAddress={fulfillmentModal.sale?.shipping_address || fulfillmentModal.sale?.customer_address}
+                customerName={fulfillmentModal.sale?.customer_name || fulfillmentModal.sale?.customer_name_override}
+                customerPhone={fulfillmentModal.sale?.customer_phone || fulfillmentModal.sale?.customer_phone_override}
+                isJobCard={isJobCardSale(fulfillmentModal.sale)}
+                forceFullForm={true}
+                hidePickupToggle={true}
+              />
+            )}
+          </div>
+          <DialogFooter className="bg-white border-t border-slate-200 px-6 py-4 flex flex-row justify-end gap-2 sticky bottom-0 z-10">
+            <Button 
+              variant="outline" 
+              onClick={handleCloseFulfillmentModal}
+              disabled={isSavingFulfillment}
+            >
+              Back
+            </Button>
+            <Button 
+              onClick={handleSaveFulfillment}
+              disabled={isSavingFulfillment}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white gap-2"
+            >
+              {isSavingFulfillment ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              Save Details
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
