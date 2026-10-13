@@ -306,6 +306,16 @@ export default function ProductsToPurchaseTab({
     return []
   })
 
+  // Track the order in which items were rejected (placed below ordered products, above redeemed)
+  const [rejectedOrder, setRejectedOrder] = useState<string[]>(() => {
+    if (typeof window === "undefined") return []
+    try {
+      const raw = localStorage.getItem(`products_to_purchase_actions_${deviceId}`)
+      if (raw) return JSON.parse(raw).rejectedOrder || []
+    } catch (_) {}
+    return []
+  })
+
   // Track the order in which items were redeemed (most recent at the end of table)
   const [redeemedOrder, setRedeemedOrder] = useState<string[]>(() => {
     if (typeof window === "undefined") return []
@@ -332,10 +342,10 @@ export default function ProductsToPurchaseTab({
     try {
       localStorage.setItem(
         `products_to_purchase_actions_${deviceId}`,
-        JSON.stringify({ itemActions, orderedOrder, redeemedOrder, itemNotes }),
+        JSON.stringify({ itemActions, orderedOrder, rejectedOrder, redeemedOrder, itemNotes }),
       )
     } catch (_) {}
-  }, [deviceId, itemActions, orderedOrder, redeemedOrder, itemNotes])
+  }, [deviceId, itemActions, orderedOrder, rejectedOrder, redeemedOrder, itemNotes])
 
   // Internal note modal state for currently ordered product
   const [orderModalProduct, setOrderModalProduct] = useState<{
@@ -343,6 +353,14 @@ export default function ProductsToPurchaseTab({
     rowKey: string
   } | null>(null)
   const [internalNote, setInternalNote] = useState<string>("")
+
+  // Reject modal state for currently rejected product
+  const [rejectModalProduct, setRejectModalProduct] = useState<{
+    product: any
+    rowKey: string
+    previousAction?: ItemActionStatus | null
+  } | null>(null)
+  const [rejectNote, setRejectNote] = useState<string>("")
 
   // Dedicated note viewer modal for clicking the note icon
   const [viewNoteModal, setViewNoteModal] = useState<{
@@ -371,6 +389,7 @@ export default function ProductsToPurchaseTab({
         // Restore saved actions from database so refresh / logout / login persists across sessions
         const dbActions: Record<string, ItemActionStatus> = {}
         const dbOrdered: { key: string; order: number }[] = []
+        const dbRejected: { key: string; order: number }[] = []
         const dbRedeemed: { key: string; order: number }[] = []
         const dbNotes: Record<string, string> = {}
 
@@ -380,6 +399,8 @@ export default function ProductsToPurchaseTab({
             dbActions[key] = p.saved_action as ItemActionStatus
             if (p.saved_action === "order") {
               dbOrdered.push({ key, order: Number(p.saved_action_order) || 0 })
+            } else if (p.saved_action === "reject") {
+              dbRejected.push({ key, order: Number(p.saved_action_order) || 0 })
             } else if (p.saved_action === "redeemed") {
               dbRedeemed.push({ key, order: Number(p.saved_action_order) || 0 })
             }
@@ -390,11 +411,16 @@ export default function ProductsToPurchaseTab({
         }
 
         dbOrdered.sort((a, b) => a.order - b.order)
+        dbRejected.sort((a, b) => a.order - b.order)
         dbRedeemed.sort((a, b) => a.order - b.order)
 
         setItemActions((prev) => ({ ...dbActions, ...prev }))
         setOrderedOrder((prev) => {
           const dbKeys = dbOrdered.map((o) => o.key)
+          return [...new Set([...dbKeys, ...prev])]
+        })
+        setRejectedOrder((prev) => {
+          const dbKeys = dbRejected.map((r) => r.key)
           return [...new Set([...dbKeys, ...prev])]
         })
         setRedeemedOrder((prev) => {
@@ -527,11 +553,14 @@ export default function ProductsToPurchaseTab({
 
   // Sort products:
   // 1. Unhandled active products (out of stock first, then alphabetically)
-  // 2. Ordered products (placed down the table, right before / above redeemed stock products)
-  // 3. Redeemed stock products (at the very bottom of the table)
+  // 1. Regular unhandled products (out of stock items first, then alphabetically)
+  // 2. Ordered products (placed down the table, right before rejected products)
+  // 3. Rejected products (placed below ordered products, above redeemed stock products)
+  // 4. Redeemed stock products (at the very bottom of the table)
   const sortedProducts = useMemo(() => {
     const unhandled: any[] = []
     const ordered: any[] = []
+    const rejected: any[] = []
     const redeemed: any[] = []
 
     for (const p of filteredProducts) {
@@ -541,6 +570,8 @@ export default function ProductsToPurchaseTab({
         redeemed.push(p)
       } else if (action === "order") {
         ordered.push(p)
+      } else if (action === "reject") {
+        rejected.push(p)
       } else {
         unhandled.push(p)
       }
@@ -570,6 +601,16 @@ export default function ProductsToPurchaseTab({
       return safeAIdx - safeBIdx
     })
 
+    rejected.sort((a, b) => {
+      const aKey = getRowKey(a)
+      const bKey = getRowKey(b)
+      const aIdx = rejectedOrder.indexOf(aKey)
+      const bIdx = rejectedOrder.indexOf(bKey)
+      const safeAIdx = aIdx === -1 ? 0 : aIdx
+      const safeBIdx = bIdx === -1 ? 0 : bIdx
+      return safeAIdx - safeBIdx
+    })
+
     redeemed.sort((a, b) => {
       const aKey = getRowKey(a)
       const bKey = getRowKey(b)
@@ -580,8 +621,8 @@ export default function ProductsToPurchaseTab({
       return safeAIdx - safeBIdx
     })
 
-    return [...unhandled, ...ordered, ...redeemed]
-  }, [filteredProducts, itemActions, orderedOrder, redeemedOrder])
+    return [...unhandled, ...ordered, ...rejected, ...redeemed]
+  }, [filteredProducts, itemActions, orderedOrder, rejectedOrder, redeemedOrder])
 
   // Paginated products
   const displayProducts = useMemo(() => {
@@ -708,6 +749,7 @@ export default function ProductsToPurchaseTab({
         [rowKey]: "order",
       }))
       setOrderedOrder((prev) => [...prev.filter((k) => k !== rowKey), rowKey])
+      setRejectedOrder((prev) => prev.filter((k) => k !== rowKey))
       setRedeemedOrder((prev) => prev.filter((k) => k !== rowKey))
 
       if (deviceId) {
@@ -718,6 +760,44 @@ export default function ProductsToPurchaseTab({
       if (prod) {
         setOrderModalProduct({ product: prod, rowKey })
         setInternalNote(itemNotes[rowKey] || "")
+      }
+      return
+    }
+
+    // Special handling for "reject" action:
+    if (action === "reject") {
+      if (current === "reject") {
+        // Toggle off reject action
+        setItemActions((prev) => {
+          const updated = { ...prev }
+          delete updated[rowKey]
+          return updated
+        })
+        setRejectedOrder((prev) => prev.filter((k) => k !== rowKey))
+        setItemNotes((prev) => {
+          const updated = { ...prev }
+          delete updated[rowKey]
+          return updated
+        })
+        if (rejectModalProduct?.rowKey === rowKey) {
+          setRejectModalProduct(null)
+          setRejectNote("")
+        }
+        if (deviceId) {
+          saveProductPurchaseAction(deviceId, rowKey, null).catch(console.error)
+        }
+        toast({
+          title: "Action Cleared",
+          description: `${productName}: Reject action cleared`,
+        })
+        return
+      }
+
+      // Open reject modal with internal note
+      const prod = products.find((p) => getRowKey(p) === rowKey)
+      if (prod) {
+        setRejectModalProduct({ product: prod, rowKey, previousAction: current || null })
+        setRejectNote(itemNotes[rowKey] || "")
       }
       return
     }
@@ -739,6 +819,13 @@ export default function ProductsToPurchaseTab({
     if (orderModalProduct?.rowKey === rowKey) {
       setOrderModalProduct(null)
       setInternalNote("")
+    }
+
+    // If changing to another action (redeemed or postponed), clean up reject state
+    setRejectedOrder((prev) => prev.filter((k) => k !== rowKey))
+    if (rejectModalProduct?.rowKey === rowKey) {
+      setRejectModalProduct(null)
+      setRejectNote("")
     }
 
     if (next === "redeemed") {
@@ -770,6 +857,73 @@ export default function ProductsToPurchaseTab({
         description: `${productName}: Action cleared`,
       })
     }
+  }
+
+  // Revert reject action when clicking Back or clicking outside of reject modal
+  const handleRejectModalBack = () => {
+    if (!rejectModalProduct) return
+    const { rowKey, product, previousAction } = rejectModalProduct
+
+    // Revert the action so the product returns to its previous state (or unhandled)
+    setItemActions((prev) => {
+      const updated = { ...prev }
+      if (previousAction) {
+        updated[rowKey] = previousAction
+      } else {
+        delete updated[rowKey]
+      }
+      return updated
+    })
+    setRejectedOrder((prev) => prev.filter((k) => k !== rowKey))
+
+    setRejectModalProduct(null)
+    setRejectNote("")
+
+    toast({
+      title: "Action Cancelled",
+      description: `${product.product_name || "Product"}: Rejection cancelled`,
+    })
+  }
+
+  // Handle Save in reject modal:
+  // Saves internal note, marks as rejected, places row below ordered products, above redeemed.
+  const handleRejectModalSave = () => {
+    if (!rejectModalProduct) return
+    const { rowKey, product } = rejectModalProduct
+    const trimmed = rejectNote.trim()
+    if (!trimmed) return
+
+    // Save as internal note
+    setItemNotes((prev) => ({
+      ...prev,
+      [rowKey]: trimmed,
+    }))
+
+    // Update item action
+    setItemActions((prev) => ({
+      ...prev,
+      [rowKey]: "reject",
+    }))
+
+    // Place below ordered products, above redeemed
+    setRejectedOrder((prev) => [...prev.filter((k) => k !== rowKey), rowKey])
+    setOrderedOrder((prev) => prev.filter((k) => k !== rowKey))
+    setRedeemedOrder((prev) => prev.filter((k) => k !== rowKey))
+
+    if (deviceId) {
+      const nextOrder = rejectedOrder.includes(rowKey)
+        ? rejectedOrder.indexOf(rowKey) + 1
+        : rejectedOrder.length + 1
+      saveProductPurchaseAction(deviceId, rowKey, "reject", nextOrder, trimmed).catch(console.error)
+    }
+
+    toast({
+      title: "Product Rejected",
+      description: `${product.product_name || "Product"}: Rejected and moved below ordered products`,
+    })
+
+    setRejectModalProduct(null)
+    setRejectNote("")
   }
 
   // Revert order action when clicking Back in internal note modal
@@ -1859,7 +2013,7 @@ export default function ProductsToPurchaseTab({
                   {headerCell("currentStock", "Current Stock", "left", "w-[14%] min-w-[130px] whitespace-nowrap")}
 
                   {/* 8. ACTIONS */}
-                  <th className="whitespace-nowrap px-5 py-3 text-center text-[11px] font-bold uppercase tracking-wider text-slate-600 w-[16%] min-w-[170px]">
+                  <th className="whitespace-nowrap px-4 py-3 text-center text-[11px] font-bold uppercase tracking-wider text-slate-600 w-[16%] min-w-[185px]">
                     Actions
                   </th>
                 </tr>
@@ -1890,6 +2044,7 @@ export default function ProductsToPurchaseTab({
                     const rowKey = getRowKey(p)
                     const isSelected = selectedRowKeys.includes(rowKey)
                     const activeAction = itemActions[rowKey]
+                    const hasNote = Boolean(itemNotes[rowKey]?.trim())
 
                     let baseBgClass =
                       index % 2 === 0
@@ -1903,6 +2058,9 @@ export default function ProductsToPurchaseTab({
                     } else if (activeAction === "order") {
                       baseBgClass = "bg-blue-100 text-blue-950 hover:bg-blue-200 font-medium"
                       borderLeftClass = "border-l-4 border-l-blue-500"
+                    } else if (activeAction === "reject") {
+                      baseBgClass = "bg-rose-100/90 text-rose-950 hover:bg-rose-200 font-medium"
+                      borderLeftClass = "border-l-4 border-l-rose-600"
                     } else if (isOutOfStock) {
                       baseBgClass = "bg-rose-100 text-rose-950 hover:bg-rose-200 font-medium"
                       borderLeftClass = "border-l-4 border-l-rose-500"
@@ -2009,42 +2167,19 @@ export default function ProductsToPurchaseTab({
                             </button>
 
                             {/* 2. Order */}
-                            <div className="flex flex-col items-center">
-                              <button
-                                type="button"
-                                onClick={() => handleAction(rowKey, "order", p.product_name)}
-                                title="Order"
-                                className={cn(
-                                  "h-7 w-7 rounded-md flex items-center justify-center transition-all cursor-pointer border",
-                                  activeAction === "order"
-                                    ? "bg-blue-600 text-white border-blue-700 ring-2 ring-blue-300 shadow-xs"
-                                    : "bg-white text-blue-700 border-slate-200 hover:bg-blue-50 hover:border-blue-300",
-                                )}
-                              >
-                                <Truck className="h-3.5 w-3.5" />
-                              </button>
-                              {(activeAction === "order" || Boolean(itemNotes[rowKey])) && (
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    handleOpenViewNoteModal(rowKey, p)
-                                  }}
-                                  title={itemNotes[rowKey] ? `Internal Note: ${itemNotes[rowKey]}` : "View / Add Internal Note"}
-                                  className={cn(
-                                    "mt-1 h-4 w-4 rounded flex items-center justify-center transition-all cursor-pointer relative",
-                                    itemNotes[rowKey]
-                                      ? "text-blue-700 hover:text-blue-900 hover:bg-blue-200/60"
-                                      : "text-slate-400 hover:text-slate-600 hover:bg-slate-100",
-                                  )}
-                                >
-                                  <FileText className="h-3 w-3" />
-                                  {Boolean(itemNotes[rowKey]) && (
-                                    <span className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-blue-600 ring-1 ring-white" />
-                                  )}
-                                </button>
+                            <button
+                              type="button"
+                              onClick={() => handleAction(rowKey, "order", p.product_name)}
+                              title="Order"
+                              className={cn(
+                                "h-7 w-7 rounded-md flex items-center justify-center transition-all cursor-pointer border",
+                                activeAction === "order"
+                                  ? "bg-blue-600 text-white border-blue-700 ring-2 ring-blue-300 shadow-xs"
+                                  : "bg-white text-blue-700 border-slate-200 hover:bg-blue-50 hover:border-blue-300",
                               )}
-                            </div>
+                            >
+                              <Truck className="h-3.5 w-3.5" />
+                            </button>
 
                             {/* 3. Postpone */}
                             <button
@@ -2074,6 +2209,24 @@ export default function ProductsToPurchaseTab({
                               )}
                             >
                               <Ban className="h-3.5 w-3.5" />
+                            </button>
+
+                            {/* 5. Internal Note (visible in every row: active if note exists, deactive otherwise) */}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleOpenViewNoteModal(rowKey, p)
+                              }}
+                              title="Internal Note"
+                              className={cn(
+                                "h-7 w-7 rounded-md flex items-center justify-center transition-all cursor-pointer border",
+                                hasNote
+                                  ? "bg-blue-600 text-white border-blue-700 ring-2 ring-blue-300 shadow-xs hover:bg-blue-700"
+                                  : "bg-white text-slate-400 border-slate-200 hover:text-slate-700 hover:bg-slate-50 hover:border-slate-300",
+                              )}
+                            >
+                              <FileText className="h-3.5 w-3.5" />
                             </button>
                           </div>
                         </td>
@@ -2105,12 +2258,15 @@ export default function ProductsToPurchaseTab({
                 const isSelected = selectedRowKeys.includes(rowKey)
                 const activeAction = itemActions[rowKey]
                 const isEven = index % 2 === 0
+                const hasNote = Boolean(itemNotes[rowKey]?.trim())
 
                 let cardAccentClass = ""
                 if (activeAction === "redeemed") {
                   cardAccentClass = "border-l-4 border-l-emerald-500 bg-emerald-100 text-emerald-950"
                 } else if (activeAction === "order") {
                   cardAccentClass = "border-l-4 border-l-blue-500 bg-blue-100 text-blue-950"
+                } else if (activeAction === "reject") {
+                  cardAccentClass = "border-l-4 border-l-rose-600 bg-rose-100 text-rose-950"
                 } else if (isOutOfStock) {
                   cardAccentClass = "border-l-4 border-l-rose-500 bg-rose-100 text-rose-950"
                 }
@@ -2195,42 +2351,22 @@ export default function ProductsToPurchaseTab({
                         >
                           <PackageCheck className="h-3.5 w-3.5" />
                         </button>
-                        <div className="flex flex-col items-center">
-                          <button
-                            type="button"
-                            onClick={() => handleAction(rowKey, "order", p.product_name)}
-                            title="Order"
-                            className={cn(
-                              "h-7 w-7 rounded-md flex items-center justify-center transition-all cursor-pointer border",
-                              activeAction === "order"
-                                ? "bg-blue-600 text-white border-blue-700"
-                                : "bg-white text-blue-700 border-slate-200 hover:bg-blue-50",
-                            )}
-                          >
-                            <Truck className="h-3.5 w-3.5" />
-                          </button>
-                          {(activeAction === "order" || Boolean(itemNotes[rowKey])) && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                handleOpenViewNoteModal(rowKey, p)
-                              }}
-                              title={itemNotes[rowKey] ? `Internal Note: ${itemNotes[rowKey]}` : "View / Add Internal Note"}
-                              className={cn(
-                                "mt-1 h-4 w-4 rounded flex items-center justify-center transition-all cursor-pointer relative",
-                                itemNotes[rowKey]
-                                  ? "text-blue-700 hover:text-blue-900 hover:bg-blue-200/60"
-                                  : "text-slate-400 hover:text-slate-600 hover:bg-slate-100",
-                              )}
-                            >
-                              <FileText className="h-3 w-3" />
-                              {Boolean(itemNotes[rowKey]) && (
-                                <span className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-blue-600 ring-1 ring-white" />
-                              )}
-                            </button>
+                        {/* 2. Order */}
+                        <button
+                          type="button"
+                          onClick={() => handleAction(rowKey, "order", p.product_name)}
+                          title="Order"
+                          className={cn(
+                            "h-7 w-7 rounded-md flex items-center justify-center transition-all cursor-pointer border",
+                            activeAction === "order"
+                              ? "bg-blue-600 text-white border-blue-700"
+                              : "bg-white text-blue-700 border-slate-200 hover:bg-blue-50",
                           )}
-                        </div>
+                        >
+                          <Truck className="h-3.5 w-3.5" />
+                        </button>
+
+                        {/* 3. Postpone */}
                         <button
                           type="button"
                           onClick={() => handleAction(rowKey, "postponed", p.product_name)}
@@ -2244,6 +2380,8 @@ export default function ProductsToPurchaseTab({
                         >
                           <Clock className="h-3.5 w-3.5" />
                         </button>
+
+                        {/* 4. Reject */}
                         <button
                           type="button"
                           onClick={() => handleAction(rowKey, "reject", p.product_name)}
@@ -2256,6 +2394,24 @@ export default function ProductsToPurchaseTab({
                           )}
                         >
                           <Ban className="h-3.5 w-3.5" />
+                        </button>
+
+                        {/* 5. Internal Note (visible in every row: active if note exists, deactive otherwise) */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleOpenViewNoteModal(rowKey, p)
+                          }}
+                          title="Internal Note"
+                          className={cn(
+                            "h-7 w-7 rounded-md flex items-center justify-center transition-all cursor-pointer border",
+                            hasNote
+                              ? "bg-blue-600 text-white border-blue-700 ring-2 ring-blue-300 shadow-xs hover:bg-blue-700"
+                              : "bg-white text-slate-400 border-slate-200 hover:text-slate-700 hover:bg-slate-50 hover:border-slate-300",
+                          )}
+                        >
+                          <FileText className="h-3.5 w-3.5" />
                         </button>
                       </div>
                     </div>
@@ -2425,6 +2581,137 @@ export default function ProductsToPurchaseTab({
                   <ArrowRight className="h-3.5 w-3.5" />
                 </>
               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reject Product Modal */}
+      <Dialog
+        open={Boolean(rejectModalProduct)}
+        onOpenChange={(open) => {
+          if (!open) handleRejectModalBack()
+        }}
+      >
+        <DialogContent
+          className="sm:max-w-md bg-white border border-slate-200 shadow-xl p-5"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <DialogHeader>
+            <div className="flex items-center gap-2.5">
+              <div className="h-8 w-8 rounded-full bg-rose-100 flex items-center justify-center text-rose-600 shrink-0">
+                <Ban className="h-4 w-4" />
+              </div>
+              <div className="text-left">
+                <DialogTitle className="text-base font-bold text-slate-900">
+                  Reject Product
+                </DialogTitle>
+                <DialogDescription className="text-xs text-slate-500">
+                  Add an internal note explaining the rejection reason
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+
+          {rejectModalProduct && (
+            <div className="space-y-3.5 py-1">
+              {/* Product summary */}
+              <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-3 space-y-1.5">
+                <div className="font-semibold text-xs text-slate-900">
+                  {rejectModalProduct.product.product_name}
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-600">
+                  {rejectModalProduct.product.variant_name &&
+                    rejectModalProduct.product.variant_name.toLowerCase() !== "default" && (
+                      <span className="rounded bg-white px-1.5 py-0.5 border border-slate-200 font-medium">
+                        Variant: {rejectModalProduct.product.variant_name}
+                      </span>
+                    )}
+                  {rejectModalProduct.product.variant_sku && (
+                    <span className="font-mono text-slate-500">
+                      SKU: {rejectModalProduct.product.variant_sku}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center justify-between pt-1 border-t border-slate-200 text-xs">
+                  <span className="text-slate-500">
+                    Required:{" "}
+                    <strong className="text-rose-600">
+                      {Number(rejectModalProduct.product.required_quantity) || 0}
+                    </strong>
+                  </span>
+                  {Number(rejectModalProduct.product.unit_price) > 0 && (
+                    <span className="text-slate-500">
+                      Unit Price:{" "}
+                      <strong className="text-slate-800">
+                        {currency} {Number(rejectModalProduct.product.unit_price).toFixed(2)}
+                      </strong>
+                    </span>
+                  )}
+                  <span className="text-slate-500">
+                    Current Stock:{" "}
+                    <strong className="text-slate-700">
+                      {Number(rejectModalProduct.product.current_stock) || 0}
+                    </strong>
+                  </span>
+                </div>
+              </div>
+
+              {/* Internal Note field */}
+              <div className="space-y-1.5">
+                <Label
+                  htmlFor="reject-internal-note-input"
+                  className="text-xs font-semibold text-slate-700"
+                >
+                  Internal Note <span className="text-rose-500">*</span>
+                </Label>
+                <Textarea
+                  id="reject-internal-note-input"
+                  placeholder="Enter internal note or reason for rejection..."
+                  value={rejectNote}
+                  onChange={(e) => setRejectNote(e.target.value)}
+                  className="min-h-[90px] text-xs resize-none bg-white border-slate-300 focus:border-rose-500 focus:ring-rose-500"
+                  autoFocus
+                />
+                <p className="text-[11px]">
+                  {rejectNote.trim().length > 0 ? (
+                    <span className="text-emerald-600 font-medium flex items-center gap-1">
+                      <CheckCircle2 className="h-3 w-3" /> Note provided. Click Save to reject this product.
+                    </span>
+                  ) : (
+                    <span className="text-rose-500 font-medium">
+                      Internal note is required to activate the Save button.
+                    </span>
+                  )}
+                </p>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="flex items-center justify-between sm:justify-between gap-2 pt-2 border-t border-slate-100">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleRejectModalBack}
+              className="h-8 px-3 text-xs gap-1.5 border-slate-300 text-slate-700 hover:bg-slate-100 cursor-pointer"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              <span>Back</span>
+            </Button>
+
+            <Button
+              type="button"
+              disabled={!rejectNote.trim()}
+              onClick={handleRejectModalSave}
+              className={cn(
+                "h-8 px-4 text-xs font-semibold gap-1.5 transition-all shadow-2xs",
+                rejectNote.trim().length > 0
+                  ? "bg-rose-600 hover:bg-rose-700 text-white cursor-pointer shadow-sm"
+                  : "bg-slate-200 text-slate-400 border border-slate-200 cursor-not-allowed opacity-60",
+              )}
+            >
+              <Save className="h-3.5 w-3.5" />
+              <span>Save</span>
             </Button>
           </DialogFooter>
         </DialogContent>
