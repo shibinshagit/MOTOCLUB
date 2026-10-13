@@ -306,6 +306,16 @@ export default function ProductsToPurchaseTab({
     return []
   })
 
+  // Track the order in which items were postponed (placed above ordered products)
+  const [postponedOrder, setPostponedOrder] = useState<string[]>(() => {
+    if (typeof window === "undefined") return []
+    try {
+      const raw = localStorage.getItem(`products_to_purchase_actions_${deviceId}`)
+      if (raw) return JSON.parse(raw).postponedOrder || []
+    } catch (_) {}
+    return []
+  })
+
   // Track the order in which items were rejected (placed below ordered products, above redeemed)
   const [rejectedOrder, setRejectedOrder] = useState<string[]>(() => {
     if (typeof window === "undefined") return []
@@ -342,10 +352,10 @@ export default function ProductsToPurchaseTab({
     try {
       localStorage.setItem(
         `products_to_purchase_actions_${deviceId}`,
-        JSON.stringify({ itemActions, orderedOrder, rejectedOrder, redeemedOrder, itemNotes }),
+        JSON.stringify({ itemActions, postponedOrder, orderedOrder, rejectedOrder, redeemedOrder, itemNotes }),
       )
     } catch (_) {}
-  }, [deviceId, itemActions, orderedOrder, rejectedOrder, redeemedOrder, itemNotes])
+  }, [deviceId, itemActions, postponedOrder, orderedOrder, rejectedOrder, redeemedOrder, itemNotes])
 
   // Internal note modal state for currently ordered product
   const [orderModalProduct, setOrderModalProduct] = useState<{
@@ -361,6 +371,14 @@ export default function ProductsToPurchaseTab({
     previousAction?: ItemActionStatus | null
   } | null>(null)
   const [rejectNote, setRejectNote] = useState<string>("")
+
+  // Postpone modal state for currently postponed product
+  const [postponeModalProduct, setPostponeModalProduct] = useState<{
+    product: any
+    rowKey: string
+    previousAction?: ItemActionStatus | null
+  } | null>(null)
+  const [postponeNote, setPostponeNote] = useState<string>("")
 
   // Dedicated note viewer modal for clicking the note icon
   const [viewNoteModal, setViewNoteModal] = useState<{
@@ -388,6 +406,7 @@ export default function ProductsToPurchaseTab({
 
         // Restore saved actions from database so refresh / logout / login persists across sessions
         const dbActions: Record<string, ItemActionStatus> = {}
+        const dbPostponed: { key: string; order: number }[] = []
         const dbOrdered: { key: string; order: number }[] = []
         const dbRejected: { key: string; order: number }[] = []
         const dbRedeemed: { key: string; order: number }[] = []
@@ -397,7 +416,9 @@ export default function ProductsToPurchaseTab({
           const key = getRowKey(p)
           if (p.saved_action) {
             dbActions[key] = p.saved_action as ItemActionStatus
-            if (p.saved_action === "order") {
+            if (p.saved_action === "postponed") {
+              dbPostponed.push({ key, order: Number(p.saved_action_order) || 0 })
+            } else if (p.saved_action === "order") {
               dbOrdered.push({ key, order: Number(p.saved_action_order) || 0 })
             } else if (p.saved_action === "reject") {
               dbRejected.push({ key, order: Number(p.saved_action_order) || 0 })
@@ -410,11 +431,16 @@ export default function ProductsToPurchaseTab({
           }
         }
 
+        dbPostponed.sort((a, b) => a.order - b.order)
         dbOrdered.sort((a, b) => a.order - b.order)
         dbRejected.sort((a, b) => a.order - b.order)
         dbRedeemed.sort((a, b) => a.order - b.order)
 
         setItemActions((prev) => ({ ...dbActions, ...prev }))
+        setPostponedOrder((prev) => {
+          const dbKeys = dbPostponed.map((o) => o.key)
+          return [...new Set([...dbKeys, ...prev])]
+        })
         setOrderedOrder((prev) => {
           const dbKeys = dbOrdered.map((o) => o.key)
           return [...new Set([...dbKeys, ...prev])]
@@ -552,13 +578,14 @@ export default function ProductsToPurchaseTab({
   }, [products, stockFilter, debouncedSearch, columnFilters, uniqueValues, valueGetters])
 
   // Sort products:
-  // 1. Unhandled active products (out of stock first, then alphabetically)
   // 1. Regular unhandled products (out of stock items first, then alphabetically)
-  // 2. Ordered products (placed down the table, right before rejected products)
-  // 3. Rejected products (placed below ordered products, above redeemed stock products)
-  // 4. Redeemed stock products (at the very bottom of the table)
+  // 2. Postponed products (placed above ordered products)
+  // 3. Ordered products (placed down the table, right before rejected products)
+  // 4. Rejected products (placed below ordered products, above redeemed stock products)
+  // 5. Redeemed stock products (at the very bottom of the table)
   const sortedProducts = useMemo(() => {
     const unhandled: any[] = []
+    const postponed: any[] = []
     const ordered: any[] = []
     const rejected: any[] = []
     const redeemed: any[] = []
@@ -568,10 +595,12 @@ export default function ProductsToPurchaseTab({
       const action = itemActions[key]
       if (action === "redeemed") {
         redeemed.push(p)
-      } else if (action === "order") {
-        ordered.push(p)
       } else if (action === "reject") {
         rejected.push(p)
+      } else if (action === "order") {
+        ordered.push(p)
+      } else if (action === "postponed") {
+        postponed.push(p)
       } else {
         unhandled.push(p)
       }
@@ -589,6 +618,16 @@ export default function ProductsToPurchaseTab({
       if (aOut && !bOut) return -1
       if (!aOut && bOut) return 1
       return (a.product_name || "").localeCompare(b.product_name || "")
+    })
+
+    postponed.sort((a, b) => {
+      const aKey = getRowKey(a)
+      const bKey = getRowKey(b)
+      const aIdx = postponedOrder.indexOf(aKey)
+      const bIdx = postponedOrder.indexOf(bKey)
+      const safeAIdx = aIdx === -1 ? 0 : aIdx
+      const safeBIdx = bIdx === -1 ? 0 : bIdx
+      return safeAIdx - safeBIdx
     })
 
     ordered.sort((a, b) => {
@@ -621,8 +660,8 @@ export default function ProductsToPurchaseTab({
       return safeAIdx - safeBIdx
     })
 
-    return [...unhandled, ...ordered, ...rejected, ...redeemed]
-  }, [filteredProducts, itemActions, orderedOrder, rejectedOrder, redeemedOrder])
+    return [...unhandled, ...postponed, ...ordered, ...rejected, ...redeemed]
+  }, [filteredProducts, itemActions, postponedOrder, orderedOrder, rejectedOrder, redeemedOrder])
 
   // Paginated products
   const displayProducts = useMemo(() => {
@@ -749,6 +788,7 @@ export default function ProductsToPurchaseTab({
         [rowKey]: "order",
       }))
       setOrderedOrder((prev) => [...prev.filter((k) => k !== rowKey), rowKey])
+      setPostponedOrder((prev) => prev.filter((k) => k !== rowKey))
       setRejectedOrder((prev) => prev.filter((k) => k !== rowKey))
       setRedeemedOrder((prev) => prev.filter((k) => k !== rowKey))
 
@@ -802,6 +842,44 @@ export default function ProductsToPurchaseTab({
       return
     }
 
+    // Special handling for "postponed" action:
+    if (action === "postponed") {
+      if (current === "postponed") {
+        // Toggle off postpone action
+        setItemActions((prev) => {
+          const updated = { ...prev }
+          delete updated[rowKey]
+          return updated
+        })
+        setPostponedOrder((prev) => prev.filter((k) => k !== rowKey))
+        setItemNotes((prev) => {
+          const updated = { ...prev }
+          delete updated[rowKey]
+          return updated
+        })
+        if (postponeModalProduct?.rowKey === rowKey) {
+          setPostponeModalProduct(null)
+          setPostponeNote("")
+        }
+        if (deviceId) {
+          saveProductPurchaseAction(deviceId, rowKey, null).catch(console.error)
+        }
+        toast({
+          title: "Action Cleared",
+          description: `${productName}: Postpone action cleared`,
+        })
+        return
+      }
+
+      // Open postpone modal with internal note
+      const prod = products.find((p) => getRowKey(p) === rowKey)
+      if (prod) {
+        setPostponeModalProduct({ product: prod, rowKey, previousAction: current || null })
+        setPostponeNote(itemNotes[rowKey] || "")
+      }
+      return
+    }
+
     const next = current === action ? undefined : action
 
     setItemActions((prev) => {
@@ -821,11 +899,18 @@ export default function ProductsToPurchaseTab({
       setInternalNote("")
     }
 
-    // If changing to another action (redeemed or postponed), clean up reject state
+    // Clean up reject state
     setRejectedOrder((prev) => prev.filter((k) => k !== rowKey))
     if (rejectModalProduct?.rowKey === rowKey) {
       setRejectModalProduct(null)
       setRejectNote("")
+    }
+
+    // Clean up postpone state
+    setPostponedOrder((prev) => prev.filter((k) => k !== rowKey))
+    if (postponeModalProduct?.rowKey === rowKey) {
+      setPostponeModalProduct(null)
+      setPostponeNote("")
     }
 
     if (next === "redeemed") {
@@ -907,6 +992,7 @@ export default function ProductsToPurchaseTab({
 
     // Place below ordered products, above redeemed
     setRejectedOrder((prev) => [...prev.filter((k) => k !== rowKey), rowKey])
+    setPostponedOrder((prev) => prev.filter((k) => k !== rowKey))
     setOrderedOrder((prev) => prev.filter((k) => k !== rowKey))
     setRedeemedOrder((prev) => prev.filter((k) => k !== rowKey))
 
@@ -924,6 +1010,74 @@ export default function ProductsToPurchaseTab({
 
     setRejectModalProduct(null)
     setRejectNote("")
+  }
+
+  // Revert postpone action when clicking Back or clicking outside of postpone modal
+  const handlePostponeModalBack = () => {
+    if (!postponeModalProduct) return
+    const { rowKey, product, previousAction } = postponeModalProduct
+
+    // Revert the action so the product returns to its previous state (or unhandled)
+    setItemActions((prev) => {
+      const updated = { ...prev }
+      if (previousAction) {
+        updated[rowKey] = previousAction
+      } else {
+        delete updated[rowKey]
+      }
+      return updated
+    })
+    setPostponedOrder((prev) => prev.filter((k) => k !== rowKey))
+
+    setPostponeModalProduct(null)
+    setPostponeNote("")
+
+    toast({
+      title: "Action Cancelled",
+      description: `${product.product_name || "Product"}: Postpone cancelled`,
+    })
+  }
+
+  // Handle Save in postpone modal:
+  // Saves internal note, marks as postponed, places row above ordered products.
+  const handlePostponeModalSave = () => {
+    if (!postponeModalProduct) return
+    const { rowKey, product } = postponeModalProduct
+    const trimmed = postponeNote.trim()
+    if (!trimmed) return
+
+    // Save as internal note
+    setItemNotes((prev) => ({
+      ...prev,
+      [rowKey]: trimmed,
+    }))
+
+    // Update item action
+    setItemActions((prev) => ({
+      ...prev,
+      [rowKey]: "postponed",
+    }))
+
+    // Place above ordered products
+    setPostponedOrder((prev) => [...prev.filter((k) => k !== rowKey), rowKey])
+    setOrderedOrder((prev) => prev.filter((k) => k !== rowKey))
+    setRejectedOrder((prev) => prev.filter((k) => k !== rowKey))
+    setRedeemedOrder((prev) => prev.filter((k) => k !== rowKey))
+
+    if (deviceId) {
+      const nextOrder = postponedOrder.includes(rowKey)
+        ? postponedOrder.indexOf(rowKey) + 1
+        : postponedOrder.length + 1
+      saveProductPurchaseAction(deviceId, rowKey, "postponed", nextOrder, trimmed).catch(console.error)
+    }
+
+    toast({
+      title: "Product Postponed",
+      description: `${product.product_name || "Product"}: Postponed and moved above ordered products`,
+    })
+
+    setPostponeModalProduct(null)
+    setPostponeNote("")
   }
 
   // Revert order action when clicking Back in internal note modal
@@ -2055,6 +2209,9 @@ export default function ProductsToPurchaseTab({
                     if (activeAction === "redeemed") {
                       baseBgClass = "bg-emerald-100 text-emerald-950 hover:bg-emerald-200 font-medium"
                       borderLeftClass = "border-l-4 border-l-emerald-500"
+                    } else if (activeAction === "postponed") {
+                      baseBgClass = "bg-amber-100/90 text-amber-950 hover:bg-amber-200 font-medium"
+                      borderLeftClass = "border-l-4 border-l-amber-600"
                     } else if (activeAction === "order") {
                       baseBgClass = "bg-blue-100 text-blue-950 hover:bg-blue-200 font-medium"
                       borderLeftClass = "border-l-4 border-l-blue-500"
@@ -2263,6 +2420,8 @@ export default function ProductsToPurchaseTab({
                 let cardAccentClass = ""
                 if (activeAction === "redeemed") {
                   cardAccentClass = "border-l-4 border-l-emerald-500 bg-emerald-100 text-emerald-950"
+                } else if (activeAction === "postponed") {
+                  cardAccentClass = "border-l-4 border-l-amber-600 bg-amber-100 text-amber-950"
                 } else if (activeAction === "order") {
                   cardAccentClass = "border-l-4 border-l-blue-500 bg-blue-100 text-blue-950"
                 } else if (activeAction === "reject") {
@@ -2707,6 +2866,137 @@ export default function ProductsToPurchaseTab({
                 "h-8 px-4 text-xs font-semibold gap-1.5 transition-all shadow-2xs",
                 rejectNote.trim().length > 0
                   ? "bg-rose-600 hover:bg-rose-700 text-white cursor-pointer shadow-sm"
+                  : "bg-slate-200 text-slate-400 border border-slate-200 cursor-not-allowed opacity-60",
+              )}
+            >
+              <Save className="h-3.5 w-3.5" />
+              <span>Save</span>
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Postpone Product Modal */}
+      <Dialog
+        open={Boolean(postponeModalProduct)}
+        onOpenChange={(open) => {
+          if (!open) handlePostponeModalBack()
+        }}
+      >
+        <DialogContent
+          className="sm:max-w-md bg-white border border-slate-200 shadow-xl p-5"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <DialogHeader>
+            <div className="flex items-center gap-2.5">
+              <div className="h-8 w-8 rounded-full bg-amber-100 flex items-center justify-center text-amber-600 shrink-0">
+                <Clock className="h-4 w-4" />
+              </div>
+              <div className="text-left">
+                <DialogTitle className="text-base font-bold text-slate-900">
+                  Postpone Product
+                </DialogTitle>
+                <DialogDescription className="text-xs text-slate-500">
+                  Add an internal note explaining the reason for postponement
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+
+          {postponeModalProduct && (
+            <div className="space-y-3.5 py-1">
+              {/* Product summary */}
+              <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-3 space-y-1.5">
+                <div className="font-semibold text-xs text-slate-900">
+                  {postponeModalProduct.product.product_name}
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-600">
+                  {postponeModalProduct.product.variant_name &&
+                    postponeModalProduct.product.variant_name.toLowerCase() !== "default" && (
+                      <span className="rounded bg-white px-1.5 py-0.5 border border-slate-200 font-medium">
+                        Variant: {postponeModalProduct.product.variant_name}
+                      </span>
+                    )}
+                  {postponeModalProduct.product.variant_sku && (
+                    <span className="font-mono text-slate-500">
+                      SKU: {postponeModalProduct.product.variant_sku}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center justify-between pt-1 border-t border-slate-200 text-xs">
+                  <span className="text-slate-500">
+                    Required:{" "}
+                    <strong className="text-rose-600">
+                      {Number(postponeModalProduct.product.required_quantity) || 0}
+                    </strong>
+                  </span>
+                  {Number(postponeModalProduct.product.unit_price) > 0 && (
+                    <span className="text-slate-500">
+                      Unit Price:{" "}
+                      <strong className="text-slate-800">
+                        {currency} {Number(postponeModalProduct.product.unit_price).toFixed(2)}
+                      </strong>
+                    </span>
+                  )}
+                  <span className="text-slate-500">
+                    Current Stock:{" "}
+                    <strong className="text-slate-700">
+                      {Number(postponeModalProduct.product.current_stock) || 0}
+                    </strong>
+                  </span>
+                </div>
+              </div>
+
+              {/* Internal Note field */}
+              <div className="space-y-1.5">
+                <Label
+                  htmlFor="postpone-internal-note-input"
+                  className="text-xs font-semibold text-slate-700"
+                >
+                  Internal Note <span className="text-amber-500">*</span>
+                </Label>
+                <Textarea
+                  id="postpone-internal-note-input"
+                  placeholder="Enter internal note or reason for postponement..."
+                  value={postponeNote}
+                  onChange={(e) => setPostponeNote(e.target.value)}
+                  className="min-h-[90px] text-xs resize-none bg-white border-slate-300 focus:border-amber-500 focus:ring-amber-500"
+                  autoFocus
+                />
+                <p className="text-[11px]">
+                  {postponeNote.trim().length > 0 ? (
+                    <span className="text-emerald-600 font-medium flex items-center gap-1">
+                      <CheckCircle2 className="h-3 w-3" /> Note provided. Click Save to postpone this product.
+                    </span>
+                  ) : (
+                    <span className="text-amber-600 font-medium">
+                      Internal note is required to activate the Save button.
+                    </span>
+                  )}
+                </p>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="flex items-center justify-between sm:justify-between gap-2 pt-2 border-t border-slate-100">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handlePostponeModalBack}
+              className="h-8 px-3 text-xs gap-1.5 border-slate-300 text-slate-700 hover:bg-slate-100 cursor-pointer"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              <span>Back</span>
+            </Button>
+
+            <Button
+              type="button"
+              disabled={!postponeNote.trim()}
+              onClick={handlePostponeModalSave}
+              className={cn(
+                "h-8 px-4 text-xs font-semibold gap-1.5 transition-all shadow-2xs",
+                postponeNote.trim().length > 0
+                  ? "bg-amber-600 hover:bg-amber-700 text-white cursor-pointer shadow-sm"
                   : "bg-slate-200 text-slate-400 border border-slate-200 cursor-not-allowed opacity-60",
               )}
             >
