@@ -59,6 +59,8 @@ const COLUMN_KEYS: ColumnKey[] = [
   "currentStock",
 ]
 
+const getRowKey = (p: any) => `${p.product_id}-${p.product_variant_id || "base"}`
+
 function TableSkeleton() {
   return (
     <div className="divide-y divide-slate-200">
@@ -146,11 +148,10 @@ function ColumnFilterHeader({
             aria-expanded={open}
             onMouseDown={(event) => event.stopPropagation()}
             onClick={(event) => event.stopPropagation()}
-            className={`rounded p-0.5 transition-colors cursor-pointer ${
-              active || open
+            className={`rounded p-0.5 transition-colors cursor-pointer ${active || open
                 ? "bg-violet-100 text-violet-700"
                 : "text-slate-400 hover:bg-slate-200 hover:text-slate-600"
-            }`}
+              }`}
           >
             <ListFilter className="h-3.5 w-3.5" />
           </button>
@@ -260,6 +261,9 @@ export default function ProductsToPurchaseTab({
 
   // 4 action states per row: redeem stock | ordered | postpone | rejected
   const [itemActions, setItemActions] = useState<Record<string, ItemActionStatus>>({})
+
+  // Track the order in which items were redeemed (most recent at the end of table)
+  const [redeemedOrder, setRedeemedOrder] = useState<string[]>([])
 
   const { toast } = useToast()
 
@@ -396,9 +400,22 @@ export default function ProductsToPurchaseTab({
     })
   }, [products, stockFilter, debouncedSearch, columnFilters, uniqueValues, valueGetters])
 
-  // Sort products (Out of stock first, then alphabetically)
+  // Sort products: unredeemed first (out of stock first, then alphabetically),
+  // then redeemed products at the very bottom in the order they were redeemed.
   const sortedProducts = useMemo(() => {
-    return [...filteredProducts].sort((a, b) => {
+    const unredeemed: any[] = []
+    const redeemed: any[] = []
+
+    for (const p of filteredProducts) {
+      const key = getRowKey(p)
+      if (itemActions[key] === "redeemed") {
+        redeemed.push(p)
+      } else {
+        unredeemed.push(p)
+      }
+    }
+
+    unredeemed.sort((a, b) => {
       const aReq = Number(a.required_quantity) || 0
       const aCur = Number(a.current_stock) || 0
       const aOut = aCur < aReq || aCur <= 0
@@ -411,7 +428,19 @@ export default function ProductsToPurchaseTab({
       if (!aOut && bOut) return 1
       return (a.product_name || "").localeCompare(b.product_name || "")
     })
-  }, [filteredProducts])
+
+    redeemed.sort((a, b) => {
+      const aKey = getRowKey(a)
+      const bKey = getRowKey(b)
+      const aIdx = redeemedOrder.indexOf(aKey)
+      const bIdx = redeemedOrder.indexOf(bKey)
+      const safeAIdx = aIdx === -1 ? 0 : aIdx
+      const safeBIdx = bIdx === -1 ? 0 : bIdx
+      return safeAIdx - safeBIdx
+    })
+
+    return [...unredeemed, ...redeemed]
+  }, [filteredProducts, itemActions, redeemedOrder])
 
   // Paginated products
   const displayProducts = useMemo(() => {
@@ -424,9 +453,7 @@ export default function ProductsToPurchaseTab({
   // Row selection handlers
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
-      const keysOnPage = displayProducts.map((p, idx) =>
-        `${p.product_id}-${p.product_variant_id || "base"}-${(page - 1) * pageSize + idx}`,
-      )
+      const keysOnPage = displayProducts.map(getRowKey)
       setSelectedRowKeys(keysOnPage)
     } else {
       setSelectedRowKeys([])
@@ -444,15 +471,35 @@ export default function ProductsToPurchaseTab({
     rowKey: string,
     action: ItemActionStatus,
     productName: string,
+    isOutOfStock?: boolean,
   ) => {
+    if (action === "redeemed" && isOutOfStock) {
+      toast({
+        title: "Cannot Redeem",
+        description: `${productName} is out of stock. Stock must be ordered.`,
+        variant: "destructive",
+      })
+      return
+    }
+
+    const current = itemActions[rowKey]
+    const next = current === action ? undefined : action
+
     setItemActions((prev) => {
-      const current = prev[rowKey]
-      const next = current === action ? undefined : action
-      return {
-        ...prev,
-        [rowKey]: next as any,
+      const updated = { ...prev }
+      if (next) {
+        updated[rowKey] = next
+      } else {
+        delete updated[rowKey]
       }
+      return updated
     })
+
+    if (next === "redeemed") {
+      setRedeemedOrder((prev) => [...prev.filter((k) => k !== rowKey), rowKey])
+    } else {
+      setRedeemedOrder((prev) => prev.filter((k) => k !== rowKey))
+    }
 
     const actionLabels: Record<ItemActionStatus, string> = {
       redeemed: "Redeemed Stock",
@@ -461,22 +508,53 @@ export default function ProductsToPurchaseTab({
       reject: "Reject",
     }
 
-    toast({
-      title: actionLabels[action],
-      description: `${productName}: ${actionLabels[action]}`,
-    })
+    if (next) {
+      toast({
+        title: actionLabels[next],
+        description: `${productName}: ${actionLabels[next]}`,
+      })
+    } else {
+      toast({
+        title: "Action Cleared",
+        description: `${productName}: Action cleared`,
+      })
+    }
   }
 
   // Handle bulk action
   const handleBulkAction = (action: ItemActionStatus) => {
     if (selectedRowKeys.length === 0) return
+    let skippedOutOfStock = 0
+    const newlyRedeemed: string[] = []
+
     setItemActions((prev) => {
       const updated = { ...prev }
       selectedRowKeys.forEach((key) => {
+        if (action === "redeemed") {
+          const prod = products.find((p) => getRowKey(p) === key)
+          if (prod) {
+            const req = Number(prod.required_quantity) || 0
+            const cur = Number(prod.current_stock) || 0
+            if (cur < req || cur <= 0) {
+              skippedOutOfStock++
+              return
+            }
+          }
+          newlyRedeemed.push(key)
+        }
         updated[key] = action
       })
       return updated
     })
+
+    if (action === "redeemed") {
+      setRedeemedOrder((prev) => {
+        const remaining = prev.filter((k) => !newlyRedeemed.includes(k))
+        return [...remaining, ...newlyRedeemed]
+      })
+    } else {
+      setRedeemedOrder((prev) => prev.filter((k) => !selectedRowKeys.includes(k)))
+    }
 
     const actionLabels: Record<ItemActionStatus, string> = {
       redeemed: "Redeemed Stock",
@@ -485,10 +563,17 @@ export default function ProductsToPurchaseTab({
       reject: "Reject",
     }
 
-    toast({
-      title: "Bulk Action Applied",
-      description: `${selectedRowKeys.length} items: ${actionLabels[action]}`,
-    })
+    if (action === "redeemed" && skippedOutOfStock > 0) {
+      toast({
+        title: "Bulk Action Applied",
+        description: `${selectedRowKeys.length - skippedOutOfStock} items redeemed (${skippedOutOfStock} out of stock items skipped)`,
+      })
+    } else {
+      toast({
+        title: "Bulk Action Applied",
+        description: `${selectedRowKeys.length} items: ${actionLabels[action]}`,
+      })
+    }
   }
 
   const handleExportExcel = () => {
@@ -510,7 +595,7 @@ export default function ProductsToPurchaseTab({
       const current = Number(p.current_stock) || 0
       const isOutOfStock = current < required || current <= 0
       const statusText = isOutOfStock ? "Out of Stock" : "In Stock"
-      const rowKey = `${p.product_id}-${p.product_variant_id || "base"}-${idx}`
+      const rowKey = getRowKey(p)
       const actionStatus = itemActions[rowKey] || "Pending"
 
       return [
@@ -552,9 +637,8 @@ export default function ProductsToPurchaseTab({
     className: string = "",
   ) => (
     <th
-      className={`whitespace-nowrap px-5 py-3 ${
-        align === "right" ? "text-right" : "text-left"
-      } ${className}`}
+      className={`whitespace-nowrap px-5 py-3 ${align === "right" ? "text-right" : "text-left"
+        } ${className}`}
     >
       <ColumnFilterHeader
         columnLabel={label}
@@ -574,11 +658,7 @@ export default function ProductsToPurchaseTab({
 
   const isAllPageSelected =
     displayProducts.length > 0 &&
-    displayProducts.every((p, idx) =>
-      selectedRowKeys.includes(
-        `${p.product_id}-${p.product_variant_id || "base"}-${(page - 1) * pageSize + idx}`,
-      ),
-    )
+    displayProducts.every((p) => selectedRowKeys.includes(getRowKey(p)))
 
   return (
     <div className="space-y-4">
@@ -885,7 +965,7 @@ export default function ProductsToPurchaseTab({
                     const required = Number(p.required_quantity) || 0
                     const current = Number(p.current_stock) || 0
                     const isOutOfStock = current < required || current <= 0
-                    const rowKey = `${p.product_id}-${p.product_variant_id || "base"}-${(page - 1) * pageSize + index}`
+                    const rowKey = getRowKey(p)
                     const isSelected = selectedRowKeys.includes(rowKey)
                     const activeAction = itemActions[rowKey]
 
@@ -895,8 +975,11 @@ export default function ProductsToPurchaseTab({
                         : "bg-slate-50 hover:bg-violet-50 text-slate-800"
                     let borderLeftClass = ""
 
-                    if (isOutOfStock) {
-                      baseBgClass = "bg-rose-50/70 text-rose-950 hover:bg-rose-100/70 font-medium"
+                    if (activeAction === "redeemed") {
+                      baseBgClass = "bg-emerald-100 text-emerald-950 hover:bg-emerald-200 font-medium"
+                      borderLeftClass = "border-l-4 border-l-emerald-500"
+                    } else if (isOutOfStock) {
+                      baseBgClass = "bg-rose-100 text-rose-950 hover:bg-rose-200 font-medium"
                       borderLeftClass = "border-l-4 border-l-rose-500"
                     }
 
@@ -904,9 +987,8 @@ export default function ProductsToPurchaseTab({
                       <tr
                         key={rowKey}
                         onClick={() => handleToggleSelectRow(rowKey)}
-                        className={`group cursor-pointer border-b border-slate-200 transition-colors ${baseBgClass} ${borderLeftClass} ${
-                          isSelected ? "bg-violet-100/80" : ""
-                        }`}
+                        className={`group cursor-pointer border-b border-slate-200 transition-colors ${baseBgClass} ${borderLeftClass} ${isSelected ? "bg-violet-100/80" : ""
+                          }`}
                       >
                         {/* 1. CHECKBOX */}
                         <td
@@ -929,16 +1011,9 @@ export default function ProductsToPurchaseTab({
                         {/* 3. PRODUCT NAME */}
                         <td className="px-5 py-3 font-semibold text-slate-800 max-w-[320px]">
                           <div className="flex flex-col gap-0.5">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="font-bold text-slate-900 leading-snug">
-                                {p.product_name}
-                              </span>
-                              {p.product_id && (
-                                <span className="text-[10px] text-slate-400 font-mono">
-                                  #{p.product_id}
-                                </span>
-                              )}
-                            </div>
+                            <span className="font-bold text-slate-900 leading-snug">
+                              {p.product_name}
+                            </span>
                             {p.variant_name && p.variant_name.toLowerCase() !== "default" && (
                               <span className="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 border border-slate-200 w-fit">
                                 Variant: {p.variant_name}
@@ -992,13 +1067,17 @@ export default function ProductsToPurchaseTab({
                             {/* 1. Redeem Stock */}
                             <button
                               type="button"
-                              onClick={() => handleAction(rowKey, "redeemed", p.product_name)}
-                              title="Redeem Stock"
+                              disabled={isOutOfStock}
+                              onClick={() => handleAction(rowKey, "redeemed", p.product_name, isOutOfStock)}
+                              title={isOutOfStock ? "Cannot redeem: Out of stock" : "Redeem Stock"}
                               className={cn(
-                                "h-7 w-7 rounded-md flex items-center justify-center transition-all cursor-pointer border",
+                                "h-7 w-7 rounded-md flex items-center justify-center transition-all border",
                                 activeAction === "redeemed"
                                   ? "bg-emerald-600 text-white border-emerald-700 ring-2 ring-emerald-300 shadow-xs"
                                   : "bg-white text-emerald-700 border-slate-200 hover:bg-emerald-50 hover:border-emerald-300",
+                                isOutOfStock
+                                  ? "opacity-40 cursor-not-allowed hover:bg-white hover:border-slate-200"
+                                  : "cursor-pointer",
                               )}
                             >
                               <PackageCheck className="h-3.5 w-3.5" />
@@ -1074,19 +1153,24 @@ export default function ProductsToPurchaseTab({
                 const required = Number(p.required_quantity) || 0
                 const current = Number(p.current_stock) || 0
                 const isOutOfStock = current < required || current <= 0
-                const rowKey = `${p.product_id}-${p.product_variant_id || "base"}-${(page - 1) * pageSize + index}`
+                const rowKey = getRowKey(p)
                 const isSelected = selectedRowKeys.includes(rowKey)
                 const activeAction = itemActions[rowKey]
                 const isEven = index % 2 === 0
+
+                let cardAccentClass = ""
+                if (activeAction === "redeemed") {
+                  cardAccentClass = "border-l-4 border-l-emerald-500 bg-emerald-100 text-emerald-950"
+                } else if (isOutOfStock) {
+                  cardAccentClass = "border-l-4 border-l-rose-500 bg-rose-100 text-rose-950"
+                }
 
                 return (
                   <div
                     key={rowKey}
                     className={`p-3.5 bg-white transition-colors space-y-2.5 ${
                       isEven ? "" : "bg-slate-50/60"
-                    } ${isOutOfStock ? "border-l-4 border-l-rose-500 bg-rose-50/40" : ""} ${
-                      isSelected ? "bg-violet-100/70" : ""
-                    }`}
+                    } ${cardAccentClass} ${isSelected ? "bg-violet-100/70" : ""}`}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex items-start gap-2 min-w-0">
@@ -1146,13 +1230,17 @@ export default function ProductsToPurchaseTab({
                       <div className="flex items-center gap-1.5">
                         <button
                           type="button"
-                          onClick={() => handleAction(rowKey, "redeemed", p.product_name)}
-                          title="Redeem Stock"
+                          disabled={isOutOfStock}
+                          onClick={() => handleAction(rowKey, "redeemed", p.product_name, isOutOfStock)}
+                          title={isOutOfStock ? "Cannot redeem: Out of stock" : "Redeem Stock"}
                           className={cn(
-                            "h-7 w-7 rounded-md flex items-center justify-center transition-all cursor-pointer border",
+                            "h-7 w-7 rounded-md flex items-center justify-center transition-all border",
                             activeAction === "redeemed"
                               ? "bg-emerald-600 text-white border-emerald-700"
                               : "bg-white text-emerald-700 border-slate-200 hover:bg-emerald-50",
+                            isOutOfStock
+                              ? "opacity-40 cursor-not-allowed hover:bg-white hover:border-slate-200"
+                              : "cursor-pointer",
                           )}
                         >
                           <PackageCheck className="h-3.5 w-3.5" />
