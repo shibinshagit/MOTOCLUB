@@ -35,7 +35,7 @@ export default function PurchaseManagerKpiCards({
 }: PurchaseManagerKpiCardsProps) {
   const reduxDeviceId = useAppSelector(selectDeviceId)
   const reduxDateRange = useAppSelector(selectDateRange)
-  const deviceCurrency = useAppSelector(selectDeviceCurrency) || "AED"
+  const deviceCurrency = useAppSelector(selectDeviceCurrency) || "INR"
 
   const effectiveDeviceId = propDeviceId ?? reduxDeviceId ?? 0
   const effectiveDateRange = propGlobalDateRange ?? reduxDateRange

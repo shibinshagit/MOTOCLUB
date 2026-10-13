@@ -22,6 +22,7 @@ import { getPurchaseDetails, markPurchaseDelivered } from "@/app/actions/purchas
 import { getProductById } from "@/app/actions/product-actions"
 import { ProductDetailSlider } from "@/components/products/product-detail-slider"
 import ReturnPurchaseModal from "@/components/purchases/return-purchase-modal"
+import { getCurrencySymbol } from "@/lib/currency-utils"
 
 interface ViewPurchaseModalProps {
   isOpen: boolean
@@ -148,7 +149,8 @@ export default function ViewPurchaseModal({
 
   const closeDetailProduct = () => setDetailProduct(null)
 
-  const deviceCurrency = useSelector(selectDeviceCurrency) || currency || "AED"
+  const rawDeviceCurrency = useSelector(selectDeviceCurrency) || currency || "INR"
+  const deviceCurrency = getCurrencySymbol(rawDeviceCurrency)
   const deviceId = useSelector(selectDeviceId)
 
   const formatCurrency = (amount: number | string) => {

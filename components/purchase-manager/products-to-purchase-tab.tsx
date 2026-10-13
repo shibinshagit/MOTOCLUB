@@ -1,7 +1,12 @@
 "use client"
 
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { getProductsToPurchase } from "@/app/actions/sale-actions"
+import { useRouter, usePathname } from "next/navigation"
+import {
+  getProductsToPurchase,
+  saveProductPurchaseAction,
+  saveProductPurchaseActionsBulk,
+} from "@/app/actions/sale-actions"
 import {
   Loader2,
   Package,
@@ -18,11 +23,26 @@ import {
   Clock,
   Ban,
   ListFilter,
+  ArrowLeft,
+  ArrowRight,
+  Save,
+  FileText,
+  ShoppingCart,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useToast } from "@/components/ui/use-toast"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog"
+import { Textarea } from "@/components/ui/textarea"
+import { Label } from "@/components/ui/label"
 import PurchaseManagerKpiCards from "@/components/purchase-manager/purchase-manager-kpi-cards"
 import {
   EXCEL_COLUMN_FILTER_POPOVER_ATTR,
@@ -32,7 +52,9 @@ import {
   type ExcelColumnFilterValue,
 } from "@/components/sales/excel-column-filter"
 import { useAppSelector } from "@/store/hooks"
-import { selectDeviceId } from "@/store/slices/deviceSlice"
+import { selectDeviceId, selectDeviceCurrency } from "@/store/slices/deviceSlice"
+import { selectCurrency } from "@/store/slices/purchaseSlice"
+import { getCurrencySymbol } from "@/lib/currency-utils"
 import { cn } from "@/lib/utils"
 
 interface ProductsToPurchaseTabProps {
@@ -238,6 +260,8 @@ export default function ProductsToPurchaseTab({
 }: ProductsToPurchaseTabProps) {
   const reduxDeviceId = useAppSelector(selectDeviceId)
   const deviceId = propDeviceId || reduxDeviceId || 0
+  const reduxCurrency = useAppSelector(selectCurrency) || useAppSelector(selectDeviceCurrency) || "INR"
+  const currency = getCurrencySymbol(reduxCurrency)
 
   const [products, setProducts] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -256,14 +280,80 @@ export default function ProductsToPurchaseTab({
     return () => clearTimeout(timer)
   }, [searchTerm])
 
+  const router = useRouter()
+  const pathname = usePathname()
+
   // Checkbox selection state
   const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([])
 
-  // 4 action states per row: redeem stock | ordered | postpone | rejected
-  const [itemActions, setItemActions] = useState<Record<string, ItemActionStatus>>({})
+  // Instant hydration from localStorage on page load / refresh
+  const [itemActions, setItemActions] = useState<Record<string, ItemActionStatus>>(() => {
+    if (typeof window === "undefined") return {}
+    try {
+      const raw = localStorage.getItem(`products_to_purchase_actions_${deviceId}`)
+      if (raw) return JSON.parse(raw).itemActions || {}
+    } catch (_) {}
+    return {}
+  })
+
+  // Track the order in which items were ordered (placed just before / above redeemed products)
+  const [orderedOrder, setOrderedOrder] = useState<string[]>(() => {
+    if (typeof window === "undefined") return []
+    try {
+      const raw = localStorage.getItem(`products_to_purchase_actions_${deviceId}`)
+      if (raw) return JSON.parse(raw).orderedOrder || []
+    } catch (_) {}
+    return []
+  })
 
   // Track the order in which items were redeemed (most recent at the end of table)
-  const [redeemedOrder, setRedeemedOrder] = useState<string[]>([])
+  const [redeemedOrder, setRedeemedOrder] = useState<string[]>(() => {
+    if (typeof window === "undefined") return []
+    try {
+      const raw = localStorage.getItem(`products_to_purchase_actions_${deviceId}`)
+      if (raw) return JSON.parse(raw).redeemedOrder || []
+    } catch (_) {}
+    return []
+  })
+
+  // Store internal notes per row
+  const [itemNotes, setItemNotes] = useState<Record<string, string>>(() => {
+    if (typeof window === "undefined") return {}
+    try {
+      const raw = localStorage.getItem(`products_to_purchase_actions_${deviceId}`)
+      if (raw) return JSON.parse(raw).itemNotes || {}
+    } catch (_) {}
+    return {}
+  })
+
+  // Synchronize state to localStorage on every update
+  useEffect(() => {
+    if (!deviceId || typeof window === "undefined") return
+    try {
+      localStorage.setItem(
+        `products_to_purchase_actions_${deviceId}`,
+        JSON.stringify({ itemActions, orderedOrder, redeemedOrder, itemNotes }),
+      )
+    } catch (_) {}
+  }, [deviceId, itemActions, orderedOrder, redeemedOrder, itemNotes])
+
+  // Internal note modal state for currently ordered product
+  const [orderModalProduct, setOrderModalProduct] = useState<{
+    product: any
+    rowKey: string
+  } | null>(null)
+  const [internalNote, setInternalNote] = useState<string>("")
+
+  // Dedicated note viewer modal for clicking the note icon
+  const [viewNoteModal, setViewNoteModal] = useState<{
+    product: any
+    rowKey: string
+    note: string
+  } | null>(null)
+
+  // Bulk Proceed to Purchase modal state
+  const [bulkOrderModalOpen, setBulkOrderModalOpen] = useState<boolean>(false)
+  const [bulkInternalNote, setBulkInternalNote] = useState<string>("")
 
   const { toast } = useToast()
 
@@ -277,6 +367,41 @@ export default function ProductsToPurchaseTab({
       })
       if (res.success && res.data) {
         setProducts(res.data)
+
+        // Restore saved actions from database so refresh / logout / login persists across sessions
+        const dbActions: Record<string, ItemActionStatus> = {}
+        const dbOrdered: { key: string; order: number }[] = []
+        const dbRedeemed: { key: string; order: number }[] = []
+        const dbNotes: Record<string, string> = {}
+
+        for (const p of res.data) {
+          const key = getRowKey(p)
+          if (p.saved_action) {
+            dbActions[key] = p.saved_action as ItemActionStatus
+            if (p.saved_action === "order") {
+              dbOrdered.push({ key, order: Number(p.saved_action_order) || 0 })
+            } else if (p.saved_action === "redeemed") {
+              dbRedeemed.push({ key, order: Number(p.saved_action_order) || 0 })
+            }
+            if (p.saved_note) {
+              dbNotes[key] = p.saved_note
+            }
+          }
+        }
+
+        dbOrdered.sort((a, b) => a.order - b.order)
+        dbRedeemed.sort((a, b) => a.order - b.order)
+
+        setItemActions((prev) => ({ ...dbActions, ...prev }))
+        setOrderedOrder((prev) => {
+          const dbKeys = dbOrdered.map((o) => o.key)
+          return [...new Set([...dbKeys, ...prev])]
+        })
+        setRedeemedOrder((prev) => {
+          const dbKeys = dbRedeemed.map((r) => r.key)
+          return [...new Set([...dbKeys, ...prev])]
+        })
+        setItemNotes((prev) => ({ ...dbNotes, ...prev }))
       } else {
         toast({
           title: "Error",
@@ -400,22 +525,28 @@ export default function ProductsToPurchaseTab({
     })
   }, [products, stockFilter, debouncedSearch, columnFilters, uniqueValues, valueGetters])
 
-  // Sort products: unredeemed first (out of stock first, then alphabetically),
-  // then redeemed products at the very bottom in the order they were redeemed.
+  // Sort products:
+  // 1. Unhandled active products (out of stock first, then alphabetically)
+  // 2. Ordered products (placed down the table, right before / above redeemed stock products)
+  // 3. Redeemed stock products (at the very bottom of the table)
   const sortedProducts = useMemo(() => {
-    const unredeemed: any[] = []
+    const unhandled: any[] = []
+    const ordered: any[] = []
     const redeemed: any[] = []
 
     for (const p of filteredProducts) {
       const key = getRowKey(p)
-      if (itemActions[key] === "redeemed") {
+      const action = itemActions[key]
+      if (action === "redeemed") {
         redeemed.push(p)
+      } else if (action === "order") {
+        ordered.push(p)
       } else {
-        unredeemed.push(p)
+        unhandled.push(p)
       }
     }
 
-    unredeemed.sort((a, b) => {
+    unhandled.sort((a, b) => {
       const aReq = Number(a.required_quantity) || 0
       const aCur = Number(a.current_stock) || 0
       const aOut = aCur < aReq || aCur <= 0
@@ -429,6 +560,16 @@ export default function ProductsToPurchaseTab({
       return (a.product_name || "").localeCompare(b.product_name || "")
     })
 
+    ordered.sort((a, b) => {
+      const aKey = getRowKey(a)
+      const bKey = getRowKey(b)
+      const aIdx = orderedOrder.indexOf(aKey)
+      const bIdx = orderedOrder.indexOf(bKey)
+      const safeAIdx = aIdx === -1 ? 0 : aIdx
+      const safeBIdx = bIdx === -1 ? 0 : bIdx
+      return safeAIdx - safeBIdx
+    })
+
     redeemed.sort((a, b) => {
       const aKey = getRowKey(a)
       const bKey = getRowKey(b)
@@ -439,8 +580,8 @@ export default function ProductsToPurchaseTab({
       return safeAIdx - safeBIdx
     })
 
-    return [...unredeemed, ...redeemed]
-  }, [filteredProducts, itemActions, redeemedOrder])
+    return [...unhandled, ...ordered, ...redeemed]
+  }, [filteredProducts, itemActions, orderedOrder, redeemedOrder])
 
   // Paginated products
   const displayProducts = useMemo(() => {
@@ -450,11 +591,59 @@ export default function ProductsToPurchaseTab({
 
   const totalPages = Math.ceil(sortedProducts.length / pageSize)
 
-  // Row selection handlers
+  // All row keys across all pages matching the active filter & search
+  const allFilteredKeys = useMemo(
+    () => sortedProducts.map(getRowKey),
+    [sortedProducts],
+  )
+
+  // Multi-page selection status: checked if every item across all pages is selected
+  const isAllSelected =
+    allFilteredKeys.length > 0 &&
+    allFilteredKeys.every((k) => selectedRowKeys.includes(k))
+
+  // Some selected but not all (for checkbox indeterminate visual indicator)
+  const isSomeSelected =
+    selectedRowKeys.length > 0 && !isAllSelected
+
+  // Selected products full object list across all pages
+  const selectedProducts = useMemo(() => {
+    if (selectedRowKeys.length === 0) return []
+    const keySet = new Set(selectedRowKeys)
+    return sortedProducts.filter((p) => keySet.has(getRowKey(p)))
+  }, [sortedProducts, selectedRowKeys])
+
+  // Total required quantity for all selected products
+  const bulkTotalQty = useMemo(() => {
+    return selectedProducts.reduce(
+      (sum, p) => sum + Math.max(1, Number(p.required_quantity) || 1),
+      0,
+    )
+  }, [selectedProducts])
+
+  // Estimated total cost for all selected products
+  const bulkTotalEstCost = useMemo(() => {
+    return selectedProducts.reduce((sum, p) => {
+      const qty = Math.max(1, Number(p.required_quantity) || 1)
+      const price = Number(
+        (Number(p.unit_price) > 0 ? p.unit_price : null) ??
+        (Number(p.variant_cost_price) > 0 ? p.variant_cost_price : null) ??
+        (Number(p.variant_wholesale_price) > 0 ? p.variant_wholesale_price : null) ??
+        (Number(p.product_wholesale_price) > 0 ? p.product_wholesale_price : null) ??
+        (Number(p.variant_price) > 0 ? p.variant_price : null) ??
+        (Number(p.product_price) > 0 ? p.product_price : null) ??
+        0,
+      )
+      const tax = Math.max(0, Math.min(100, Number(p.tax_percentage) || 0))
+      const base = qty * price
+      return sum + base + base * (tax / 100)
+    }, 0)
+  }, [selectedProducts])
+
+  // Row selection handlers: Select All selects all products across ALL pages
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
-      const keysOnPage = displayProducts.map(getRowKey)
-      setSelectedRowKeys(keysOnPage)
+      setSelectedRowKeys(allFilteredKeys)
     } else {
       setSelectedRowKeys([])
     }
@@ -483,6 +672,56 @@ export default function ProductsToPurchaseTab({
     }
 
     const current = itemActions[rowKey]
+
+    // Special handling for "order" action:
+    if (action === "order") {
+      if (current === "order") {
+        // Toggle off order action
+        setItemActions((prev) => {
+          const updated = { ...prev }
+          delete updated[rowKey]
+          return updated
+        })
+        setOrderedOrder((prev) => prev.filter((k) => k !== rowKey))
+        setItemNotes((prev) => {
+          const updated = { ...prev }
+          delete updated[rowKey]
+          return updated
+        })
+        if (orderModalProduct?.rowKey === rowKey) {
+          setOrderModalProduct(null)
+          setInternalNote("")
+        }
+        if (deviceId) {
+          saveProductPurchaseAction(deviceId, rowKey, null).catch(console.error)
+        }
+        toast({
+          title: "Action Cleared",
+          description: `${productName}: Order action cleared`,
+        })
+        return
+      }
+
+      // Mark as ordered, move down before redeemed products, and open internal note modal
+      setItemActions((prev) => ({
+        ...prev,
+        [rowKey]: "order",
+      }))
+      setOrderedOrder((prev) => [...prev.filter((k) => k !== rowKey), rowKey])
+      setRedeemedOrder((prev) => prev.filter((k) => k !== rowKey))
+
+      if (deviceId) {
+        saveProductPurchaseAction(deviceId, rowKey, "order", orderedOrder.length + 1, itemNotes[rowKey] || null).catch(console.error)
+      }
+
+      const prod = products.find((p) => getRowKey(p) === rowKey)
+      if (prod) {
+        setOrderModalProduct({ product: prod, rowKey })
+        setInternalNote(itemNotes[rowKey] || "")
+      }
+      return
+    }
+
     const next = current === action ? undefined : action
 
     setItemActions((prev) => {
@@ -495,10 +734,22 @@ export default function ProductsToPurchaseTab({
       return updated
     })
 
+    // If changing away from order, clean up order state
+    setOrderedOrder((prev) => prev.filter((k) => k !== rowKey))
+    if (orderModalProduct?.rowKey === rowKey) {
+      setOrderModalProduct(null)
+      setInternalNote("")
+    }
+
     if (next === "redeemed") {
       setRedeemedOrder((prev) => [...prev.filter((k) => k !== rowKey), rowKey])
     } else {
       setRedeemedOrder((prev) => prev.filter((k) => k !== rowKey))
+    }
+
+    if (deviceId) {
+      const actionOrder = next === "redeemed" ? redeemedOrder.length + 1 : 0
+      saveProductPurchaseAction(deviceId, rowKey, next || null, actionOrder, null).catch(console.error)
     }
 
     const actionLabels: Record<ItemActionStatus, string> = {
@@ -519,6 +770,454 @@ export default function ProductsToPurchaseTab({
         description: `${productName}: Action cleared`,
       })
     }
+  }
+
+  // Revert order action when clicking Back in internal note modal
+  const handleOrderModalBack = () => {
+    if (!orderModalProduct) return
+    const { rowKey, product } = orderModalProduct
+
+    // Revert the action so the product returns to its original unhandled place and color
+    setItemActions((prev) => {
+      const updated = { ...prev }
+      delete updated[rowKey]
+      return updated
+    })
+    setOrderedOrder((prev) => prev.filter((k) => k !== rowKey))
+    setItemNotes((prev) => {
+      const updated = { ...prev }
+      delete updated[rowKey]
+      return updated
+    })
+
+    setOrderModalProduct(null)
+    setInternalNote("")
+
+    if (deviceId) {
+      saveProductPurchaseAction(deviceId, rowKey, null).catch(console.error)
+    }
+
+    toast({
+      title: "Action Reverted",
+      description: `${product.product_name || "Product"}: Returned to original list`,
+    })
+  }
+
+  // Open the view/edit note modal when clicking the note icon
+  const handleOpenViewNoteModal = (rowKey: string, product: any) => {
+    setViewNoteModal({
+      product,
+      rowKey,
+      note: itemNotes[rowKey] || "",
+    })
+  }
+
+  // Save changes from the view/edit note modal
+  const handleSaveViewNote = () => {
+    if (!viewNoteModal) return
+    const { rowKey, note } = viewNoteModal
+    const trimmed = note.trim()
+
+    setItemNotes((prev) => {
+      const updated = { ...prev }
+      if (trimmed) {
+        updated[rowKey] = trimmed
+      } else {
+        delete updated[rowKey]
+      }
+      return updated
+    })
+
+    if (deviceId) {
+      const action = itemActions[rowKey] || null
+      const orderIndex = orderedOrder.indexOf(rowKey)
+      const actionOrder = action === "order" && orderIndex !== -1 ? orderIndex + 1 : 0
+      saveProductPurchaseAction(deviceId, rowKey, action, actionOrder, trimmed || null).catch(console.error)
+    }
+
+    toast({
+      title: "Note Saved",
+      description: trimmed ? "Internal note updated successfully" : "Internal note cleared",
+    })
+
+    setViewNoteModal(null)
+  }
+
+  // Handle Skip or Save button in internal note modal:
+  // Directly moves to the new purchase page with the product details and internal notes.
+  const handleOrderModalSkipOrSave = () => {
+    if (!orderModalProduct) return
+    const { rowKey, product } = orderModalProduct
+    const noteText = internalNote.trim()
+
+    // Persist internal note if entered
+    if (noteText) {
+      setItemNotes((prev) => ({
+        ...prev,
+        [rowKey]: noteText,
+      }))
+    }
+
+    const requiredQty = Math.max(1, Number(product.required_quantity) || 1)
+    const resolvedPrice = Number(
+      (Number(product.unit_price) > 0 ? product.unit_price : null) ??
+      (Number(product.variant_cost_price) > 0 ? product.variant_cost_price : null) ??
+      (Number(product.variant_wholesale_price) > 0 ? product.variant_wholesale_price : null) ??
+      (Number(product.product_wholesale_price) > 0 ? product.product_wholesale_price : null) ??
+      (Number(product.variant_price) > 0 ? product.variant_price : null) ??
+      (Number(product.product_price) > 0 ? product.product_price : null) ??
+      0
+    )
+    const taxPercentage = Math.max(0, Math.min(100, Number(product.tax_percentage) || 0))
+    const baseTotal = requiredQty * resolvedPrice
+    const taxAmount = baseTotal * (taxPercentage / 100)
+    const lineTotal = baseTotal + taxAmount
+
+    const hasVariantName =
+      product.variant_name &&
+      product.variant_name.trim().toLowerCase() !== "default" &&
+      product.variant_name.trim().toLowerCase() !== "default variant"
+    const displayName =
+      hasVariantName && !product.product_name.toLowerCase().includes(product.variant_name.toLowerCase())
+        ? `${product.product_name} (${product.variant_name})`
+        : (product.product_name || "")
+
+    const variantId = product.product_variant_id ? Number(product.product_variant_id) : null
+    const variantSku = product.variant_sku || product.product_barcode || null
+    const variantBarcode = product.variant_barcode || product.product_barcode || null
+    const variantShelf = product.variant_shelf || product.product_shelf || null
+    const currentStock = Number(product.current_stock) || 0
+    const msp = product.variant_msp != null ? Number(product.variant_msp) : (product.product_msp != null ? Number(product.product_msp) : null)
+    const mrp = product.variant_mrp != null ? Number(product.variant_mrp) : (product.product_mrp != null ? Number(product.product_mrp) : null)
+
+    const newDraftId = crypto.randomUUID()
+    const draftItem = {
+      id: crypto.randomUUID(),
+      productId: Number(product.product_id),
+      productName: displayName,
+      quantity: requiredQty,
+      quantityInput: String(requiredQty),
+      price: resolvedPrice,
+      priceInput: String(resolvedPrice),
+      total: baseTotal,
+      wholesalePrice: resolvedPrice,
+      taxPercentage,
+      taxPercentageInput: String(taxPercentage),
+      taxAmount,
+      lineTotal,
+      variant_id: variantId,
+      sku: variantSku,
+      barcode: variantBarcode,
+      shelf: variantShelf,
+      msp,
+      mrp,
+      stock: currentStock,
+      variants: variantId
+        ? [
+            {
+              id: variantId,
+              name: product.variant_name || "Default",
+              quantity: requiredQty,
+              sku: variantSku,
+              barcode: variantBarcode,
+              shelf: variantShelf,
+              stock: currentStock,
+              cost_price: resolvedPrice,
+              wholesale_price: resolvedPrice,
+              price: resolvedPrice,
+              msp,
+              mrp,
+            },
+          ]
+        : [],
+      variantEntries: variantId
+        ? [
+            {
+              id: variantId,
+              name: product.variant_name || "Default",
+              quantity: requiredQty,
+              quantityInput: String(requiredQty),
+              price: resolvedPrice,
+              priceInput: String(resolvedPrice),
+              msp,
+              mrp,
+              sku: variantSku,
+              barcode: variantBarcode,
+              shelf: variantShelf,
+              stock: currentStock,
+              taxPercentage,
+              taxPercentageInput: String(taxPercentage),
+              total: baseTotal,
+              taxAmount,
+              lineTotal,
+            },
+          ]
+        : [],
+    }
+
+    const newDraft = {
+      id: newDraftId,
+      name: `Order: ${displayName || "New Purchase"}`,
+      updatedAt: Date.now(),
+      date: new Date().toISOString(),
+      supplier: "",
+      status: "Credit",
+      purchaseStatus: "Delivered",
+      paymentMethod: "Cash",
+      receivedAmount: 0,
+      discountAmount: 0,
+      products: [draftItem],
+      isEditMode: false,
+      editingPurchaseId: null,
+      notes: noteText || undefined,
+    }
+
+    // Persist draft in localStorage
+    const storageKey = `purchase_entry_drafts_${deviceId || "default"}`
+    let parsedExisting: any[] = []
+    try {
+      const raw = localStorage.getItem(storageKey)
+      if (raw) parsedExisting = JSON.parse(raw)
+    } catch (_) {}
+
+    const updatedDrafts = [
+      newDraft,
+      ...(Array.isArray(parsedExisting) ? parsedExisting.filter((d: any) => d.id !== newDraftId) : []),
+    ]
+    localStorage.setItem(storageKey, JSON.stringify(updatedDrafts))
+    localStorage.setItem(`${storageKey}_active`, newDraftId)
+
+    // Fallback key
+    localStorage.setItem(`purchase_entry_drafts_default`, JSON.stringify(updatedDrafts))
+    localStorage.setItem(`purchase_entry_drafts_default_active`, newDraftId)
+
+    // Store in sessionStorage for instant active prefill hydration
+    sessionStorage.setItem("pending_purchase_prefill", JSON.stringify(newDraft))
+
+    if (deviceId) {
+      saveProductPurchaseAction(deviceId, rowKey, "order", orderedOrder.indexOf(rowKey) + 1, noteText || null).catch(console.error)
+    }
+
+    setOrderModalProduct(null)
+    setInternalNote("")
+
+    // Directly move to the new purchase page
+    const targetUrl = `${pathname}?tab=purchase&purchaseView=entry`
+    router.push(targetUrl)
+  }
+
+  // Handle bulk Proceed to Purchase (Skip or Save)
+  // Directs to the new purchase page with all selected products and their notes
+  const handleBulkOrderSkipOrSave = () => {
+    if (selectedProducts.length === 0) return
+
+    const noteText = bulkInternalNote.trim()
+    const newlyOrderedKeys = selectedProducts.map(getRowKey)
+
+    // Build draft item objects with full pricing, quantity, and variant details
+    const draftItems = selectedProducts.map((product) => {
+      const requiredQty = Math.max(1, Number(product.required_quantity) || 1)
+      const resolvedPrice = Number(
+        (Number(product.unit_price) > 0 ? product.unit_price : null) ??
+        (Number(product.variant_cost_price) > 0 ? product.variant_cost_price : null) ??
+        (Number(product.variant_wholesale_price) > 0 ? product.variant_wholesale_price : null) ??
+        (Number(product.product_wholesale_price) > 0 ? product.product_wholesale_price : null) ??
+        (Number(product.variant_price) > 0 ? product.variant_price : null) ??
+        (Number(product.product_price) > 0 ? product.product_price : null) ??
+        0,
+      )
+      const taxPercentage = Math.max(0, Math.min(100, Number(product.tax_percentage) || 0))
+      const baseTotal = requiredQty * resolvedPrice
+      const taxAmount = baseTotal * (taxPercentage / 100)
+      const lineTotal = baseTotal + taxAmount
+
+      const hasVariantName =
+        product.variant_name &&
+        product.variant_name.trim().toLowerCase() !== "default" &&
+        product.variant_name.trim().toLowerCase() !== "default variant"
+      const displayName =
+        hasVariantName && !product.product_name.toLowerCase().includes(product.variant_name.toLowerCase())
+          ? `${product.product_name} (${product.variant_name})`
+          : (product.product_name || "")
+
+      const variantId = product.product_variant_id ? Number(product.product_variant_id) : null
+      const variantSku = product.variant_sku || product.product_barcode || null
+      const variantBarcode = product.variant_barcode || product.product_barcode || null
+      const variantShelf = product.variant_shelf || product.product_shelf || null
+      const currentStock = Number(product.current_stock) || 0
+      const msp =
+        product.variant_msp != null
+          ? Number(product.variant_msp)
+          : product.product_msp != null
+          ? Number(product.product_msp)
+          : null
+      const mrp =
+        product.variant_mrp != null
+          ? Number(product.variant_mrp)
+          : product.product_mrp != null
+          ? Number(product.product_mrp)
+          : null
+
+      return {
+        id: crypto.randomUUID(),
+        productId: Number(product.product_id),
+        productName: displayName,
+        quantity: requiredQty,
+        quantityInput: String(requiredQty),
+        price: resolvedPrice,
+        priceInput: String(resolvedPrice),
+        total: baseTotal,
+        wholesalePrice: resolvedPrice,
+        taxPercentage,
+        taxPercentageInput: String(taxPercentage),
+        taxAmount,
+        lineTotal,
+        variant_id: variantId,
+        sku: variantSku,
+        barcode: variantBarcode,
+        shelf: variantShelf,
+        msp,
+        mrp,
+        stock: currentStock,
+        variants: variantId
+          ? [
+              {
+                id: variantId,
+                name: product.variant_name || "Default",
+                quantity: requiredQty,
+                sku: variantSku,
+                barcode: variantBarcode,
+                shelf: variantShelf,
+                stock: currentStock,
+                cost_price: resolvedPrice,
+                wholesale_price: resolvedPrice,
+                price: resolvedPrice,
+                msp,
+                mrp,
+              },
+            ]
+          : [],
+        variantEntries: variantId
+          ? [
+              {
+                id: variantId,
+                name: product.variant_name || "Default",
+                quantity: requiredQty,
+                quantityInput: String(requiredQty),
+                price: resolvedPrice,
+                priceInput: String(resolvedPrice),
+                msp,
+                mrp,
+                sku: variantSku,
+                barcode: variantBarcode,
+                shelf: variantShelf,
+                stock: currentStock,
+                taxPercentage,
+                taxPercentageInput: String(taxPercentage),
+                total: baseTotal,
+                taxAmount,
+                lineTotal,
+              },
+            ]
+          : [],
+      }
+    })
+
+    const newDraftId = crypto.randomUUID()
+    const draftName =
+      selectedProducts.length === 1
+        ? `Order: ${draftItems[0]?.productName || "New Purchase"}`
+        : `Bulk Order (${draftItems.length} items)`
+
+    const newDraft = {
+      id: newDraftId,
+      name: draftName,
+      updatedAt: Date.now(),
+      date: new Date().toISOString(),
+      supplier: "",
+      status: "Credit",
+      purchaseStatus: "Delivered",
+      paymentMethod: "Cash",
+      receivedAmount: 0,
+      discountAmount: 0,
+      products: draftItems,
+      isEditMode: false,
+      editingPurchaseId: null,
+      notes: noteText || undefined,
+    }
+
+    // Persist draft in localStorage
+    const storageKey = `purchase_entry_drafts_${deviceId || "default"}`
+    let parsedExisting: any[] = []
+    try {
+      const raw = localStorage.getItem(storageKey)
+      if (raw) parsedExisting = JSON.parse(raw)
+    } catch (_) {}
+
+    const updatedDrafts = [
+      newDraft,
+      ...(Array.isArray(parsedExisting) ? parsedExisting.filter((d: any) => d.id !== newDraftId) : []),
+    ]
+    localStorage.setItem(storageKey, JSON.stringify(updatedDrafts))
+    localStorage.setItem(`${storageKey}_active`, newDraftId)
+
+    // Fallback key
+    localStorage.setItem(`purchase_entry_drafts_default`, JSON.stringify(updatedDrafts))
+    localStorage.setItem(`purchase_entry_drafts_default_active`, newDraftId)
+
+    // Store in sessionStorage for instant active prefill hydration
+    sessionStorage.setItem("pending_purchase_prefill", JSON.stringify(newDraft))
+
+    // Update state
+    setItemActions((prev) => {
+      const updated = { ...prev }
+      newlyOrderedKeys.forEach((k) => {
+        updated[k] = "order"
+      })
+      return updated
+    })
+
+    setOrderedOrder((prev) => {
+      const remaining = prev.filter((k) => !newlyOrderedKeys.includes(k))
+      return [...remaining, ...newlyOrderedKeys]
+    })
+    setRedeemedOrder((prev) => prev.filter((k) => !newlyOrderedKeys.includes(k)))
+
+    if (noteText) {
+      setItemNotes((prev) => {
+        const updated = { ...prev }
+        newlyOrderedKeys.forEach((k) => {
+          updated[k] = noteText
+        })
+        return updated
+      })
+    }
+
+    // Save to database
+    if (deviceId) {
+      saveProductPurchaseActionsBulk(
+        deviceId,
+        newlyOrderedKeys.map((key, idx) => ({
+          rowKey: key,
+          action: "order",
+          actionOrder: idx + 1,
+          note: noteText || null,
+        })),
+      ).catch(console.error)
+    }
+
+    setBulkOrderModalOpen(false)
+    setBulkInternalNote("")
+    setSelectedRowKeys([])
+
+    toast({
+      title: "Proceeding to Purchase",
+      description: `${draftItems.length} products loaded into new purchase entry`,
+    })
+
+    // Directly move to the new purchase page
+    const targetUrl = `${pathname}?tab=purchase&purchaseView=entry`
+    router.push(targetUrl)
   }
 
   // Handle bulk action
@@ -547,13 +1246,39 @@ export default function ProductsToPurchaseTab({
       return updated
     })
 
-    if (action === "redeemed") {
+    if (action === "order") {
+      setOrderedOrder((prev) => {
+        const remaining = prev.filter((k) => !selectedRowKeys.includes(k))
+        return [...remaining, ...selectedRowKeys]
+      })
+      setRedeemedOrder((prev) => prev.filter((k) => !selectedRowKeys.includes(k)))
+      if (deviceId) {
+        saveProductPurchaseActionsBulk(
+          deviceId,
+          selectedRowKeys.map((key, idx) => ({ rowKey: key, action: "order", actionOrder: idx + 1 })),
+        ).catch(console.error)
+      }
+    } else if (action === "redeemed") {
+      setOrderedOrder((prev) => prev.filter((k) => !selectedRowKeys.includes(k)))
       setRedeemedOrder((prev) => {
         const remaining = prev.filter((k) => !newlyRedeemed.includes(k))
         return [...remaining, ...newlyRedeemed]
       })
+      if (deviceId) {
+        saveProductPurchaseActionsBulk(
+          deviceId,
+          newlyRedeemed.map((key, idx) => ({ rowKey: key, action: "redeemed", actionOrder: idx + 1 })),
+        ).catch(console.error)
+      }
     } else {
+      setOrderedOrder((prev) => prev.filter((k) => !selectedRowKeys.includes(k)))
       setRedeemedOrder((prev) => prev.filter((k) => !selectedRowKeys.includes(k)))
+      if (deviceId) {
+        saveProductPurchaseActionsBulk(
+          deviceId,
+          selectedRowKeys.map((key) => ({ rowKey: key, action })),
+        ).catch(console.error)
+      }
     }
 
     const actionLabels: Record<ItemActionStatus, string> = {
@@ -576,8 +1301,14 @@ export default function ProductsToPurchaseTab({
     }
   }
 
+  // Export to Excel / CSV: exports all selected items across all pages, or all sorted items if none selected
   const handleExportExcel = () => {
-    if (filteredProducts.length === 0) {
+    const targetProducts =
+      selectedRowKeys.length > 0
+        ? sortedProducts.filter((p) => selectedRowKeys.includes(getRowKey(p)))
+        : sortedProducts
+
+    if (targetProducts.length === 0) {
       toast({ title: "No data", description: "No products to export" })
       return
     }
@@ -588,15 +1319,29 @@ export default function ProductsToPurchaseTab({
       "Status",
       "Required Qty",
       "Current Stock",
+      "Unit Price",
+      "Estimated Total",
       "Action Status",
+      "Internal Note",
     ]
-    const rows = filteredProducts.map((p, idx) => {
+    const rows = targetProducts.map((p) => {
       const required = Number(p.required_quantity) || 0
       const current = Number(p.current_stock) || 0
       const isOutOfStock = current < required || current <= 0
       const statusText = isOutOfStock ? "Out of Stock" : "In Stock"
       const rowKey = getRowKey(p)
       const actionStatus = itemActions[rowKey] || "Pending"
+      const note = itemNotes[rowKey] || ""
+      const price = Number(
+        (Number(p.unit_price) > 0 ? p.unit_price : null) ??
+        (Number(p.variant_cost_price) > 0 ? p.variant_cost_price : null) ??
+        (Number(p.variant_wholesale_price) > 0 ? p.variant_wholesale_price : null) ??
+        (Number(p.product_wholesale_price) > 0 ? p.product_wholesale_price : null) ??
+        (Number(p.variant_price) > 0 ? p.variant_price : null) ??
+        (Number(p.product_price) > 0 ? p.product_price : null) ??
+        0,
+      )
+      const estTotal = required * price
 
       return [
         `"${(p.product_name || "").replace(/"/g, '""')}"`,
@@ -605,7 +1350,10 @@ export default function ProductsToPurchaseTab({
         `"${statusText}"`,
         required,
         current,
+        price.toFixed(2),
+        estTotal.toFixed(2),
         `"${actionStatus}"`,
+        `"${note.replace(/"/g, '""')}"`,
       ].join(",")
     })
     const csvContent = [headers.join(","), ...rows].join("\n")
@@ -622,12 +1370,194 @@ export default function ProductsToPurchaseTab({
     document.body.removeChild(link)
     toast({
       title: "Exported",
-      description: "Products list downloaded successfully as CSV",
+      description:
+        selectedRowKeys.length > 0
+          ? `${targetProducts.length} selected products exported successfully`
+          : "Products list downloaded successfully as CSV",
     })
   }
 
+  // Printable table escaping helper
+  const escapePrintHtml = (str: any) => {
+    if (str == null) return ""
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;")
+  }
+
+  // Print Products: prints all selected items across all pages, or all sorted items if none selected
   const handlePrint = () => {
-    window.print()
+    const targetProducts =
+      selectedRowKeys.length > 0
+        ? sortedProducts.filter((p) => selectedRowKeys.includes(getRowKey(p)))
+        : sortedProducts
+
+    if (targetProducts.length === 0) {
+      toast({ title: "No data", description: "No products to print" })
+      return
+    }
+
+    const printWindow = window.open("", "_blank")
+    if (!printWindow) {
+      window.print()
+      return
+    }
+
+    const todayDate = new Date().toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    })
+
+    const rowsHtml = targetProducts
+      .map((p, idx) => {
+        const required = Number(p.required_quantity) || 0
+        const current = Number(p.current_stock) || 0
+        const isOutOfStock = current < required || current <= 0
+        const statusText = isOutOfStock ? "Out of Stock" : "In Stock"
+        const rowKey = getRowKey(p)
+        const actionStatus = itemActions[rowKey]
+          ? itemActions[rowKey].toUpperCase()
+          : "PENDING"
+        const note = itemNotes[rowKey] || ""
+
+        return `
+          <tr>
+            <td style="text-align: center; color: #64748b;">${idx + 1}</td>
+            <td style="font-weight: 600;">
+              ${escapePrintHtml(p.product_name || "—")}
+              ${note ? `<div style="font-size: 10px; color: #2563eb; font-style: italic;">Note: ${escapePrintHtml(note)}</div>` : ""}
+            </td>
+            <td>${escapePrintHtml(p.variant_name && p.variant_name.toLowerCase() !== "default" ? p.variant_name : "—")}</td>
+            <td style="font-family: monospace;">${escapePrintHtml(p.variant_sku || "—")}</td>
+            <td>
+              <span style="font-weight: 600; color: ${isOutOfStock ? "#dc2626" : "#16a34a"};">
+                ${escapePrintHtml(statusText)}
+              </span>
+            </td>
+            <td style="text-align: right; font-weight: 700; color: #dc2626;">${required}</td>
+            <td style="text-align: right;">${current}</td>
+            <td style="text-align: center; font-size: 10px; font-weight: 600;">${escapePrintHtml(actionStatus)}</td>
+          </tr>
+        `
+      })
+      .join("")
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Products to Purchase - ${todayDate}</title>
+  <style>
+    @media print {
+      @page {
+        size: A4 portrait;
+        margin: 12mm;
+      }
+      body {
+        margin: 0;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      .no-print {
+        display: none !important;
+      }
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: #0f172a;
+      background: #ffffff;
+      margin: 0;
+      padding: 20px;
+      font-size: 11px;
+      line-height: 1.4;
+    }
+    .print-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      padding-bottom: 12px;
+      margin-bottom: 16px;
+      border-bottom: 2px solid #0f172a;
+    }
+    .print-title {
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+      margin: 0 0 4px 0;
+      text-transform: uppercase;
+    }
+    .print-subtitle {
+      font-size: 11px;
+      color: #475569;
+      font-weight: 500;
+      margin: 0;
+    }
+    .print-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 16px;
+    }
+    .print-table th {
+      background-color: #f1f5f9;
+      color: #1e293b;
+      font-weight: 700;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 7px 9px;
+      border: 1px solid #cbd5e1;
+      text-align: left;
+    }
+    .print-table td {
+      padding: 6px 9px;
+      border: 1px solid #e2e8f0;
+      vertical-align: top;
+    }
+    .print-table tr:nth-child(even) td {
+      background-color: #f8fafc;
+    }
+  </style>
+</head>
+<body>
+  <div class="print-header">
+    <div>
+      <h1 class="print-title">Products to Purchase</h1>
+      <p class="print-subtitle">Date: ${todayDate} &bull; Total Products: ${targetProducts.length}</p>
+    </div>
+  </div>
+  <table class="print-table">
+    <thead>
+      <tr>
+        <th style="width: 35px; text-align: center;">#</th>
+        <th>Product Name</th>
+        <th style="width: 15%;">Variant</th>
+        <th style="width: 14%;">SKU / Code</th>
+        <th style="width: 12%;">Status</th>
+        <th style="width: 10%; text-align: right;">Req Qty</th>
+        <th style="width: 10%; text-align: right;">Current Stock</th>
+        <th style="width: 12%; text-align: center;">Action</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rowsHtml}
+    </tbody>
+  </table>
+  <script>
+    window.onload = function() {
+      setTimeout(function() {
+        window.print();
+      }, 200);
+    };
+  </script>
+</body>
+</html>`
+
+    printWindow.document.write(html)
+    printWindow.document.close()
   }
 
   const headerCell = (
@@ -729,59 +1659,44 @@ export default function ProductsToPurchaseTab({
         </div>
       </div>
 
-      {/* BULK SELECTION TOOLBAR */}
+      {/* BULK SELECTION TOOLBAR - PROCEED TO PURCHASE */}
       {selectedRowKeys.length > 0 && (
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-violet-300 bg-violet-50 p-3 shadow-xs">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-bold text-violet-900">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-blue-200 bg-blue-50/80 p-3 shadow-xs transition-all">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-blue-600 text-white shadow-2xs">
+              <ShoppingCart className="h-3.5 w-3.5" />
               {selectedRowKeys.length}{" "}
               {selectedRowKeys.length === 1 ? "product" : "products"} selected
             </span>
+            {selectedRowKeys.length < sortedProducts.length && (
+              <button
+                type="button"
+                onClick={() => setSelectedRowKeys(allFilteredKeys)}
+                className="text-xs font-semibold text-blue-700 hover:text-blue-900 underline cursor-pointer"
+              >
+                Select all {sortedProducts.length} products across all pages
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setSelectedRowKeys([])}
-              className="text-xs font-semibold text-violet-700 hover:text-violet-950 underline ml-1 cursor-pointer"
+              className="text-xs font-medium text-slate-500 hover:text-slate-800 underline ml-1 cursor-pointer"
             >
               Clear selection
             </button>
           </div>
 
-          <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex items-center gap-2">
             <Button
               size="sm"
-              variant="outline"
-              className="h-7 text-xs gap-1 bg-white border-emerald-300 hover:bg-emerald-50 text-emerald-800"
-              onClick={() => handleBulkAction("redeemed")}
+              className="h-8 px-4 text-xs font-bold gap-2 bg-blue-600 hover:bg-blue-700 text-white shadow-sm cursor-pointer transition-all"
+              onClick={() => {
+                setBulkInternalNote("")
+                setBulkOrderModalOpen(true)
+              }}
             >
-              <PackageCheck className="h-3.5 w-3.5 text-emerald-600" />
-              Redeem Stock
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 text-xs gap-1 bg-white border-blue-300 hover:bg-blue-50 text-blue-800"
-              onClick={() => handleBulkAction("order")}
-            >
-              <Truck className="h-3.5 w-3.5 text-blue-600" />
-              Order
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 text-xs gap-1 bg-white border-amber-300 hover:bg-amber-50 text-amber-800"
-              onClick={() => handleBulkAction("postponed")}
-            >
-              <Clock className="h-3.5 w-3.5 text-amber-600" />
-              Postpone
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 text-xs gap-1 bg-white border-rose-300 hover:bg-rose-50 text-rose-800"
-              onClick={() => handleBulkAction("reject")}
-            >
-              <Ban className="h-3.5 w-3.5 text-rose-600" />
-              Reject
+              <ShoppingCart className="h-3.5 w-3.5" />
+              <span>Proceed to Purchase</span>
             </Button>
           </div>
         </div>
@@ -910,9 +1825,16 @@ export default function ProductsToPurchaseTab({
                     <input
                       type="checkbox"
                       className="h-4 w-4 rounded border-gray-300 text-violet-600 focus:ring-violet-600 cursor-pointer"
-                      checked={isAllPageSelected}
+                      checked={isAllSelected}
+                      ref={(el) => {
+                        if (el) el.indeterminate = isSomeSelected
+                      }}
                       onChange={(e) => handleSelectAll(e.target.checked)}
-                      title="Select all products on this page"
+                      title={
+                        isAllSelected
+                          ? "Deselect all products across all pages"
+                          : `Select all ${sortedProducts.length} products across all pages`
+                      }
                     />
                   </th>
 
@@ -978,6 +1900,9 @@ export default function ProductsToPurchaseTab({
                     if (activeAction === "redeemed") {
                       baseBgClass = "bg-emerald-100 text-emerald-950 hover:bg-emerald-200 font-medium"
                       borderLeftClass = "border-l-4 border-l-emerald-500"
+                    } else if (activeAction === "order") {
+                      baseBgClass = "bg-blue-100 text-blue-950 hover:bg-blue-200 font-medium"
+                      borderLeftClass = "border-l-4 border-l-blue-500"
                     } else if (isOutOfStock) {
                       baseBgClass = "bg-rose-100 text-rose-950 hover:bg-rose-200 font-medium"
                       borderLeftClass = "border-l-4 border-l-rose-500"
@@ -1084,19 +2009,42 @@ export default function ProductsToPurchaseTab({
                             </button>
 
                             {/* 2. Order */}
-                            <button
-                              type="button"
-                              onClick={() => handleAction(rowKey, "order", p.product_name)}
-                              title="Order"
-                              className={cn(
-                                "h-7 w-7 rounded-md flex items-center justify-center transition-all cursor-pointer border",
-                                activeAction === "order"
-                                  ? "bg-blue-600 text-white border-blue-700 ring-2 ring-blue-300 shadow-xs"
-                                  : "bg-white text-blue-700 border-slate-200 hover:bg-blue-50 hover:border-blue-300",
+                            <div className="flex flex-col items-center">
+                              <button
+                                type="button"
+                                onClick={() => handleAction(rowKey, "order", p.product_name)}
+                                title="Order"
+                                className={cn(
+                                  "h-7 w-7 rounded-md flex items-center justify-center transition-all cursor-pointer border",
+                                  activeAction === "order"
+                                    ? "bg-blue-600 text-white border-blue-700 ring-2 ring-blue-300 shadow-xs"
+                                    : "bg-white text-blue-700 border-slate-200 hover:bg-blue-50 hover:border-blue-300",
+                                )}
+                              >
+                                <Truck className="h-3.5 w-3.5" />
+                              </button>
+                              {(activeAction === "order" || Boolean(itemNotes[rowKey])) && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    handleOpenViewNoteModal(rowKey, p)
+                                  }}
+                                  title={itemNotes[rowKey] ? `Internal Note: ${itemNotes[rowKey]}` : "View / Add Internal Note"}
+                                  className={cn(
+                                    "mt-1 h-4 w-4 rounded flex items-center justify-center transition-all cursor-pointer relative",
+                                    itemNotes[rowKey]
+                                      ? "text-blue-700 hover:text-blue-900 hover:bg-blue-200/60"
+                                      : "text-slate-400 hover:text-slate-600 hover:bg-slate-100",
+                                  )}
+                                >
+                                  <FileText className="h-3 w-3" />
+                                  {Boolean(itemNotes[rowKey]) && (
+                                    <span className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-blue-600 ring-1 ring-white" />
+                                  )}
+                                </button>
                               )}
-                            >
-                              <Truck className="h-3.5 w-3.5" />
-                            </button>
+                            </div>
 
                             {/* 3. Postpone */}
                             <button
@@ -1161,6 +2109,8 @@ export default function ProductsToPurchaseTab({
                 let cardAccentClass = ""
                 if (activeAction === "redeemed") {
                   cardAccentClass = "border-l-4 border-l-emerald-500 bg-emerald-100 text-emerald-950"
+                } else if (activeAction === "order") {
+                  cardAccentClass = "border-l-4 border-l-blue-500 bg-blue-100 text-blue-950"
                 } else if (isOutOfStock) {
                   cardAccentClass = "border-l-4 border-l-rose-500 bg-rose-100 text-rose-950"
                 }
@@ -1245,19 +2195,42 @@ export default function ProductsToPurchaseTab({
                         >
                           <PackageCheck className="h-3.5 w-3.5" />
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => handleAction(rowKey, "order", p.product_name)}
-                          title="Order"
-                          className={cn(
-                            "h-7 w-7 rounded-md flex items-center justify-center transition-all cursor-pointer border",
-                            activeAction === "order"
-                              ? "bg-blue-600 text-white border-blue-700"
-                              : "bg-white text-blue-700 border-slate-200 hover:bg-blue-50",
+                        <div className="flex flex-col items-center">
+                          <button
+                            type="button"
+                            onClick={() => handleAction(rowKey, "order", p.product_name)}
+                            title="Order"
+                            className={cn(
+                              "h-7 w-7 rounded-md flex items-center justify-center transition-all cursor-pointer border",
+                              activeAction === "order"
+                                ? "bg-blue-600 text-white border-blue-700"
+                                : "bg-white text-blue-700 border-slate-200 hover:bg-blue-50",
+                            )}
+                          >
+                            <Truck className="h-3.5 w-3.5" />
+                          </button>
+                          {(activeAction === "order" || Boolean(itemNotes[rowKey])) && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleOpenViewNoteModal(rowKey, p)
+                              }}
+                              title={itemNotes[rowKey] ? `Internal Note: ${itemNotes[rowKey]}` : "View / Add Internal Note"}
+                              className={cn(
+                                "mt-1 h-4 w-4 rounded flex items-center justify-center transition-all cursor-pointer relative",
+                                itemNotes[rowKey]
+                                  ? "text-blue-700 hover:text-blue-900 hover:bg-blue-200/60"
+                                  : "text-slate-400 hover:text-slate-600 hover:bg-slate-100",
+                              )}
+                            >
+                              <FileText className="h-3 w-3" />
+                              {Boolean(itemNotes[rowKey]) && (
+                                <span className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-blue-600 ring-1 ring-white" />
+                              )}
+                            </button>
                           )}
-                        >
-                          <Truck className="h-3.5 w-3.5" />
-                        </button>
+                        </div>
                         <button
                           type="button"
                           onClick={() => handleAction(rowKey, "postponed", p.product_name)}
@@ -1326,6 +2299,401 @@ export default function ProductsToPurchaseTab({
           </div>
         </div>
       </div>
+
+      {/* Internal Note Modal */}
+      <Dialog
+        open={Boolean(orderModalProduct)}
+        onOpenChange={(open) => {
+          if (!open) handleOrderModalBack()
+        }}
+      >
+        <DialogContent className="sm:max-w-md bg-white border border-slate-200 shadow-xl p-5">
+          <DialogHeader>
+            <div className="flex items-center gap-2.5">
+              <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 shrink-0">
+                <FileText className="h-4 w-4" />
+              </div>
+              <div className="text-left">
+                <DialogTitle className="text-base font-bold text-slate-900">
+                  Internal Note
+                </DialogTitle>
+                <DialogDescription className="text-xs text-slate-500">
+                  Add internal notes or instructions for ordering this product
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+
+          {orderModalProduct && (
+            <div className="space-y-3.5 py-1">
+              {/* Product summary */}
+              <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-3 space-y-1.5">
+                <div className="font-semibold text-xs text-slate-900">
+                  {orderModalProduct.product.product_name}
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-600">
+                  {orderModalProduct.product.variant_name &&
+                    orderModalProduct.product.variant_name.toLowerCase() !== "default" && (
+                      <span className="rounded bg-white px-1.5 py-0.5 border border-slate-200 font-medium">
+                        Variant: {orderModalProduct.product.variant_name}
+                      </span>
+                    )}
+                  {orderModalProduct.product.variant_sku && (
+                    <span className="font-mono text-slate-500">
+                      SKU: {orderModalProduct.product.variant_sku}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center justify-between pt-1 border-t border-slate-200 text-xs">
+                  <span className="text-slate-500">
+                    Required:{" "}
+                    <strong className="text-rose-600">
+                      {Number(orderModalProduct.product.required_quantity) || 0}
+                    </strong>
+                  </span>
+                  {Number(orderModalProduct.product.unit_price) > 0 && (
+                    <span className="text-slate-500">
+                      Unit Price:{" "}
+                      <strong className="text-slate-800">
+                        {currency} {Number(orderModalProduct.product.unit_price).toFixed(2)}
+                      </strong>
+                    </span>
+                  )}
+                  <span className="text-slate-500">
+                    Current Stock:{" "}
+                    <strong className="text-slate-700">
+                      {Number(orderModalProduct.product.current_stock) || 0}
+                    </strong>
+                  </span>
+                </div>
+              </div>
+
+              {/* Internal Note field */}
+              <div className="space-y-1.5">
+                <Label
+                  htmlFor="internal-note-input"
+                  className="text-xs font-semibold text-slate-700"
+                >
+                  Internal Note
+                </Label>
+                <Textarea
+                  id="internal-note-input"
+                  placeholder="Add internal note or order instructions..."
+                  value={internalNote}
+                  onChange={(e) => setInternalNote(e.target.value)}
+                  className="min-h-[90px] text-xs resize-none bg-white border-slate-300 focus:border-blue-500 focus:ring-blue-500"
+                  autoFocus
+                />
+                <p className="text-[11px] text-slate-400">
+                  {internalNote.trim().length > 0
+                    ? "Click Save to proceed to the new purchase page with this note."
+                    : "Click Skip to proceed to the new purchase page without a note."}
+                </p>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="flex items-center justify-between sm:justify-between gap-2 pt-2 border-t border-slate-100">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleOrderModalBack}
+              className="h-8 px-3 text-xs gap-1.5 border-slate-300 text-slate-700 hover:bg-slate-100 cursor-pointer"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              <span>Back</span>
+            </Button>
+
+            <Button
+              type="button"
+              onClick={handleOrderModalSkipOrSave}
+              className={cn(
+                "h-8 px-4 text-xs font-semibold gap-1.5 cursor-pointer transition-colors shadow-2xs",
+                internalNote.trim().length > 0
+                  ? "bg-blue-600 hover:bg-blue-700 text-white"
+                  : "bg-slate-800 hover:bg-slate-900 text-white",
+              )}
+            >
+              {internalNote.trim().length > 0 ? (
+                <>
+                  <Save className="h-3.5 w-3.5" />
+                  <span>Save</span>
+                </>
+              ) : (
+                <>
+                  <span>Skip</span>
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* View / Edit Note Modal */}
+      <Dialog
+        open={Boolean(viewNoteModal)}
+        onOpenChange={(open) => {
+          if (!open) setViewNoteModal(null)
+        }}
+      >
+        <DialogContent
+          className="sm:max-w-md bg-white border border-slate-200 shadow-xl p-5"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <DialogHeader>
+            <div className="flex items-center gap-2.5">
+              <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 shrink-0">
+                <FileText className="h-4 w-4" />
+              </div>
+              <div className="text-left">
+                <DialogTitle className="text-base font-bold text-slate-900">
+                  Internal Note
+                </DialogTitle>
+                <DialogDescription className="text-xs text-slate-500">
+                  View and update internal notes for this product order
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+
+          {viewNoteModal && (
+            <div className="space-y-3.5 py-1">
+              {/* Product summary */}
+              <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-3 space-y-1.5">
+                <div className="font-semibold text-xs text-slate-900">
+                  {viewNoteModal.product.product_name}
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-600">
+                  {viewNoteModal.product.variant_name &&
+                    viewNoteModal.product.variant_name.toLowerCase() !== "default" && (
+                      <span className="rounded bg-white px-1.5 py-0.5 border border-slate-200 font-medium">
+                        Variant: {viewNoteModal.product.variant_name}
+                      </span>
+                    )}
+                  {viewNoteModal.product.variant_sku && (
+                    <span className="font-mono text-slate-500">
+                      SKU: {viewNoteModal.product.variant_sku}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center justify-between pt-1 border-t border-slate-200 text-xs">
+                  <span className="text-slate-500">
+                    Required:{" "}
+                    <strong className="text-rose-600">
+                      {Number(viewNoteModal.product.required_quantity) || 0}
+                    </strong>
+                  </span>
+                  {Number(viewNoteModal.product.unit_price) > 0 && (
+                    <span className="text-slate-500">
+                      Unit Price:{" "}
+                      <strong className="text-slate-800">
+                        {currency} {Number(viewNoteModal.product.unit_price).toFixed(2)}
+                      </strong>
+                    </span>
+                  )}
+                  <span className="text-slate-500">
+                    Current Stock:{" "}
+                    <strong className="text-slate-700">
+                      {Number(viewNoteModal.product.current_stock) || 0}
+                    </strong>
+                  </span>
+                </div>
+              </div>
+
+              {/* Note Content */}
+              <div className="space-y-1.5">
+                <Label
+                  htmlFor="view-internal-note-input"
+                  className="text-xs font-semibold text-slate-700"
+                >
+                  Internal Note Content
+                </Label>
+                <Textarea
+                  id="view-internal-note-input"
+                  placeholder="No note entered yet. Add notes here..."
+                  value={viewNoteModal.note}
+                  onChange={(e) =>
+                    setViewNoteModal((prev) =>
+                      prev ? { ...prev, note: e.target.value } : null
+                    )
+                  }
+                  className="min-h-[100px] text-xs resize-none bg-white border-slate-300 focus:border-blue-500 focus:ring-blue-500"
+                  autoFocus
+                />
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="flex items-center justify-between sm:justify-between gap-2 pt-2 border-t border-slate-100">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setViewNoteModal(null)}
+              className="h-8 px-3 text-xs border-slate-300 text-slate-700 hover:bg-slate-100 cursor-pointer"
+            >
+              Close
+            </Button>
+
+            <Button
+              type="button"
+              onClick={handleSaveViewNote}
+              className="h-8 px-3 text-xs bg-blue-600 hover:bg-blue-700 text-white font-medium cursor-pointer shadow-xs"
+            >
+              <Save className="h-3.5 w-3.5 mr-1" />
+              Save Note
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* BULK ORDER / PROCEED TO PURCHASE MODAL */}
+      <Dialog
+        open={bulkOrderModalOpen}
+        onOpenChange={(open) => {
+          if (!open) setBulkOrderModalOpen(false)
+        }}
+      >
+        <DialogContent
+          className="sm:max-w-lg bg-white border border-slate-200 shadow-xl p-5"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <DialogHeader>
+            <div className="flex items-center gap-2.5">
+              <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 shrink-0">
+                <ShoppingCart className="h-4 w-4" />
+              </div>
+              <div className="text-left">
+                <DialogTitle className="text-base font-bold text-slate-900">
+                  Proceed to Purchase
+                </DialogTitle>
+                <DialogDescription className="text-xs text-slate-500">
+                  Review selected products and add internal order note before proceeding to purchase entry
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+
+          <div className="space-y-3.5 py-1">
+            {/* Products summary card */}
+            <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-3 space-y-2">
+              <div className="flex items-center justify-between text-xs font-semibold text-slate-900">
+                <span className="flex items-center gap-1.5">
+                  <span className="inline-flex items-center justify-center h-5 px-2 rounded-full bg-blue-100 text-blue-800 text-[11px] font-bold">
+                    {selectedProducts.length}
+                  </span>
+                  <span>Products Selected</span>
+                </span>
+                <span className="text-slate-600">
+                  Total Units: <strong className="text-slate-900">{bulkTotalQty}</strong>
+                </span>
+              </div>
+
+              {/* Scrollable list preview of selected products */}
+              <div className="max-h-36 overflow-y-auto space-y-1 pr-1 divide-y divide-slate-100">
+                {selectedProducts.map((p) => {
+                  const rKey = getRowKey(p)
+                  const req = Math.max(1, Number(p.required_quantity) || 1)
+                  const unitP = Number(
+                    (Number(p.unit_price) > 0 ? p.unit_price : null) ??
+                    (Number(p.variant_cost_price) > 0 ? p.variant_cost_price : null) ??
+                    (Number(p.variant_wholesale_price) > 0 ? p.variant_wholesale_price : null) ??
+                    (Number(p.product_wholesale_price) > 0 ? p.product_wholesale_price : null) ??
+                    (Number(p.variant_price) > 0 ? p.variant_price : null) ??
+                    (Number(p.product_price) > 0 ? p.product_price : null) ??
+                    0,
+                  )
+                  return (
+                    <div key={rKey} className="flex items-center justify-between text-[11px] py-1 text-slate-700">
+                      <div className="truncate pr-2">
+                        <span className="font-medium text-slate-900">{p.product_name}</span>
+                        {p.variant_name && p.variant_name.toLowerCase() !== "default" && (
+                          <span className="text-slate-500 ml-1">({p.variant_name})</span>
+                        )}
+                      </div>
+                      <div className="shrink-0 flex items-center gap-2 text-slate-600 font-mono">
+                        <span className="text-rose-600 font-semibold">{req} qty</span>
+                        {unitP > 0 && (
+                          <span className="text-slate-500">
+                            @{currency} {unitP.toFixed(2)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+
+              {bulkTotalEstCost > 0 && (
+                <div className="flex items-center justify-between pt-2 border-t border-slate-200 text-xs">
+                  <span className="text-slate-500 font-medium">Estimated Purchase Total:</span>
+                  <strong className="text-blue-700 font-bold">
+                    {currency} {bulkTotalEstCost.toFixed(2)}
+                  </strong>
+                </div>
+              )}
+            </div>
+
+            {/* Internal Note input */}
+            <div className="space-y-1.5">
+              <Label
+                htmlFor="bulk-internal-note-input"
+                className="text-xs font-semibold text-slate-700"
+              >
+                Internal Note (Optional)
+              </Label>
+              <Textarea
+                id="bulk-internal-note-input"
+                placeholder="Add internal note or order instructions for these products..."
+                value={bulkInternalNote}
+                onChange={(e) => setBulkInternalNote(e.target.value)}
+                className="min-h-[90px] text-xs resize-none bg-white border-slate-300 focus:border-blue-500 focus:ring-blue-500"
+                autoFocus
+              />
+              <p className="text-[11px] text-slate-400">
+                {bulkInternalNote.trim().length > 0
+                  ? "Click Save to proceed to the new purchase page with this note."
+                  : "Click Skip to proceed to the new purchase page without a note."}
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter className="flex items-center justify-between sm:justify-between gap-2 pt-2 border-t border-slate-100">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setBulkOrderModalOpen(false)}
+              className="h-8 px-3 text-xs gap-1.5 border-slate-300 text-slate-700 hover:bg-slate-100 cursor-pointer"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              <span>Back</span>
+            </Button>
+
+            <Button
+              type="button"
+              onClick={handleBulkOrderSkipOrSave}
+              className={cn(
+                "h-8 px-4 text-xs font-semibold gap-1.5 cursor-pointer transition-colors shadow-2xs",
+                bulkInternalNote.trim().length > 0
+                  ? "bg-blue-600 hover:bg-blue-700 text-white"
+                  : "bg-slate-800 hover:bg-slate-900 text-white",
+              )}
+            >
+              {bulkInternalNote.trim().length > 0 ? (
+                <>
+                  <Save className="h-3.5 w-3.5" />
+                  <span>Save</span>
+                </>
+              ) : (
+                <>
+                  <span>Skip</span>
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

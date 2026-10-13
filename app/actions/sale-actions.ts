@@ -3372,9 +3372,30 @@ export async function getOrCreateTrackingToken(saleId: number) {
   }
 }
 
+async function ensureProductPurchaseActionTable() {
+  try {
+    await sql`
+      CREATE TABLE IF NOT EXISTS product_purchase_actions (
+        id SERIAL PRIMARY KEY,
+        device_id INTEGER NOT NULL,
+        row_key VARCHAR(100) NOT NULL,
+        action VARCHAR(50) NOT NULL,
+        action_order INTEGER DEFAULT 0,
+        note TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(device_id, row_key)
+      )
+    `
+  } catch (e) {
+    console.warn("ensureProductPurchaseActionTable warning:", e)
+  }
+}
+
 export async function getProductsToPurchase(deviceId: number, options: { dateFrom?: string, dateTo?: string } = {}) {
   try {
     resetConnectionState()
+    await ensureProductPurchaseActionTable()
     const endExclusive = options.dateTo ? getExclusiveEndDate(options.dateTo) : null;
     const dateFrom = options.dateFrom || null;
 
@@ -3399,9 +3420,57 @@ export async function getProductsToPurchase(deviceId: number, options: { dateFro
         r.product_variant_id,
         p.name as product_name,
         p.image_url,
+        p.price as product_price,
+        p.wholesale_price as product_wholesale_price,
+        p.msp as product_msp,
+        p.mrp as product_mrp,
+        p.barcode as product_barcode,
+        p.shelf as product_shelf,
         pv.name as variant_name,
         pv.sku as variant_sku,
+        pv.cost_price as variant_cost_price,
+        pv.wholesale_price as variant_wholesale_price,
+        pv.price as variant_price,
+        pv.msp as variant_msp,
+        pv.mrp as variant_mrp,
+        pv.barcode as variant_barcode,
+        pv.shelf as variant_shelf,
         r.required_quantity,
+        COALESCE(
+          NULLIF(pv.cost_price, 0),
+          (
+            SELECT pb.cost_price
+            FROM product_batches pb
+            WHERE pb.product_variant_id = r.product_variant_id AND pb.cost_price > 0
+            ORDER BY pb.id DESC
+            LIMIT 1
+          ),
+          (
+            SELECT pi.price
+            FROM purchase_items pi
+            WHERE pi.product_id = r.product_id
+              AND (r.product_variant_id IS NULL OR pi.product_variant_id = r.product_variant_id)
+              AND pi.price > 0
+            ORDER BY pi.id DESC
+            LIMIT 1
+          ),
+          NULLIF(pv.wholesale_price, 0),
+          NULLIF(p.wholesale_price, 0),
+          NULLIF(pv.price, 0),
+          p.price,
+          0
+        ) as unit_price,
+        COALESCE(
+          (
+            SELECT pi.tax_percentage
+            FROM purchase_items pi
+            WHERE pi.product_id = r.product_id
+              AND (r.product_variant_id IS NULL OR pi.product_variant_id = r.product_variant_id)
+            ORDER BY pi.id DESC
+            LIMIT 1
+          ),
+          0
+        ) as tax_percentage,
         CASE 
           WHEN r.product_variant_id IS NOT NULL THEN
             COALESCE((
@@ -3416,15 +3485,73 @@ export async function getProductsToPurchase(deviceId: number, options: { dateFro
               FROM product_device_stock pds
               WHERE pds.product_id = r.product_id AND pds.device_id = ${deviceId}
             ), 0)
-        END as current_stock
+        END as current_stock,
+        ppa.action as saved_action,
+        ppa.action_order as saved_action_order,
+        ppa.note as saved_note
       FROM RequiredItems r
       JOIN products p ON r.product_id = p.id
       LEFT JOIN product_variants pv ON r.product_variant_id = pv.id
+      LEFT JOIN product_purchase_actions ppa
+        ON ppa.device_id = ${deviceId}
+        AND ppa.row_key = (r.product_id::text || '-' || COALESCE(r.product_variant_id::text, 'base'))
       ORDER BY p.name ASC, pv.name ASC
     `
     return { success: true, data: data as any[] }
   } catch (error: any) {
     console.error("Failed to get products to purchase:", error)
+    return { success: false, message: error.message }
+  }
+}
+
+export async function saveProductPurchaseAction(
+  deviceId: number,
+  rowKey: string,
+  action: string | null,
+  actionOrder: number = 0,
+  note: string | null = null,
+) {
+  try {
+    resetConnectionState()
+    await ensureProductPurchaseActionTable()
+    if (!action) {
+      await sql`
+        DELETE FROM product_purchase_actions
+        WHERE device_id = ${deviceId} AND row_key = ${rowKey}
+      `
+    } else {
+      await sql`
+        INSERT INTO product_purchase_actions (device_id, row_key, action, action_order, note, updated_at)
+        VALUES (${deviceId}, ${rowKey}, ${action}, ${actionOrder}, ${note}, NOW())
+        ON CONFLICT (device_id, row_key)
+        DO UPDATE SET action = ${action}, action_order = ${actionOrder}, note = ${note}, updated_at = NOW()
+      `
+    }
+    return { success: true }
+  } catch (error: any) {
+    console.error("Failed to save product purchase action:", error)
+    return { success: false, message: error.message }
+  }
+}
+
+export async function saveProductPurchaseActionsBulk(
+  deviceId: number,
+  items: Array<{ rowKey: string; action: string; actionOrder?: number; note?: string | null }>,
+) {
+  try {
+    resetConnectionState()
+    await ensureProductPurchaseActionTable()
+    for (const item of items) {
+      await sql`
+        INSERT INTO product_purchase_actions (device_id, row_key, action, action_order, note, updated_at)
+        VALUES (${deviceId}, ${item.rowKey}, ${item.action}, ${item.actionOrder ?? 0}, ${item.note ?? null}, NOW())
+        ON CONFLICT (device_id, row_key)
+        DO UPDATE SET action = ${item.action}, action_order = ${item.actionOrder ?? 0}, note = ${item.note ?? null}, updated_at = NOW()
+      `
+    }
+    return { success: true }
+  } catch (error: any) {
+    console.error("Failed to save bulk product purchase actions:", error)
     return { success: false, message: error.message }
   }
 }

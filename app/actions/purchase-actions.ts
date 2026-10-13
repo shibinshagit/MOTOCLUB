@@ -548,6 +548,7 @@ export async function createPurchase(formData: FormData) {
   const courierCharge = Number.parseFloat(formData.get("courier_charge") as string) || 0
   const courierChargePercentage = Number.parseFloat(formData.get("courier_charge_percentage") as string) || 0
   const discount = Number.parseFloat(formData.get("discount") as string) || Number.parseFloat(formData.get("discount_amount") as string) || 0
+  const notes = (formData.get("notes") as string)?.trim() || null
 
   // Parse optional payments array from JSON string
   const paymentsJson = formData.get("payments") as string
@@ -651,12 +652,12 @@ export async function createPurchase(formData: FormData) {
         INSERT INTO purchases (
           supplier, total_amount, status, payment_method, purchase_status, 
           created_by, device_id, purchase_date, received_amount,
-          courier_charge, courier_charge_percentage, discount
+          courier_charge, courier_charge_percentage, discount, notes
         )
         VALUES (
           ${supplier}, ${totalAmount}, ${status}, ${primaryPaymentMethod}, ${purchaseStatus}, 
           ${userId}, ${deviceId}, ${purchaseDate}, ${finalReceivedAmount},
-          ${courierCharge}, ${courierChargePercentage}, ${discount}
+          ${courierCharge}, ${courierChargePercentage}, ${discount}, ${notes}
         )
         RETURNING *
       `
@@ -1038,6 +1039,7 @@ export async function updatePurchase(formData: FormData) {
   const courierCharge = Number.parseFloat(formData.get("courier_charge") as string) || 0
   const courierChargePercentage = Number.parseFloat(formData.get("courier_charge_percentage") as string) || 0
   const discount = Number.parseFloat(formData.get("discount") as string) || Number.parseFloat(formData.get("discount_amount") as string) || 0
+  const notes = (formData.get("notes") as string)?.trim() || null
 
   // Parse optional payments array from JSON string
   const paymentsJson = formData.get("payments") as string
@@ -1139,7 +1141,8 @@ export async function updatePurchase(formData: FormData) {
             received_amount = ${finalReceivedAmount},
             courier_charge = ${courierCharge},
             courier_charge_percentage = ${courierChargePercentage},
-            discount = ${discount}
+            discount = ${discount},
+            notes = ${notes}
         WHERE id = ${purchaseId} AND device_id = ${deviceId}
         RETURNING *
       `

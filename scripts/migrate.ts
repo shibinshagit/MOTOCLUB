@@ -1051,6 +1051,23 @@ async function createTables() {
     await sql`CREATE INDEX IF NOT EXISTS idx_crm_lead_products_product ON crm_lead_products(product_id)`
   })
 
+  await run("product_purchase_actions", async () => {
+    await sql`
+      CREATE TABLE IF NOT EXISTS product_purchase_actions (
+        id SERIAL PRIMARY KEY,
+        device_id INTEGER NOT NULL,
+        row_key VARCHAR(100) NOT NULL,
+        action VARCHAR(50) NOT NULL,
+        action_order INTEGER DEFAULT 0,
+        note TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(device_id, row_key)
+      )
+    `
+    await sql`CREATE INDEX IF NOT EXISTS idx_ppa_device_key ON product_purchase_actions(device_id, row_key)`
+  })
+
 }
 
 async function upgradeLegacyColumns() {
