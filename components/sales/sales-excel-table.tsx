@@ -34,6 +34,7 @@ import {
   getSaleDetails,
   getPaginatedUserSales,
   getSalesSummaryCards,
+  getSalesByIds,
   updateSaleFulfillmentDetails,
 } from "@/app/actions/sale-actions"
 import {
@@ -409,7 +410,10 @@ export default function SalesExcelTable({
 
   const [cardFilter, setCardFilter] = useState<"all" | "today" | "pending" | "critical">("all")
   const [typeFilter, setTypeFilter] = useState<"all" | "normal" | "job_card">("all")
+  const [typeOfSaleFilter, setTypeOfSaleFilter] = useState<"all" | "walk in" | "courier">("all")
   const [selectedSales, setSelectedSales] = useState<number[]>([])
+  const [allMatchingSales, setAllMatchingSales] = useState<{ id: number; isJobCard: boolean }[]>([])
+  const [loadedSalesCache, setLoadedSalesCache] = useState<Record<number, any>>({})
   const [expandedSaleId, setExpandedSaleId] = useState<number | null>(null)
   const [isBreakdownModalOpen, setIsBreakdownModalOpen] = useState(false)
 
@@ -429,6 +433,16 @@ export default function SalesExcelTable({
   const [hasFetchedServer, setHasFetchedServer] = useState(false)
   const [serverError, setServerError] = useState<string | null>(null)
   const latestFetchIdRef = useRef(0)
+
+  const allMatchingIds = useMemo(() => allMatchingSales.map((s) => s.id), [allMatchingSales])
+  const allMatchingJobCardIds = useMemo(
+    () => new Set(allMatchingSales.filter((s) => s.isJobCard).map((s) => s.id)),
+    [allMatchingSales],
+  )
+  const selectedJobCardCount = useMemo(
+    () => selectedSales.filter((id) => allMatchingJobCardIds.has(id)).length,
+    [selectedSales, allMatchingJobCardIds],
+  )
 
   // Column dropdown options come from the rows of the current page (the list is server-paginated).
   const uniqueValues = useMemo(() => {
@@ -463,6 +477,7 @@ export default function SalesExcelTable({
           dateFrom: globalDateRange?.from,
           dateTo: globalDateRange?.to,
           typeFilter,
+          typeOfSaleFilter,
           cardFilter,
           searchTerm: debouncedSearch,
           onlyPosUpdated,
@@ -472,6 +487,7 @@ export default function SalesExcelTable({
           dateFrom: globalDateRange?.from,
           dateTo: globalDateRange?.to,
           typeFilter,
+          typeOfSaleFilter,
           searchTerm: debouncedSearch,
           onlyPosUpdated,
           excludePendingAndPickup: isLogistics,
@@ -483,6 +499,14 @@ export default function SalesExcelTable({
         setServerSales(salesRes.data)
         setTotalServerCount(salesRes.totalCount)
         setTotalServerPages(salesRes.totalPages)
+        setAllMatchingSales(salesRes.allMatching || [])
+        setLoadedSalesCache((prev) => {
+          const next = { ...prev }
+          for (const s of (salesRes.data as any[])) {
+            next[Number(s.id)] = s
+          }
+          return next
+        })
         setServerError(null)
       } else {
         setServerError(salesRes.message || "Failed to load sales")
@@ -500,11 +524,12 @@ export default function SalesExcelTable({
         setHasFetchedServer(true)
       }
     }
-  }, [deviceId, page, pageSize, globalDateRange?.from, globalDateRange?.to, typeFilter, cardFilter, debouncedSearch, onlyPosUpdated, isLogistics])
+  }, [deviceId, page, pageSize, globalDateRange?.from, globalDateRange?.to, typeFilter, typeOfSaleFilter, cardFilter, debouncedSearch, onlyPosUpdated, isLogistics])
 
-  // A new date range starts again from the first page.
+  // A new date range starts again from the first page and clears selection.
   useEffect(() => {
     setPage(1)
+    setSelectedSales([])
   }, [globalDateRange?.from, globalDateRange?.to])
 
   // Re-run when query inputs change or the parent signals a mutation (refreshKey).
@@ -637,6 +662,7 @@ export default function SalesExcelTable({
     setColumnFilters(buildInitialFilters([], valueGetters))
     setCardFilter("all")
     setTypeFilter("all")
+    setTypeOfSaleFilter("all")
     setPage(1)
     setSelectedSales([])
   }
@@ -725,11 +751,41 @@ export default function SalesExcelTable({
     }
   }
 
+  const resolveSelectedSalesList = async (): Promise<any[]> => {
+    if (selectedSales.length === 0) return []
+
+    const cache: Record<number, any> = { ...loadedSalesCache }
+    for (const sale of displaySales) {
+      cache[sale.id] = sale
+    }
+
+    const missingIds = selectedSales.filter((id) => !cache[id])
+
+    if (missingIds.length > 0 && deviceId) {
+      try {
+        const res = await getSalesByIds(deviceId, missingIds)
+        if (res.success && res.data) {
+          for (const s of (res.data as any[])) {
+            cache[Number(s.id)] = s
+          }
+          setLoadedSalesCache((prev) => ({ ...prev, ...cache }))
+        }
+      } catch (e) {
+        console.error("Failed to fetch missing sales for printing:", e)
+      }
+    }
+
+    return selectedSales.map((id) => cache[id]).filter(Boolean)
+  }
+
   const handleBulkPrintInvoices = async () => {
-    if (selectedSalesList.length === 0) return
+    if (selectedSales.length === 0) return
     setIsGeneratingReport(true)
     try {
-      for (const sale of selectedSalesList) {
+      const fullList = await resolveSelectedSalesList()
+      if (fullList.length === 0) return
+
+      for (const sale of fullList) {
         if (sale.items && sale.items.length > 0) {
           printSalesReceipt(sale, sale.items, "INR", {}, false)
         } else {
@@ -739,7 +795,7 @@ export default function SalesExcelTable({
           }
         }
       }
-      notifySuccess(toast, `Sent ${selectedSalesList.length} invoice(s) to print.`)
+      notifySuccess(toast, `Sent ${fullList.length} invoice(s) to print.`)
     } catch (err: any) {
       notifyError(toast, err?.message || "Failed to print selected invoices.")
     } finally {
@@ -747,20 +803,38 @@ export default function SalesExcelTable({
     }
   }
 
-  const handleBulkPrintLabels = () => {
-    if (selectedSalesList.length === 0) return
-    printBatchJobCards(selectedSalesList, "INR")
-    notifySuccess(toast, `Opened print window for ${selectedSalesList.length} delivery label(s).`)
+  const handleBulkPrintLabels = async () => {
+    if (selectedSales.length === 0) return
+    setIsGeneratingReport(true)
+    try {
+      const fullList = await resolveSelectedSalesList()
+      if (fullList.length === 0) return
+      printBatchJobCards(fullList, "INR")
+      notifySuccess(toast, `Opened print window for ${fullList.length} delivery label(s).`)
+    } catch (err: any) {
+      notifyError(toast, err?.message || "Failed to print labels.")
+    } finally {
+      setIsGeneratingReport(false)
+    }
   }
 
-  const handleBulkPrintJobCards = () => {
-    const jobCardSales = selectedSalesList.filter(isJobCardSale)
-    if (jobCardSales.length === 0) {
-      notifyWarning(toast, "No Job Card orders selected.")
-      return
+  const handleBulkPrintJobCards = async () => {
+    if (selectedSales.length === 0) return
+    setIsGeneratingReport(true)
+    try {
+      const fullList = await resolveSelectedSalesList()
+      const jobCardSales = fullList.filter(isJobCardSale)
+      if (jobCardSales.length === 0) {
+        notifyWarning(toast, "No Job Card orders selected.")
+        return
+      }
+      printBatchJobCards(jobCardSales, "INR")
+      notifySuccess(toast, `Opened print window for ${jobCardSales.length} Job Card(s).`)
+    } catch (err: any) {
+      notifyError(toast, err?.message || "Failed to print Job Cards.")
+    } finally {
+      setIsGeneratingReport(false)
     }
-    printBatchJobCards(jobCardSales, "INR")
-    notifySuccess(toast, `Opened print window for ${jobCardSales.length} Job Card(s).`)
   }
 
   const stickyActionHeaderClass =
@@ -1121,6 +1195,15 @@ export default function SalesExcelTable({
             <span className="text-xs font-bold text-violet-900">
               {selectedSales.length} {selectedSales.length === 1 ? "order" : "orders"} selected
             </span>
+            {allMatchingIds.length > selectedSales.length && (
+              <button
+                type="button"
+                onClick={() => setSelectedSales(allMatchingIds)}
+                className="text-xs font-semibold text-violet-700 hover:text-violet-950 underline ml-1 cursor-pointer"
+              >
+                Select all {allMatchingIds.length} orders
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setSelectedSales([])}
@@ -1153,7 +1236,7 @@ export default function SalesExcelTable({
               Print Labels ({selectedSales.length})
             </Button>
 
-            {selectedSalesList.some(isJobCardSale) && (
+            {selectedJobCardCount > 0 && (
               <Button
                 size="sm"
                 className="h-8 text-xs gap-1.5 bg-violet-600 hover:bg-violet-700 text-white font-medium flex-1 sm:flex-initial"
@@ -1161,7 +1244,7 @@ export default function SalesExcelTable({
                 disabled={isFetchingServer || isGeneratingReport}
               >
                 <Printer className="h-3.5 w-3.5" />
-                Print Job Cards ({selectedSalesList.filter(isJobCardSale).length})
+                Print Job Cards ({selectedJobCardCount})
               </Button>
             )}
           </div>
@@ -1239,7 +1322,7 @@ export default function SalesExcelTable({
 
           {/* ACTION BUTTONS ROW */}
           <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-200/60">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2.5">
               <span className="text-xs font-medium text-slate-600">
                 {deviceId ? (
                   `Showing ${displaySales.length > 0 ? (page - 1) * pageSize + 1 : 0}–${Math.min(
@@ -1256,6 +1339,58 @@ export default function SalesExcelTable({
                   {pendingSalesCount} Pending
                 </span>
               )}
+
+              {/* SLIDING FILTER PILL: All Sales | Walk in | Courier */}
+              <div className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-100/90 p-0.5 shadow-2xs">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTypeOfSaleFilter("all")
+                    setPage(1)
+                    setSelectedSales([])
+                  }}
+                  className={cn(
+                    "px-2.5 py-1 text-xs font-semibold rounded-md transition-all cursor-pointer whitespace-nowrap",
+                    typeOfSaleFilter === "all"
+                      ? "bg-white text-slate-900 shadow-2xs font-bold"
+                      : "text-slate-600 hover:text-slate-900",
+                  )}
+                >
+                  All Sales
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTypeOfSaleFilter("walk in")
+                    setPage(1)
+                    setSelectedSales([])
+                  }}
+                  className={cn(
+                    "px-2.5 py-1 text-xs font-semibold rounded-md transition-all cursor-pointer whitespace-nowrap",
+                    typeOfSaleFilter === "walk in"
+                      ? "bg-white text-slate-900 shadow-2xs font-bold"
+                      : "text-slate-600 hover:text-slate-900",
+                  )}
+                >
+                  Walk in
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTypeOfSaleFilter("courier")
+                    setPage(1)
+                    setSelectedSales([])
+                  }}
+                  className={cn(
+                    "px-2.5 py-1 text-xs font-semibold rounded-md transition-all cursor-pointer whitespace-nowrap",
+                    typeOfSaleFilter === "courier"
+                      ? "bg-white text-slate-900 shadow-2xs font-bold"
+                      : "text-slate-600 hover:text-slate-900",
+                  )}
+                >
+                  Courier
+                </button>
+              </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-1.5 w-full sm:w-auto">
@@ -1363,16 +1498,26 @@ export default function SalesExcelTable({
                   <th className="whitespace-nowrap px-2 py-1.5 text-center w-10">
                     <input
                       type="checkbox"
-                      className="h-4 w-4 rounded border-gray-300 text-violet-600 focus:ring-violet-600 cursor-pointer"
-                      checked={displaySales.length > 0 && selectedSales.length === displaySales.length}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setSelectedSales(displaySales.map((s) => s.id))
-                        } else {
-                          setSelectedSales([])
+                      ref={(el) => {
+                        if (el) {
+                          el.indeterminate =
+                            selectedSales.length > 0 && selectedSales.length < allMatchingIds.length
                         }
                       }}
-                      title="Select all visible orders"
+                      className="h-4 w-4 rounded border-gray-300 text-violet-600 focus:ring-violet-600 cursor-pointer"
+                      checked={allMatchingIds.length > 0 && selectedSales.length === allMatchingIds.length}
+                      onChange={() => {
+                        if (allMatchingIds.length > 0 && selectedSales.length === allMatchingIds.length) {
+                          setSelectedSales([])
+                        } else {
+                          setSelectedSales(allMatchingIds)
+                        }
+                      }}
+                      title={
+                        allMatchingIds.length > 0 && selectedSales.length === allMatchingIds.length
+                          ? "Deselect all orders"
+                          : `Select all ${allMatchingIds.length} orders across all pages`
+                      }
                     />
                   </th>
                   <th className="whitespace-nowrap px-1 py-1.5 text-center w-8"></th>
@@ -1819,6 +1964,40 @@ export default function SalesExcelTable({
 
           {/* MOBILE & TABLET CARD LIST VIEW (< 1024px) */}
           <div className="block lg:hidden divide-y divide-slate-200 bg-slate-50/50">
+            {allMatchingIds.length > 0 && (
+              <div className="p-3 bg-white border-b border-slate-200 flex items-center justify-between">
+                <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-700 select-none">
+                  <input
+                    type="checkbox"
+                    ref={(el) => {
+                      if (el) {
+                        el.indeterminate =
+                          selectedSales.length > 0 && selectedSales.length < allMatchingIds.length
+                      }
+                    }}
+                    className="h-4 w-4 rounded border-gray-300 text-violet-600 focus:ring-violet-600 cursor-pointer"
+                    checked={allMatchingIds.length > 0 && selectedSales.length === allMatchingIds.length}
+                    onChange={() => {
+                      if (allMatchingIds.length > 0 && selectedSales.length === allMatchingIds.length) {
+                        setSelectedSales([])
+                      } else {
+                        setSelectedSales(allMatchingIds)
+                      }
+                    }}
+                  />
+                  <span>
+                    {allMatchingIds.length > 0 && selectedSales.length === allMatchingIds.length
+                      ? "Deselect all"
+                      : `Select all ${allMatchingIds.length} orders`}
+                  </span>
+                </label>
+                {selectedSales.length > 0 && (
+                  <span className="text-xs font-bold text-violet-800">
+                    {selectedSales.length} selected
+                  </span>
+                )}
+              </div>
+            )}
             {!hasFetchedServer ? (
               <div className="p-4 space-y-3">
                 {[...Array(4)].map((_, i) => (

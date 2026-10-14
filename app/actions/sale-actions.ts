@@ -713,6 +713,7 @@ export interface GetPaginatedSalesOptions {
   dateFrom?: string
   dateTo?: string
   typeFilter?: "all" | "normal" | "job_card"
+  typeOfSaleFilter?: "all" | "walk in" | "courier"
   cardFilter?: "all" | "today" | "pending" | "critical"
   searchTerm?: string
   onlyPosUpdated?: boolean
@@ -721,7 +722,7 @@ export interface GetPaginatedSalesOptions {
 
 export async function getPaginatedUserSales(deviceId: number, options: GetPaginatedSalesOptions = {}) {
   if (!deviceId) {
-    return { success: false, message: "Device ID is required", data: [], totalCount: 0, page: 1, totalPages: 0 }
+    return { success: false, message: "Device ID is required", data: [], totalCount: 0, page: 1, totalPages: 0, allMatching: [], allIds: [] }
   }
 
   resetConnectionState()
@@ -737,6 +738,7 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
 
   const dateFrom = options.dateFrom || null
   const typeFilter = options.typeFilter || "all"
+  const typeOfSaleFilter = options.typeOfSaleFilter || "all"
   const cardFilter = options.cardFilter || "all"
   const onlyPosUpdated = options.onlyPosUpdated || false
   const excludePendingAndPickup = options.excludePendingAndPickup || false
@@ -850,6 +852,11 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
             OR (${typeFilter} = 'normal' AND (COALESCE(s.sale_type, '') != 'job_card' AND (s.tracking_id IS NULL OR s.tracking_id NOT LIKE 'JC-%')))
           )
           AND (
+            ${typeOfSaleFilter} = 'all'
+            OR (${typeOfSaleFilter} = 'walk in' AND LOWER(COALESCE(s.type_of_sale, 'walk in')) = 'walk in')
+            OR (${typeOfSaleFilter} = 'courier' AND LOWER(COALESCE(s.type_of_sale, '')) = 'courier')
+          )
+          AND (
             ${cardFilter} = 'all'
             OR (${cardFilter} = 'today' AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned') AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled' AND LOWER(COALESCE(s.delivery_status, '')) NOT IN ('returned', 'failed') AND COALESCE(s.sale_date, s.created_at)::date = CURRENT_DATE)
             OR (
@@ -904,7 +911,15 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
       `
 
       const countResult = await sql`
-        SELECT COUNT(*) as total
+        SELECT 
+          COUNT(*)::int as total,
+          COALESCE(
+            JSON_AGG(
+              JSON_BUILD_OBJECT('id', s.id, 'isJobCard', (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%'))
+              ORDER BY COALESCE(s.sale_date, s.created_at) DESC, s.id DESC
+            ) FILTER (WHERE s.id IS NOT NULL),
+            '[]'::json
+          ) as all_matching
         FROM sales s
         LEFT JOIN customers c ON s.customer_id = c.id
         LEFT JOIN staff st ON s.staff_id = st.id
@@ -921,6 +936,11 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
             ${typeFilter} = 'all'
             OR (${typeFilter} = 'job_card' AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%'))
             OR (${typeFilter} = 'normal' AND (COALESCE(s.sale_type, '') != 'job_card' AND (s.tracking_id IS NULL OR s.tracking_id NOT LIKE 'JC-%')))
+          )
+          AND (
+            ${typeOfSaleFilter} = 'all'
+            OR (${typeOfSaleFilter} = 'walk in' AND LOWER(COALESCE(s.type_of_sale, 'walk in')) = 'walk in')
+            OR (${typeOfSaleFilter} = 'courier' AND LOWER(COALESCE(s.type_of_sale, '')) = 'courier')
           )
           AND (
             ${cardFilter} = 'all'
@@ -977,11 +997,36 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
       const totalCount = Number(countResult[0]?.total || 0)
       const totalPages = Math.ceil(totalCount / pageSize)
 
+      const rawMatching = countResult[0]?.all_matching
+      let allMatching: { id: number; isJobCard: boolean }[] = []
+      if (Array.isArray(rawMatching)) {
+        allMatching = rawMatching
+          .map((item: any) => ({
+            id: Number(item?.id),
+            isJobCard: Boolean(item?.isJobCard),
+          }))
+          .filter((item) => !isNaN(item.id))
+      } else if (typeof rawMatching === "string") {
+        try {
+          const parsed = JSON.parse(rawMatching)
+          if (Array.isArray(parsed)) {
+            allMatching = parsed
+              .map((item: any) => ({
+                id: Number(item?.id),
+                isJobCard: Boolean(item?.isJobCard),
+              }))
+              .filter((item) => !isNaN(item.id))
+          }
+        } catch {}
+      }
+
       return {
         sales,
         totalCount,
         page,
         totalPages,
+        allMatching,
+        allIds: allMatching.map((m) => m.id),
       }
     })
 
@@ -993,6 +1038,8 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
       totalCount: result.totalCount,
       page: result.page,
       totalPages: result.totalPages,
+      allMatching: result.allMatching,
+      allIds: result.allIds,
     }
   } catch (error) {
     console.error("Get paginated user sales error:", error)
@@ -1003,7 +1050,124 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
       totalCount: 0,
       page: 1,
       totalPages: 0,
+      allMatching: [],
+      allIds: [],
     }
+  }
+}
+
+export async function getSalesByIds(deviceId: number, saleIds: number[]) {
+  if (!deviceId || !saleIds || saleIds.length === 0) {
+    return { success: true, data: [] }
+  }
+
+  resetConnectionState()
+
+  try {
+    const uniqueIds = Array.from(new Set(saleIds.map(Number))).filter((id) => !isNaN(id))
+    if (uniqueIds.length === 0) {
+      return { success: true, data: [] }
+    }
+
+    const allowEcom = isEcomAllowedDevice(deviceId)
+
+    const sales = await executeWithRetry(async () => {
+      return await sql`
+        SELECT 
+          s.id,
+          s.is_pos_updated,
+          COALESCE(s.sale_date, s.created_at) as sale_date,
+          s.created_at,
+          s.status,
+          s.payment_status,
+          s.payment_method,
+          s.fulfillment_type,
+          s.delivery_status,
+          s.tracking_id,
+          s.courier_service_name,
+          md.tracking_url_template as tracking_url_template,
+          s.total_amount,
+          s.received_amount,
+          s.advance_amount,
+          s.balance_amount,
+          s.sale_type,
+          s.type_of_sale,
+          s.source,
+          s.external_order_id,
+          s.customer_id,
+          s.customer_name_override,
+          s.customer_phone_override,
+          COALESCE(NULLIF(s.shipping_address, ''), c.address) as shipping_address,
+          COALESCE(NULLIF(s.shipping_street, ''), c.street) as shipping_street,
+          COALESCE(NULLIF(s.shipping_city, ''), c.city) as shipping_city,
+          COALESCE(NULLIF(s.shipping_district, ''), c.district) as shipping_district,
+          COALESCE(NULLIF(s.shipping_state, ''), c.state) as shipping_state,
+          COALESCE(NULLIF(s.shipping_pincode, ''), c.pincode) as shipping_pincode,
+          COALESCE(NULLIF(s.shipping_landmark, ''), c.landmark) as shipping_landmark,
+          COALESCE(NULLIF(s.shipping_address_type, ''), c.address_type) as shipping_address_type,
+          c.street as customer_street,
+          c.city as customer_city,
+          c.district as customer_district,
+          c.state as customer_state,
+          c.pincode as customer_pincode,
+          c.landmark as customer_landmark,
+          c.address as customer_address,
+          s.shipping_notes,
+          s.courier_paid_extra,
+          s.expense_courier,
+          s.expense_packing,
+          s.courier_partner_id,
+          s.courier_service_id,
+          s.packaging_type_id,
+          s.packaging_type_name,
+          s.weight_kg,
+          s.length_cm,
+          s.width_cm,
+          s.height_cm,
+          s.shipping_date,
+          s.shipped_at,
+          s.delivered_at,
+          COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name,
+          COALESCE(NULLIF(s.customer_phone_override, ''), c.phone, '') as customer_phone,
+          st.name as staff_name,
+          COALESCE(
+            (SELECT STRING_AGG(
+               CONCAT(
+                 COALESCE(p.name, sv.name, si.notes, 'Item'),
+                 CASE WHEN pv.name IS NOT NULL AND pv.name != '' AND LOWER(TRIM(pv.name)) NOT IN ('default', 'default variant', 'default-variant') THEN CONCAT(' - ', pv.name) ELSE '' END,
+                 ' × ',
+                 si.quantity
+               ),
+               E'\n'
+             )
+             FROM sale_items si
+             LEFT JOIN products p ON si.product_id = p.id AND NOT EXISTS (SELECT 1 FROM services s2 WHERE s2.id = si.product_id)
+             LEFT JOIN services sv ON si.product_id = sv.id
+             LEFT JOIN product_variants pv ON si.product_variant_id = pv.id
+             WHERE si.sale_id = s.id), ''
+          ) as products_text,
+          COALESCE(
+            (SELECT STRING_AGG(COALESCE(p.name, sv.name, si.notes, ''), ', ')
+             FROM sale_items si
+             LEFT JOIN products p ON si.product_id = p.id AND NOT EXISTS (SELECT 1 FROM services s2 WHERE s2.id = si.product_id)
+             LEFT JOIN services sv ON si.product_id = sv.id
+             WHERE si.sale_id = s.id), ''
+          ) as items_summary
+        FROM sales s
+        LEFT JOIN customers c ON s.customer_id = c.id
+        LEFT JOIN staff st ON s.staff_id = st.id
+        LEFT JOIN master_data md ON s.courier_partner_id = md.id
+        WHERE s.id = ANY(${uniqueIds})
+          AND (s.device_id = ${deviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
+        ORDER BY COALESCE(s.sale_date, s.created_at) DESC, s.id DESC
+      `
+    })
+
+    const filteredSales = await filterSalesForStaff(sales, deviceId)
+    return { success: true, data: filteredSales }
+  } catch (error) {
+    console.error("Get sales by ids error:", error)
+    return { success: false, message: "Failed to fetch sales by ids", data: [] }
   }
 }
 
@@ -1013,6 +1177,7 @@ export async function getSalesSummaryCards(
     dateFrom?: string
     dateTo?: string
     typeFilter?: string
+    typeOfSaleFilter?: "all" | "walk in" | "courier"
     searchTerm?: string
     onlyPosUpdated?: boolean
     excludePendingAndPickup?: boolean
@@ -1030,6 +1195,7 @@ export async function getSalesSummaryCards(
   const allowEcom = isEcomAllowedDevice(deviceId)
   const dateFrom = options.dateFrom || null
   const typeFilter = options.typeFilter || "all"
+  const typeOfSaleFilter = options.typeOfSaleFilter || "all"
   const onlyPosUpdated = options.onlyPosUpdated || false
   const excludePendingAndPickup = options.excludePendingAndPickup || false
 
@@ -1091,6 +1257,11 @@ export async function getSalesSummaryCards(
             ${typeFilter} = 'all'
             OR (${typeFilter} = 'job_card' AND (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%'))
             OR (${typeFilter} = 'normal' AND (COALESCE(s.sale_type, '') != 'job_card' AND (s.tracking_id IS NULL OR s.tracking_id NOT LIKE 'JC-%')))
+          )
+          AND (
+            ${typeOfSaleFilter} = 'all'
+            OR (${typeOfSaleFilter} = 'walk in' AND LOWER(COALESCE(s.type_of_sale, 'walk in')) = 'walk in')
+            OR (${typeOfSaleFilter} = 'courier' AND LOWER(COALESCE(s.type_of_sale, '')) = 'courier')
           )
           AND (
             ${searchPattern}::text IS NULL
