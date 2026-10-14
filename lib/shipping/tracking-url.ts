@@ -1,3 +1,5 @@
+import { getConfiguredAppUrl, PRODUCTION_APP_URL } from "@/lib/app-url"
+
 export function generateCourierTrackingUrl(
   courierServiceName?: string | null,
   trackingId?: string | null,
@@ -53,9 +55,11 @@ export function getPublicTrackingUrl(tokenOrTrackingId?: string | null): string 
   const clean = tokenOrTrackingId?.trim()
   if (!clean) return null
 
-  let baseUrl = process.env.NEXT_PUBLIC_APP_URL || "https://ims.motoclub.in"
+  const configured = getConfiguredAppUrl()
+  let baseUrl = configured || PRODUCTION_APP_URL
 
-  if (typeof window !== "undefined" && window.location?.origin) {
+  // Without an explicit config, follow the current host (e.g. preview deployments)
+  if (!configured && typeof window !== "undefined" && window.location?.origin) {
     if (!window.location.origin.includes("localhost") && !window.location.origin.includes("127.0.0.1")) {
       baseUrl = window.location.origin
     }

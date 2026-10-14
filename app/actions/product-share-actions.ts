@@ -1,6 +1,7 @@
 "use server"
 
 import { headers } from "next/headers"
+import { getConfiguredAppUrl } from "@/lib/app-url"
 import { sql } from "@/lib/db"
 import {
   buildShareUrl,
@@ -10,7 +11,7 @@ import {
 import { fetchSharedProductByToken, getShareExpiryDate, verifyProductShareAccess } from "@/lib/product-share-data"
 
 async function getShareBaseUrl() {
-  const configured = process.env.NEXT_PUBLIC_APP_URL?.trim().replace(/\/$/, "")
+  const configured = getConfiguredAppUrl()
   if (configured) return configured
 
   const headerList = await headers()
