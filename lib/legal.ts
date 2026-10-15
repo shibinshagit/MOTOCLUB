@@ -10,16 +10,16 @@ export const TERMS_URL = `${PRODUCTION_APP_URL}${TERMS_PATH}`
 // rendered as a highlighted placeholder, so the pages must not be submitted to
 // Meta until the business team has filled these in and legal has reviewed the text.
 export const LEGAL_DETAILS: Record<LegalDetailKey, string | null> = {
-  tradingName: null,
-  legalName: null,
-  registeredAddress: null,
-  contactEmail: null,
-  contactPhone: null,
-  effectiveDate: null,
-  lastUpdated: null,
+  tradingName: "MOTO CART ONLINE",
+  legalName: "MOTO CART",
+  registeredAddress: "MOTO CART, CHANGUVETTY, KOTTAKKAL, MALAPPURAM, KERALA, INDIA, PIN: 676503",
+  contactEmail: "murshidkallen@gmail.com",
+  contactPhone: "+91 8547315581",
+  effectiveDate: "1 January 2026",
+  lastUpdated: "15 October 2026",
   retentionPeriod: null,
   requestResponseTime: null,
-  governingLaw: null,
+  governingLaw: "the laws of Kerala, India",
 }
 
 export type LegalDetailKey =
