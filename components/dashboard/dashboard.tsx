@@ -61,6 +61,7 @@ import ProductsToPurchaseTab from "@/components/purchase-manager/products-to-pur
 import { BrandLogo } from "@/components/brand-logo"
 import { useStaffRestrictions } from "@/hooks/use-staff-restrictions"
 import { type StaffPageId } from "@/lib/staff-restrictions"
+import NotificationBell from "@/components/notifications/notification-bell"
 
 import { useAppSelector, useAppDispatch } from "@/store/hooks"
 import {
@@ -125,8 +126,18 @@ export function Dashboard({
   const tabParam = searchParams?.get("tab") as TabType | "home" | null
   const pathname = usePathname()
   const activeStaff = useAppSelector(selectActiveStaff)
+  const user = useAppSelector(selectUser)
   const isPurchaseManager = activeStaff?.role === "purchase_manager" || Boolean(pathname?.startsWith("/purchase-manager"))
   const isLogistics = isLogisticsProp ?? (activeStaff?.role === "logistics" || Boolean(pathname?.startsWith("/logistics")))
+  const isAdminStaff = Boolean(
+    (activeStaff?.role === "admin" || (!activeStaff && user?.role === "ADMIN")) &&
+      !isPurchaseManager &&
+      !isLogistics &&
+      activeStaff?.role !== "purchase_manager" &&
+      activeStaff?.role !== "logistics" &&
+      activeStaff?.role !== "staff" &&
+      activeStaff?.role !== "partner",
+  )
   const defaultContentTab: TabType = isPurchaseManager && onlyPosUpdatedSales && !hideProductsToPurchaseTab ? "products-to-purchase" : DEFAULT_CONTENT_TAB
 
   const resolveTab = useCallback((param: TabType | "stock" | "home" | "sales-orders" | null): TabType => {
@@ -152,7 +163,6 @@ export function Dashboard({
   const activeTabRef = useRef(activeTab)
   const lastContentTabRef = useRef(lastContentTab)
   const dispatch = useAppDispatch()
-  const user = useAppSelector(selectUser)
   const company = useAppSelector(selectCompany)
   const device = useAppSelector(selectDevice)
   const deviceLogo = useAppSelector(selectDeviceLogo)
@@ -710,6 +720,9 @@ export function Dashboard({
             {isMobileMenuOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
           </Button>          {/* Desktop Controls */}
           <div className="hidden sm:flex items-center space-x-2">
+            {isAdminStaff && (
+              <NotificationBell deviceId={device?.id} />
+            )}
             {canAccessTab("product") && (
               <Button
                 onClick={handleInventoryToggle}
@@ -816,6 +829,9 @@ export function Dashboard({
 
           {/* Mobile Controls */}
           <div className="flex sm:hidden items-center space-x-2">
+            {isAdminStaff && (
+              <NotificationBell deviceId={device?.id} />
+            )}
             {canAccessTab("product") && (
               <Button
                 onClick={handleInventoryToggle}

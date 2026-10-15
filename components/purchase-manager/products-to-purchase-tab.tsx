@@ -54,6 +54,8 @@ import {
 import { useAppSelector } from "@/store/hooks"
 import { selectDeviceId, selectDeviceCurrency } from "@/store/slices/deviceSlice"
 import { selectCurrency } from "@/store/slices/purchaseSlice"
+import { selectActiveStaff } from "@/store/slices/staffSlice"
+import { createPurchaseActionNotification } from "@/app/actions/notification-actions"
 import { getCurrencySymbol } from "@/lib/currency-utils"
 import { cn } from "@/lib/utils"
 
@@ -262,6 +264,7 @@ export default function ProductsToPurchaseTab({
   const deviceId = propDeviceId || reduxDeviceId || 0
   const reduxCurrency = useAppSelector(selectCurrency) || useAppSelector(selectDeviceCurrency) || "INR"
   const currency = getCurrencySymbol(reduxCurrency)
+  const activeStaff = useAppSelector(selectActiveStaff)
 
   const [products, setProducts] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -1021,6 +1024,25 @@ export default function ProductsToPurchaseTab({
         ? rejectedOrder.indexOf(rowKey) + 1
         : rejectedOrder.length + 1
       saveProductPurchaseAction(deviceId, rowKey, "reject", nextOrder, trimmed).catch(console.error)
+
+      createPurchaseActionNotification({
+        deviceId,
+        actionType: "reject",
+        products: [
+          {
+            productId: Number(product.product_id),
+            productName: product.product_name || "",
+            variantName: product.variant_name,
+            sku: product.variant_sku || product.product_barcode,
+            requiredQty: Number(product.required_quantity) || 1,
+            currentStock: Number(product.current_stock) || 0,
+            price: Number(product.unit_price) || 0,
+          },
+        ],
+        internalNote: trimmed || null,
+        staffId: activeStaff?.id,
+        staffName: activeStaff?.name,
+      }).catch(console.error)
     }
 
     toast({
@@ -1089,6 +1111,25 @@ export default function ProductsToPurchaseTab({
         ? postponedOrder.indexOf(rowKey) + 1
         : postponedOrder.length + 1
       saveProductPurchaseAction(deviceId, rowKey, "postponed", nextOrder, trimmed).catch(console.error)
+
+      createPurchaseActionNotification({
+        deviceId,
+        actionType: "postponed",
+        products: [
+          {
+            productId: Number(product.product_id),
+            productName: product.product_name || "",
+            variantName: product.variant_name,
+            sku: product.variant_sku || product.product_barcode,
+            requiredQty: Number(product.required_quantity) || 1,
+            currentStock: Number(product.current_stock) || 0,
+            price: Number(product.unit_price) || 0,
+          },
+        ],
+        internalNote: trimmed || null,
+        staffId: activeStaff?.id,
+        staffName: activeStaff?.name,
+      }).catch(console.error)
     }
 
     toast({
@@ -1173,7 +1214,7 @@ export default function ProductsToPurchaseTab({
 
   // Handle Skip or Save button in internal note modal:
   // Directly moves to the new purchase page with the product details and internal notes.
-  const handleOrderModalSkipOrSave = () => {
+  const handleOrderModalSkipOrSave = async () => {
     if (!orderModalProduct) return
     const { rowKey, product } = orderModalProduct
     const noteText = internalNote.trim()
@@ -1323,7 +1364,31 @@ export default function ProductsToPurchaseTab({
     sessionStorage.setItem("pending_purchase_prefill", JSON.stringify(newDraft))
 
     if (deviceId) {
-      saveProductPurchaseAction(deviceId, rowKey, "order", orderedOrder.indexOf(rowKey) + 1, noteText || null).catch(console.error)
+      try {
+        await Promise.all([
+          saveProductPurchaseAction(deviceId, rowKey, "order", orderedOrder.indexOf(rowKey) + 1, noteText || null),
+          createPurchaseActionNotification({
+            deviceId,
+            actionType: "order",
+            products: [
+              {
+                productId: Number(product.product_id),
+                productName: displayName,
+                variantName: product.variant_name,
+                sku: variantSku,
+                requiredQty,
+                currentStock,
+                price: resolvedPrice,
+              },
+            ],
+            internalNote: noteText || null,
+            staffId: activeStaff?.id,
+            staffName: activeStaff?.name,
+          }),
+        ])
+      } catch (err) {
+        console.error("Order action/notification failed:", err)
+      }
     }
 
     setOrderModalProduct(null)
@@ -1336,7 +1401,7 @@ export default function ProductsToPurchaseTab({
 
   // Handle bulk Proceed to Purchase (Skip or Save)
   // Directs to the new purchase page with all selected products and their notes
-  const handleBulkOrderSkipOrSave = () => {
+  const handleBulkOrderSkipOrSave = async () => {
     if (selectedProducts.length === 0) return
 
     const noteText = bulkInternalNote.trim()
@@ -1523,15 +1588,52 @@ export default function ProductsToPurchaseTab({
 
     // Save to database
     if (deviceId) {
-      saveProductPurchaseActionsBulk(
-        deviceId,
-        newlyOrderedKeys.map((key, idx) => ({
-          rowKey: key,
-          action: "order",
-          actionOrder: idx + 1,
-          note: noteText || null,
-        })),
-      ).catch(console.error)
+      try {
+        const bulkProductsPayload = selectedProducts.map((p) => {
+          const prodName = p.product_name || p.name || "Product"
+          const vName = p.variant_name || null
+          const hasVariant =
+            vName &&
+            vName.trim().toLowerCase() !== "default" &&
+            vName.trim().toLowerCase() !== "default variant"
+          const displayName =
+            hasVariant && prodName && !prodName.toLowerCase().includes(vName.toLowerCase())
+              ? `${prodName} (${vName})`
+              : prodName
+
+          return {
+            productId: Number(p.product_id || p.id || 0),
+            productName: displayName,
+            variantName: vName,
+            sku: p.variant_sku || p.product_barcode || p.sku || null,
+            requiredQty: Math.max(1, Number(p.required_quantity) || 1),
+            currentStock: Number(p.current_stock) || 0,
+            price: Number(p.unit_price) || 0,
+          }
+        })
+
+        await Promise.all([
+          saveProductPurchaseActionsBulk(
+            deviceId,
+            newlyOrderedKeys.map((key, idx) => ({
+              rowKey: key,
+              action: "order",
+              actionOrder: idx + 1,
+              note: noteText || null,
+            })),
+          ),
+          createPurchaseActionNotification({
+            deviceId,
+            actionType: "bulk_order",
+            products: bulkProductsPayload,
+            internalNote: noteText || null,
+            staffId: activeStaff?.id,
+            staffName: activeStaff?.name,
+          }),
+        ])
+      } catch (err) {
+        console.error("Bulk order action/notification failed:", err)
+      }
     }
 
     setBulkOrderModalOpen(false)
@@ -1585,6 +1687,28 @@ export default function ProductsToPurchaseTab({
           deviceId,
           selectedRowKeys.map((key, idx) => ({ rowKey: key, action: "order", actionOrder: idx + 1 })),
         ).catch(console.error)
+
+        const bulkProducts = selectedRowKeys.map((key) => {
+          const p = products.find((prod) => getRowKey(prod) === key) || {}
+          return {
+            productId: Number(p.product_id || 0),
+            productName: p.product_name || "Product",
+            variantName: p.variant_name,
+            sku: p.variant_sku || p.product_barcode,
+            requiredQty: Math.max(1, Number(p.required_quantity) || 1),
+            currentStock: Number(p.current_stock) || 0,
+            price: Number(p.unit_price) || 0,
+          }
+        })
+
+        createPurchaseActionNotification({
+          deviceId,
+          actionType: "bulk_order",
+          products: bulkProducts,
+          internalNote: null,
+          staffId: activeStaff?.id,
+          staffName: activeStaff?.name,
+        }).catch(console.error)
       }
     } else if (action === "redeemed") {
       setOrderedOrder((prev) => prev.filter((k) => !selectedRowKeys.includes(k)))

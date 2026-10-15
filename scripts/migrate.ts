@@ -1068,6 +1068,27 @@ async function createTables() {
     await sql`CREATE INDEX IF NOT EXISTS idx_ppa_device_key ON product_purchase_actions(device_id, row_key)`
   })
 
+  await run("notifications", async () => {
+    await sql`
+      CREATE TABLE IF NOT EXISTS notifications (
+        id SERIAL PRIMARY KEY,
+        device_id INTEGER NOT NULL,
+        company_id INTEGER,
+        type VARCHAR(50) NOT NULL,
+        title VARCHAR(255) NOT NULL,
+        message TEXT,
+        internal_note TEXT,
+        data JSONB,
+        status VARCHAR(20) DEFAULT 'unchecked',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        read_at TIMESTAMP WITH TIME ZONE,
+        created_by_staff_id INTEGER,
+        created_by_staff_name VARCHAR(255)
+      )
+    `
+    await sql`CREATE INDEX IF NOT EXISTS idx_notifications_device_status ON notifications(device_id, status)`
+    await sql`CREATE INDEX IF NOT EXISTS idx_notifications_device_created ON notifications(device_id, created_at DESC)`
+  })
 }
 
 async function upgradeLegacyColumns() {
