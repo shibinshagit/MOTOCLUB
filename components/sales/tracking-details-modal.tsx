@@ -42,7 +42,7 @@ export function TrackingDetailsModal({
   const [loading, setLoading] = useState(false)
   const { toast } = useToast()
 
-  const isShippingTransition = targetDeliveryStatus === "Shipping"
+  const isShippingTransition = targetDeliveryStatus === "Shipping" || targetDeliveryStatus === "Shipped"
 
   // Reset/sync state when modal opens
   useEffect(() => {
@@ -101,7 +101,7 @@ export function TrackingDetailsModal({
             />
             <p className="text-xs text-slate-500">
               {isShippingTransition 
-                ? "The order can be set to Shipping now even if the Tracking ID is not available yet. You can add it later." 
+                ? "The order can be set to Shipped now even if the Tracking ID is not available yet. You can add it later." 
                 : "Enter the shipment tracking number provided by the courier."}
             </p>
           </div>
@@ -126,11 +126,11 @@ export function TrackingDetailsModal({
           </Button>
           {isShippingTransition && !trackingId.trim() ? (
             <Button onClick={() => handleSave("")} disabled={loading} className="bg-indigo-600 hover:bg-indigo-700 text-white">
-              {loading ? "Updating..." : "Set to Shipping"}
+              {loading ? "Updating..." : "Set to Shipped"}
             </Button>
           ) : (
             <Button onClick={() => handleSave()} disabled={loading} className="bg-indigo-600 hover:bg-indigo-700 text-white">
-              {loading ? "Saving..." : isShippingTransition ? "Save & Set to Shipping" : "Save"}
+              {loading ? "Saving..." : isShippingTransition ? "Save & Set to Shipped" : "Save"}
             </Button>
           )}
         </DialogFooter>

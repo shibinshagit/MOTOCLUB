@@ -167,6 +167,7 @@ function DeliveryStatusBadge({ status }: { status: string }) {
     Direct: "bg-blue-50 text-blue-700 border-blue-200",
     Courier: "bg-indigo-50 text-indigo-700 border-indigo-200",
     Shipping: "bg-cyan-50 text-cyan-700 border-cyan-200",
+    Shipped: "bg-cyan-50 text-cyan-700 border-cyan-200",
     Delivered: "bg-emerald-50 text-emerald-700 border-emerald-200",
     Returned: "bg-rose-50 text-rose-700 border-rose-200",
     Failed: "bg-rose-50 text-rose-700 border-rose-200",

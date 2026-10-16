@@ -3314,7 +3314,7 @@ export async function updateSaleDeliveryStatus(
 
     const shippedAt =
       rows[0].shipped_at ||
-      (["Shipping", "Courier", "In transit", "Delivered"].includes(deliveryStatus) ? new Date() : null)
+      (["Shipped", "Shipping", "Courier", "In transit", "Delivered"].includes(deliveryStatus) ? new Date() : null)
     const deliveredAt =
       rows[0].delivered_at || (deliveryStatus === "Delivered" ? new Date() : null)
 
@@ -3324,7 +3324,7 @@ export async function updateSaleDeliveryStatus(
     const isJobCard = rows[0].sale_type === 'job_card'
     const isEcommerce = rows[0].source === 'ECOMMERCE' || rows[0].external_order_id != null
 
-    const allowedStatuses = ["Pending", "Paid", "Packed", "Sent", "Direct", "Courier", "Shipping", "Delivered", "Returned", "Failed"]
+    const allowedStatuses = ["Pending", "Paid", "Packed", "Sent", "Direct", "Courier", "Shipped", "Shipping", "Delivered", "Returned", "Failed"]
 
     if (!allowedStatuses.includes(deliveryStatus)) {
       return { success: false as const, message: `Invalid delivery status: ${deliveryStatus}` }
@@ -3618,7 +3618,7 @@ export async function updateSaleFulfillmentDetails(saleId: number, shippingData:
       })
     }
 
-    const shippedAt = (["Shipping", "Courier", "In transit", "Delivered"].includes(String(shippingData.deliveryStatus)) ? new Date() : null)
+    const shippedAt = (["Shipped", "Shipping", "Courier", "In transit", "Delivered"].includes(String(shippingData.deliveryStatus)) ? new Date() : null)
     const deliveredAt = (shippingData.deliveryStatus === "Delivered" ? new Date() : null)
 
     await sql`

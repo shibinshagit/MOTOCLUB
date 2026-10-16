@@ -37,7 +37,7 @@ const STATUSES = [
   { value: "Paid", label: "Paid" },
   { value: "Packed", label: "Packed" },
   { value: "Sent", label: "Sent" },
-  { value: "Shipping", label: "Shipping" },
+  { value: "Shipped", label: "Shipped" },
   { value: "Delivered", label: "Delivered" },
   { value: "Direct", label: "Direct" },
 ]
