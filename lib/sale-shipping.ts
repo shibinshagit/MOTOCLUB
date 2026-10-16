@@ -300,9 +300,9 @@ export function isCriticalSale(sale: any): boolean {
   if (!isPaidSale(sale)) return false
 
   const dStatus = (sale.delivery_status || "Pending").trim().toLowerCase()
-  const excludedStatuses = ["direct", "delivered", "returned", "failed"]
+  const allowedCriticalStatuses = ["pending", "paid", "packed", "sent"]
 
-  return !excludedStatuses.includes(dStatus)
+  return allowedCriticalStatuses.includes(dStatus)
 }
 
 export function isJobCardSale(sale: any): boolean {
