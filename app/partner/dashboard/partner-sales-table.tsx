@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useTransition } from "react"
+import React, { useState, useEffect, useTransition } from "react"
 import { format } from "date-fns"
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import Link from "next/link"
@@ -13,7 +13,7 @@ import {
 } from "@/app/actions/partner-actions"
 import { notifySuccess, notifyError } from "@/lib/notifications"
 import { useToast } from "@/components/ui/use-toast"
-import { Loader2, Phone, RefreshCw, FileText, Printer, Package, ArrowRight, FilterX, Info, ExternalLink } from "lucide-react"
+import { Loader2, Phone, RefreshCw, FileText, Printer, Package, ArrowRight, FilterX, Info, ExternalLink, ChevronDown, ChevronRight } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 
@@ -33,6 +33,7 @@ interface PartnerSalesTableProps {
   pendingReplacementsCount?: number
   hideOrderTypeFilter?: boolean
   onlyReplacements?: boolean
+  deviceId?: number | null
 }
 
 export function PartnerSalesTable({
@@ -46,6 +47,7 @@ export function PartnerSalesTable({
   pendingReplacementsCount = 0,
   hideOrderTypeFilter = false,
   onlyReplacements = false,
+  deviceId,
 }: PartnerSalesTableProps) {
   const router = useRouter()
   const pathname = usePathname()
@@ -216,6 +218,8 @@ export function PartnerSalesTable({
     pushQueryParams(resetState, 1)
     executeFilterFetch(resetState, 1)
   }
+
+
 
   const handleRefresh = () => {
     setIsRefreshing(true)
@@ -804,9 +808,9 @@ export function PartnerSalesTable({
                   const itemKey = isReplacement ? `rs-${order.id}` : `sale-${order.id}`
 
                   return (
+                    <React.Fragment key={itemKey}>
                     <tr
-                      key={itemKey}
-                      className={isReplacement ? "bg-purple-50/25 hover:bg-purple-50/50 transition-colors" : "hover:bg-gray-50/50 transition-colors"}
+                      className={`${isReplacement ? "bg-purple-50/25 hover:bg-purple-50/50" : "hover:bg-gray-50/50"} transition-colors`}
                     >
                       {/* Order / Date */}
                       <td className="px-3 py-3 lg:px-4 text-gray-600 font-medium whitespace-nowrap">
@@ -1020,6 +1024,8 @@ export function PartnerSalesTable({
                         </div>
                       </td>
                     </tr>
+
+                    </React.Fragment>
                   )
                 })}
               </tbody>

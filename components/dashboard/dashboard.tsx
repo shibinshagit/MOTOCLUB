@@ -1,4 +1,4 @@
-import { useRouter, useSearchParams } from "next/navigation"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import Image from "next/image"
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import {
@@ -24,6 +24,7 @@ import {
   FileText,
   RotateCcw,
   LayoutDashboard,
+  ClipboardList,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/components/ui/use-toast"
@@ -56,9 +57,11 @@ import ReturnsTab from "./returns-tab"
 import AdminDashboardView from "@/components/admin/dashboard/admin-dashboard-view"
 import GlobalDateFilter from "./global-date-filter"
 import StaffAuthModal from "../staff/staff-auth-modal"
+import ProductsToPurchaseTab from "@/components/purchase-manager/products-to-purchase-tab"
 import { BrandLogo } from "@/components/brand-logo"
 import { useStaffRestrictions } from "@/hooks/use-staff-restrictions"
 import { type StaffPageId } from "@/lib/staff-restrictions"
+import NotificationBell from "@/components/notifications/notification-bell"
 
 import { useAppSelector, useAppDispatch } from "@/store/hooks"
 import {
@@ -74,12 +77,18 @@ import { activateStaff, clearStaff, selectActiveStaff, setStaff } from "@/store/
 import { getStaffForAuthentication } from "@/app/actions/staff-actions"
 import { selectDateRange } from "@/store/slices/dateRangeSlice"
 
-type TabType = "sale" | "sales" | "sales-orders" | "purchase" | "product" | "trending" | "customer" | "transfer" | "accounting" | "supplier" | "platform" | "master" | "attendance" | "requests" | "returns" | "admin-dashboard"
+type TabType = "sale" | "sales" | "sales-orders" | "purchase" | "product" | "trending" | "customer" | "transfer" | "accounting" | "supplier" | "platform" | "master" | "attendance" | "requests" | "returns" | "admin-dashboard" | "products-to-purchase"
 
 const DEFAULT_CONTENT_TAB: TabType = "sale"
 
 interface DashboardProps {
   onLogout?: () => void
+  onlyPosUpdatedSales?: boolean
+  hideProductsToPurchaseTab?: boolean
+  hideAttendanceTab?: boolean
+  showSalesActions?: boolean
+  showSalesViewModal?: boolean
+  isLogistics?: boolean
 }
 
 // Fallback component for when a tab fails to load
@@ -104,36 +113,60 @@ function LoadingTab() {
   )
 }
 
-export function Dashboard({ onLogout }: DashboardProps) {
+export function Dashboard({
+  onLogout,
+  onlyPosUpdatedSales,
+  hideProductsToPurchaseTab,
+  hideAttendanceTab,
+  showSalesActions = true,
+  showSalesViewModal,
+  isLogistics: isLogisticsProp,
+}: DashboardProps) {
   const searchParams = useSearchParams()
   const tabParam = searchParams?.get("tab") as TabType | "home" | null
-  const resolveTab = (param: TabType | "stock" | "home" | "sales-orders" | null): TabType => {
+  const pathname = usePathname()
+  const activeStaff = useAppSelector(selectActiveStaff)
+  const user = useAppSelector(selectUser)
+  const isPurchaseManager = activeStaff?.role === "purchase_manager" || Boolean(pathname?.startsWith("/purchase-manager"))
+  const isLogistics = isLogisticsProp ?? (activeStaff?.role === "logistics" || Boolean(pathname?.startsWith("/logistics")))
+  const isAdminStaff = Boolean(
+    (activeStaff?.role === "admin" || (!activeStaff && user?.role === "ADMIN")) &&
+      !isPurchaseManager &&
+      !isLogistics &&
+      activeStaff?.role !== "purchase_manager" &&
+      activeStaff?.role !== "logistics" &&
+      activeStaff?.role !== "staff" &&
+      activeStaff?.role !== "partner",
+  )
+  const defaultContentTab: TabType = isPurchaseManager && onlyPosUpdatedSales && !hideProductsToPurchaseTab ? "products-to-purchase" : DEFAULT_CONTENT_TAB
+
+  const resolveTab = useCallback((param: TabType | "stock" | "home" | "sales-orders" | null): TabType => {
     if (param === "stock") return "product"
     if (param === "sales" || param === "sales-orders" || param === "home") return "sale"
     if (
       param &&
-      ["sale", "sales", "purchase", "product", "trending", "customer", "transfer", "accounting", "supplier", "platform", "master", "attendance", "requests", "returns", "admin-dashboard"].includes(
+      ["sale", "sales", "purchase", "product", "trending", "customer", "transfer", "accounting", "supplier", "platform", "master", "attendance", "requests", "returns", "admin-dashboard", "products-to-purchase"].includes(
         param,
       )
     ) {
       return param as TabType
     }
-    return "sale"
-  }
+    return defaultContentTab
+  }, [defaultContentTab])
+
   const initialTab = resolveTab(tabParam)
 
   const [activeTab, setActiveTab] = useState<TabType>(initialTab)
   const [lastContentTab, setLastContentTab] = useState<TabType>(
-    initialTab === "product" || initialTab === "trending" ? DEFAULT_CONTENT_TAB : initialTab,
+    initialTab === "product" || initialTab === "trending" ? defaultContentTab : initialTab,
   )
   const activeTabRef = useRef(activeTab)
   const lastContentTabRef = useRef(lastContentTab)
   const dispatch = useAppDispatch()
-  const user = useAppSelector(selectUser)
   const company = useAppSelector(selectCompany)
   const device = useAppSelector(selectDevice)
   const deviceLogo = useAppSelector(selectDeviceLogo)
-  const activeStaff = useAppSelector(selectActiveStaff)
+  const resolvedShowSalesViewModal = showSalesViewModal ?? (!isPurchaseManager && !isLogistics)
   const dateRange = useAppSelector(selectDateRange)
   const dateRangeRef = useRef(dateRange)
   useEffect(() => {
@@ -161,6 +194,16 @@ export function Dashboard({ onLogout }: DashboardProps) {
       if (tabId === "admin-dashboard") {
         return Boolean(isAdminSession)
       }
+      
+      // Allow products-to-purchase if onlyPosUpdatedSales is true and not explicitly hidden
+      if (tabId === "products-to-purchase") {
+        return Boolean(onlyPosUpdatedSales && !hideProductsToPurchaseTab)
+      }
+
+      // Disallow attendance if hideAttendanceTab is true or if user is purchase manager
+      if (tabId === "attendance" && (hideAttendanceTab || activeStaff?.role === "purchase_manager")) {
+        return false
+      }
 
       // 1. Device level check (Super Admin restrictions)
       const deviceAllowedPagesStr = isAdminSession
@@ -185,7 +228,13 @@ export function Dashboard({ onLogout }: DashboardProps) {
 
   // Navigation items configuration
   const navItems = [
+    ...(isPurchaseManager && onlyPosUpdatedSales && !hideProductsToPurchaseTab
+      ? [{ id: "products-to-purchase", icon: <ClipboardList className="h-4 w-4" />, label: "Products to Purchase" }]
+      : []),
     { id: "sale", icon: <Receipt className="h-4 w-4" />, label: "Sales" },
+    ...(!isPurchaseManager && onlyPosUpdatedSales && !hideProductsToPurchaseTab
+      ? [{ id: "products-to-purchase", icon: <ClipboardList className="h-4 w-4" />, label: "Products to Purchase" }]
+      : []),
     { id: "purchase", icon: <Receipt className="h-4 w-4" />, label: "Purchase" },
     { id: "customer", icon: <User className="h-4 w-4" />, label: "Customers" },
     { id: "attendance", icon: <CalendarDays className="h-4 w-4" />, label: "Attendance" },
@@ -197,7 +246,10 @@ export function Dashboard({ onLogout }: DashboardProps) {
   ]
 
   // Primary tabs for bottom navigation (most used)
-  const primaryTabs = ["sale", "purchase", "master"]
+  const primaryTabs =
+    isPurchaseManager && onlyPosUpdatedSales && !hideProductsToPurchaseTab
+      ? ["products-to-purchase", "sale", "purchase", "master"]
+      : ["sale", ...(onlyPosUpdatedSales && !hideProductsToPurchaseTab ? ["products-to-purchase"] : []), "purchase", "master"]
   const secondaryTabs = ["customer", "attendance", "supplier", "transfer", "platform", "admin-dashboard"]
 
   // Filtered navigation items based on permission
@@ -332,19 +384,23 @@ export function Dashboard({ onLogout }: DashboardProps) {
     }
     setLastContentTab(tab)
     setActiveTab(tab)
-  }, [tabParam])
+  }, [tabParam, resolveTab])
 
   // Enforce page restrictions: redirect if active tab is restricted
   useEffect(() => {
     if (mounted && !canAccessTab(activeTab)) {
-      const fallbackTab = (["sales-orders", "sale", "purchase", "returns", "customer", "attendance", "supplier", "transfer", "platform", "master"] as TabType[]).find(
+      const fallbackList =
+        isPurchaseManager && onlyPosUpdatedSales && !hideProductsToPurchaseTab
+          ? (["products-to-purchase", "sale", "purchase", "sales-orders", "returns", "customer", "attendance", "supplier", "transfer", "platform", "master"] as TabType[])
+          : (["sales-orders", "sale", "purchase", "returns", "customer", "attendance", "supplier", "transfer", "platform", "master"] as TabType[])
+      const fallbackTab = fallbackList.find(
         (tabId) => canAccessTab(tabId),
       )
       if (fallbackTab) {
         setActiveTab(fallbackTab)
       }
     }
-  }, [activeStaff, activeTab, canAccessTab, mounted])
+  }, [activeStaff, activeTab, canAccessTab, mounted, isPurchaseManager, onlyPosUpdatedSales, hideProductsToPurchaseTab])
 
   const salesViewParam = searchParams?.get("salesView")
   const salesNavView = salesViewParam === "entry" ? "entry" : "list"
@@ -542,9 +598,20 @@ export function Dashboard({ onLogout }: DashboardProps) {
             <SaleTab
               userId={device?.id ?? 0}
               companyId={companyId}
-              isAddModalOpen={activeTab === "sale" && isAddModalOpen}
+              isAddModalOpen={activeTab === "sale" && isAddModalOpen && showSalesActions}
               onModalClose={() => setIsAddModalOpen(false)}
-              mode={salesNavView === "entry" ? "entry" : "info"}
+              mode={salesNavView === "entry" && showSalesActions ? "entry" : "info"}
+              onlyPosUpdatedSales={onlyPosUpdatedSales}
+              showActions={showSalesActions}
+              showViewModal={resolvedShowSalesViewModal}
+              isLogistics={isLogistics}
+            />
+          )
+        case "products-to-purchase":
+          return (
+            <ProductsToPurchaseTab
+              deviceId={deviceId!}
+              globalDateRange={dateRangeRef.current}
             />
           )
         case "purchase":
@@ -559,6 +626,9 @@ export function Dashboard({ onLogout }: DashboardProps) {
             <CustomerTab userId={device?.id ?? 0} companyId={companyId} />
           )
         case "attendance":
+          if (hideAttendanceTab || isPurchaseManager) {
+            return null
+          }
           return <AttendanceTab />
         case "supplier":
           return (
@@ -607,7 +677,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
             {deviceLogo ? (
               <Image
                 src={deviceLogo}
-                alt={`${device?.name || "Device"} logo`}
+                alt={`${isPurchaseManager || isLogistics ? (company?.name || "Company") : (device?.name || "Device")} logo`}
                 fill
                 className="object-contain"
                 priority
@@ -617,14 +687,18 @@ export function Dashboard({ onLogout }: DashboardProps) {
               <BrandLogo variant="icon" width={40} height={40} className="h-full w-full" priority />
             )}
           </div>
-          <div className="hidden sm:flex flex-col min-w-0 flex-1">
-            <span className="text-sm sm:text-xl font-bold text-gray-800 truncate max-w-[130px] sm:max-w-none">
+          <div className={cn(isPurchaseManager || isLogistics ? "flex" : "hidden sm:flex", "flex-col min-w-0 flex-1")}>
+            <span className="text-xs sm:text-xl font-bold text-gray-800 truncate max-w-[110px] sm:max-w-none">
               {company?.name || "Company"}
             </span>
             <div className="flex items-center">
-              <div className="w-2 h-2 bg-green-500 rounded-full mr-1.5 sm:mr-2 animate-pulse flex-shrink-0"></div>
-              <span className="text-[10px] sm:text-xs text-gray-500 truncate max-w-[120px] sm:max-w-none">
-                {device?.name || "Device"} - {device?.currency || "AED"}
+              <div className="w-1.5 h-1.5 sm:w-2 sm:h-2 bg-green-500 rounded-full mr-1 sm:mr-2 animate-pulse flex-shrink-0"></div>
+              <span className="text-[10px] sm:text-xs text-gray-500 truncate max-w-[100px] sm:max-w-none">
+                {isPurchaseManager
+                  ? (activeStaff?.name || "Purchase Manager")
+                  : isLogistics
+                    ? (activeStaff?.name || "Logistics Staff")
+                    : `${device?.name || "Device"} - ${device?.currency || "AED"}`}
               </span>
             </div>
           </div>
@@ -646,6 +720,9 @@ export function Dashboard({ onLogout }: DashboardProps) {
             {isMobileMenuOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
           </Button>          {/* Desktop Controls */}
           <div className="hidden sm:flex items-center space-x-2">
+            {isAdminStaff && (
+              <NotificationBell deviceId={device?.id} role="admin" />
+            )}
             {canAccessTab("product") && (
               <Button
                 onClick={handleInventoryToggle}
@@ -723,7 +800,15 @@ export function Dashboard({ onLogout }: DashboardProps) {
                     <div className="px-2 py-2">
                       <p className="text-sm font-medium text-gray-900">{activeStaff.name}</p>
                       <p className="text-xs text-gray-500">
-                        {activeStaff.role === "admin" ? "Admin role" : "Normal staff role"}
+                        {activeStaff.role === "admin"
+                          ? "Admin role"
+                          : activeStaff.role === "purchase_manager"
+                            ? "Purchase Manager role"
+                            : activeStaff.role === "partner"
+                              ? "Partner role"
+                              : activeStaff.role === "logistics"
+                                ? "Logistics role"
+                                : "Normal staff role"}
                       </p>
                     </div>
                     <DropdownMenuSeparator className="bg-gray-200" />
@@ -744,6 +829,9 @@ export function Dashboard({ onLogout }: DashboardProps) {
 
           {/* Mobile Controls */}
           <div className="flex sm:hidden items-center space-x-2">
+            {isAdminStaff && (
+              <NotificationBell deviceId={device?.id} role="admin" />
+            )}
             {canAccessTab("product") && (
               <Button
                 onClick={handleInventoryToggle}
@@ -805,7 +893,15 @@ export function Dashboard({ onLogout }: DashboardProps) {
                     <div className="px-2 py-2">
                       <p className="text-sm font-medium text-gray-900">{activeStaff.name}</p>
                       <p className="text-xs text-gray-500">
-                        {activeStaff.role === "admin" ? "Admin role" : "Normal staff role"}
+                        {activeStaff.role === "admin"
+                          ? "Admin role"
+                          : activeStaff.role === "purchase_manager"
+                            ? "Purchase Manager role"
+                            : activeStaff.role === "partner"
+                              ? "Partner role"
+                              : activeStaff.role === "logistics"
+                                ? "Logistics role"
+                                : "Normal staff role"}
                       </p>
                     </div>
                     <DropdownMenuSeparator className="bg-gray-200" />
@@ -954,6 +1050,19 @@ export function Dashboard({ onLogout }: DashboardProps) {
                 }
 
                 if (tabId === "sale") {
+                  if (!showSalesActions) {
+                    const item = navItems.find((nav) => nav.id === tabId)
+                    return (
+                      <MobileNavItem
+                        key="sale"
+                        icon={item?.icon || <Receipt className="h-4 w-4" />}
+                        label={item?.label || "Sales"}
+                        iconOnly={Boolean((item as any)?.iconOnly)}
+                        isActive={activeTab === "sale"}
+                        onClick={() => handleTabChange("sale")}
+                      />
+                    )
+                  }
                   return (
                     <SalesNavSegment
                       key="sale"
@@ -1022,6 +1131,18 @@ export function Dashboard({ onLogout }: DashboardProps) {
             }
 
             if (item.id === "sale") {
+              if (!showSalesActions) {
+                return (
+                  <NavItem
+                    key={item.id}
+                    icon={item.icon}
+                    label={item.label}
+                    iconOnly={Boolean((item as any).iconOnly)}
+                    isActive={activeTab === item.id}
+                    onClick={() => handleTabChange(item.id as TabType)}
+                  />
+                )
+              }
               return (
                 <SalesNavSegment
                   key={item.id}

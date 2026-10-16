@@ -26,6 +26,8 @@ interface SaleShippingSectionProps {
   isJobCard?: boolean
   customerName?: string
   customerPhone?: string
+  forceFullForm?: boolean
+  hidePickupToggle?: boolean
 }
 
 export default function SaleShippingSection({
@@ -38,6 +40,8 @@ export default function SaleShippingSection({
   isJobCard = false,
   customerName = "",
   customerPhone = "",
+  forceFullForm = false,
+  hidePickupToggle = false,
 }: SaleShippingSectionProps) {
   const shipping = { ...DEFAULT_SALE_SHIPPING, ...value }
   const [courierPartners, setCourierPartners] = useState<{ id: number; name: string; linked_partner_id?: number | null; tracking_url_template?: string | null }[]>([])
@@ -233,7 +237,7 @@ export default function SaleShippingSection({
     })
   }
 
-  if (isJobCard) {
+  if (isJobCard && !forceFullForm) {
     return (
       <div className={cn("rounded-lg border border-blue-100 bg-blue-50/30 overflow-hidden", className)}>
         <div className="bg-blue-100/50 px-3 py-2 border-b border-blue-100 flex items-center">
@@ -285,8 +289,8 @@ export default function SaleShippingSection({
                         className="h-9 text-sm font-bold bg-white" 
                       />
                       <div className="flex gap-1">
-                        <button type="button" onClick={handleCreateService} className="flex-1 bg-slate-900 text-white rounded text-xs py-1.5 font-bold">Save</button>
-                        <button type="button" onClick={() => setIsCreatingService(false)} className="flex-1 bg-slate-200 text-slate-700 rounded text-xs py-1.5 font-bold">Cancel</button>
+                        <button type="button" onClick={handleCreateService} className="flex-1 bg-slate-900 text-white rounded text-xs py-1 font-bold">Save</button>
+                        <button type="button" onClick={() => setIsCreatingService(false)} className="flex-1 bg-slate-200 text-slate-700 rounded text-xs py-1 font-bold">Cancel</button>
                       </div>
                     </div>
                   ) : (
@@ -349,53 +353,58 @@ export default function SaleShippingSection({
     )
   }
 
+  const isPickupSelected = !forceFullForm && shipping.fulfillmentType === "pickup"
+
   return (
     <div className={cn("overflow-hidden rounded-xl border border-slate-200 bg-white", className)}>
-      <div className="border-b border-slate-200 bg-[#F1F4F9] px-3 py-2">
-        <div className="flex items-center justify-between gap-2">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-600">Fulfillment</h3>
-          <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5">
-            <button
-              type="button"
-              onClick={() => setFulfillmentType("pickup")}
-              className={cn(
-                "rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors",
-                shipping.fulfillmentType === "pickup"
-                  ? "bg-slate-900 text-white"
-                  : "text-slate-600 hover:bg-slate-50",
-              )}
-            >
-              Pickup
-            </button>
-            <button
-              type="button"
-              onClick={() => setFulfillmentType("ship")}
-              className={cn(
-                "rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors",
-                shipping.fulfillmentType === "ship"
-                  ? "bg-slate-900 text-white"
-                  : "text-slate-600 hover:bg-slate-50",
-              )}
-            >
-              Ship
-            </button>
+      {!hidePickupToggle && !forceFullForm && (
+        <div className="border-b border-slate-200 bg-[#F1F4F9] px-3 py-2">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-600">Fulfillment</h3>
+            <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5">
+              <button
+                type="button"
+                onClick={() => setFulfillmentType("pickup")}
+                className={cn(
+                  "rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors",
+                  shipping.fulfillmentType === "pickup"
+                    ? "bg-slate-900 text-white"
+                    : "text-slate-600 hover:bg-slate-50",
+                )}
+              >
+                Pickup
+              </button>
+              <button
+                type="button"
+                onClick={() => setFulfillmentType("ship")}
+                className={cn(
+                  "rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors",
+                  shipping.fulfillmentType === "ship"
+                    ? "bg-slate-900 text-white"
+                    : "text-slate-600 hover:bg-slate-50",
+                )}
+              >
+                Ship
+              </button>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
-      {shipping.fulfillmentType === "pickup" ? (
+      {isPickupSelected ? (
         <div className="px-3 py-4 text-xs text-slate-500">Customer pickup in store. No shipping details required.</div>
       ) : (
-        <div className="space-y-3 p-3">
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="space-y-1">
-              <Label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                Delivery status
+        <div className="space-y-4 p-3.5 sm:p-4">
+          {/* Row 1: Delivery Status, Courier Partner, Courier Service, Packaging Type */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                DELIVERY STATUS
               </Label>
               <select
                 value={shipping.deliveryStatus || "Pending"}
                 onChange={(e) => patch({ deliveryStatus: e.target.value })}
-                className="flex h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-900"
+                className="flex h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900/10 cursor-pointer"
               >
                 {DELIVERY_STATUSES.map((status) => (
                   <option key={status} value={status}>
@@ -405,14 +414,14 @@ export default function SaleShippingSection({
               </select>
             </div>
 
-            <div className="space-y-1">
-              <Label className="text-xs font-bold uppercase tracking-wide text-slate-700">
-                Courier Partner
+            <div className="space-y-1.5">
+              <Label className="text-[11px] font-extrabold uppercase tracking-wider text-slate-800">
+                COURIER PARTNER
               </Label>
               <select
                 value={shipping.courierPartnerId ? String(shipping.courierPartnerId) : ""}
                 onChange={(e) => handleCourierPartnerChange(e.target.value)}
-                className="flex h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-900"
+                className="flex h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900/10 cursor-pointer"
               >
                 <option value="" className="font-normal">Select partner</option>
                 {courierPartners.map((courier) => (
@@ -423,28 +432,28 @@ export default function SaleShippingSection({
               </select>
             </div>
 
-            <div className="space-y-1">
-              <Label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                Courier service
+            <div className="space-y-1.5">
+              <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                COURIER SERVICE
               </Label>
               {isCreatingService ? (
-                <div className="flex flex-col gap-1 rounded border border-slate-200 bg-slate-50 p-1.5">
+                <div className="flex flex-col gap-1 rounded-xl border border-slate-200 bg-slate-50 p-1.5">
                   <Input 
                     placeholder="Service Name" 
                     value={newServiceName} 
                     onChange={e => setNewServiceName(e.target.value)} 
-                    className="h-7 text-xs bg-white" 
+                    className="h-8 text-xs font-semibold bg-white rounded-lg" 
                   />
                   <div className="flex gap-1">
-                    <button type="button" onClick={handleCreateService} className="flex-1 bg-slate-900 text-white rounded text-[10px] py-1 font-medium">Save</button>
-                    <button type="button" onClick={() => setIsCreatingService(false)} className="flex-1 bg-slate-200 text-slate-700 rounded text-[10px] py-1 font-medium">Cancel</button>
+                    <button type="button" onClick={handleCreateService} className="flex-1 bg-slate-900 text-white rounded text-xs py-1 font-bold">Save</button>
+                    <button type="button" onClick={() => setIsCreatingService(false)} className="flex-1 bg-slate-200 text-slate-700 rounded text-xs py-1 font-bold">Cancel</button>
                   </div>
                 </div>
               ) : (
                 <select
                   value={shipping.courierServiceId ? String(shipping.courierServiceId) : ""}
                   onChange={(e) => handleCourierServiceChange(e.target.value)}
-                  className="flex h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-900"
+                  className="flex h-10 w-full rounded-xl border-2 border-slate-900 bg-white px-3 text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900/10 cursor-pointer"
                 >
                   <option value="">Select service</option>
                   {courierServices.map((service) => (
@@ -457,16 +466,16 @@ export default function SaleShippingSection({
               )}
             </div>
 
-            <div className="space-y-1">
-              <Label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                Packaging type
+            <div className="space-y-1.5">
+              <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                PACKAGING TYPE
               </Label>
               <select
                 value={shipping.packagingTypeId ? String(shipping.packagingTypeId) : ""}
                 onChange={(e) => handlePackagingChange(e.target.value)}
-                className="flex h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-900"
+                className="flex h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900/10 cursor-pointer"
               >
-                <option value="">Select packaging</option>
+                <option value="">Select packag...</option>
                 {packagingTypes.map((packaging) => (
                   <option key={packaging.id} value={packaging.id}>
                     {packaging.name}
@@ -474,33 +483,42 @@ export default function SaleShippingSection({
                 ))}
               </select>
             </div>
+          </div>
 
-            <div className="space-y-1">
-              <Label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Tracking ID</Label>
+          {/* Row 2: Tracking ID */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                TRACKING ID
+              </Label>
               <Input
                 value={shipping.trackingId || ""}
                 onChange={(e) => patch({ trackingId: e.target.value })}
-                placeholder="AWB / tracking number"
-                className="h-8 border-slate-200 text-xs"
+                placeholder="AWB / tracking..."
+                className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-medium text-slate-800 focus-visible:ring-2 focus-visible:ring-indigo-500/20"
               />
             </div>
           </div>
 
-          <div className="space-y-1">
-            <Label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-              Shipping address
+          {/* Row 3: Shipping Address */}
+          <div className="space-y-1.5">
+            <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+              SHIPPING ADDRESS
             </Label>
             <Textarea
               value={shipping.shippingAddress || ""}
               onChange={(e) => patch({ shippingAddress: e.target.value })}
               placeholder="Delivery address"
-              className="min-h-[72px] border-slate-200 text-xs"
+              className="min-h-[85px] w-full rounded-xl border border-slate-200 bg-white p-3 text-xs font-medium text-slate-800 focus-visible:ring-2 focus-visible:ring-indigo-500/20"
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            <div className="space-y-1">
-              <Label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Weight (kg)</Label>
+          {/* Row 4: Weight (kg), Length (cm), Width (cm), Height (cm) */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                WEIGHT (KG)
+              </Label>
               <Input
                 type="number"
                 min="0"
@@ -509,11 +527,13 @@ export default function SaleShippingSection({
                 onChange={(e) =>
                   patch({ weightKg: e.target.value === "" ? null : Number.parseFloat(e.target.value) })
                 }
-                className="h-8 border-slate-200 text-xs"
+                className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-800 focus-visible:ring-2 focus-visible:ring-indigo-500/20"
               />
             </div>
-            <div className="space-y-1">
-              <Label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Length (cm)</Label>
+            <div className="space-y-1.5">
+              <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                LENGTH (CM)
+              </Label>
               <Input
                 type="number"
                 min="0"
@@ -522,11 +542,13 @@ export default function SaleShippingSection({
                 onChange={(e) =>
                   patch({ lengthCm: e.target.value === "" ? null : Number.parseFloat(e.target.value) })
                 }
-                className="h-8 border-slate-200 text-xs"
+                className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-800 focus-visible:ring-2 focus-visible:ring-indigo-500/20"
               />
             </div>
-            <div className="space-y-1">
-              <Label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Width (cm)</Label>
+            <div className="space-y-1.5">
+              <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                WIDTH (CM)
+              </Label>
               <Input
                 type="number"
                 min="0"
@@ -535,11 +557,13 @@ export default function SaleShippingSection({
                 onChange={(e) =>
                   patch({ widthCm: e.target.value === "" ? null : Number.parseFloat(e.target.value) })
                 }
-                className="h-8 border-slate-200 text-xs"
+                className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-800 focus-visible:ring-2 focus-visible:ring-indigo-500/20"
               />
             </div>
-            <div className="space-y-1">
-              <Label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Height (cm)</Label>
+            <div className="space-y-1.5">
+              <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                HEIGHT (CM)
+              </Label>
               <Input
                 type="number"
                 min="0"
@@ -548,62 +572,66 @@ export default function SaleShippingSection({
                 onChange={(e) =>
                   patch({ heightCm: e.target.value === "" ? null : Number.parseFloat(e.target.value) })
                 }
-                className="h-8 border-slate-200 text-xs"
+                className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-800 focus-visible:ring-2 focus-visible:ring-indigo-500/20"
               />
             </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-2 rounded-lg border border-slate-200 bg-slate-50/70 p-2 sm:grid-cols-3">
-            <div className="space-y-1">
-              <Label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                Courier paid (extra)
-              </Label>
-              <Input
-                type="number"
-                min="0"
-                step="0.01"
-                value={shipping.courierPaidExtra ?? 0}
-                onChange={(e) => patch({ courierPaidExtra: Number.parseFloat(e.target.value) || 0 })}
-                className="h-8 border-slate-200 bg-white text-xs"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                Expense: courier
-              </Label>
-              <Input
-                type="number"
-                min="0"
-                step="0.01"
-                value={shipping.expenseCourier ?? 0}
-                onChange={(e) => patch({ expenseCourier: Number.parseFloat(e.target.value) || 0 })}
-                className="h-8 border-amber-50 bg-amber-50/70 text-xs"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                Expense: packing
-              </Label>
-              <Input
-                type="number"
-                min="0"
-                step="0.01"
-                value={shipping.expensePacking ?? 0}
-                onChange={(e) => patch({ expensePacking: Number.parseFloat(e.target.value) || 0 })}
-                className="h-8 border-slate-200 bg-white text-xs"
-              />
+          {/* Row 5: Courier Paid (Extra), Expense: Courier, Expense: Packing */}
+          <div className="rounded-2xl border border-slate-200/90 bg-slate-50/50 p-3.5 sm:p-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                  COURIER PAID (EXTRA)
+                </Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={shipping.courierPaidExtra ?? 0}
+                  onChange={(e) => patch({ courierPaidExtra: Number.parseFloat(e.target.value) || 0 })}
+                  className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-800 focus-visible:ring-2 focus-visible:ring-indigo-500/20"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                  EXPENSE: COURIER
+                </Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={shipping.expenseCourier ?? 0}
+                  onChange={(e) => patch({ expenseCourier: Number.parseFloat(e.target.value) || 0 })}
+                  className="h-10 rounded-xl border border-amber-200/80 bg-[#FFFDF0] px-3 text-xs font-bold text-slate-900 focus-visible:ring-2 focus-visible:ring-amber-500/20"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                  EXPENSE: PACKING
+                </Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={shipping.expensePacking ?? 0}
+                  onChange={(e) => patch({ expensePacking: Number.parseFloat(e.target.value) || 0 })}
+                  className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-800 focus-visible:ring-2 focus-visible:ring-indigo-500/20"
+                />
+              </div>
             </div>
           </div>
 
-          <div className="space-y-1">
-            <Label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-              Shipping notes
+          {/* Row 6: Shipping Notes */}
+          <div className="space-y-1.5">
+            <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+              SHIPPING NOTES
             </Label>
             <Textarea
               value={shipping.shippingNotes || ""}
               onChange={(e) => patch({ shippingNotes: e.target.value })}
               placeholder="Fragile, call before delivery, etc."
-              className="min-h-[60px] border-slate-200 text-xs"
+              className="min-h-[75px] w-full rounded-xl border border-slate-200 bg-white p-3 text-xs font-medium text-slate-800 focus-visible:ring-2 focus-visible:ring-indigo-500/20"
             />
           </div>
 

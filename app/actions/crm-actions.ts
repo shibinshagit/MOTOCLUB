@@ -1,4 +1,5 @@
 import { sql, resetConnectionState } from "@/lib/db"
+import { createNewLeadNotification } from "@/app/actions/notification-actions"
 
 export type CrmLeadProductRef = { product_id: number; product_variant_id: number | null }
 
@@ -15,7 +16,9 @@ export async function createCrmLead(agencyId: number, companyId: number, deviceI
       source,
       campaign,
       ad_name,
-      message
+      message,
+      vehicle,
+      year
     } = data
     const products: CrmLeadProductRef[] = Array.isArray(data.products) ? data.products : []
 
@@ -54,12 +57,14 @@ export async function createCrmLead(agencyId: number, companyId: number, deviceI
         INSERT INTO crm_leads (
           lead_number, agency_id, company_id, device_id, external_lead_id,
           name, phone, email, source, campaign, ad_name, message,
+          vehicle, year,
           status, created_at, updated_at
         )
         VALUES (
           ${leadNumber}, ${agencyId}, ${companyId}, ${deviceId}, ${external_lead_id},
           ${name}, ${phone || null}, ${email || null}, ${source || null},
           ${campaign || null}, ${ad_name || null}, ${message || null},
+          ${vehicle || null}, ${year || null},
           'New', NOW(), NOW()
         )
         ON CONFLICT (agency_id, external_lead_id) DO UPDATE SET updated_at = NOW()
@@ -78,13 +83,38 @@ export async function createCrmLead(agencyId: number, companyId: number, deviceI
       return leadRow
     })
 
+    let notifResult: any = null
+    if (row.inserted) {
+      try {
+        // Trigger new lead notification alert to relevant devices only
+        notifResult = await createNewLeadNotification({
+          leadId: Number(row.id),
+          leadNumber: String(row.lead_number),
+          companyId,
+          deviceId,
+          customerName: name,
+          phone,
+          email,
+          vehicle,
+          year,
+          source,
+          campaign,
+          message,
+        })
+      } catch (err: any) {
+        console.error("Failed to trigger new lead notification:", err)
+        notifResult = { success: false, error: err?.message || String(err) }
+      }
+    }
+
     return {
       success: true,
       message: row.inserted ? "Lead created successfully" : "Lead already exists",
       data: {
         lead_id: Number(row.id),
         lead_number: String(row.lead_number),
-        created: row.inserted
+        created: row.inserted,
+        notification: notifResult,
       }
     }
   } catch (error: any) {

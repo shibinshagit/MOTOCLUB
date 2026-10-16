@@ -1,9 +1,13 @@
 "use client"
 
 import { useEffect, useMemo, useState, useCallback, useRef } from "react"
+import { usePathname } from "next/navigation"
 import { format } from "date-fns"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useAppSelector } from "@/store/hooks"
+import { selectActiveStaff } from "@/store/slices/staffSlice"
+import PurchaseManagerKpiCards from "@/components/purchase-manager/purchase-manager-kpi-cards"
 import {
   ExcelColumnFilterHeader,
   createEmptyColumnFilter,
@@ -11,14 +15,37 @@ import {
   passesColumnFilter,
   type ExcelColumnFilterValue,
 } from "@/components/sales/excel-column-filter"
-import { getSaleDeliveryLabel, isPendingSale, isCriticalSale, isJobCardSale, isNormalSale } from "@/lib/sale-shipping"
+import {
+  getSaleDeliveryLabel,
+  isPendingSale,
+  isCriticalSale,
+  isJobCardSale,
+  isNormalSale,
+  mapSaleShippingFromRecord,
+  type SaleShippingInput,
+} from "@/lib/sale-shipping"
 import { DeliveryStatusSelect } from "@/components/sales/delivery-status-select"
 import { PhoneCell } from "@/components/sales/phone-cell"
 import { TrackingCell } from "@/components/sales/tracking-cell"
 import { StaffOwnerSelect } from "@/components/sales/staff-owner-select"
-import { parseSaleDate, cn } from "@/lib/utils"
+import { parseSaleDate, parseSaleDateTime, cn } from "@/lib/utils"
 import { printJobCard, printBatchJobCards, printSalesReceipt } from "@/lib/receipt-utils"
-import { getSaleDetails, getPaginatedUserSales, getSalesSummaryCards } from "@/app/actions/sale-actions"
+import {
+  getSaleDetails,
+  getPaginatedUserSales,
+  getSalesSummaryCards,
+  getSalesByIds,
+  updateSaleFulfillmentDetails,
+} from "@/app/actions/sale-actions"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog"
+import SaleShippingSection from "@/components/sales/sale-shipping-section"
 import {
   Search,
   X,
@@ -43,6 +70,10 @@ import {
   ExternalLink,
   Share2,
   Info,
+  Calendar,
+  Package,
+  ArrowRight,
+  Save,
 } from "lucide-react"
 import { SalesBreakdownModal } from "@/components/shared/sales-breakdown-modal"
 import {
@@ -80,17 +111,25 @@ function getSaleStatusLabel(sale: any): string {
   const received = Number(sale.received_amount) || 0
 
   if (pStatus === "paid" || pStatus === "completed" || (total > 0 && received >= total)) {
-    return "Completed"
+    return "Paid"
   }
-  if (pStatus === "credit" || pStatus === "partial" || (received > 0 && received < total)) {
+  if (pStatus === "partial") {
+    return "Partial"
+  }
+  if (pStatus === "credit") {
     return "Credit"
+  }
+  if (received > 0 && received < total) {
+    return "Partial"
   }
   return "Pending"
 }
 
 function SaleStatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
+    Paid: "bg-emerald-50 text-emerald-700 border-emerald-200",
     Completed: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    Partial: "bg-blue-50 text-blue-700 border-blue-200",
     Credit: "bg-amber-50 text-amber-700 border-amber-200",
     Cancelled: "bg-rose-50 text-rose-700 border-rose-200",
     Returned: "bg-rose-50 text-rose-700 border-rose-200",
@@ -98,8 +137,10 @@ function SaleStatusBadge({ status }: { status: string }) {
   }
 
   const labelMap: Record<string, string> = {
+    Paid: "Paid",
     Completed: "Paid",
-    Credit: "Partially Paid",
+    Partial: "Partial",
+    Credit: "Credit",
     Pending: "Pending",
     Cancelled: "Cancelled",
     Returned: "Returned",
@@ -124,6 +165,7 @@ function DeliveryStatusBadge({ status }: { status: string }) {
     Packed: "bg-blue-50 text-blue-700 border-blue-200",
     Sent: "bg-purple-50 text-purple-700 border-purple-200",
     Direct: "bg-blue-50 text-blue-700 border-blue-200",
+    Courier: "bg-indigo-50 text-indigo-700 border-indigo-200",
     Shipping: "bg-cyan-50 text-cyan-700 border-cyan-200",
     Delivered: "bg-emerald-50 text-emerald-700 border-emerald-200",
     Returned: "bg-rose-50 text-rose-700 border-rose-200",
@@ -157,6 +199,8 @@ function buildInitialFilters(sales: any[], getters: Record<ColumnKey, (sale: any
 interface SalesExcelTableProps {
   searchTerm?: string
   onSearchTermChange?: (term: string) => void
+  isPurchaseManager?: boolean
+  isLogistics?: boolean
   periodLabel: string
   isCurrentMonth: boolean
   canGoNextMonth: boolean
@@ -173,6 +217,9 @@ interface SalesExcelTableProps {
   deviceId?: number
   onRefreshSales?: () => void
   globalDateRange?: { from?: string; to?: string }
+  onlyPosUpdated?: boolean
+  showActions?: boolean
+  showViewModal?: boolean
 }
 
 function TableSkeleton() {
@@ -198,6 +245,8 @@ function TableSkeleton() {
 export default function SalesExcelTable({
   searchTerm: externalSearchTerm,
   onSearchTermChange,
+  isPurchaseManager: propIsPurchaseManager,
+  isLogistics: propIsLogistics,
   periodLabel,
   isCurrentMonth,
   canGoNextMonth,
@@ -214,12 +263,101 @@ export default function SalesExcelTable({
   deviceId,
   onRefreshSales,
   globalDateRange,
+  onlyPosUpdated,
+  showActions = true,
+  showViewModal = true,
 }: SalesExcelTableProps) {
+  const pathname = usePathname()
+  const activeStaff = useAppSelector(selectActiveStaff)
+  const isPurchaseManager =
+    propIsPurchaseManager !== undefined
+      ? propIsPurchaseManager
+      : activeStaff?.role === "purchase_manager" || Boolean(pathname?.startsWith("/purchase-manager"))
+  const isLogistics =
+    propIsLogistics !== undefined
+      ? propIsLogistics
+      : activeStaff?.role === "logistics" || Boolean(pathname?.startsWith("/logistics"))
+
   const { toast } = useToast()
   const [internalSearchTerm, setInternalSearchTerm] = useState("")
   const [isGeneratingReport, setIsGeneratingReport] = useState(false)
   const [isCreateJobCardOpen, setIsCreateJobCardOpen] = useState(false)
   const [editingJobCardId, setEditingJobCardId] = useState<number | null>(null)
+  const [fulfillmentModal, setFulfillmentModal] = useState<{
+    isOpen: boolean
+    sale: any
+    shippingData: SaleShippingInput
+  } | null>(null)
+  const [isSavingFulfillment, setIsSavingFulfillment] = useState(false)
+
+  const openFulfillmentModal = useCallback(async (sale: any) => {
+    const initialShipping = mapSaleShippingFromRecord(sale)
+    initialShipping.fulfillmentType = "ship"
+    if (!initialShipping.shippingAddress) {
+      initialShipping.shippingAddress = sale.shipping_address || sale.customer_address || ""
+    }
+    setFulfillmentModal({
+      isOpen: true,
+      sale,
+      shippingData: initialShipping,
+    })
+
+    try {
+      const res = await getSaleDetails(sale.id)
+      if (res.success && res.data) {
+        const fullSale = res.data.sale ? { ...res.data.sale, items: res.data.items, payments: res.data.payments } : res.data
+        const updatedShipping = mapSaleShippingFromRecord(fullSale)
+        updatedShipping.fulfillmentType = "ship"
+        if (!updatedShipping.shippingAddress) {
+          updatedShipping.shippingAddress = fullSale.shipping_address || fullSale.customer_address || ""
+        }
+        setFulfillmentModal((prev) => {
+          if (!prev || prev.sale.id !== sale.id) return prev
+          return {
+            ...prev,
+            sale: { ...prev.sale, ...fullSale },
+            shippingData: updatedShipping,
+          }
+        })
+      }
+    } catch (err) {
+      console.warn("Could not fetch extra details for fulfillment modal:", err)
+    }
+  }, [])
+
+  const handleCloseFulfillmentModal = () => {
+    setFulfillmentModal(null)
+  }
+
+  const handleSaveFulfillment = async () => {
+    if (!fulfillmentModal) return
+    setIsSavingFulfillment(true)
+    try {
+      const res = await updateSaleFulfillmentDetails(fulfillmentModal.sale.id, fulfillmentModal.shippingData)
+      if (res.success) {
+        toast({
+          title: "Success",
+          description: "Fulfillment details saved successfully",
+        })
+        handleCloseFulfillmentModal()
+        fetchServerSales()
+      } else {
+        toast({
+          title: "Error",
+          description: res.message || "Failed to save fulfillment details",
+          variant: "destructive",
+        })
+      }
+    } catch (err) {
+      toast({
+        title: "Error",
+        description: "An error occurred while saving fulfillment details",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSavingFulfillment(false)
+    }
+  }
 
   const handleRowEdit = (sale: any) => {
     if (isJobCardSale(sale)) {
@@ -244,7 +382,7 @@ export default function SalesExcelTable({
       saleId: (sale: any) => String(sale.id),
       status: (sale: any) => getSaleStatusLabel(sale),
       delivery: (sale: any) => getSaleDeliveryLabel(sale),
-      date: (sale: any) => format(parseSaleDate(sale.sale_date), "dd-MM-yyyy"),
+      date: (sale: any) => format(parseSaleDateTime(sale), "dd-MM-yyyy, hh:mm a"),
       customer: (sale: any) => sale.customer_name || "Walk-in",
       staff: (sale: any) => sale.staff_name || "Store / Admin",
       payment: (sale: any) => getPaymentMethodDisplay(sale),
@@ -270,9 +408,12 @@ export default function SalesExcelTable({
     [formatCurrency, getPaymentMethodDisplay, getRemainingAmount],
   )
 
-  const [cardFilter, setCardFilter] = useState<"all" | "pending" | "critical">("all")
+  const [cardFilter, setCardFilter] = useState<"all" | "today" | "pending" | "critical">("all")
   const [typeFilter, setTypeFilter] = useState<"all" | "normal" | "job_card">("all")
+  const [typeOfSaleFilter, setTypeOfSaleFilter] = useState<"all" | "walk in" | "courier">("all")
   const [selectedSales, setSelectedSales] = useState<number[]>([])
+  const [allMatchingSales, setAllMatchingSales] = useState<{ id: number; isJobCard: boolean }[]>([])
+  const [loadedSalesCache, setLoadedSalesCache] = useState<Record<number, any>>({})
   const [expandedSaleId, setExpandedSaleId] = useState<number | null>(null)
   const [isBreakdownModalOpen, setIsBreakdownModalOpen] = useState(false)
 
@@ -283,7 +424,7 @@ export default function SalesExcelTable({
   const [serverSales, setServerSales] = useState<any[]>([])
   const [totalServerCount, setTotalServerCount] = useState(0)
   const [totalServerPages, setTotalServerPages] = useState(0)
-  const [serverCardCounts, setServerCardCounts] = useState<{ total: number; pending: number; critical: number } | null>(
+  const [serverCardCounts, setServerCardCounts] = useState<{ total: number; today?: number; pending: number; critical: number } | null>(
     null,
   )
   const [isFetchingServer, setIsFetchingServer] = useState(false)
@@ -292,6 +433,16 @@ export default function SalesExcelTable({
   const [hasFetchedServer, setHasFetchedServer] = useState(false)
   const [serverError, setServerError] = useState<string | null>(null)
   const latestFetchIdRef = useRef(0)
+
+  const allMatchingIds = useMemo(() => allMatchingSales.map((s) => s.id), [allMatchingSales])
+  const allMatchingJobCardIds = useMemo(
+    () => new Set(allMatchingSales.filter((s) => s.isJobCard).map((s) => s.id)),
+    [allMatchingSales],
+  )
+  const selectedJobCardCount = useMemo(
+    () => selectedSales.filter((id) => allMatchingJobCardIds.has(id)).length,
+    [selectedSales, allMatchingJobCardIds],
+  )
 
   // Column dropdown options come from the rows of the current page (the list is server-paginated).
   const uniqueValues = useMemo(() => {
@@ -326,14 +477,20 @@ export default function SalesExcelTable({
           dateFrom: globalDateRange?.from,
           dateTo: globalDateRange?.to,
           typeFilter,
+          typeOfSaleFilter,
           cardFilter,
           searchTerm: debouncedSearch,
+          onlyPosUpdated,
+          excludePendingAndPickup: isLogistics,
         }),
         getSalesSummaryCards(deviceId!, {
           dateFrom: globalDateRange?.from,
           dateTo: globalDateRange?.to,
           typeFilter,
+          typeOfSaleFilter,
           searchTerm: debouncedSearch,
+          onlyPosUpdated,
+          excludePendingAndPickup: isLogistics,
         }),
       ])
       if (fetchId !== latestFetchIdRef.current) return
@@ -342,6 +499,14 @@ export default function SalesExcelTable({
         setServerSales(salesRes.data)
         setTotalServerCount(salesRes.totalCount)
         setTotalServerPages(salesRes.totalPages)
+        setAllMatchingSales(salesRes.allMatching || [])
+        setLoadedSalesCache((prev) => {
+          const next = { ...prev }
+          for (const s of (salesRes.data as any[])) {
+            next[Number(s.id)] = s
+          }
+          return next
+        })
         setServerError(null)
       } else {
         setServerError(salesRes.message || "Failed to load sales")
@@ -359,11 +524,12 @@ export default function SalesExcelTable({
         setHasFetchedServer(true)
       }
     }
-  }, [deviceId, page, pageSize, globalDateRange?.from, globalDateRange?.to, typeFilter, cardFilter, debouncedSearch])
+  }, [deviceId, page, pageSize, globalDateRange?.from, globalDateRange?.to, typeFilter, typeOfSaleFilter, cardFilter, debouncedSearch, onlyPosUpdated, isLogistics])
 
-  // A new date range starts again from the first page.
+  // A new date range starts again from the first page and clears selection.
   useEffect(() => {
     setPage(1)
+    setSelectedSales([])
   }, [globalDateRange?.from, globalDateRange?.to])
 
   // Re-run when query inputs change or the parent signals a mutation (refreshKey).
@@ -407,13 +573,35 @@ export default function SalesExcelTable({
   }
 
   // The list is always server-paginated/filtered; rows are already the current page.
-  const displaySales = serverSales
+  const displaySales = useMemo(() => {
+    if (!isLogistics) return serverSales
+    return serverSales.filter((s: any) => {
+      const dStatus = (s.delivery_status || "pending").toLowerCase()
+      return dStatus !== "pending" && dStatus !== "pickup"
+    })
+  }, [serverSales, isLogistics])
 
   const selectedSalesList = useMemo(() => {
     return displaySales.filter((s) => selectedSales.includes(s.id))
   }, [displaySales, selectedSales])
 
-  const totalCount = serverCardCounts ? serverCardCounts.total : totalServerCount
+  const isTodaySale = useCallback((sale: any) => {
+    if (!sale) return false
+    try {
+      const dt = parseSaleDateTime(sale)
+      const now = new Date()
+      return (
+        dt.getFullYear() === now.getFullYear() &&
+        dt.getMonth() === now.getMonth() &&
+        dt.getDate() === now.getDate()
+      )
+    } catch {
+      return false
+    }
+  }, [])
+
+  const totalCount = onlyPosUpdated ? totalServerCount : (serverCardCounts ? serverCardCounts.total : totalServerCount)
+  const todayCount = serverCardCounts?.today ?? displaySales.filter(isTodaySale).length
   const pendingCount = serverCardCounts ? serverCardCounts.pending : 0
   const criticalCount = serverCardCounts ? serverCardCounts.critical : 0
   const pendingSalesCount = pendingCount
@@ -421,6 +609,11 @@ export default function SalesExcelTable({
   const totalSalesAmount = useMemo(
     () => displaySales.reduce((sum, sale) => sum + Number(sale.total_amount || 0), 0),
     [displaySales],
+  )
+  const todaySalesAmount = useMemo(
+    () =>
+      displaySales.filter(isTodaySale).reduce((sum, sale) => sum + Number(sale.total_amount || 0), 0),
+    [displaySales, isTodaySale],
   )
   const pendingSalesAmount = useMemo(
     () =>
@@ -469,6 +662,7 @@ export default function SalesExcelTable({
     setColumnFilters(buildInitialFilters([], valueGetters))
     setCardFilter("all")
     setTypeFilter("all")
+    setTypeOfSaleFilter("all")
     setPage(1)
     setSelectedSales([])
   }
@@ -557,11 +751,41 @@ export default function SalesExcelTable({
     }
   }
 
+  const resolveSelectedSalesList = async (): Promise<any[]> => {
+    if (selectedSales.length === 0) return []
+
+    const cache: Record<number, any> = { ...loadedSalesCache }
+    for (const sale of displaySales) {
+      cache[sale.id] = sale
+    }
+
+    const missingIds = selectedSales.filter((id) => !cache[id])
+
+    if (missingIds.length > 0 && deviceId) {
+      try {
+        const res = await getSalesByIds(deviceId, missingIds)
+        if (res.success && res.data) {
+          for (const s of (res.data as any[])) {
+            cache[Number(s.id)] = s
+          }
+          setLoadedSalesCache((prev) => ({ ...prev, ...cache }))
+        }
+      } catch (e) {
+        console.error("Failed to fetch missing sales for printing:", e)
+      }
+    }
+
+    return selectedSales.map((id) => cache[id]).filter(Boolean)
+  }
+
   const handleBulkPrintInvoices = async () => {
-    if (selectedSalesList.length === 0) return
+    if (selectedSales.length === 0) return
     setIsGeneratingReport(true)
     try {
-      for (const sale of selectedSalesList) {
+      const fullList = await resolveSelectedSalesList()
+      if (fullList.length === 0) return
+
+      for (const sale of fullList) {
         if (sale.items && sale.items.length > 0) {
           printSalesReceipt(sale, sale.items, "INR", {}, false)
         } else {
@@ -571,7 +795,7 @@ export default function SalesExcelTable({
           }
         }
       }
-      notifySuccess(toast, `Sent ${selectedSalesList.length} invoice(s) to print.`)
+      notifySuccess(toast, `Sent ${fullList.length} invoice(s) to print.`)
     } catch (err: any) {
       notifyError(toast, err?.message || "Failed to print selected invoices.")
     } finally {
@@ -579,20 +803,38 @@ export default function SalesExcelTable({
     }
   }
 
-  const handleBulkPrintLabels = () => {
-    if (selectedSalesList.length === 0) return
-    printBatchJobCards(selectedSalesList, "INR")
-    notifySuccess(toast, `Opened print window for ${selectedSalesList.length} delivery label(s).`)
+  const handleBulkPrintLabels = async () => {
+    if (selectedSales.length === 0) return
+    setIsGeneratingReport(true)
+    try {
+      const fullList = await resolveSelectedSalesList()
+      if (fullList.length === 0) return
+      printBatchJobCards(fullList, "INR")
+      notifySuccess(toast, `Opened print window for ${fullList.length} delivery label(s).`)
+    } catch (err: any) {
+      notifyError(toast, err?.message || "Failed to print labels.")
+    } finally {
+      setIsGeneratingReport(false)
+    }
   }
 
-  const handleBulkPrintJobCards = () => {
-    const jobCardSales = selectedSalesList.filter(isJobCardSale)
-    if (jobCardSales.length === 0) {
-      notifyWarning(toast, "No Job Card orders selected.")
-      return
+  const handleBulkPrintJobCards = async () => {
+    if (selectedSales.length === 0) return
+    setIsGeneratingReport(true)
+    try {
+      const fullList = await resolveSelectedSalesList()
+      const jobCardSales = fullList.filter(isJobCardSale)
+      if (jobCardSales.length === 0) {
+        notifyWarning(toast, "No Job Card orders selected.")
+        return
+      }
+      printBatchJobCards(jobCardSales, "INR")
+      notifySuccess(toast, `Opened print window for ${jobCardSales.length} Job Card(s).`)
+    } catch (err: any) {
+      notifyError(toast, err?.message || "Failed to print Job Cards.")
+    } finally {
+      setIsGeneratingReport(false)
     }
-    printBatchJobCards(jobCardSales, "INR")
-    notifySuccess(toast, `Opened print window for ${jobCardSales.length} Job Card(s).`)
   }
 
   const stickyActionHeaderClass =
@@ -663,8 +905,170 @@ export default function SalesExcelTable({
       </div>
 
       {/* OPERATIONAL CARDS */}
-      <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
-        {/* CARD 1 — TOTAL SALES */}
+      {isPurchaseManager ? (
+        <PurchaseManagerKpiCards
+          deviceId={deviceId}
+          globalDateRange={globalDateRange}
+          formatCurrency={formatCurrency}
+        />
+      ) : isLogistics ? (
+        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+          {/* LOGISTICS CARD 1 — TOTAL ORDERS */}
+          <button
+            type="button"
+            onClick={() => {
+              setCardFilter("all")
+              setPage(1)
+            }}
+            className={cn(
+              "flex flex-col justify-between rounded-xl border p-3.5 text-left transition-all cursor-pointer shadow-xs hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-400 min-w-0",
+              cardFilter === "all"
+                ? "border-violet-500 bg-violet-50/90 ring-2 ring-violet-400/30"
+                : "border-slate-200 bg-white hover:border-violet-300 hover:bg-slate-50/50",
+            )}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-violet-700">Total Orders</span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setIsBreakdownModalOpen(true)
+                  }}
+                  title="View sales breakdown"
+                  className="p-0.5 rounded-full hover:bg-violet-200/60 text-violet-600 hover:text-violet-800 transition-colors cursor-pointer"
+                >
+                  <Info className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              <Package className="h-4 w-4 text-violet-600 shrink-0" />
+            </div>
+            <div className="mt-2 flex items-baseline justify-between gap-2 min-w-0">
+              <div className="min-w-0">
+                <div className="text-xl font-extrabold text-slate-900 leading-tight">
+                  {totalCount} <span className="text-xs font-normal text-slate-500">{totalCount === 1 ? "Order" : "Orders"}</span>
+                </div>
+                <div className="text-xs font-semibold text-violet-700 mt-0.5 truncate">
+                  {formatCurrency(totalSalesAmount)}
+                </div>
+              </div>
+              {cardFilter === "all" && (
+                <span className="text-[10px] font-bold text-violet-700 bg-violet-100 px-2 py-0.5 rounded-full border border-violet-200 shrink-0">
+                  All Orders
+                </span>
+              )}
+            </div>
+          </button>
+
+          {/* LOGISTICS CARD 2 — TODAY'S ORDERS */}
+          <button
+            type="button"
+            onClick={() => {
+              setCardFilter((prev) => (prev === "today" ? "all" : "today"))
+              setPage(1)
+            }}
+            className={cn(
+              "flex flex-col justify-between rounded-xl border p-3.5 text-left transition-all cursor-pointer shadow-xs hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400 min-w-0",
+              cardFilter === "today"
+                ? "border-blue-500 bg-blue-50/90 ring-2 ring-blue-400/30"
+                : "border-slate-200 bg-white hover:border-blue-300 hover:bg-slate-50/50",
+            )}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-blue-700">Today&apos;s Orders</span>
+              <Calendar className="h-4 w-4 text-blue-600 shrink-0" />
+            </div>
+            <div className="mt-2 flex items-baseline justify-between gap-2 min-w-0">
+              <div className="min-w-0">
+                <div className="text-xl font-extrabold text-slate-900 leading-tight">
+                  {todayCount} <span className="text-xs font-normal text-slate-500">{todayCount === 1 ? "Order" : "Orders"}</span>
+                </div>
+                <div className="text-xs font-semibold text-blue-700 mt-0.5 truncate">
+                  {formatCurrency(todaySalesAmount)}
+                </div>
+              </div>
+              {cardFilter === "today" && (
+                <span className="text-[10px] font-bold text-blue-800 bg-blue-100 px-2 py-0.5 rounded-full border border-blue-200 shrink-0">
+                  Active Filter
+                </span>
+              )}
+            </div>
+          </button>
+
+          {/* LOGISTICS CARD 3 — PENDING ORDERS */}
+          <button
+            type="button"
+            onClick={() => {
+              setCardFilter((prev) => (prev === "pending" ? "all" : "pending"))
+              setPage(1)
+            }}
+            className={cn(
+              "flex flex-col justify-between rounded-xl border p-3.5 text-left transition-all cursor-pointer shadow-xs hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-amber-400 min-w-0",
+              cardFilter === "pending"
+                ? "border-amber-500 bg-amber-50/90 ring-2 ring-amber-400/30"
+                : "border-slate-200 bg-white hover:border-amber-300 hover:bg-slate-50/50",
+            )}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-amber-700">Pending Orders</span>
+              <Clock className="h-4 w-4 text-amber-600 shrink-0" />
+            </div>
+            <div className="mt-2 flex items-baseline justify-between gap-2 min-w-0">
+              <div className="min-w-0">
+                <div className="text-xl font-extrabold text-slate-900 leading-tight">
+                  {pendingCount} <span className="text-xs font-normal text-slate-500">{pendingCount === 1 ? "Order" : "Orders"}</span>
+                </div>
+                <div className="text-xs font-semibold text-amber-700 mt-0.5 truncate">
+                  {formatCurrency(pendingSalesAmount)}
+                </div>
+              </div>
+              {cardFilter === "pending" && (
+                <span className="text-[10px] font-bold text-amber-800 bg-amber-200 px-2 py-0.5 rounded-full border border-amber-300 shrink-0">
+                  Active Filter
+                </span>
+              )}
+            </div>
+          </button>
+
+          {/* LOGISTICS CARD 4 — CRITICAL ORDERS */}
+          <button
+            type="button"
+            onClick={() => {
+              setCardFilter((prev) => (prev === "critical" ? "all" : "critical"))
+              setPage(1)
+            }}
+            className={cn(
+              "flex flex-col justify-between rounded-xl border p-3.5 text-left transition-all cursor-pointer shadow-xs hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-rose-400 min-w-0",
+              cardFilter === "critical"
+                ? "border-rose-500 bg-rose-50/90 ring-2 ring-rose-400/30"
+                : "border-slate-200 bg-white hover:border-rose-300 hover:bg-slate-50/50",
+            )}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-rose-700">Critical Orders</span>
+              <AlertTriangle className="h-4 w-4 text-rose-600 shrink-0" />
+            </div>
+            <div className="mt-2 flex items-baseline justify-between gap-2 min-w-0">
+              <div className="min-w-0">
+                <div className="text-xl font-extrabold text-slate-900 leading-tight">
+                  {criticalCount} <span className="text-xs font-normal text-slate-500">{criticalCount === 1 ? "Order" : "Orders"}</span>
+                </div>
+                <div className="text-xs font-semibold text-rose-700 mt-0.5 truncate">
+                  {formatCurrency(criticalSalesAmount)}
+                </div>
+              </div>
+              {cardFilter === "critical" && (
+                <span className="text-[10px] font-bold text-rose-800 bg-rose-200 px-2 py-0.5 rounded-full border border-rose-300 shrink-0">
+                  Active Filter
+                </span>
+              )}
+            </div>
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+          {/* CARD 1 — TOTAL SALES */}
         <button
           type="button"
           onClick={() => {
@@ -782,6 +1186,7 @@ export default function SalesExcelTable({
           </div>
         </button>
       </div>
+      )}
 
       {/* BULK ACTION TOOLBAR */}
       {selectedSales.length > 0 && (
@@ -790,6 +1195,15 @@ export default function SalesExcelTable({
             <span className="text-xs font-bold text-violet-900">
               {selectedSales.length} {selectedSales.length === 1 ? "order" : "orders"} selected
             </span>
+            {allMatchingIds.length > selectedSales.length && (
+              <button
+                type="button"
+                onClick={() => setSelectedSales(allMatchingIds)}
+                className="text-xs font-semibold text-violet-700 hover:text-violet-950 underline ml-1 cursor-pointer"
+              >
+                Select all {allMatchingIds.length} orders
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setSelectedSales([])}
@@ -822,7 +1236,7 @@ export default function SalesExcelTable({
               Print Labels ({selectedSales.length})
             </Button>
 
-            {selectedSalesList.some(isJobCardSale) && (
+            {selectedJobCardCount > 0 && (
               <Button
                 size="sm"
                 className="h-8 text-xs gap-1.5 bg-violet-600 hover:bg-violet-700 text-white font-medium flex-1 sm:flex-initial"
@@ -830,7 +1244,7 @@ export default function SalesExcelTable({
                 disabled={isFetchingServer || isGeneratingReport}
               >
                 <Printer className="h-3.5 w-3.5" />
-                Print Job Cards ({selectedSalesList.filter(isJobCardSale).length})
+                Print Job Cards ({selectedJobCardCount})
               </Button>
             )}
           </div>
@@ -908,7 +1322,7 @@ export default function SalesExcelTable({
 
           {/* ACTION BUTTONS ROW */}
           <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-200/60">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2.5">
               <span className="text-xs font-medium text-slate-600">
                 {deviceId ? (
                   `Showing ${displaySales.length > 0 ? (page - 1) * pageSize + 1 : 0}–${Math.min(
@@ -919,12 +1333,64 @@ export default function SalesExcelTable({
                   `${displaySales.length} of ${totalCount}`
                 )}
               </span>
-              {pendingSalesCount > 0 && (
+              {!onlyPosUpdated && !isLogistics && pendingSalesCount > 0 && (
                 <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800">
                   <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
                   {pendingSalesCount} Pending
                 </span>
               )}
+
+              {/* SLIDING FILTER PILL: All Sales | Walk in | Courier */}
+              <div className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-100/90 p-0.5 shadow-2xs">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTypeOfSaleFilter("all")
+                    setPage(1)
+                    setSelectedSales([])
+                  }}
+                  className={cn(
+                    "px-2.5 py-1 text-xs font-semibold rounded-md transition-all cursor-pointer whitespace-nowrap",
+                    typeOfSaleFilter === "all"
+                      ? "bg-white text-slate-900 shadow-2xs font-bold"
+                      : "text-slate-600 hover:text-slate-900",
+                  )}
+                >
+                  All Sales
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTypeOfSaleFilter("walk in")
+                    setPage(1)
+                    setSelectedSales([])
+                  }}
+                  className={cn(
+                    "px-2.5 py-1 text-xs font-semibold rounded-md transition-all cursor-pointer whitespace-nowrap",
+                    typeOfSaleFilter === "walk in"
+                      ? "bg-white text-slate-900 shadow-2xs font-bold"
+                      : "text-slate-600 hover:text-slate-900",
+                  )}
+                >
+                  Walk in
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTypeOfSaleFilter("courier")
+                    setPage(1)
+                    setSelectedSales([])
+                  }}
+                  className={cn(
+                    "px-2.5 py-1 text-xs font-semibold rounded-md transition-all cursor-pointer whitespace-nowrap",
+                    typeOfSaleFilter === "courier"
+                      ? "bg-white text-slate-900 shadow-2xs font-bold"
+                      : "text-slate-600 hover:text-slate-900",
+                  )}
+                >
+                  Courier
+                </button>
+              </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-1.5 w-full sm:w-auto">
@@ -988,15 +1454,17 @@ export default function SalesExcelTable({
                 <span>Excel</span>
               </Button>
 
-              <Button
-                size="sm"
-                className="h-7 gap-1.5 px-3 text-xs font-semibold bg-violet-600 hover:bg-violet-700 text-white shadow-2xs"
-                onClick={() => setIsCreateJobCardOpen(true)}
-                title="Create a new Job Card"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                <span>Job Card</span>
-              </Button>
+              {!isPurchaseManager && !isLogistics && (
+                <Button
+                  size="sm"
+                  className="h-7 gap-1.5 px-3 text-xs font-semibold bg-violet-600 hover:bg-violet-700 text-white shadow-2xs"
+                  onClick={() => setIsCreateJobCardOpen(true)}
+                  title="Create a new Job Card"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  <span>Job Card</span>
+                </Button>
+              )}
 
               {activeFilterCount > 0 || cardFilter !== "all" || typeFilter !== "all" ? (
                 <Button
@@ -1030,16 +1498,26 @@ export default function SalesExcelTable({
                   <th className="whitespace-nowrap px-2 py-1.5 text-center w-10">
                     <input
                       type="checkbox"
-                      className="h-4 w-4 rounded border-gray-300 text-violet-600 focus:ring-violet-600 cursor-pointer"
-                      checked={displaySales.length > 0 && selectedSales.length === displaySales.length}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setSelectedSales(displaySales.map((s) => s.id))
-                        } else {
-                          setSelectedSales([])
+                      ref={(el) => {
+                        if (el) {
+                          el.indeterminate =
+                            selectedSales.length > 0 && selectedSales.length < allMatchingIds.length
                         }
                       }}
-                      title="Select all visible orders"
+                      className="h-4 w-4 rounded border-gray-300 text-violet-600 focus:ring-violet-600 cursor-pointer"
+                      checked={allMatchingIds.length > 0 && selectedSales.length === allMatchingIds.length}
+                      onChange={() => {
+                        if (allMatchingIds.length > 0 && selectedSales.length === allMatchingIds.length) {
+                          setSelectedSales([])
+                        } else {
+                          setSelectedSales(allMatchingIds)
+                        }
+                      }}
+                      title={
+                        allMatchingIds.length > 0 && selectedSales.length === allMatchingIds.length
+                          ? "Deselect all orders"
+                          : `Select all ${allMatchingIds.length} orders across all pages`
+                      }
                     />
                   </th>
                   <th className="whitespace-nowrap px-1 py-1.5 text-center w-8"></th>
@@ -1051,22 +1529,22 @@ export default function SalesExcelTable({
                   {headerCell("customer", "Customer")}
                   {headerCell("staff", "Staff Member")}
                   {headerCell("payment", "Payment")}
-                  {headerCell("total", "Total / Profit", "right")}
+                  {headerCell("total", "Total", "right")}
                   {headerCell("received", "Received", "right")}
                   {headerCell("balance", "Balance", "right")}
-                  <th className={stickyActionHeaderClass}>Action</th>
+                  {(showActions || isLogistics) && <th className={stickyActionHeaderClass}>Action</th>}
                 </tr>
               </thead>
               <tbody className={isFetchingServer && hasFetchedServer ? "opacity-60 transition-opacity" : "transition-opacity"}>
                 {!hasFetchedServer ? (
                   <tr>
-                    <td colSpan={14}>
+                    <td colSpan={showActions || isLogistics ? 14 : 13}>
                       <TableSkeleton />
                     </td>
                   </tr>
                 ) : serverError && displaySales.length === 0 ? (
                   <tr>
-                    <td colSpan={14} className="px-4 py-8 text-center text-sm text-rose-600">
+                    <td colSpan={showActions || isLogistics ? 14 : 13} className="px-4 py-8 text-center text-sm text-rose-600">
                       {serverError}
                       <Button variant="outline" size="sm" className="ml-3 h-7 text-xs" onClick={() => fetchServerSales()}>
                         Retry
@@ -1075,7 +1553,7 @@ export default function SalesExcelTable({
                   </tr>
                 ) : displaySales.length === 0 ? (
                   <tr>
-                    <td colSpan={14} className="px-4 py-12 text-center text-sm text-muted-foreground">
+                    <td colSpan={showActions || isLogistics ? 14 : 13} className="px-4 py-12 text-center text-sm text-muted-foreground">
                       {debouncedSearch || cardFilter !== "all" || typeFilter !== "all"
                         ? "No sales match the current filters"
                         : `No sales found for ${periodLabel}`}
@@ -1118,6 +1596,7 @@ export default function SalesExcelTable({
                       deliveryStatusLower.includes("paid") ||
                       deliveryStatusLower.includes("pack") ||
                       deliveryStatusLower.includes("sent") ||
+                      deliveryStatusLower.includes("courier") ||
                       deliveryStatusLower.includes("ship") ||
                       deliveryStatusLower.includes("transit") ||
                       deliveryStatusLower.includes("out for delivery") ||
@@ -1157,8 +1636,12 @@ export default function SalesExcelTable({
                     const mainRow = (
                       <tr
                         key={sale.id}
-                        onClick={() => onViewSale(sale)}
-                        className={`group cursor-pointer border-b border-slate-200 transition-colors ${rowClass}`}
+                        onClick={() => {
+                          if (showViewModal) {
+                            onViewSale(sale)
+                          }
+                        }}
+                        className={`group ${showViewModal ? "cursor-pointer" : ""} border-b border-slate-200 transition-colors ${rowClass}`}
                       >
                         <td className="whitespace-nowrap px-2 py-1.5 text-center" onClick={(e) => e.stopPropagation()}>
                           <input
@@ -1186,13 +1669,18 @@ export default function SalesExcelTable({
                             )}
                           </button>
                         </td>
-                        <td className="whitespace-nowrap px-2 py-1.5 text-xs text-muted-foreground">
+                        <td className="whitespace-nowrap px-2 py-1.5 text-xs text-muted-foreground text-center">
+                          {!sale.is_pos_updated && (
+                            <span className="text-red-600 font-bold mr-1 text-base leading-none" title="POS Not Updated">!</span>
+                          )}
                           {(page - 1) * pageSize + index + 1}
                         </td>
                         <td className="whitespace-nowrap px-3 py-1.5 font-semibold text-slate-800">
                           <div className="flex flex-col gap-0.5">
                             <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="font-bold text-blue-700">#{sale.id}</span>
+                              <span className="font-bold text-blue-700 flex items-center">
+                                #{sale.id}
+                              </span>
                               {isJobCard ? (
                                 <span className="inline-flex items-center rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold text-blue-800 border border-blue-200">
                                   JOB CARD
@@ -1235,26 +1723,25 @@ export default function SalesExcelTable({
                           <SaleStatusBadge status={getSaleStatusLabel(sale)} />
                         </td>
                         <td className="whitespace-nowrap px-3 py-1.5" onClick={(e) => e.stopPropagation()}>
-                          {getSaleDeliveryLabel(sale) === "Pickup" ? (
-                            <DeliveryStatusBadge status="Pickup" />
-                          ) : (
-                            <DeliveryStatusSelect
-                              saleId={sale.id}
-                              deviceId={sale.device_id || deviceId || 0}
-                              currentStatus={sale.delivery_status || "Pending"}
-                              customerName={sale.customer_name}
-                              customerPhone={sale.customer_phone || sale.customer_phone_override}
-                              trackingId={sale.tracking_id}
-                              orderNumber={sale.id}
-                              paymentStatus={sale.payment_status}
-                              isJobCard={isJobCard}
-                              userRole="admin"
-                              onStatusChange={(newStatus) => handleDeliveryStatusChange(sale.id, newStatus)}
-                            />
-                          )}
+                          <DeliveryStatusSelect
+                            saleId={sale.id}
+                            deviceId={sale.device_id || deviceId || 0}
+                            currentStatus={sale.delivery_status || "Pending"}
+                            customerName={sale.customer_name}
+                            customerPhone={sale.customer_phone || sale.customer_phone_override}
+                            trackingId={sale.tracking_id}
+                            orderNumber={sale.id}
+                            paymentStatus={sale.payment_status}
+                            isJobCard={isJobCard}
+                            userRole="admin"
+                            onStatusChange={(newStatus) => handleDeliveryStatusChange(sale.id, newStatus)}
+                          />
                         </td>
                         <td className="whitespace-nowrap px-3 py-1.5 text-slate-700">
-                          {format(parseSaleDate(sale.sale_date), "dd-MM-yyyy")}
+                          <div className="flex flex-col">
+                            <span className="font-medium text-slate-800">{format(parseSaleDateTime(sale), "dd-MM-yyyy")}</span>
+                            <span className="text-[11px] text-slate-500 font-normal">{format(parseSaleDateTime(sale), "hh:mm a")}</span>
+                          </div>
                         </td>
                         <td className="max-w-[200px] px-3 py-1.5 text-slate-700">
                           <div className="flex flex-col gap-0.5">
@@ -1281,11 +1768,11 @@ export default function SalesExcelTable({
                           {getPaymentMethodDisplay(sale)}
                         </td>
                         <td className="whitespace-nowrap px-3 py-1.5 text-right font-medium text-slate-800">
-                          <div className="flex flex-col items-end">
+                          <div className="group/total inline-flex flex-col items-end cursor-default">
                             <span className="font-bold text-slate-900">{formatCurrency(Number(sale.total_amount))}</span>
                             {!hideCogs && (
-                              <span className="text-[11px] font-semibold text-emerald-700">
-                                Profit: {formatCurrency(profitAmount)}
+                              <span className="text-[11px] font-semibold text-emerald-700 opacity-0 group-hover/total:opacity-100 transition-opacity select-none">
+                                {formatCurrency(profitAmount)}
                               </span>
                             )}
                           </div>
@@ -1296,33 +1783,52 @@ export default function SalesExcelTable({
                         <td className="whitespace-nowrap px-3 py-1.5 text-right text-amber-700 font-semibold">
                           {remaining > 0 ? formatCurrency(remaining) : "—"}
                         </td>
-                        <td className={stickyActionCellClass(baseBgClass, isPending)}>
-                          <div className="flex items-center justify-end gap-1.5">
-                            <Button
-                              type="button"
-                              size="sm"
-                              onClick={(event) => {
-                                event.stopPropagation()
-                                onEditSale(sale)
-                              }}
-                              className="h-6 px-2 text-[11px] font-bold bg-green-600 hover:bg-green-700 text-white shadow-2xs gap-1 cursor-pointer"
-                              title="Open and edit in POS mode"
-                            >
-                              <ShoppingCart className="h-3 w-3" />
-                              POS
-                            </Button>
-                            <button
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation()
-                                handleRowEdit(sale)
-                              }}
-                              className="text-xs font-medium text-brand-blue hover:text-blue-700 hover:underline cursor-pointer"
-                            >
-                              Edit
-                            </button>
-                          </div>
-                        </td>
+                        {(showActions || isLogistics) && (
+                          <td className={stickyActionCellClass(baseBgClass, isPending)}>
+                            {isLogistics ? (
+                              <div className="flex items-center justify-center">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    openFulfillmentModal(sale)
+                                  }}
+                                  className="h-7 w-7 p-0 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white shadow-2xs hover:shadow-xs transition-transform hover:scale-105 active:scale-95 flex items-center justify-center cursor-pointer"
+                                  title="Fulfillment Details"
+                                >
+                                  <ArrowRight className="h-3.5 w-3.5" />
+                                </Button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center justify-end gap-1.5">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    onEditSale(sale)
+                                  }}
+                                  className="h-6 px-2 text-[11px] font-bold bg-green-600 hover:bg-green-700 text-white shadow-2xs gap-1 cursor-pointer"
+                                  title="Open and edit in POS mode"
+                                >
+                                  <ShoppingCart className="h-3 w-3" />
+                                  POS
+                                </Button>
+                                <button
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    handleRowEdit(sale)
+                                  }}
+                                  className="text-xs font-medium text-brand-blue hover:text-blue-700 hover:underline cursor-pointer"
+                                >
+                                  Edit
+                                </button>
+                              </div>
+                            )}
+                          </td>
+                        )}
                       </tr>
                     )
 
@@ -1330,7 +1836,7 @@ export default function SalesExcelTable({
 
                     const expandedRow = (
                       <tr key={`expand-${sale.id}`} className="bg-slate-50 border-b border-slate-200">
-                        <td colSpan={14} className="p-3" onClick={(e) => e.stopPropagation()}>
+                        <td colSpan={showActions || isLogistics ? 14 : 13} className="p-3" onClick={(e) => e.stopPropagation()}>
                           <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs space-y-3">
                             <div className="flex flex-wrap items-center justify-between border-b border-slate-100 pb-2 gap-2">
                               <div className="flex items-center gap-2">
@@ -1342,7 +1848,7 @@ export default function SalesExcelTable({
                                 )}
                               </div>
                               <span className="text-xs text-slate-500">
-                                Date: {format(parseSaleDate(sale.sale_date), "dd MMM yyyy, hh:mm a")}
+                                Date: {format(parseSaleDateTime(sale), "dd MMM yyyy, hh:mm a")}
                               </span>
                             </div>
 
@@ -1420,22 +1926,26 @@ export default function SalesExcelTable({
                                 />
 
                                 <div className="pt-2 flex flex-wrap gap-1.5">
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    className="h-7 text-xs px-2.5"
-                                    onClick={() => handleRowEdit(sale)}
-                                  >
-                                    <Edit className="h-3 w-3 mr-1 text-slate-600" /> Edit
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    className="h-7 text-xs px-2.5"
-                                    onClick={() => onViewSale(sale)}
-                                  >
-                                    <Eye className="h-3 w-3 mr-1 text-slate-600" /> View Modal
-                                  </Button>
+                                  {showActions && (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-7 text-xs px-2.5"
+                                      onClick={() => handleRowEdit(sale)}
+                                    >
+                                      <Edit className="h-3 w-3 mr-1 text-slate-600" /> Edit
+                                    </Button>
+                                  )}
+                                  {showViewModal && (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-7 text-xs px-2.5"
+                                      onClick={() => onViewSale(sale)}
+                                    >
+                                      <Eye className="h-3 w-3 mr-1 text-slate-600" /> View Modal
+                                    </Button>
+                                  )}
                                   <SaleDocumentActions sale={sale} size="row" />
                                 </div>
                               </div>
@@ -1454,6 +1964,40 @@ export default function SalesExcelTable({
 
           {/* MOBILE & TABLET CARD LIST VIEW (< 1024px) */}
           <div className="block lg:hidden divide-y divide-slate-200 bg-slate-50/50">
+            {allMatchingIds.length > 0 && (
+              <div className="p-3 bg-white border-b border-slate-200 flex items-center justify-between">
+                <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-700 select-none">
+                  <input
+                    type="checkbox"
+                    ref={(el) => {
+                      if (el) {
+                        el.indeterminate =
+                          selectedSales.length > 0 && selectedSales.length < allMatchingIds.length
+                      }
+                    }}
+                    className="h-4 w-4 rounded border-gray-300 text-violet-600 focus:ring-violet-600 cursor-pointer"
+                    checked={allMatchingIds.length > 0 && selectedSales.length === allMatchingIds.length}
+                    onChange={() => {
+                      if (allMatchingIds.length > 0 && selectedSales.length === allMatchingIds.length) {
+                        setSelectedSales([])
+                      } else {
+                        setSelectedSales(allMatchingIds)
+                      }
+                    }}
+                  />
+                  <span>
+                    {allMatchingIds.length > 0 && selectedSales.length === allMatchingIds.length
+                      ? "Deselect all"
+                      : `Select all ${allMatchingIds.length} orders`}
+                  </span>
+                </label>
+                {selectedSales.length > 0 && (
+                  <span className="text-xs font-bold text-violet-800">
+                    {selectedSales.length} selected
+                  </span>
+                )}
+              </div>
+            )}
             {!hasFetchedServer ? (
               <div className="p-4 space-y-3">
                 {[...Array(4)].map((_, i) => (
@@ -1528,7 +2072,12 @@ export default function SalesExcelTable({
                           }}
                         />
                         <div className="flex items-center gap-1.5 flex-wrap min-w-0">
-                          <span className="font-extrabold text-blue-700 text-sm">#{sale.id}</span>
+                          <span className="font-extrabold text-blue-700 text-sm flex items-center">
+                            {!sale.is_pos_updated && (
+                              <span className="text-red-600 font-bold mr-1 text-base leading-none" title="POS Not Updated">!</span>
+                            )}
+                            #{sale.id}
+                          </span>
                           {isJobCard ? (
                             <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold text-blue-800 border border-blue-200">
                               JOB CARD
@@ -1556,8 +2105,15 @@ export default function SalesExcelTable({
                       </div>
 
                       <div className="text-right shrink-0">
-                        <div className="text-sm font-extrabold text-slate-900 leading-tight">
-                          {formatCurrency(Number(sale.total_amount))}
+                        <div className="group/total inline-flex flex-col items-end cursor-default">
+                          <div className="text-sm font-extrabold text-slate-900 leading-tight">
+                            {formatCurrency(Number(sale.total_amount))}
+                          </div>
+                          {!hideCogs && (
+                            <span className="text-[11px] font-semibold text-emerald-700 opacity-0 group-hover/total:opacity-100 transition-opacity select-none">
+                              {formatCurrency(profitAmount)}
+                            </span>
+                          )}
                         </div>
                         <div className="mt-0.5">
                           <SaleStatusBadge status={statusLabel} />
@@ -1585,10 +2141,10 @@ export default function SalesExcelTable({
                           Date & Time
                         </span>
                         <span className="font-semibold text-slate-700 block">
-                          {format(parseSaleDate(sale.sale_date), "dd MMM yyyy")}
+                          {format(parseSaleDateTime(sale), "dd MMM yyyy")}
                         </span>
                         <span className="text-[11px] text-slate-500 block">
-                          {format(parseSaleDate(sale.sale_date), "hh:mm a")}
+                          {format(parseSaleDateTime(sale), "hh:mm a")}
                         </span>
                       </div>
                     </div>
@@ -1622,25 +2178,19 @@ export default function SalesExcelTable({
                     {/* DELIVERY STATUS & TRACKING CONTROLS */}
                     <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pt-0.5">
                       <div className="flex-1">
-                        {getSaleDeliveryLabel(sale) === "Pickup" ? (
-                          <div className="inline-flex items-center gap-1 text-xs font-medium text-slate-600 bg-slate-100 px-2.5 py-1 rounded-md">
-                            Delivery: Pickup
-                          </div>
-                        ) : (
-                          <DeliveryStatusSelect
-                            saleId={sale.id}
-                            deviceId={sale.device_id || deviceId || 0}
-                            currentStatus={sale.delivery_status || "Pending"}
-                            customerName={sale.customer_name}
-                            customerPhone={sale.customer_phone || sale.customer_phone_override}
-                            trackingId={sale.tracking_id}
-                            orderNumber={sale.id}
-                            paymentStatus={sale.payment_status}
-                            isJobCard={isJobCard}
-                            userRole="admin"
-                            onStatusChange={(newStatus) => handleDeliveryStatusChange(sale.id, newStatus)}
-                          />
-                        )}
+                        <DeliveryStatusSelect
+                          saleId={sale.id}
+                          deviceId={sale.device_id || deviceId || 0}
+                          currentStatus={sale.delivery_status || "Pending"}
+                          customerName={sale.customer_name}
+                          customerPhone={sale.customer_phone || sale.customer_phone_override}
+                          trackingId={sale.tracking_id}
+                          orderNumber={sale.id}
+                          paymentStatus={sale.payment_status}
+                          isJobCard={isJobCard}
+                          userRole="admin"
+                          onStatusChange={(newStatus) => handleDeliveryStatusChange(sale.id, newStatus)}
+                        />
                       </div>
 
                       {sale.tracking_id && (
@@ -1662,6 +2212,18 @@ export default function SalesExcelTable({
                     <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100">
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <SaleDocumentActions sale={sale} size="card" />
+
+                        {isLogistics && (
+                          <Button
+                            size="sm"
+                            onClick={() => openFulfillmentModal(sale)}
+                            className="h-8 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white gap-1.5 rounded-lg px-2.5 shadow-2xs cursor-pointer"
+                            title="Open Fulfillment Details"
+                          >
+                            <span>Fulfillment</span>
+                            <ArrowRight className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
 
                         <Button
                           size="sm"
@@ -1689,19 +2251,30 @@ export default function SalesExcelTable({
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-48">
-                          <DropdownMenuItem onClick={() => onViewSale(sale)}>
-                            <Eye className="h-4 w-4 mr-2 text-slate-500" /> View Modal
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => onEditSale(sale)}>
-                            <ShoppingCart className="h-4 w-4 mr-2 text-green-600" /> Open in POS
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleRowEdit(sale)}>
-                            <Edit className="h-4 w-4 mr-2 text-slate-500" /> Edit Sale
-                          </DropdownMenuItem>
-                          {isJobCard && (
-                            <DropdownMenuItem onClick={() => setEditingJobCardId(sale.id)}>
-                              <Layers className="h-4 w-4 mr-2 text-blue-600" /> Edit Job Card
+                          {showViewModal && (
+                            <DropdownMenuItem onClick={() => onViewSale(sale)}>
+                              <Eye className="h-4 w-4 mr-2 text-slate-500" /> View Modal
                             </DropdownMenuItem>
+                          )}
+                          {isLogistics && (
+                            <DropdownMenuItem onClick={() => openFulfillmentModal(sale)}>
+                              <Package className="h-4 w-4 mr-2 text-indigo-600" /> Fulfillment Details
+                            </DropdownMenuItem>
+                          )}
+                          {showActions && (
+                            <>
+                              <DropdownMenuItem onClick={() => onEditSale(sale)}>
+                                <ShoppingCart className="h-4 w-4 mr-2 text-green-600" /> Open in POS
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => handleRowEdit(sale)}>
+                                <Edit className="h-4 w-4 mr-2 text-slate-500" /> Edit Sale
+                              </DropdownMenuItem>
+                              {isJobCard && (
+                                <DropdownMenuItem onClick={() => setEditingJobCardId(sale.id)}>
+                                  <Layers className="h-4 w-4 mr-2 text-blue-600" /> Edit Job Card
+                                </DropdownMenuItem>
+                              )}
+                            </>
                           )}
                           <DropdownMenuItem onClick={() => printSalesReceipt(sale, sale.items || [], "INR", {}, false)}>
                             <Printer className="h-4 w-4 mr-2 text-slate-500" /> Print Invoice
@@ -1724,7 +2297,7 @@ export default function SalesExcelTable({
                         <div className="font-bold text-slate-900 border-b border-slate-200 pb-1.5 flex justify-between items-center">
                           <span>Order #{sale.id} Details</span>
                           <span className="text-[11px] font-normal text-slate-500">
-                            {format(parseSaleDate(sale.sale_date), "dd/MM/yyyy, hh:mm a")}
+                            {format(parseSaleDateTime(sale), "dd/MM/yyyy, hh:mm a")}
                           </span>
                         </div>
 
@@ -1838,7 +2411,7 @@ export default function SalesExcelTable({
         ) : null}
       </div>
 
-      {isCreateJobCardOpen && (
+      {!isPurchaseManager && !isLogistics && isCreateJobCardOpen && (
         <JobCardModal
           isOpen={true}
           onClose={() => {
@@ -1876,6 +2449,58 @@ export default function SalesExcelTable({
           }
         }}
       />
+
+      {/* FULFILLMENT MODAL (LOGISTICS) */}
+      <Dialog open={!!fulfillmentModal} onOpenChange={(open) => !open && handleCloseFulfillmentModal()}>
+        <DialogContent className="max-w-4xl p-0 overflow-hidden bg-slate-50 sm:rounded-xl">
+          <DialogHeader className="bg-white border-b border-slate-200 px-6 py-4 flex flex-row items-center justify-between sticky top-0 z-10">
+            <div>
+              <DialogTitle className="text-lg font-bold text-slate-800">
+                Fulfillment Details
+              </DialogTitle>
+              <DialogDescription className="text-xs text-slate-500 mt-1">
+                {isJobCardSale(fulfillmentModal?.sale) ? "Job Card Order" : "Normal Order"}{" "}
+                <span className="font-semibold text-slate-700 ml-1">#{fulfillmentModal?.sale?.id}</span>
+                {fulfillmentModal?.sale?.customer_name && (
+                  <span className="ml-2 text-slate-600 font-medium">({fulfillmentModal.sale.customer_name})</span>
+                )}
+              </DialogDescription>
+            </div>
+          </DialogHeader>
+          <div className="p-6 max-h-[70vh] overflow-y-auto">
+            {fulfillmentModal && (
+              <SaleShippingSection
+                deviceId={deviceId || fulfillmentModal.sale?.device_id || 0}
+                value={fulfillmentModal.shippingData}
+                onChange={(val) => setFulfillmentModal((prev) => (prev ? { ...prev, shippingData: val } : null))}
+                customerAddress={fulfillmentModal.sale?.shipping_address || fulfillmentModal.sale?.customer_address}
+                customerName={fulfillmentModal.sale?.customer_name || fulfillmentModal.sale?.customer_name_override}
+                customerPhone={fulfillmentModal.sale?.customer_phone || fulfillmentModal.sale?.customer_phone_override}
+                isJobCard={isJobCardSale(fulfillmentModal.sale)}
+                forceFullForm={true}
+                hidePickupToggle={true}
+              />
+            )}
+          </div>
+          <DialogFooter className="bg-white border-t border-slate-200 px-6 py-4 flex flex-row justify-end gap-2 sticky bottom-0 z-10">
+            <Button 
+              variant="outline" 
+              onClick={handleCloseFulfillmentModal}
+              disabled={isSavingFulfillment}
+            >
+              Back
+            </Button>
+            <Button 
+              onClick={handleSaveFulfillment}
+              disabled={isSavingFulfillment}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white gap-2"
+            >
+              {isSavingFulfillment ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              Save Details
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

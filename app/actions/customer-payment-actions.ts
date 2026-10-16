@@ -43,6 +43,7 @@ function parseStoredPaymentNotes(raw: string | null | undefined): StoredPaymentN
 function deriveSaleStatus(totalAmount: number, receivedAmount: number): string {
   const remaining = totalAmount - receivedAmount
   if (remaining <= 0.01) return "Completed"
+  if (receivedAmount > 0) return "Partial"
   return "Credit"
 }
 
@@ -76,7 +77,7 @@ async function reverseSalePayment(saleId: number, reverseAmount: number) {
   const newReceivedAmount = Number(Math.max(0, currentReceived - amountToReverse).toFixed(2))
   const newRemainingBalance = Number((totalAmount - newReceivedAmount).toFixed(2))
   const newStatus = deriveSaleStatus(totalAmount, newReceivedAmount)
-  const newPaymentStatus = newRemainingBalance <= 0.01 ? "Paid" : "Credit"
+  const newPaymentStatus = newRemainingBalance <= 0.01 ? "Paid" : (newReceivedAmount > 0 ? "Partial" : "Credit")
   const newBalanceAmount = Math.max(0, newRemainingBalance)
 
   await sql`
@@ -142,7 +143,7 @@ async function applyPaymentToSales(params: {
     const newRemainingBalance = Number((totalAmount - newReceivedAmount).toFixed(2))
     const newStatus = deriveSaleStatus(totalAmount, newReceivedAmount)
 
-    const newPaymentStatus = newRemainingBalance <= 0.01 ? "Paid" : "Credit"
+    const newPaymentStatus = newRemainingBalance <= 0.01 ? "Paid" : (newReceivedAmount > 0 ? "Partial" : "Credit")
     const newBalanceAmount = Math.max(0, newRemainingBalance)
 
     const saleCogs = await getSaleCogs(Number(sale.id))

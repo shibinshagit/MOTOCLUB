@@ -236,7 +236,7 @@ export async function recordSaleTransaction(saleData: {
       costAmount = 0
       receivedAmountForRecord = 0
       description = `Sale #${saleData.saleId} - Cancelled - ${saleData.paymentMethod || "Cash"} - Customer: ${saleData.customerId ? `ID ${saleData.customerId}` : "Walk-in"}`
-    } else if (saleData.status === "Credit" || saleData.status === "Partial") {
+    } else if (saleData.status === "Credit" || saleData.status === "Partial" || saleData.status === "Pending") {
       creditAmount = productReceived
       debitAmount = 0
 

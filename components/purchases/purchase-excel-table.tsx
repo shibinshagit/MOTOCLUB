@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { usePathname } from "next/navigation"
 import { format } from "date-fns"
 import { ChevronLeft, ChevronRight, Search, X, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -17,6 +18,9 @@ import {
   getPurchaseFilterOptions,
   type PurchaseColumnFilters,
 } from "@/app/actions/purchase-actions"
+import { useAppSelector } from "@/store/hooks"
+import { selectActiveStaff } from "@/store/slices/staffSlice"
+import PurchaseManagerKpiCards from "@/components/purchase-manager/purchase-manager-kpi-cards"
 
 function PaymentStatusBadge({ status }: { status: string }) {
   const normalized = status === "Partial" ? "Cancelled" : status
@@ -107,6 +111,7 @@ function buildInitialFilters(): ColumnFilters {
 interface PurchaseExcelTableProps {
   deviceId: number
   isActive?: boolean
+  isPurchaseManager?: boolean
   dateFrom?: string
   dateTo?: string
   debouncedSearchTerm: string
@@ -151,6 +156,7 @@ function TableSkeleton() {
 export default function PurchaseExcelTable({
   deviceId,
   isActive = true,
+  isPurchaseManager: propIsPurchaseManager,
   dateFrom,
   dateTo,
   debouncedSearchTerm,
@@ -170,6 +176,13 @@ export default function PurchaseExcelTable({
   onViewPurchase,
   onEditPurchase,
 }: PurchaseExcelTableProps) {
+  const pathname = usePathname()
+  const activeStaff = useAppSelector(selectActiveStaff)
+  const isPurchaseManager =
+    propIsPurchaseManager !== undefined
+      ? propIsPurchaseManager
+      : activeStaff?.role === "purchase_manager" || Boolean(pathname?.startsWith("/purchase-manager"))
+
   // Plain value of a row for a column; matches the SQL expressions used by the server-side filters.
   const rawValue = useCallback(
     (key: ColumnKey, purchase: any): string => {
@@ -437,26 +450,33 @@ export default function PurchaseExcelTable({
   return (
     <div className="space-y-4">
       {/* KPI Cards Header */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <div className="rounded-lg border border-purple-100 bg-purple-50 px-3 py-2">
-          <p className="text-[11px] font-medium uppercase tracking-wide text-purple-600">Total</p>
-          <p className="text-sm font-bold text-purple-700">{summary ? formatCurrency(summary.total) : DASH}</p>
+      {isPurchaseManager ? (
+        <PurchaseManagerKpiCards
+          summary={summary}
+          formatCurrency={formatCurrency}
+        />
+      ) : (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="rounded-lg border border-purple-100 bg-purple-50 px-3 py-2">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-purple-600">Total</p>
+            <p className="text-sm font-bold text-purple-700">{summary ? formatCurrency(summary.total) : DASH}</p>
+          </div>
+          <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-emerald-600">Paid</p>
+            <p className="text-sm font-bold text-emerald-700">{summary ? formatCurrency(summary.paid) : DASH}</p>
+          </div>
+          <div className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-amber-600">Remaining</p>
+            <p className="text-sm font-bold text-amber-700">{summary ? formatCurrency(summary.remaining) : DASH}</p>
+          </div>
+          <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-blue-600">Delivered</p>
+            <p className="text-sm font-bold text-blue-700">
+              {summary ? `${summary.delivered} of ${summary.count}` : DASH}
+            </p>
+          </div>
         </div>
-        <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2">
-          <p className="text-[11px] font-medium uppercase tracking-wide text-emerald-600">Paid</p>
-          <p className="text-sm font-bold text-emerald-700">{summary ? formatCurrency(summary.paid) : DASH}</p>
-        </div>
-        <div className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2">
-          <p className="text-[11px] font-medium uppercase tracking-wide text-amber-600">Remaining</p>
-          <p className="text-sm font-bold text-amber-700">{summary ? formatCurrency(summary.remaining) : DASH}</p>
-        </div>
-        <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2">
-          <p className="text-[11px] font-medium uppercase tracking-wide text-blue-600">Delivered</p>
-          <p className="text-sm font-bold text-blue-700">
-            {summary ? `${summary.delivered} of ${summary.count}` : DASH}
-          </p>
-        </div>
-      </div>
+      )}
 
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-card">
         <div className="flex flex-col sm:flex-row items-center justify-between gap-2 border-b border-slate-200 bg-[#F1F4F9] px-3 py-2.5 sm:px-4">

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { 
   LayoutDashboard, 
@@ -31,6 +31,7 @@ import { clearStaff, selectActiveStaff } from "@/store/slices/staffSlice"
 import { selectDateRange } from "@/store/slices/dateRangeSlice"
 import { useToast } from "@/components/ui/use-toast"
 import { BrandLogo } from "@/components/brand-logo"
+import NotificationBell from "@/components/notifications/notification-bell"
 import StaffAttendance from "./staff-attendance"
 import StaffInventoryTab from "./staff-inventory-tab"
 import { TodaySalesList } from "@/components/shared/job-card"
@@ -53,6 +54,9 @@ export default function StaffDashboard() {
   const [isLoadingStats, setIsLoadingStats] = useState(false)
   const [statsError, setStatsError] = useState<string | null>(null)
   const [fetchedStaffName, setFetchedStaffName] = useState<string>("")
+  const [refreshKey, setRefreshKey] = useState(0)
+  const [mounted, setMounted] = useState(false)
+  const [unreadLeadCount, setUnreadLeadCount] = useState<number>(0)
   const router = useRouter()
   const { toast } = useToast()
   const dispatch = useAppDispatch()
@@ -60,9 +64,14 @@ export default function StaffDashboard() {
   const activeStaff = useAppSelector(selectActiveStaff)
   const dateRange = useAppSelector(selectDateRange)
 
-  // Fetch dashboard stats when tab changes to home, device changes, or date range changes
+  const isNormalStaff = activeStaff?.role === "staff"
+
   useEffect(() => {
-    if (activeTab === "home" && device?.id) {
+    setMounted(true)
+  }, [])
+
+  const fetchStats = useCallback(() => {
+    if (device?.id) {
       setIsLoadingStats(true)
       setStatsError(null)
       getStaffDashboardStats(device.id, dateRange.from, dateRange.to)
@@ -83,7 +92,19 @@ export default function StaffDashboard() {
           setIsLoadingStats(false)
         })
     }
-  }, [activeTab, device?.id, dateRange.from, dateRange.to])
+  }, [device?.id, dateRange.from, dateRange.to])
+
+  // Fetch dashboard stats when tab changes to home, device changes, or date range changes
+  useEffect(() => {
+    if (activeTab === "home") {
+      fetchStats()
+    }
+  }, [activeTab, fetchStats])
+
+  const refreshDashboard = useCallback(() => {
+    fetchStats()
+    setRefreshKey(prev => prev + 1)
+  }, [fetchStats])
 
   const userName = fetchedStaffName || activeStaff?.name || device?.user?.name || ""
 
@@ -153,11 +174,18 @@ export default function StaffDashboard() {
 
       <Button
         variant={activeTab === "leads" ? "secondary" : "ghost"}
-        className="w-full justify-start"
+        className="w-full justify-between"
         onClick={() => { setActiveTab("leads"); setIsMobileMenuOpen(false) }}
       >
-        <Briefcase className="mr-3 h-5 w-5" />
-        CRM Leads
+        <div className="flex items-center">
+          <Briefcase className="mr-3 h-5 w-5" />
+          CRM Leads
+        </div>
+        {isNormalStaff && unreadLeadCount > 0 && (
+          <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-bold text-white shadow-sm ring-1 ring-white">
+            {unreadLeadCount > 99 ? "99+" : unreadLeadCount}
+          </span>
+        )}
       </Button>
 
       <Button
@@ -230,6 +258,17 @@ export default function StaffDashboard() {
     </div>
   )
 
+  if (!mounted) {
+    return (
+      <div className="flex min-h-screen w-full items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <Loader2 className="mx-auto mb-4 h-8 w-8 animate-spin text-gray-400" />
+          <p className="text-gray-500">Loading dashboard...</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="flex h-full w-full">
       {/* Desktop Sidebar */}
@@ -238,12 +277,25 @@ export default function StaffDashboard() {
           <div className="flex items-center flex-shrink-0 px-4 mb-5">
             <BrandLogo overrideSrc={device?.logo_url || undefined} />
           </div>
-          <div className="px-4 pb-4">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Staff Portal</p>
-            {device?.name && (
-              <p className="text-sm font-medium text-slate-800 mt-1 truncate" title={device.name}>
-                {device.name}
-              </p>
+          <div className="px-4 pb-4 flex items-center justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Staff Portal</p>
+              {device?.name && (
+                <p className="text-sm font-medium text-slate-800 mt-1 truncate" title={device.name}>
+                  {device.name}
+                </p>
+              )}
+            </div>
+            {isNormalStaff && (
+              <NotificationBell
+                deviceId={device?.id}
+                role="staff"
+                side="right"
+                align="start"
+                sideOffset={20}
+                onNotificationClick={() => setActiveTab("leads")}
+                onUnreadCountChange={setUnreadLeadCount}
+              />
             )}
           </div>
           <NavigationMenu />
@@ -272,9 +324,19 @@ export default function StaffDashboard() {
         <div className="flex items-center min-w-0 overflow-hidden">
           <BrandLogo overrideSrc={device?.logo_url || undefined} className="h-8 w-auto max-h-8 object-contain" />
         </div>
-        <Button variant="ghost" size="icon" onClick={() => setIsMobileMenuOpen(true)}>
-          <Menu className="h-6 w-6" />
-        </Button>
+        <div className="flex items-center gap-2">
+          {isNormalStaff && (
+            <NotificationBell
+              deviceId={device?.id}
+              role="staff"
+              onNotificationClick={() => setActiveTab("leads")}
+              onUnreadCountChange={setUnreadLeadCount}
+            />
+          )}
+          <Button variant="ghost" size="icon" onClick={() => setIsMobileMenuOpen(true)}>
+            <Menu className="h-6 w-6" />
+          </Button>
+        </div>
       </div>
 
       {/* Mobile Sidebar */}
@@ -454,6 +516,7 @@ export default function StaffDashboard() {
                       fromDate={dateRange.from}
                       toDate={dateRange.to}
                       onSummaryUpdate={setChartSummary} 
+                      refreshKey={refreshKey}
                     />
                   )}
                 </div>
@@ -464,6 +527,8 @@ export default function StaffDashboard() {
                     canCreateProducts={false}
                     globalFromDate={dateRange.from}
                     globalToDate={dateRange.to}
+                    refreshKey={refreshKey}
+                    onSaleChanged={refreshDashboard}
                   />
                 </div>
               </div>
@@ -501,7 +566,11 @@ export default function StaffDashboard() {
         onClose={() => {
           setIsJobCardModalOpen(false)
           setSelectedCustomerForJobCard(null)
+          refreshDashboard()
         }} 
+        onSuccess={() => {
+          refreshDashboard()
+        }}
         initialCustomer={selectedCustomerForJobCard}
         canCreateProducts={false}
       />

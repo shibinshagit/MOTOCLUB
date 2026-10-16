@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Plus, Trash2, Loader2, CreditCard, Banknote, Globe, X, ChevronDown } from "lucide-react"
 import { createPurchase } from "@/app/actions/purchase-actions"
 import { getDeviceCurrency, getDeviceDefaultCourierPct } from "@/app/actions/dashboard-actions"
+import { getCurrencySymbol } from "@/lib/currency-utils"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { FormAlert } from "@/components/ui/form-alert"
 import { useToast } from "@/components/ui/use-toast"
@@ -78,6 +79,7 @@ export default function NewPurchaseModal({
 }: NewPurchaseModalProps) {
   const dispatch = useDispatch()
   const [localCurrency, setLocalCurrency] = useState(currency)
+  const currencySymbol = getCurrencySymbol(localCurrency)
   const [date, setDate] = useState<Date>(new Date())
   const [supplier, setSupplier] = useState("")
   const [status, setStatus] = useState<string>("Credit")
@@ -500,11 +502,11 @@ export default function NewPurchaseModal({
       return
     }
 
-    // Validate received amount
+    // Validate paid amount
     if (receivedAmount > totalAmount) {
       setFormAlert({
         type: "error",
-        message: "Received amount cannot be greater than total amount",
+        message: "Paid amount cannot be greater than total amount",
       })
       return
     }
@@ -679,10 +681,10 @@ export default function NewPurchaseModal({
                   </div>
                 )}
 
-                {/* Received Amount - only show for Credit */}
+                {/* Paid Amount - only show for Credit */}
                 {status === "Credit" && (
                   <div>
-                    <Label className="text-sm font-medium text-gray-700">Received Amount</Label>
+                    <Label className="text-sm font-medium text-gray-700">Paid Amount</Label>
                     <Input
                       type="number"
                       min="0"
@@ -702,7 +704,7 @@ export default function NewPurchaseModal({
                     <div className="flex justify-between text-gray-600">
                       <span>Subtotal:</span>
                       <span>
-                        {localCurrency} {subtotal.toFixed(2)}
+                        {currencySymbol} {subtotal.toFixed(2)}
                       </span>
                     </div>
                     <div className="flex justify-between items-center">
@@ -719,7 +721,7 @@ export default function NewPurchaseModal({
                     <div className="flex justify-between font-bold text-green-600 border-t border-gray-200 pt-2">
                       <span>Grand Total:</span>
                       <span>
-                        {localCurrency} {totalAmount.toFixed(2)}
+                        {currencySymbol} {totalAmount.toFixed(2)}
                       </span>
                     </div>
 
@@ -727,11 +729,11 @@ export default function NewPurchaseModal({
                       <div className="p-2.5 bg-blue-50 border border-blue-200 rounded-md text-xs space-y-1.5 mt-2">
                         <div className="flex justify-between items-center text-gray-700">
                           <span>Purchase Total:</span>
-                          <span className="font-semibold">{localCurrency} {totalAmount.toFixed(2)}</span>
+                          <span className="font-semibold">{currencySymbol} {totalAmount.toFixed(2)}</span>
                         </div>
                         <div className="flex justify-between items-center text-blue-800">
                           <span>Available Supplier Credit:</span>
-                          <span className="font-semibold">{localCurrency} {selectedSupplierCredit.toFixed(2)}</span>
+                          <span className="font-semibold">{currencySymbol} {selectedSupplierCredit.toFixed(2)}</span>
                         </div>
                         <div className="flex items-center space-x-2 pt-1 border-t border-blue-200">
                           <input
@@ -749,11 +751,11 @@ export default function NewPurchaseModal({
                           <>
                             <div className="flex justify-between text-blue-700 font-medium pt-1 border-t border-blue-200">
                               <span>Supplier Credit Applied:</span>
-                              <span>- {localCurrency} {Math.min(selectedSupplierCredit, Math.max(totalAmount - (status === "Paid" ? totalAmount : receivedAmount), 0)).toFixed(2)}</span>
+                              <span>- {currencySymbol} {Math.min(selectedSupplierCredit, Math.max(totalAmount - (status === "Paid" ? totalAmount : receivedAmount), 0)).toFixed(2)}</span>
                             </div>
                             <div className="flex justify-between text-gray-900 font-bold border-t border-blue-200 pt-1">
                               <span>Remaining to Pay:</span>
-                              <span>{localCurrency} {Math.max(totalAmount - (status === "Paid" ? totalAmount : receivedAmount) - (useSupplierCreditOnPurchase ? selectedSupplierCredit : 0), 0).toFixed(2)}</span>
+                              <span>{currencySymbol} {Math.max(totalAmount - (status === "Paid" ? totalAmount : receivedAmount) - (useSupplierCreditOnPurchase ? selectedSupplierCredit : 0), 0).toFixed(2)}</span>
                             </div>
                           </>
                         )}
@@ -869,10 +871,10 @@ export default function NewPurchaseModal({
                       />
                     </div>
                     <div className="min-w-0 text-sm text-gray-600 truncate">
-                      {localCurrency} {product.taxAmount.toFixed(2)}
+                      {currencySymbol} {product.taxAmount.toFixed(2)}
                     </div>
                     <div className="min-w-0 font-medium text-gray-900 truncate">
-                      {localCurrency} {product.lineTotal.toFixed(2)}
+                      {currencySymbol} {product.lineTotal.toFixed(2)}
                     </div>
                     <div className="min-w-0 flex justify-center">
                       <Button
@@ -891,10 +893,10 @@ export default function NewPurchaseModal({
                     <div className="grid grid-cols-[38fr_62fr] gap-2 px-2 py-1 text-xs bg-purple-50 text-purple-900 border-b border-gray-200">
                       <div></div>
                       <div className="flex gap-4 items-center">
-                        <span>Original: {localCurrency} {product.lineTotal.toFixed(2)}</span>
+                        <span>Original: {currencySymbol} {product.lineTotal.toFixed(2)}</span>
                         <span>Allocation: {allocationMap.get(product.id)!.allocationPercentage.toFixed(2)}%</span>
-                        <span>Courier: {localCurrency} {allocationMap.get(product.id)!.allocatedCourier.toFixed(2)}</span>
-                        <span className="font-semibold">Final Cost: {localCurrency} {allocationMap.get(product.id)!.finalCost.toFixed(2)}</span>
+                        <span>Courier: {currencySymbol} {allocationMap.get(product.id)!.allocatedCourier.toFixed(2)}</span>
+                        <span className="font-semibold">Final Cost: {currencySymbol} {allocationMap.get(product.id)!.finalCost.toFixed(2)}</span>
                       </div>
                     </div>
                   )}
@@ -935,8 +937,8 @@ export default function NewPurchaseModal({
                               }
                             }} />
                           </div>
-                          <div className="min-w-0 text-xs text-gray-600 truncate">{localCurrency} {variant.taxAmount.toFixed(2)}</div>
-                          <div className="min-w-0 text-xs font-medium text-gray-900 truncate">{localCurrency} {variant.lineTotal.toFixed(2)}</div>
+                          <div className="min-w-0 text-xs text-gray-600 truncate">{currencySymbol} {variant.taxAmount.toFixed(2)}</div>
+                          <div className="min-w-0 text-xs font-medium text-gray-900 truncate">{currencySymbol} {variant.lineTotal.toFixed(2)}</div>
                           <div className="min-w-0 rounded bg-gray-50 px-1 py-2 text-xs text-gray-600 truncate">{variant.msp ?? "–"}</div>
                           <div className="min-w-0 rounded bg-gray-50 px-1 py-2 text-xs text-gray-600 truncate">{variant.mrp ?? "–"}</div>
                         </div>
@@ -944,10 +946,10 @@ export default function NewPurchaseModal({
                           <div className="grid grid-cols-[28fr_72fr] gap-2 px-3 py-1 text-[11px] bg-purple-50 text-purple-900 border-b border-gray-100 border-t border-t-slate-50">
                             <div></div>
                             <div className="flex gap-4 items-center">
-                              <span>Original: {localCurrency} {((variant.quantity * variant.price) + (variant.quantity * variant.price * ((variant.taxPercentage || 0) / 100))).toFixed(2)}</span>
+                              <span>Original: {currencySymbol} {((variant.quantity * variant.price) + (variant.quantity * variant.price * ((variant.taxPercentage || 0) / 100))).toFixed(2)}</span>
                               <span>Allocation: {allocationMap.get(`${product.id}-${variant.id}`)!.allocationPercentage.toFixed(2)}%</span>
-                              <span>Courier: {localCurrency} {allocationMap.get(`${product.id}-${variant.id}`)!.allocatedCourier.toFixed(2)}</span>
-                              <span className="font-semibold">Final Cost: {localCurrency} {allocationMap.get(`${product.id}-${variant.id}`)!.finalCost.toFixed(2)}</span>
+                              <span>Courier: {currencySymbol} {allocationMap.get(`${product.id}-${variant.id}`)!.allocatedCourier.toFixed(2)}</span>
+                              <span className="font-semibold">Final Cost: {currencySymbol} {allocationMap.get(`${product.id}-${variant.id}`)!.finalCost.toFixed(2)}</span>
                             </div>
                           </div>
                         )}

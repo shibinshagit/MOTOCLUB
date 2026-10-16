@@ -34,6 +34,7 @@ export async function createSale(saleData: SaleData) {
         total_amount, 
         payment_method, 
         status, 
+        is_pos_updated,
         sale_date
       )
       VALUES (
@@ -43,6 +44,7 @@ export async function createSale(saleData: SaleData) {
         ${saleData.total_amount}, 
         ${saleData.payment_method}, 
         ${saleData.status}, 
+        false,
         NOW()
       )
       RETURNING id

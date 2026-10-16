@@ -15,8 +15,9 @@ const VALID_TRANSITIONS: Record<string, string[]> = {
   "Pending": [], // No manual exits allowed
   "Paid": ["Packed", "Returned"],
   "Packed": ["Sent", "Returned"],
-  "Sent": ["Direct", "Shipping", "Returned"],
-  "Direct": ["Delivered", "Shipping", "Returned"],
+  "Sent": ["Direct", "Courier", "Shipping", "Returned"],
+  "Direct": ["Delivered", "Courier", "Shipping", "Returned"],
+  "Courier": ["Shipping", "Delivered", "Returned"],
   "Shipping": ["Delivered", "Returned"],
   "Delivered": ["Returned"],
   "Returned": [],
@@ -285,6 +286,7 @@ export function DeliveryStatusSelect({
       case "Packed": return "border-indigo-300"
       case "Sent": return "border-purple-300"
       case "Direct": return "border-blue-400"
+      case "Courier": return "border-indigo-400"
       case "Shipping": return "border-cyan-300"
       case "Delivered": return "border-green-400"
       case "Returned": return "border-red-300"
@@ -293,7 +295,7 @@ export function DeliveryStatusSelect({
   }
 
   // Enable all standard delivery status options for full flexibility
-  const ALL_STATUS_OPTIONS = ["Pending", "Paid", "Packed", "Sent", "Direct", "Shipping", "Delivered", "Returned", "Failed"]
+  const ALL_STATUS_OPTIONS = ["Pending", "Paid", "Packed", "Sent", "Direct", "Courier", "Shipping", "Delivered", "Returned", "Failed", "Pickup"]
   const uniqueOptions = Array.from(new Set([status, currentStatus, ...ALL_STATUS_OPTIONS]))
     .filter((opt): opt is string => Boolean(opt) && opt !== "Shipped" && opt !== "shipped" && opt !== "In transit" && opt !== "in transit")
 

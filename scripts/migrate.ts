@@ -991,7 +991,9 @@ async function createTables() {
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW(),
         converted_at TIMESTAMP,
-        next_follow_up_at TIMESTAMP
+        next_follow_up_at TIMESTAMP,
+        vehicle VARCHAR(255),
+        year VARCHAR(50)
       )
     `
     await sql`
@@ -1051,6 +1053,44 @@ async function createTables() {
     await sql`CREATE INDEX IF NOT EXISTS idx_crm_lead_products_product ON crm_lead_products(product_id)`
   })
 
+  await run("product_purchase_actions", async () => {
+    await sql`
+      CREATE TABLE IF NOT EXISTS product_purchase_actions (
+        id SERIAL PRIMARY KEY,
+        device_id INTEGER NOT NULL,
+        row_key VARCHAR(100) NOT NULL,
+        action VARCHAR(50) NOT NULL,
+        action_order INTEGER DEFAULT 0,
+        note TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(device_id, row_key)
+      )
+    `
+    await sql`CREATE INDEX IF NOT EXISTS idx_ppa_device_key ON product_purchase_actions(device_id, row_key)`
+  })
+
+  await run("notifications", async () => {
+    await sql`
+      CREATE TABLE IF NOT EXISTS notifications (
+        id SERIAL PRIMARY KEY,
+        device_id INTEGER NOT NULL,
+        company_id INTEGER,
+        type VARCHAR(50) NOT NULL,
+        title VARCHAR(255) NOT NULL,
+        message TEXT,
+        internal_note TEXT,
+        data JSONB,
+        status VARCHAR(20) DEFAULT 'unchecked',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        read_at TIMESTAMP WITH TIME ZONE,
+        created_by_staff_id INTEGER,
+        created_by_staff_name VARCHAR(255)
+      )
+    `
+    await sql`CREATE INDEX IF NOT EXISTS idx_notifications_device_status ON notifications(device_id, status)`
+    await sql`CREATE INDEX IF NOT EXISTS idx_notifications_device_created ON notifications(device_id, created_at DESC)`
+  })
 }
 
 async function upgradeLegacyColumns() {
@@ -1188,9 +1228,13 @@ async function upgradeLegacyColumns() {
     ["sales.sync_attempts", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS sync_attempts INTEGER DEFAULT 1`],
     ["sales.last_sync_error", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS last_sync_error TEXT`],
     ["sales.tracking_token", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS tracking_token VARCHAR(255)`],
+    ["sales.is_pos_updated", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS is_pos_updated BOOLEAN DEFAULT false`],
+    ["sales.type_of_sale", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS type_of_sale VARCHAR(50) DEFAULT 'walk in'`],
     ["orders.sync_status", () => sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS sync_status VARCHAR(50) DEFAULT 'PENDING'`],
     ["orders.synced_at", () => sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS synced_at TIMESTAMP`],
     ["orders.synced_sale_id", () => sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS synced_sale_id INTEGER`],
+    ["crm_leads.vehicle", () => sql`ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS vehicle VARCHAR(255)`],
+    ["crm_leads.year", () => sql`ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS year VARCHAR(50)`],
   ]
 
   for (const [label, fn] of columns) {

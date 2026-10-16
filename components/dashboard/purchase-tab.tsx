@@ -5,6 +5,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { format, subMonths, addMonths, startOfMonth, endOfMonth, isSameMonth, isAfter, parseISO } from "date-fns"
@@ -48,6 +49,8 @@ import { selectDeviceId, selectDeviceCurrency } from "@/store/slices/deviceSlice
 import { markInventoryStale } from "@/lib/inventory-sync"
 import { getSuppliers as getRegisteredSuppliers } from "@/app/actions/supplier-actions"
 import { useConfirm } from "@/hooks/use-confirm"
+import { getCurrencySymbol } from "@/lib/currency-utils"
+import { formatCurrency as formatMoney } from "@/lib/utils"
 
 interface PurchaseTabProps {
   userId: number
@@ -136,6 +139,7 @@ interface PurchaseDraftSnapshot {
   products: ProductRow[]
   isEditMode: boolean
   editingPurchaseId: number | null
+  notes?: string
 }
 
 function getMonthRange(month: Date) {
@@ -173,6 +177,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
   const [paymentMethod, setPaymentMethod] = useState<string>("Cash")
   const [receivedAmount, setReceivedAmount] = useState<number>(0)
   const [discountAmount, setDiscountAmount] = useState<number>(0)
+  const [notes, setNotes] = useState<string>("")
   const [courierChargePercentage, setCourierChargePercentage] = useState<number>(0)
   const [courierChargePercentageInput, setCourierChargePercentageInput] = useState<string>("")
   const [customCourierCharge, setCustomCourierCharge] = useState<number | null>(null)
@@ -218,7 +223,8 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
   const searchParams = useSearchParams()
   const pathname = usePathname()
 
-  const currency = deviceCurrency || "AED"
+  const currencyCode = deviceCurrency || "INR"
+  const currency = getCurrencySymbol(currencyCode)
 
   useEffect(() => {
     setActiveView(mode === "info" ? "info" : "entry")
@@ -274,6 +280,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
       products: [createEmptyProductRow()],
       isEditMode: false,
       editingPurchaseId: null,
+      notes: "",
     }),
     [createEmptyProductRow],
   )
@@ -294,6 +301,29 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
   useEffect(() => {
     if (activeView !== "entry") return
     try {
+      // Check for pending purchase prefill (e.g. from Products to Purchase tab)
+      const pendingPrefillRaw = typeof window !== "undefined" ? sessionStorage.getItem("pending_purchase_prefill") : null
+      if (pendingPrefillRaw) {
+        sessionStorage.removeItem("pending_purchase_prefill")
+        const prefillData = JSON.parse(pendingPrefillRaw) as PurchaseDraftSnapshot
+        if (prefillData && prefillData.id) {
+          const rawDrafts = localStorage.getItem(purchaseDraftStorageKey)
+          let parsedDrafts: PurchaseDraftSnapshot[] = []
+          if (rawDrafts) {
+            try {
+              parsedDrafts = JSON.parse(rawDrafts)
+            } catch (e) {}
+          }
+          const merged = [prefillData, ...(Array.isArray(parsedDrafts) ? parsedDrafts.filter((d) => d.id !== prefillData.id) : [])]
+          setPurchaseDrafts(merged)
+          setActiveDraftId(prefillData.id)
+          localStorage.setItem(purchaseDraftStorageKey, JSON.stringify(merged))
+          localStorage.setItem(`${purchaseDraftStorageKey}_active`, prefillData.id)
+          setDraftsHydrated(true)
+          return
+        }
+      }
+
       const rawDrafts = localStorage.getItem(purchaseDraftStorageKey)
       const rawActiveId = localStorage.getItem(`${purchaseDraftStorageKey}_active`)
       if (rawDrafts) {
@@ -328,9 +358,18 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
     setPaymentMethod(activeDraft.paymentMethod || "Cash")
     setReceivedAmount(Number(activeDraft.receivedAmount) || 0)
     setDiscountAmount(Number(activeDraft.discountAmount) || 0)
+    setNotes(activeDraft.notes || "")
     setProducts(
       Array.isArray(activeDraft.products) && activeDraft.products.length > 0
-        ? activeDraft.products
+        ? activeDraft.products.map((p) => {
+            const calculated = calculatePurchaseLine(p)
+            return {
+              ...p,
+              total: Number(p.total) > 0 ? Number(p.total) : calculated.total,
+              taxAmount: p.taxAmount !== undefined && Number(p.taxAmount) > 0 ? Number(p.taxAmount) : calculated.taxAmount,
+              lineTotal: Number(p.lineTotal) > 0 ? Number(p.lineTotal) : calculated.lineTotal,
+            }
+          })
         : [createEmptyProductRow()],
     )
     setIsEditMode(Boolean(activeDraft.isEditMode))
@@ -355,11 +394,14 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
     if (activeView !== "entry" || !draftsHydrated || !activeDraftId) return
     if (draftSwitchingRef.current) return
 
+    const currentDraft = purchaseDrafts.find((d) => d.id === activeDraftId)
     const computedName = isEditMode
       ? `Edit #${editingPurchaseId || ""}`.trim()
       : supplier?.trim()
         ? supplier.trim()
-        : "New Purchase"
+        : currentDraft?.name?.startsWith("Order: ")
+          ? currentDraft.name
+          : "New Purchase"
 
     setPurchaseDrafts((prev) =>
       prev.map((draft) =>
@@ -378,6 +420,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
               products,
               isEditMode,
               editingPurchaseId,
+              notes,
             }
           : draft,
       ),
@@ -396,6 +439,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
     products,
     isEditMode,
     editingPurchaseId,
+    notes,
   ])
 
   useEffect(() => {
@@ -501,11 +545,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
   }, [totalAmount, status])
 
   const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: currency || "AED",
-      minimumFractionDigits: 2,
-    }).format(amount)
+    return formatMoney(amount, currencyCode)
   }
 
   const applyPurchasesMonth = useCallback((month: Date) => {
@@ -540,6 +580,20 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
           updatedProduct.total = updatedProduct.variantEntries!.reduce((sum, entry) => sum + entry.total, 0)
           updatedProduct.taxAmount = updatedProduct.variantEntries!.reduce((sum, entry) => sum + entry.taxAmount, 0)
           updatedProduct.lineTotal = updatedProduct.total + updatedProduct.taxAmount
+        } else if (updatedProduct.variantEntries?.length === 1) {
+          const single = updatedProduct.variantEntries[0]
+          updatedProduct.variantEntries = [{
+            ...single,
+            quantity: updatedProduct.quantity,
+            quantityInput: updatedProduct.quantityInput,
+            price: updatedProduct.price,
+            priceInput: updatedProduct.priceInput,
+            taxPercentage: updatedProduct.taxPercentage,
+            taxPercentageInput: updatedProduct.taxPercentageInput,
+            total: updatedProduct.total,
+            taxAmount: updatedProduct.taxAmount,
+            lineTotal: updatedProduct.lineTotal,
+          }]
         }
         return updatedProduct
       }
@@ -727,6 +781,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
     setProducts(resetProducts)
     setDiscountAmount(0)
     setReceivedAmount(0)
+    setNotes("")
     setFormAlert(null)
     setIsEditMode(false)
     setEditingPurchaseId(null)
@@ -755,6 +810,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
         setPurchaseStatus(purchase.purchase_status || "Delivered")
         setPaymentMethod(purchase.payment_method || "Cash")
         setReceivedAmount(Number(purchase.received_amount) || 0)
+        setNotes(purchase.notes || "")
 
         const lineTotalsBeforeDiscount = items.reduce(
           (sum: number, item: any) => sum + Number(item.line_total ?? (item.quantity * item.price)),
@@ -868,7 +924,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
     }
 
     if (receivedAmount > totalAmount) {
-      setFormAlert({ type: "error", message: "Received amount cannot be greater than total amount" })
+      setFormAlert({ type: "error", message: "Paid amount cannot be greater than total amount" })
       return
     }
 
@@ -918,6 +974,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
         formData.append("courier_charge", courierCharge.toString())
         formData.append("courier_charge_percentage", courierChargePercentage.toString())
         formData.append("discount", discountAmount.toString())
+        formData.append("notes", notes)
 
         const result =
           isEditMode && editingPurchaseId ? await updatePurchase(formData) : await createPurchase(formData)
@@ -1699,7 +1756,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
                       {status === "Credit" && (
                         <div className="space-y-1">
                           <Label htmlFor="received_amount" className="text-xs font-medium text-gray-900">
-                            Received Amount
+                            Paid Amount
                           </Label>
                           <Input
                             id="received_amount"
@@ -1717,6 +1774,19 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
                           </p>
                         </div>
                       )}
+
+                      <div className="space-y-1">
+                        <Label htmlFor="purchase-notes" className="text-xs font-medium text-gray-900">
+                          Internal Notes
+                        </Label>
+                        <Textarea
+                          id="purchase-notes"
+                          value={notes}
+                          onChange={(e) => setNotes(e.target.value)}
+                          placeholder="Internal notes or instructions..."
+                          className="h-16 text-xs bg-white border-gray-300 text-gray-900 resize-none"
+                        />
+                      </div>
                     </div>
               </div>
 

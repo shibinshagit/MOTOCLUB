@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Plus, Trash2, CheckCircle2, User, Phone, MapPin, Loader2 } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 import { useSelector } from "react-redux"
@@ -51,6 +52,7 @@ export function JobCardForm({
   crmLeadId,
   initialProducts,
   canCreateProducts = true,
+  onSuccess,
 }: {
   onClose?: () => void
   editSaleId?: number | null
@@ -59,6 +61,7 @@ export function JobCardForm({
   initialProducts?: any[]
   /** Staff can only pick existing products; admins keep "Add New Product". */
   canCreateProducts?: boolean
+  onSuccess?: (data?: any) => void
 }) {
   const deviceId = useSelector(selectDeviceId)
   const currency = useSelector(selectDeviceCurrency)
@@ -95,6 +98,7 @@ export function JobCardForm({
   const [customerId, setCustomerId] = useState<number | null>(null)
   const [customerName, setCustomerName] = useState("")
   const [customerPhone, setCustomerPhone] = useState("")
+  const [typeOfSale, setTypeOfSale] = useState<string>("")
   const [originalDeliveryStatus, setOriginalDeliveryStatus] = useState("")
 
   // Shipping Address Fields
@@ -165,6 +169,7 @@ export function JobCardForm({
     customerId,
     customerName,
     customerPhone,
+    typeOfSale,
     shippingCity,
     shippingDistrict,
     shippingState,
@@ -181,6 +186,7 @@ export function JobCardForm({
     customerId,
     customerName,
     customerPhone,
+    typeOfSale,
     shippingCity,
     shippingDistrict,
     shippingState,
@@ -200,6 +206,7 @@ export function JobCardForm({
     if (d.customerId !== null) return true
     if (d.customerName && d.customerName.trim() !== "") return true
     if (d.customerPhone && d.customerPhone.trim() !== "") return true
+    if (d.typeOfSale && d.typeOfSale.trim() !== "") return true
     if (d.shippingCity && d.shippingCity.trim() !== "") return true
     if (d.shippingStreet && d.shippingStreet.trim() !== "") return true
     if (d.shippingPincode && d.shippingPincode.trim() !== "") return true
@@ -244,6 +251,9 @@ export function JobCardForm({
       setCustomerId(draft.customerId ?? null)
       setCustomerName(draft.customerName || "")
       setCustomerPhone(draft.customerPhone || "")
+      if (draft.typeOfSale) {
+        setTypeOfSale(draft.typeOfSale)
+      }
       setShippingCity(draft.shippingCity || "")
       setShippingDistrict(draft.shippingDistrict || "")
       setShippingState(draft.shippingState || "")
@@ -339,6 +349,7 @@ export function JobCardForm({
       setCustomerId(sale.customer_id)
       setCustomerName(sale.customer_name_override || sale.customer_name || "")
       setCustomerPhone(formatPhoneNumber(sale.customer_phone_override || sale.customer_phone || ""))
+      setTypeOfSale(sale.type_of_sale || "")
       setShippingCity(sale.shipping_city || "")
       setShippingDistrict(sale.shipping_district || "")
       setShippingState(sale.shipping_state || "")
@@ -515,6 +526,11 @@ export function JobCardForm({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
+    if (!typeOfSale || !typeOfSale.trim()) {
+      toast({ title: "Validation Error", description: "Please select Type of customer", variant: "destructive" })
+      return
+    }
+
     if (!customerName.trim()) {
       toast({ title: "Validation Error", description: "Customer Name is required", variant: "destructive" })
       return
@@ -551,6 +567,7 @@ export function JobCardForm({
         customerName,
         customerPhone,
         customerId,
+        typeOfSale,
         deviceId,
         staffId: activeStaff?.id || null,
         crmLeadId,
@@ -587,6 +604,7 @@ export function JobCardForm({
         if (!editSaleId) {
           clearDraft()
         }
+        onSuccess?.(res.data)
         if (editSaleId && originalDeliveryStatus?.toLowerCase() === "pending") {
           setSuccessData({ ...res.data, showWhatsappConfirmation: true, saleData: input })
           setIsSuccess(true)
@@ -615,6 +633,7 @@ export function JobCardForm({
     setCustomerId(null)
     setCustomerName("")
     setCustomerPhone("")
+    setTypeOfSale("")
     setShippingCity("")
     setShippingDistrict("")
     setShippingState("")
@@ -743,6 +762,31 @@ export function JobCardForm({
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4 pt-4">
+            {/* Type of customer */}
+            <div className="space-y-2 pb-2 border-b border-gray-100">
+              <Label className="text-xs font-semibold text-gray-700 flex items-center gap-1">
+                Type of customer <span className="text-red-500">*</span>
+              </Label>
+              <RadioGroup
+                value={typeOfSale}
+                onValueChange={setTypeOfSale}
+                className="flex items-center gap-6 pt-1"
+              >
+                <div className="flex items-center space-x-2 cursor-pointer">
+                  <RadioGroupItem value="walk in" id="customer-type-walk-in" />
+                  <Label htmlFor="customer-type-walk-in" className="text-sm font-medium text-gray-800 cursor-pointer">
+                    Walk in
+                  </Label>
+                </div>
+                <div className="flex items-center space-x-2 cursor-pointer">
+                  <RadioGroupItem value="courier" id="customer-type-courier" />
+                  <Label htmlFor="customer-type-courier" className="text-sm font-medium text-gray-800 cursor-pointer">
+                    Courier
+                  </Label>
+                </div>
+              </RadioGroup>
+            </div>
+
             <div className="space-y-1">
               <Label className="text-xs text-gray-500">Select Existing Customer (Optional)</Label>
               <CustomerSelectSimple

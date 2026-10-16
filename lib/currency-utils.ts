@@ -69,3 +69,21 @@ export function formatCurrencySync(amount: number, currencyCode = DEFAULT_CURREN
     return `${amount.toFixed(2)} ${DEFAULT_CURRENCY}`
   }
 }
+
+// Convert currency code (e.g. INR, USD) to display symbol (e.g. ₹, $)
+export function getCurrencySymbol(currencyCode?: string): string {
+  if (!currencyCode) return "₹"
+  const upper = currencyCode.trim().toUpperCase()
+  if (upper === "INR") return "₹"
+  if (upper === "USD") return "$"
+  if (upper === "EUR") return "€"
+  if (upper === "GBP") return "£"
+  if (upper === "AED") return "AED"
+  if (upper === "QAR") return "QAR"
+  if (upper === "SAR") return "SAR"
+  if (upper === "KWD") return "KWD"
+  if (upper === "OMR") return "OMR"
+  if (upper === "BHD") return "BHD"
+  return currencyCode
+}
+

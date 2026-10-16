@@ -25,9 +25,10 @@ interface StaffSalesChartProps {
   fromDate: string  // yyyy-MM-dd
   toDate: string    // yyyy-MM-dd
   onSummaryUpdate?: (totals: { sales: number; orders: number }) => void
+  refreshKey?: number
 }
 
-export function StaffSalesChart({ deviceId, currency = "INR", fromDate, toDate, onSummaryUpdate }: StaffSalesChartProps) {
+export function StaffSalesChart({ deviceId, currency = "INR", fromDate, toDate, onSummaryUpdate, refreshKey }: StaffSalesChartProps) {
   const [chartType, setChartType] = useState<"bar" | "line">("bar")
   const [data, setData] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -96,7 +97,7 @@ export function StaffSalesChart({ deviceId, currency = "INR", fromDate, toDate, 
     return () => {
       mounted = false
     }
-  }, [fromDate, toDate, deviceId, onSummaryUpdate])
+  }, [fromDate, toDate, deviceId, onSummaryUpdate, refreshKey])
 
   const formatCurrency = (val: number) => {
     return new Intl.NumberFormat("en-US", {

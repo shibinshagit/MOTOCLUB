@@ -508,7 +508,7 @@ export default function SalesOrdersTab() {
                   <th className="whitespace-nowrap px-3 py-2.5 text-left">Phone</th>
                   <th className="whitespace-nowrap px-3 py-2.5 text-left">Tracking ID</th>
                   <th className="whitespace-nowrap px-2 py-2.5 text-center">Items</th>
-                  <th className="whitespace-nowrap px-3 py-2.5 text-right">Total / Profit</th>
+                  <th className="whitespace-nowrap px-3 py-2.5 text-right">Total</th>
                   <th className="whitespace-nowrap px-3 py-2.5 text-center">Delivery Status</th>
                   <th className="whitespace-nowrap px-3 py-2.5 text-right">Actions</th>
                 </tr>
@@ -519,8 +519,9 @@ export default function SalesOrdersTab() {
                   const isSelected = selectedSales.includes(sale.id)
                   const itemQuantity = Number(sale.total_quantity) || sale.items?.reduce((sum: number, i: any) => sum + i.quantity, 0) || 0
                   
-                  const saleDate = parseSaleDate(sale.sale_date)
-                  const dateFormatted = format(saleDate, "dd MMM yyyy")
+                  const saleDateTime = parseSaleDateTime(sale)
+                  const dateFormatted = format(saleDateTime, "dd MMM yyyy")
+                  const timeFormatted = format(saleDateTime, "hh:mm a")
   
                   const statusLower = (sale.delivery_status || "Pending").toLowerCase()
                   let rowBg = index % 2 === 0 ? "bg-white text-slate-800" : "bg-slate-50/50 text-slate-800"
@@ -573,7 +574,27 @@ export default function SalesOrdersTab() {
                                   ECOMMERCE
                                 </Badge>
                               )}
-                              {sale.status === "Pending" && (
+                              {sale.payment_status === "Paid" && (
+                                <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-emerald-50 text-emerald-700 border-emerald-200 font-semibold">
+                                  Paid
+                                </Badge>
+                              )}
+                              {sale.payment_status === "Partial" && (
+                                <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-blue-50 text-blue-700 border-blue-200 font-semibold">
+                                  Partial
+                                </Badge>
+                              )}
+                              {sale.payment_status === "Credit" && (
+                                <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-amber-50 text-amber-700 border-amber-200 font-semibold">
+                                  Credit
+                                </Badge>
+                              )}
+                              {sale.payment_status === "Pending" && (
+                                <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-slate-50 text-slate-700 border-slate-200 font-semibold">
+                                  Pending
+                                </Badge>
+                              )}
+                              {sale.status === "Pending" && !sale.is_pos_updated && (
                                 <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-amber-100 text-amber-800 border-amber-300 font-semibold">
                                   Not Updated
                                 </Badge>
@@ -621,7 +642,10 @@ export default function SalesOrdersTab() {
                           </div>
                         </td>
                         <td className="whitespace-nowrap px-3 py-2.5">
-                          <span className="font-medium text-slate-800 text-xs">{dateFormatted}</span>
+                          <div className="flex flex-col">
+                            <span className="font-medium text-slate-800 text-xs">{dateFormatted}</span>
+                            <span className="text-[11px] text-slate-500 font-normal">{timeFormatted}</span>
+                          </div>
                         </td>
                         <td className="max-w-[150px] px-3 py-2.5">
                           <div className="font-semibold text-slate-800 truncate" title={sale.customer_name || "N/A"}>
@@ -669,11 +693,13 @@ export default function SalesOrdersTab() {
                         </td>
                         <td className="whitespace-nowrap px-2 py-2.5 text-center font-medium text-slate-700">{itemQuantity}</td>
                         <td className="whitespace-nowrap px-3 py-2.5 text-right">
-                          <div className="font-bold text-slate-900">
-                            {currency} {Number(sale.total_amount).toFixed(2)}
-                          </div>
-                          <div className="text-[11px] font-semibold text-emerald-700 mt-0.5" title="Net Profit">
-                            Profit: {currency} {saleProfit.toFixed(2)}
+                          <div className="group/total inline-flex flex-col items-end cursor-default">
+                            <div className="font-bold text-slate-900">
+                              {currency} {Number(sale.total_amount).toFixed(2)}
+                            </div>
+                            <div className="text-[11px] font-semibold text-emerald-700 mt-0.5 opacity-0 group-hover/total:opacity-100 transition-opacity select-none">
+                              {currency} {saleProfit.toFixed(2)}
+                            </div>
                           </div>
                         </td>
                         <td className="whitespace-nowrap px-3 py-2.5 text-center" onClick={(e) => e.stopPropagation()}>
@@ -723,13 +749,13 @@ export default function SalesOrdersTab() {
                               <Button 
                                 variant="ghost" 
                                 size="icon" 
-                                className={`h-7 w-7 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 ${sale.status === "Pending" ? "bg-amber-50 ring-1 ring-amber-300" : ""}`} 
+                                className={`h-7 w-7 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 ${sale.status === "Pending" && !sale.is_pos_updated ? "bg-amber-50 ring-1 ring-amber-300" : ""}`} 
                                 onClick={() => handleOpenInPOS(sale.id)} 
-                                title={sale.status === "Pending" ? "Open in POS (Sale Not Updated Yet)" : "Open in POS"}
+                                title={sale.status === "Pending" && !sale.is_pos_updated ? "Open in POS (Sale Not Updated Yet)" : "Open in POS"}
                               >
                                 <PlayCircle className="h-4 w-4" />
                               </Button>
-                              {sale.status === "Pending" && (
+                              {sale.status === "Pending" && !sale.is_pos_updated && (
                                 <span className="absolute -top-0.5 -right-0.5 flex h-2 w-2">
                                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
                                   <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>

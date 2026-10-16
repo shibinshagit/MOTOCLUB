@@ -29,7 +29,23 @@ export default function DatePickerSimple({ date, onDateChange }: DatePickerSimpl
           selected={date}
           onSelect={(newDate) => {
             if (newDate) {
-              onDateChange(newDate)
+              const now = new Date()
+              const existingHasTime =
+                date &&
+                !isNaN(date.getTime()) &&
+                !(date.getHours() === 0 && date.getMinutes() === 0 && date.getSeconds() === 0)
+              const hours = existingHasTime ? date.getHours() : now.getHours()
+              const minutes = existingHasTime ? date.getMinutes() : now.getMinutes()
+              const seconds = existingHasTime ? date.getSeconds() : now.getSeconds()
+              const merged = new Date(
+                newDate.getFullYear(),
+                newDate.getMonth(),
+                newDate.getDate(),
+                hours,
+                minutes,
+                seconds
+              )
+              onDateChange(merged)
               setOpen(false)
             }
           }}

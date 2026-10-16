@@ -60,11 +60,12 @@ export function SplitPaymentInput({
         referenceNumber: p.referenceNumber || "",
       }))
     }
+    const isPendingOrCredit = paymentStatus === "Pending" || paymentStatus === "Credit" || paymentStatus === "Cancelled" || !paymentStatus
     return [
       {
         rowId: `row-0-${Date.now()}`,
         paymentMethod: "Cash",
-        amount: totalAmount > 0 ? totalAmount : 0,
+        amount: isPendingOrCredit ? 0 : (totalAmount > 0 ? totalAmount : 0),
         referenceNumber: "",
       },
     ]
@@ -118,8 +119,22 @@ export function SplitPaymentInput({
     }
   }, [hasCod, isEditMode, paymentStatus, onPaymentStatusChange])
 
+  const prevPaymentStatus = React.useRef(paymentStatus)
+
   useEffect(() => {
-    if (paymentStatus === "Pending" || paymentStatus === "Cancelled") {
+    const statusChangedToPaid = 
+      (paymentStatus === "Paid" || paymentStatus === "Completed") && 
+      (prevPaymentStatus.current !== "Paid" && prevPaymentStatus.current !== "Completed")
+      
+    const statusChangedToPendingOrCredit = 
+      (paymentStatus === "Pending" || paymentStatus === "Credit" || paymentStatus === "Cancelled") && 
+      (prevPaymentStatus.current !== "Pending" && prevPaymentStatus.current !== "Credit" && prevPaymentStatus.current !== "Cancelled")
+
+    const statusChangedToPartialFromPaid =
+      paymentStatus === "Partial" &&
+      (prevPaymentStatus.current === "Paid" || prevPaymentStatus.current === "Completed")
+
+    if (statusChangedToPendingOrCredit) {
       const allZero = rows.every((r) => Number(r.amount) === 0)
       if (!allZero) {
         const updated = rows.map((r) => ({ ...r, amount: 0 }))
@@ -127,7 +142,7 @@ export function SplitPaymentInput({
         // eslint-disable-next-line react-hooks/exhaustive-deps
         notifyParent(updated)
       }
-    } else if ((paymentStatus === "Paid" || paymentStatus === "Completed") && (!hasCod || isEditMode)) {
+    } else if (statusChangedToPaid && (!hasCod || isEditMode)) {
       const totalAllocatedVal = rows.reduce((sum, r) => sum + (Number(r.amount) || 0), 0)
       if (totalAllocatedVal !== totalAmount && totalAmount > 0) {
         const updated = [
@@ -142,7 +157,13 @@ export function SplitPaymentInput({
         // eslint-disable-next-line react-hooks/exhaustive-deps
         notifyParent(updated)
       }
+    } else if (statusChangedToPartialFromPaid) {
+      const updated = rows.map((r) => ({ ...r, amount: 0 }))
+      setRows(updated)
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      notifyParent(updated)
     }
+    prevPaymentStatus.current = paymentStatus
   }, [paymentStatus, totalAmount, hasCod, isEditMode])
 
   // Total amount allocated across all payment methods (including COD)
@@ -198,6 +219,19 @@ export function SplitPaymentInput({
       const willHaveCod = isCodMethod(value) || updated.some((r) => isCodMethod(r.paymentMethod))
       if (willHaveCod) {
         onPaymentStatusChange?.("Credit")
+      }
+    }
+
+    if (field === "amount") {
+      const totalAlloc = updated.reduce((sum, r) => sum + (Number(r.amount) || 0), 0)
+      if (totalAlloc >= totalAmount && totalAmount > 0) {
+        onPaymentStatusChange?.("Paid")
+      } else if (totalAlloc > 0 && totalAlloc < totalAmount) {
+        onPaymentStatusChange?.("Partial")
+      } else if (totalAlloc === 0) {
+        if (paymentStatus !== "Credit") {
+          onPaymentStatusChange?.("Pending")
+        }
       }
     }
   }
@@ -280,7 +314,7 @@ export function SplitPaymentInput({
                 Method #{index + 1}
               </Label>
               <select
-                disabled={disabled || isPendingOrCancelled}
+                disabled={disabled}
                 className="flex h-8 w-full items-center justify-between rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-900 focus:outline-none focus:ring-1 focus:ring-slate-400 disabled:opacity-50"
                 value={row.paymentMethod}
                 onChange={(e) =>
@@ -301,15 +335,14 @@ export function SplitPaymentInput({
               </Label>
               <div className="relative">
                 <Input
-                  disabled={disabled || isPendingOrCancelled}
+                  disabled={disabled}
                   type="number"
                   min="0"
                   step="0.01"
                   placeholder="0.00"
-                  value={row.amount === 0 && row.amount.toString() === "0" ? "" : row.amount}
+                  value={row.amount === 0 ? "" : row.amount}
                   onChange={(e) => {
-                    const val = e.target.value === "" ? 0 : Number.parseFloat(e.target.value)
-                    handleRowChange(row.rowId, "amount", isNaN(val) ? 0 : val)
+                    handleRowChange(row.rowId, "amount", e.target.value)
                   }}
                   className="h-8 text-xs bg-white border-gray-300 text-gray-900 pr-2 focus-visible:ring-1"
                 />
@@ -321,7 +354,7 @@ export function SplitPaymentInput({
                 Reference No. (Optional)
               </Label>
               <Input
-                disabled={disabled || isPendingOrCancelled}
+                disabled={disabled}
                 type="text"
                 placeholder="Ref / Transaction ID"
                 value={row.referenceNumber || ""}
@@ -332,7 +365,7 @@ export function SplitPaymentInput({
               />
             </div>
 
-            {rows.length > 1 && !disabled && !isPendingOrCancelled && (
+            {rows.length > 1 && !disabled && (
               <Button
                 type="button"
                 variant="ghost"
@@ -348,7 +381,7 @@ export function SplitPaymentInput({
         ))}
       </div>
 
-      {!disabled && !isPendingOrCancelled && (
+      {!disabled && (
         <Button
           type="button"
           variant="outline"
@@ -407,33 +440,57 @@ export function SplitPaymentInput({
           {onPaymentStatusChange ? (
             <select
               disabled={disabled}
-              value={paymentStatus === "Credit" || paymentStatus === "Partial" ? "Credit" : (paymentStatus || (hasCod && !isEditMode ? "Credit" : "Paid"))}
+              value={paymentStatus || (hasCod && !isEditMode ? "Credit" : "Pending")}
               onChange={(e) => {
                 const nextVal = e.target.value
                 if (!isEditMode && hasCod && (nextVal === "Paid" || nextVal === "Completed")) {
                   return
                 }
-                onPaymentStatusChange(nextVal)
+                onPaymentStatusChange?.(nextVal)
+                if (nextVal === "Paid") {
+                  const updated = [
+                    {
+                      rowId: rows[0]?.rowId || `row-0-${Date.now()}`,
+                      paymentMethod: rows[0]?.paymentMethod || "Cash",
+                      amount: totalAmount > 0 ? totalAmount : 0,
+                      referenceNumber: rows[0]?.referenceNumber || "",
+                    },
+                  ]
+                  setRows(updated)
+                  notifyParent(updated)
+                } else if (nextVal === "Pending" || nextVal === "Credit") {
+                  const updated = rows.map((r) => ({ ...r, amount: 0 }))
+                  setRows(updated)
+                  notifyParent(updated)
+                } else if (nextVal === "Partial") {
+                  const totalAlloc = rows.reduce((sum, r) => sum + (Number(r.amount) || 0), 0)
+                  if (totalAlloc >= totalAmount && totalAmount > 0) {
+                    const updated = rows.map((r) => ({ ...r, amount: 0 }))
+                    setRows(updated)
+                    notifyParent(updated)
+                  }
+                }
               }}
               className="h-7 text-xs font-semibold rounded border border-gray-300 bg-white px-2 py-0.5 text-gray-900 focus:outline-none"
             >
+              <option value="Pending">Pending</option>
+              <option value="Credit">Credit</option>
+              <option value="Partial">Partial</option>
               <option value="Paid" disabled={!isEditMode && hasCod}>
                 Paid {!isEditMode && hasCod ? "(Disabled for COD)" : ""}
               </option>
-              <option value="Credit">Credit / Partial</option>
-              <option value="Pending">Pending</option>
             </select>
           ) : (
             <span className={`font-semibold px-2 py-0.5 rounded text-xs ${
               paymentStatus === "Paid" || paymentStatus === "Completed"
                 ? "bg-emerald-100 text-emerald-800"
-                : paymentStatus === "Credit" || paymentStatus === "Partial"
+                : paymentStatus === "Credit"
                 ? "bg-amber-100 text-amber-800"
-                : "bg-gray-100 text-gray-800"
+                : paymentStatus === "Partial"
+                ? "bg-blue-100 text-blue-800"
+                : "bg-slate-100 text-slate-800"
             }`}>
-              {paymentStatus === "Credit" || paymentStatus === "Partial"
-                ? "Credit / Partial"
-                : (paymentStatus || "Paid")}
+              {paymentStatus || "Pending"}
             </span>
           )}
         </div>

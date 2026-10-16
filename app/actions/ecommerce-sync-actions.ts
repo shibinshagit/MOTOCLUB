@@ -409,6 +409,7 @@ export async function syncEcommerceOrder(
         customer_phone_override,
         customer_address,
         shipping_address,
+        is_pos_updated,
         created_at,
         updated_at
       ) VALUES (
@@ -433,6 +434,7 @@ export async function syncEcommerceOrder(
         ${order.customer_phone || null},
         ${order.delivery_address || null},
         ${order.delivery_address || null},
+        false,
         ${order.created_at || new Date()},
         NOW()
       )

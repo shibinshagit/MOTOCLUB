@@ -24,6 +24,21 @@ export function DatePickerField({ id, label, date, onDateChange, className }: Da
   const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value
     if (value) {
+      const parts = value.split("-").map(Number)
+      if (parts.length === 3 && parts[0] && parts[1] && parts[2]) {
+        const [year, month, day] = parts
+        const now = new Date()
+        const existingHasTime =
+          date &&
+          !isNaN(date.getTime()) &&
+          !(date.getHours() === 0 && date.getMinutes() === 0 && date.getSeconds() === 0)
+        const hours = existingHasTime ? date.getHours() : now.getHours()
+        const minutes = existingHasTime ? date.getMinutes() : now.getMinutes()
+        const seconds = existingHasTime ? date.getSeconds() : now.getSeconds()
+        const newDate = new Date(year, month - 1, day, hours, minutes, seconds)
+        onDateChange(newDate)
+        return
+      }
       const newDate = new Date(value)
       if (!isNaN(newDate.getTime())) {
         onDateChange(newDate)

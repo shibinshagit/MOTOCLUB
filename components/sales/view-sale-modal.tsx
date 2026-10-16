@@ -30,7 +30,7 @@ import { CreateReplacementModal } from "@/components/sales/create-replacement-mo
 import { ReplacementShipmentCard } from "@/components/sales/replacement-shipment-card"
 import { buildTrackingUrl, mapSaleShippingFromRecord } from "@/lib/sale-shipping"
 import { StaffOwnerSelect } from "@/components/sales/staff-owner-select"
-import { cn } from "@/lib/utils"
+import { cn, formatCurrency as formatMoney, parseSaleDateTime } from "@/lib/utils"
 
 interface ViewSaleModalProps {
   isOpen: boolean
@@ -45,11 +45,23 @@ interface ViewSaleModalProps {
 
 function SaleStatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
+    Paid: "bg-emerald-50 text-emerald-700 border-emerald-200",
     Completed: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    Partial: "bg-blue-50 text-blue-700 border-blue-200",
     Credit: "bg-amber-50 text-amber-700 border-amber-200",
     Cancelled: "bg-rose-50 text-rose-700 border-rose-200",
     Returned: "bg-purple-50 text-purple-700 border-purple-200",
-    Pending: "bg-amber-50 text-amber-700 border-amber-200",
+    Pending: "bg-slate-50 text-slate-700 border-slate-200",
+  }
+
+  const labelMap: Record<string, string> = {
+    Paid: "Paid",
+    Completed: "Paid",
+    Partial: "Partial",
+    Credit: "Credit",
+    Pending: "Pending",
+    Cancelled: "Cancelled",
+    Returned: "Returned",
   }
 
   return (
@@ -58,7 +70,7 @@ function SaleStatusBadge({ status }: { status: string }) {
         styles[status] || "border-border bg-muted text-muted-foreground"
       }`}
     >
-      {status}
+      {labelMap[status] || status}
     </span>
   )
 }
@@ -66,7 +78,12 @@ function SaleStatusBadge({ status }: { status: string }) {
 function DeliveryStatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
     Pending: "bg-amber-50 text-amber-700 border-amber-200",
+    Paid: "bg-emerald-50 text-emerald-700 border-emerald-200",
     Packed: "bg-blue-50 text-blue-700 border-blue-200",
+    Sent: "bg-purple-50 text-purple-700 border-purple-200",
+    Direct: "bg-blue-50 text-blue-700 border-blue-200",
+    Courier: "bg-indigo-50 text-indigo-700 border-indigo-200",
+    Shipping: "bg-cyan-50 text-cyan-700 border-cyan-200",
     Shipped: "bg-violet-50 text-violet-700 border-violet-200",
     "In transit": "bg-indigo-50 text-indigo-700 border-indigo-200",
     Delivered: "bg-emerald-50 text-emerald-700 border-emerald-200",
@@ -172,8 +189,7 @@ export default function ViewSaleModal({
 
   const formatCurrency = (amount: number | string) => {
     const numAmount = typeof amount === "string" ? Number.parseFloat(amount) : amount
-    if (isNaN(numAmount)) return `${deviceCurrency} 0.00`
-    return `${deviceCurrency} ${numAmount.toFixed(2)}`
+    return formatMoney(isNaN(numAmount) ? 0 : numAmount, deviceCurrency)
   }
 
   useEffect(() => {
@@ -250,8 +266,13 @@ export default function ViewSaleModal({
     if (sale.status === "Cancelled") return "Cancelled"
     if (sale.status === "Returned") return "Returned"
     const pStatus = sale.payment_status?.toLowerCase()
-    if (pStatus === "paid" || pStatus === "completed") return "Completed"
-    if (pStatus === "credit" || pStatus === "partial") return "Credit"
+    if (pStatus === "paid" || pStatus === "completed") return "Paid"
+    if (pStatus === "partial") return "Partial"
+    if (pStatus === "credit") return "Credit"
+    const total = Number(sale.total_amount) || 0
+    const received = Number(sale.received_amount) || 0
+    if (total > 0 && received >= total) return "Paid"
+    if (received > 0 && received < total) return "Partial"
     return "Pending"
   }
 
@@ -393,10 +414,11 @@ export default function ViewSaleModal({
     }
   }
 
-  const formatSaleDate = (dateValue: string | null | undefined) => {
-    if (!dateValue) return "—"
+  const formatSaleDate = (dateValue: string | null | undefined, saleObj?: any) => {
+    if (!dateValue && !saleObj?.created_at) return "—"
     try {
-      return format(new Date(dateValue), "dd-MM-yyyy")
+      const parsed = parseSaleDateTime(saleObj || dateValue)
+      return format(parsed, "dd-MM-yyyy, hh:mm a")
     } catch {
       return "Invalid date"
     }
@@ -426,16 +448,18 @@ export default function ViewSaleModal({
           <DialogHeader className="space-y-0 border-b border-slate-200 bg-[#F1F4F9] px-4 py-3 text-left">
             <DialogTitle className="sr-only">Sale {saleId ? `#${saleId}` : "details"}</DialogTitle>
             <div className="flex flex-wrap items-center gap-2 pr-10">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleEdit}
-                disabled={isLoading || !saleData}
-                className="h-8 border-slate-200 bg-white px-3 text-xs"
-              >
-                <Edit className="mr-1.5 h-3.5 w-3.5" />
-                Edit
-              </Button>
+              {Boolean(onEdit) && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleEdit}
+                  disabled={isLoading || !saleData}
+                  className="h-8 border-slate-200 bg-white px-3 text-xs"
+                >
+                  <Edit className="mr-1.5 h-3.5 w-3.5" />
+                  Edit
+                </Button>
+              )}
               <Button
                 variant="outline"
                 size="sm"
@@ -524,7 +548,7 @@ export default function ViewSaleModal({
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
                   <InfoCell label="Sale #" value={`#${saleData.id}`} />
-                  <InfoCell label="Date" value={formatSaleDate(saleData.sale_date)} />
+                  <InfoCell label="Date & Time" value={formatSaleDate(saleData.sale_date, saleData)} />
                   <InfoCell label="Status" value={<SaleStatusBadge status={status} />} />
                   <InfoCell
                     label="Fulfillment"

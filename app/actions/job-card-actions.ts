@@ -77,6 +77,8 @@ export interface JobCardInput {
 
   courierPaidExtra?: number
 
+  typeOfSale?: string
+
   products: JobCardProductInput[]
   crmLeadId?: number
 }
@@ -221,6 +223,7 @@ export async function createJobCard(input: JobCardInput) {
                 received_amount,
                 staff_id,
                 sale_type,
+                type_of_sale,
                 job_card_number,
                 tracking_id,
                 customer_name_override,
@@ -238,7 +241,10 @@ export async function createJobCard(input: JobCardInput) {
                 advance_amount,
                 balance_amount,
                 fulfillment_type,
-                delivery_status
+                delivery_status,
+                is_pos_updated,
+                sale_date,
+                created_at
               ) VALUES (
                 ${resolvedCustomerId || null},
                 ${totalAmount},
@@ -249,6 +255,7 @@ export async function createJobCard(input: JobCardInput) {
                 0,
                 ${staffId},
                 'job_card',
+                ${input.typeOfSale || 'walk in'},
                 ${trackingId},
                 ${trackingId},
                 ${customerNameOverride},
@@ -266,7 +273,10 @@ export async function createJobCard(input: JobCardInput) {
                 0,
                 ${totalAmount},
                 'ship',
-                'Pending'
+                'Pending',
+                false,
+                NOW(),
+                NOW()
               )
               RETURNING id
             `
@@ -440,7 +450,8 @@ export async function updateJobCard(id: number, input: any) {
           courier_paid_extra = ${input.courierPaidExtra || 0},
           balance_amount = ${balanceAmount},
           fulfillment_type = COALESCE(fulfillment_type, 'ship'),
-          delivery_status = COALESCE(delivery_status, 'Pending')
+          delivery_status = COALESCE(delivery_status, 'Pending'),
+          type_of_sale = COALESCE(${input.typeOfSale || null}, type_of_sale)
         WHERE id = ${id} AND staff_id = ${staffId}
         RETURNING tracking_id
       `
@@ -463,7 +474,8 @@ export async function updateJobCard(id: number, input: any) {
           courier_paid_extra = ${input.courierPaidExtra || 0},
           balance_amount = ${balanceAmount},
           fulfillment_type = COALESCE(fulfillment_type, 'ship'),
-          delivery_status = COALESCE(delivery_status, 'Pending')
+          delivery_status = COALESCE(delivery_status, 'Pending'),
+          type_of_sale = COALESCE(${input.typeOfSale || null}, type_of_sale)
         WHERE id = ${id}
         RETURNING tracking_id
       `
@@ -794,14 +806,12 @@ export async function getAllJobCards(
       `
     } else if (statusFilter === "critical") {
       statusWhere = sql`
-        (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%' OR s.tracking_id LIKE 'DOD-%')
-        AND LOWER(COALESCE(s.fulfillment_type, 'pickup')) = 'ship'
-        AND s.status NOT IN ('Cancelled', 'Returned')
+        s.status NOT IN ('Cancelled', 'Returned')
         AND (s.payment_status IS NULL OR LOWER(s.payment_status) != 'cancelled')
         AND (
           LOWER(s.payment_status) IN ('paid', 'completed') OR (COALESCE(s.total_amount, 0) > 0 AND COALESCE(s.received_amount, 0) >= COALESCE(s.total_amount, 0))
         )
-        AND (s.delivery_status IS NULL OR LOWER(s.delivery_status) NOT IN ('pickup', 'direct', 'shipping', 'delivered', 'returned', 'failed'))
+        AND (s.delivery_status IS NULL OR LOWER(COALESCE(s.delivery_status, 'pending')) NOT IN ('direct', 'delivered', 'failed', 'returned'))
       `
     }
 

@@ -72,7 +72,7 @@ export async function POST(req: NextRequest) {
 
     // Field lengths mirror the database columns; longer values would otherwise fail the insert with a 500
     const MAX_LENGTHS: Record<string, number> = {
-      external_lead_id: 255, name: 255, phone: 50, email: 255, source: 100, campaign: 255, ad_name: 255
+      external_lead_id: 255, name: 255, phone: 50, email: 255, source: 100, campaign: 255, ad_name: 255, vehicle: 255, year: 50
     }
     const tooLong: Record<string, string> = {}
     for (const [field, max] of Object.entries(MAX_LENGTHS)) {
@@ -123,6 +123,8 @@ export async function POST(req: NextRequest) {
       campaign: typeof body.campaign === 'string' ? body.campaign.trim() : null,
       ad_name: typeof body.ad_name === 'string' ? body.ad_name.trim() : null,
       message: typeof body.message === 'string' ? body.message.trim() : null,
+      vehicle: typeof body.vehicle === 'string' ? body.vehicle.trim() : null,
+      year: typeof body.year === 'string' ? body.year.trim() : null,
       products
     }
 

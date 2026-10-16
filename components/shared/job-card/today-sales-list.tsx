@@ -25,11 +25,15 @@ export function TodaySalesList({
   canCreateProducts = true,
   globalFromDate,
   globalToDate,
+  refreshKey,
+  onSaleChanged,
 }: {
   onOpenCreateModal?: () => void
   canCreateProducts?: boolean
   globalFromDate?: string
   globalToDate?: string
+  refreshKey?: number
+  onSaleChanged?: () => void
 }) {
   const currency = useSelector(selectDeviceCurrency)
   const deviceId = useSelector(selectDeviceId)
@@ -77,21 +81,29 @@ export function TodaySalesList({
 
   useEffect(() => {
     fetchSales()
-  }, [debouncedSearch, monthStr, globalFromDate, globalToDate])
+  }, [debouncedSearch, monthStr, globalFromDate, globalToDate, refreshKey])
 
   const fetchSales = async () => {
     setLoading(true)
-    // When global date range is provided, use it; otherwise use internal monthStr
-    const res = globalFromDate && globalToDate 
-      ? await getTodayJobCards(undefined, debouncedSearch, globalFromDate, globalToDate)
-      : await getTodayJobCards(monthStr, debouncedSearch)
-    if (res.success && res.data) {
-      const sorted = [...res.data].sort((a, b) => {
-        return parseSaleDateTime(b).getTime() - parseSaleDateTime(a).getTime()
-      })
-      setSales(sorted)
+    try {
+      // When global date range is provided, use it; otherwise use internal monthStr
+      const res = globalFromDate && globalToDate 
+        ? await getTodayJobCards(undefined, debouncedSearch, globalFromDate, globalToDate)
+        : await getTodayJobCards(monthStr, debouncedSearch)
+      if (res?.success && Array.isArray(res?.data)) {
+        const sorted = [...res.data].sort((a, b) => {
+          return parseSaleDateTime(b).getTime() - parseSaleDateTime(a).getTime()
+        })
+        setSales(sorted)
+      } else {
+        setSales([])
+      }
+    } catch (err) {
+      console.error("fetchSales error:", err)
+      setSales([])
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   const toggleExpand = (id: number) => {
@@ -160,6 +172,11 @@ export function TodaySalesList({
           onClose={() => {
             setEditingSaleId(null)
             fetchSales()
+            onSaleChanged?.()
+          }}
+          onSuccess={() => {
+            fetchSales()
+            onSaleChanged?.()
           }}
           editSaleId={editingSaleId}
           canCreateProducts={canCreateProducts}
@@ -285,6 +302,7 @@ export function TodaySalesList({
                       onStatusChange={(newStatus) => {
                         setSales((prev) => prev.map((s) => (s.id === sale.id ? { ...s, delivery_status: newStatus } : s)))
                         fetchSales()
+                        onSaleChanged?.()
                       }}
                     />
                   </div>
@@ -302,11 +320,16 @@ export function TodaySalesList({
                     {sale.customer_phone ? formatPhoneNumber(sale.customer_phone) : (sale.tracking_id || `#${sale.id}`)}
                   </p>
 
-                  {/* Product Badge */}
-                  <div className="mt-3">
+                  {/* Product Badge & Type */}
+                  <div className="mt-3 flex items-center gap-2">
                     <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold bg-purple-50 text-purple-700 border border-purple-100">
                       {itemQuantity} Products
                     </span>
+                    {sale.type_of_sale && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium capitalize bg-gray-100 text-gray-700 border border-gray-200">
+                        {sale.type_of_sale}
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -470,7 +493,14 @@ export function TodaySalesList({
                       </td>
                       <td className="max-w-[200px] truncate px-4 py-4">
                         <div className="flex flex-col">
-                          <span className="font-bold text-slate-900">{sale.customer_name || "N/A"}</span>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-bold text-slate-900">{sale.customer_name || "N/A"}</span>
+                            {sale.type_of_sale && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium capitalize bg-gray-100 text-gray-700 border border-gray-200">
+                                {sale.type_of_sale}
+                              </span>
+                            )}
+                          </div>
                           <span className="text-xs text-slate-500 mt-0.5">{sale.customer_phone ? formatPhoneNumber(sale.customer_phone) : "N/A"}</span>
                         </div>
                       </td>
@@ -514,6 +544,7 @@ export function TodaySalesList({
                           onStatusChange={(newStatus) => {
                             setSales((prev) => prev.map((s) => (s.id === sale.id ? { ...s, delivery_status: newStatus } : s)))
                             fetchSales()
+                            onSaleChanged?.()
                           }}
                         />
                       </td>
@@ -566,9 +597,14 @@ export function TodaySalesList({
                                   )}
                                   <div>
                                     <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 block mb-1">Customer Details</span>
-                                  <p className="font-medium text-slate-800 text-base">{sale.customer_name || "N/A"}</p>
-                                  <p className="flex items-center gap-1.5 mt-1"><Phone className="h-3.5 w-3.5 text-slate-400" /> {sale.customer_phone ? formatPhoneNumber(sale.customer_phone) : "N/A"}</p>
-                                </div>
+                                    <p className="font-medium text-slate-800 text-base">{sale.customer_name || "N/A"}</p>
+                                    <p className="flex items-center gap-1.5 mt-1"><Phone className="h-3.5 w-3.5 text-slate-400" /> {sale.customer_phone ? formatPhoneNumber(sale.customer_phone) : "N/A"}</p>
+                                    {sale.type_of_sale && (
+                                      <p className="mt-1 text-xs text-slate-600">
+                                        <span className="font-semibold text-slate-400">Type:</span> <span className="capitalize font-medium">{sale.type_of_sale}</span>
+                                      </p>
+                                    )}
+                                  </div>
                                 
                                 {sale.shipping_street && (
                                   <div className="pt-2">

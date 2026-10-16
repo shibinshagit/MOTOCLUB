@@ -6,6 +6,7 @@ export const DELIVERY_STATUSES = [
   "Packed",
   "Sent",
   "Direct",
+  "Courier",
   "Shipping",
   "Delivered",
   "Returned",
@@ -120,27 +121,7 @@ export function getSaleDeliveryLabel(sale: {
   tracking_id?: string | null
 }) {
   if (!sale) return "Pending"
-
-  const status = sale.delivery_status || "Pending"
-
-  const isJobCard =
-    sale.sale_type === "job_card" ||
-    String(sale.tracking_id || "").startsWith("JC-") ||
-    String(sale.tracking_id || "").startsWith("DOD")
-
-  if (isJobCard) {
-    return status
-  }
-
-  if (sale.fulfillment_type === "ship") {
-    return status
-  }
-
-  if (sale.fulfillment_type === "pickup") {
-    return status !== "Pending" && status !== "Pickup" ? status : "Pickup"
-  }
-
-  return status
+  return sale.delivery_status || "Pending"
 }
 
 export function normalizeSaleShippingInput(input?: SaleShippingInput | null) {
@@ -150,7 +131,7 @@ export function normalizeSaleShippingInput(input?: SaleShippingInput | null) {
   if (fulfillmentType === "pickup") {
     return {
       fulfillment_type: "pickup" as const,
-      delivery_status: input?.deliveryStatus || null,
+      delivery_status: input?.deliveryStatus || "Pending",
       courier_partner_id: null,
       courier_service_id: null,
       courier_service_name: null,
@@ -305,14 +286,6 @@ export function isPendingSale(sale: any): boolean {
 export function isCriticalSale(sale: any): boolean {
   if (!sale) return false
 
-  // Critical orders are strictly Job Card sales
-  if (!isJobCardSale(sale)) return false
-
-  // Pickup sales (or non-shipping sales) are not critical orders
-  if (getSaleDeliveryLabel(sale) === "Pickup" || (sale.fulfillment_type || "pickup").toLowerCase() !== "ship") {
-    return false
-  }
-
   const isCancelledOrReturned =
     sale.status === "Cancelled" ||
     sale.status === "Returned" ||
@@ -327,9 +300,9 @@ export function isCriticalSale(sale: any): boolean {
   if (!isPaidSale(sale)) return false
 
   const dStatus = (sale.delivery_status || "Pending").trim().toLowerCase()
-  const nonCriticalStatuses = ["pickup", "direct", "shipping", "delivered", "returned", "failed"]
+  const excludedStatuses = ["direct", "delivered", "returned", "failed"]
 
-  return !nonCriticalStatuses.includes(dStatus)
+  return !excludedStatuses.includes(dStatus)
 }
 
 export function isJobCardSale(sale: any): boolean {
