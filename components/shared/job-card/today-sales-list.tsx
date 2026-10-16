@@ -85,17 +85,25 @@ export function TodaySalesList({
 
   const fetchSales = async () => {
     setLoading(true)
-    // When global date range is provided, use it; otherwise use internal monthStr
-    const res = globalFromDate && globalToDate 
-      ? await getTodayJobCards(undefined, debouncedSearch, globalFromDate, globalToDate)
-      : await getTodayJobCards(monthStr, debouncedSearch)
-    if (res.success && res.data) {
-      const sorted = [...res.data].sort((a, b) => {
-        return parseSaleDateTime(b).getTime() - parseSaleDateTime(a).getTime()
-      })
-      setSales(sorted)
+    try {
+      // When global date range is provided, use it; otherwise use internal monthStr
+      const res = globalFromDate && globalToDate 
+        ? await getTodayJobCards(undefined, debouncedSearch, globalFromDate, globalToDate)
+        : await getTodayJobCards(monthStr, debouncedSearch)
+      if (res?.success && Array.isArray(res?.data)) {
+        const sorted = [...res.data].sort((a, b) => {
+          return parseSaleDateTime(b).getTime() - parseSaleDateTime(a).getTime()
+        })
+        setSales(sorted)
+      } else {
+        setSales([])
+      }
+    } catch (err) {
+      console.error("fetchSales error:", err)
+      setSales([])
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   const toggleExpand = (id: number) => {
