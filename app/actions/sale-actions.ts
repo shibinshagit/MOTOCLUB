@@ -718,6 +718,7 @@ export interface GetPaginatedSalesOptions {
   searchTerm?: string
   onlyPosUpdated?: boolean
   excludePendingAndPickup?: boolean
+  isPurchaseManager?: boolean
 }
 
 export async function getPaginatedUserSales(deviceId: number, options: GetPaginatedSalesOptions = {}) {
@@ -742,6 +743,7 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
   const cardFilter = options.cardFilter || "all"
   const onlyPosUpdated = options.onlyPosUpdated || false
   const excludePendingAndPickup = options.excludePendingAndPickup || false
+  const isPurchaseManager = options.isPurchaseManager || false
 
   try {
     const result = await executeWithRetry(async () => {
@@ -879,6 +881,10 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
             )
           )
           AND (
+            ${isPurchaseManager} = false
+            OR LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+          )
+          AND (
             ${searchPattern}::text IS NULL
             OR LOWER(COALESCE(s.customer_name_override, c.name, '')) LIKE ${searchPattern}
             OR LOWER(COALESCE(s.customer_phone_override, c.phone, '')) LIKE ${searchPattern}
@@ -963,6 +969,10 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
               LOWER(COALESCE(s.delivery_status, 'pending')) != 'pending'
               AND LOWER(COALESCE(s.delivery_status, '')) != 'pickup'
             )
+          )
+          AND (
+            ${isPurchaseManager} = false
+            OR LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
           )
           AND (
             ${searchPattern}::text IS NULL
@@ -1181,6 +1191,7 @@ export async function getSalesSummaryCards(
     searchTerm?: string
     onlyPosUpdated?: boolean
     excludePendingAndPickup?: boolean
+    isPurchaseManager?: boolean
   } = {}
 ) {
   if (!deviceId) {
@@ -1198,6 +1209,7 @@ export async function getSalesSummaryCards(
   const typeOfSaleFilter = options.typeOfSaleFilter || "all"
   const onlyPosUpdated = options.onlyPosUpdated || false
   const excludePendingAndPickup = options.excludePendingAndPickup || false
+  const isPurchaseManager = options.isPurchaseManager || false
 
   try {
     const cardCounts = await executeWithRetry(async () => {
@@ -1252,6 +1264,10 @@ export async function getSalesSummaryCards(
               LOWER(COALESCE(s.delivery_status, 'pending')) != 'pending'
               AND LOWER(COALESCE(s.delivery_status, '')) != 'pickup'
             )
+          )
+          AND (
+            ${isPurchaseManager} = false
+            OR LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
           )
           AND (
             ${typeFilter} = 'all'
@@ -3901,6 +3917,7 @@ export async function getProductsToPurchase(deviceId: number, options: { dateFro
         WHERE s.device_id = ${deviceId}
           AND s.is_pos_updated = true
           AND s.status NOT IN ('Cancelled', 'Returned')
+          AND LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
           AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
           AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
           AND si.product_id IS NOT NULL

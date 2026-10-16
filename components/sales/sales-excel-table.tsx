@@ -483,6 +483,7 @@ export default function SalesExcelTable({
           searchTerm: debouncedSearch,
           onlyPosUpdated,
           excludePendingAndPickup: isLogistics,
+          isPurchaseManager,
         }),
         getSalesSummaryCards(deviceId!, {
           dateFrom: globalDateRange?.from,
@@ -492,6 +493,7 @@ export default function SalesExcelTable({
           searchTerm: debouncedSearch,
           onlyPosUpdated,
           excludePendingAndPickup: isLogistics,
+          isPurchaseManager,
         }),
       ])
       if (fetchId !== latestFetchIdRef.current) return
@@ -525,7 +527,7 @@ export default function SalesExcelTable({
         setHasFetchedServer(true)
       }
     }
-  }, [deviceId, page, pageSize, globalDateRange?.from, globalDateRange?.to, typeFilter, typeOfSaleFilter, cardFilter, debouncedSearch, onlyPosUpdated, isLogistics])
+  }, [deviceId, page, pageSize, globalDateRange?.from, globalDateRange?.to, typeFilter, typeOfSaleFilter, cardFilter, debouncedSearch, onlyPosUpdated, isLogistics, isPurchaseManager])
 
   // A new date range starts again from the first page and clears selection.
   useEffect(() => {
@@ -575,12 +577,18 @@ export default function SalesExcelTable({
 
   // The list is always server-paginated/filtered; rows are already the current page.
   const displaySales = useMemo(() => {
+    if (isPurchaseManager) {
+      return serverSales.filter((s: any) => {
+        const dStatus = (s.delivery_status || "pending").trim().toLowerCase()
+        return dStatus === "pending" || dStatus === "paid"
+      })
+    }
     if (!isLogistics) return serverSales
     return serverSales.filter((s: any) => {
       const dStatus = (s.delivery_status || "pending").toLowerCase()
       return dStatus !== "pending" && dStatus !== "pickup"
     })
-  }, [serverSales, isLogistics])
+  }, [serverSales, isLogistics, isPurchaseManager])
 
   const selectedSalesList = useMemo(() => {
     return displaySales.filter((s) => selectedSales.includes(s.id))
