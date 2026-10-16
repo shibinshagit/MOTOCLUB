@@ -482,7 +482,7 @@ export default function SalesExcelTable({
           cardFilter,
           searchTerm: debouncedSearch,
           onlyPosUpdated,
-          excludePendingAndPickup: isLogistics,
+          isLogistics,
           isPurchaseManager,
         }),
         getSalesSummaryCards(deviceId!, {
@@ -492,7 +492,7 @@ export default function SalesExcelTable({
           typeOfSaleFilter,
           searchTerm: debouncedSearch,
           onlyPosUpdated,
-          excludePendingAndPickup: isLogistics,
+          isLogistics,
           isPurchaseManager,
         }),
       ])
@@ -583,11 +583,22 @@ export default function SalesExcelTable({
         return dStatus === "pending" || dStatus === "paid"
       })
     }
-    if (!isLogistics) return serverSales
-    return serverSales.filter((s: any) => {
-      const dStatus = (s.delivery_status || "pending").toLowerCase()
-      return dStatus !== "pending" && dStatus !== "pickup"
-    })
+    if (isLogistics) {
+      const excluded = new Set(["delivered", "returned", "failed", "pickup", "cancelled"])
+      return serverSales.filter((s: any) => {
+        const dStatus = (s.delivery_status || "pending").trim().toLowerCase()
+        const fType = (s.fulfillment_type || "").trim().toLowerCase()
+        const status = (s.status || "").trim().toLowerCase()
+        const pStatus = (s.payment_status || "").trim().toLowerCase()
+        return (
+          !excluded.has(dStatus) &&
+          !excluded.has(status) &&
+          !excluded.has(pStatus) &&
+          fType !== "pickup"
+        )
+      })
+    }
+    return serverSales
   }, [serverSales, isLogistics, isPurchaseManager])
 
   const selectedSalesList = useMemo(() => {

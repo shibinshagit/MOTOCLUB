@@ -14,9 +14,8 @@ const VALID_TRANSITIONS: Record<string, string[]> = {
   "Pending": [], // No manual exits allowed
   "Paid": ["Packed", "Returned"],
   "Packed": ["Sent", "Returned"],
-  "Sent": ["Direct", "Courier", "Shipped", "Returned"],
-  "Direct": ["Delivered", "Courier", "Shipped", "Returned"],
-  "Courier": ["Shipped", "Delivered", "Returned"],
+  "Sent": ["Direct", "Shipped", "Returned"],
+  "Direct": ["Delivered", "Shipped", "Returned"],
   "Shipped": ["Delivered", "Returned"],
   "Shipping": ["Delivered", "Returned"],
   "Delivered": ["Returned"],
@@ -287,7 +286,6 @@ export function DeliveryStatusSelect({
       case "Packed": return "border-indigo-300"
       case "Sent": return "border-purple-300"
       case "Direct": return "border-blue-400"
-      case "Courier": return "border-indigo-400"
       case "Shipped": return "border-cyan-300"
       case "Shipping": return "border-cyan-300"
       case "Delivered": return "border-green-400"
@@ -297,11 +295,11 @@ export function DeliveryStatusSelect({
   }
 
   // Enable all standard delivery status options for full flexibility
-  const ALL_STATUS_OPTIONS = ["Pending", "Paid", "Packed", "Sent", "Direct", "Courier", "Shipped", "Delivered", "Returned", "Failed", "Pickup"]
+  const ALL_STATUS_OPTIONS = ["Pending", "Paid", "Packed", "Sent", "Direct", "Shipped", "Delivered", "Returned", "Failed", "Pickup"]
   const currentMapped = status === "Shipping" ? "Shipped" : status
   const currentServerMapped = currentStatus === "Shipping" ? "Shipped" : currentStatus
   const uniqueOptions = Array.from(new Set([currentMapped, currentServerMapped, ...ALL_STATUS_OPTIONS]))
-    .filter((opt): opt is string => Boolean(opt) && opt !== "Shipping" && opt !== "shipping" && opt !== "In transit" && opt !== "in transit")
+    .filter((opt): opt is string => Boolean(opt) && opt !== "Shipping" && opt !== "shipping" && opt !== "In transit" && opt !== "in transit" && opt !== "Courier" && opt !== "courier")
 
   const isDropdownDisabled = loading
 
