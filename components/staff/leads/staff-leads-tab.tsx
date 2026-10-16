@@ -10,6 +10,7 @@ import {
   updateLeadNotes, 
   getCompanyStaff, 
   assignLead,
+  saveLeadFollowUpAndVehicle,
   setLeadFollowUp,
   getLeadActivities,
   convertLeadToCustomer
@@ -18,7 +19,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Loader2, Search, Phone, Calendar, Briefcase, Clock, Activity as ActivityIcon, UserCheck } from "lucide-react"
+import { Loader2, Search, Phone, Calendar, Briefcase, Clock, Activity as ActivityIcon, UserCheck, Car } from "lucide-react"
 import { format, isPast, isToday } from "date-fns"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
@@ -62,6 +63,8 @@ export default function StaffLeadsTab() {
   const [editNotes, setEditNotes] = useState("")
   const [editStatus, setEditStatus] = useState("")
   const [editFollowUp, setEditFollowUp] = useState("")
+  const [editVehicle, setEditVehicle] = useState("")
+  const [editYear, setEditYear] = useState("")
   const [saving, setSaving] = useState(false)
   
   // Staff
@@ -124,6 +127,8 @@ export default function StaffLeadsTab() {
       setSelectedLead(leadRes.data)
       setEditNotes(leadRes.data.notes || "")
       setEditStatus(leadRes.data.status || "New")
+      setEditVehicle(leadRes.data.vehicle || "")
+      setEditYear(leadRes.data.year || "")
       
       if (leadRes.data.next_follow_up_at) {
         // Convert UTC to local datetime string for input
@@ -174,18 +179,22 @@ export default function StaffLeadsTab() {
     setSaving(false)
   }
 
-  const handleSaveFollowUp = async () => {
+  const handleSaveFollowUpAndVehicle = async () => {
     if (!selectedLead) return
     setSaving(true)
     const dt = editFollowUp ? new Date(editFollowUp).toISOString() : null
-    const res = await setLeadFollowUp(selectedLead.id, dt)
+    const res = await saveLeadFollowUpAndVehicle(selectedLead.id, {
+      date: dt,
+      vehicle: editVehicle,
+      year: editYear
+    })
     if (res.success) {
-      toast({ title: "Follow-up updated" })
+      toast({ title: "Follow-up & vehicle details saved" })
       fetchLeads()
       fetchSummary()
       await loadLeadData(selectedLead.id)
     } else {
-      toast({ title: "Failed to update follow-up", variant: "destructive" })
+      toast({ title: "Failed to save details", variant: "destructive" })
     }
     setSaving(false)
   }
@@ -340,6 +349,7 @@ export default function StaffLeadsTab() {
                 <tr>
                   <th className="px-4 py-3 font-medium">Lead No</th>
                   <th className="px-4 py-3 font-medium">Customer</th>
+                  <th className="px-4 py-3 font-medium">Vehicle</th>
                   <th className="px-4 py-3 font-medium">Source / Campaign</th>
                   <th className="px-4 py-3 font-medium">Assigned To</th>
                   <th className="px-4 py-3 font-medium">Status</th>
@@ -354,6 +364,16 @@ export default function StaffLeadsTab() {
                     <td className="px-4 py-3">
                       <div className="font-medium">{lead.name}</div>
                       <div className="text-xs text-muted-foreground">{lead.phone || lead.email || '-'}</div>
+                    </td>
+                    <td className="px-4 py-3 text-xs">
+                      {lead.vehicle ? (
+                        <div>
+                          <span className="font-medium text-foreground">{lead.vehicle}</span>
+                          {lead.year && <span className="text-muted-foreground ml-1 font-normal">({lead.year})</span>}
+                        </div>
+                      ) : (
+                        <span className="text-muted-foreground">-</span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-xs">
                       <div>{lead.source || '-'}</div>
@@ -389,6 +409,13 @@ export default function StaffLeadsTab() {
                   <div className="text-sm text-muted-foreground flex items-center mt-1">
                     <Phone className="h-3 w-3 mr-1" /> {lead.phone || '-'}
                   </div>
+                  {lead.vehicle && (
+                    <div className="text-xs text-muted-foreground flex items-center mt-1">
+                      <Car className="h-3.5 w-3.5 mr-1 text-primary shrink-0" />
+                      <span className="font-medium text-foreground">{lead.vehicle}</span>
+                      {lead.year && <span className="ml-1">({lead.year})</span>}
+                    </div>
+                  )}
                   <div className="flex justify-between items-center mt-3 text-xs text-muted-foreground">
                     <div className="flex items-center"><Briefcase className="h-3 w-3 mr-1" /> {lead.assigned_staff_name || 'Unassigned'}</div>
                     <div className="flex items-center"><Clock className="h-3 w-3 mr-1" /> {lead.next_follow_up_at ? formatFollowUp(lead.next_follow_up_at) : '-'}</div>
@@ -474,6 +501,18 @@ export default function StaffLeadsTab() {
                       <p className="text-sm text-muted-foreground">Source / Campaign</p>
                       <p className="text-sm">{selectedLead.source || '-'} / {selectedLead.campaign || '-'}</p>
                     </div>
+                    <div className="space-y-1">
+                      <p className="text-sm text-muted-foreground">Vehicle & Year</p>
+                      <p className="text-sm font-medium">
+                        {selectedLead.vehicle ? (
+                          <span>
+                            {selectedLead.vehicle} {selectedLead.year ? <span className="text-muted-foreground font-normal">({selectedLead.year})</span> : null}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground font-normal">-</span>
+                        )}
+                      </p>
+                    </div>
                     <div className="space-y-1 md:col-span-2">
                       <p className="text-sm text-muted-foreground">Original Message</p>
                       <div className="text-sm p-3 bg-muted/50 rounded-md whitespace-pre-wrap">
@@ -511,7 +550,7 @@ export default function StaffLeadsTab() {
                   <div className="border-t pt-4 space-y-4">
                     <h4 className="font-semibold text-sm uppercase tracking-wider text-muted-foreground">Management</h4>
                     
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <label className="text-sm font-medium">Update Status</label>
                         <div className="flex gap-2">
@@ -537,16 +576,51 @@ export default function StaffLeadsTab() {
                           </SelectContent>
                         </Select>
                       </div>
+                    </div>
 
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">Next Follow Up</label>
-                        <div className="flex gap-2">
+                    {/* Common Section for Follow Up, Vehicle and Year with single "Set" button */}
+                    <div className="p-4 rounded-lg border bg-muted/30 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Calendar className="h-4 w-4 text-blue-600" />
+                          <h5 className="text-sm font-semibold">Follow Up, Vehicle & Year</h5>
+                        </div>
+                        <Button 
+                          size="sm" 
+                          onClick={handleSaveFollowUpAndVehicle} 
+                          disabled={saving}
+                          className="bg-blue-600 hover:bg-blue-700 min-w-[70px]"
+                        >
+                          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Set"}
+                        </Button>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-medium text-muted-foreground">Vehicle</label>
+                          <Input 
+                            placeholder="e.g. BMW S1000RR / R15" 
+                            value={editVehicle} 
+                            onChange={(e) => setEditVehicle(e.target.value)} 
+                          />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-medium text-muted-foreground">Year</label>
+                          <Input 
+                            placeholder="e.g. 2024" 
+                            value={editYear} 
+                            onChange={(e) => setEditYear(e.target.value)} 
+                          />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-medium text-muted-foreground">Next Follow Up</label>
                           <Input 
                             type="datetime-local" 
                             value={editFollowUp} 
                             onChange={(e) => setEditFollowUp(e.target.value)} 
                           />
-                          <Button size="sm" onClick={handleSaveFollowUp} disabled={saving}>Set</Button>
                         </div>
                       </div>
                     </div>

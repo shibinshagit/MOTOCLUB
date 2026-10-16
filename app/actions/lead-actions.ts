@@ -60,7 +60,9 @@ export async function getLeads(params: {
         l.email ILIKE ${searchObj} OR
         l.external_lead_id ILIKE ${searchObj} OR
         l.campaign ILIKE ${searchObj} OR
-        l.source ILIKE ${searchObj}
+        l.source ILIKE ${searchObj} OR
+        l.vehicle ILIKE ${searchObj} OR
+        l.year ILIKE ${searchObj}
       ))
       AND (${params.status && params.status !== "All" ? params.status : null}::text IS NULL OR l.status = ${params.status})
       AND (${params.assigned_filter === 'mine' ? session.staffId : null}::int IS NULL OR l.assigned_to = ${session.staffId})
@@ -75,7 +77,8 @@ export async function getLeads(params: {
     SELECT 
       l.id, l.lead_number, l.name, l.phone, l.email, 
       l.source, l.campaign, l.status, l.created_at, l.next_follow_up_at,
-      l.assigned_to, s.name as assigned_staff_name
+      l.assigned_to, s.name as assigned_staff_name,
+      l.vehicle, l.year
     FROM crm_leads l
     LEFT JOIN staff s ON l.assigned_to = s.id
     WHERE l.company_id = ${companyId} 
@@ -87,7 +90,9 @@ export async function getLeads(params: {
         l.email ILIKE ${searchObj} OR
         l.external_lead_id ILIKE ${searchObj} OR
         l.campaign ILIKE ${searchObj} OR
-        l.source ILIKE ${searchObj}
+        l.source ILIKE ${searchObj} OR
+        l.vehicle ILIKE ${searchObj} OR
+        l.year ILIKE ${searchObj}
       ))
       AND (${params.status && params.status !== "All" ? params.status : null}::text IS NULL OR l.status = ${params.status})
       AND (${params.assigned_filter === 'mine' ? session.staffId : null}::int IS NULL OR l.assigned_to = ${session.staffId})
@@ -280,29 +285,64 @@ export async function updateLeadNotes(leadId: number, notes: string) {
   }
 }
 
-export async function setLeadFollowUp(leadId: number, date: string | null) {
+export async function saveLeadFollowUpAndVehicle(leadId: number, params: {
+  date: string | null;
+  vehicle?: string | null;
+  year?: string | null;
+}) {
   const session = await getStaffSession()
   if (!session) return { success: false, message: "Unauthorized" }
 
+  const cleanVehicle = params.vehicle !== undefined ? (params.vehicle?.trim() || null) : null
+  const cleanYear = params.year !== undefined ? (params.year?.trim() || null) : null
+
   try {
     await sql.begin(async (tx: any) => {
-      const old = await tx`SELECT id FROM crm_leads WHERE id = ${leadId} AND company_id = ${session.companyId} AND (device_id IS NULL OR device_id = ${session.deviceId})`
+      const old = await tx`
+        SELECT id, next_follow_up_at, vehicle, year 
+        FROM crm_leads 
+        WHERE id = ${leadId} 
+          AND company_id = ${session.companyId} 
+          AND (device_id IS NULL OR device_id = ${session.deviceId})
+      `
       if (old.length === 0) throw new Error("Not found")
-      
-      await tx`UPDATE crm_leads SET next_follow_up_at = ${date}, updated_at = NOW() WHERE id = ${leadId}`
+
+      await tx`
+        UPDATE crm_leads 
+        SET 
+          next_follow_up_at = ${params.date}, 
+          vehicle = ${cleanVehicle}, 
+          year = ${cleanYear}, 
+          updated_at = NOW() 
+        WHERE id = ${leadId}
+      `
+
+      const changes: string[] = []
+      const oldDateStr = old[0].next_follow_up_at ? new Date(old[0].next_follow_up_at).toISOString() : null
+      if (params.date !== oldDateStr) {
+        changes.push(params.date ? `Follow-up set for ${new Date(params.date).toLocaleString()}` : "Follow-up removed")
+      }
+      if (cleanVehicle !== (old[0].vehicle || null) || cleanYear !== (old[0].year || null)) {
+        changes.push(`Vehicle: ${cleanVehicle || "None"}${cleanYear ? ` (${cleanYear})` : ""}`)
+      }
+
       await logLeadActivity(tx, {
         lead_id: leadId,
         company_id: session.companyId,
         staff_id: session.staffId,
-        activity_type: date ? 'FOLLOW_UP_SET' : 'FOLLOW_UP_UPDATED',
-        note: date ? `Follow-up set for ${new Date(date).toLocaleString()}` : 'Follow-up removed'
+        activity_type: params.date ? 'FOLLOW_UP_SET' : 'DETAILS_UPDATED',
+        note: changes.length > 0 ? changes.join(" | ") : "Lead details updated"
       })
     })
     revalidatePath("/dashboard")
-    return { success: true, message: "Follow-up updated" }
+    return { success: true, message: "Follow-up & vehicle details saved" }
   } catch(e) {
     return { success: false, message: "Lead not found or unauthorized" }
   }
+}
+
+export async function setLeadFollowUp(leadId: number, date: string | null) {
+  return saveLeadFollowUpAndVehicle(leadId, { date })
 }
 
 export async function getCompanyStaff() {

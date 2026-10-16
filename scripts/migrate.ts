@@ -991,7 +991,9 @@ async function createTables() {
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW(),
         converted_at TIMESTAMP,
-        next_follow_up_at TIMESTAMP
+        next_follow_up_at TIMESTAMP,
+        vehicle VARCHAR(255),
+        year VARCHAR(50)
       )
     `
     await sql`
@@ -1231,6 +1233,8 @@ async function upgradeLegacyColumns() {
     ["orders.sync_status", () => sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS sync_status VARCHAR(50) DEFAULT 'PENDING'`],
     ["orders.synced_at", () => sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS synced_at TIMESTAMP`],
     ["orders.synced_sale_id", () => sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS synced_sale_id INTEGER`],
+    ["crm_leads.vehicle", () => sql`ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS vehicle VARCHAR(255)`],
+    ["crm_leads.year", () => sql`ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS year VARCHAR(50)`],
   ]
 
   for (const [label, fn] of columns) {
