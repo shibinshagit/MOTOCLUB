@@ -974,7 +974,7 @@ export default function SalesExcelTable({
           <button
             type="button"
             onClick={() => {
-              setCardFilter((prev) => (prev === "today" ? "all" : "today"))
+              setCardFilter("today")
               setPage(1)
             }}
             className={cn(
@@ -1009,7 +1009,7 @@ export default function SalesExcelTable({
           <button
             type="button"
             onClick={() => {
-              setCardFilter((prev) => (prev === "pending" ? "all" : "pending"))
+              setCardFilter("pending")
               setPage(1)
             }}
             className={cn(
@@ -1044,7 +1044,7 @@ export default function SalesExcelTable({
           <button
             type="button"
             onClick={() => {
-              setCardFilter((prev) => (prev === "critical" ? "all" : "critical"))
+              setCardFilter("critical")
               setPage(1)
             }}
             className={cn(
@@ -1129,7 +1129,7 @@ export default function SalesExcelTable({
         <button
           type="button"
           onClick={() => {
-            setCardFilter((prev) => (prev === "pending" ? "all" : "pending"))
+            setCardFilter("pending")
             setPage(1)
           }}
           className={cn(
@@ -1164,7 +1164,7 @@ export default function SalesExcelTable({
         <button
           type="button"
           onClick={() => {
-            setCardFilter((prev) => (prev === "critical" ? "all" : "critical"))
+            setCardFilter("critical")
             setPage(1)
           }}
           className={cn(

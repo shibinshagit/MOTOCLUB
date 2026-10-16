@@ -414,7 +414,7 @@ export default function SalesOrdersTab() {
         {/* CARD 2 — PENDING ORDERS */}
         <button
           type="button"
-          onClick={() => setCardFilter((prev) => (prev === "pending" ? "all" : "pending"))}
+          onClick={() => setCardFilter("pending")}
           className={cn(
             "flex flex-col justify-between rounded-xl border p-3.5 text-left transition-all cursor-pointer shadow-xs hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-amber-400",
             cardFilter === "pending"
@@ -446,7 +446,7 @@ export default function SalesOrdersTab() {
         {/* CARD 3 — CRITICAL ORDERS */}
         <button
           type="button"
-          onClick={() => setCardFilter((prev) => (prev === "critical" ? "all" : "critical"))}
+          onClick={() => setCardFilter("critical")}
           className={cn(
             "flex flex-col justify-between rounded-xl border p-3.5 text-left transition-all cursor-pointer shadow-xs hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-rose-400",
             cardFilter === "critical"
