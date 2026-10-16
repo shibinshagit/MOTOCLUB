@@ -1645,12 +1645,9 @@ export default function SalesExcelTable({
                     const mainRow = (
                       <tr
                         key={sale.id}
-                        onClick={() => {
-                          if (showViewModal) {
-                            onViewSale(sale)
-                          }
-                        }}
-                        className={`group ${showViewModal ? "cursor-pointer" : ""} border-b border-slate-200 transition-colors ${rowClass}`}
+                        onClick={() => toggleExpandRow(sale.id)}
+                        className={`group cursor-pointer border-b border-slate-200 transition-colors ${rowClass}`}
+                        title="Click to view order details"
                       >
                         <td className="whitespace-nowrap px-2 py-1.5 text-center" onClick={(e) => e.stopPropagation()}>
                           <input
@@ -1665,18 +1662,45 @@ export default function SalesExcelTable({
                           />
                         </td>
                         <td className="whitespace-nowrap px-1 py-1.5 text-center" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            type="button"
-                            className="h-6 w-6 inline-flex items-center justify-center text-slate-400 hover:text-slate-700 rounded hover:bg-slate-200/60"
-                            onClick={() => toggleExpandRow(sale.id)}
-                            title={isExpanded ? "Collapse details" : "Expand details"}
-                          >
-                            {isExpanded ? (
-                              <ChevronUp className="h-4 w-4 text-violet-700" />
-                            ) : (
-                              <ChevronDown className="h-4 w-4" />
-                            )}
-                          </button>
+                          {isPurchaseManager || isLogistics ? (
+                            <button
+                              type="button"
+                              className="h-6 w-6 inline-flex items-center justify-center text-slate-400 hover:text-slate-700 rounded hover:bg-slate-200/60 transition-colors cursor-pointer"
+                              onClick={() => toggleExpandRow(sale.id)}
+                              title={isExpanded ? "Collapse details" : "Expand details"}
+                            >
+                              {isExpanded ? (
+                                <ChevronUp className="h-4 w-4 text-violet-700" />
+                              ) : (
+                                <ChevronDown className="h-4 w-4" />
+                              )}
+                            </button>
+                          ) : showViewModal ? (
+                            <button
+                              type="button"
+                              className="h-6 w-6 inline-flex items-center justify-center text-slate-400 hover:text-violet-700 rounded hover:bg-slate-200/60 transition-colors cursor-pointer"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                onViewSale(sale)
+                              }}
+                              title="Open order modal"
+                            >
+                              <Eye className="h-4 w-4" />
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              className="h-6 w-6 inline-flex items-center justify-center text-slate-400 hover:text-slate-700 rounded hover:bg-slate-200/60 transition-colors cursor-pointer"
+                              onClick={() => toggleExpandRow(sale.id)}
+                              title={isExpanded ? "Collapse details" : "Expand details"}
+                            >
+                              {isExpanded ? (
+                                <ChevronUp className="h-4 w-4 text-violet-700" />
+                              ) : (
+                                <ChevronDown className="h-4 w-4" />
+                              )}
+                            </button>
+                          )}
                         </td>
                         <td className="whitespace-nowrap px-2 py-1.5 text-xs text-muted-foreground text-center">
                           {!sale.is_pos_updated && (
@@ -1687,8 +1711,15 @@ export default function SalesExcelTable({
                         <td className="whitespace-nowrap px-3 py-1.5 font-semibold text-slate-800">
                           <div className="flex flex-col gap-0.5">
                             <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="font-bold text-blue-700 flex items-center">
+                              <span className="font-bold text-blue-700 flex items-center gap-1">
                                 #{sale.id}
+                                {!isPurchaseManager && !isLogistics && (
+                                  isExpanded ? (
+                                    <ChevronUp className="h-3 w-3 text-violet-700" />
+                                  ) : (
+                                    <ChevronDown className="h-3 w-3 text-slate-400 opacity-60 group-hover:opacity-100 transition-opacity" />
+                                  )
+                                )}
                               </span>
                               {isJobCard ? (
                                 <span className="inline-flex items-center rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold text-blue-800 border border-blue-200">
@@ -1945,7 +1976,7 @@ export default function SalesExcelTable({
                                       <Edit className="h-3 w-3 mr-1 text-slate-600" /> Edit
                                     </Button>
                                   )}
-                                  {showViewModal && (
+                                  {showViewModal && !isPurchaseManager && !isLogistics && (
                                     <Button
                                       size="sm"
                                       variant="outline"
@@ -2260,7 +2291,7 @@ export default function SalesExcelTable({
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-48">
-                          {showViewModal && (
+                          {showViewModal && !isPurchaseManager && !isLogistics && (
                             <DropdownMenuItem onClick={() => onViewSale(sale)}>
                               <Eye className="h-4 w-4 mr-2 text-slate-500" /> View Modal
                             </DropdownMenuItem>
