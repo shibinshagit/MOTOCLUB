@@ -15,9 +15,9 @@ const VALID_TRANSITIONS: Record<string, string[]> = {
   "Pending": [], // No manual exits allowed
   "Paid": ["Packed", "Returned"],
   "Packed": ["Sent", "Returned"],
-  "Sent": ["Direct", "Courier", "Shipping", "Returned"],
-  "Direct": ["Delivered", "Courier", "Shipping", "Returned"],
-  "Courier": ["Shipping", "Delivered", "Returned"],
+  "Sent": ["Direct", "Shipped", "Returned"],
+  "Direct": ["Delivered", "Shipped", "Returned"],
+  "Shipped": ["Delivered", "Returned"],
   "Shipping": ["Delivered", "Returned"],
   "Delivered": ["Returned"],
   "Returned": [],
@@ -51,13 +51,14 @@ export function DeliveryStatusSelect({
 }) {
   const { toast } = useToast()
   const [loading, setLoading] = useState(false)
-  const initialStatus = currentStatus || "Pending"
+  const initialStatus = currentStatus === "Shipping" ? "Shipped" : (currentStatus || "Pending")
   const [status, setStatus] = useState(initialStatus)
   const [pendingOptimisticStatus, setPendingOptimisticStatus] = useState<string | null>(null)
 
   // Keep internal status state in sync when parent prop updates from server
   useEffect(() => {
-    const cleanCurrent = currentStatus || "Pending"
+    const rawCurrent = currentStatus || "Pending"
+    const cleanCurrent = rawCurrent === "Shipping" ? "Shipped" : rawCurrent
     if (pendingOptimisticStatus !== null) {
       if (cleanCurrent === pendingOptimisticStatus) {
         setPendingOptimisticStatus(null)
@@ -118,14 +119,14 @@ export function DeliveryStatusSelect({
   const handleUpdateStatusWithTracking = async (newTrackingId?: string, newCourierService?: string) => {
     const previousStatus = status
     setIsTrackingModalOpen(false) // Close input modal immediately
-    setStatus("Shipping") // Optimistic instant update
-    setPendingOptimisticStatus("Shipping")
+    setStatus("Shipped") // Optimistic instant update
+    setPendingOptimisticStatus("Shipped")
     setLoading(true)
 
     const cleanTracking = newTrackingId?.trim() || ""
 
     try {
-      const res = await updateSaleDeliveryStatus(saleId, deviceId || 0, "Shipping", cleanTracking || undefined)
+      const res = await updateSaleDeliveryStatus(saleId, deviceId || 0, "Shipped", cleanTracking || undefined)
       if (res.success) {
         if (newCourierService) {
           try {
@@ -139,8 +140,8 @@ export function DeliveryStatusSelect({
         toast({ 
           title: "Success", 
           description: cleanTracking 
-            ? "Delivery status updated to Shipping." 
-            : "Delivery status updated to Shipping. Tracking ID can be added later." 
+            ? "Delivery status updated to Shipped." 
+            : "Delivery status updated to Shipped. Tracking ID can be added later." 
         })
 
         const effectiveTrackingId = cleanTracking || trackingId || ""
@@ -238,7 +239,7 @@ export function DeliveryStatusSelect({
       return // Show confirmation dialog first
     }
 
-    if (newStatus === "Shipping") {
+    if (newStatus === "Shipped" || newStatus === "Shipping") {
       setIsTrackingModalOpen(true)
       return // Halt update until tracking ID is entered
     }
@@ -286,7 +287,7 @@ export function DeliveryStatusSelect({
       case "Packed": return "border-indigo-300"
       case "Sent": return "border-purple-300"
       case "Direct": return "border-blue-400"
-      case "Courier": return "border-indigo-400"
+      case "Shipped": return "border-cyan-300"
       case "Shipping": return "border-cyan-300"
       case "Delivered": return "border-green-400"
       case "Returned": return "border-red-300"
@@ -295,9 +296,11 @@ export function DeliveryStatusSelect({
   }
 
   // Enable all standard delivery status options for full flexibility
-  const ALL_STATUS_OPTIONS = ["Pending", "Paid", "Packed", "Sent", "Direct", "Courier", "Shipping", "Delivered", "Returned", "Failed", "Pickup"]
-  const uniqueOptions = Array.from(new Set([status, currentStatus, ...ALL_STATUS_OPTIONS]))
-    .filter((opt): opt is string => Boolean(opt) && opt !== "Shipped" && opt !== "shipped" && opt !== "In transit" && opt !== "in transit")
+  const ALL_STATUS_OPTIONS = ["Pending", "Paid", "Packed", "Sent", "Direct", "Shipped", "Delivered", "Returned", "Failed", "Pickup"]
+  const currentMapped = status === "Shipping" ? "Shipped" : status
+  const currentServerMapped = currentStatus === "Shipping" ? "Shipped" : currentStatus
+  const uniqueOptions = Array.from(new Set([currentMapped, currentServerMapped, ...ALL_STATUS_OPTIONS]))
+    .filter((opt): opt is string => Boolean(opt) && opt !== "Shipping" && opt !== "shipping" && opt !== "In transit" && opt !== "in transit" && opt !== "Courier" && opt !== "courier")
 
   const isDropdownDisabled = loading
 
@@ -414,7 +417,7 @@ export function DeliveryStatusSelect({
           onSave={handleUpdateStatusWithTracking}
           initialTrackingId={trackingId}
           currentDeliveryStatus={status}
-          targetDeliveryStatus="Shipping"
+          targetDeliveryStatus="Shipped"
           saleId={saleId}
           deviceId={deviceId}
         />
@@ -477,7 +480,7 @@ export function DeliveryStatusSelect({
             if (!open) {
               setShippingWhatsappData(null)
               if (onStatusChange) {
-                onStatusChange("Shipping")
+                onStatusChange("Shipped")
               }
             }
           }}
@@ -497,7 +500,7 @@ export function DeliveryStatusSelect({
               onComplete={() => {
                 setShippingWhatsappData(null)
                 if (onStatusChange) {
-                  onStatusChange("Shipping")
+                  onStatusChange("Shipped")
                 }
               }}
             />

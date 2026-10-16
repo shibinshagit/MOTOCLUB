@@ -375,7 +375,7 @@ export function ReplacementShipmentCard({
                 onChange={(e) => setNewStatus(e.target.value)}
                 className="w-full h-9 rounded-md border border-slate-300 bg-white px-3 text-xs"
               >
-                {["Pending", "Packed", "Sent", "Direct", "Shipping", "Shipped", "In transit", "Delivered", "Returned", "Failed", "Cancelled"].map(
+                {["Pending", "Packed", "Sent", "Direct", "Shipped", "In transit", "Delivered", "Returned", "Failed", "Cancelled"].map(
                   (st) => (
                     <option key={st} value={st}>
                       {st}

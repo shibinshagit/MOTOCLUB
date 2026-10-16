@@ -718,6 +718,8 @@ export interface GetPaginatedSalesOptions {
   searchTerm?: string
   onlyPosUpdated?: boolean
   excludePendingAndPickup?: boolean
+  isPurchaseManager?: boolean
+  isLogistics?: boolean
 }
 
 export async function getPaginatedUserSales(deviceId: number, options: GetPaginatedSalesOptions = {}) {
@@ -741,7 +743,8 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
   const typeOfSaleFilter = options.typeOfSaleFilter || "all"
   const cardFilter = options.cardFilter || "all"
   const onlyPosUpdated = options.onlyPosUpdated || false
-  const excludePendingAndPickup = options.excludePendingAndPickup || false
+  const isPurchaseManager = options.isPurchaseManager || false
+  const isLogistics = options.isLogistics ?? options.excludePendingAndPickup ?? false
 
   try {
     const result = await executeWithRetry(async () => {
@@ -860,6 +863,13 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
             ${cardFilter} = 'all'
             OR (${cardFilter} = 'today' AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned') AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled' AND LOWER(COALESCE(s.delivery_status, '')) NOT IN ('returned', 'failed') AND COALESCE(s.sale_date, s.created_at)::date = CURRENT_DATE)
             OR (
+              ${cardFilter} = 'pending'
+              AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
+              AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
+              AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed', 'pickup')
+              AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+            )
+            OR (
               ${cardFilter} = 'critical'
               AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
               AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled'
@@ -867,16 +877,22 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
                 LOWER(COALESCE(s.payment_status, '')) IN ('paid', 'completed')
                 OR (s.total_amount > 0 AND s.received_amount >= s.total_amount)
               )
-              AND LOWER(COALESCE(s.delivery_status, 'pending')) NOT IN ('direct', 'delivered', 'failed', 'returned')
+              AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) IN ('pending', 'paid', 'packed', 'sent')
             )
           )
           AND (${onlyPosUpdated} = false OR s.is_pos_updated = true)
           AND (
-            ${excludePendingAndPickup} = false
+            ${isLogistics} = false
             OR (
-              LOWER(COALESCE(s.delivery_status, 'pending')) != 'pending'
-              AND LOWER(COALESCE(s.delivery_status, '')) != 'pickup'
+              COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
+              AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
+              AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed', 'pickup')
+              AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
             )
+          )
+          AND (
+            ${isPurchaseManager} = false
+            OR LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
           )
           AND (
             ${searchPattern}::text IS NULL
@@ -946,6 +962,13 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
             ${cardFilter} = 'all'
             OR (${cardFilter} = 'today' AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned') AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled' AND LOWER(COALESCE(s.delivery_status, '')) NOT IN ('returned', 'failed') AND COALESCE(s.sale_date, s.created_at)::date = CURRENT_DATE)
             OR (
+              ${cardFilter} = 'pending'
+              AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
+              AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
+              AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed', 'pickup')
+              AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+            )
+            OR (
               ${cardFilter} = 'critical'
               AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
               AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled'
@@ -953,16 +976,22 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
                 LOWER(COALESCE(s.payment_status, '')) IN ('paid', 'completed')
                 OR (s.total_amount > 0 AND s.received_amount >= s.total_amount)
               )
-              AND LOWER(COALESCE(s.delivery_status, 'pending')) NOT IN ('direct', 'delivered', 'failed', 'returned')
+              AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) IN ('pending', 'paid', 'packed', 'sent')
             )
           )
           AND (${onlyPosUpdated} = false OR s.is_pos_updated = true)
           AND (
-            ${excludePendingAndPickup} = false
+            ${isLogistics} = false
             OR (
-              LOWER(COALESCE(s.delivery_status, 'pending')) != 'pending'
-              AND LOWER(COALESCE(s.delivery_status, '')) != 'pickup'
+              COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
+              AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
+              AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed', 'pickup')
+              AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
             )
+          )
+          AND (
+            ${isPurchaseManager} = false
+            OR LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
           )
           AND (
             ${searchPattern}::text IS NULL
@@ -1181,6 +1210,8 @@ export async function getSalesSummaryCards(
     searchTerm?: string
     onlyPosUpdated?: boolean
     excludePendingAndPickup?: boolean
+    isPurchaseManager?: boolean
+    isLogistics?: boolean
   } = {}
 ) {
   if (!deviceId) {
@@ -1197,7 +1228,8 @@ export async function getSalesSummaryCards(
   const typeFilter = options.typeFilter || "all"
   const typeOfSaleFilter = options.typeOfSaleFilter || "all"
   const onlyPosUpdated = options.onlyPosUpdated || false
-  const excludePendingAndPickup = options.excludePendingAndPickup || false
+  const isPurchaseManager = options.isPurchaseManager || false
+  const isLogistics = options.isLogistics ?? options.excludePendingAndPickup ?? false
 
   try {
     const cardCounts = await executeWithRetry(async () => {
@@ -1218,9 +1250,9 @@ export async function getSalesSummaryCards(
           )::int as today_count,
           COUNT(*) FILTER (
             WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
-              AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled'
-              AND LOWER(COALESCE(s.delivery_status, '')) NOT IN ('returned', 'failed')
-              AND LOWER(COALESCE(s.delivery_status, 'pending')) != 'delivered'
+              AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
+              AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed', 'pickup')
+              AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
               AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
               AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
           )::int as pending_count,
@@ -1231,7 +1263,7 @@ export async function getSalesSummaryCards(
                 LOWER(COALESCE(s.payment_status, '')) IN ('paid', 'completed')
                 OR (s.total_amount > 0 AND s.received_amount >= s.total_amount)
               )
-              AND LOWER(COALESCE(s.delivery_status, 'pending')) NOT IN ('direct', 'delivered', 'failed', 'returned')
+              AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) IN ('pending', 'paid', 'packed', 'sent')
               AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
               AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
           )::int as critical_count
@@ -1247,11 +1279,17 @@ export async function getSalesSummaryCards(
           )
           AND (${onlyPosUpdated} = false OR s.is_pos_updated = true)
           AND (
-            ${excludePendingAndPickup} = false
+            ${isLogistics} = false
             OR (
-              LOWER(COALESCE(s.delivery_status, 'pending')) != 'pending'
-              AND LOWER(COALESCE(s.delivery_status, '')) != 'pickup'
+              COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
+              AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
+              AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed', 'pickup')
+              AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
             )
+          )
+          AND (
+            ${isPurchaseManager} = false
+            OR LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
           )
           AND (
             ${typeFilter} = 'all'
@@ -3314,7 +3352,7 @@ export async function updateSaleDeliveryStatus(
 
     const shippedAt =
       rows[0].shipped_at ||
-      (["Shipping", "Courier", "In transit", "Delivered"].includes(deliveryStatus) ? new Date() : null)
+      (["Shipped", "Shipping", "Courier", "In transit", "Delivered"].includes(deliveryStatus) ? new Date() : null)
     const deliveredAt =
       rows[0].delivered_at || (deliveryStatus === "Delivered" ? new Date() : null)
 
@@ -3324,7 +3362,7 @@ export async function updateSaleDeliveryStatus(
     const isJobCard = rows[0].sale_type === 'job_card'
     const isEcommerce = rows[0].source === 'ECOMMERCE' || rows[0].external_order_id != null
 
-    const allowedStatuses = ["Pending", "Paid", "Packed", "Sent", "Direct", "Courier", "Shipping", "Delivered", "Returned", "Failed"]
+    const allowedStatuses = ["Pending", "Paid", "Packed", "Sent", "Direct", "Courier", "Shipped", "Shipping", "Delivered", "Returned", "Failed"]
 
     if (!allowedStatuses.includes(deliveryStatus)) {
       return { success: false as const, message: `Invalid delivery status: ${deliveryStatus}` }
@@ -3618,7 +3656,7 @@ export async function updateSaleFulfillmentDetails(saleId: number, shippingData:
       })
     }
 
-    const shippedAt = (["Shipping", "Courier", "In transit", "Delivered"].includes(String(shippingData.deliveryStatus)) ? new Date() : null)
+    const shippedAt = (["Shipped", "Shipping", "Courier", "In transit", "Delivered"].includes(String(shippingData.deliveryStatus)) ? new Date() : null)
     const deliveredAt = (shippingData.deliveryStatus === "Delivered" ? new Date() : null)
 
     await sql`
@@ -3901,6 +3939,7 @@ export async function getProductsToPurchase(deviceId: number, options: { dateFro
         WHERE s.device_id = ${deviceId}
           AND s.is_pos_updated = true
           AND s.status NOT IN ('Cancelled', 'Returned')
+          AND LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
           AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
           AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
           AND si.product_id IS NOT NULL

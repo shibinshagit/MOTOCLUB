@@ -811,7 +811,7 @@ export async function getAllJobCards(
         AND (
           LOWER(s.payment_status) IN ('paid', 'completed') OR (COALESCE(s.total_amount, 0) > 0 AND COALESCE(s.received_amount, 0) >= COALESCE(s.total_amount, 0))
         )
-        AND (s.delivery_status IS NULL OR LOWER(COALESCE(s.delivery_status, 'pending')) NOT IN ('direct', 'delivered', 'failed', 'returned'))
+        AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) IN ('pending', 'paid', 'packed', 'sent')
       `
     }
 

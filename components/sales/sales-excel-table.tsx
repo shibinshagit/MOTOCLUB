@@ -167,6 +167,7 @@ function DeliveryStatusBadge({ status }: { status: string }) {
     Direct: "bg-blue-50 text-blue-700 border-blue-200",
     Courier: "bg-indigo-50 text-indigo-700 border-indigo-200",
     Shipping: "bg-cyan-50 text-cyan-700 border-cyan-200",
+    Shipped: "bg-cyan-50 text-cyan-700 border-cyan-200",
     Delivered: "bg-emerald-50 text-emerald-700 border-emerald-200",
     Returned: "bg-rose-50 text-rose-700 border-rose-200",
     Failed: "bg-rose-50 text-rose-700 border-rose-200",
@@ -481,7 +482,8 @@ export default function SalesExcelTable({
           cardFilter,
           searchTerm: debouncedSearch,
           onlyPosUpdated,
-          excludePendingAndPickup: isLogistics,
+          isLogistics,
+          isPurchaseManager,
         }),
         getSalesSummaryCards(deviceId!, {
           dateFrom: globalDateRange?.from,
@@ -490,7 +492,8 @@ export default function SalesExcelTable({
           typeOfSaleFilter,
           searchTerm: debouncedSearch,
           onlyPosUpdated,
-          excludePendingAndPickup: isLogistics,
+          isLogistics,
+          isPurchaseManager,
         }),
       ])
       if (fetchId !== latestFetchIdRef.current) return
@@ -524,7 +527,7 @@ export default function SalesExcelTable({
         setHasFetchedServer(true)
       }
     }
-  }, [deviceId, page, pageSize, globalDateRange?.from, globalDateRange?.to, typeFilter, typeOfSaleFilter, cardFilter, debouncedSearch, onlyPosUpdated, isLogistics])
+  }, [deviceId, page, pageSize, globalDateRange?.from, globalDateRange?.to, typeFilter, typeOfSaleFilter, cardFilter, debouncedSearch, onlyPosUpdated, isLogistics, isPurchaseManager])
 
   // A new date range starts again from the first page and clears selection.
   useEffect(() => {
@@ -574,12 +577,29 @@ export default function SalesExcelTable({
 
   // The list is always server-paginated/filtered; rows are already the current page.
   const displaySales = useMemo(() => {
-    if (!isLogistics) return serverSales
-    return serverSales.filter((s: any) => {
-      const dStatus = (s.delivery_status || "pending").toLowerCase()
-      return dStatus !== "pending" && dStatus !== "pickup"
-    })
-  }, [serverSales, isLogistics])
+    if (isPurchaseManager) {
+      return serverSales.filter((s: any) => {
+        const dStatus = (s.delivery_status || "pending").trim().toLowerCase()
+        return dStatus === "pending" || dStatus === "paid"
+      })
+    }
+    if (isLogistics) {
+      const excluded = new Set(["delivered", "returned", "failed", "pickup", "cancelled"])
+      return serverSales.filter((s: any) => {
+        const dStatus = (s.delivery_status || "pending").trim().toLowerCase()
+        const fType = (s.fulfillment_type || "").trim().toLowerCase()
+        const status = (s.status || "").trim().toLowerCase()
+        const pStatus = (s.payment_status || "").trim().toLowerCase()
+        return (
+          !excluded.has(dStatus) &&
+          !excluded.has(status) &&
+          !excluded.has(pStatus) &&
+          fType !== "pickup"
+        )
+      })
+    }
+    return serverSales
+  }, [serverSales, isLogistics, isPurchaseManager])
 
   const selectedSalesList = useMemo(() => {
     return displaySales.filter((s) => selectedSales.includes(s.id))
@@ -965,7 +985,7 @@ export default function SalesExcelTable({
           <button
             type="button"
             onClick={() => {
-              setCardFilter((prev) => (prev === "today" ? "all" : "today"))
+              setCardFilter("today")
               setPage(1)
             }}
             className={cn(
@@ -1000,7 +1020,7 @@ export default function SalesExcelTable({
           <button
             type="button"
             onClick={() => {
-              setCardFilter((prev) => (prev === "pending" ? "all" : "pending"))
+              setCardFilter("pending")
               setPage(1)
             }}
             className={cn(
@@ -1035,7 +1055,7 @@ export default function SalesExcelTable({
           <button
             type="button"
             onClick={() => {
-              setCardFilter((prev) => (prev === "critical" ? "all" : "critical"))
+              setCardFilter("critical")
               setPage(1)
             }}
             className={cn(
@@ -1120,7 +1140,7 @@ export default function SalesExcelTable({
         <button
           type="button"
           onClick={() => {
-            setCardFilter((prev) => (prev === "pending" ? "all" : "pending"))
+            setCardFilter("pending")
             setPage(1)
           }}
           className={cn(
@@ -1155,7 +1175,7 @@ export default function SalesExcelTable({
         <button
           type="button"
           onClick={() => {
-            setCardFilter((prev) => (prev === "critical" ? "all" : "critical"))
+            setCardFilter("critical")
             setPage(1)
           }}
           className={cn(
@@ -1636,12 +1656,9 @@ export default function SalesExcelTable({
                     const mainRow = (
                       <tr
                         key={sale.id}
-                        onClick={() => {
-                          if (showViewModal) {
-                            onViewSale(sale)
-                          }
-                        }}
-                        className={`group ${showViewModal ? "cursor-pointer" : ""} border-b border-slate-200 transition-colors ${rowClass}`}
+                        onClick={() => toggleExpandRow(sale.id)}
+                        className={`group cursor-pointer border-b border-slate-200 transition-colors ${rowClass}`}
+                        title="Click to view order details"
                       >
                         <td className="whitespace-nowrap px-2 py-1.5 text-center" onClick={(e) => e.stopPropagation()}>
                           <input
@@ -1656,18 +1673,45 @@ export default function SalesExcelTable({
                           />
                         </td>
                         <td className="whitespace-nowrap px-1 py-1.5 text-center" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            type="button"
-                            className="h-6 w-6 inline-flex items-center justify-center text-slate-400 hover:text-slate-700 rounded hover:bg-slate-200/60"
-                            onClick={() => toggleExpandRow(sale.id)}
-                            title={isExpanded ? "Collapse details" : "Expand details"}
-                          >
-                            {isExpanded ? (
-                              <ChevronUp className="h-4 w-4 text-violet-700" />
-                            ) : (
-                              <ChevronDown className="h-4 w-4" />
-                            )}
-                          </button>
+                          {isPurchaseManager || isLogistics ? (
+                            <button
+                              type="button"
+                              className="h-6 w-6 inline-flex items-center justify-center text-slate-400 hover:text-slate-700 rounded hover:bg-slate-200/60 transition-colors cursor-pointer"
+                              onClick={() => toggleExpandRow(sale.id)}
+                              title={isExpanded ? "Collapse details" : "Expand details"}
+                            >
+                              {isExpanded ? (
+                                <ChevronUp className="h-4 w-4 text-violet-700" />
+                              ) : (
+                                <ChevronDown className="h-4 w-4" />
+                              )}
+                            </button>
+                          ) : showViewModal ? (
+                            <button
+                              type="button"
+                              className="h-6 w-6 inline-flex items-center justify-center text-slate-400 hover:text-violet-700 rounded hover:bg-slate-200/60 transition-colors cursor-pointer"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                onViewSale(sale)
+                              }}
+                              title="Open order modal"
+                            >
+                              <Eye className="h-4 w-4" />
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              className="h-6 w-6 inline-flex items-center justify-center text-slate-400 hover:text-slate-700 rounded hover:bg-slate-200/60 transition-colors cursor-pointer"
+                              onClick={() => toggleExpandRow(sale.id)}
+                              title={isExpanded ? "Collapse details" : "Expand details"}
+                            >
+                              {isExpanded ? (
+                                <ChevronUp className="h-4 w-4 text-violet-700" />
+                              ) : (
+                                <ChevronDown className="h-4 w-4" />
+                              )}
+                            </button>
+                          )}
                         </td>
                         <td className="whitespace-nowrap px-2 py-1.5 text-xs text-muted-foreground text-center">
                           {!sale.is_pos_updated && (
@@ -1678,8 +1722,15 @@ export default function SalesExcelTable({
                         <td className="whitespace-nowrap px-3 py-1.5 font-semibold text-slate-800">
                           <div className="flex flex-col gap-0.5">
                             <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="font-bold text-blue-700 flex items-center">
+                              <span className="font-bold text-blue-700 flex items-center gap-1">
                                 #{sale.id}
+                                {!isPurchaseManager && !isLogistics && (
+                                  isExpanded ? (
+                                    <ChevronUp className="h-3 w-3 text-violet-700" />
+                                  ) : (
+                                    <ChevronDown className="h-3 w-3 text-slate-400 opacity-60 group-hover:opacity-100 transition-opacity" />
+                                  )
+                                )}
                               </span>
                               {isJobCard ? (
                                 <span className="inline-flex items-center rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold text-blue-800 border border-blue-200">
@@ -1936,7 +1987,7 @@ export default function SalesExcelTable({
                                       <Edit className="h-3 w-3 mr-1 text-slate-600" /> Edit
                                     </Button>
                                   )}
-                                  {showViewModal && (
+                                  {showViewModal && !isPurchaseManager && !isLogistics && (
                                     <Button
                                       size="sm"
                                       variant="outline"
@@ -2251,7 +2302,7 @@ export default function SalesExcelTable({
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-48">
-                          {showViewModal && (
+                          {showViewModal && !isPurchaseManager && !isLogistics && (
                             <DropdownMenuItem onClick={() => onViewSale(sale)}>
                               <Eye className="h-4 w-4 mr-2 text-slate-500" /> View Modal
                             </DropdownMenuItem>

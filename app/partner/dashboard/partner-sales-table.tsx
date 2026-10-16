@@ -93,7 +93,7 @@ export function PartnerSalesTable({
     isOpen: false,
     targetType: "sale",
     targetId: 0,
-    targetStatus: "Shipping",
+    targetStatus: "Shipped",
     initialTrackingId: "",
     initialCourierServiceName: "",
   })

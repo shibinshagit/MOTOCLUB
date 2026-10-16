@@ -6,8 +6,7 @@ export const DELIVERY_STATUSES = [
   "Packed",
   "Sent",
   "Direct",
-  "Courier",
-  "Shipping",
+  "Shipped",
   "Delivered",
   "Returned",
   "Failed",
@@ -272,15 +271,19 @@ export function isPendingSale(sale: any): boolean {
     sale.status === "Cancelled" ||
     sale.status === "Returned" ||
     sale.payment_status?.toLowerCase() === "cancelled" ||
+    sale.payment_status?.toLowerCase() === "returned" ||
     sale.delivery_status === "Returned" ||
     sale.delivery_status?.toLowerCase() === "returned" ||
     sale.delivery_status === "Failed" ||
-    sale.delivery_status?.toLowerCase() === "failed"
+    sale.delivery_status?.toLowerCase() === "failed" ||
+    sale.delivery_status === "Delivered" ||
+    sale.delivery_status?.toLowerCase() === "delivered" ||
+    sale.delivery_status === "pickup" ||
+    sale.delivery_status?.toLowerCase() === "pickup" ||
+    sale.fulfillment_type === "pickup" ||
+    sale.fulfillment_type?.toLowerCase() === "pickup"
 
-  if (isCancelledOrReturned) return false
-
-  const dStatus = (sale.delivery_status || "Pending").trim().toLowerCase()
-  return dStatus !== "delivered"
+  return !isCancelledOrReturned
 }
 
 export function isCriticalSale(sale: any): boolean {
@@ -300,9 +303,9 @@ export function isCriticalSale(sale: any): boolean {
   if (!isPaidSale(sale)) return false
 
   const dStatus = (sale.delivery_status || "Pending").trim().toLowerCase()
-  const excludedStatuses = ["direct", "delivered", "returned", "failed"]
+  const allowedCriticalStatuses = ["pending", "paid", "packed", "sent"]
 
-  return !excludedStatuses.includes(dStatus)
+  return allowedCriticalStatuses.includes(dStatus)
 }
 
 export function isJobCardSale(sale: any): boolean {
