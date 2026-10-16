@@ -115,6 +115,15 @@ export default function StaffLeadsTab() {
     fetchLeads()
   }, [fetchLeads])
 
+  useEffect(() => {
+    const handleNewLead = () => {
+      fetchLeads()
+      fetchSummary()
+    }
+    window.addEventListener("crm:new-lead", handleNewLead)
+    return () => window.removeEventListener("crm:new-lead", handleNewLead)
+  }, [fetchLeads, fetchSummary])
+
   const loadLeadData = async (id: number) => {
     const [leadRes, actRes, prodRes] = await Promise.all([
       getLeadDetails(id),

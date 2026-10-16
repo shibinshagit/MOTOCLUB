@@ -31,6 +31,7 @@ import { clearStaff, selectActiveStaff } from "@/store/slices/staffSlice"
 import { selectDateRange } from "@/store/slices/dateRangeSlice"
 import { useToast } from "@/components/ui/use-toast"
 import { BrandLogo } from "@/components/brand-logo"
+import NotificationBell from "@/components/notifications/notification-bell"
 import StaffAttendance from "./staff-attendance"
 import StaffInventoryTab from "./staff-inventory-tab"
 import { TodaySalesList } from "@/components/shared/job-card"
@@ -55,12 +56,15 @@ export default function StaffDashboard() {
   const [fetchedStaffName, setFetchedStaffName] = useState<string>("")
   const [refreshKey, setRefreshKey] = useState(0)
   const [mounted, setMounted] = useState(false)
+  const [unreadLeadCount, setUnreadLeadCount] = useState<number>(0)
   const router = useRouter()
   const { toast } = useToast()
   const dispatch = useAppDispatch()
   const device = useAppSelector(selectDevice)
   const activeStaff = useAppSelector(selectActiveStaff)
   const dateRange = useAppSelector(selectDateRange)
+
+  const isNormalStaff = activeStaff?.role === "staff"
 
   useEffect(() => {
     setMounted(true)
@@ -170,11 +174,18 @@ export default function StaffDashboard() {
 
       <Button
         variant={activeTab === "leads" ? "secondary" : "ghost"}
-        className="w-full justify-start"
+        className="w-full justify-between"
         onClick={() => { setActiveTab("leads"); setIsMobileMenuOpen(false) }}
       >
-        <Briefcase className="mr-3 h-5 w-5" />
-        CRM Leads
+        <div className="flex items-center">
+          <Briefcase className="mr-3 h-5 w-5" />
+          CRM Leads
+        </div>
+        {isNormalStaff && unreadLeadCount > 0 && (
+          <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-bold text-white shadow-sm ring-1 ring-white">
+            {unreadLeadCount > 99 ? "99+" : unreadLeadCount}
+          </span>
+        )}
       </Button>
 
       <Button
@@ -266,12 +277,25 @@ export default function StaffDashboard() {
           <div className="flex items-center flex-shrink-0 px-4 mb-5">
             <BrandLogo overrideSrc={device?.logo_url || undefined} />
           </div>
-          <div className="px-4 pb-4">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Staff Portal</p>
-            {device?.name && (
-              <p className="text-sm font-medium text-slate-800 mt-1 truncate" title={device.name}>
-                {device.name}
-              </p>
+          <div className="px-4 pb-4 flex items-center justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Staff Portal</p>
+              {device?.name && (
+                <p className="text-sm font-medium text-slate-800 mt-1 truncate" title={device.name}>
+                  {device.name}
+                </p>
+              )}
+            </div>
+            {isNormalStaff && (
+              <NotificationBell
+                deviceId={device?.id}
+                role="staff"
+                side="right"
+                align="start"
+                sideOffset={20}
+                onNotificationClick={() => setActiveTab("leads")}
+                onUnreadCountChange={setUnreadLeadCount}
+              />
             )}
           </div>
           <NavigationMenu />
@@ -300,9 +324,19 @@ export default function StaffDashboard() {
         <div className="flex items-center min-w-0 overflow-hidden">
           <BrandLogo overrideSrc={device?.logo_url || undefined} className="h-8 w-auto max-h-8 object-contain" />
         </div>
-        <Button variant="ghost" size="icon" onClick={() => setIsMobileMenuOpen(true)}>
-          <Menu className="h-6 w-6" />
-        </Button>
+        <div className="flex items-center gap-2">
+          {isNormalStaff && (
+            <NotificationBell
+              deviceId={device?.id}
+              role="staff"
+              onNotificationClick={() => setActiveTab("leads")}
+              onUnreadCountChange={setUnreadLeadCount}
+            />
+          )}
+          <Button variant="ghost" size="icon" onClick={() => setIsMobileMenuOpen(true)}>
+            <Menu className="h-6 w-6" />
+          </Button>
+        </div>
       </div>
 
       {/* Mobile Sidebar */}

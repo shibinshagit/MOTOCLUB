@@ -18,10 +18,15 @@ import {
   BellOff,
   User,
   Sparkles,
+  Phone,
+  Mail,
+  Car,
+  ExternalLink,
 } from "lucide-react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { useToast } from "@/components/ui/use-toast"
 import { cn } from "@/lib/utils"
 import {
   getNotifications,
@@ -31,12 +36,46 @@ import {
   markAllNotificationsAsChecked,
   type NotificationItem,
   type NotificationFilter,
+  type NotificationRole,
 } from "@/app/actions/notification-actions"
 import { io as socketIO, type Socket } from "socket.io-client"
+
+export function playNotificationSound() {
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext
+    if (!AudioCtx) return
+    const ctx = new AudioCtx()
+    if (ctx.state === "suspended") {
+      ctx.resume()
+    }
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    osc.type = "sine"
+    const now = ctx.currentTime
+    // Pleasant two-tone chime (D5 -> A5)
+    osc.frequency.setValueAtTime(587.33, now)
+    osc.frequency.setValueAtTime(880, now + 0.12)
+    gain.gain.setValueAtTime(0, now)
+    gain.gain.linearRampToValueAtTime(0.35, now + 0.02)
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.45)
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+    osc.start(now)
+    osc.stop(now + 0.45)
+  } catch (_) {
+    // Autoplay or audio context initialization blocked
+  }
+}
 
 interface NotificationBellProps {
   deviceId?: number | null
   className?: string
+  role?: NotificationRole
+  side?: "top" | "right" | "bottom" | "left"
+  align?: "start" | "center" | "end"
+  sideOffset?: number
+  onNotificationClick?: (notification: NotificationItem) => void
+  onUnreadCountChange?: (count: number) => void
 }
 
 function formatRelativeTime(dateString: string): string {
@@ -61,7 +100,16 @@ function formatRelativeTime(dateString: string): string {
   }
 }
 
-export function NotificationBell({ deviceId, className }: NotificationBellProps) {
+export function NotificationBell({
+  deviceId,
+  className,
+  role,
+  side = "bottom",
+  align = "end",
+  sideOffset = 8,
+  onNotificationClick,
+  onUnreadCountChange,
+}: NotificationBellProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [activeFilter, setActiveFilter] = useState<NotificationFilter>("all")
   const [notifications, setNotifications] = useState<NotificationItem[]>([])
@@ -71,15 +119,17 @@ export function NotificationBell({ deviceId, className }: NotificationBellProps)
   const [isSocketConnected, setIsSocketConnected] = useState(false)
   const socketRef = useRef<Socket | null>(null)
   const eventSourceRef = useRef<EventSource | null>(null)
+  const { toast } = useToast()
 
   // Fetch count
   const fetchCount = useCallback(async () => {
     if (!deviceId) return
-    const res = await getUnreadNotificationCount(deviceId)
+    const res = await getUnreadNotificationCount(deviceId, role)
     if (res.success) {
       setUnreadCount(res.count)
+      onUnreadCountChange?.(res.count)
     }
-  }, [deviceId])
+  }, [deviceId, role, onUnreadCountChange])
 
   // Fetch full notifications list for active tab
   const fetchNotificationsList = useCallback(
@@ -87,10 +137,11 @@ export function NotificationBell({ deviceId, className }: NotificationBellProps)
       if (!deviceId) return
       setIsLoading(true)
       try {
-        const res = await getNotifications(deviceId, filter)
+        const res = await getNotifications(deviceId, filter, 50, role)
         if (res.success) {
           setNotifications(res.data)
           setUnreadCount(res.unreadCount)
+          onUnreadCountChange?.(res.unreadCount)
         }
       } catch (err) {
         console.error("Failed to load notifications:", err)
@@ -98,7 +149,7 @@ export function NotificationBell({ deviceId, className }: NotificationBellProps)
         setIsLoading(false)
       }
     },
-    [deviceId, activeFilter],
+    [deviceId, activeFilter, role, onUnreadCountChange],
   )
 
   // Initial load
@@ -117,6 +168,56 @@ export function NotificationBell({ deviceId, className }: NotificationBellProps)
 
     // 1. Kickstart socket server via API
     fetch("/api/notifications/socket").catch(() => {})
+
+    const handleIncomingNotification = (newNotif: NotificationItem) => {
+      // Role filtering:
+      // Admin should never see or hear new_lead notifications
+      if (role === "admin" && (newNotif.type === "new_lead" || newNotif.data?.targetRole === "staff")) {
+        return
+      }
+      // Staff should never see purchase manager action notifications
+      if (role === "staff" && (newNotif.type !== "new_lead" && newNotif.data?.targetRole !== "staff")) {
+        return
+      }
+
+      setUnreadCount((prev) => {
+        const next = prev + 1
+        onUnreadCountChange?.(next)
+        return next
+      })
+
+      setNotifications((prev) => {
+        if (prev.some((n) => n.id === newNotif.id)) return prev
+        return [newNotif, ...prev]
+      })
+
+      // Audio & toast alert for normal staff on new lead
+      if (role === "staff" && newNotif.type === "new_lead") {
+        playNotificationSound()
+        try {
+          window.dispatchEvent(new CustomEvent("crm:new-lead", { detail: newNotif }))
+        } catch (_) {}
+
+        const custName = newNotif.data?.customerName || newNotif.data?.name || "Customer"
+        const phoneStr = newNotif.data?.phone ? ` (${newNotif.data.phone})` : ""
+        const vehicleStr = newNotif.data?.vehicle ? ` • ${newNotif.data.vehicle}` : ""
+
+        toast({
+          title: "🔔 New CRM Lead Received!",
+          description: `${custName}${phoneStr}${vehicleStr}`,
+          action: onNotificationClick ? (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
+              onClick={() => onNotificationClick(newNotif)}
+            >
+              View Lead
+            </Button>
+          ) : undefined,
+        })
+      }
+    }
 
     // 2. Connect to Socket.io server
     try {
@@ -144,12 +245,7 @@ export function NotificationBell({ deviceId, className }: NotificationBellProps)
       })
 
       socket.on("notification:new", (newNotif: NotificationItem) => {
-        setUnreadCount((prev) => prev + 1)
-        setNotifications((prev) => {
-          // Prevent duplicates
-          if (prev.some((n) => n.id === newNotif.id)) return prev
-          return [newNotif, ...prev]
-        })
+        handleIncomingNotification(newNotif)
       })
     } catch (err) {
       console.warn("Socket initialization failed, falling back to SSE/polling:", err)
@@ -164,11 +260,7 @@ export function NotificationBell({ deviceId, className }: NotificationBellProps)
         if (!event.data || event.data.startsWith(":")) return
         try {
           const newNotif = JSON.parse(event.data)
-          setUnreadCount((prev) => prev + 1)
-          setNotifications((prev) => {
-            if (prev.some((n) => n.id === newNotif.id)) return prev
-            return [newNotif, ...prev]
-          })
+          handleIncomingNotification(newNotif)
         } catch (_) {}
       }
     } catch (_) {}
@@ -193,14 +285,15 @@ export function NotificationBell({ deviceId, className }: NotificationBellProps)
         eventSourceRef.current = null
       }
     }
-  }, [deviceId, isOpen, fetchCount, fetchNotificationsList])
+  }, [deviceId, isOpen, role, fetchCount, fetchNotificationsList, onNotificationClick, onUnreadCountChange, toast])
 
   // Handle Mark All as Checked
   const handleMarkAllChecked = async () => {
     if (!deviceId) return
-    const res = await markAllNotificationsAsChecked(deviceId)
+    const res = await markAllNotificationsAsChecked(deviceId, role)
     if (res.success) {
       setUnreadCount(0)
+      onUnreadCountChange?.(0)
       setNotifications((prev) =>
         prev.map((n) => ({
           ...n,
@@ -217,9 +310,10 @@ export function NotificationBell({ deviceId, className }: NotificationBellProps)
     if (!deviceId) return
 
     if (notif.status === "unchecked") {
-      const res = await markNotificationAsChecked(notif.id, deviceId)
+      const res = await markNotificationAsChecked(notif.id, deviceId, role)
       if (res.success) {
         setUnreadCount(res.unreadCount)
+        onUnreadCountChange?.(res.unreadCount)
         setNotifications((prev) =>
           prev.map((n) =>
             n.id === notif.id ? { ...n, status: "checked", read_at: new Date().toISOString() } : n,
@@ -227,9 +321,10 @@ export function NotificationBell({ deviceId, className }: NotificationBellProps)
         )
       }
     } else {
-      const res = await markNotificationAsUnchecked(notif.id, deviceId)
+      const res = await markNotificationAsUnchecked(notif.id, deviceId, role)
       if (res.success) {
         setUnreadCount(res.unreadCount)
+        onUnreadCountChange?.(res.unreadCount)
         setNotifications((prev) =>
           prev.map((n) => (n.id === notif.id ? { ...n, status: "unchecked", read_at: null } : n)),
         )
@@ -255,6 +350,13 @@ export function NotificationBell({ deviceId, className }: NotificationBellProps)
   // Action badge config
   const getActionBadge = (type: string) => {
     switch (type) {
+      case "new_lead":
+        return (
+          <Badge className="bg-emerald-100 hover:bg-emerald-100 text-emerald-800 border-0 flex items-center gap-1 font-semibold text-[11px] px-2 py-0.5">
+            <Sparkles className="h-3 w-3 text-emerald-600" />
+            New Lead
+          </Badge>
+        )
       case "order":
         return (
           <Badge className="bg-blue-100 hover:bg-blue-100 text-blue-700 border-0 flex items-center gap-1 font-semibold text-[11px] px-2 py-0.5">
@@ -315,9 +417,11 @@ export function NotificationBell({ deviceId, className }: NotificationBellProps)
       </PopoverTrigger>
 
       <PopoverContent
-        align="end"
-        sideOffset={8}
-        className="w-[380px] sm:w-[460px] max-w-[95vw] p-0 rounded-2xl shadow-2xl border border-slate-200 bg-white overflow-hidden z-50"
+        side={side}
+        align={align}
+        sideOffset={sideOffset}
+        collisionPadding={12}
+        className="w-[380px] sm:w-[460px] max-w-[95vw] p-0 rounded-2xl shadow-2xl border border-slate-200 bg-white overflow-hidden z-[100]"
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/80 px-4 py-3">
@@ -419,9 +523,10 @@ export function NotificationBell({ deviceId, className }: NotificationBellProps)
                   key={notif.id}
                   onClick={() => {
                     if (isUnchecked && deviceId) {
-                      markNotificationAsChecked(notif.id, deviceId).then((res) => {
+                      markNotificationAsChecked(notif.id, deviceId, role).then((res) => {
                         if (res.success) {
                           setUnreadCount(res.unreadCount)
+                          onUnreadCountChange?.(res.unreadCount)
                           setNotifications((prev) =>
                             prev.map((n) =>
                               n.id === notif.id
@@ -431,6 +536,10 @@ export function NotificationBell({ deviceId, className }: NotificationBellProps)
                           )
                         }
                       })
+                    }
+                    if (notif.type === "new_lead" && onNotificationClick) {
+                      setIsOpen(false)
+                      onNotificationClick(notif)
                     }
                   }}
                   className={cn(
@@ -474,8 +583,89 @@ export function NotificationBell({ deviceId, className }: NotificationBellProps)
                     {notif.title}
                   </h5>
 
+                  {/* CRM New Lead Details Section */}
+                  {notif.type === "new_lead" && (
+                    <div className="mt-2 rounded-lg bg-emerald-50/60 border border-emerald-100 p-2.5 text-xs space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-slate-800 text-sm">
+                          {data.customerName || data.name || notif.title}
+                        </span>
+                        {data.leadNumber && (
+                          <span className="text-[10px] font-mono bg-white px-1.5 py-0.5 rounded border border-emerald-200 text-emerald-700 font-semibold">
+                            {data.leadNumber}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-600">
+                        {data.phone && (
+                          <a
+                            href={`tel:${data.phone}`}
+                            onClick={(e) => e.stopPropagation()}
+                            className="flex items-center gap-1 font-medium text-slate-800 hover:text-emerald-700 hover:underline"
+                          >
+                            <Phone className="h-3 w-3 text-emerald-600" />
+                            {data.phone}
+                          </a>
+                        )}
+                        {data.email && (
+                          <a
+                            href={`mailto:${data.email}`}
+                            onClick={(e) => e.stopPropagation()}
+                            className="flex items-center gap-1 text-slate-500 hover:text-emerald-700 hover:underline"
+                          >
+                            <Mail className="h-3 w-3 text-emerald-600" />
+                            {data.email}
+                          </a>
+                        )}
+                      </div>
+
+                      {(data.vehicle || data.year) && (
+                        <div className="flex items-center gap-1 text-[11px] text-slate-700 font-medium">
+                          <Car className="h-3 w-3 text-emerald-600 flex-shrink-0" />
+                          <span>
+                            {data.vehicle} {data.year ? `(${data.year})` : ""}
+                          </span>
+                        </div>
+                      )}
+
+                      {(data.campaign || data.source) && (
+                        <div className="text-[10px] text-slate-400">
+                          Source: {data.source || "External"} {data.campaign ? `• Campaign: ${data.campaign}` : ""}
+                        </div>
+                      )}
+
+                      {data.message && (
+                        <p className="text-[11px] text-slate-600 italic bg-white/70 p-1.5 rounded border border-emerald-100/70">
+                          &ldquo;{data.message}&rdquo;
+                        </p>
+                      )}
+
+                      {onNotificationClick && (
+                        <div className="pt-1 flex justify-end">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-6 text-[11px] px-2 text-emerald-700 border-emerald-200 hover:bg-emerald-100 flex items-center gap-1"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              if (isUnchecked && deviceId) {
+                                markNotificationAsChecked(notif.id, deviceId, role)
+                              }
+                              setIsOpen(false)
+                              onNotificationClick(notif)
+                            }}
+                          >
+                            <span>Open in CRM Leads</span>
+                            <ExternalLink className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {/* Product Details Section */}
-                  {!isBulk && productsList.length > 0 && (
+                  {notif.type !== "new_lead" && !isBulk && productsList.length > 0 && (
                     <div className="mt-2 rounded-lg bg-slate-50/80 border border-slate-100 p-2.5 text-xs space-y-1">
                       {productsList.map((prod, idx) => (
                         <div key={idx} className="space-y-0.5">

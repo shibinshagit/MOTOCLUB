@@ -721,7 +721,7 @@ export function Dashboard({
           </Button>          {/* Desktop Controls */}
           <div className="hidden sm:flex items-center space-x-2">
             {isAdminStaff && (
-              <NotificationBell deviceId={device?.id} />
+              <NotificationBell deviceId={device?.id} role="admin" />
             )}
             {canAccessTab("product") && (
               <Button
@@ -830,7 +830,7 @@ export function Dashboard({
           {/* Mobile Controls */}
           <div className="flex sm:hidden items-center space-x-2">
             {isAdminStaff && (
-              <NotificationBell deviceId={device?.id} />
+              <NotificationBell deviceId={device?.id} role="admin" />
             )}
             {canAccessTab("product") && (
               <Button
