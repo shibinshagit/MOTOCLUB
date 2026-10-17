@@ -872,9 +872,10 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
             OR (
               ${cardFilter} = 'critical'
               AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
-              AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled'
+              AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned', 'pending')
               AND (
-                LOWER(COALESCE(s.payment_status, '')) IN ('paid', 'completed')
+                LOWER(COALESCE(s.payment_status, '')) IN ('paid', 'completed', 'partial', 'credit')
+                OR LOWER(COALESCE(s.status, '')) IN ('credit', 'partial')
                 OR (s.total_amount > 0 AND s.received_amount >= s.total_amount)
               )
               AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) IN ('pending', 'paid', 'packed', 'sent')
@@ -971,9 +972,10 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
             OR (
               ${cardFilter} = 'critical'
               AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
-              AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled'
+              AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned', 'pending')
               AND (
-                LOWER(COALESCE(s.payment_status, '')) IN ('paid', 'completed')
+                LOWER(COALESCE(s.payment_status, '')) IN ('paid', 'completed', 'partial', 'credit')
+                OR LOWER(COALESCE(s.status, '')) IN ('credit', 'partial')
                 OR (s.total_amount > 0 AND s.received_amount >= s.total_amount)
               )
               AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) IN ('pending', 'paid', 'packed', 'sent')
@@ -1258,9 +1260,10 @@ export async function getSalesSummaryCards(
           )::int as pending_count,
           COUNT(*) FILTER (
             WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
-              AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled'
+              AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned', 'pending')
               AND (
-                LOWER(COALESCE(s.payment_status, '')) IN ('paid', 'completed')
+                LOWER(COALESCE(s.payment_status, '')) IN ('paid', 'completed', 'partial', 'credit')
+                OR LOWER(COALESCE(s.status, '')) IN ('credit', 'partial')
                 OR (s.total_amount > 0 AND s.received_amount >= s.total_amount)
               )
               AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) IN ('pending', 'paid', 'packed', 'sent')

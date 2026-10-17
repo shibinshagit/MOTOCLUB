@@ -300,7 +300,17 @@ export function isCriticalSale(sale: any): boolean {
 
   if (isCancelledOrReturned) return false
 
-  if (!isPaidSale(sale)) return false
+  const pStatus = (sale.payment_status || "").trim().toLowerCase()
+  if (pStatus === "pending") return false
+
+  const isPaid = isPaidSale(sale)
+  const isPartialOrCredit =
+    pStatus === "partial" ||
+    pStatus === "credit" ||
+    sale.status?.toLowerCase() === "credit" ||
+    sale.status?.toLowerCase() === "partial"
+
+  if (!isPaid && !isPartialOrCredit) return false
 
   const dStatus = (sale.delivery_status || "Pending").trim().toLowerCase()
   const allowedCriticalStatuses = ["pending", "paid", "packed", "sent"]
