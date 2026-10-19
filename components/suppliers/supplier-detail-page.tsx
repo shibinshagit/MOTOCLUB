@@ -24,9 +24,15 @@ import {
   History,
   Edit,
   ChevronRight,
+  ChevronLeft,
+  Download,
 } from "lucide-react"
 import { useAppSelector } from "@/store/hooks"
 import ViewPurchaseModal from "@/components/purchases/view-purchase-modal"
+import { TableRowsInput } from "@/components/ui/table-rows-input"
+import { downloadPurchasesPDF } from "@/lib/purchases-pdf-utils"
+import { useToast } from "@/components/ui/use-toast"
+import { notifyError, notifySuccess, notifyWarning } from "@/lib/notifications"
 import { format } from "date-fns"
 
 interface SupplierDetailPageProps {
@@ -46,13 +52,19 @@ export default function SupplierDetailPage({
   onViewPayments,
   onEditSupplier,
 }: SupplierDetailPageProps) {
+  const { toast } = useToast()
   const [supplierData, setSupplierData] = useState<any>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [isDownloadingPDF, setIsDownloadingPDF] = useState(false)
 
   // Search & filter for purchases
   const [searchTerm, setSearchTerm] = useState("")
   const [statusFilter, setStatusFilter] = useState<"all" | "Paid" | "Credit">("all")
+
+  // Pagination state (like other tables)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
 
   // View purchase modal state
   const [selectedPurchaseId, setSelectedPurchaseId] = useState<number | null>(null)
@@ -130,9 +142,61 @@ export default function SupplierDetailPage({
     })
   }, [purchases, statusFilter, searchTerm])
 
+  // Reset page when filters change
+  useEffect(() => {
+    setPage(1)
+  }, [searchTerm, statusFilter])
+
+  const totalCount = filteredPurchases.length
+  const totalPages = Math.ceil(totalCount / pageSize) || 1
+
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages)
+    }
+  }, [page, totalPages])
+
+  const paginatedPurchases = useMemo(() => {
+    const start = (page - 1) * pageSize
+    return filteredPurchases.slice(start, start + pageSize)
+  }, [filteredPurchases, page, pageSize])
+
   const handleOpenPurchase = (purchaseId: number) => {
     setSelectedPurchaseId(purchaseId)
     setIsViewPurchaseModalOpen(true)
+  }
+
+  const handleDownloadPDF = async () => {
+    if (isDownloadingPDF) return
+    if (!filteredPurchases || filteredPurchases.length === 0) {
+      notifyWarning(toast, "No purchases found to download")
+      return
+    }
+
+    setIsDownloadingPDF(true)
+    try {
+      // Include all filtered purchases across all pages with supplier name
+      const allPurchasesForPDF = filteredPurchases.map((p: any) => ({
+        ...p,
+        supplier: p.supplier || supplier?.name || "—",
+      }))
+
+      const periodLabel = supplier?.name ? `${supplier.name} - Purchases` : "Supplier Purchases"
+      await downloadPurchasesPDF(
+        allPurchasesForPDF,
+        periodLabel,
+        formatCurrency,
+        (p) => Number(p.received_amount) || 0,
+        (p) => Math.max(0, (Number(p.total_amount) || 0) - (Number(p.received_amount) || 0)),
+        (p) => p.payment_method || "—",
+      )
+      notifySuccess(toast, `Purchases PDF report downloaded successfully (${filteredPurchases.length} orders)`)
+    } catch (err: any) {
+      console.error("Error downloading purchases PDF:", err)
+      notifyError(toast, err?.message || "Failed to download purchases PDF")
+    } finally {
+      setIsDownloadingPDF(false)
+    }
   }
 
   return (
@@ -399,6 +463,27 @@ export default function SupplierDetailPage({
                         Credit
                       </button>
                     </div>
+
+                    {/* PDF Download Button */}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleDownloadPDF}
+                      disabled={isDownloadingPDF || filteredPurchases.length === 0}
+                      className="h-8 gap-1.5 px-3 text-xs font-semibold bg-white border-slate-200 hover:bg-slate-50 text-slate-700 shadow-2xs cursor-pointer"
+                      title={
+                        filteredPurchases.length > 0
+                          ? `Download all ${filteredPurchases.length} purchases as PDF`
+                          : "Download purchases as PDF"
+                      }
+                    >
+                      PDF
+                      {isDownloadingPDF ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-500" />
+                      ) : (
+                        <Download className="h-3.5 w-3.5 text-slate-600" />
+                      )}
+                    </Button>
                   </div>
                 </div>
               </div>
@@ -431,7 +516,7 @@ export default function SupplierDetailPage({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {filteredPurchases.map((purchase: any) => {
+                      {paginatedPurchases.map((purchase: any) => {
                         const total = Number(purchase.total_amount || 0)
                         const paid = Number(purchase.received_amount || 0)
                         const balance = Math.max(total - paid, 0)
@@ -524,6 +609,49 @@ export default function SupplierDetailPage({
                       })}
                     </tbody>
                   </table>
+                </div>
+              )}
+
+              {/* PAGINATION TOOLBAR */}
+              {filteredPurchases.length > 0 && (
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-slate-200 bg-[#F1F4F9] px-4 py-3 text-xs font-medium text-slate-600">
+                  <div>
+                    Showing {filteredPurchases.length > 0 ? (page - 1) * pageSize + 1 : 0} to{" "}
+                    {Math.min(page * pageSize, filteredPurchases.length)} of {filteredPurchases.length} purchases
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <TableRowsInput
+                      value={pageSize}
+                      onChange={(newSize) => {
+                        setPageSize(newSize)
+                        setPage(1)
+                      }}
+                      disabled={isLoading}
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 px-3 text-xs bg-white border-slate-200 hover:bg-slate-50 cursor-pointer"
+                      disabled={page <= 1 || isLoading}
+                      onClick={() => setPage(Math.max(1, page - 1))}
+                    >
+                      <ChevronLeft className="h-3.5 w-3.5 mr-1" />
+                      Previous
+                    </Button>
+                    <span className="px-2 text-slate-700 font-semibold">
+                      Page {page} of {totalPages || 1}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 px-3 text-xs bg-white border-slate-200 hover:bg-slate-50 cursor-pointer"
+                      disabled={page >= totalPages || isLoading}
+                      onClick={() => setPage(Math.min(totalPages, page + 1))}
+                    >
+                      Next
+                      <ChevronRight className="h-3.5 w-3.5 ml-1" />
+                    </Button>
+                  </div>
                 </div>
               )}
             </div>
