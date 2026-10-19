@@ -50,6 +50,7 @@ import { selectDeviceId } from "@/store/slices/deviceSlice"
 import SimpleAddModal from "@/components/suppliers/simple-add-modal"
 import SimpleViewModal from "@/components/suppliers/simple-view-modal"
 import SimpleEditModal from "@/components/suppliers/simple-edit-modal"
+import SupplierDetailPage from "@/components/suppliers/supplier-detail-page"
 import PayCreditModal from "@/components/suppliers/pay-credit-modal"
 import RefundCreditModal from "@/components/suppliers/refund-credit-modal"
 import ViewSupplierPaymentModal from "@/components/suppliers/View-supplier-payment-model"
@@ -144,6 +145,7 @@ export default function SupplierTab({
 
   // Local state
   const [localSearchTerm, setLocalSearchTerm] = useState("")
+  const [viewingSupplierId, setViewingSupplierId] = useState<number | null>(null)
   const [showAddModal, setShowAddModal] = useState(false)
   const [showViewModal, setShowViewModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
@@ -367,7 +369,7 @@ export default function SupplierTab({
   // Modal handlers
   const handleView = useCallback((supplierId: number) => {
     dispatch(setSelectedSupplierId(supplierId))
-    setShowViewModal(true)
+    setViewingSupplierId(supplierId)
   }, [dispatch])
 
   const handleEdit = useCallback((supplierId: number) => {
@@ -632,99 +634,115 @@ export default function SupplierTab({
 
   return (
     <div className="h-full flex flex-col bg-gray-50">
-      {/* Header */}
-      <div className="bg-white border-b border-gray-200 px-4 sm:px-6 py-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-center space-x-4">
-            <div>
-              <div className="flex items-center space-x-2">
-                <h1 className="text-lg sm:text-xl font-bold text-gray-900">Suppliers</h1>
-                {(isRefreshing || isLoading) && <RefreshCw className="h-4 w-4 animate-spin text-blue-600 flex-shrink-0" />}
+      {viewingSupplierId ? (
+        <SupplierDetailPage
+          supplierId={viewingSupplierId}
+          userId={userId}
+          onBack={() => {
+            setViewingSupplierId(null)
+            fetchSuppliersData({ forceRefresh: true })
+          }}
+          onPayCredit={handlePayCredit}
+          onViewPayments={handleOpenPaymentHistory}
+          onEditSupplier={handleEdit}
+        />
+      ) : (
+        <>
+          {/* Header */}
+          <div className="bg-white border-b border-gray-200 px-4 sm:px-6 py-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center space-x-4">
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <h1 className="text-lg sm:text-xl font-bold text-gray-900">Suppliers</h1>
+                    {(isRefreshing || isLoading) && <RefreshCw className="h-4 w-4 animate-spin text-blue-600 flex-shrink-0" />}
+                  </div>
+                  <p className="text-xs sm:text-sm text-gray-500">
+                    {stats.total > 0
+                      ? `${stats.total} suppliers • ${formatCurrency(stats.totalAmount)} total • ${formatCurrency(stats.totalBalance)} balance`
+                      : "No suppliers found"}
+                  </p>
+                </div>
               </div>
-              <p className="text-xs sm:text-sm text-gray-500">
-                {stats.total > 0
-                  ? `${stats.total} suppliers • ${formatCurrency(stats.totalAmount)} total • ${formatCurrency(stats.totalBalance)} balance`
-                  : "No suppliers found"}
-              </p>
+
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                {/* Search */}
+                <div className="relative flex-1 sm:flex-initial">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400 flex-shrink-0" />
+                  <Input
+                    placeholder="Search suppliers..."
+                    value={localSearchTerm}
+                    onChange={(e) => handleSearchChange(e.target.value)}
+                    className="pl-10 w-full sm:w-64 h-9 text-sm"
+                  />
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {/* Refresh button */}
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={handleRefresh} 
+                    disabled={isLoading || isRefreshing} 
+                    className="h-9 flex-shrink-0"
+                  >
+                    <RefreshCw className={`h-4 w-4 ${(isLoading || isRefreshing) ? "animate-spin" : ""}`} />
+                    <span className="hidden sm:inline ml-2">Refresh</span>
+                  </Button>
+
+                  {/* Add button */}
+                  <Button onClick={handleAdd} size="sm" className="bg-blue-600 hover:bg-blue-700 text-white h-9 flex-shrink-0">
+                    <Plus className="h-4 w-4 mr-2 flex-shrink-0" />
+                    <span className="hidden sm:inline">Add Supplier</span>
+                    <span className="sm:hidden">Add</span>
+                  </Button>
+                </div>
+              </div>
             </div>
           </div>
 
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-            {/* Search */}
-            <div className="relative flex-1 sm:flex-initial">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400 flex-shrink-0" />
-              <Input
-                placeholder="Search suppliers..."
-                value={localSearchTerm}
-                onChange={(e) => handleSearchChange(e.target.value)}
-                className="pl-10 w-full sm:w-64 h-9 text-sm"
-              />
-            </div>
-
-            <div className="flex items-center gap-2">
-              {/* Refresh button */}
-              <Button 
-                variant="outline" 
-                size="sm" 
-                onClick={handleRefresh} 
-                disabled={isLoading || isRefreshing} 
-                className="h-9 flex-shrink-0"
-              >
-                <RefreshCw className={`h-4 w-4 ${(isLoading || isRefreshing) ? "animate-spin" : ""}`} />
-                <span className="hidden sm:inline ml-2">Refresh</span>
-              </Button>
-
-              {/* Add button */}
-              <Button onClick={handleAdd} size="sm" className="bg-blue-600 hover:bg-blue-700 text-white h-9 flex-shrink-0">
-                <Plus className="h-4 w-4 mr-2 flex-shrink-0" />
-                <span className="hidden sm:inline">Add Supplier</span>
-                <span className="sm:hidden">Add</span>
-              </Button>
-            </div>
+          {/* Content Area */}
+          <div className="flex-1 overflow-auto p-4 sm:p-6">
+            {isLoading && allSuppliers.length === 0 ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-6 w-6 animate-spin mr-2 text-blue-600" />
+                <span className="text-gray-600">Loading suppliers...</span>
+              </div>
+            ) : error && allSuppliers.length === 0 ? (
+              <Card className="bg-white">
+                <CardContent className="text-center py-12">
+                  <div className="text-red-600 mb-4">{error}</div>
+                  <Button onClick={handleRefresh} variant="outline">
+                    Try Again
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : suppliers.length === 0 ? (
+              <Card className="bg-white">
+                <CardContent className="text-center py-12">
+                  <Users className="h-16 w-16 text-gray-300 mx-auto mb-4" />
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">
+                    {localSearchTerm ? "No suppliers match your search" : "No suppliers found"}
+                  </h3>
+                  <p className="text-gray-500 mb-6">
+                    {localSearchTerm ? "Try adjusting your search terms" : "Get started by adding your first supplier"}
+                  </p>
+                  {!localSearchTerm && (
+                    <Button onClick={handleAdd} className="bg-blue-600 hover:bg-blue-700 text-white">
+                      <Plus className="h-4 w-4 mr-2" />
+                      Add Your First Supplier
+                    </Button>
+                  )}
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="space-y-2">
+                {supplierCards}
+              </div>
+            )}
           </div>
-        </div>
-      </div>
-
-      {/* Content Area */}
-      <div className="flex-1 overflow-auto p-4 sm:p-6">
-        {isLoading && allSuppliers.length === 0 ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="h-6 w-6 animate-spin mr-2 text-blue-600" />
-            <span className="text-gray-600">Loading suppliers...</span>
-          </div>
-        ) : error && allSuppliers.length === 0 ? (
-          <Card className="bg-white">
-            <CardContent className="text-center py-12">
-              <div className="text-red-600 mb-4">{error}</div>
-              <Button onClick={handleRefresh} variant="outline">
-                Try Again
-              </Button>
-            </CardContent>
-          </Card>
-        ) : suppliers.length === 0 ? (
-          <Card className="bg-white">
-            <CardContent className="text-center py-12">
-              <Users className="h-16 w-16 text-gray-300 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 mb-2">
-                {localSearchTerm ? "No suppliers match your search" : "No suppliers found"}
-              </h3>
-              <p className="text-gray-500 mb-6">
-                {localSearchTerm ? "Try adjusting your search terms" : "Get started by adding your first supplier"}
-              </p>
-              {!localSearchTerm && (
-                <Button onClick={handleAdd} className="bg-blue-600 hover:bg-blue-700 text-white">
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Your First Supplier
-                </Button>
-              )}
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="space-y-2">
-            {supplierCards}
-          </div>
-        )}
-      </div>
+        </>
+      )}
 
       {/* Modals */}
       <SimpleAddModal 
