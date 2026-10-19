@@ -729,54 +729,6 @@ export default function SalesExcelTable({
     return totalPrice - cost - partnerCourier
   }
 
-  const handlePrintSummary = () => {
-    if (isGeneratingReport) return
-    if (!displaySales || displaySales.length === 0) {
-      notifyWarning(toast, "No sales found for the selected filters.")
-      return
-    }
-    setIsGeneratingReport(true)
-    try {
-      printSalesSummaryReport(displaySales, periodLabel, formatCurrency)
-      notifySuccess(toast, "Sales summary printable report opened.")
-    } catch (err: any) {
-      notifyError(toast, err?.message || "Failed to generate print summary.")
-    } finally {
-      setIsGeneratingReport(false)
-    }
-  }
-
-  const handleDownloadPDF = async () => {
-    if (isGeneratingReport) return
-    if (!displaySales || displaySales.length === 0) {
-      notifyWarning(toast, "No sales found for the selected filters.")
-      return
-    }
-    setIsGeneratingReport(true)
-    try {
-      await downloadSalesSummaryPDF(displaySales, periodLabel, formatCurrency, globalDateRange)
-      notifySuccess(toast, "Sales summary PDF report downloaded.")
-    } catch (err: any) {
-      notifyError(toast, err?.message || "Failed to download PDF report.")
-    } finally {
-      setIsGeneratingReport(false)
-    }
-  }
-
-  const handleDownloadExcel = () => {
-    if (isGeneratingReport) return
-    if (!displaySales || displaySales.length === 0) {
-      notifyWarning(toast, "No sales found for the selected filters.")
-      return
-    }
-    try {
-      downloadSalesSummaryExcel(displaySales, periodLabel, globalDateRange)
-      notifySuccess(toast, "Sales summary Excel report downloaded.")
-    } catch (err: any) {
-      notifyError(toast, err?.message || "Failed to download Excel report.")
-    }
-  }
-
   const resolveSelectedSalesList = async (): Promise<any[]> => {
     if (selectedSales.length === 0) return []
 
@@ -786,22 +738,119 @@ export default function SalesExcelTable({
     }
 
     const missingIds = selectedSales.filter((id) => !cache[id])
+    const effectiveDeviceId = deviceId || (displaySales.length > 0 ? displaySales[0].device_id : undefined)
 
-    if (missingIds.length > 0 && deviceId) {
+    if (missingIds.length > 0 && effectiveDeviceId) {
       try {
-        const res = await getSalesByIds(deviceId, missingIds)
-        if (res.success && res.data) {
-          for (const s of (res.data as any[])) {
-            cache[Number(s.id)] = s
+        const chunkSize = 200
+        for (let i = 0; i < missingIds.length; i += chunkSize) {
+          const chunk = missingIds.slice(i, i + chunkSize)
+          const res = await getSalesByIds(effectiveDeviceId, chunk)
+          if (res.success && res.data) {
+            for (const s of (res.data as any[])) {
+              cache[Number(s.id)] = s
+            }
           }
-          setLoadedSalesCache((prev) => ({ ...prev, ...cache }))
         }
+        setLoadedSalesCache((prev) => ({ ...prev, ...cache }))
       } catch (e) {
-        console.error("Failed to fetch missing sales for printing:", e)
+        console.error("Failed to fetch missing sales for printing/export:", e)
       }
     }
 
     return selectedSales.map((id) => cache[id]).filter(Boolean)
+  }
+
+  const getEffectivePeriodLabel = (targetCount: number) => {
+    if (selectedSales.length > 0) {
+      return `${periodLabel} (${targetCount} Selected)`
+    }
+    return periodLabel
+  }
+
+  const handlePrintSummary = async () => {
+    if (isGeneratingReport) return
+    const isSelected = selectedSales.length > 0
+    if (!isSelected && (!displaySales || displaySales.length === 0)) {
+      notifyWarning(toast, "No sales found for the selected filters.")
+      return
+    }
+
+    // Pre-open window immediately to avoid popup blockers when resolving async data
+    const printWindow = typeof window !== "undefined" ? window.open("", "_blank") : null
+    if (printWindow) {
+      printWindow.document.write(
+        "<!DOCTYPE html><html><head><title>Loading Summary...</title></head><body style='font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;padding:32px;color:#334155;text-align:center;'><h2 style='font-size:18px;margin-bottom:8px;'>Generating Sales Summary Report</h2><p style='font-size:14px;color:#64748b;'>Loading report data, please wait a moment...</p></body></html>"
+      )
+    }
+
+    setIsGeneratingReport(true)
+    try {
+      const targetSales = isSelected ? await resolveSelectedSalesList() : displaySales
+      if (!targetSales || targetSales.length === 0) {
+        if (printWindow) printWindow.close()
+        notifyWarning(toast, isSelected ? "No sales found for the selected orders." : "No sales found for the selected filters.")
+        return
+      }
+      const label = getEffectivePeriodLabel(targetSales.length)
+      printSalesSummaryReport(targetSales, label, formatCurrency, printWindow)
+      notifySuccess(toast, `Sales summary printable report opened (${targetSales.length} orders).`)
+    } catch (err: any) {
+      if (printWindow) printWindow.close()
+      notifyError(toast, err?.message || "Failed to generate print summary.")
+    } finally {
+      setIsGeneratingReport(false)
+    }
+  }
+
+  const handleDownloadPDF = async () => {
+    if (isGeneratingReport) return
+    const isSelected = selectedSales.length > 0
+    if (!isSelected && (!displaySales || displaySales.length === 0)) {
+      notifyWarning(toast, "No sales found for the selected filters.")
+      return
+    }
+
+    setIsGeneratingReport(true)
+    try {
+      const targetSales = isSelected ? await resolveSelectedSalesList() : displaySales
+      if (!targetSales || targetSales.length === 0) {
+        notifyWarning(toast, isSelected ? "No sales found for the selected orders." : "No sales found for the selected filters.")
+        return
+      }
+      const label = getEffectivePeriodLabel(targetSales.length)
+      await downloadSalesSummaryPDF(targetSales, label, formatCurrency, globalDateRange)
+      notifySuccess(toast, `Sales summary PDF report downloaded (${targetSales.length} orders).`)
+    } catch (err: any) {
+      notifyError(toast, err?.message || "Failed to download PDF report.")
+    } finally {
+      setIsGeneratingReport(false)
+    }
+  }
+
+  const handleDownloadExcel = async () => {
+    if (isGeneratingReport) return
+    const isSelected = selectedSales.length > 0
+    if (!isSelected && (!displaySales || displaySales.length === 0)) {
+      notifyWarning(toast, "No sales found for the selected filters.")
+      return
+    }
+
+    setIsGeneratingReport(true)
+    try {
+      const targetSales = isSelected ? await resolveSelectedSalesList() : displaySales
+      if (!targetSales || targetSales.length === 0) {
+        notifyWarning(toast, isSelected ? "No sales found for the selected orders." : "No sales found for the selected filters.")
+        return
+      }
+      const label = getEffectivePeriodLabel(targetSales.length)
+      downloadSalesSummaryExcel(targetSales, label, globalDateRange)
+      notifySuccess(toast, `Sales summary Excel report downloaded (${targetSales.length} orders).`)
+    } catch (err: any) {
+      notifyError(toast, err?.message || "Failed to download Excel report.")
+    } finally {
+      setIsGeneratingReport(false)
+    }
   }
 
   const handleBulkPrintInvoices = async () => {
@@ -1442,14 +1491,18 @@ export default function SalesExcelTable({
                 className="h-7 gap-1.5 px-2.5 text-xs font-medium bg-white hover:bg-slate-50 border-slate-200 text-slate-700 shadow-2xs"
                 onClick={handlePrintSummary}
                 disabled={isFetchingServer || isGeneratingReport}
-                title="View and print Sales Summary Report"
+                title={
+                  selectedSales.length > 0
+                    ? `View and print Sales Summary Report for ${selectedSales.length} selected orders`
+                    : "View and print Sales Summary Report"
+                }
               >
                 {isGeneratingReport ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-500" />
                 ) : (
                   <Printer className="h-3.5 w-3.5 text-slate-600" />
                 )}
-                <span>Summary</span>
+                <span>Summary{selectedSales.length > 0 ? ` (${selectedSales.length})` : ""}</span>
               </Button>
 
               <Button
@@ -1458,14 +1511,18 @@ export default function SalesExcelTable({
                 className="h-7 gap-1.5 px-2.5 text-xs font-medium bg-white hover:bg-slate-50 border-slate-200 text-slate-700 shadow-2xs"
                 onClick={handleDownloadPDF}
                 disabled={isFetchingServer || isGeneratingReport}
-                title="Download Sales Summary PDF Report"
+                title={
+                  selectedSales.length > 0
+                    ? `Download Sales Summary PDF Report for ${selectedSales.length} selected orders`
+                    : "Download Sales Summary PDF Report"
+                }
               >
                 {isGeneratingReport ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-500" />
                 ) : (
                   <Download className="h-3.5 w-3.5 text-slate-600" />
                 )}
-                <span>PDF</span>
+                <span>PDF{selectedSales.length > 0 ? ` (${selectedSales.length})` : ""}</span>
               </Button>
 
               <Button
@@ -1474,10 +1531,18 @@ export default function SalesExcelTable({
                 className="h-7 gap-1.5 px-2.5 text-xs font-medium bg-white hover:bg-slate-50 border-slate-200 text-slate-700 shadow-2xs"
                 onClick={handleDownloadExcel}
                 disabled={isFetchingServer || isGeneratingReport}
-                title="Download Sales Summary Excel / CSV Report"
+                title={
+                  selectedSales.length > 0
+                    ? `Download Sales Summary Excel / CSV Report for ${selectedSales.length} selected orders`
+                    : "Download Sales Summary Excel / CSV Report"
+                }
               >
-                <Download className="h-3.5 w-3.5 text-emerald-600" />
-                <span>Excel</span>
+                {isGeneratingReport ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-500" />
+                ) : (
+                  <Download className="h-3.5 w-3.5 text-emerald-600" />
+                )}
+                <span>Excel{selectedSales.length > 0 ? ` (${selectedSales.length})` : ""}</span>
               </Button>
 
               {!isPurchaseManager && !isLogistics && (

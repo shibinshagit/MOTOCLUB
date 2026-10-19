@@ -252,11 +252,12 @@ export function printSalesSummaryReport(
   sales: any[],
   periodLabel: string,
   formatCurrency: (amount: number) => string,
+  targetWindow?: Window | null,
 ) {
   const rows = sales.map(extractSaleSummaryRow)
   const totals = computeSalesSummaryTotals(rows)
 
-  const printWindow = window.open("", "_blank")
+  const printWindow = targetWindow || window.open("", "_blank")
   if (!printWindow) {
     throw new Error("Unable to open print window. Please allow popups for this site.")
   }
