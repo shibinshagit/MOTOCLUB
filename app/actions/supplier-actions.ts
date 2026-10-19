@@ -225,13 +225,33 @@ export async function getSupplierWithPurchases(id: number, userId: number) {
         COALESCE(SUM(CASE WHEN status = 'Credit' THEN total_amount ELSE 0 END), 0) as total_credit,
         COALESCE(SUM(CASE WHEN status != 'Cancelled' THEN (total_amount - COALESCE(received_amount, 0)) ELSE 0 END), 0) as outstanding_balance
       FROM purchases
-      WHERE TRIM(supplier) = TRIM(${supplier.name}) AND created_by = ${userId}
+      WHERE (TRIM(supplier) = TRIM(${supplier.name}) OR LOWER(TRIM(supplier)) = LOWER(TRIM(${supplier.name})))
+        AND (created_by = ${userId} OR device_id = ${userId})
     `
 
     const purchasesResult = await sql`
       SELECT 
         p.*,
-        COALESCE(pi.items_count, 0) as items_count
+        COALESCE(pi.items_count, 0) as items_count,
+        COALESCE(
+          (
+            SELECT STRING_AGG(
+              CONCAT(
+                pr2.name,
+                CASE 
+                  WHEN pv2.name IS NOT NULL AND pv2.name != '' AND LOWER(pv2.name) != 'default' AND LOWER(pv2.name) != 'default variant' 
+                  THEN CONCAT(' (', pv2.name, ')')
+                  ELSE ''
+                END,
+                ' × ', pi2.quantity
+              ), ', '
+            )
+            FROM purchase_items pi2
+            LEFT JOIN products pr2 ON pr2.id = pi2.product_id
+            LEFT JOIN product_variants pv2 ON pv2.id = pi2.product_variant_id
+            WHERE pi2.purchase_id = p.id
+          ), '—'
+        ) AS items_summary
       FROM purchases p
       LEFT JOIN (
         SELECT 
@@ -240,7 +260,8 @@ export async function getSupplierWithPurchases(id: number, userId: number) {
         FROM purchase_items
         GROUP BY purchase_id
       ) pi ON p.id = pi.purchase_id
-      WHERE TRIM(p.supplier) = TRIM(${supplier.name}) AND p.created_by = ${userId}
+      WHERE (TRIM(p.supplier) = TRIM(${supplier.name}) OR LOWER(TRIM(p.supplier)) = LOWER(TRIM(${supplier.name})))
+        AND (p.created_by = ${userId} OR p.device_id = ${userId})
       ORDER BY p.purchase_date DESC, p.id DESC
     `
 

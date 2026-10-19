@@ -1183,7 +1183,24 @@ export async function getSalesByIds(deviceId: number, saleIds: number[]) {
              LEFT JOIN products p ON si.product_id = p.id AND NOT EXISTS (SELECT 1 FROM services s2 WHERE s2.id = si.product_id)
              LEFT JOIN services sv ON si.product_id = sv.id
              WHERE si.sale_id = s.id), ''
-          ) as items_summary
+          ) as items_summary,
+          COALESCE(
+            (SELECT SUM(si.quantity * COALESCE(si.cost, pv.wholesale_price, p.wholesale_price, 0))
+             FROM sale_items si 
+             LEFT JOIN products p ON si.product_id = p.id AND NOT EXISTS (SELECT 1 FROM services s2 WHERE s2.id = si.product_id)
+             LEFT JOIN product_variants pv ON si.product_variant_id = pv.id
+             WHERE si.sale_id = s.id), 0
+          ) as total_cost,
+          COALESCE(
+            (SELECT SUM(sri.returned_quantity)
+             FROM sale_return_items sri
+             WHERE sri.sale_id = s.id), 0
+          ) as total_returned_qty,
+          COALESCE(
+            (SELECT COUNT(sr.id)
+             FROM sale_returns sr
+             WHERE sr.sale_id = s.id), 0
+          ) as return_count
         FROM sales s
         LEFT JOIN customers c ON s.customer_id = c.id
         LEFT JOIN staff st ON s.staff_id = st.id
