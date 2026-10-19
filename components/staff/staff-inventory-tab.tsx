@@ -76,9 +76,14 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
   const [stats, setStats] = useState({ total: 0, available: 0, low: 0, out: 0 })
 
   const isFirstMount = useRef(true)
+  const activeFetchIdRef = useRef(0)
 
-  // 250ms Debounce search input
+  // Search debouncing: instant on clearing, 250ms when typing
   useEffect(() => {
+    if (!searchTerm) {
+      setDebouncedSearch("")
+      return
+    }
     const timer = setTimeout(() => {
       setDebouncedSearch(searchTerm)
     }, 250)
@@ -108,6 +113,7 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
 
   // Fetch paginated inventory from server
   const loadInventory = useCallback(async (isRefresh = false) => {
+    const fetchId = ++activeFetchIdRef.current
     if (isRefresh) {
       setIsRefreshing(true)
     } else {
@@ -125,6 +131,8 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
         categoryName: selectedCategory?.name || null,
       })
 
+      if (fetchId !== activeFetchIdRef.current) return
+
       if (res.success) {
         setProducts(res.data || [])
         setTotalCount(res.totalCount || 0)
@@ -135,12 +143,15 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
         toast({ title: "Error", description: res.message || "Failed to load inventory", variant: "destructive" })
       }
     } catch (err: any) {
+      if (fetchId !== activeFetchIdRef.current) return
       setHasError(true)
       setErrorMessage("Failed to load inventory. Please try again.")
       toast({ title: "Error", description: "Failed to load inventory", variant: "destructive" })
     } finally {
-      setLoading(false)
-      setIsRefreshing(false)
+      if (fetchId === activeFetchIdRef.current) {
+        setLoading(false)
+        setIsRefreshing(false)
+      }
     }
   }, [page, pageSize, debouncedSearch, selectedCategory, toast])
 
