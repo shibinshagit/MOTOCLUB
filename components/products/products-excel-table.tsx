@@ -1,6 +1,7 @@
 import { useMemo, useState, memo } from "react"
 import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { TableRowsInput } from "@/components/ui/table-rows-input"
 import {
   ExcelColumnFilterHeader,
   createEmptyColumnFilter,
@@ -414,19 +415,11 @@ function ProductsExcelTable({
           </div>
 
           <div className="flex flex-wrap items-center gap-3 sm:gap-4">
-            <div className="flex items-center gap-1.5">
-              <span className="text-slate-500">Per page:</span>
-              <select
-                value={pageSize}
-                onChange={(e) => onPageSizeChange?.(Number(e.target.value))}
-                className="h-8 rounded border border-slate-200 bg-white px-2 text-xs font-medium text-slate-700 focus:border-violet-500 focus:outline-none"
-              >
-                <option value={10}>10</option>
-                <option value={25}>25</option>
-                <option value={50}>50</option>
-                <option value={100}>100</option>
-              </select>
-            </div>
+            <TableRowsInput
+              value={pageSize}
+              onChange={(newSize) => onPageSizeChange?.(newSize)}
+              disabled={isLoading}
+            />
 
             <div className="flex items-center gap-1">
               <Button

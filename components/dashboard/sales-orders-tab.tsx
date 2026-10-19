@@ -18,6 +18,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { TableRowsInput } from "@/components/ui/table-rows-input"
 import { ChevronDown, ChevronUp, MapPin, Phone, User, Calendar, Layers, Printer, Edit, Trash2, Search, PlayCircle, Eye, Plus, Loader2, FileText, ExternalLink, ShoppingCart, Clock, AlertTriangle, Info, ChevronLeft, ChevronRight } from "lucide-react"
 import { SalesBreakdownModal } from "@/components/shared/sales-breakdown-modal"
 import { formatPhoneNumber, parseSaleDateTime, parseSaleDate, cn } from "@/lib/utils"
@@ -54,8 +55,13 @@ export default function SalesOrdersTab() {
   
   // Pagination State
   const [page, setPage] = useState(1)
-  const limit = 25
+  const [limit, setLimit] = useState(25)
   const [hasMore, setHasMore] = useState(false)
+
+  const handleLimitChange = (newLimit: number) => {
+    setLimit(newLimit)
+    setPage(1)
+  }
 
   // Summary State
   const [summary, setSummary] = useState({
@@ -118,7 +124,7 @@ export default function SalesOrdersTab() {
         })
       })
     }
-  }, [deviceId, dateRange.from, dateRange.to, debouncedSearch, page, cardFilter])
+  }, [deviceId, dateRange.from, dateRange.to, debouncedSearch, page, cardFilter, limit])
 
   const fetchSummary = async () => {
     const res = await getJobCardsSummary(deviceId || 0, {
@@ -941,6 +947,11 @@ export default function SalesOrdersTab() {
               Showing <span className="font-medium text-slate-700">{totalCount > 0 ? (page - 1) * limit + 1 : 0}</span> to <span className="font-medium text-slate-700">{Math.min(page * limit, totalCount)}</span> of <span className="font-medium text-slate-700">{totalCount}</span> results
             </div>
             <div className="flex items-center gap-2">
+              <TableRowsInput
+                value={limit}
+                onChange={handleLimitChange}
+                disabled={loading}
+              />
               <Button
                 variant="outline"
                 size="sm"

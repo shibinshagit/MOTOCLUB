@@ -1,6 +1,7 @@
 "use client"
 
 import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react"
+import { TableRowsInput } from "@/components/ui/table-rows-input"
 
 interface PartnerPaginationProps {
   page: number
@@ -8,6 +9,7 @@ interface PartnerPaginationProps {
   totalCount: number
   totalPages: number
   onPageChange: (newPage: number) => void
+  onPageSizeChange?: (newPageSize: number) => void
   isLoading?: boolean
 }
 
@@ -17,6 +19,7 @@ export function PartnerPagination({
   totalCount,
   totalPages,
   onPageChange,
+  onPageSizeChange,
   isLoading = false,
 }: PartnerPaginationProps) {
   if (totalCount === 0) return null
@@ -63,6 +66,13 @@ export function PartnerPagination({
 
       {/* Pagination controls */}
       <div className="flex items-center gap-1">
+        {onPageSizeChange && (
+          <TableRowsInput
+            value={pageSize}
+            onChange={onPageSizeChange}
+            disabled={isLoading}
+          />
+        )}
         {/* First Page */}
         <button
           type="button"

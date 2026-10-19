@@ -31,6 +31,7 @@ import {
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { TableRowsInput } from "@/components/ui/table-rows-input"
 import { useToast } from "@/components/ui/use-toast"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
@@ -272,7 +273,12 @@ export default function ProductsToPurchaseTab({
   const [debouncedSearch, setDebouncedSearch] = useState("")
   const [activeTab, setActiveTab] = useState<"all" | "redeemed" | "order" | "postponed" | "reject">("all")
   const [page, setPage] = useState(1)
-  const pageSize = 25
+  const [pageSize, setPageSize] = useState(25)
+
+  const handlePageSizeChange = (newSize: number) => {
+    setPageSize(newSize)
+    setPage(1)
+  }
 
   // 250ms search debounce matching sales page
   useEffect(() => {
@@ -2824,6 +2830,11 @@ export default function ProductsToPurchaseTab({
             {Math.min(page * pageSize, sortedProducts.length)} of {sortedProducts.length} products
           </div>
           <div className="flex items-center gap-2">
+            <TableRowsInput
+              value={pageSize}
+              onChange={handlePageSizeChange}
+              disabled={loading}
+            />
             <Button
               variant="outline"
               size="sm"

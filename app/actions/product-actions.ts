@@ -1062,7 +1062,7 @@ export async function getPaginatedProducts({
   }
 
   const safePage = Math.max(1, Number(page) || 1)
-  const safePageSize = Math.min(200, Math.max(5, Number(pageSize) || 10))
+  const safePageSize = Math.min(1000, Math.max(1, Number(pageSize) || 25))
   const offset = (safePage - 1) * safePageSize
 
   try {

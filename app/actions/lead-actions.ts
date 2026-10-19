@@ -31,6 +31,7 @@ export async function logLeadActivity(tx: any, params: {
 
 export async function getLeads(params: {
   page: number;
+  pageSize?: number;
   search?: string;
   status?: string;
   assigned_filter?: string; // 'all', 'mine', 'unassigned'
@@ -42,7 +43,7 @@ export async function getLeads(params: {
   const companyId = session.companyId
   const deviceId = session.deviceId
 
-  const pageSize = 25
+  const pageSize = Math.max(1, Math.min(1000, Number(params.pageSize) || 25))
   const offset = (params.page - 1) * pageSize
 
   const searchObj = params.search ? `%${params.search}%` : null;

@@ -92,7 +92,7 @@ export async function getFilteredPartnerOrders(params: PartnerOrderFilterParams 
 
     const partnerId = session.staffId
     const page = Math.max(1, Number(params.page) || 1)
-    const pageSize = Math.min(100, Math.max(1, Number(params.pageSize) || 20))
+    const pageSize = Math.min(1000, Math.max(1, Number(params.pageSize) || 25))
     const offset = (page - 1) * pageSize
 
     const search = (params.search || "").trim()
