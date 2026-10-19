@@ -1069,6 +1069,18 @@ export async function getPaginatedProducts({
     const trimmedSearch = searchTerm ? searchTerm.trim() : ""
     const isIdSearch = trimmedSearch !== "" && /^\d+$/.test(trimmedSearch)
 
+    // Pre-resolve authorized company device IDs once to avoid slow nested correlated subqueries
+    let companyDeviceIds: number[] = []
+    if (userId) {
+      const deviceRows = await sql`
+        SELECT d2.id FROM devices d1 JOIN devices d2 ON d2.company_id = d1.company_id WHERE d1.id = ${userId}
+      `
+      companyDeviceIds = deviceRows.map((d: any) => Number(d.id))
+      if (companyDeviceIds.length === 0) {
+        companyDeviceIds = [userId]
+      }
+    }
+
     let totalCount = 0
     let products: any[] = []
 
@@ -1076,75 +1088,75 @@ export async function getPaginatedProducts({
       const productId = parseInt(trimmedSearch, 10)
       if (userId) {
         if (categoryId) {
-          const countRes = await sql`
-            SELECT COUNT(*)::int as total FROM products p
-            WHERE p.id = ${productId} AND p.category_id = ${categoryId}
-            AND p.created_by IN (
-              SELECT d2.id FROM devices d1 JOIN devices d2 ON d2.company_id = d1.company_id WHERE d1.id = ${userId}
-            )
-          `
+          const [countRes, prods] = await Promise.all([
+            sql`
+              SELECT COUNT(*)::int as total FROM products p
+              WHERE p.id = ${productId} AND p.category_id = ${categoryId}
+              AND p.created_by = ANY(${companyDeviceIds})
+            `,
+            sql`
+              SELECT p.*, c.name as category_name
+              FROM products p
+              LEFT JOIN product_categories c ON p.category_id = c.id
+              WHERE p.id = ${productId} AND p.category_id = ${categoryId}
+              AND p.created_by = ANY(${companyDeviceIds})
+              LIMIT ${safePageSize} OFFSET ${offset}
+            `
+          ])
           totalCount = countRes[0]?.total || 0
-
-          products = await sql`
-            SELECT p.*, c.name as category_name
-            FROM products p
-            LEFT JOIN product_categories c ON p.category_id = c.id
-            WHERE p.id = ${productId} AND p.category_id = ${categoryId}
-            AND p.created_by IN (
-              SELECT d2.id FROM devices d1 JOIN devices d2 ON d2.company_id = d1.company_id WHERE d1.id = ${userId}
-            )
-            LIMIT ${safePageSize} OFFSET ${offset}
-          `
+          products = prods
         } else {
-          const countRes = await sql`
-            SELECT COUNT(*)::int as total FROM products p
-            WHERE p.id = ${productId}
-            AND p.created_by IN (
-              SELECT d2.id FROM devices d1 JOIN devices d2 ON d2.company_id = d1.company_id WHERE d1.id = ${userId}
-            )
-          `
+          const [countRes, prods] = await Promise.all([
+            sql`
+              SELECT COUNT(*)::int as total FROM products p
+              WHERE p.id = ${productId}
+              AND p.created_by = ANY(${companyDeviceIds})
+            `,
+            sql`
+              SELECT p.*, c.name as category_name
+              FROM products p
+              LEFT JOIN product_categories c ON p.category_id = c.id
+              WHERE p.id = ${productId}
+              AND p.created_by = ANY(${companyDeviceIds})
+              LIMIT ${safePageSize} OFFSET ${offset}
+            `
+          ])
           totalCount = countRes[0]?.total || 0
-
-          products = await sql`
-            SELECT p.*, c.name as category_name
-            FROM products p
-            LEFT JOIN product_categories c ON p.category_id = c.id
-            WHERE p.id = ${productId}
-            AND p.created_by IN (
-              SELECT d2.id FROM devices d1 JOIN devices d2 ON d2.company_id = d1.company_id WHERE d1.id = ${userId}
-            )
-            LIMIT ${safePageSize} OFFSET ${offset}
-          `
+          products = prods
         }
       } else {
         if (categoryId) {
-          const countRes = await sql`
-            SELECT COUNT(*)::int as total FROM products p
-            WHERE p.id = ${productId} AND p.category_id = ${categoryId}
-          `
+          const [countRes, prods] = await Promise.all([
+            sql`
+              SELECT COUNT(*)::int as total FROM products p
+              WHERE p.id = ${productId} AND p.category_id = ${categoryId}
+            `,
+            sql`
+              SELECT p.*, c.name as category_name
+              FROM products p
+              LEFT JOIN product_categories c ON p.category_id = c.id
+              WHERE p.id = ${productId} AND p.category_id = ${categoryId}
+              LIMIT ${safePageSize} OFFSET ${offset}
+            `
+          ])
           totalCount = countRes[0]?.total || 0
-
-          products = await sql`
-            SELECT p.*, c.name as category_name
-            FROM products p
-            LEFT JOIN product_categories c ON p.category_id = c.id
-            WHERE p.id = ${productId} AND p.category_id = ${categoryId}
-            LIMIT ${safePageSize} OFFSET ${offset}
-          `
+          products = prods
         } else {
-          const countRes = await sql`
-            SELECT COUNT(*)::int as total FROM products p
-            WHERE p.id = ${productId}
-          `
+          const [countRes, prods] = await Promise.all([
+            sql`
+              SELECT COUNT(*)::int as total FROM products p
+              WHERE p.id = ${productId}
+            `,
+            sql`
+              SELECT p.*, c.name as category_name
+              FROM products p
+              LEFT JOIN product_categories c ON p.category_id = c.id
+              WHERE p.id = ${productId}
+              LIMIT ${safePageSize} OFFSET ${offset}
+            `
+          ])
           totalCount = countRes[0]?.total || 0
-
-          products = await sql`
-            SELECT p.*, c.name as category_name
-            FROM products p
-            LEFT JOIN product_categories c ON p.category_id = c.id
-            WHERE p.id = ${productId}
-            LIMIT ${safePageSize} OFFSET ${offset}
-          `
+          products = prods
         }
       }
     } else if (trimmedSearch !== "") {
@@ -1154,454 +1166,464 @@ export async function getPaginatedProducts({
 
       if (userId) {
         if (categoryId) {
-          const countRes = await sql`
-            SELECT COUNT(*)::int as total FROM products p
-            LEFT JOIN product_categories c ON p.category_id = c.id
-            WHERE p.created_by IN (
-              SELECT d2.id FROM devices d1 JOIN devices d2 ON d2.company_id = d1.company_id WHERE d1.id = ${userId}
-            )
-            AND p.category_id = ${categoryId}
-            AND (
-              REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
-              LOWER(p.name) LIKE ${rawSearchPattern} OR
-              REPLACE(LOWER(COALESCE(p.category, '')), ' ', '') LIKE ${searchPattern} OR
-              LOWER(COALESCE(p.category, '')) LIKE ${rawSearchPattern} OR
-              REPLACE(LOWER(COALESCE(c.name, '')), ' ', '') LIKE ${searchPattern} OR
-              REPLACE(LOWER(COALESCE(p.company_name, '')), ' ', '') LIKE ${searchPattern} OR
-              LOWER(COALESCE(p.company_name, '')) LIKE ${rawSearchPattern} OR
-              LOWER(COALESCE(p.barcode, '')) LIKE ${rawSearchPattern} OR
-              LOWER(COALESCE(p.shelf, '')) LIKE ${rawSearchPattern} OR
-              LOWER(COALESCE(p.description, '')) LIKE ${rawSearchPattern} OR
-              REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern} OR
-              EXISTS (
-                SELECT 1 FROM product_variants pv
-                WHERE pv.product_id = p.id AND (
-                  LOWER(pv.name) LIKE ${rawSearchPattern} OR
-                  REPLACE(LOWER(pv.name), ' ', '') LIKE ${searchPattern} OR
-                  LOWER(COALESCE(pv.sku, '')) LIKE ${rawSearchPattern} OR
-                  LOWER(COALESCE(pv.barcode, '')) LIKE ${rawSearchPattern} OR
-                  EXISTS (
-                    SELECT 1 FROM product_batches pb
-                    WHERE pb.product_variant_id = pv.id AND LOWER(pb.batch_no) LIKE ${rawSearchPattern}
+          const [countRes, prods] = await Promise.all([
+            sql`
+              SELECT COUNT(*)::int as total FROM products p
+              LEFT JOIN product_categories c ON p.category_id = c.id
+              WHERE p.created_by = ANY(${companyDeviceIds})
+              AND p.category_id = ${categoryId}
+              AND (
+                REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
+                LOWER(p.name) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(p.category, '')), ' ', '') LIKE ${searchPattern} OR
+                LOWER(COALESCE(p.category, '')) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(c.name, '')), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(COALESCE(p.company_name, '')), ' ', '') LIKE ${searchPattern} OR
+                LOWER(COALESCE(p.company_name, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.barcode, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.shelf, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.description, '')) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern} OR
+                EXISTS (
+                  SELECT 1 FROM product_variants pv
+                  WHERE pv.product_id = p.id AND (
+                    LOWER(pv.name) LIKE ${rawSearchPattern} OR
+                    REPLACE(LOWER(pv.name), ' ', '') LIKE ${searchPattern} OR
+                    LOWER(COALESCE(pv.sku, '')) LIKE ${rawSearchPattern} OR
+                    LOWER(COALESCE(pv.barcode, '')) LIKE ${rawSearchPattern} OR
+                    EXISTS (
+                      SELECT 1 FROM product_batches pb
+                      WHERE pb.product_variant_id = pv.id AND LOWER(pb.batch_no) LIKE ${rawSearchPattern}
+                    )
                   )
                 )
               )
-            )
-          `
+            `,
+            sql`
+              SELECT p.*, c.name as category_name
+              FROM products p
+              LEFT JOIN product_categories c ON p.category_id = c.id
+              LEFT JOIN (
+                SELECT pv.product_id, SUM(pbds.stock) as total_stock
+                FROM product_batch_device_stock pbds
+                JOIN product_batches pb ON pb.id = pbds.batch_id
+                JOIN product_variants pv ON pv.id = pb.product_variant_id
+                WHERE pbds.device_id = ${userId}
+                GROUP BY pv.product_id
+              ) pb_stock ON pb_stock.product_id = p.id
+              LEFT JOIN (
+                SELECT pds.product_id, SUM(pds.stock) as total_stock
+                FROM product_device_stock pds
+                WHERE pds.device_id = ${userId}
+                GROUP BY pds.product_id
+              ) pd_stock ON pd_stock.product_id = p.id
+              WHERE p.created_by = ANY(${companyDeviceIds})
+              AND p.category_id = ${categoryId}
+              AND (
+                REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
+                LOWER(p.name) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(p.category, '')), ' ', '') LIKE ${searchPattern} OR
+                LOWER(COALESCE(p.category, '')) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(c.name, '')), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(COALESCE(p.company_name, '')), ' ', '') LIKE ${searchPattern} OR
+                LOWER(COALESCE(p.company_name, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.barcode, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.shelf, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.description, '')) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern} OR
+                EXISTS (
+                  SELECT 1 FROM product_variants pv
+                  WHERE pv.product_id = p.id AND (
+                    LOWER(pv.name) LIKE ${rawSearchPattern} OR
+                    REPLACE(LOWER(pv.name), ' ', '') LIKE ${searchPattern} OR
+                    LOWER(COALESCE(pv.sku, '')) LIKE ${rawSearchPattern} OR
+                    LOWER(COALESCE(pv.barcode, '')) LIKE ${rawSearchPattern} OR
+                    EXISTS (
+                      SELECT 1 FROM product_batches pb
+                      WHERE pb.product_variant_id = pv.id AND LOWER(pb.batch_no) LIKE ${rawSearchPattern}
+                    )
+                  )
+                )
+              )
+              ORDER BY 
+                CASE 
+                  WHEN p.id::text = ${trimmedSearch} THEN 0 
+                  WHEN LOWER(p.name) = LOWER(${trimmedSearch}) THEN 1
+                  WHEN LOWER(p.name) LIKE ${prefixPattern} THEN 2
+                  WHEN LOWER(p.name) LIKE ${rawSearchPattern} THEN 3
+                  WHEN LOWER(COALESCE(p.barcode, '')) = LOWER(${trimmedSearch}) THEN 4
+                  ELSE 5 
+                END,
+                CASE WHEN COALESCE(pb_stock.total_stock, pd_stock.total_stock, 0) > 0 THEN 1 ELSE 0 END DESC,
+                COALESCE(pb_stock.total_stock, pd_stock.total_stock, 0) DESC,
+                p.created_at DESC
+              LIMIT ${safePageSize} OFFSET ${offset}
+            `
+          ])
           totalCount = countRes[0]?.total || 0
-
-          products = await sql`
-            SELECT p.*, c.name as category_name
-            FROM products p
-            LEFT JOIN product_categories c ON p.category_id = c.id
-            LEFT JOIN (
-              SELECT pv.product_id, SUM(pbds.stock) as total_stock
-              FROM product_batch_device_stock pbds
-              JOIN product_batches pb ON pb.id = pbds.batch_id
-              JOIN product_variants pv ON pv.id = pb.product_variant_id
-              WHERE pbds.device_id = ${userId}
-              GROUP BY pv.product_id
-            ) pb_stock ON pb_stock.product_id = p.id
-            LEFT JOIN (
-              SELECT pds.product_id, SUM(pds.stock) as total_stock
-              FROM product_device_stock pds
-              WHERE pds.device_id = ${userId}
-              GROUP BY pds.product_id
-            ) pd_stock ON pd_stock.product_id = p.id
-            WHERE p.created_by IN (
-              SELECT d2.id FROM devices d1 JOIN devices d2 ON d2.company_id = d1.company_id WHERE d1.id = ${userId}
-            )
-            AND p.category_id = ${categoryId}
-            AND (
-              REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
-              LOWER(p.name) LIKE ${rawSearchPattern} OR
-              REPLACE(LOWER(COALESCE(p.category, '')), ' ', '') LIKE ${searchPattern} OR
-              LOWER(COALESCE(p.category, '')) LIKE ${rawSearchPattern} OR
-              REPLACE(LOWER(COALESCE(c.name, '')), ' ', '') LIKE ${searchPattern} OR
-              REPLACE(LOWER(COALESCE(p.company_name, '')), ' ', '') LIKE ${searchPattern} OR
-              LOWER(COALESCE(p.company_name, '')) LIKE ${rawSearchPattern} OR
-              LOWER(COALESCE(p.barcode, '')) LIKE ${rawSearchPattern} OR
-              LOWER(COALESCE(p.shelf, '')) LIKE ${rawSearchPattern} OR
-              LOWER(COALESCE(p.description, '')) LIKE ${rawSearchPattern} OR
-              REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern} OR
-              EXISTS (
-                SELECT 1 FROM product_variants pv
-                WHERE pv.product_id = p.id AND (
-                  LOWER(pv.name) LIKE ${rawSearchPattern} OR
-                  REPLACE(LOWER(pv.name), ' ', '') LIKE ${searchPattern} OR
-                  LOWER(COALESCE(pv.sku, '')) LIKE ${rawSearchPattern} OR
-                  LOWER(COALESCE(pv.barcode, '')) LIKE ${rawSearchPattern} OR
-                  EXISTS (
-                    SELECT 1 FROM product_batches pb
-                    WHERE pb.product_variant_id = pv.id AND LOWER(pb.batch_no) LIKE ${rawSearchPattern}
-                  )
-                )
-              )
-            )
-            ORDER BY 
-              CASE 
-                WHEN p.id::text = ${trimmedSearch} THEN 0 
-                WHEN LOWER(p.name) = LOWER(${trimmedSearch}) THEN 1
-                WHEN LOWER(p.name) LIKE ${prefixPattern} THEN 2
-                WHEN LOWER(p.name) LIKE ${rawSearchPattern} THEN 3
-                WHEN LOWER(COALESCE(p.barcode, '')) = LOWER(${trimmedSearch}) THEN 4
-                ELSE 5 
-              END,
-              CASE WHEN COALESCE(pb_stock.total_stock, pd_stock.total_stock, 0) > 0 THEN 1 ELSE 0 END DESC,
-              COALESCE(pb_stock.total_stock, pd_stock.total_stock, 0) DESC,
-              p.created_at DESC
-            LIMIT ${safePageSize} OFFSET ${offset}
-          `
+          products = prods
         } else {
-          const countRes = await sql`
-            SELECT COUNT(*)::int as total FROM products p
-            LEFT JOIN product_categories c ON p.category_id = c.id
-            WHERE p.created_by IN (
-              SELECT d2.id FROM devices d1 JOIN devices d2 ON d2.company_id = d1.company_id WHERE d1.id = ${userId}
-            )
-            AND (
-              REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
-              LOWER(p.name) LIKE ${rawSearchPattern} OR
-              REPLACE(LOWER(COALESCE(p.category, '')), ' ', '') LIKE ${searchPattern} OR
-              LOWER(COALESCE(p.category, '')) LIKE ${rawSearchPattern} OR
-              REPLACE(LOWER(COALESCE(c.name, '')), ' ', '') LIKE ${searchPattern} OR
-              REPLACE(LOWER(COALESCE(p.company_name, '')), ' ', '') LIKE ${searchPattern} OR
-              LOWER(COALESCE(p.company_name, '')) LIKE ${rawSearchPattern} OR
-              LOWER(COALESCE(p.barcode, '')) LIKE ${rawSearchPattern} OR
-              LOWER(COALESCE(p.shelf, '')) LIKE ${rawSearchPattern} OR
-              LOWER(COALESCE(p.description, '')) LIKE ${rawSearchPattern} OR
-              REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern} OR
-              EXISTS (
-                SELECT 1 FROM product_variants pv
-                WHERE pv.product_id = p.id AND (
-                  LOWER(pv.name) LIKE ${rawSearchPattern} OR
-                  REPLACE(LOWER(pv.name), ' ', '') LIKE ${searchPattern} OR
-                  LOWER(COALESCE(pv.sku, '')) LIKE ${rawSearchPattern} OR
-                  LOWER(COALESCE(pv.barcode, '')) LIKE ${rawSearchPattern} OR
-                  EXISTS (
-                    SELECT 1 FROM product_batches pb
-                    WHERE pb.product_variant_id = pv.id AND LOWER(pb.batch_no) LIKE ${rawSearchPattern}
+          const [countRes, prods] = await Promise.all([
+            sql`
+              SELECT COUNT(*)::int as total FROM products p
+              LEFT JOIN product_categories c ON p.category_id = c.id
+              WHERE p.created_by = ANY(${companyDeviceIds})
+              AND (
+                REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
+                LOWER(p.name) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(p.category, '')), ' ', '') LIKE ${searchPattern} OR
+                LOWER(COALESCE(p.category, '')) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(c.name, '')), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(COALESCE(p.company_name, '')), ' ', '') LIKE ${searchPattern} OR
+                LOWER(COALESCE(p.company_name, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.barcode, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.shelf, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.description, '')) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern} OR
+                EXISTS (
+                  SELECT 1 FROM product_variants pv
+                  WHERE pv.product_id = p.id AND (
+                    LOWER(pv.name) LIKE ${rawSearchPattern} OR
+                    REPLACE(LOWER(pv.name), ' ', '') LIKE ${searchPattern} OR
+                    LOWER(COALESCE(pv.sku, '')) LIKE ${rawSearchPattern} OR
+                    LOWER(COALESCE(pv.barcode, '')) LIKE ${rawSearchPattern} OR
+                    EXISTS (
+                      SELECT 1 FROM product_batches pb
+                      WHERE pb.product_variant_id = pv.id AND LOWER(pb.batch_no) LIKE ${rawSearchPattern}
+                    )
                   )
                 )
               )
-            )
-          `
+            `,
+            sql`
+              SELECT p.*, c.name as category_name
+              FROM products p
+              LEFT JOIN product_categories c ON p.category_id = c.id
+              LEFT JOIN (
+                SELECT pv.product_id, SUM(pbds.stock) as total_stock
+                FROM product_batch_device_stock pbds
+                JOIN product_batches pb ON pb.id = pbds.batch_id
+                JOIN product_variants pv ON pv.id = pb.product_variant_id
+                WHERE pbds.device_id = ${userId}
+                GROUP BY pv.product_id
+              ) pb_stock ON pb_stock.product_id = p.id
+              LEFT JOIN (
+                SELECT pds.product_id, SUM(pds.stock) as total_stock
+                FROM product_device_stock pds
+                WHERE pds.device_id = ${userId}
+                GROUP BY pds.product_id
+              ) pd_stock ON pd_stock.product_id = p.id
+              WHERE p.created_by = ANY(${companyDeviceIds})
+              AND (
+                REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
+                LOWER(p.name) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(p.category, '')), ' ', '') LIKE ${searchPattern} OR
+                LOWER(COALESCE(p.category, '')) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(c.name, '')), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(COALESCE(p.company_name, '')), ' ', '') LIKE ${searchPattern} OR
+                LOWER(COALESCE(p.company_name, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.barcode, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.shelf, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.description, '')) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern} OR
+                EXISTS (
+                  SELECT 1 FROM product_variants pv
+                  WHERE pv.product_id = p.id AND (
+                    LOWER(pv.name) LIKE ${rawSearchPattern} OR
+                    REPLACE(LOWER(pv.name), ' ', '') LIKE ${searchPattern} OR
+                    LOWER(COALESCE(pv.sku, '')) LIKE ${rawSearchPattern} OR
+                    LOWER(COALESCE(pv.barcode, '')) LIKE ${rawSearchPattern} OR
+                    EXISTS (
+                      SELECT 1 FROM product_batches pb
+                      WHERE pb.product_variant_id = pv.id AND LOWER(pb.batch_no) LIKE ${rawSearchPattern}
+                    )
+                  )
+                )
+              )
+              ORDER BY 
+                CASE 
+                  WHEN p.id::text = ${trimmedSearch} THEN 0 
+                  WHEN LOWER(p.name) = LOWER(${trimmedSearch}) THEN 1
+                  WHEN LOWER(p.name) LIKE ${prefixPattern} THEN 2
+                  WHEN LOWER(p.name) LIKE ${rawSearchPattern} THEN 3
+                  WHEN LOWER(COALESCE(p.barcode, '')) = LOWER(${trimmedSearch}) THEN 4
+                  ELSE 5 
+                END,
+                CASE WHEN COALESCE(pb_stock.total_stock, pd_stock.total_stock, 0) > 0 THEN 1 ELSE 0 END DESC,
+                COALESCE(pb_stock.total_stock, pd_stock.total_stock, 0) DESC,
+                p.created_at DESC
+              LIMIT ${safePageSize} OFFSET ${offset}
+            `
+          ])
           totalCount = countRes[0]?.total || 0
-
-          products = await sql`
-            SELECT p.*, c.name as category_name
-            FROM products p
-            LEFT JOIN product_categories c ON p.category_id = c.id
-            LEFT JOIN (
-              SELECT pv.product_id, SUM(pbds.stock) as total_stock
-              FROM product_batch_device_stock pbds
-              JOIN product_batches pb ON pb.id = pbds.batch_id
-              JOIN product_variants pv ON pv.id = pb.product_variant_id
-              WHERE pbds.device_id = ${userId}
-              GROUP BY pv.product_id
-            ) pb_stock ON pb_stock.product_id = p.id
-            LEFT JOIN (
-              SELECT pds.product_id, SUM(pds.stock) as total_stock
-              FROM product_device_stock pds
-              WHERE pds.device_id = ${userId}
-              GROUP BY pds.product_id
-            ) pd_stock ON pd_stock.product_id = p.id
-            WHERE p.created_by IN (
-              SELECT d2.id FROM devices d1 JOIN devices d2 ON d2.company_id = d1.company_id WHERE d1.id = ${userId}
-            )
-            AND (
-              REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
-              LOWER(p.name) LIKE ${rawSearchPattern} OR
-              REPLACE(LOWER(COALESCE(p.category, '')), ' ', '') LIKE ${searchPattern} OR
-              LOWER(COALESCE(p.category, '')) LIKE ${rawSearchPattern} OR
-              REPLACE(LOWER(COALESCE(c.name, '')), ' ', '') LIKE ${searchPattern} OR
-              REPLACE(LOWER(COALESCE(p.company_name, '')), ' ', '') LIKE ${searchPattern} OR
-              LOWER(COALESCE(p.company_name, '')) LIKE ${rawSearchPattern} OR
-              LOWER(COALESCE(p.barcode, '')) LIKE ${rawSearchPattern} OR
-              LOWER(COALESCE(p.shelf, '')) LIKE ${rawSearchPattern} OR
-              LOWER(COALESCE(p.description, '')) LIKE ${rawSearchPattern} OR
-              REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern} OR
-              EXISTS (
-                SELECT 1 FROM product_variants pv
-                WHERE pv.product_id = p.id AND (
-                  LOWER(pv.name) LIKE ${rawSearchPattern} OR
-                  REPLACE(LOWER(pv.name), ' ', '') LIKE ${searchPattern} OR
-                  LOWER(COALESCE(pv.sku, '')) LIKE ${rawSearchPattern} OR
-                  LOWER(COALESCE(pv.barcode, '')) LIKE ${rawSearchPattern} OR
-                  EXISTS (
-                    SELECT 1 FROM product_batches pb
-                    WHERE pb.product_variant_id = pv.id AND LOWER(pb.batch_no) LIKE ${rawSearchPattern}
-                  )
-                )
-              )
-            )
-            ORDER BY 
-              CASE 
-                WHEN p.id::text = ${trimmedSearch} THEN 0 
-                WHEN LOWER(p.name) = LOWER(${trimmedSearch}) THEN 1
-                WHEN LOWER(p.name) LIKE ${prefixPattern} THEN 2
-                WHEN LOWER(p.name) LIKE ${rawSearchPattern} THEN 3
-                WHEN LOWER(COALESCE(p.barcode, '')) = LOWER(${trimmedSearch}) THEN 4
-                ELSE 5 
-              END,
-              CASE WHEN COALESCE(pb_stock.total_stock, pd_stock.total_stock, 0) > 0 THEN 1 ELSE 0 END DESC,
-              COALESCE(pb_stock.total_stock, pd_stock.total_stock, 0) DESC,
-              p.created_at DESC
-            LIMIT ${safePageSize} OFFSET ${offset}
-          `
+          products = prods
         }
       } else {
         if (categoryId) {
-          const countRes = await sql`
-            SELECT COUNT(*)::int as total FROM products p
-            LEFT JOIN product_categories c ON p.category_id = c.id
-            WHERE p.category_id = ${categoryId}
-            AND (
-              REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
-              LOWER(p.name) LIKE ${rawSearchPattern} OR
-              REPLACE(LOWER(COALESCE(p.category, '')), ' ', '') LIKE ${searchPattern} OR
-              LOWER(COALESCE(p.category, '')) LIKE ${rawSearchPattern} OR
-              REPLACE(LOWER(COALESCE(c.name, '')), ' ', '') LIKE ${searchPattern} OR
-              REPLACE(LOWER(COALESCE(p.company_name, '')), ' ', '') LIKE ${searchPattern} OR
-              LOWER(COALESCE(p.company_name, '')) LIKE ${rawSearchPattern} OR
-              LOWER(COALESCE(p.barcode, '')) LIKE ${rawSearchPattern} OR
-              LOWER(COALESCE(p.shelf, '')) LIKE ${rawSearchPattern} OR
-              LOWER(COALESCE(p.description, '')) LIKE ${rawSearchPattern} OR
-              REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern} OR
-              EXISTS (
-                SELECT 1 FROM product_variants pv
-                WHERE pv.product_id = p.id AND (
-                  LOWER(pv.name) LIKE ${rawSearchPattern} OR
-                  REPLACE(LOWER(pv.name), ' ', '') LIKE ${searchPattern} OR
-                  LOWER(COALESCE(pv.sku, '')) LIKE ${rawSearchPattern} OR
-                  LOWER(COALESCE(pv.barcode, '')) LIKE ${rawSearchPattern} OR
-                  EXISTS (
-                    SELECT 1 FROM product_batches pb
-                    WHERE pb.product_variant_id = pv.id AND LOWER(pb.batch_no) LIKE ${rawSearchPattern}
+          const [countRes, prods] = await Promise.all([
+            sql`
+              SELECT COUNT(*)::int as total FROM products p
+              LEFT JOIN product_categories c ON p.category_id = c.id
+              WHERE p.category_id = ${categoryId}
+              AND (
+                REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
+                LOWER(p.name) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(p.category, '')), ' ', '') LIKE ${searchPattern} OR
+                LOWER(COALESCE(p.category, '')) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(c.name, '')), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(COALESCE(p.company_name, '')), ' ', '') LIKE ${searchPattern} OR
+                LOWER(COALESCE(p.company_name, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.barcode, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.shelf, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.description, '')) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern} OR
+                EXISTS (
+                  SELECT 1 FROM product_variants pv
+                  WHERE pv.product_id = p.id AND (
+                    LOWER(pv.name) LIKE ${rawSearchPattern} OR
+                    REPLACE(LOWER(pv.name), ' ', '') LIKE ${searchPattern} OR
+                    LOWER(COALESCE(pv.sku, '')) LIKE ${rawSearchPattern} OR
+                    LOWER(COALESCE(pv.barcode, '')) LIKE ${rawSearchPattern} OR
+                    EXISTS (
+                      SELECT 1 FROM product_batches pb
+                      WHERE pb.product_variant_id = pv.id AND LOWER(pb.batch_no) LIKE ${rawSearchPattern}
+                    )
                   )
                 )
               )
-            )
-          `
+            `,
+            sql`
+              SELECT p.*, c.name as category_name
+              FROM products p
+              LEFT JOIN product_categories c ON p.category_id = c.id
+              WHERE p.category_id = ${categoryId}
+              AND (
+                REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
+                LOWER(p.name) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(p.category, '')), ' ', '') LIKE ${searchPattern} OR
+                LOWER(COALESCE(p.category, '')) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(c.name, '')), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(COALESCE(p.company_name, '')), ' ', '') LIKE ${searchPattern} OR
+                LOWER(COALESCE(p.company_name, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.barcode, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.shelf, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.description, '')) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern} OR
+                EXISTS (
+                  SELECT 1 FROM product_variants pv
+                  WHERE pv.product_id = p.id AND (
+                    LOWER(pv.name) LIKE ${rawSearchPattern} OR
+                    REPLACE(LOWER(pv.name), ' ', '') LIKE ${searchPattern} OR
+                    LOWER(COALESCE(pv.sku, '')) LIKE ${rawSearchPattern} OR
+                    LOWER(COALESCE(pv.barcode, '')) LIKE ${rawSearchPattern} OR
+                    EXISTS (
+                      SELECT 1 FROM product_batches pb
+                      WHERE pb.product_variant_id = pv.id AND LOWER(pb.batch_no) LIKE ${rawSearchPattern}
+                    )
+                  )
+                )
+              )
+              ORDER BY 
+                CASE 
+                  WHEN p.id::text = ${trimmedSearch} THEN 0 
+                  WHEN LOWER(p.name) = LOWER(${trimmedSearch}) THEN 1
+                  WHEN LOWER(p.name) LIKE ${prefixPattern} THEN 2
+                  WHEN LOWER(p.name) LIKE ${rawSearchPattern} THEN 3
+                  WHEN LOWER(COALESCE(p.barcode, '')) = LOWER(${trimmedSearch}) THEN 4
+                  ELSE 5 
+                END,
+                p.created_at DESC
+              LIMIT ${safePageSize} OFFSET ${offset}
+            `
+          ])
           totalCount = countRes[0]?.total || 0
-
-          products = await sql`
-            SELECT p.*, c.name as category_name
-            FROM products p
-            LEFT JOIN product_categories c ON p.category_id = c.id
-            WHERE p.category_id = ${categoryId}
-            AND (
-              REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
-              LOWER(p.name) LIKE ${rawSearchPattern} OR
-              REPLACE(LOWER(COALESCE(p.category, '')), ' ', '') LIKE ${searchPattern} OR
-              LOWER(COALESCE(p.category, '')) LIKE ${rawSearchPattern} OR
-              REPLACE(LOWER(COALESCE(c.name, '')), ' ', '') LIKE ${searchPattern} OR
-              REPLACE(LOWER(COALESCE(p.company_name, '')), ' ', '') LIKE ${searchPattern} OR
-              LOWER(COALESCE(p.company_name, '')) LIKE ${rawSearchPattern} OR
-              LOWER(COALESCE(p.barcode, '')) LIKE ${rawSearchPattern} OR
-              LOWER(COALESCE(p.shelf, '')) LIKE ${rawSearchPattern} OR
-              LOWER(COALESCE(p.description, '')) LIKE ${rawSearchPattern} OR
-              REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern} OR
-              EXISTS (
-                SELECT 1 FROM product_variants pv
-                WHERE pv.product_id = p.id AND (
-                  LOWER(pv.name) LIKE ${rawSearchPattern} OR
-                  REPLACE(LOWER(pv.name), ' ', '') LIKE ${searchPattern} OR
-                  LOWER(COALESCE(pv.sku, '')) LIKE ${rawSearchPattern} OR
-                  LOWER(COALESCE(pv.barcode, '')) LIKE ${rawSearchPattern} OR
-                  EXISTS (
-                    SELECT 1 FROM product_batches pb
-                    WHERE pb.product_variant_id = pv.id AND LOWER(pb.batch_no) LIKE ${rawSearchPattern}
-                  )
-                )
-              )
-            )
-            ORDER BY 
-              CASE 
-                WHEN p.id::text = ${trimmedSearch} THEN 0 
-                WHEN LOWER(p.name) = LOWER(${trimmedSearch}) THEN 1
-                WHEN LOWER(p.name) LIKE ${prefixPattern} THEN 2
-                WHEN LOWER(p.name) LIKE ${rawSearchPattern} THEN 3
-                WHEN LOWER(COALESCE(p.barcode, '')) = LOWER(${trimmedSearch}) THEN 4
-                ELSE 5 
-              END,
-              p.created_at DESC
-            LIMIT ${safePageSize} OFFSET ${offset}
-          `
+          products = prods
         } else {
-          const countRes = await sql`
-            SELECT COUNT(*)::int as total FROM products p
-            LEFT JOIN product_categories c ON p.category_id = c.id
-            WHERE (
-              REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
-              LOWER(p.name) LIKE ${rawSearchPattern} OR
-              REPLACE(LOWER(COALESCE(p.category, '')), ' ', '') LIKE ${searchPattern} OR
-              LOWER(COALESCE(p.category, '')) LIKE ${rawSearchPattern} OR
-              REPLACE(LOWER(COALESCE(c.name, '')), ' ', '') LIKE ${searchPattern} OR
-              REPLACE(LOWER(COALESCE(p.company_name, '')), ' ', '') LIKE ${searchPattern} OR
-              LOWER(COALESCE(p.company_name, '')) LIKE ${rawSearchPattern} OR
-              LOWER(COALESCE(p.barcode, '')) LIKE ${rawSearchPattern} OR
-              LOWER(COALESCE(p.shelf, '')) LIKE ${rawSearchPattern} OR
-              LOWER(COALESCE(p.description, '')) LIKE ${rawSearchPattern} OR
-              REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern} OR
-              EXISTS (
-                SELECT 1 FROM product_variants pv
-                WHERE pv.product_id = p.id AND (
-                  LOWER(pv.name) LIKE ${rawSearchPattern} OR
-                  REPLACE(LOWER(pv.name), ' ', '') LIKE ${searchPattern} OR
-                  LOWER(COALESCE(pv.sku, '')) LIKE ${rawSearchPattern} OR
-                  LOWER(COALESCE(pv.barcode, '')) LIKE ${rawSearchPattern} OR
-                  EXISTS (
-                    SELECT 1 FROM product_batches pb
-                    WHERE pb.product_variant_id = pv.id AND LOWER(pb.batch_no) LIKE ${rawSearchPattern}
+          const [countRes, prods] = await Promise.all([
+            sql`
+              SELECT COUNT(*)::int as total FROM products p
+              LEFT JOIN product_categories c ON p.category_id = c.id
+              WHERE (
+                REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
+                LOWER(p.name) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(p.category, '')), ' ', '') LIKE ${searchPattern} OR
+                LOWER(COALESCE(p.category, '')) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(c.name, '')), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(COALESCE(p.company_name, '')), ' ', '') LIKE ${searchPattern} OR
+                LOWER(COALESCE(p.company_name, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.barcode, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.shelf, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.description, '')) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern} OR
+                EXISTS (
+                  SELECT 1 FROM product_variants pv
+                  WHERE pv.product_id = p.id AND (
+                    LOWER(pv.name) LIKE ${rawSearchPattern} OR
+                    REPLACE(LOWER(pv.name), ' ', '') LIKE ${searchPattern} OR
+                    LOWER(COALESCE(pv.sku, '')) LIKE ${rawSearchPattern} OR
+                    LOWER(COALESCE(pv.barcode, '')) LIKE ${rawSearchPattern} OR
+                    EXISTS (
+                      SELECT 1 FROM product_batches pb
+                      WHERE pb.product_variant_id = pv.id AND LOWER(pb.batch_no) LIKE ${rawSearchPattern}
+                    )
                   )
                 )
               )
-            )
-          `
+            `,
+            sql`
+              SELECT p.*, c.name as category_name
+              FROM products p
+              LEFT JOIN product_categories c ON p.category_id = c.id
+              WHERE (
+                REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
+                LOWER(p.name) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(p.category, '')), ' ', '') LIKE ${searchPattern} OR
+                LOWER(COALESCE(p.category, '')) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(c.name, '')), ' ', '') LIKE ${searchPattern} OR
+                REPLACE(LOWER(COALESCE(p.company_name, '')), ' ', '') LIKE ${searchPattern} OR
+                LOWER(COALESCE(p.company_name, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.barcode, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.shelf, '')) LIKE ${rawSearchPattern} OR
+                LOWER(COALESCE(p.description, '')) LIKE ${rawSearchPattern} OR
+                REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern} OR
+                EXISTS (
+                  SELECT 1 FROM product_variants pv
+                  WHERE pv.product_id = p.id AND (
+                    LOWER(pv.name) LIKE ${rawSearchPattern} OR
+                    REPLACE(LOWER(pv.name), ' ', '') LIKE ${searchPattern} OR
+                    LOWER(COALESCE(pv.sku, '')) LIKE ${rawSearchPattern} OR
+                    LOWER(COALESCE(pv.barcode, '')) LIKE ${rawSearchPattern} OR
+                    EXISTS (
+                      SELECT 1 FROM product_batches pb
+                      WHERE pb.product_variant_id = pv.id AND LOWER(pb.batch_no) LIKE ${rawSearchPattern}
+                    )
+                  )
+                )
+              )
+              ORDER BY 
+                CASE 
+                  WHEN p.id::text = ${trimmedSearch} THEN 0 
+                  WHEN LOWER(p.name) = LOWER(${trimmedSearch}) THEN 1
+                  WHEN LOWER(p.name) LIKE ${prefixPattern} THEN 2
+                  WHEN LOWER(p.name) LIKE ${rawSearchPattern} THEN 3
+                  WHEN LOWER(COALESCE(p.barcode, '')) = LOWER(${trimmedSearch}) THEN 4
+                  ELSE 5 
+                END,
+                p.created_at DESC
+              LIMIT ${safePageSize} OFFSET ${offset}
+            `
+          ])
           totalCount = countRes[0]?.total || 0
-
-          products = await sql`
-            SELECT p.*, c.name as category_name
-            FROM products p
-            LEFT JOIN product_categories c ON p.category_id = c.id
-            WHERE (
-              REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
-              LOWER(p.name) LIKE ${rawSearchPattern} OR
-              REPLACE(LOWER(COALESCE(p.category, '')), ' ', '') LIKE ${searchPattern} OR
-              LOWER(COALESCE(p.category, '')) LIKE ${rawSearchPattern} OR
-              REPLACE(LOWER(COALESCE(c.name, '')), ' ', '') LIKE ${searchPattern} OR
-              REPLACE(LOWER(COALESCE(p.company_name, '')), ' ', '') LIKE ${searchPattern} OR
-              LOWER(COALESCE(p.company_name, '')) LIKE ${rawSearchPattern} OR
-              LOWER(COALESCE(p.barcode, '')) LIKE ${rawSearchPattern} OR
-              LOWER(COALESCE(p.shelf, '')) LIKE ${rawSearchPattern} OR
-              LOWER(COALESCE(p.description, '')) LIKE ${rawSearchPattern} OR
-              REPLACE(LOWER(COALESCE(p.suitable_for, '')), ' ', '') LIKE ${searchPattern} OR
-              EXISTS (
-                SELECT 1 FROM product_variants pv
-                WHERE pv.product_id = p.id AND (
-                  LOWER(pv.name) LIKE ${rawSearchPattern} OR
-                  REPLACE(LOWER(pv.name), ' ', '') LIKE ${searchPattern} OR
-                  LOWER(COALESCE(pv.sku, '')) LIKE ${rawSearchPattern} OR
-                  LOWER(COALESCE(pv.barcode, '')) LIKE ${rawSearchPattern} OR
-                  EXISTS (
-                    SELECT 1 FROM product_batches pb
-                    WHERE pb.product_variant_id = pv.id AND LOWER(pb.batch_no) LIKE ${rawSearchPattern}
-                  )
-                )
-              )
-            )
-            ORDER BY p.created_at DESC
-            LIMIT ${safePageSize} OFFSET ${offset}
-          `
+          products = prods
         }
       }
     } else {
+      // Empty search (clearing search or default view)
       if (userId) {
         if (categoryId) {
-          const countRes = await sql`
-            SELECT COUNT(*)::int as total FROM products p
-            WHERE p.created_by IN (
-              SELECT d2.id FROM devices d1 JOIN devices d2 ON d2.company_id = d1.company_id WHERE d1.id = ${userId}
-            )
-            AND p.category_id = ${categoryId}
-          `
+          const [countRes, prods] = await Promise.all([
+            sql`
+              SELECT COUNT(*)::int as total FROM products p
+              WHERE p.created_by = ANY(${companyDeviceIds})
+              AND p.category_id = ${categoryId}
+            `,
+            sql`
+              SELECT p.*, c.name as category_name
+              FROM products p
+              LEFT JOIN product_categories c ON p.category_id = c.id
+              LEFT JOIN (
+                SELECT pv.product_id, SUM(pbds.stock) as total_stock
+                FROM product_batch_device_stock pbds
+                JOIN product_batches pb ON pb.id = pbds.batch_id
+                JOIN product_variants pv ON pv.id = pb.product_variant_id
+                WHERE pbds.device_id = ${userId}
+                GROUP BY pv.product_id
+              ) pb_stock ON pb_stock.product_id = p.id
+              LEFT JOIN (
+                SELECT pds.product_id, SUM(pds.stock) as total_stock
+                FROM product_device_stock pds
+                WHERE pds.device_id = ${userId}
+                GROUP BY pds.product_id
+              ) pd_stock ON pd_stock.product_id = p.id
+              WHERE p.created_by = ANY(${companyDeviceIds})
+              AND p.category_id = ${categoryId}
+              ORDER BY 
+                CASE WHEN COALESCE(pb_stock.total_stock, pd_stock.total_stock, 0) > 0 THEN 1 ELSE 0 END DESC,
+                COALESCE(pb_stock.total_stock, pd_stock.total_stock, 0) DESC,
+                p.created_at DESC
+              LIMIT ${safePageSize} OFFSET ${offset}
+            `
+          ])
           totalCount = countRes[0]?.total || 0
-
-          products = await sql`
-            SELECT p.*, c.name as category_name
-            FROM products p
-            LEFT JOIN product_categories c ON p.category_id = c.id
-            LEFT JOIN (
-              SELECT pv.product_id, SUM(pbds.stock) as total_stock
-              FROM product_batch_device_stock pbds
-              JOIN product_batches pb ON pb.id = pbds.batch_id
-              JOIN product_variants pv ON pv.id = pb.product_variant_id
-              WHERE pbds.device_id = ${userId}
-              GROUP BY pv.product_id
-            ) pb_stock ON pb_stock.product_id = p.id
-            LEFT JOIN (
-              SELECT pds.product_id, SUM(pds.stock) as total_stock
-              FROM product_device_stock pds
-              WHERE pds.device_id = ${userId}
-              GROUP BY pds.product_id
-            ) pd_stock ON pd_stock.product_id = p.id
-            WHERE p.created_by IN (
-              SELECT d2.id FROM devices d1 JOIN devices d2 ON d2.company_id = d1.company_id WHERE d1.id = ${userId}
-            )
-            AND p.category_id = ${categoryId}
-            ORDER BY 
-              CASE WHEN COALESCE(pb_stock.total_stock, pd_stock.total_stock, 0) > 0 THEN 1 ELSE 0 END DESC,
-              COALESCE(pb_stock.total_stock, pd_stock.total_stock, 0) DESC,
-              p.created_at DESC
-            LIMIT ${safePageSize} OFFSET ${offset}
-          `
+          products = prods
         } else {
-          const countRes = await sql`
-            SELECT COUNT(*)::int as total FROM products p
-            WHERE p.created_by IN (
-              SELECT d2.id FROM devices d1 JOIN devices d2 ON d2.company_id = d1.company_id WHERE d1.id = ${userId}
-            )
-          `
+          const [countRes, prods] = await Promise.all([
+            sql`
+              SELECT COUNT(*)::int as total FROM products p
+              WHERE p.created_by = ANY(${companyDeviceIds})
+            `,
+            sql`
+              SELECT p.*, c.name as category_name
+              FROM products p
+              LEFT JOIN product_categories c ON p.category_id = c.id
+              LEFT JOIN (
+                SELECT pv.product_id, SUM(pbds.stock) as total_stock
+                FROM product_batch_device_stock pbds
+                JOIN product_batches pb ON pb.id = pbds.batch_id
+                JOIN product_variants pv ON pv.id = pb.product_variant_id
+                WHERE pbds.device_id = ${userId}
+                GROUP BY pv.product_id
+              ) pb_stock ON pb_stock.product_id = p.id
+              LEFT JOIN (
+                SELECT pds.product_id, SUM(pds.stock) as total_stock
+                FROM product_device_stock pds
+                WHERE pds.device_id = ${userId}
+                GROUP BY pds.product_id
+              ) pd_stock ON pd_stock.product_id = p.id
+              WHERE p.created_by = ANY(${companyDeviceIds})
+              ORDER BY 
+                CASE WHEN COALESCE(pb_stock.total_stock, pd_stock.total_stock, 0) > 0 THEN 1 ELSE 0 END DESC,
+                COALESCE(pb_stock.total_stock, pd_stock.total_stock, 0) DESC,
+                p.created_at DESC
+              LIMIT ${safePageSize} OFFSET ${offset}
+            `
+          ])
           totalCount = countRes[0]?.total || 0
-
-          products = await sql`
-            SELECT p.*, c.name as category_name
-            FROM products p
-            LEFT JOIN product_categories c ON p.category_id = c.id
-            LEFT JOIN (
-              SELECT pv.product_id, SUM(pbds.stock) as total_stock
-              FROM product_batch_device_stock pbds
-              JOIN product_batches pb ON pb.id = pbds.batch_id
-              JOIN product_variants pv ON pv.id = pb.product_variant_id
-              WHERE pbds.device_id = ${userId}
-              GROUP BY pv.product_id
-            ) pb_stock ON pb_stock.product_id = p.id
-            LEFT JOIN (
-              SELECT pds.product_id, SUM(pds.stock) as total_stock
-              FROM product_device_stock pds
-              WHERE pds.device_id = ${userId}
-              GROUP BY pds.product_id
-            ) pd_stock ON pd_stock.product_id = p.id
-            WHERE p.created_by IN (
-              SELECT d2.id FROM devices d1 JOIN devices d2 ON d2.company_id = d1.company_id WHERE d1.id = ${userId}
-            )
-            ORDER BY 
-              CASE WHEN COALESCE(pb_stock.total_stock, pd_stock.total_stock, 0) > 0 THEN 1 ELSE 0 END DESC,
-              COALESCE(pb_stock.total_stock, pd_stock.total_stock, 0) DESC,
-              p.created_at DESC
-            LIMIT ${safePageSize} OFFSET ${offset}
-          `
+          products = prods
         }
       } else {
         if (categoryId) {
-          const countRes = await sql`
-            SELECT COUNT(*)::int as total FROM products p
-            WHERE p.category_id = ${categoryId}
-          `
+          const [countRes, prods] = await Promise.all([
+            sql`
+              SELECT COUNT(*)::int as total FROM products p
+              WHERE p.category_id = ${categoryId}
+            `,
+            sql`
+              SELECT p.*, c.name as category_name
+              FROM products p
+              LEFT JOIN product_categories c ON p.category_id = c.id
+              WHERE p.category_id = ${categoryId}
+              ORDER BY p.created_at DESC
+              LIMIT ${safePageSize} OFFSET ${offset}
+            `
+          ])
           totalCount = countRes[0]?.total || 0
-
-          products = await sql`
-            SELECT p.*, c.name as category_name
-            FROM products p
-            LEFT JOIN product_categories c ON p.category_id = c.id
-            WHERE p.category_id = ${categoryId}
-            ORDER BY p.created_at DESC
-            LIMIT ${safePageSize} OFFSET ${offset}
-          `
+          products = prods
         } else {
-          const countRes = await sql`
-            SELECT COUNT(*)::int as total FROM products p
-          `
+          const [countRes, prods] = await Promise.all([
+            sql`
+              SELECT COUNT(*)::int as total FROM products p
+            `,
+            sql`
+              SELECT p.*, c.name as category_name
+              FROM products p
+              LEFT JOIN product_categories c ON p.category_id = c.id
+              ORDER BY p.created_at DESC
+              LIMIT ${safePageSize} OFFSET ${offset}
+            `
+          ])
           totalCount = countRes[0]?.total || 0
-
-          products = await sql`
-            SELECT p.*, c.name as category_name
-            FROM products p
-            LEFT JOIN product_categories c ON p.category_id = c.id
-            ORDER BY p.created_at DESC
-            LIMIT ${safePageSize} OFFSET ${offset}
-          `
+          products = prods
         }
       }
     }
@@ -1609,94 +1631,94 @@ export async function getPaginatedProducts({
     const productIds: number[] = (products as any[]).map((p: any) => Number(p.id))
     let stockMap = new Map<number, number>()
     let companyTotalStockMap = new Map<number, number>()
-
-    if (userId && productIds.length > 0) {
-      const deviceStocks = await sql`
-        SELECT 
-          p.id AS product_id,
-          COALESCE(pb_stock.total_stock, pd_stock.total_stock, 0) AS stock
-        FROM products p
-        LEFT JOIN (
-          SELECT pv.product_id, SUM(pbds.stock) as total_stock
-          FROM product_batch_device_stock pbds
-          JOIN product_batches pb ON pb.id = pbds.batch_id
-          JOIN product_variants pv ON pv.id = pb.product_variant_id
-          WHERE pbds.device_id = ${userId} AND pv.product_id = ANY(${productIds})
-          GROUP BY pv.product_id
-        ) pb_stock ON pb_stock.product_id = p.id
-        LEFT JOIN (
-          SELECT pds.product_id, SUM(pds.stock) as total_stock
-          FROM product_device_stock pds
-          WHERE pds.device_id = ${userId} AND pds.product_id = ANY(${productIds})
-          GROUP BY pds.product_id
-        ) pd_stock ON pd_stock.product_id = p.id
-        WHERE p.id = ANY(${productIds})
-      `
-      stockMap = new Map<number, number>(deviceStocks.map((row: any) => [Number(row.product_id), Number(row.stock)]))
-
-      const companyDeviceStocks = await sql`
-        SELECT 
-          p.id AS product_id,
-          COALESCE(pb_stock.total_stock, pd_stock.total_stock, 0) AS total_stock
-        FROM products p
-        LEFT JOIN (
-          SELECT pv.product_id, SUM(pbds.stock) as total_stock
-          FROM product_batch_device_stock pbds
-          JOIN product_batches pb ON pb.id = pbds.batch_id
-          JOIN product_variants pv ON pv.id = pb.product_variant_id
-          JOIN devices d ON d.id = pbds.device_id
-          WHERE d.company_id = (
-            SELECT company_id FROM devices WHERE id = ${userId}
-          ) AND pv.product_id = ANY(${productIds})
-          GROUP BY pv.product_id
-        ) pb_stock ON pb_stock.product_id = p.id
-        LEFT JOIN (
-          SELECT pds.product_id, SUM(pds.stock) as total_stock
-          FROM product_device_stock pds
-          JOIN devices d ON d.id = pds.device_id
-          WHERE d.company_id = (
-            SELECT company_id FROM devices WHERE id = ${userId}
-          ) AND pds.product_id = ANY(${productIds})
-          GROUP BY pds.product_id
-        ) pd_stock ON pd_stock.product_id = p.id
-        WHERE p.id = ANY(${productIds})
-      `
-      companyTotalStockMap = new Map(
-        companyDeviceStocks.map((row: any) => [Number(row.product_id), Number(row.total_stock)]),
-      )
-    }
-
     let variantsByProductId = new Map<number, any>()
     let batchesByVariantId = new Map<number, any[]>()
 
     if (productIds.length > 0) {
       const deviceStockId = userId || 0
-      const allVariants = await sql`
-        SELECT
-          pv.id,
-          pv.product_id,
-          pv.name,
-          pv.name AS variant_name,
-          pv.sku,
-          pv.barcode,
-          pv.cost_price,
-          pv.wholesale_price,
-          pv.price,
-          pv.msp,
-          pv.mrp,
-          pv.shelf,
-          pv.minimum_stock,
-          pv.status,
-          COALESCE((
-            SELECT SUM(pbds.stock)
+      const [deviceStocks, companyDeviceStocks, allVariants] = await Promise.all([
+        userId ? sql`
+          SELECT 
+            p.id AS product_id,
+            COALESCE(pb_stock.total_stock, pd_stock.total_stock, 0) AS stock
+          FROM products p
+          LEFT JOIN (
+            SELECT pv.product_id, SUM(pbds.stock) as total_stock
             FROM product_batch_device_stock pbds
             JOIN product_batches pb ON pb.id = pbds.batch_id
-            WHERE pb.product_variant_id = pv.id AND pbds.device_id = ${deviceStockId}
-          ), 0) AS stock
-        FROM product_variants pv
-        WHERE pv.product_id = ANY(${productIds}) AND pv.status = 'active'
-        ORDER BY pv.id ASC
-      `
+            JOIN product_variants pv ON pv.id = pb.product_variant_id
+            WHERE pbds.device_id = ${userId} AND pv.product_id = ANY(${productIds})
+            GROUP BY pv.product_id
+          ) pb_stock ON pb_stock.product_id = p.id
+          LEFT JOIN (
+            SELECT pds.product_id, SUM(pds.stock) as total_stock
+            FROM product_device_stock pds
+            WHERE pds.device_id = ${userId} AND pds.product_id = ANY(${productIds})
+            GROUP BY pds.product_id
+          ) pd_stock ON pd_stock.product_id = p.id
+          WHERE p.id = ANY(${productIds})
+        ` : Promise.resolve([]),
+        userId ? sql`
+          SELECT 
+            p.id AS product_id,
+            COALESCE(pb_stock.total_stock, pd_stock.total_stock, 0) AS total_stock
+          FROM products p
+          LEFT JOIN (
+            SELECT pv.product_id, SUM(pbds.stock) as total_stock
+            FROM product_batch_device_stock pbds
+            JOIN product_batches pb ON pb.id = pbds.batch_id
+            JOIN product_variants pv ON pv.id = pb.product_variant_id
+            JOIN devices d ON d.id = pbds.device_id
+            WHERE d.company_id = (
+              SELECT company_id FROM devices WHERE id = ${userId}
+            ) AND pv.product_id = ANY(${productIds})
+            GROUP BY pv.product_id
+          ) pb_stock ON pb_stock.product_id = p.id
+          LEFT JOIN (
+            SELECT pds.product_id, SUM(pds.stock) as total_stock
+            FROM product_device_stock pds
+            JOIN devices d ON d.id = pds.device_id
+            WHERE d.company_id = (
+              SELECT company_id FROM devices WHERE id = ${userId}
+            ) AND pds.product_id = ANY(${productIds})
+            GROUP BY pds.product_id
+          ) pd_stock ON pd_stock.product_id = p.id
+          WHERE p.id = ANY(${productIds})
+        ` : Promise.resolve([]),
+        sql`
+          SELECT
+            pv.id,
+            pv.product_id,
+            pv.name,
+            pv.name AS variant_name,
+            pv.sku,
+            pv.barcode,
+            pv.cost_price,
+            pv.wholesale_price,
+            pv.price,
+            pv.msp,
+            pv.mrp,
+            pv.shelf,
+            pv.minimum_stock,
+            pv.status,
+            COALESCE((
+              SELECT SUM(pbds.stock)
+              FROM product_batch_device_stock pbds
+              JOIN product_batches pb ON pb.id = pbds.batch_id
+              WHERE pb.product_variant_id = pv.id AND pbds.device_id = ${deviceStockId}
+            ), 0) AS stock
+          FROM product_variants pv
+          WHERE pv.product_id = ANY(${productIds}) AND pv.status = 'active'
+          ORDER BY pv.id ASC
+        `
+      ])
+
+      if (userId) {
+        stockMap = new Map<number, number>((deviceStocks as any[]).map((row: any) => [Number(row.product_id), Number(row.stock)]))
+        companyTotalStockMap = new Map(
+          (companyDeviceStocks as any[]).map((row: any) => [Number(row.product_id), Number(row.total_stock)]),
+        )
+      }
 
       const variantIds: number[] = (allVariants as any[]).map((v: any) => Number(v.id))
 
@@ -1838,18 +1860,22 @@ export async function getProductSearchSuggestions(
     let categories: any[] = []
     let companies: any[] = []
 
+    let companyDeviceIds: number[] = []
     if (userId) {
-      if (categoryId || catNameLower) {
-        products = await sql`
+      const deviceRows = await sql`
+        SELECT d2.id FROM devices d1 JOIN devices d2 ON d2.company_id = d1.company_id WHERE d1.id = ${userId}
+      `
+      companyDeviceIds = deviceRows.map((d: any) => Number(d.id))
+      if (companyDeviceIds.length === 0) companyDeviceIds = [userId]
+    }
+
+    if (userId) {
+      const [prods, cats, comps] = await Promise.all([
+        (categoryId || catNameLower) ? sql`
           SELECT p.id, p.name, p.category, p.company_name, p.price, p.mrp, p.msp
           FROM products p
           LEFT JOIN product_categories c ON p.category_id = c.id
-          WHERE p.created_by IN (
-            SELECT d2.id
-            FROM devices d1
-            JOIN devices d2 ON d2.company_id = d1.company_id
-            WHERE d1.id = ${userId}
-          )
+          WHERE p.created_by = ANY(${companyDeviceIds})
           AND (
             (${categoryId}::int IS NOT NULL AND p.category_id = ${categoryId}) OR
             (${catNameLower}::text IS NOT NULL AND (LOWER(COALESCE(p.category, '')) = ${catNameLower} OR LOWER(COALESCE(c.name, '')) = ${catNameLower}))
@@ -1876,17 +1902,10 @@ export async function getProductSearchSuggestions(
             END,
             p.created_at DESC
           LIMIT 5
-        `
-      } else {
-        products = await sql`
+        ` : sql`
           SELECT p.id, p.name, p.category, p.company_name, p.price, p.mrp, p.msp
           FROM products p
-          WHERE p.created_by IN (
-            SELECT d2.id
-            FROM devices d1
-            JOIN devices d2 ON d2.company_id = d1.company_id
-            WHERE d1.id = ${userId}
-          )
+          WHERE p.created_by = ANY(${companyDeviceIds})
           AND (
             LOWER(p.name) LIKE ${searchPattern} OR
             LOWER(COALESCE(p.category, '')) LIKE ${searchPattern} OR
@@ -1909,34 +1928,31 @@ export async function getProductSearchSuggestions(
             END,
             p.created_at DESC
           LIMIT 5
-        `
-      }
-
-      categories = await sql`
-        SELECT DISTINCT c_id, c_name as name FROM (
-          SELECT c.id as c_id, c.name as c_name
-          FROM product_categories c
-          WHERE LOWER(c.name) LIKE ${searchPattern}
-          UNION
-          SELECT p.category_id as c_id, p.category as c_name
+        `,
+        sql`
+          SELECT DISTINCT c_id, c_name as name FROM (
+            SELECT c.id as c_id, c.name as c_name
+            FROM product_categories c
+            WHERE LOWER(c.name) LIKE ${searchPattern}
+            UNION
+            SELECT p.category_id as c_id, p.category as c_name
+            FROM products p
+            WHERE p.created_by = ANY(${companyDeviceIds})
+            AND p.category IS NOT NULL AND p.category != '' AND LOWER(p.category) LIKE ${searchPattern}
+          ) sub
+          LIMIT 3
+        `,
+        sql`
+          SELECT DISTINCT p.company_name as name
           FROM products p
-          WHERE p.created_by IN (
-            SELECT d2.id FROM devices d1 JOIN devices d2 ON d2.company_id = d1.company_id WHERE d1.id = ${userId}
-          )
-          AND p.category IS NOT NULL AND p.category != '' AND LOWER(p.category) LIKE ${searchPattern}
-        ) sub
-        LIMIT 3
-      `
-
-      companies = await sql`
-        SELECT DISTINCT p.company_name as name
-        FROM products p
-        WHERE p.created_by IN (
-          SELECT d2.id FROM devices d1 JOIN devices d2 ON d2.company_id = d1.company_id WHERE d1.id = ${userId}
-        )
-        AND p.company_name IS NOT NULL AND p.company_name != '' AND LOWER(p.company_name) LIKE ${searchPattern}
-        LIMIT 3
-      `
+          WHERE p.created_by = ANY(${companyDeviceIds})
+          AND p.company_name IS NOT NULL AND p.company_name != '' AND LOWER(p.company_name) LIKE ${searchPattern}
+          LIMIT 3
+        `
+      ])
+      products = prods
+      categories = cats
+      companies = comps
     } else {
       if (categoryId || catNameLower) {
         products = await sql`

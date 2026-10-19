@@ -70,8 +70,12 @@ export function InventorySearchBox({
     return selectedCategory
   }, [selectedCategory])
 
-  // 250ms debounce for suggestion computation
+  // Instant reset on clear, 250ms debounce for suggestion computation when typing
   useEffect(() => {
+    if (!value) {
+      setDebouncedValue("")
+      return
+    }
     const timer = setTimeout(() => {
       setDebouncedValue(value)
     }, 250)
@@ -277,6 +281,8 @@ export function InventorySearchBox({
             type="button"
             onClick={() => {
               onChange("")
+              setDebouncedValue("")
+              setServerSuggestions({ products: [], categories: [], companies: [], totalCount: 0 })
               setIsOpen(false)
               setHighlightedIndex(-1)
               inputRef.current?.focus()

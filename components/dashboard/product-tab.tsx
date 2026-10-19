@@ -78,14 +78,19 @@ export default function ProductTab({
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
 
-  const fetchInFlightRef = useRef(false)
+  const activeFetchIdRef = useRef(0)
 
   useEffect(() => {
     if (isAddModalOpen) setIsProductModalOpen(true)
   }, [isAddModalOpen])
 
-  // 250ms debouncing for search query
+  // Search debouncing: instant on clearing, 250ms when typing
   useEffect(() => {
+    if (!searchTerm) {
+      setDebouncedSearch("")
+      setPage(1)
+      return
+    }
     const timer = setTimeout(() => {
       setDebouncedSearch(searchTerm)
       setPage(1) // Reset to page 1 on search change
@@ -102,9 +107,8 @@ export default function ProductTab({
   const fetchInventory = useCallback(
     async ({ silent = false, isRefresh = false }: { silent?: boolean; isRefresh?: boolean } = {}) => {
       if (!userId) return
-      if (fetchInFlightRef.current && !isRefresh) return
 
-      fetchInFlightRef.current = true
+      const fetchId = ++activeFetchIdRef.current
       if (isRefresh || silent) setSummaryRefreshKey((k) => k + 1)
       if (isRefresh) {
         setIsRefreshing(true)
@@ -122,6 +126,9 @@ export default function ProductTab({
           categoryName: selectedCategory?.name || null,
         })
 
+        // Discard stale in-flight responses if a newer search/clear was initiated
+        if (fetchId !== activeFetchIdRef.current) return
+
         if (result.success) {
           setProducts(result.data || [])
           setTotalCount(result.totalCount || 0)
@@ -136,15 +143,17 @@ export default function ProductTab({
           notifyError(toast, result.message || "Failed to load inventory")
         }
       } catch (err) {
+        if (fetchId !== activeFetchIdRef.current) return
         console.error("Error fetching inventory:", err)
         setProducts([])
         setTotalCount(0)
         setTotalPages(1)
         notifyError(toast, "Failed to load inventory. Please try again later.")
       } finally {
-        setLoading(false)
-        setIsRefreshing(false)
-        fetchInFlightRef.current = false
+        if (fetchId === activeFetchIdRef.current) {
+          setLoading(false)
+          setIsRefreshing(false)
+        }
       }
     },
     [userId, page, pageSize, debouncedSearch, selectedCategory, dispatch, toast],
