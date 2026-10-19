@@ -4,6 +4,7 @@ import React, { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { TableRowsInput } from "@/components/ui/table-rows-input"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
@@ -354,15 +355,19 @@ export default function StaffProfileTab() {
   }
 
   // --- PAGINATION HELPERS ---
-  const paginate = (array: any[], page: number) => {
-    const startIndex = (page - 1) * ITEMS_PER_PAGE
-    return array.slice(startIndex, startIndex + ITEMS_PER_PAGE)
+  const [salaryPageSize, setSalaryPageSize] = useState(25)
+  const [requestsPageSize, setRequestsPageSize] = useState(25)
+  const [purchasesPageSize, setPurchasesPageSize] = useState(25)
+
+  const paginate = (array: any[], page: number, perPage: number = 25) => {
+    const startIndex = (page - 1) * perPage
+    return array.slice(startIndex, startIndex + perPage)
   }
 
-  const totalSalaryPages = Math.ceil(salaryHistory.length / ITEMS_PER_PAGE) || 1
-  const totalRequestsPages = Math.ceil(requests.length / ITEMS_PER_PAGE) || 1
+  const totalSalaryPages = Math.ceil(salaryHistory.length / salaryPageSize) || 1
+  const totalRequestsPages = Math.ceil(requests.length / requestsPageSize) || 1
   const purchasesList = purchaseDetails?.purchases || []
-  const totalPurchasesPages = Math.ceil(purchasesList.length / ITEMS_PER_PAGE) || 1
+  const totalPurchasesPages = Math.ceil(purchasesList.length / purchasesPageSize) || 1
 
   return (
     <div className="space-y-6">
@@ -568,7 +573,7 @@ export default function StaffProfileTab() {
                   <>
                     {/* MOBILE CARD LIST VIEW (< md) */}
                     <div className="block md:hidden space-y-3">
-                      {paginate(salaryHistory, salaryPage).map((item: any, idx: number) => (
+                      {paginate(salaryHistory, salaryPage, salaryPageSize).map((item: any, idx: number) => (
                         <div key={item.id || idx} className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm space-y-2.5">
                           <div className="flex items-center justify-between gap-2">
                             <span className="text-xs font-semibold text-slate-900">
@@ -616,7 +621,7 @@ export default function StaffProfileTab() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {paginate(salaryHistory, salaryPage).map((item: any, idx: number) => (
+                          {paginate(salaryHistory, salaryPage, salaryPageSize).map((item: any, idx: number) => (
                             <tr key={item.id || idx} className="hover:bg-slate-50/50">
                               <td className="px-4 py-3 font-medium text-slate-900">
                                 {item.payment_date || item.created_at ? new Date(item.payment_date || item.created_at).toLocaleDateString() : "-"}
@@ -644,10 +649,17 @@ export default function StaffProfileTab() {
                     {/* Salary Pagination */}
                     <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 text-center sm:text-left">
                       <p className="text-xs text-slate-500">
-                        Showing {Math.min((salaryPage - 1) * ITEMS_PER_PAGE + 1, salaryHistory.length)} to{" "}
-                        {Math.min(salaryPage * ITEMS_PER_PAGE, salaryHistory.length)} of {salaryHistory.length} entries
+                        Showing {Math.min((salaryPage - 1) * salaryPageSize + 1, salaryHistory.length)} to{" "}
+                        {Math.min(salaryPage * salaryPageSize, salaryHistory.length)} of {salaryHistory.length} entries
                       </p>
                       <div className="flex items-center gap-2">
+                        <TableRowsInput
+                          value={salaryPageSize}
+                          onChange={(newSize) => {
+                            setSalaryPageSize(newSize)
+                            setSalaryPage(1)
+                          }}
+                        />
                         <Button
                           variant="outline"
                           size="sm"
@@ -692,7 +704,7 @@ export default function StaffProfileTab() {
                   <>
                     {/* MOBILE CARD LIST VIEW (< md) */}
                     <div className="block md:hidden space-y-3">
-                      {paginate(requests, requestsPage).map((req: any) => (
+                      {paginate(requests, requestsPage, requestsPageSize).map((req: any) => (
                         <div key={req.id} className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm space-y-2.5">
                           <div className="flex items-start justify-between gap-2">
                             <div>
@@ -756,7 +768,7 @@ export default function StaffProfileTab() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {paginate(requests, requestsPage).map((req: any) => (
+                          {paginate(requests, requestsPage, requestsPageSize).map((req: any) => (
                             <tr key={req.id} className="hover:bg-slate-50/50">
                               <td className="px-4 py-3 font-medium text-slate-900">
                                 {new Date(req.created_at).toLocaleDateString()}
@@ -802,10 +814,17 @@ export default function StaffProfileTab() {
                     {/* Requests Pagination */}
                     <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 text-center sm:text-left">
                       <p className="text-xs text-slate-500">
-                        Showing {Math.min((requestsPage - 1) * ITEMS_PER_PAGE + 1, requests.length)} to{" "}
-                        {Math.min(requestsPage * ITEMS_PER_PAGE, requests.length)} of {requests.length} entries
+                        Showing {Math.min((requestsPage - 1) * requestsPageSize + 1, requests.length)} to{" "}
+                        {Math.min(requestsPage * requestsPageSize, requests.length)} of {requests.length} entries
                       </p>
                       <div className="flex items-center gap-2">
+                        <TableRowsInput
+                          value={requestsPageSize}
+                          onChange={(newSize) => {
+                            setRequestsPageSize(newSize)
+                            setRequestsPage(1)
+                          }}
+                        />
                         <Button
                           variant="outline"
                           size="sm"
@@ -881,7 +900,7 @@ export default function StaffProfileTab() {
 
                     {/* MOBILE CARD LIST VIEW (< md) */}
                     <div className="block md:hidden space-y-3">
-                      {paginate(purchasesList, purchasesPage).map((pur: any) => (
+                      {paginate(purchasesList, purchasesPage, purchasesPageSize).map((pur: any) => (
                         <div key={pur.id} className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm space-y-2.5">
                           <div className="flex items-center justify-between gap-2">
                             <div className="flex items-center gap-2">
@@ -967,7 +986,7 @@ export default function StaffProfileTab() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {paginate(purchasesList, purchasesPage).map((pur: any) => (
+                          {paginate(purchasesList, purchasesPage, purchasesPageSize).map((pur: any) => (
                             <tr key={pur.id} className="hover:bg-slate-50/50 transition-colors">
                               <td className="px-4 py-3 font-medium text-slate-900">
                                 <div className="font-bold text-blue-600">#{pur.tracking_id || pur.id}</div>
@@ -1025,10 +1044,17 @@ export default function StaffProfileTab() {
                     {/* Purchases Pagination */}
                     <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 text-center sm:text-left">
                       <p className="text-xs text-slate-500">
-                        Showing {Math.min((purchasesPage - 1) * ITEMS_PER_PAGE + 1, purchasesList.length)} to{" "}
-                        {Math.min(purchasesPage * ITEMS_PER_PAGE, purchasesList.length)} of {purchasesList.length} entries
+                        Showing {Math.min((purchasesPage - 1) * purchasesPageSize + 1, purchasesList.length)} to{" "}
+                        {Math.min(purchasesPage * purchasesPageSize, purchasesList.length)} of {purchasesList.length} entries
                       </p>
                       <div className="flex items-center gap-2">
+                        <TableRowsInput
+                          value={purchasesPageSize}
+                          onChange={(newSize) => {
+                            setPurchasesPageSize(newSize)
+                            setPurchasesPage(1)
+                          }}
+                        />
                         <Button
                           variant="outline"
                           size="sm"

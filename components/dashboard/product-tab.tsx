@@ -61,7 +61,7 @@ export default function ProductTab({
   const [totalCount, setTotalCount] = useState<number>(0)
   const [totalPages, setTotalPages] = useState<number>(1)
   const [page, setPage] = useState<number>(1)
-  const [pageSize, setPageSize] = useState<number>(10)
+  const [pageSize, setPageSize] = useState<number>(25)
   const [searchTerm, setSearchTerm] = useState<string>("")
   const [debouncedSearch, setDebouncedSearch] = useState<string>("")
   const [selectedCategory, setSelectedCategory] = useState<{ id?: number | string | null; name: string } | null>(null)

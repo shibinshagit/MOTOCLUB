@@ -289,7 +289,7 @@ export async function getPaginatedUserPurchases(deviceId: number, options: GetPa
   resetConnectionState()
 
   const page = Math.max(1, Math.floor(options.page || 1))
-  const pageSize = Math.max(1, Math.min(100, Math.floor(options.pageSize || 25)))
+  const pageSize = Math.max(1, Math.min(1000, Math.floor(options.pageSize || 25)))
   const offset = (page - 1) * pageSize
 
   try {

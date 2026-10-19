@@ -42,7 +42,7 @@ export function PartnerSalesTable({
   initialReplacements = [],
   initialTotalCount = 0,
   initialPage = 1,
-  initialPageSize = 20,
+  initialPageSize = 25,
   initialTotalPages = 1,
   pendingReplacementsCount = 0,
   hideOrderTypeFilter = false,
@@ -137,12 +137,13 @@ export function PartnerSalesTable({
   }, [searchParams, onlyReplacements])
 
   // Execute filter search client-side/server-side fetch
-  const executeFilterFetch = async (newFilters: PartnerFilterState, newPage: number) => {
+  const executeFilterFetch = async (newFilters: PartnerFilterState, newPage: number, pageSizeOverride?: number) => {
     setIsLoading(true)
+    const effectivePageSize = pageSizeOverride || pageSize
     try {
       const res = await getFilteredPartnerOrders({
         page: newPage,
-        pageSize: pageSize,
+        pageSize: effectivePageSize,
         search: newFilters.search,
         status: newFilters.status,
         orderType: newFilters.orderType,
@@ -201,6 +202,13 @@ export function PartnerSalesTable({
     setPage(newPage)
     pushQueryParams(filters, newPage)
     executeFilterFetch(filters, newPage)
+  }
+
+  const handlePageSizeChange = (newPageSize: number) => {
+    setPageSize(newPageSize)
+    setPage(1)
+    pushQueryParams(filters, 1)
+    executeFilterFetch(filters, 1, newPageSize)
   }
 
   const handleResetFilters = () => {
@@ -1041,6 +1049,7 @@ export function PartnerSalesTable({
         totalCount={totalCount}
         totalPages={totalPages}
         onPageChange={handlePageChange}
+        onPageSizeChange={handlePageSizeChange}
         isLoading={isLoading || isPending}
       />
 

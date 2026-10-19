@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation"
 import { format } from "date-fns"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { TableRowsInput } from "@/components/ui/table-rows-input"
 import { useAppSelector } from "@/store/hooks"
 import { selectActiveStaff } from "@/store/slices/staffSlice"
 import PurchaseManagerKpiCards from "@/components/purchase-manager/purchase-manager-kpi-cards"
@@ -420,7 +421,7 @@ export default function SalesExcelTable({
 
   // High-performance server-side state
   const [page, setPage] = useState(1)
-  const [pageSize] = useState(25)
+  const [pageSize, setPageSize] = useState(25)
   const [debouncedSearch, setDebouncedSearch] = useState("")
   const [serverSales, setServerSales] = useState<any[]>([])
   const [totalServerCount, setTotalServerCount] = useState(0)
@@ -455,6 +456,11 @@ export default function SalesExcelTable({
   }, [serverSales, valueGetters])
 
   const [columnFilters, setColumnFilters] = useState<ColumnFilters>(() => buildInitialFilters([], valueGetters))
+
+  const handlePageSizeChange = useCallback((newSize: number) => {
+    setPageSize(newSize)
+    setPage(1)
+  }, [])
 
   // 250ms search debounce
   useEffect(() => {
@@ -2434,6 +2440,11 @@ export default function SalesExcelTable({
               {Math.min(page * pageSize, totalServerCount)} of {totalServerCount} sales
             </div>
             <div className="flex items-center gap-2">
+              <TableRowsInput
+                value={pageSize}
+                onChange={handlePageSizeChange}
+                disabled={isFetchingServer}
+              />
               <Button
                 variant="outline"
                 size="sm"

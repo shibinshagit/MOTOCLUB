@@ -18,6 +18,7 @@ import {
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { TableRowsInput } from "@/components/ui/table-rows-input"
 import { InventorySearchBox } from "@/components/products/inventory-search-box"
 import { getStaffInventory, getStaffInventoryStats } from "@/app/actions/staff-inventory-actions"
 import { useToast } from "@/components/ui/use-toast"
@@ -63,7 +64,7 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
 
   // Server-side pagination & search state
   const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(10)
+  const [pageSize, setPageSize] = useState(25)
   const [totalCount, setTotalCount] = useState(0)
   const [totalPages, setTotalPages] = useState(1)
   const [searchTerm, setSearchTerm] = useState("")
@@ -550,19 +551,11 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
               </div>
 
               <div className="flex flex-wrap items-center gap-3 sm:gap-4">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-slate-500">Per page:</span>
-                  <select
-                    value={pageSize}
-                    onChange={(e) => handlePageSizeChange(Number(e.target.value))}
-                    className="h-8 rounded border border-slate-200 bg-white px-2 text-xs font-medium text-slate-700 focus:border-indigo-500 focus:outline-none"
-                  >
-                    <option value={10}>10</option>
-                    <option value={25}>25</option>
-                    <option value={50}>50</option>
-                    <option value={100}>100</option>
-                  </select>
-                </div>
+                <TableRowsInput
+                  value={pageSize}
+                  onChange={handlePageSizeChange}
+                  disabled={loading}
+                />
 
                 <div className="flex items-center gap-1">
                   <Button

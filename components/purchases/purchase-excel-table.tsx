@@ -3,9 +3,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { usePathname } from "next/navigation"
 import { format } from "date-fns"
-import { ChevronLeft, ChevronRight, Search, X, RefreshCw } from "lucide-react"
+import { ChevronLeft, ChevronRight, Search, X, RefreshCw, Download, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { TableRowsInput } from "@/components/ui/table-rows-input"
+import { useToast } from "@/components/ui/use-toast"
+import { notifyError, notifySuccess, notifyWarning } from "@/lib/notifications"
+import { downloadPurchasesPDF } from "@/lib/purchases-pdf-utils"
 import {
   ExcelColumnFilterHeader,
   createEmptyColumnFilter,
@@ -73,7 +77,6 @@ type ColumnKey =
 
 type ColumnFilters = Record<ColumnKey, ExcelColumnFilterValue>
 
-const PAGE_SIZE = 25
 const DASH = "\u2014"
 const COLUMN_KEYS: ColumnKey[] = [
   "purchaseId",
@@ -238,6 +241,54 @@ export default function PurchaseExcelTable({
   const [isFetching, setIsFetching] = useState(false)
   const [hasFetched, setHasFetched] = useState(false)
   const [fetchError, setFetchError] = useState<string | null>(null)
+  const [isDownloadingPDF, setIsDownloadingPDF] = useState(false)
+  const { toast } = useToast()
+
+  const handleDownloadPDF = async () => {
+    if (isDownloadingPDF) return
+    if (!displayPurchases || displayPurchases.length === 0) {
+      notifyWarning(toast, "No purchases to download")
+      return
+    }
+
+    setIsDownloadingPDF(true)
+    try {
+      let exportData = displayPurchases
+      if (totalCount > displayPurchases.length && totalCount <= 1000 && deviceId) {
+        try {
+          const fullRes = await getPaginatedUserPurchases(deviceId, {
+            page: 1,
+            pageSize: totalCount,
+            dateFrom,
+            dateTo,
+            searchTerm: debouncedSearchTerm,
+            columnFilters: appliedFilters,
+          })
+          if (fullRes?.success && fullRes.data && fullRes.data.length > 0) {
+            exportData = fullRes.data.map(serializePurchaseRecord)
+          }
+        } catch (fetchErr) {
+          console.warn("Could not fetch full purchase list for PDF, using current page:", fetchErr)
+        }
+      }
+
+      await downloadPurchasesPDF(
+        exportData,
+        periodLabel,
+        formatCurrency,
+        getPaidAmount,
+        getRemainingAmount,
+        getPaymentMethodDisplay,
+        { from: dateFrom, to: dateTo },
+      )
+      notifySuccess(toast, "Purchases PDF report downloaded successfully")
+    } catch (err: any) {
+      console.error("Error downloading purchases PDF:", err)
+      notifyError(toast, err?.message || "Failed to download purchases PDF")
+    } finally {
+      setIsDownloadingPDF(false)
+    }
+  }
   const [refreshTick, setRefreshTick] = useState(0)
   const listFetchIdRef = useRef(0)
   const summaryFetchIdRef = useRef(0)
@@ -310,8 +361,10 @@ export default function PurchaseExcelTable({
     return () => window.clearTimeout(timer)
   }, [buildServerFilters])
 
+  const [pageSize, setPageSize] = useState(25)
+
   // Any change to the query returns to page 1 without an extra request.
-  const queryKey = JSON.stringify([deviceId, dateFrom, dateTo, debouncedSearchTerm, appliedFilters])
+  const queryKey = JSON.stringify([deviceId, dateFrom, dateTo, debouncedSearchTerm, appliedFilters, pageSize])
   const [pageState, setPageState] = useState({ key: queryKey, page: 1 })
   const page = pageState.key === queryKey ? pageState.page : 1
   const setPage = (next: number) => setPageState({ key: queryKey, page: next })
@@ -322,7 +375,7 @@ export default function PurchaseExcelTable({
     setIsFetching(true)
     getPaginatedUserPurchases(deviceId, {
       page,
-      pageSize: PAGE_SIZE,
+      pageSize,
       dateFrom,
       dateTo,
       searchTerm: debouncedSearchTerm,
@@ -481,8 +534,8 @@ export default function PurchaseExcelTable({
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-card">
         <div className="flex flex-col sm:flex-row items-center justify-between gap-2 border-b border-slate-200 bg-[#F1F4F9] px-3 py-2.5 sm:px-4">
           <span className="text-xs font-medium text-slate-600">
-            Showing {displayPurchases.length > 0 ? (page - 1) * PAGE_SIZE + 1 : 0}-
-            {Math.min(page * PAGE_SIZE, totalCount)} of {totalCount} {totalCount === 1 ? "purchase" : "purchases"}
+            Showing {displayPurchases.length > 0 ? (page - 1) * pageSize + 1 : 0}-
+            {Math.min(page * pageSize, totalCount)} of {totalCount} {totalCount === 1 ? "purchase" : "purchases"}
           </span>
 
           <div className="flex items-center gap-1">
@@ -523,6 +576,21 @@ export default function PurchaseExcelTable({
               title="Refresh purchases"
             >
               <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? 'animate-spin' : ''}`} />
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2.5 text-xs font-semibold text-slate-700 bg-white border-slate-200 hover:bg-slate-50 shrink-0 shadow-none mr-1"
+              onClick={handleDownloadPDF}
+              disabled={isDownloadingPDF || displayPurchases.length === 0}
+              title="Download purchases as PDF"
+            >
+              PDF
+              {isDownloadingPDF ? (
+                <Loader2 className="ml-1.5 h-3.5 w-3.5 animate-spin text-slate-500" />
+              ) : (
+                <Download className="ml-1.5 h-3.5 w-3.5 text-slate-500" />
+              )}
             </Button>
             <div className="relative w-full sm:w-72">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
@@ -626,7 +694,7 @@ export default function PurchaseExcelTable({
                         index % 2 === 0 ? "bg-white" : "bg-slate-50/60"
                       }`}
                     >
-                      <td className="whitespace-nowrap px-3 py-1.5 text-xs text-muted-foreground">{(page - 1) * PAGE_SIZE + index + 1}</td>
+                      <td className="whitespace-nowrap px-3 py-1.5 text-xs text-muted-foreground">{(page - 1) * pageSize + index + 1}</td>
                       <td className="whitespace-nowrap px-3 py-1.5 font-semibold text-slate-800">#{purchase.id}</td>
                       <td className="whitespace-nowrap px-3 py-1.5">
                         <PaymentStatusBadge status={paymentStatus} />
@@ -794,10 +862,15 @@ export default function PurchaseExcelTable({
 
         <div className="flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-slate-200 bg-[#F1F4F9] px-4 py-3 text-xs font-medium text-slate-600">
           <div>
-            Showing {displayPurchases.length > 0 ? (page - 1) * PAGE_SIZE + 1 : 0} to{" "}
-            {Math.min(page * PAGE_SIZE, totalCount)} of {totalCount} purchases
+            Showing {displayPurchases.length > 0 ? (page - 1) * pageSize + 1 : 0} to{" "}
+            {Math.min(page * pageSize, totalCount)} of {totalCount} purchases
           </div>
           <div className="flex items-center gap-2">
+            <TableRowsInput
+              value={pageSize}
+              onChange={(newSize) => setPageSize(newSize)}
+              disabled={isFetching}
+            />
             <Button
               variant="outline"
               size="sm"

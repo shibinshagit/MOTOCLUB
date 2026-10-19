@@ -18,6 +18,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
+import { TableRowsInput } from "@/components/ui/table-rows-input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Loader2, Search, Phone, Calendar, Briefcase, Clock, Activity as ActivityIcon, UserCheck, Car } from "lucide-react"
 import { format, isPast, isToday } from "date-fns"
@@ -37,6 +38,7 @@ export default function StaffLeadsTab() {
   
   // Pagination & Filters
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
   const [totalPages, setTotalPages] = useState(1)
   const [search, setSearch] = useState("")
   const [debouncedSearch, setDebouncedSearch] = useState("")
@@ -84,6 +86,7 @@ export default function StaffLeadsTab() {
     setLoading(true)
     const res = await getLeads({ 
       page, 
+      pageSize,
       search: debouncedSearch, 
       status: statusFilter,
       assigned_filter: assignedFilter,
@@ -94,7 +97,7 @@ export default function StaffLeadsTab() {
       setTotalPages(res.totalPages || 1)
     }
     setLoading(false)
-  }, [page, debouncedSearch, statusFilter, assignedFilter, followUpFilter])
+  }, [page, pageSize, debouncedSearch, statusFilter, assignedFilter, followUpFilter])
 
   const fetchSummary = useCallback(async () => {
     const res = await getLeadSummary()
@@ -434,11 +437,21 @@ export default function StaffLeadsTab() {
             ))}
           </div>
 
-          {totalPages > 1 && (
+          {leads.length > 0 && (
             <div className="flex items-center justify-between mt-4">
-              <Button variant="outline" size="sm" disabled={page === 1} onClick={() => setPage(p => p - 1)}>Previous</Button>
-              <span className="text-sm text-muted-foreground">Page {page} of {totalPages}</span>
-              <Button variant="outline" size="sm" disabled={page === totalPages} onClick={() => setPage(p => p + 1)}>Next</Button>
+              <div className="flex items-center gap-2">
+                <TableRowsInput
+                  value={pageSize}
+                  onChange={(newSize) => {
+                    setPageSize(newSize)
+                    setPage(1)
+                  }}
+                  disabled={loading}
+                />
+                <Button variant="outline" size="sm" disabled={page === 1 || loading} onClick={() => setPage(p => p - 1)}>Previous</Button>
+              </div>
+              <span className="text-sm text-muted-foreground">Page {page} of {totalPages || 1}</span>
+              <Button variant="outline" size="sm" disabled={page >= totalPages || loading} onClick={() => setPage(p => p + 1)}>Next</Button>
             </div>
           )}
         </>

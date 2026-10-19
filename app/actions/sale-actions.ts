@@ -730,7 +730,7 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
   resetConnectionState()
 
   const page = Math.max(1, options.page || 1)
-  const pageSize = Math.max(1, Math.min(100, options.pageSize || 25))
+  const pageSize = Math.max(1, Math.min(1000, options.pageSize || 25))
   const offset = (page - 1) * pageSize
 
   const normalizedSearch = options.searchTerm?.trim() || null
