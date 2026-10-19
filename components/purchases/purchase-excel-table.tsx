@@ -3,10 +3,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { usePathname } from "next/navigation"
 import { format } from "date-fns"
-import { ChevronLeft, ChevronRight, Search, X, RefreshCw } from "lucide-react"
+import { ChevronLeft, ChevronRight, Search, X, RefreshCw, Download, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { TableRowsInput } from "@/components/ui/table-rows-input"
+import { useToast } from "@/components/ui/use-toast"
+import { notifyError, notifySuccess, notifyWarning } from "@/lib/notifications"
+import { downloadPurchasesPDF } from "@/lib/purchases-pdf-utils"
 import {
   ExcelColumnFilterHeader,
   createEmptyColumnFilter,
@@ -238,6 +241,54 @@ export default function PurchaseExcelTable({
   const [isFetching, setIsFetching] = useState(false)
   const [hasFetched, setHasFetched] = useState(false)
   const [fetchError, setFetchError] = useState<string | null>(null)
+  const [isDownloadingPDF, setIsDownloadingPDF] = useState(false)
+  const { toast } = useToast()
+
+  const handleDownloadPDF = async () => {
+    if (isDownloadingPDF) return
+    if (!displayPurchases || displayPurchases.length === 0) {
+      notifyWarning(toast, "No purchases to download")
+      return
+    }
+
+    setIsDownloadingPDF(true)
+    try {
+      let exportData = displayPurchases
+      if (totalCount > displayPurchases.length && totalCount <= 1000 && deviceId) {
+        try {
+          const fullRes = await getPaginatedUserPurchases(deviceId, {
+            page: 1,
+            pageSize: totalCount,
+            dateFrom,
+            dateTo,
+            searchTerm: debouncedSearchTerm,
+            columnFilters: appliedFilters,
+          })
+          if (fullRes?.success && fullRes.data && fullRes.data.length > 0) {
+            exportData = fullRes.data.map(serializePurchaseRecord)
+          }
+        } catch (fetchErr) {
+          console.warn("Could not fetch full purchase list for PDF, using current page:", fetchErr)
+        }
+      }
+
+      await downloadPurchasesPDF(
+        exportData,
+        periodLabel,
+        formatCurrency,
+        getPaidAmount,
+        getRemainingAmount,
+        getPaymentMethodDisplay,
+        { from: dateFrom, to: dateTo },
+      )
+      notifySuccess(toast, "Purchases PDF report downloaded successfully")
+    } catch (err: any) {
+      console.error("Error downloading purchases PDF:", err)
+      notifyError(toast, err?.message || "Failed to download purchases PDF")
+    } finally {
+      setIsDownloadingPDF(false)
+    }
+  }
   const [refreshTick, setRefreshTick] = useState(0)
   const listFetchIdRef = useRef(0)
   const summaryFetchIdRef = useRef(0)
@@ -525,6 +576,21 @@ export default function PurchaseExcelTable({
               title="Refresh purchases"
             >
               <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? 'animate-spin' : ''}`} />
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2.5 text-xs font-semibold text-slate-700 bg-white border-slate-200 hover:bg-slate-50 shrink-0 shadow-none mr-1"
+              onClick={handleDownloadPDF}
+              disabled={isDownloadingPDF || displayPurchases.length === 0}
+              title="Download purchases as PDF"
+            >
+              PDF
+              {isDownloadingPDF ? (
+                <Loader2 className="ml-1.5 h-3.5 w-3.5 animate-spin text-slate-500" />
+              ) : (
+                <Download className="ml-1.5 h-3.5 w-3.5 text-slate-500" />
+              )}
             </Button>
             <div className="relative w-full sm:w-72">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
