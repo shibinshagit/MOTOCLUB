@@ -440,3 +440,144 @@ export async function getPublicEcommerceBanners(deviceId?: number) {
   }
 }
 
+export async function getManualCategoryDetails(categoryId: number, deviceId?: number) {
+  noStore()
+  try {
+    const categoryQuery = await sql`
+      SELECT md.*, d.name as device_name, d.currency
+      FROM master_data md
+      LEFT JOIN devices d ON d.id = md.device_id
+      WHERE md.id = ${categoryId}
+      LIMIT 1
+    `
+    if (categoryQuery.length === 0) {
+      return { success: false, message: "Manual category not found" }
+    }
+    const categoryRow = categoryQuery[0] as Record<string, unknown>
+    const category = mapMasterDataRow(categoryRow)
+    const effectiveDeviceId = deviceId || (categoryRow.device_id ? Number(categoryRow.device_id) : null)
+
+    // Parallel fetch: aggregate stats + recent transaction history
+    const statsPromise = effectiveDeviceId
+      ? sql`
+        SELECT 
+          COUNT(*)::int AS total_count,
+          COALESCE(SUM(CASE WHEN ft.debit_amount > 0 THEN ft.debit_amount ELSE (CASE WHEN ft.transaction_type = 'expense' THEN ft.amount ELSE 0 END) END), 0)::numeric AS total_debit,
+          COALESCE(SUM(CASE WHEN ft.credit_amount > 0 THEN ft.credit_amount ELSE (CASE WHEN ft.transaction_type = 'income' THEN ft.amount ELSE 0 END) END), 0)::numeric AS total_credit,
+          COALESCE(SUM(CASE WHEN ft.transaction_date >= date_trunc('month', CURRENT_DATE) THEN (CASE WHEN ft.debit_amount > 0 THEN ft.debit_amount ELSE (CASE WHEN ft.transaction_type = 'expense' THEN ft.amount ELSE 0 END) END) ELSE 0 END), 0)::numeric AS this_month_debit,
+          COALESCE(SUM(CASE WHEN ft.transaction_date >= date_trunc('month', CURRENT_DATE - INTERVAL '1 month') AND ft.transaction_date < date_trunc('month', CURRENT_DATE) THEN (CASE WHEN ft.debit_amount > 0 THEN ft.debit_amount ELSE (CASE WHEN ft.transaction_type = 'expense' THEN ft.amount ELSE 0 END) END) ELSE 0 END), 0)::numeric AS last_month_debit,
+          COUNT(DISTINCT ft.payment_method)::int AS payment_methods_count,
+          MIN(ft.transaction_date) as first_transaction_date,
+          MAX(ft.transaction_date) as last_transaction_date
+        FROM financial_transactions ft
+        WHERE ft.reference_type = 'manual'
+          AND (ft.reference_id = ${categoryId} OR LOWER(TRIM(ft.category_name)) = LOWER(TRIM(${category.name})))
+          AND (ft.device_id = ${effectiveDeviceId} OR ft.device_id IS NULL)
+      `
+      : sql`
+        SELECT 
+          COUNT(*)::int AS total_count,
+          COALESCE(SUM(CASE WHEN ft.debit_amount > 0 THEN ft.debit_amount ELSE (CASE WHEN ft.transaction_type = 'expense' THEN ft.amount ELSE 0 END) END), 0)::numeric AS total_debit,
+          COALESCE(SUM(CASE WHEN ft.credit_amount > 0 THEN ft.credit_amount ELSE (CASE WHEN ft.transaction_type = 'income' THEN ft.amount ELSE 0 END) END), 0)::numeric AS total_credit,
+          COALESCE(SUM(CASE WHEN ft.transaction_date >= date_trunc('month', CURRENT_DATE) THEN (CASE WHEN ft.debit_amount > 0 THEN ft.debit_amount ELSE (CASE WHEN ft.transaction_type = 'expense' THEN ft.amount ELSE 0 END) END) ELSE 0 END), 0)::numeric AS this_month_debit,
+          COALESCE(SUM(CASE WHEN ft.transaction_date >= date_trunc('month', CURRENT_DATE - INTERVAL '1 month') AND ft.transaction_date < date_trunc('month', CURRENT_DATE) THEN (CASE WHEN ft.debit_amount > 0 THEN ft.debit_amount ELSE (CASE WHEN ft.transaction_type = 'expense' THEN ft.amount ELSE 0 END) END) ELSE 0 END), 0)::numeric AS last_month_debit,
+          COUNT(DISTINCT ft.payment_method)::int AS payment_methods_count,
+          MIN(ft.transaction_date) as first_transaction_date,
+          MAX(ft.transaction_date) as last_transaction_date
+        FROM financial_transactions ft
+        WHERE ft.reference_type = 'manual'
+          AND (ft.reference_id = ${categoryId} OR LOWER(TRIM(ft.category_name)) = LOWER(TRIM(${category.name})))
+      `
+
+    const transactionsPromise = effectiveDeviceId
+      ? sql`
+        SELECT 
+          ft.id,
+          ft.transaction_date,
+          ft.amount,
+          ft.debit_amount,
+          ft.credit_amount,
+          ft.transaction_type,
+          ft.category_name,
+          ft.description,
+          ft.payment_method,
+          ft.status,
+          ft.created_at,
+          COALESCE(s.name, d.name, 'Admin') AS created_by_name
+        FROM financial_transactions ft
+        LEFT JOIN staff s ON s.id = ft.staff_id
+        LEFT JOIN devices d ON d.id = ft.device_id
+        WHERE ft.reference_type = 'manual'
+          AND (ft.reference_id = ${categoryId} OR LOWER(TRIM(ft.category_name)) = LOWER(TRIM(${category.name})))
+          AND (ft.device_id = ${effectiveDeviceId} OR ft.device_id IS NULL)
+        ORDER BY ft.transaction_date DESC, ft.id DESC
+        LIMIT 1000
+      `
+      : sql`
+        SELECT 
+          ft.id,
+          ft.transaction_date,
+          ft.amount,
+          ft.debit_amount,
+          ft.credit_amount,
+          ft.transaction_type,
+          ft.category_name,
+          ft.description,
+          ft.payment_method,
+          ft.status,
+          ft.created_at,
+          COALESCE(s.name, d.name, 'Admin') AS created_by_name
+        FROM financial_transactions ft
+        LEFT JOIN staff s ON s.id = ft.staff_id
+        LEFT JOIN devices d ON d.id = ft.device_id
+        WHERE ft.reference_type = 'manual'
+          AND (ft.reference_id = ${categoryId} OR LOWER(TRIM(ft.category_name)) = LOWER(TRIM(${category.name})))
+        ORDER BY ft.transaction_date DESC, ft.id DESC
+        LIMIT 1000
+      `
+
+    const [statsResult, transactions] = await Promise.all([statsPromise, transactionsPromise])
+
+    const statsRow = statsResult[0] || {}
+    const totalCount = Number(statsRow.total_count) || 0
+    const totalDebit = Number(statsRow.total_debit) || 0
+    const totalCredit = Number(statsRow.total_credit) || 0
+    const netSpend = totalDebit - totalCredit
+    const thisMonthDebit = Number(statsRow.this_month_debit) || 0
+    const lastMonthDebit = Number(statsRow.last_month_debit) || 0
+    const averageAmount = totalCount > 0 ? totalDebit / totalCount : 0
+
+    return {
+      success: true,
+      data: {
+        category,
+        deviceName: categoryRow.device_name || "All Branches",
+        currency: categoryRow.currency || "INR",
+        stats: {
+          totalCount,
+          totalDebit,
+          totalCredit,
+          netSpend,
+          thisMonthDebit,
+          lastMonthDebit,
+          averageAmount,
+          firstTransactionDate: statsRow.first_transaction_date,
+          lastTransactionDate: statsRow.last_transaction_date,
+        },
+        transactions: transactions.map((t: any) => ({
+          ...t,
+          amount: Number(t.amount) || 0,
+          debit_amount: Number(t.debit_amount) || 0,
+          credit_amount: Number(t.credit_amount) || 0,
+          transaction_date: t.transaction_date ? (t.transaction_date instanceof Date ? t.transaction_date.toISOString() : String(t.transaction_date)) : null,
+          created_at: t.created_at ? (t.created_at instanceof Date ? t.created_at.toISOString() : String(t.created_at)) : null,
+        }))
+      }
+    }
+  } catch (error: any) {
+    console.error("getManualCategoryDetails error:", error)
+    return { success: false, message: error.message || "Failed to fetch category details" }
+  }
+}
+
+
