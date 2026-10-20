@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { 
   Package, 
   Search, 
@@ -14,13 +14,17 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronsLeft,
-  ChevronsRight
+  ChevronsRight,
+  Folder,
+  ChevronsUpDown,
+  Check
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { TableRowsInput } from "@/components/ui/table-rows-input"
 import { InventorySearchBox } from "@/components/products/inventory-search-box"
-import { getStaffInventory, getStaffInventoryStats } from "@/app/actions/staff-inventory-actions"
+import { getStaffInventory, getStaffInventoryStats, getStaffCategories } from "@/app/actions/staff-inventory-actions"
 import { useToast } from "@/components/ui/use-toast"
 import { cn } from "@/lib/utils"
 import StaffViewProductModal from "./staff-view-product-modal"
@@ -70,6 +74,9 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
   const [searchTerm, setSearchTerm] = useState("")
   const [debouncedSearch, setDebouncedSearch] = useState("")
   const [selectedCategory, setSelectedCategory] = useState<{ id?: number | string | null; name: string } | null>(null)
+  const [categories, setCategories] = useState<any[]>([])
+  const [categoryOpen, setCategoryOpen] = useState(false)
+  const [categorySearch, setCategorySearch] = useState("")
 
   const [selectedProduct, setSelectedProduct] = useState<any>(null)
   const [mediaEditProduct, setMediaEditProduct] = useState<any>(null)
@@ -77,6 +84,39 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
 
   const isFirstMount = useRef(true)
   const activeFetchIdRef = useRef(0)
+
+  // Load categories for staff inventory filter
+  useEffect(() => {
+    let isMounted = true
+    getStaffCategories().then((res) => {
+      if (isMounted && res.success && res.data) {
+        setCategories(res.data)
+      }
+    }).catch((err) => {
+      console.error("Failed to load staff categories:", err)
+    })
+    return () => {
+      isMounted = false
+    }
+  }, [deviceId])
+
+  // Clear category search when dropdown closes
+  useEffect(() => {
+    if (!categoryOpen) {
+      setCategorySearch("")
+    }
+  }, [categoryOpen])
+
+  // Filter categories for the category drop box search
+  const filteredCategories = useMemo(() => {
+    if (!categorySearch.trim()) return categories
+    const q = categorySearch.toLowerCase().trim()
+    return categories.filter((cat) => {
+      const name = (cat.name || "").toLowerCase()
+      const parent = (cat.parent_name || "").toLowerCase()
+      return name.includes(q) || parent.includes(q)
+    })
+  }, [categories, categorySearch])
 
   // Search debouncing: instant on clearing, 250ms when typing
   useEffect(() => {
@@ -168,6 +208,9 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
   const handleRefresh = () => {
     loadStats()
     loadInventory(true)
+    getStaffCategories().then((res) => {
+      if (res.success && res.data) setCategories(res.data)
+    })
   }
 
   const handleProductUpdated = (updatedProduct: any) => {
@@ -217,22 +260,143 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
         </div>
 
         {/* Toolbar */}
-        <div className="bg-white p-3 sm:p-4 rounded-t-xl border border-b-0 border-slate-200 flex flex-col sm:flex-row gap-4 justify-between items-center">
-          <div className="w-full max-w-lg">
-            <InventorySearchBox
-              value={searchTerm}
-              onChange={setSearchTerm}
-              selectedCategory={selectedCategory}
-              onSelectCategory={setSelectedCategory}
-              onSelectProduct={(prod) => setSelectedProduct(prod)}
-              products={products}
-              userId={deviceId}
-              placeholder="Search by name, brand, category, SKU, barcode..."
-              className="w-full"
-            />
+        <div className="bg-white p-3 sm:p-4 rounded-t-xl border border-b-0 border-slate-200 flex flex-col sm:flex-row gap-3 justify-between items-stretch sm:items-center">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 flex-1 max-w-3xl">
+            <div className="flex-1 min-w-[200px]">
+              <InventorySearchBox
+                value={searchTerm}
+                onChange={setSearchTerm}
+                selectedCategory={selectedCategory}
+                onSelectCategory={setSelectedCategory}
+                onSelectProduct={(prod) => setSelectedProduct(prod)}
+                products={products}
+                userId={deviceId}
+                placeholder="Search by name, brand, category, SKU, barcode..."
+                showCategoryChip={false}
+                className="w-full"
+              />
+            </div>
+
+            {/* Category Filter Drop Box with Category Search */}
+            <Popover open={categoryOpen} onOpenChange={setCategoryOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  role="combobox"
+                  aria-expanded={categoryOpen}
+                  className="h-8 px-2.5 text-xs border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-normal rounded-md inline-flex items-center justify-between gap-2 shadow-none focus-visible:ring-1 focus-visible:ring-violet-500 w-full sm:w-[190px] shrink-0"
+                >
+                  <div className="flex items-center gap-1.5 truncate">
+                    <Folder className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                    <span className="truncate">
+                      {selectedCategory?.name || "All Category"}
+                    </span>
+                  </div>
+                  <ChevronsUpDown className="h-3.5 w-3.5 opacity-50 shrink-0" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[230px] p-0 bg-white border border-slate-200 shadow-md rounded-lg" align="start">
+                <div className="flex items-center border-b border-slate-100 px-2.5 py-1.5 gap-2">
+                  <Search className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                  <input
+                    type="text"
+                    placeholder="Search category..."
+                    value={categorySearch}
+                    onChange={(e) => setCategorySearch(e.target.value)}
+                    className="w-full bg-transparent text-xs text-slate-800 outline-none placeholder:text-slate-400"
+                    autoFocus
+                  />
+                  {categorySearch && (
+                    <button
+                      type="button"
+                      onClick={() => setCategorySearch("")}
+                      className="text-slate-400 hover:text-slate-600 p-0.5 rounded"
+                      title="Clear search"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+                <div className="max-h-[220px] overflow-y-auto p-1">
+                  {(!categorySearch.trim() ||
+                    "all category".includes(categorySearch.toLowerCase().trim()) ||
+                    "all categories".includes(categorySearch.toLowerCase().trim())) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedCategory(null)
+                        setCategoryOpen(false)
+                        setCategorySearch("")
+                      }}
+                      className={cn(
+                        "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-xs text-left transition-colors",
+                        !selectedCategory ? "bg-violet-50 text-violet-900 font-medium" : "text-slate-700 hover:bg-slate-50"
+                      )}
+                    >
+                      <span className="flex items-center gap-1.5 truncate">
+                        <Folder className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                        <span>All Category</span>
+                      </span>
+                      {!selectedCategory && <Check className="h-3.5 w-3.5 text-violet-600 shrink-0" />}
+                    </button>
+                  )}
+
+                  {filteredCategories.map((cat) => {
+                    const isSelected = selectedCategory?.id === cat.id || selectedCategory?.name === cat.name
+                    const displayName = cat.parent_name ? `${cat.parent_name} › ${cat.name}` : cat.name
+                    return (
+                      <button
+                        key={cat.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedCategory({ id: cat.id, name: cat.name })
+                          setCategoryOpen(false)
+                          setCategorySearch("")
+                        }}
+                        className={cn(
+                          "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-xs text-left transition-colors",
+                          isSelected ? "bg-violet-50 text-violet-900 font-medium" : "text-slate-700 hover:bg-slate-50"
+                        )}
+                      >
+                        <span className="truncate pr-2">{displayName}</span>
+                        {isSelected && <Check className="h-3.5 w-3.5 text-violet-600 shrink-0" />}
+                      </button>
+                    )
+                  })}
+
+                  {filteredCategories.length === 0 &&
+                    categorySearch.trim() &&
+                    !"all category".includes(categorySearch.toLowerCase().trim()) &&
+                    !"all categories".includes(categorySearch.toLowerCase().trim()) && (
+                      <div className="py-4 text-center text-xs text-slate-400">
+                        No categories found
+                      </div>
+                    )}
+                </div>
+              </PopoverContent>
+            </Popover>
+
+            {/* Selected Category Chip - placed to the right of the category filter box */}
+            {selectedCategory && (
+              <div className="inline-flex h-8 shrink-0 items-center justify-between gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-800 shadow-sm max-w-full sm:max-w-[200px] transition-all">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <Folder className="h-3.5 w-3.5 text-violet-600 shrink-0" />
+                  <span className="truncate" title={selectedCategory.name}>{selectedCategory.name}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedCategory(null)}
+                  className="ml-0.5 rounded-full p-0.5 hover:bg-violet-200/80 text-violet-600 hover:text-violet-950 transition-colors shrink-0"
+                  title="Remove category filter"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
           </div>
 
-          <div className="text-xs text-slate-500 self-end sm:self-center font-medium">
+          <div className="text-xs text-slate-500 self-end sm:self-center font-medium shrink-0">
             {loading ? (
               <span className="flex items-center gap-1.5 text-indigo-600">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" /> Searching...

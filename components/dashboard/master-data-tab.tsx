@@ -25,6 +25,7 @@ import ProductTab from "@/components/dashboard/product-tab"
 import ReturnsTab from "@/components/dashboard/returns-tab"
 import PayrollRequestsTab from "@/components/admin/payroll-requests-tab"
 import { CourierProfileModal } from "@/components/master-data/courier-profile-modal"
+import { ManualCategoryDetailModal } from "@/components/master-data/manual-category-detail-modal"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -149,6 +150,15 @@ export default function MasterDataTab({ userId, initialCategory }: MasterDataTab
   const handleOpenCourierProfile = (courierId: number) => {
     setSelectedCourierIdForProfile(courierId)
     setIsCourierProfileOpen(true)
+  }
+
+  // Manual Category Detail Modal state
+  const [selectedManualCategoryId, setSelectedManualCategoryId] = useState<number | null>(null)
+  const [isManualCategoryModalOpen, setIsManualCategoryModalOpen] = useState(false)
+
+  const handleOpenManualCategoryDetail = (categoryId: number) => {
+    setSelectedManualCategoryId(categoryId)
+    setIsManualCategoryModalOpen(true)
   }
 
   const fetchItems = useCallback(async () => {
@@ -430,17 +440,25 @@ export default function MasterDataTab({ userId, initialCategory }: MasterDataTab
                         <tr
                           key={item.id}
                           className={cn(
-                            "border-b border-slate-200",
+                            "border-b border-slate-200 transition-colors",
                             index % 2 === 0 ? "bg-white" : "bg-slate-50/60",
+                            (activeCategory === "courier" || activeCategory === "manual_category") && "cursor-pointer hover:bg-violet-50/40"
                           )}
+                          onClick={() => {
+                            if (activeCategory === "courier") {
+                              handleOpenCourierProfile(item.id)
+                            } else if (activeCategory === "manual_category") {
+                              handleOpenManualCategoryDetail(item.id)
+                            }
+                          }}
                         >
                           <td className="px-4 py-3">
                             <p
                               className={cn(
                                 "font-semibold text-slate-900",
-                                activeCategory === "courier" && "cursor-pointer hover:text-blue-600 hover:underline"
+                                activeCategory === "courier" && "cursor-pointer hover:text-blue-600 hover:underline",
+                                activeCategory === "manual_category" && "cursor-pointer hover:text-violet-700 hover:underline"
                               )}
-                              onClick={() => activeCategory === "courier" && handleOpenCourierProfile(item.id)}
                             >
                               {item.name}
                             </p>
@@ -488,7 +506,7 @@ export default function MasterDataTab({ userId, initialCategory }: MasterDataTab
                             </span>
                           </td>
                           <td className="px-4 py-3">
-                            <div className="flex justify-end items-center gap-1.5">
+                            <div className="flex justify-end items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
                               {activeCategory === "courier" && (
                                 <Button
                                   variant="outline"
@@ -498,6 +516,18 @@ export default function MasterDataTab({ userId, initialCategory }: MasterDataTab
                                   title="View Partner Profile & Earnings"
                                 >
                                   <Eye className="mr-1 h-4 w-4 text-blue-600" />
+                                  View
+                                </Button>
+                              )}
+                              {activeCategory === "manual_category" && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-8 border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100 font-semibold text-xs px-2.5"
+                                  onClick={() => handleOpenManualCategoryDetail(item.id)}
+                                  title="View Category Details & Transactions"
+                                >
+                                  <Eye className="mr-1 h-4 w-4 text-violet-600" />
                                   View
                                 </Button>
                               )}
@@ -674,6 +704,13 @@ export default function MasterDataTab({ userId, initialCategory }: MasterDataTab
         courierId={selectedCourierIdForProfile}
         isOpen={isCourierProfileOpen}
         onClose={() => setIsCourierProfileOpen(false)}
+      />
+
+      <ManualCategoryDetailModal
+        categoryId={selectedManualCategoryId}
+        deviceId={deviceId}
+        isOpen={isManualCategoryModalOpen}
+        onClose={() => setIsManualCategoryModalOpen(false)}
       />
     </div>
   )

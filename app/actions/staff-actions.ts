@@ -697,50 +697,22 @@ export async function getStaffDashboardStats(deviceId: number, fromDate?: string
     }
 
     const [
-      totalOrdersResult,
-      totalSalesResult,
-      periodSalesResult,
-      periodActivityResult,
+      salesSummaryResult,
       pendingCostsResult,
       staffNameResult
     ] = await Promise.all([
-      // 1. Total Orders in date range
+      // Consolidated: Total Orders & Total Sales in date range in a single scan
       sql`
-        SELECT COUNT(*) as total
-        FROM sales
-        WHERE device_id = ${deviceId} AND staff_id = ${session.staffId} AND status != 'Cancelled'
-          AND sale_date >= ${effectiveFrom}::date
-          AND sale_date < ${effectiveToExclusive}::date
-      `,
-      
-      // 2. Total Sale Amount in date range
-      sql`
-        SELECT COALESCE(SUM(total_amount), 0) as total
-        FROM sales
-        WHERE device_id = ${deviceId} AND staff_id = ${session.staffId} AND status != 'Cancelled'
-          AND sale_date >= ${effectiveFrom}::date
-          AND sale_date < ${effectiveToExclusive}::date
-      `,
-      
-      // 3. Period Sale Amount (same as total for date range)
-      sql`
-        SELECT COALESCE(SUM(total_amount), 0) as total
-        FROM sales
-        WHERE device_id = ${deviceId} AND staff_id = ${session.staffId} AND status != 'Cancelled'
-          AND sale_date >= ${effectiveFrom}::date
-          AND sale_date < ${effectiveToExclusive}::date
-      `,
-      
-      // 4. Period Activity (orders processing in date range)
-      sql`
-        SELECT COUNT(*) as total
+        SELECT 
+          COUNT(*)::int as total_orders,
+          COALESCE(SUM(total_amount), 0)::numeric as total_sales
         FROM sales
         WHERE device_id = ${deviceId} AND staff_id = ${session.staffId} AND status != 'Cancelled'
           AND sale_date >= ${effectiveFrom}::date
           AND sale_date < ${effectiveToExclusive}::date
       `,
 
-      // 5. Pending Costs (filtered by date range where applicable)
+      // Pending Costs (filtered by date range where applicable)
       sql`
         SELECT 
           (SELECT COUNT(*) FROM purchases WHERE status != 'Paid' AND status != 'Cancelled' AND device_id = ${deviceId} AND staff_id = ${session.staffId}
@@ -753,16 +725,16 @@ export async function getStaffDashboardStats(deviceId: number, fromDate?: string
         as total
       `,
 
-      // 6. Staff Name
+      // Staff Name
       sql`
         SELECT name FROM staff WHERE id = ${session.staffId} LIMIT 1
       `
     ]);
 
-    const totalOrders = Number(totalOrdersResult[0]?.total) || 0;
-    const totalSales = Number(totalSalesResult[0]?.total) || 0;
-    const periodSales = Number(periodSalesResult[0]?.total) || 0;
-    const periodActivity = Number(periodActivityResult[0]?.total) || 0;
+    const totalOrders = Number(salesSummaryResult[0]?.total_orders) || 0;
+    const totalSales = Number(salesSummaryResult[0]?.total_sales) || 0;
+    const periodSales = totalSales;
+    const periodActivity = totalOrders;
     const pendingCosts = Number(pendingCostsResult[0]?.total) || 0;
     const staffName = staffNameResult[0]?.name || session.staffName || session.deviceName || "";
 

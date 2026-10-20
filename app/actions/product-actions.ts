@@ -911,55 +911,45 @@ export async function getProducts(
             FROM product_batch_device_stock pbds
             JOIN product_batches pb ON pb.id = pbds.batch_id
             WHERE pb.product_variant_id = pv.id AND pbds.device_id = ${deviceStockId}
-          ), 0) AS stock
+          ), 0)::numeric AS stock,
+          COALESCE((
+            SELECT json_agg(json_build_object(
+              'id', pb.id,
+              'batch_id', pb.id,
+              'product_variant_id', pb.product_variant_id,
+              'batch_no', pb.batch_no,
+              'cost_price', pb.cost_price,
+              'selling_price', pb.selling_price,
+              'created_at', pb.created_at,
+              'status', pb.status,
+              'supplier_name', s.name,
+              'stock', COALESCE(pbds.stock, 0)
+            ) ORDER BY pb.created_at ASC)
+            FROM product_batches pb
+            LEFT JOIN product_batch_device_stock pbds ON pbds.batch_id = pb.id AND pbds.device_id = ${deviceStockId}
+            LEFT JOIN suppliers s ON s.id = pb.supplier_id
+            WHERE pb.product_variant_id = pv.id 
+              AND pb.status = 'active'
+              AND pbds.stock > 0
+          ), '[]'::json) AS batches
         FROM product_variants pv
         WHERE pv.product_id = ANY(${productIds}) AND pv.status = 'active'
         ORDER BY pv.id ASC
       `
-      
-      const variantIds: number[] = (allVariants as any[]).map((v: any) => Number(v.id))
-      
-      if (variantIds.length > 0) {
-        const allBatches = await sql`
-          SELECT 
-            pb.id as id,
-            pb.id as batch_id,
-            pb.product_variant_id,
-            pb.batch_no,
-            pb.cost_price,
-            pb.selling_price,
-            pb.created_at,
-            pb.status,
-            s.name as supplier_name,
-            COALESCE(pbds.stock, 0) as stock
-          FROM product_batches pb
-          LEFT JOIN product_batch_device_stock pbds ON pbds.batch_id = pb.id AND pbds.device_id = ${deviceStockId}
-          LEFT JOIN suppliers s ON s.id = pb.supplier_id
-          WHERE pb.product_variant_id = ANY(${variantIds}) 
-            AND pb.status = 'active'
-            AND pbds.stock > 0
-          ORDER BY pb.created_at ASC
-        `
-        
-        for (const b of allBatches as any[]) {
-          const vid = Number(b.product_variant_id)
-          if (!batchesByVariantId.has(vid)) batchesByVariantId.set(vid, [])
-          batchesByVariantId.get(vid)!.push({
-            ...b,
-            created_at: b.created_at ? (b.created_at instanceof Date ? b.created_at.toISOString() : String(b.created_at)) : null,
-            stock: Number(b.stock)
-          })
-        }
-      }
 
       for (const v of allVariants as any[]) {
         const pid = Number(v.product_id)
-        const vid = Number(v.id)
         if (!variantsByProductId.has(pid)) variantsByProductId.set(pid, [])
+        const rawBatches = Array.isArray(v.batches) ? v.batches : []
+        const batches = rawBatches.map((b: any) => ({
+          ...b,
+          created_at: b.created_at ? (b.created_at instanceof Date ? b.created_at.toISOString() : String(b.created_at)) : null,
+          stock: Number(b.stock || 0)
+        }))
         variantsByProductId.get(pid)!.push({
           ...v,
-          stock: Number(v.stock),
-          batches: batchesByVariantId.get(vid) || []
+          stock: Number(v.stock || 0),
+          batches,
         })
       }
     }
@@ -1023,6 +1013,22 @@ export async function getProducts(
   }
 }
 
+const companyDevicesCache = new Map<number, { ids: number[]; expires: number }>()
+
+async function getCachedCompanyDeviceIds(userId: number): Promise<number[]> {
+  const cached = companyDevicesCache.get(userId)
+  if (cached && cached.expires > Date.now()) {
+    return cached.ids
+  }
+  const deviceRows = await sql`
+    SELECT d2.id FROM devices d1 JOIN devices d2 ON d2.company_id = d1.company_id WHERE d1.id = ${userId}
+  `
+  const ids = deviceRows.map((d: any) => Number(d.id))
+  const finalIds = ids.length > 0 ? ids : [userId]
+  companyDevicesCache.set(userId, { ids: finalIds, expires: Date.now() + 5 * 60 * 1000 })
+  return finalIds
+}
+
 export async function getPaginatedProducts({
   userId: requestedUserId,
   page = 1,
@@ -1069,17 +1075,8 @@ export async function getPaginatedProducts({
     const trimmedSearch = searchTerm ? searchTerm.trim() : ""
     const isIdSearch = trimmedSearch !== "" && /^\d+$/.test(trimmedSearch)
 
-    // Pre-resolve authorized company device IDs once to avoid slow nested correlated subqueries
-    let companyDeviceIds: number[] = []
-    if (userId) {
-      const deviceRows = await sql`
-        SELECT d2.id FROM devices d1 JOIN devices d2 ON d2.company_id = d1.company_id WHERE d1.id = ${userId}
-      `
-      companyDeviceIds = deviceRows.map((d: any) => Number(d.id))
-      if (companyDeviceIds.length === 0) {
-        companyDeviceIds = [userId]
-      }
-    }
+    // Pre-resolve authorized company device IDs (cached in-memory to eliminate redundant roundtrips)
+    const companyDeviceIds: number[] = userId ? await getCachedCompanyDeviceIds(userId) : []
 
     let totalCount = 0
     let products: any[] = []
@@ -1636,55 +1633,50 @@ export async function getPaginatedProducts({
 
     if (productIds.length > 0) {
       const deviceStockId = userId || 0
-      const [deviceStocks, companyDeviceStocks, allVariants] = await Promise.all([
+
+      // Consolidated parallel fetch: combined stock + variants with batches embedded (eliminates 2 sequential roundtrips)
+      const [combinedStocks, allVariants] = await Promise.all([
         userId ? sql`
           SELECT 
             p.id AS product_id,
-            COALESCE(pb_stock.total_stock, pd_stock.total_stock, 0) AS stock
+            COALESCE(dev_pb.stock, dev_pd.stock, 0)::numeric AS device_stock,
+            COALESCE(comp_pb.stock, comp_pd.stock, 0)::numeric AS company_total_stock
           FROM products p
           LEFT JOIN (
-            SELECT pv.product_id, SUM(pbds.stock) as total_stock
+            SELECT pv.product_id, SUM(pbds.stock) as stock
             FROM product_batch_device_stock pbds
             JOIN product_batches pb ON pb.id = pbds.batch_id
             JOIN product_variants pv ON pv.id = pb.product_variant_id
             WHERE pbds.device_id = ${userId} AND pv.product_id = ANY(${productIds})
             GROUP BY pv.product_id
-          ) pb_stock ON pb_stock.product_id = p.id
+          ) dev_pb ON dev_pb.product_id = p.id
           LEFT JOIN (
-            SELECT pds.product_id, SUM(pds.stock) as total_stock
+            SELECT pds.product_id, SUM(pds.stock) as stock
             FROM product_device_stock pds
             WHERE pds.device_id = ${userId} AND pds.product_id = ANY(${productIds})
             GROUP BY pds.product_id
-          ) pd_stock ON pd_stock.product_id = p.id
-          WHERE p.id = ANY(${productIds})
-        ` : Promise.resolve([]),
-        userId ? sql`
-          SELECT 
-            p.id AS product_id,
-            COALESCE(pb_stock.total_stock, pd_stock.total_stock, 0) AS total_stock
-          FROM products p
+          ) dev_pd ON dev_pd.product_id = p.id
           LEFT JOIN (
-            SELECT pv.product_id, SUM(pbds.stock) as total_stock
+            SELECT pv.product_id, SUM(pbds.stock) as stock
             FROM product_batch_device_stock pbds
             JOIN product_batches pb ON pb.id = pbds.batch_id
             JOIN product_variants pv ON pv.id = pb.product_variant_id
             JOIN devices d ON d.id = pbds.device_id
-            WHERE d.company_id = (
-              SELECT company_id FROM devices WHERE id = ${userId}
-            ) AND pv.product_id = ANY(${productIds})
+            WHERE d.company_id = (SELECT company_id FROM devices WHERE id = ${userId})
+              AND pv.product_id = ANY(${productIds})
             GROUP BY pv.product_id
-          ) pb_stock ON pb_stock.product_id = p.id
+          ) comp_pb ON comp_pb.product_id = p.id
           LEFT JOIN (
-            SELECT pds.product_id, SUM(pds.stock) as total_stock
+            SELECT pds.product_id, SUM(pds.stock) as stock
             FROM product_device_stock pds
             JOIN devices d ON d.id = pds.device_id
-            WHERE d.company_id = (
-              SELECT company_id FROM devices WHERE id = ${userId}
-            ) AND pds.product_id = ANY(${productIds})
+            WHERE d.company_id = (SELECT company_id FROM devices WHERE id = ${userId})
+              AND pds.product_id = ANY(${productIds})
             GROUP BY pds.product_id
-          ) pd_stock ON pd_stock.product_id = p.id
+          ) comp_pd ON comp_pd.product_id = p.id
           WHERE p.id = ANY(${productIds})
         ` : Promise.resolve([]),
+
         sql`
           SELECT
             pv.id,
@@ -1706,7 +1698,27 @@ export async function getPaginatedProducts({
               FROM product_batch_device_stock pbds
               JOIN product_batches pb ON pb.id = pbds.batch_id
               WHERE pb.product_variant_id = pv.id AND pbds.device_id = ${deviceStockId}
-            ), 0) AS stock
+            ), 0)::numeric AS stock,
+            COALESCE((
+              SELECT json_agg(json_build_object(
+                'id', pb.id,
+                'batch_id', pb.id,
+                'product_variant_id', pb.product_variant_id,
+                'batch_no', pb.batch_no,
+                'cost_price', pb.cost_price,
+                'selling_price', pb.selling_price,
+                'created_at', pb.created_at,
+                'status', pb.status,
+                'supplier_name', s.name,
+                'stock', COALESCE(pbds.stock, 0)
+              ) ORDER BY pb.created_at ASC)
+              FROM product_batches pb
+              LEFT JOIN product_batch_device_stock pbds ON pbds.batch_id = pb.id AND pbds.device_id = ${deviceStockId}
+              LEFT JOIN suppliers s ON s.id = pb.supplier_id
+              WHERE pb.product_variant_id = pv.id 
+                AND pb.status = 'active'
+                AND pbds.stock > 0
+            ), '[]'::json) AS batches
           FROM product_variants pv
           WHERE pv.product_id = ANY(${productIds}) AND pv.status = 'active'
           ORDER BY pv.id ASC
@@ -1714,55 +1726,25 @@ export async function getPaginatedProducts({
       ])
 
       if (userId) {
-        stockMap = new Map<number, number>((deviceStocks as any[]).map((row: any) => [Number(row.product_id), Number(row.stock)]))
-        companyTotalStockMap = new Map(
-          (companyDeviceStocks as any[]).map((row: any) => [Number(row.product_id), Number(row.total_stock)]),
-        )
-      }
-
-      const variantIds: number[] = (allVariants as any[]).map((v: any) => Number(v.id))
-
-      if (variantIds.length > 0) {
-        const allBatches = await sql`
-          SELECT 
-            pb.id as id,
-            pb.id as batch_id,
-            pb.product_variant_id,
-            pb.batch_no,
-            pb.cost_price,
-            pb.selling_price,
-            pb.created_at,
-            pb.status,
-            s.name as supplier_name,
-            COALESCE(pbds.stock, 0) as stock
-          FROM product_batches pb
-          LEFT JOIN product_batch_device_stock pbds ON pbds.batch_id = pb.id AND pbds.device_id = ${deviceStockId}
-          LEFT JOIN suppliers s ON s.id = pb.supplier_id
-          WHERE pb.product_variant_id = ANY(${variantIds}) 
-            AND pb.status = 'active'
-            AND pbds.stock > 0
-          ORDER BY pb.created_at ASC
-        `
-
-        for (const b of allBatches as any[]) {
-          const vid = Number(b.product_variant_id)
-          if (!batchesByVariantId.has(vid)) batchesByVariantId.set(vid, [])
-          batchesByVariantId.get(vid)!.push({
-            ...b,
-            created_at: b.created_at ? (b.created_at instanceof Date ? b.created_at.toISOString() : String(b.created_at)) : null,
-            stock: Number(b.stock)
-          })
+        for (const row of combinedStocks as any[]) {
+          stockMap.set(Number(row.product_id), Number(row.device_stock || 0))
+          companyTotalStockMap.set(Number(row.product_id), Number(row.company_total_stock || 0))
         }
       }
 
       for (const v of allVariants as any[]) {
         const pid = Number(v.product_id)
-        const vid = Number(v.id)
         if (!variantsByProductId.has(pid)) variantsByProductId.set(pid, [])
+        const rawBatches = Array.isArray(v.batches) ? v.batches : []
+        const batches = rawBatches.map((b: any) => ({
+          ...b,
+          created_at: b.created_at ? (b.created_at instanceof Date ? b.created_at.toISOString() : String(b.created_at)) : null,
+          stock: Number(b.stock || 0)
+        }))
         variantsByProductId.get(pid)!.push({
           ...v,
-          stock: Number(v.stock),
-          batches: batchesByVariantId.get(vid) || []
+          stock: Number(v.stock || 0),
+          batches,
         })
       }
     }

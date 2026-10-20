@@ -48,6 +48,34 @@ export function generateCourierTrackingUrl(
       : "https://stcourier.com/track/shipment"
   }
 
+  // 5. Delhivery
+  if (nameLower.includes("delhivery")) {
+    return cleanTrackingId
+      ? `https://www.delhivery.com/track/package/${encodeURIComponent(cleanTrackingId)}`
+      : "https://www.delhivery.com/"
+  }
+
+  // 6. Blue Dart
+  if (nameLower.includes("blue dart") || nameLower.includes("bluedart")) {
+    return cleanTrackingId
+      ? `https://www.bluedart.com/tracking?handler=tnt&action=custtrack&track=true&numbers=${encodeURIComponent(cleanTrackingId)}`
+      : "https://www.bluedart.com/"
+  }
+
+  // 7. India Post / Speed Post
+  if (nameLower.includes("speed post") || nameLower.includes("speedpost") || nameLower.includes("india post") || nameLower.includes("indiapost")) {
+    return cleanTrackingId
+      ? `https://www.indiapost.gov.in/_layouts/15/dop.portal.tracking/trackconsignment.aspx`
+      : "https://www.indiapost.gov.in/"
+  }
+
+  // 8. Professional Courier
+  if (nameLower.includes("professional") || nameLower.includes("tpc")) {
+    return cleanTrackingId
+      ? `https://www.tpcindia.com/`
+      : "https://www.tpcindia.com/"
+  }
+
   return null
 }
 

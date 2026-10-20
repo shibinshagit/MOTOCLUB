@@ -4,7 +4,7 @@ import { sql, getLastError } from "@/lib/db"
 import { getStaffSession } from "@/lib/staff-session"
 import { getServerActor } from "@/lib/device-access"
 import { getPaginatedProducts } from "@/app/actions/product-actions"
-
+import { getCategories } from "@/app/actions/category-actions"
 import { revalidatePath } from "next/cache"
 
 export async function getStaffInventory(
@@ -108,7 +108,7 @@ export async function getStaffInventoryStats() {
         ) s GROUP BY product_id
       ) ds ON ds.product_id = p.id
       WHERE p.created_by IN (
-        SELECT d2.id FROM devices d1 JOIN devices d2 ON d2.company_id = d1.company_id WHERE d1.id = ${deviceId}
+        SELECT id FROM devices WHERE company_id = ${session.companyId || sql`(SELECT company_id FROM devices WHERE id = ${deviceId})`}
       )
     `
 
@@ -248,3 +248,34 @@ export async function updateStaffProductMedia(
     return { success: false, message: "Failed to update product media" }
   }
 }
+
+export async function getStaffCategories() {
+  try {
+    const session = await getStaffSession()
+    const companyId = session?.companyId
+    const deviceId = session?.deviceId
+
+    if (companyId) {
+      const categories = await sql`
+        SELECT 
+          c.*,
+          p.name as parent_name
+        FROM product_categories c
+        LEFT JOIN product_categories p ON c.parent_id = p.id
+        WHERE (c.company_id = ${companyId} OR c.company_id IS NULL)
+        ORDER BY COALESCE(c.parent_id, c.id), c.parent_id NULLS FIRST, c.name ASC
+      `
+      return { success: true, data: categories || [] }
+    }
+
+    if (deviceId) {
+      return await getCategories(deviceId)
+    }
+
+    return await getCategories()
+  } catch (error) {
+    console.error("Get staff categories error:", error)
+    return { success: false, data: [] }
+  }
+}
+
