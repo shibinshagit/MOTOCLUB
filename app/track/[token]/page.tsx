@@ -92,6 +92,29 @@ export default function CustomerTrackingPage() {
     fetchTracking()
   }, [token])
 
+  useEffect(() => {
+    // Set dynamic tab title
+    if (data?.trackingId || data?.orderId) {
+      document.title = `Tracking ${data.trackingId || data.orderId} | MOTOCLUB`
+    } else {
+      document.title = "Live Shipment & Parcel Tracking | MOTOCLUB"
+    }
+  }, [data])
+
+  useEffect(() => {
+    // Set tracking favicon to circular MOTO logo
+    if (typeof document !== "undefined") {
+      let link: HTMLLinkElement | null = document.querySelector("link[rel~='icon']")
+      if (!link) {
+        link = document.createElement("link")
+        link.rel = "icon"
+        document.head.appendChild(link)
+      }
+      link.type = "image/svg+xml"
+      link.href = "/track-favicon.svg"
+    }
+  }, [])
+
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
     if (searchInput.trim()) {
@@ -219,8 +242,7 @@ export default function CustomerTrackingPage() {
         {loading && (
           <div className="bg-white p-12 rounded-3xl border border-slate-200 shadow-sm flex flex-col items-center justify-center space-y-3">
             <Loader2 className="h-8 w-8 text-slate-900 animate-spin" />
-            <p className="text-sm font-semibold text-slate-700">Connecting to carrier live tracking...</p>
-            <p className="text-xs text-slate-400">Fetching real-time scans and checkpoint updates</p>
+            <p className="text-sm font-semibold text-slate-700">Checking...</p>
           </div>
         )}
 
