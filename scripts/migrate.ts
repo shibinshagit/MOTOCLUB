@@ -1497,6 +1497,22 @@ async function createIndexes() {
     ["idx_crm_agencies_company_id", () => sql`CREATE INDEX IF NOT EXISTS idx_crm_agencies_company_id ON crm_agencies(company_id)`],
     ["idx_crm_agencies_device_id", () => sql`CREATE INDEX IF NOT EXISTS idx_crm_agencies_device_id ON crm_agencies(device_id)`],
     ["idx_crm_agencies_status", () => sql`CREATE INDEX IF NOT EXISTS idx_crm_agencies_status ON crm_agencies(status)`],
+
+    // Core high-traffic relational indexes to eliminate sequential table scans
+    ["idx_purchase_items_purchase_id", () => sql`CREATE INDEX IF NOT EXISTS idx_purchase_items_purchase_id ON purchase_items(purchase_id)`],
+    ["idx_purchase_items_product_id", () => sql`CREATE INDEX IF NOT EXISTS idx_purchase_items_product_id ON purchase_items(product_id)`],
+    ["idx_purchase_items_variant_id", () => sql`CREATE INDEX IF NOT EXISTS idx_purchase_items_variant_id ON purchase_items(product_variant_id)`],
+    ["idx_sale_batch_allocations_item_id", () => sql`CREATE INDEX IF NOT EXISTS idx_sale_batch_allocations_item_id ON sale_batch_allocations(sale_item_id)`],
+    ["idx_sale_batch_allocations_batch_id", () => sql`CREATE INDEX IF NOT EXISTS idx_sale_batch_allocations_batch_id ON sale_batch_allocations(batch_id)`],
+    ["idx_sale_items_product_id", () => sql`CREATE INDEX IF NOT EXISTS idx_sale_items_product_id ON sale_items(product_id)`],
+    ["idx_sale_items_variant_id", () => sql`CREATE INDEX IF NOT EXISTS idx_sale_items_variant_id ON sale_items(product_variant_id)`],
+    ["idx_devices_company_id", () => sql`CREATE INDEX IF NOT EXISTS idx_devices_company_id ON devices(company_id)`],
+    ["idx_purchases_device_id", () => sql`CREATE INDEX IF NOT EXISTS idx_purchases_device_id ON purchases(device_id)`],
+    ["idx_purchases_status", () => sql`CREATE INDEX IF NOT EXISTS idx_purchases_status ON purchases(status)`],
+    ["idx_purchases_created_by", () => sql`CREATE INDEX IF NOT EXISTS idx_purchases_created_by ON purchases(created_by)`],
+    ["idx_sales_staff_device_status", () => sql`CREATE INDEX IF NOT EXISTS idx_sales_staff_device_status ON sales(device_id, staff_id, status)`],
+    ["idx_ft_device_staff", () => sql`CREATE INDEX IF NOT EXISTS idx_ft_device_staff ON financial_transactions(device_id, staff_id)`],
+    ["idx_ft_status_type", () => sql`CREATE INDEX IF NOT EXISTS idx_ft_status_type ON financial_transactions(transaction_type, status)`],
   ]
 
   for (const [label, fn] of indexes) {
