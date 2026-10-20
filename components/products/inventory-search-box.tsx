@@ -28,6 +28,7 @@ interface InventorySearchBoxProps {
   className?: string
   inputClassName?: string
   autoFocus?: boolean
+  showCategoryChip?: boolean
 }
 
 type FlatSuggestionItem =
@@ -47,6 +48,7 @@ export function InventorySearchBox({
   className = "",
   inputClassName = "",
   autoFocus = false,
+  showCategoryChip = true,
 }: InventorySearchBoxProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [highlightedIndex, setHighlightedIndex] = useState(-1)
@@ -234,7 +236,7 @@ export function InventorySearchBox({
   return (
     <div ref={containerRef} className={cn("relative flex w-full flex-col sm:flex-row items-stretch sm:items-center gap-1.5", className)}>
       {/* Category Filter Chip */}
-      {activeCategory ? (
+      {showCategoryChip && activeCategory ? (
         <div className="inline-flex h-8 shrink-0 items-center justify-between gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-800 shadow-sm max-w-full sm:max-w-[200px] transition-all">
           <div className="flex items-center gap-1.5 min-w-0">
             <Folder className="h-3.5 w-3.5 text-violet-600 shrink-0" />
