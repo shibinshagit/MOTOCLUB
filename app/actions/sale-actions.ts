@@ -713,7 +713,7 @@ export interface GetPaginatedSalesOptions {
   dateFrom?: string
   dateTo?: string
   typeFilter?: "all" | "normal" | "job_card"
-  typeOfSaleFilter?: "all" | "walk in" | "courier"
+  typeOfSaleFilter?: "all" | "walk in" | "courier" | "pending_payments"
   cardFilter?: "all" | "today" | "pending" | "critical"
   searchTerm?: string
   onlyPosUpdated?: boolean
@@ -858,6 +858,15 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
             ${typeOfSaleFilter} = 'all'
             OR (${typeOfSaleFilter} = 'walk in' AND LOWER(COALESCE(s.type_of_sale, 'walk in')) = 'walk in')
             OR (${typeOfSaleFilter} = 'courier' AND LOWER(COALESCE(s.type_of_sale, '')) = 'courier')
+            OR (
+              ${typeOfSaleFilter} = 'pending_payments'
+              AND (
+                LOWER(COALESCE(s.payment_status, '')) IN ('credit', 'cod', 'partial')
+                OR LOWER(COALESCE(s.status, '')) IN ('credit', 'cod', 'partial')
+              )
+              AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
+              AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
+            )
           )
           AND (
             ${cardFilter} = 'all'
@@ -958,6 +967,15 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
             ${typeOfSaleFilter} = 'all'
             OR (${typeOfSaleFilter} = 'walk in' AND LOWER(COALESCE(s.type_of_sale, 'walk in')) = 'walk in')
             OR (${typeOfSaleFilter} = 'courier' AND LOWER(COALESCE(s.type_of_sale, '')) = 'courier')
+            OR (
+              ${typeOfSaleFilter} = 'pending_payments'
+              AND (
+                LOWER(COALESCE(s.payment_status, '')) IN ('credit', 'cod', 'partial')
+                OR LOWER(COALESCE(s.status, '')) IN ('credit', 'cod', 'partial')
+              )
+              AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
+              AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
+            )
           )
           AND (
             ${cardFilter} = 'all'
@@ -1225,7 +1243,7 @@ export async function getSalesSummaryCards(
     dateFrom?: string
     dateTo?: string
     typeFilter?: string
-    typeOfSaleFilter?: "all" | "walk in" | "courier"
+    typeOfSaleFilter?: "all" | "walk in" | "courier" | "pending_payments"
     searchTerm?: string
     onlyPosUpdated?: boolean
     excludePendingAndPickup?: boolean
@@ -1320,6 +1338,15 @@ export async function getSalesSummaryCards(
             ${typeOfSaleFilter} = 'all'
             OR (${typeOfSaleFilter} = 'walk in' AND LOWER(COALESCE(s.type_of_sale, 'walk in')) = 'walk in')
             OR (${typeOfSaleFilter} = 'courier' AND LOWER(COALESCE(s.type_of_sale, '')) = 'courier')
+            OR (
+              ${typeOfSaleFilter} = 'pending_payments'
+              AND (
+                LOWER(COALESCE(s.payment_status, '')) IN ('credit', 'cod', 'partial')
+                OR LOWER(COALESCE(s.status, '')) IN ('credit', 'cod', 'partial')
+              )
+              AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
+              AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
+            )
           )
           AND (
             ${searchPattern}::text IS NULL

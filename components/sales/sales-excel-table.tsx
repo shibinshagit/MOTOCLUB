@@ -416,7 +416,7 @@ export default function SalesExcelTable({
 
   const [cardFilter, setCardFilter] = useState<"all" | "today" | "pending" | "critical">("all")
   const [typeFilter, setTypeFilter] = useState<"all" | "normal" | "job_card">("all")
-  const [typeOfSaleFilter, setTypeOfSaleFilter] = useState<"all" | "walk in" | "courier">("all")
+  const [typeOfSaleFilter, setTypeOfSaleFilter] = useState<"all" | "walk in" | "courier" | "pending_payments">("all")
   const [selectedSales, setSelectedSales] = useState<number[]>([])
   const [allMatchingSales, setAllMatchingSales] = useState<{ id: number; isJobCard: boolean }[]>([])
   const [loadedSalesCache, setLoadedSalesCache] = useState<Record<number, any>>({})
@@ -1419,7 +1419,7 @@ export default function SalesExcelTable({
                 </span>
               )}
 
-              {/* SLIDING FILTER PILL: All Sales | Walk in | Courier */}
+              {/* SLIDING FILTER PILL: All Sales | Walk in | Courier | Pending Payments */}
               <div className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-100/90 p-0.5 shadow-2xs">
                 <button
                   type="button"
@@ -1468,6 +1468,22 @@ export default function SalesExcelTable({
                   )}
                 >
                   Courier
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTypeOfSaleFilter("pending_payments")
+                    setPage(1)
+                    setSelectedSales([])
+                  }}
+                  className={cn(
+                    "px-2.5 py-1 text-xs font-semibold rounded-md transition-all cursor-pointer whitespace-nowrap",
+                    typeOfSaleFilter === "pending_payments"
+                      ? "bg-white text-slate-900 shadow-2xs font-bold"
+                      : "text-slate-600 hover:text-slate-900",
+                  )}
+                >
+                  Pending Payments
                 </button>
               </div>
             </div>
