@@ -918,10 +918,8 @@ export default function SalesExcelTable({
 
   const stickyActionHeaderClass =
     "min-w-[5.5rem] whitespace-nowrap border-l border-slate-200 bg-[#F1F4F9] px-3 py-1.5 text-right"
-  const stickyActionCellClass = (rowBg: string, isPending: boolean) =>
-    `min-w-[5.5rem] whitespace-nowrap border-l border-slate-200 px-3 py-1.5 text-right ${
-      isPending ? "bg-amber-50 group-hover:bg-amber-100" : `group-hover:bg-violet-50 ${rowBg}`
-    }`
+  const stickyActionCellClass = (rowBg: string) =>
+    `min-w-[5.5rem] whitespace-nowrap border-l border-slate-200 px-3 py-1.5 text-right ${rowBg}`
 
   return (
     <div className="space-y-3 pb-28 sm:pb-6 min-w-0 max-w-full overflow-hidden">
@@ -1679,63 +1677,63 @@ export default function SalesExcelTable({
                         ? Number(sale.total_amount || 0)
                         : Number(sale.received_amount || 0)
 
-                    const statusLabel = getSaleStatusLabel(sale)
                     const isCancelledOrReturned =
                       sale.status === "Cancelled" ||
                       sale.payment_status?.toLowerCase() === "cancelled" ||
                       sale.delivery_status === "Returned" ||
                       sale.delivery_status?.toLowerCase() === "returned"
 
-                    const isPending =
-                      !isCancelledOrReturned &&
-                      (statusLabel === "Pending" || sale.status === "Pending" || sale.payment_status === "Pending")
-
+                    const paymentStatusLower = (sale.payment_status || "").toLowerCase()
                     const deliveryStatusLower = (sale.delivery_status || "").toLowerCase()
-                    let statusClass = "pending"
+                    const saleStatusLower = (sale.status || "").toLowerCase()
+
+                    let statusClass: "default" | "red" | "blue" | "green" = "default"
+
                     if (isCancelledOrReturned) {
-                      statusClass = "cancel"
-                    } else if (isPending) {
-                      statusClass = "pending"
+                      // Cancelled / Returned -> Red
+                      statusClass = "red"
                     } else if (
+                      paymentStatusLower === "paid" ||
+                      paymentStatusLower === "completed" ||
                       deliveryStatusLower.includes("deliver") ||
-                      deliveryStatusLower.includes("complete") ||
-                      sale.payment_status === "Paid" ||
-                      sale.payment_status === "Completed"
+                      deliveryStatusLower.includes("complete")
                     ) {
-                      statusClass = "deliver"
+                      // 2. Green / Emerald: As same as now (Paid / Completed / Delivered)
+                      statusClass = "green"
                     } else if (
-                      deliveryStatusLower.includes("paid") ||
-                      deliveryStatusLower.includes("pack") ||
-                      deliveryStatusLower.includes("sent") ||
-                      deliveryStatusLower.includes("courier") ||
-                      deliveryStatusLower.includes("ship") ||
-                      deliveryStatusLower.includes("transit") ||
-                      deliveryStatusLower.includes("out for delivery") ||
-                      deliveryStatusLower.includes("dispatch")
+                      paymentStatusLower === "cod" ||
+                      paymentStatusLower === "credit" ||
+                      saleStatusLower === "credit" ||
+                      saleStatusLower === "cod"
                     ) {
-                      statusClass = "ship"
+                      // 3. Red: Payment status COD or Credit
+                      statusClass = "red"
+                    } else if (
+                      paymentStatusLower === "partial" ||
+                      saleStatusLower === "partial"
+                    ) {
+                      // 4. Blue: Payment status Partial
+                      statusClass = "blue"
                     } else {
-                      statusClass = "deliver"
+                      // 1. Grey / White: Payment status Pending or delivery status pending (no amber/orange)
+                      statusClass = "default"
                     }
 
                     let baseBgClass =
                       index % 2 === 0
-                        ? "bg-white hover:bg-violet-50 text-slate-800"
-                        : "bg-slate-50 hover:bg-violet-50 text-slate-800"
+                        ? "bg-white hover:bg-slate-100 text-slate-800"
+                        : "bg-slate-50 hover:bg-slate-100 text-slate-800"
                     let borderLeftClass = ""
 
-                    if (statusClass === "pending") {
-                      baseBgClass = "bg-amber-100 text-amber-950 hover:bg-amber-200 font-medium"
-                      borderLeftClass = "border-l-4 border-l-amber-500"
-                    } else if (statusClass === "ship") {
-                      baseBgClass = "bg-blue-100 text-blue-950 hover:bg-blue-200 font-medium"
-                      borderLeftClass = "border-l-4 border-l-blue-500"
-                    } else if (statusClass === "deliver") {
-                      baseBgClass = "bg-emerald-100 text-emerald-950 hover:bg-emerald-200 font-medium"
-                      borderLeftClass = "border-l-4 border-l-emerald-500"
-                    } else if (statusClass === "cancel") {
+                    if (statusClass === "red") {
                       baseBgClass = "bg-rose-100 text-rose-950 hover:bg-rose-200 font-medium"
                       borderLeftClass = "border-l-4 border-l-rose-500"
+                    } else if (statusClass === "blue") {
+                      baseBgClass = "bg-blue-100 text-blue-950 hover:bg-blue-200 font-medium"
+                      borderLeftClass = "border-l-4 border-l-blue-500"
+                    } else if (statusClass === "green") {
+                      baseBgClass = "bg-emerald-100 text-emerald-950 hover:bg-emerald-200 font-medium"
+                      borderLeftClass = "border-l-4 border-l-emerald-500"
                     }
 
                     const isSelected = selectedSales.includes(sale.id)
@@ -1926,7 +1924,7 @@ export default function SalesExcelTable({
                           {remaining > 0 ? formatCurrency(remaining) : "—"}
                         </td>
                         {(showActions || isLogistics) && (
-                          <td className={stickyActionCellClass(baseBgClass, isPending)}>
+                          <td className={stickyActionCellClass(baseBgClass)}>
                             {isLogistics ? (
                               <div className="flex items-center justify-center">
                                 <Button
