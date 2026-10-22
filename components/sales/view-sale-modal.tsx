@@ -79,6 +79,7 @@ function DeliveryStatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
     Pending: "bg-amber-50 text-amber-700 border-amber-200",
     Paid: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    COD: "bg-purple-50 text-purple-700 border-purple-200",
     Packed: "bg-blue-50 text-blue-700 border-blue-200",
     Sent: "bg-purple-50 text-purple-700 border-purple-200",
     Direct: "bg-blue-50 text-blue-700 border-blue-200",
@@ -269,6 +270,7 @@ export default function ViewSaleModal({
     if (pStatus === "paid" || pStatus === "completed") return "Paid"
     if (pStatus === "partial") return "Partial"
     if (pStatus === "credit") return "Credit"
+    if (pStatus === "cod") return "COD"
     const total = Number(sale.total_amount) || 0
     const received = Number(sale.received_amount) || 0
     if (total > 0 && received >= total) return "Paid"

@@ -529,25 +529,46 @@ export default function SalesOrdersTab() {
                   const dateFormatted = format(saleDateTime, "dd MMM yyyy")
                   const timeFormatted = format(saleDateTime, "hh:mm a")
   
-                  const statusLower = (sale.delivery_status || "Pending").toLowerCase()
-                  let rowBg = index % 2 === 0 ? "bg-white text-slate-800" : "bg-slate-50/50 text-slate-800"
+                  const deliveryStatusLower = (sale.delivery_status || "Pending").toLowerCase()
+                  const paymentStatusLower = (sale.payment_status || "").toLowerCase()
+                  const saleStatusLower = (sale.status || "").toLowerCase()
 
-                  if (statusLower === "pending" || statusLower === "pending delivery") {
-                    rowBg = "bg-amber-100/80 border-l-4 border-l-amber-500 hover:bg-amber-200/80 text-amber-950 font-medium"
-                  } else if (
-                    statusLower.includes("paid") ||
-                    statusLower.includes("pack") ||
-                    statusLower.includes("sent") ||
-                    statusLower.includes("ship") ||
-                    statusLower.includes("transit") ||
-                    statusLower.includes("out for delivery") ||
-                    statusLower.includes("dispatch")
+                  let rowBg = index % 2 === 0 ? "bg-white text-slate-800 hover:bg-slate-100/60" : "bg-slate-50/50 text-slate-800 hover:bg-slate-100/60"
+
+                  if (
+                    sale.status === "Cancelled" ||
+                    paymentStatusLower === "cancelled" ||
+                    deliveryStatusLower === "returned" ||
+                    deliveryStatusLower.includes("cancel") ||
+                    deliveryStatusLower.includes("return")
                   ) {
-                    rowBg = "bg-blue-100/80 border-l-4 border-l-blue-500 hover:bg-blue-200/80 text-blue-950 font-medium"
-                  } else if (statusLower.includes("deliver") || statusLower.includes("complete")) {
-                    rowBg = "bg-emerald-100/80 border-l-4 border-l-emerald-500 hover:bg-emerald-200/80 text-emerald-950 font-medium"
-                  } else if (statusLower.includes("cancel") || statusLower.includes("return")) {
+                    // Cancelled / Returned -> Red
                     rowBg = "bg-rose-100/80 border-l-4 border-l-rose-500 hover:bg-rose-200/80 text-rose-950 font-medium"
+                  } else if (
+                    paymentStatusLower === "paid" ||
+                    paymentStatusLower === "completed" ||
+                    deliveryStatusLower.includes("deliver") ||
+                    deliveryStatusLower.includes("complete")
+                  ) {
+                    // 2. Green / Emerald: As same as now (Paid / Completed / Delivered)
+                    rowBg = "bg-emerald-100/80 border-l-4 border-l-emerald-500 hover:bg-emerald-200/80 text-emerald-950 font-medium"
+                  } else if (
+                    paymentStatusLower === "cod" ||
+                    paymentStatusLower === "credit" ||
+                    saleStatusLower === "credit" ||
+                    saleStatusLower === "cod"
+                  ) {
+                    // 3. Red: Payment status COD or Credit
+                    rowBg = "bg-rose-100/80 border-l-4 border-l-rose-500 hover:bg-rose-200/80 text-rose-950 font-medium"
+                  } else if (
+                    paymentStatusLower === "partial" ||
+                    saleStatusLower === "partial"
+                  ) {
+                    // 4. Blue: Payment status Partial
+                    rowBg = "bg-blue-100/80 border-l-4 border-l-blue-500 hover:bg-blue-200/80 text-blue-950 font-medium"
+                  } else {
+                    // 1. Grey / White: Payment status Pending or delivery status pending (no amber/orange)
+                    rowBg = index % 2 === 0 ? "bg-white text-slate-800 hover:bg-slate-100/60" : "bg-slate-50/50 text-slate-800 hover:bg-slate-100/60"
                   }
 
                   const saleProfit = getSaleProfit(sale)
@@ -598,6 +619,11 @@ export default function SalesOrdersTab() {
                               {sale.payment_status === "Pending" && (
                                 <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-slate-50 text-slate-700 border-slate-200 font-semibold">
                                   Pending
+                                </Badge>
+                              )}
+                              {(sale.payment_status === "COD" || sale.payment_status?.toUpperCase() === "COD") && (
+                                <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-purple-50 text-purple-700 border-purple-200 font-semibold">
+                                  COD
                                 </Badge>
                               )}
                               {sale.status === "Pending" && !sale.is_pos_updated && (

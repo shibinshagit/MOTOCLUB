@@ -369,7 +369,7 @@ export async function syncEcommerceOrder(
     const isCOD = rawPaymentMethod.toLowerCase().includes("cod") || rawPaymentMethod.toLowerCase().includes("cash")
     const isPaidVerified = order.payment_status?.toLowerCase() === "paid" || order.payment_status?.toLowerCase() === "completed"
 
-    let paymentStatus = "Pending"
+    let paymentStatus = isCOD ? "COD" : "Pending"
     let receivedAmount = 0
     let balanceAmount = totalAmount
 

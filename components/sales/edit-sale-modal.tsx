@@ -190,8 +190,8 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, company
           setAdvanceAmount(Number(sale.advance_amount) || 0)
           setSaleType(sale.sale_type || "")
           const rawPs = sale.payment_status || "Pending"
-          const capPs = rawPs.charAt(0).toUpperCase() + rawPs.slice(1).toLowerCase()
-          const validPs = ["Pending", "Credit", "Partial", "Paid"].includes(capPs) ? capPs : "Pending"
+          const capPs = rawPs.toUpperCase() === "COD" ? "COD" : rawPs.charAt(0).toUpperCase() + rawPs.slice(1).toLowerCase()
+          const validPs = ["Pending", "Credit", "Partial", "Paid", "COD"].includes(capPs) ? capPs : "Pending"
           setPaymentStatus(validPs)
           setStatus(sale.status || "Completed")
           setOriginalStatus(sale.status || "Completed")
@@ -326,7 +326,7 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, company
   useEffect(() => {
     if (paymentStatus === "Paid") {
       setReceivedAmount(totalAmount)
-    } else if (paymentStatus === "Pending") {
+    } else if (paymentStatus === "Pending" || paymentStatus === "COD") {
       setReceivedAmount(0)
     } else if (paymentStatus === "Credit" || paymentStatus === "Partial") {
       if (receivedAmount > totalAmount) {
@@ -742,6 +742,8 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, company
         errorMsg = "Please select a customer for a partial sale."
       } else if (paymentStatus === "Pending") {
         errorMsg = "Please select a customer for a pending sale."
+      } else if (paymentStatus === "COD") {
+        errorMsg = "Please select a customer for a COD sale."
       } else if (paymentStatus === "Paid" || paymentStatus === "Completed") {
         errorMsg = "Please select a customer for a paid sale."
       }
@@ -763,7 +765,7 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, company
 
       if (newPaymentStatus === "Paid") {
         finalReceivedAmount = totalAmount
-      } else if (newPaymentStatus === "Pending" || newPaymentStatus === "Credit") {
+      } else if (newPaymentStatus === "Pending" || newPaymentStatus === "Credit" || newPaymentStatus === "COD") {
         finalReceivedAmount = 0
       } else if (newPaymentStatus === "Partial") {
         if (finalReceivedAmount >= totalAmount && totalAmount > 0) {
@@ -1179,7 +1181,7 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, company
                                 setPaymentStatus(val)
                                 if (val === "Paid") {
                                   setReceivedAmount(totalAmount)
-                                } else if (val === "Pending" || val === "Credit") {
+                                } else if (val === "Pending" || val === "Credit" || val === "COD") {
                                   setReceivedAmount(0)
                                 } else if (val === "Partial") {
                                   if (receivedAmount >= totalAmount) {
@@ -1196,6 +1198,7 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, company
                                 <SelectItem value="Credit">Credit</SelectItem>
                                 <SelectItem value="Partial">Partial</SelectItem>
                                 <SelectItem value="Paid">Paid</SelectItem>
+                                <SelectItem value="COD">COD</SelectItem>
                               </SelectContent>
                             </Select>
                           </div>
@@ -1256,7 +1259,7 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, company
                               } else if (val > 0) {
                                 setPaymentStatus("Partial")
                               } else {
-                                if (paymentStatus !== "Credit") {
+                                if (paymentStatus !== "Credit" && paymentStatus !== "COD") {
                                   setPaymentStatus("Pending")
                                 }
                               }
