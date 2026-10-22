@@ -1922,51 +1922,42 @@ export async function addSale(saleData: any) {
       advanceAmount = receivedAmount
     }
     let balanceAmount = Math.max(0, total - receivedAmount)
-    let newPaymentStatus = saleData.paymentStatus || "Pending"
 
-    // 1. Ensure Payment Status and amounts are consistent based on total vs received
+    // Resolve payment status directly from user selection, otherwise default to "Pending"
+    const rawStatus = (saleData.paymentStatus || "").toString().trim()
+    let newPaymentStatus = "Pending"
+    if (/^paid$/i.test(rawStatus) || /^completed$/i.test(rawStatus)) {
+      newPaymentStatus = "Paid"
+    } else if (/^credit$/i.test(rawStatus)) {
+      newPaymentStatus = "Credit"
+    } else if (/^cod$/i.test(rawStatus)) {
+      newPaymentStatus = "COD"
+    } else if (/^partial$/i.test(rawStatus)) {
+      newPaymentStatus = "Partial"
+    } else if (/^pending$/i.test(rawStatus)) {
+      newPaymentStatus = "Pending"
+    } else if (rawStatus) {
+      newPaymentStatus = rawStatus
+    } else {
+      newPaymentStatus = "Pending"
+    }
+
+    // 1. Ensure Payment Status and amounts are consistent based on selected status
     if (newOrderStatus.toLowerCase() !== "cancelled") {
-      if (hasCodPayment && (newPaymentStatus.toLowerCase() === "paid" || newPaymentStatus.toLowerCase() === "completed")) {
-        // COD rule: Payment Status must NEVER be Paid during sale creation.
-        // COD should initially be treated as Credit / Partial (balance due).
-        newPaymentStatus = "Credit"
-      } else if (newPaymentStatus.toLowerCase() === "pending") {
-        newPaymentStatus = "Pending"
-        receivedAmount = 0
-        balanceAmount = total
-      } else if (newPaymentStatus.toLowerCase() === "credit") {
-        newPaymentStatus = "Credit"
-        receivedAmount = 0
-        balanceAmount = total
-      } else if (newPaymentStatus.toLowerCase() === "paid") {
-        newPaymentStatus = "Paid"
+      if (newPaymentStatus === "Paid") {
         receivedAmount = total
         balanceAmount = 0
-      } else if (newPaymentStatus.toLowerCase() === "partial") {
-        newPaymentStatus = "Partial"
+      } else if (newPaymentStatus === "Credit" || newPaymentStatus === "COD" || newPaymentStatus === "Pending") {
+        receivedAmount = 0
+        balanceAmount = total
+      } else if (newPaymentStatus === "Partial") {
         if (receivedAmount >= total && total > 0) {
           newPaymentStatus = "Paid"
           receivedAmount = total
           balanceAmount = 0
-        } else if (receivedAmount <= 0) {
-          newPaymentStatus = "Pending"
-          receivedAmount = 0
-          balanceAmount = total
         } else {
+          receivedAmount = Math.min(Math.max(0, receivedAmount), total)
           balanceAmount = Math.max(0, total - receivedAmount)
-        }
-      } else {
-        if (total > 0 && receivedAmount >= total) {
-          newPaymentStatus = "Paid"
-          receivedAmount = total
-          balanceAmount = 0
-        } else if (receivedAmount > 0 && receivedAmount < total) {
-          newPaymentStatus = "Partial"
-          balanceAmount = Math.max(0, total - receivedAmount)
-        } else {
-          newPaymentStatus = "Pending"
-          receivedAmount = 0
-          balanceAmount = total
         }
       }
     }
@@ -1985,6 +1976,8 @@ export async function addSale(saleData: any) {
         errorMsg = "Please select a customer for a partial sale."
       } else if (newPaymentStatus.toLowerCase() === "pending") {
         errorMsg = "Please select a customer for a pending sale."
+      } else if (newPaymentStatus.toLowerCase() === "cod") {
+        errorMsg = "Please select a customer for a COD sale."
       } else if (newPaymentStatus.toLowerCase() === "paid" || newPaymentStatus.toLowerCase() === "completed") {
         errorMsg = "Please select a customer for a paid sale."
       }
@@ -2513,7 +2506,7 @@ function calculateSaleChanges(
   balanceAmount = Math.max(0, newTotal - newReceivedAmount)
 
   if (newOrderStatus.toLowerCase() !== "cancelled") {
-    if (isMarkedPaid || (newTotal > 0 && newReceivedAmount >= newTotal && !hasCodPayment)) {
+    if (newPaymentStatus.toLowerCase() === "paid" || newPaymentStatus.toLowerCase() === "completed" || isMarkedPaid) {
       newPaymentStatus = "Paid"
       newOrderStatus = "Completed"
       newReceivedAmount = newTotal
@@ -2540,9 +2533,11 @@ function calculateSaleChanges(
     } else if (newReceivedAmount > 0 && newReceivedAmount < newTotal) {
       newPaymentStatus = "Partial"
       newOrderStatus = "Partial"
-    } else if (newReceivedAmount === 0) {
+    } else {
       newPaymentStatus = "Pending"
       newOrderStatus = "Pending"
+      newReceivedAmount = 0
+      balanceAmount = newTotal
     }
   }
 

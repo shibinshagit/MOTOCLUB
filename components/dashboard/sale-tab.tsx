@@ -650,12 +650,6 @@ export default function SaleTab({
 
   // Auto-calculate received amount and balance amount based on paymentStatus and paymentMethod
   useEffect(() => {
-    const hasCod = isCodMethod(paymentMethod) || (Array.isArray(payments) && payments.some(p => isCodMethod(p.paymentMethod)))
-    if (!isEditMode && hasCod && (paymentStatus === "Paid" || paymentStatus === "Completed")) {
-      setPaymentStatus("COD")
-      return
-    }
-
     if (paymentStatus === "Paid" || paymentStatus === "Completed") {
       setReceivedAmount(totalAmount)
       setBalanceAmount(0)
@@ -1506,9 +1500,7 @@ export default function SaleTab({
         const hasCodOnCreate =
           isCodMethod(paymentMethod) ||
           (Array.isArray(payments) && payments.some((p) => isCodMethod(p.paymentMethod)))
-        const finalPaymentStatus = hasCodOnCreate && (paymentStatus === "Paid" || paymentStatus === "Completed")
-          ? "COD"
-          : (paymentStatus || "Pending")
+        const finalPaymentStatus = paymentStatus || "Pending"
 
         let finalReceivedAmount = 0
         if (finalPaymentStatus === "Paid" || finalPaymentStatus === "Completed") {
@@ -2683,18 +2675,10 @@ export default function SaleTab({
                                     if (updatedPayments.length > 0) {
                                       setPaymentMethod(updatedPayments[0].paymentMethod || "Cash")
                                     }
-                                    if (!isEditMode && hasCodInPayments && (paymentStatus === "Paid" || paymentStatus === "Completed")) {
-                                      setPaymentStatus("COD")
-                                    }
                                   }}
                                   paymentStatus={paymentStatus}
                                   onPaymentStatusChange={(newStatus) => {
-                                    const hasCodInPayments = payments.some((p) => isCodMethod(p.paymentMethod)) || isCodMethod(paymentMethod)
-                                    if (!isEditMode && hasCodInPayments && (newStatus === "Paid" || newStatus === "Completed")) {
-                                      setPaymentStatus("COD")
-                                    } else {
-                                      setPaymentStatus(newStatus)
-                                    }
+                                    setPaymentStatus(newStatus)
                                   }}
                                   currencySymbol={deviceCurrencyState}
                                 />

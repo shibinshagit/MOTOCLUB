@@ -100,6 +100,7 @@ export function JobCardForm({
   const [customerPhone, setCustomerPhone] = useState("")
   const [typeOfSale, setTypeOfSale] = useState<string>("")
   const [originalDeliveryStatus, setOriginalDeliveryStatus] = useState("")
+  const [paymentStatus, setPaymentStatus] = useState<string>("Pending")
 
   // Shipping Address Fields
   const [shippingCity, setShippingCity] = useState("")
@@ -181,6 +182,7 @@ export function JobCardForm({
     shippingPhone,
     shippingNotes,
     courierPaidExtra,
+    paymentStatus,
     products,
   }), [
     customerId,
@@ -198,6 +200,7 @@ export function JobCardForm({
     shippingPhone,
     shippingNotes,
     courierPaidExtra,
+    paymentStatus,
     products,
   ])
 
@@ -266,6 +269,9 @@ export function JobCardForm({
       setShippingNotes(draft.shippingNotes || "")
       if (draft.courierPaidExtra !== undefined && draft.courierPaidExtra !== null) {
         setCourierPaidExtra(draft.courierPaidExtra)
+      }
+      if (draft.paymentStatus) {
+        setPaymentStatus(draft.paymentStatus)
       }
       if (Array.isArray(draft.products) && draft.products.length > 0) {
         setProducts(draft.products)
@@ -362,6 +368,7 @@ export function JobCardForm({
       setShippingNotes(sale.shipping_notes || "")
       setCourierPaidExtra(sale.courier_paid_extra > 0 ? sale.courier_paid_extra : "")
       setOriginalDeliveryStatus(sale.delivery_status || "Pending")
+      setPaymentStatus(sale.payment_status || "Pending")
       if (sale.customer_id) {
         getCustomerAddresses(sale.customer_id).then((addrRes) => {
           if (addrRes.success && addrRes.data && addrRes.data.length > 0) {
@@ -568,6 +575,7 @@ export function JobCardForm({
         customerPhone,
         customerId,
         typeOfSale,
+        paymentStatus: paymentStatus || "Pending",
         deviceId,
         staffId: activeStaff?.id || null,
         crmLeadId,
@@ -646,6 +654,7 @@ export function JobCardForm({
     setShippingNotes("")
     setCustomerAddresses([])
     setCourierPaidExtra("")
+    setPaymentStatus("Pending")
     setProducts([{
       id: crypto.randomUUID(),
       productId: null,
@@ -1344,6 +1353,21 @@ export function JobCardForm({
             </div>
 
             <div className="w-full lg:max-w-sm p-4 bg-gray-50 rounded-lg border border-gray-100 shrink-0 space-y-3">
+              <div className="space-y-1">
+                <Label className="text-xs font-medium text-gray-700">Payment Status</Label>
+                <select
+                  value={paymentStatus}
+                  onChange={(e) => setPaymentStatus(e.target.value)}
+                  className="flex h-9 w-full items-center justify-between rounded-md border border-gray-300 bg-white px-3 py-1 text-xs text-gray-900 focus:outline-none focus:ring-1 focus:ring-slate-400 font-medium"
+                >
+                  <option value="Pending">Pending</option>
+                  <option value="Credit">Credit</option>
+                  <option value="COD">COD</option>
+                  <option value="Partial">Partial</option>
+                  <option value="Paid">Paid</option>
+                </select>
+              </div>
+
               <div className="space-y-1">
                 <Label className="text-xs font-medium text-gray-700">Courier Paid (Extra)</Label>
                 <div className="relative">

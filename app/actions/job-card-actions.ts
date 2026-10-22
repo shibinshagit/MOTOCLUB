@@ -78,6 +78,7 @@ export interface JobCardInput {
   courierPaidExtra?: number
 
   typeOfSale?: string
+  paymentStatus?: string
 
   products: JobCardProductInput[]
   crmLeadId?: number
@@ -249,10 +250,27 @@ export async function createJobCard(input: JobCardInput) {
                 ${resolvedCustomerId || null},
                 ${totalAmount},
                 ${totalCost},
-                'Pending',
-                'Pending',
+                ${(() => {
+                  const s = (input.paymentStatus || "").toLowerCase()
+                  if (s === "paid" || s === "completed") return "Completed"
+                  if (s === "credit") return "Credit"
+                  if (s === "partial") return "Partial"
+                  return "Pending"
+                })()},
+                ${(() => {
+                  const s = (input.paymentStatus || "").trim()
+                  if (/^paid$/i.test(s) || /^completed$/i.test(s)) return "Paid"
+                  if (/^credit$/i.test(s)) return "Credit"
+                  if (/^cod$/i.test(s)) return "COD"
+                  if (/^partial$/i.test(s)) return "Partial"
+                  if (/^pending$/i.test(s)) return "Pending"
+                  return s || "Pending"
+                })()},
                 ${deviceId},
-                0,
+                ${(() => {
+                  const s = (input.paymentStatus || "").toLowerCase()
+                  return s === "paid" || s === "completed" ? totalAmount : 0
+                })()},
                 ${staffId},
                 'job_card',
                 ${input.typeOfSale || 'walk in'},
@@ -271,7 +289,10 @@ export async function createJobCard(input: JobCardInput) {
                 ${input.courierPaidExtra || 0},
                 ${createdBy},
                 0,
-                ${totalAmount},
+                ${(() => {
+                  const s = (input.paymentStatus || "").toLowerCase()
+                  return s === "paid" || s === "completed" ? 0 : totalAmount
+                })()},
                 'ship',
                 'Pending',
                 false,
@@ -425,9 +446,34 @@ export async function updateJobCard(id: number, input: any) {
       `
     }
 
-    // 3. Fetch current received_amount to compute balance
-    const currentReceived = Number(existingSale[0]?.received_amount) || 0
-    const balanceAmount = totalAmount - currentReceived
+    // 3. Determine payment status & received/balance amounts
+    const rawInputStatus = input.paymentStatus ? input.paymentStatus.trim() : null
+    let nextPaymentStatus = rawInputStatus || existingSale[0]?.payment_status || 'Pending'
+    if (/^paid$/i.test(nextPaymentStatus) || /^completed$/i.test(nextPaymentStatus)) {
+      nextPaymentStatus = 'Paid'
+    } else if (/^credit$/i.test(nextPaymentStatus)) {
+      nextPaymentStatus = 'Credit'
+    } else if (/^cod$/i.test(nextPaymentStatus)) {
+      nextPaymentStatus = 'COD'
+    } else if (/^partial$/i.test(nextPaymentStatus)) {
+      nextPaymentStatus = 'Partial'
+    } else if (/^pending$/i.test(nextPaymentStatus)) {
+      nextPaymentStatus = 'Pending'
+    }
+
+    let updatedReceived = Number(existingSale[0]?.received_amount) || 0
+    if (rawInputStatus) {
+      if (nextPaymentStatus === 'Paid') {
+        updatedReceived = totalAmount
+      } else if (nextPaymentStatus === 'Credit' || nextPaymentStatus === 'Pending' || nextPaymentStatus === 'COD') {
+        updatedReceived = 0
+      }
+    }
+    const balanceAmount = Math.max(0, totalAmount - updatedReceived)
+    const nextOrderStatus =
+      nextPaymentStatus === 'Paid' ? 'Completed' :
+      nextPaymentStatus === 'Credit' ? 'Credit' :
+      nextPaymentStatus === 'Partial' ? 'Partial' : 'Pending'
 
     // 4. Update the sales record
     let updatedSaleRows
@@ -437,6 +483,9 @@ export async function updateJobCard(id: number, input: any) {
           customer_id = ${resolvedCustomerId || null},
           total_amount = ${totalAmount},
           total_cost = ${totalCost},
+          status = ${nextOrderStatus},
+          payment_status = ${nextPaymentStatus},
+          received_amount = ${updatedReceived},
           customer_name_override = ${customerNameOverride},
           customer_phone_override = ${customerPhoneOverride},
           shipping_city = ${input.shippingCity || null},
@@ -461,6 +510,9 @@ export async function updateJobCard(id: number, input: any) {
           customer_id = ${resolvedCustomerId || null},
           total_amount = ${totalAmount},
           total_cost = ${totalCost},
+          status = ${nextOrderStatus},
+          payment_status = ${nextPaymentStatus},
+          received_amount = ${updatedReceived},
           customer_name_override = ${customerNameOverride},
           customer_phone_override = ${customerPhoneOverride},
           shipping_city = ${input.shippingCity || null},

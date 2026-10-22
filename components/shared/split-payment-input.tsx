@@ -110,15 +110,6 @@ export function SplitPaymentInput({
     return rows.some((r) => isCodMethod(r.paymentMethod))
   }, [rows])
 
-  // COD rule: selecting COD must automatically force payment status to Credit / Partial during sale creation
-  useEffect(() => {
-    if (!isEditMode && hasCod) {
-      if (paymentStatus === "Paid" || paymentStatus === "Completed" || !paymentStatus) {
-        onPaymentStatusChange?.("Credit")
-      }
-    }
-  }, [hasCod, isEditMode, paymentStatus, onPaymentStatusChange])
-
   const prevPaymentStatus = React.useRef(paymentStatus)
 
   useEffect(() => {
@@ -127,8 +118,8 @@ export function SplitPaymentInput({
       (prevPaymentStatus.current !== "Paid" && prevPaymentStatus.current !== "Completed")
       
     const statusChangedToPendingOrCredit = 
-      (paymentStatus === "Pending" || paymentStatus === "Credit" || paymentStatus === "Cancelled") && 
-      (prevPaymentStatus.current !== "Pending" && prevPaymentStatus.current !== "Credit" && prevPaymentStatus.current !== "Cancelled")
+      (paymentStatus === "Pending" || paymentStatus === "Credit" || paymentStatus === "COD" || paymentStatus === "Cancelled") && 
+      (prevPaymentStatus.current !== "Pending" && prevPaymentStatus.current !== "Credit" && prevPaymentStatus.current !== "COD" && prevPaymentStatus.current !== "Cancelled")
 
     const statusChangedToPartialFromPaid =
       paymentStatus === "Partial" &&
@@ -142,7 +133,7 @@ export function SplitPaymentInput({
         // eslint-disable-next-line react-hooks/exhaustive-deps
         notifyParent(updated)
       }
-    } else if (statusChangedToPaid && (!hasCod || isEditMode)) {
+    } else if (statusChangedToPaid) {
       const totalAllocatedVal = rows.reduce((sum, r) => sum + (Number(r.amount) || 0), 0)
       if (totalAllocatedVal !== totalAmount && totalAmount > 0) {
         const updated = [
@@ -215,13 +206,6 @@ export function SplitPaymentInput({
     setRows(updated)
     notifyParent(updated)
 
-    if (!isEditMode && field === "paymentMethod") {
-      const willHaveCod = isCodMethod(value) || updated.some((r) => isCodMethod(r.paymentMethod))
-      if (willHaveCod) {
-        onPaymentStatusChange?.("Credit")
-      }
-    }
-
     if (field === "amount") {
       const totalAlloc = updated.reduce((sum, r) => sum + (Number(r.amount) || 0), 0)
       if (totalAlloc >= totalAmount && totalAmount > 0) {
@@ -229,7 +213,7 @@ export function SplitPaymentInput({
       } else if (totalAlloc > 0 && totalAlloc < totalAmount) {
         onPaymentStatusChange?.("Partial")
       } else if (totalAlloc === 0) {
-        if (paymentStatus !== "Credit") {
+        if (paymentStatus !== "Credit" && paymentStatus !== "COD") {
           onPaymentStatusChange?.("Pending")
         }
       }
@@ -440,12 +424,9 @@ export function SplitPaymentInput({
           {onPaymentStatusChange ? (
             <select
               disabled={disabled}
-              value={paymentStatus || (hasCod && !isEditMode ? "Credit" : "Pending")}
+              value={paymentStatus || "Pending"}
               onChange={(e) => {
                 const nextVal = e.target.value
-                if (!isEditMode && hasCod && (nextVal === "Paid" || nextVal === "Completed")) {
-                  return
-                }
                 onPaymentStatusChange?.(nextVal)
                 if (nextVal === "Paid") {
                   const updated = [
@@ -477,9 +458,7 @@ export function SplitPaymentInput({
               <option value="Credit">Credit</option>
               <option value="Partial">Partial</option>
               <option value="COD">COD</option>
-              <option value="Paid" disabled={!isEditMode && hasCod}>
-                Paid {!isEditMode && hasCod ? "(Disabled for COD)" : ""}
-              </option>
+              <option value="Paid">Paid</option>
             </select>
           ) : (
             <span className={`font-semibold px-2 py-0.5 rounded text-xs ${
