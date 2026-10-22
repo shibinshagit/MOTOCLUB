@@ -102,6 +102,7 @@ Thank you for choosing us!
       return
     }
     openWhatsApp(phoneNum, whatsappText)
+    onComplete()
   }
 
   const handleMarkPaid = async () => {
