@@ -84,6 +84,7 @@ Thank you for shopping with us!
       return
     }
     openWhatsApp(phoneNum, whatsappText)
+    onClose()
   }
 
   const handleCopyText = () => {
