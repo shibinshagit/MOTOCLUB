@@ -874,7 +874,7 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
               AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
               AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned', 'pending')
               AND (
-                LOWER(COALESCE(s.payment_status, '')) IN ('paid', 'completed', 'partial', 'credit')
+                LOWER(COALESCE(s.payment_status, '')) IN ('paid', 'completed', 'partial', 'credit', 'cod')
                 OR LOWER(COALESCE(s.status, '')) IN ('credit', 'partial')
                 OR (s.total_amount > 0 AND s.received_amount >= s.total_amount)
               )
@@ -974,7 +974,7 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
               AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
               AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned', 'pending')
               AND (
-                LOWER(COALESCE(s.payment_status, '')) IN ('paid', 'completed', 'partial', 'credit')
+                LOWER(COALESCE(s.payment_status, '')) IN ('paid', 'completed', 'partial', 'credit', 'cod')
                 OR LOWER(COALESCE(s.status, '')) IN ('credit', 'partial')
                 OR (s.total_amount > 0 AND s.received_amount >= s.total_amount)
               )
@@ -1279,7 +1279,7 @@ export async function getSalesSummaryCards(
             WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
               AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned', 'pending')
               AND (
-                LOWER(COALESCE(s.payment_status, '')) IN ('paid', 'completed', 'partial', 'credit')
+                LOWER(COALESCE(s.payment_status, '')) IN ('paid', 'completed', 'partial', 'credit', 'cod')
                 OR LOWER(COALESCE(s.status, '')) IN ('credit', 'partial')
                 OR (s.total_amount > 0 AND s.received_amount >= s.total_amount)
               )
@@ -2526,6 +2526,11 @@ function calculateSaleChanges(
     } else if (newPaymentStatus.toLowerCase() === "credit") {
       newPaymentStatus = "Credit"
       newOrderStatus = "Credit"
+      newReceivedAmount = 0
+      balanceAmount = newTotal
+    } else if (newPaymentStatus.toLowerCase() === "cod") {
+      newPaymentStatus = "COD"
+      newOrderStatus = "Pending"
       newReceivedAmount = 0
       balanceAmount = newTotal
     } else if (newPaymentStatus.toLowerCase() === "partial") {

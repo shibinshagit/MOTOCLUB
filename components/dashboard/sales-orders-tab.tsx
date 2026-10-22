@@ -600,6 +600,11 @@ export default function SalesOrdersTab() {
                                   Pending
                                 </Badge>
                               )}
+                              {(sale.payment_status === "COD" || sale.payment_status?.toUpperCase() === "COD") && (
+                                <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-purple-50 text-purple-700 border-purple-200 font-semibold">
+                                  COD
+                                </Badge>
+                              )}
                               {sale.status === "Pending" && !sale.is_pos_updated && (
                                 <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-amber-100 text-amber-800 border-amber-300 font-semibold">
                                   Not Updated

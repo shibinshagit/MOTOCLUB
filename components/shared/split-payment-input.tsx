@@ -60,7 +60,7 @@ export function SplitPaymentInput({
         referenceNumber: p.referenceNumber || "",
       }))
     }
-    const isPendingOrCredit = paymentStatus === "Pending" || paymentStatus === "Credit" || paymentStatus === "Cancelled" || !paymentStatus
+    const isPendingOrCredit = paymentStatus === "Pending" || paymentStatus === "Credit" || paymentStatus === "COD" || paymentStatus === "Cancelled" || !paymentStatus
     return [
       {
         rowId: `row-0-${Date.now()}`,
@@ -458,7 +458,7 @@ export function SplitPaymentInput({
                   ]
                   setRows(updated)
                   notifyParent(updated)
-                } else if (nextVal === "Pending" || nextVal === "Credit") {
+                } else if (nextVal === "Pending" || nextVal === "Credit" || nextVal === "COD") {
                   const updated = rows.map((r) => ({ ...r, amount: 0 }))
                   setRows(updated)
                   notifyParent(updated)
@@ -476,6 +476,7 @@ export function SplitPaymentInput({
               <option value="Pending">Pending</option>
               <option value="Credit">Credit</option>
               <option value="Partial">Partial</option>
+              <option value="COD">COD</option>
               <option value="Paid" disabled={!isEditMode && hasCod}>
                 Paid {!isEditMode && hasCod ? "(Disabled for COD)" : ""}
               </option>
@@ -488,6 +489,8 @@ export function SplitPaymentInput({
                 ? "bg-amber-100 text-amber-800"
                 : paymentStatus === "Partial"
                 ? "bg-blue-100 text-blue-800"
+                : paymentStatus === "COD"
+                ? "bg-purple-100 text-purple-800"
                 : "bg-slate-100 text-slate-800"
             }`}>
               {paymentStatus || "Pending"}

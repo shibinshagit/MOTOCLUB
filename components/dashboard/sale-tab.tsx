@@ -652,14 +652,14 @@ export default function SaleTab({
   useEffect(() => {
     const hasCod = isCodMethod(paymentMethod) || (Array.isArray(payments) && payments.some(p => isCodMethod(p.paymentMethod)))
     if (!isEditMode && hasCod && (paymentStatus === "Paid" || paymentStatus === "Completed")) {
-      setPaymentStatus("Credit")
+      setPaymentStatus("COD")
       return
     }
 
     if (paymentStatus === "Paid" || paymentStatus === "Completed") {
       setReceivedAmount(totalAmount)
       setBalanceAmount(0)
-    } else if (paymentStatus === "Cancelled" || paymentStatus === "Pending") {
+    } else if (paymentStatus === "Cancelled" || paymentStatus === "Pending" || paymentStatus === "COD") {
       setReceivedAmount(0)
       setBalanceAmount(totalAmount)
     } else if (paymentStatus === "Credit") {
@@ -1385,6 +1385,8 @@ export default function SaleTab({
         errorMsg = "Please select a customer for a partial sale."
       } else if (paymentStatus === "Pending") {
         errorMsg = "Please select a customer for a pending sale."
+      } else if (paymentStatus === "COD") {
+        errorMsg = "Please select a customer for a COD sale."
       } else if (paymentStatus === "Paid" || paymentStatus === "Completed") {
         errorMsg = "Please select a customer for a paid sale."
       }
@@ -1403,7 +1405,7 @@ export default function SaleTab({
         // Update existing sale
         const effectiveReceived = (paymentStatus === "Paid" || paymentStatus === "Completed")
           ? totalAmount
-          : (paymentStatus === "Pending" || paymentStatus === "Credit" ? 0 : (paymentMethod === "COD" ? advanceAmount : receivedAmount))
+          : (paymentStatus === "Pending" || paymentStatus === "Credit" || paymentStatus === "COD" ? 0 : (paymentMethod === "COD" ? advanceAmount : receivedAmount))
 
         const effectiveBalance = (paymentStatus === "Paid" || paymentStatus === "Completed")
           ? 0
@@ -1505,13 +1507,13 @@ export default function SaleTab({
           isCodMethod(paymentMethod) ||
           (Array.isArray(payments) && payments.some((p) => isCodMethod(p.paymentMethod)))
         const finalPaymentStatus = hasCodOnCreate && (paymentStatus === "Paid" || paymentStatus === "Completed")
-          ? "Credit"
+          ? "COD"
           : (paymentStatus || "Pending")
 
         let finalReceivedAmount = 0
         if (finalPaymentStatus === "Paid" || finalPaymentStatus === "Completed") {
           finalReceivedAmount = totalAmount
-        } else if (finalPaymentStatus === "Pending" || finalPaymentStatus === "Credit") {
+        } else if (finalPaymentStatus === "Pending" || finalPaymentStatus === "Credit" || finalPaymentStatus === "COD") {
           finalReceivedAmount = 0
         } else if (finalPaymentStatus === "Partial") {
           const totalAlloc = (Array.isArray(payments) && payments.length > 0)
@@ -1521,7 +1523,7 @@ export default function SaleTab({
         }
         const finalBalanceAmount = Math.max(0, totalAmount - finalReceivedAmount)
 
-        const finalPayments = (finalPaymentStatus === "Pending" || finalPaymentStatus === "Credit")
+        const finalPayments = (finalPaymentStatus === "Pending" || finalPaymentStatus === "Credit" || finalPaymentStatus === "COD")
           ? (payments || []).map((p) => ({ ...p, amount: 0 }))
           : payments
 
@@ -2682,14 +2684,14 @@ export default function SaleTab({
                                       setPaymentMethod(updatedPayments[0].paymentMethod || "Cash")
                                     }
                                     if (!isEditMode && hasCodInPayments && (paymentStatus === "Paid" || paymentStatus === "Completed")) {
-                                      setPaymentStatus("Credit")
+                                      setPaymentStatus("COD")
                                     }
                                   }}
                                   paymentStatus={paymentStatus}
                                   onPaymentStatusChange={(newStatus) => {
                                     const hasCodInPayments = payments.some((p) => isCodMethod(p.paymentMethod)) || isCodMethod(paymentMethod)
                                     if (!isEditMode && hasCodInPayments && (newStatus === "Paid" || newStatus === "Completed")) {
-                                      setPaymentStatus("Credit")
+                                      setPaymentStatus("COD")
                                     } else {
                                       setPaymentStatus(newStatus)
                                     }

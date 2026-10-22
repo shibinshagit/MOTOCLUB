@@ -120,6 +120,9 @@ function getSaleStatusLabel(sale: any): string {
   if (pStatus === "credit") {
     return "Credit"
   }
+  if (pStatus === "cod") {
+    return "COD"
+  }
   if (received > 0 && received < total) {
     return "Partial"
   }
@@ -132,6 +135,7 @@ function SaleStatusBadge({ status }: { status: string }) {
     Completed: "bg-emerald-50 text-emerald-700 border-emerald-200",
     Partial: "bg-blue-50 text-blue-700 border-blue-200",
     Credit: "bg-amber-50 text-amber-700 border-amber-200",
+    COD: "bg-purple-50 text-purple-700 border-purple-200",
     Cancelled: "bg-rose-50 text-rose-700 border-rose-200",
     Returned: "bg-rose-50 text-rose-700 border-rose-200",
     Pending: "bg-slate-50 text-slate-700 border-slate-200",

@@ -307,6 +307,7 @@ export function isCriticalSale(sale: any): boolean {
   const isPartialOrCredit =
     pStatus === "partial" ||
     pStatus === "credit" ||
+    pStatus === "cod" ||
     sale.status?.toLowerCase() === "credit" ||
     sale.status?.toLowerCase() === "partial"
 
