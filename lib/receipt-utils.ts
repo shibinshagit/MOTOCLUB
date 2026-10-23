@@ -1600,6 +1600,22 @@ export function extractJobCardItemsText(sale: any): string {
   return '';
 }
 
+const DEFAULT_LOGISTIC_PHONE = "+91 8089872576";
+
+function isCodPaymentStatus(sale: any): boolean {
+  if (!sale) return false;
+  const pStatus = String(sale.payment_status || sale.paymentStatus || '').trim().toLowerCase();
+  const pMethod = String(sale.payment_method || sale.paymentMethod || '').trim().toLowerCase();
+  return (
+    pStatus === 'cod' ||
+    pStatus === 'cash on delivery' ||
+    pStatus === 'cash_on_delivery' ||
+    pMethod === 'cod' ||
+    pMethod === 'cash on delivery' ||
+    pMethod === 'cash_on_delivery'
+  );
+}
+
 // Print Job Card
 export async function printJobCard(sale: any, currency = 'AED', businessInfo: any = {}) {
   if (typeof window === 'undefined' || !sale) return;
@@ -1607,7 +1623,7 @@ export async function printJobCard(sale: any, currency = 'AED', businessInfo: an
   let currentSale = sale;
   let itemsText = extractJobCardItemsText(currentSale);
 
-  if (!itemsText && currentSale?.id) {
+  if ((!itemsText || currentSale?.payment_status === undefined) && currentSale?.id) {
     try {
       const { getSaleDetails } = await import("@/app/actions/sale-actions");
       const res = await getSaleDetails(currentSale.id);
@@ -1638,11 +1654,15 @@ export async function printJobCard(sale: any, currency = 'AED', businessInfo: an
   }
   const logoUrl = rawLogo;
   let storeDeviceName = "";
+  let storeDeviceId: number | null = null;
   try {
     const { store } = require("@/store/store");
     const state = store.getState();
     if (state?.device?.name) {
       storeDeviceName = state.device.name;
+    }
+    if (state?.device?.id) {
+      storeDeviceId = Number(state.device.id);
     }
   } catch (e) {
     // ignore
@@ -1650,6 +1670,29 @@ export async function printJobCard(sale: any, currency = 'AED', businessInfo: an
   const fromName = currentSale?.device_name || currentSale?.device?.name || storeDeviceName || currentSale?.branch_name || business.device_name || business.branch_name || business.name || 'Moto Club Online';
 
   const formattedOrderId = formatOrderId(currentSale.id);
+
+  let toPhoneNumber = currentSale.customer_phone || 'N/A';
+  if (isCodPaymentStatus(currentSale)) {
+    const targetDeviceId = Number(
+      currentSale.device_id ??
+      currentSale.deviceId ??
+      businessInfo?.device_id ??
+      businessInfo?.deviceId ??
+      storeDeviceId ??
+      0
+    );
+
+    let logisticPhone: string | null = null;
+    if (targetDeviceId > 0) {
+      try {
+        const { getDeviceLogisticPhone } = await import("@/app/actions/staff-actions");
+        logisticPhone = await getDeviceLogisticPhone(targetDeviceId);
+      } catch (err) {
+        console.error("Error fetching logistic phone for job card:", err);
+      }
+    }
+    toPhoneNumber = logisticPhone || DEFAULT_LOGISTIC_PHONE;
+  }
 
   const html = `
     <!DOCTYPE html>
@@ -1694,7 +1737,7 @@ export async function printJobCard(sale: any, currency = 'AED', businessInfo: an
         <p class="customer-name">${currentSale.customer_name || 'N/A'}</p>
         ${addressLines.map(line => `<p>${line}</p>`).join('')}
         ${pincode ? `<p>Pin: ${pincode}</p>` : ''}
-        <p>Ph: ${currentSale.customer_phone || 'N/A'}</p>
+        <p>Ph: ${toPhoneNumber}</p>
       </div>
 
       <hr />
@@ -1782,11 +1825,15 @@ export async function printBatchJobCards(sales: any[], currency = 'AED', busines
   }
 
   let storeDeviceName = "";
+  let storeDeviceId: number | null = null;
   try {
     const { store } = require("@/store/store");
     const state = store.getState();
     if (state?.device?.name) {
       storeDeviceName = state.device.name;
+    }
+    if (state?.device?.id) {
+      storeDeviceId = Number(state.device.id);
     }
   } catch (e) {
     // ignore
@@ -1795,7 +1842,7 @@ export async function printBatchJobCards(sales: any[], currency = 'AED', busines
   const resolvedSales = await Promise.all(
     sales.map(async (sale) => {
       let itemsText = extractJobCardItemsText(sale);
-      if (!itemsText && sale?.id) {
+      if ((!itemsText || sale?.payment_status === undefined) && sale?.id) {
         try {
           const { getSaleDetails } = await import("@/app/actions/sale-actions");
           const res = await getSaleDetails(sale.id);
@@ -1810,6 +1857,25 @@ export async function printBatchJobCards(sales: any[], currency = 'AED', busines
     })
   );
 
+  const isAnyCod = resolvedSales.some(isCodPaymentStatus);
+  let logisticPhoneMap: Record<number, string> = {};
+
+  if (isAnyCod) {
+    const codDeviceIds = resolvedSales
+      .filter(isCodPaymentStatus)
+      .map(sale => Number(sale.device_id ?? sale.deviceId ?? businessInfo?.device_id ?? businessInfo?.deviceId ?? storeDeviceId ?? 0))
+      .filter(dId => dId > 0);
+
+    if (codDeviceIds.length > 0) {
+      try {
+        const { getDevicesLogisticPhones } = await import("@/app/actions/staff-actions");
+        logisticPhoneMap = await getDevicesLogisticPhones(codDeviceIds);
+      } catch (e) {
+        console.error("Error batch fetching logistic phones:", e);
+      }
+    }
+  }
+
   const pagesHtml = resolvedSales.map((sale, index) => {
     let logoUrl = sale.device_logo || sale.logo_url || sale.logo || baseLogo;
     if (logoUrl && typeof window !== "undefined" && logoUrl.startsWith("/")) {
@@ -1821,6 +1887,20 @@ export async function printBatchJobCards(sales: any[], currency = 'AED', busines
     const { addressLines, pincode } = buildJobCardAddressLines(sale);
     const formattedOrderId = formatOrderId(sale.id);
 
+    let toPhoneNumber = sale.customer_phone || 'N/A';
+    if (isCodPaymentStatus(sale)) {
+      const targetDeviceId = Number(
+        sale.device_id ??
+        sale.deviceId ??
+        businessInfo?.device_id ??
+        businessInfo?.deviceId ??
+        storeDeviceId ??
+        0
+      );
+      const logisticPhone = targetDeviceId > 0 ? logisticPhoneMap[targetDeviceId] : null;
+      toPhoneNumber = logisticPhone || DEFAULT_LOGISTIC_PHONE;
+    }
+
     return `
       <div class="page" ${index < resolvedSales.length - 1 ? 'style="page-break-after: always; break-after: page;"' : ''}>
         ${logoUrl ? `<div class="header"><img src="${logoUrl}" alt="Logo" class="logo" /></div>` : ''}
@@ -1830,7 +1910,7 @@ export async function printBatchJobCards(sales: any[], currency = 'AED', busines
           <p class="customer-name">${sale.customer_name || 'N/A'}</p>
           ${addressLines.map(line => `<p>${line}</p>`).join('')}
           ${pincode ? `<p>Pin: ${pincode}</p>` : ''}
-          <p>Ph: ${sale.customer_phone || 'N/A'}</p>
+          <p>Ph: ${toPhoneNumber}</p>
         </div>
 
         <hr />
