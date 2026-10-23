@@ -755,3 +755,56 @@ export async function getStaffDashboardStats(deviceId: number, fromDate?: string
     return { success: false, message: error.message || "Failed to fetch dashboard stats", data: null };
   }
 }
+
+// Get active logistics staff phone for a device
+export async function getDeviceLogisticPhone(deviceId: number): Promise<string | null> {
+  try {
+    if (!deviceId) return null
+    const staff = await sql`
+      SELECT phone FROM staff 
+      WHERE device_id = ${deviceId} 
+        AND is_active = true 
+        AND LOWER(role) = 'logistics'
+        AND phone IS NOT NULL
+        AND TRIM(phone) != ''
+      ORDER BY id ASC 
+      LIMIT 1
+    `
+    if (staff && staff.length > 0 && staff[0].phone) {
+      return String(staff[0].phone).trim()
+    }
+    return null
+  } catch (error) {
+    console.error("Error fetching device logistic phone:", error)
+    return null
+  }
+}
+
+// Batch get active logistics staff phones for multiple devices
+export async function getDevicesLogisticPhones(deviceIds: number[]): Promise<Record<number, string>> {
+  try {
+    const validIds = Array.from(new Set(deviceIds.filter(id => typeof id === "number" && !isNaN(id) && id > 0)))
+    if (validIds.length === 0) return {}
+    const staff = await sql`
+      SELECT device_id, phone FROM staff 
+      WHERE device_id = ANY(${validIds}) 
+        AND is_active = true 
+        AND LOWER(role) = 'logistics'
+        AND phone IS NOT NULL
+        AND TRIM(phone) != ''
+      ORDER BY id ASC
+    `
+    const map: Record<number, string> = {}
+    for (const s of staff) {
+      const dId = Number(s.device_id)
+      if (dId && s.phone && !map[dId]) {
+        map[dId] = String(s.phone).trim()
+      }
+    }
+    return map
+  } catch (error) {
+    console.error("Error fetching device logistic phones:", error)
+    return {}
+  }
+}
+
