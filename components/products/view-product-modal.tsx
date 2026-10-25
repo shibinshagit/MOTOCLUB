@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { Button } from "@/components/ui/button"
 import { format } from "date-fns"
-import { Loader2, Printer, Copy, Settings, ChevronLeft, Link2, Barcode, ExternalLink } from "lucide-react"
+import { Loader2, Printer, Copy, Settings, ChevronLeft, Link2, Barcode, ExternalLink, Eye, ZoomIn, Maximize2 } from "lucide-react"
 import { getProductStockHistory, getProductStockByDevice, updateProductPlatformStatus, updateProductTrendingStatus, type PlatformKey, type PlatformStatus } from "@/app/actions/product-actions"
 import { printBarcodeSticker, printMultipleBarcodeStickers, encodeNumberAsLetters, sendPrintJobToBarTender } from "@/lib/barcode-utils"
 import { Label } from "@/components/ui/label"
@@ -12,6 +12,7 @@ import { Switch } from "@/components/ui/switch"
 import { useDispatch } from "react-redux"
 import { updateProduct } from "@/store/slices/productSlice"
 import StaffMediaEditModal from "@/components/staff/staff-media-edit-modal"
+import { ProductMediaViewerModal } from "@/components/products/product-media-viewer-modal"
 
 import { ShareProductButton } from "@/components/shared/share-product-button"
 import { getDeviceCurrency } from "@/app/actions/dashboard-actions"
@@ -144,6 +145,8 @@ export function ProductDetailPanel({
 
   const [currentProduct, setCurrentProduct] = useState(product)
   const [isMediaManageOpen, setIsMediaManageOpen] = useState(false)
+  const [isMediaViewerOpen, setIsMediaViewerOpen] = useState(false)
+  const [selectedMediaIndex, setSelectedMediaIndex] = useState(0)
   const [updatingPlatform, setUpdatingPlatform] = useState<string | null>(null)
   const dispatch = useDispatch()
 
@@ -228,6 +231,24 @@ export function ProductDetailPanel({
   }, [currentProduct.image_urls, currentProduct.image_url])
   const productLinks = useMemo(() => parseProductLinks(currentProduct.link), [currentProduct.link])
   const mediaVideoUrl = typeof currentProduct.video_url === "string" && currentProduct.video_url.trim() ? currentProduct.video_url : null
+  const mediaItems = useMemo(() => {
+    const items: Array<{ type: "image" | "video"; url: string; title?: string }> = []
+    mediaImageUrls.forEach((url, i) => {
+      items.push({
+        type: "image",
+        url,
+        title: `${currentProduct?.name || "Product"} - Photo ${i + 1}`,
+      })
+    })
+    if (mediaVideoUrl) {
+      items.push({
+        type: "video",
+        url: mediaVideoUrl,
+        title: `${currentProduct?.name || "Product"} - Video`,
+      })
+    }
+    return items
+  }, [mediaImageUrls, mediaVideoUrl, currentProduct?.name])
   const platformStatuses = [
     { key: "amazon", label: "Amazon", status: currentProduct.amazon_status || "not_listed" },
     { key: "flipkart", label: "Flipkart", status: currentProduct.flipkart_status || "not_listed" },
@@ -643,31 +664,77 @@ export function ProductDetailPanel({
                 <p className="text-xs text-slate-500">
                   {mediaImageUrls.length} of 4 photos{mediaVideoUrl ? " + video" : ""}
                 </p>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-9 shrink-0 border-slate-200 bg-white px-3 text-xs"
-                  onClick={() => setIsMediaManageOpen(true)}
-                >
-                  Manage Media
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-9 shrink-0 border-slate-200 bg-white px-3 text-xs flex items-center gap-1.5 hover:bg-slate-50 hover:text-brand-blue"
+                    onClick={() => {
+                      setSelectedMediaIndex(0)
+                      setIsMediaViewerOpen(true)
+                    }}
+                    disabled={mediaItems.length === 0}
+                    title={mediaItems.length === 0 ? "No media available to view" : "View media in fullscreen viewer"}
+                  >
+                    <Eye className="h-3.5 w-3.5 text-slate-500" />
+                    View Media
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-9 shrink-0 border-slate-200 bg-white px-3 text-xs"
+                    onClick={() => setIsMediaManageOpen(true)}
+                  >
+                    Manage Media
+                  </Button>
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-3 p-4 md:grid-cols-4">
                 {mediaImageUrls.map((url, index) => (
-                  <div key={`${url}-${index}`} className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+                  <button
+                    key={`${url}-${index}`}
+                    type="button"
+                    onClick={() => {
+                      setSelectedMediaIndex(index)
+                      setIsMediaViewerOpen(true)
+                    }}
+                    className="group relative overflow-hidden rounded-lg border border-slate-200 bg-white text-left transition hover:border-brand-blue hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
+                    title="Click to view full photo with zoom"
+                  >
                     <img
                       src={url}
                       alt={`${currentProduct.name} ${index + 1}`}
-                      className="h-24 w-full object-cover"
+                      className="h-24 w-full object-cover transition-transform duration-200 group-hover:scale-105"
                     />
-                  </div>
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/25 opacity-0 transition-opacity group-hover:opacity-100">
+                      <span className="flex items-center gap-1 rounded-full bg-black/70 px-2 py-0.5 text-[10px] font-medium text-white backdrop-blur-sm shadow">
+                        <ZoomIn className="h-3 w-3" />
+                        View
+                      </span>
+                    </div>
+                  </button>
                 ))}
                 {mediaVideoUrl ? (
                   <div className="col-span-2 overflow-hidden rounded-lg border border-slate-200 bg-white p-1 md:col-span-4">
-                    <video controls className="max-h-40 w-full rounded-md">
-                      <source src={mediaVideoUrl} />
-                    </video>
+                    <div className="relative group">
+                      <video controls className="max-h-40 w-full rounded-md">
+                        <source src={mediaVideoUrl} />
+                      </video>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedMediaIndex(mediaImageUrls.length)
+                          setIsMediaViewerOpen(true)
+                        }}
+                        className="absolute top-2 right-2 flex items-center gap-1 rounded bg-black/70 px-2 py-1 text-[11px] font-medium text-white backdrop-blur-sm opacity-90 hover:opacity-100 transition shadow hover:bg-black/90"
+                        title="Open video in viewer"
+                      >
+                        <Maximize2 className="h-3 w-3" />
+                        Expand
+                      </button>
+                    </div>
                   </div>
                 ) : null}
               </div>
@@ -1032,6 +1099,14 @@ export function ProductDetailPanel({
           product={product}
           copies={printCopies}
           currency={currency}
+        />
+        <ProductMediaViewerModal
+          isOpen={isMediaViewerOpen}
+          onClose={() => setIsMediaViewerOpen(false)}
+          mediaItems={mediaItems}
+          initialIndex={selectedMediaIndex}
+          productName={currentProduct?.name}
+          productSku={currentProduct?.barcode || currentProduct?.sku}
         />
         {isMediaManageOpen && (
           <StaffMediaEditModal

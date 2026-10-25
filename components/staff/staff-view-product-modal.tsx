@@ -17,7 +17,8 @@ import {
   AlertTriangle, 
   XCircle,
   Share2,
-  Sparkles
+  Sparkles,
+  Eye
 } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 import { cn } from "@/lib/utils"
@@ -27,6 +28,7 @@ import { ShareProductButton } from "@/components/shared/share-product-button"
 import { useAppSelector } from "@/store/hooks"
 import { selectDevice, selectDeviceCurrency } from "@/store/slices/deviceSlice"
 import StaffMediaEditModal from "./staff-media-edit-modal"
+import { ProductMediaViewerModal } from "@/components/products/product-media-viewer-modal"
 
 interface StaffViewProductModalProps {
   isOpen: boolean
@@ -97,6 +99,7 @@ export default function StaffViewProductModal({
   const currency = currencyProp || deviceCurrency || "INR"
   const currentDeviceId = device?.id || undefined
   const [isMediaEditOpen, setIsMediaEditOpen] = useState(false)
+  const [isMediaViewerOpen, setIsMediaViewerOpen] = useState(false)
   const [selectedImageIndex, setSelectedImageIndex] = useState(0)
   const [activeMediaTab, setActiveMediaTab] = useState<"images" | "video">("images")
 
@@ -257,11 +260,24 @@ export default function StaffViewProductModal({
                       </video>
                     </div>
                   ) : mainImageUrl ? (
-                    <img
-                      src={mainImageUrl}
-                      alt={product.name}
-                      className="w-full h-full object-contain p-2 transition-transform duration-300 group-hover:scale-105"
-                    />
+                    <button
+                      type="button"
+                      onClick={() => setIsMediaViewerOpen(true)}
+                      className="w-full h-full relative cursor-zoom-in group/img"
+                      title="Click to view full photo with zoom"
+                    >
+                      <img
+                        src={mainImageUrl}
+                        alt={product.name}
+                        className="w-full h-full object-contain p-2 transition-transform duration-300 group-hover/img:scale-105"
+                      />
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/20 opacity-0 group-hover/img:opacity-100 transition-opacity">
+                        <span className="flex items-center gap-1 rounded-full bg-black/70 px-2.5 py-1 text-xs font-medium text-white backdrop-blur-sm shadow">
+                          <Eye className="h-3.5 w-3.5" />
+                          View Media
+                        </span>
+                      </div>
+                    </button>
                   ) : (
                     <div className="flex flex-col items-center justify-center text-slate-300 p-6 text-center">
                       <Package className="h-16 w-16 mb-2 stroke-[1.2]" />
@@ -528,6 +544,16 @@ export default function StaffViewProductModal({
               <Button
                 variant="outline"
                 size="sm"
+                onClick={() => setIsMediaViewerOpen(true)}
+                disabled={mediaImageUrls.length === 0 && !mediaVideoUrl}
+                className="border-slate-200 text-slate-700 bg-white hover:bg-slate-50 text-xs font-semibold h-9"
+              >
+                <Eye className="h-4 w-4 mr-1.5 text-slate-500" />
+                View Media
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={() => setIsMediaEditOpen(true)}
                 className="border-violet-200 text-violet-700 bg-white hover:bg-violet-50 text-xs font-semibold h-9"
               >
@@ -541,6 +567,16 @@ export default function StaffViewProductModal({
           </div>
         </DialogContent>
       </Dialog>
+
+      <ProductMediaViewerModal
+        isOpen={isMediaViewerOpen}
+        onClose={() => setIsMediaViewerOpen(false)}
+        imageUrls={mediaImageUrls}
+        videoUrl={mediaVideoUrl}
+        initialIndex={activeMediaTab === "video" ? mediaImageUrls.length : selectedImageIndex}
+        productName={product?.name}
+        productSku={product?.barcode || product?.sku}
+      />
 
       {isMediaEditOpen && (
         <StaffMediaEditModal
