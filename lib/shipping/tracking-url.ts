@@ -35,11 +35,18 @@ export function generateCourierTrackingUrl(
   // 3. DTDC
   if (nameLower.includes("dtdc")) {
     return cleanTrackingId
-      ? `https://trackcourier.io/dtdc-tracking?tracking_no=${encodeURIComponent(cleanTrackingId)}`
-      : "https://trackcourier.io/dtdc-tracking"
+      ? `https://trackparcel.in/carrier/dtdc-tracking/?tracking_no=${encodeURIComponent(cleanTrackingId)}`
+      : "https://www.dtdc.in/"
   }
 
-  // 4. ST Courier
+  // 4. Gokulam Speed & Safe
+  if (nameLower.includes("gokulam") || nameLower.includes("speed & safe") || nameLower.includes("speed and safe") || nameLower.includes("speed n safe")) {
+    return cleanTrackingId
+      ? `https://trackparcel.in/carrier/gokulam-speed-and-safe-courier-tracking/?tracking_no=${encodeURIComponent(cleanTrackingId)}`
+      : "https://www.speedandsafe.com/"
+  }
+
+  // 5. ST Courier
   if (nameLower.includes("st courier") || nameLower.includes("stcourier")) {
     return cleanTrackingId
       ? `https://stcourier.com/track/shipment?id=${encodeURIComponent(cleanTrackingId)}`

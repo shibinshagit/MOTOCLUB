@@ -112,7 +112,7 @@ export function TrackingDetailsModal({
             </Label>
             <Input
               id="courier-service"
-              placeholder="e.g. Trackon, DTDC, ST Courier, A1 Parcel"
+              placeholder="e.g. Trackon Courier, DTDC, ST Courier, A1 Parcel"
               value={courierServiceName}
               onChange={(e) => setCourierServiceName(e.target.value)}
               disabled={loading}

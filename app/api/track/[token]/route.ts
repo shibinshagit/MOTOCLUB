@@ -2,10 +2,11 @@ import { NextResponse } from "next/server"
 import { sql } from "@/lib/db"
 import { generateCourierTrackingUrl } from "@/lib/shipping/tracking-url"
 import {
-  resolveCourierSlug,
-  fetchFromTrackCourier,
-  normalizeTrackCourierResponse,
-} from "@/lib/shipping/trackcourier"
+  resolveTrackParcelCarrier,
+  fetchFromTrackParcel,
+  normalizeTrackParcelResponse,
+  getCarrierDisplayName,
+} from "@/lib/shipping/trackparcel"
 import { format } from "date-fns"
 
 function safeFormatDate(input: any, defaultStr = "dd MMM yyyy, hh:mm a"): string {
@@ -18,6 +19,27 @@ function safeFormatDate(input: any, defaultStr = "dd MMM yyyy, hh:mm a"): string
     return format(new Date(), defaultStr)
   }
 }
+
+function parseCachedPayload(payload: any): any {
+  if (!payload) return null
+  let data = payload
+  if (typeof data === "string") {
+    try {
+      data = JSON.parse(data)
+    } catch {
+      return null
+    }
+  }
+  if (typeof data === "string") {
+    try {
+      data = JSON.parse(data)
+    } catch {
+      return null
+    }
+  }
+  return data && typeof data === "object" ? data : null
+}
+
 
 export async function GET(
   request: Request,
@@ -63,6 +85,7 @@ export async function GET(
         s.courier_partner_id,
         s.tracking_cache_payload,
         s.tracking_last_polled_at,
+        EXTRACT(EPOCH FROM (NOW() - s.tracking_last_polled_at)) / 60 as tracking_age_minutes,
         s.is_tracking_frozen,
         COALESCE(s.customer_name_override, c.name, '') as customer_name,
         COALESCE(s.customer_phone_override, c.phone, '') as customer_phone,
@@ -80,12 +103,12 @@ export async function GET(
     `
 
     if (rows.length === 0) {
-      // If not found in local sales DB, check if it's a direct Courier AWB number
-      const { slug } = resolveCourierSlug(null, cleanToken)
-      if (slug) {
-        const tcRes = await fetchFromTrackCourier(slug, cleanToken)
-        if (tcRes.success && tcRes.data) {
-          const normalized = normalizeTrackCourierResponse(tcRes.data, { id: 0 }, cleanToken, slug)
+      // Direct AWB query via TrackParcel
+      const { carrier: tpCarrier } = resolveTrackParcelCarrier(null, cleanToken)
+      if (tpCarrier && process.env.TRACKPARCEL_API_KEY) {
+        const tpRes = await fetchFromTrackParcel(tpCarrier, cleanToken)
+        if (tpRes.success && tpRes.data) {
+          const normalized = normalizeTrackParcelResponse(tpRes.data, { id: 0 }, cleanToken, tpCarrier)
           if (normalized.hasLiveCheckpoints) {
             return NextResponse.json({
               success: true,
@@ -96,7 +119,7 @@ export async function GET(
                 trackingId: cleanToken,
                 courierPartnerName: normalized.courierServiceName,
                 courierServiceName: normalized.courierServiceName,
-                courierTrackingUrl: generateCourierTrackingUrl(slug, cleanToken),
+                courierTrackingUrl: generateCourierTrackingUrl(tpCarrier, cleanToken),
                 currentLocation: normalized.currentLocation,
                 destination: normalized.destination,
                 origin: normalized.origin || null,
@@ -111,47 +134,49 @@ export async function GET(
                 lastUpdate: normalized.lastUpdate,
                 timeline: normalized.timeline,
               },
-              source: "direct_courier_query",
-            })
-          } else {
-            // Recognized carrier, but carrier has not yet logged physical transit checkpoints
-            const courierName = normalized.courierServiceName || slug.toUpperCase()
-            return NextResponse.json({
-              success: true,
-              data: {
-                version: 2,
-                orderId: cleanToken,
-                deliveryStatus: "Pending First Scan",
-                trackingId: cleanToken,
-                courierPartnerName: courierName,
-                courierServiceName: courierName,
-                courierTrackingUrl: generateCourierTrackingUrl(slug, cleanToken),
-                currentLocation: "Awaiting First Scan",
-                destination: "Delivery Destination",
-                origin: "Origin Facility",
-                expectedDelivery: null,
-                additionalInfo: `Tracking number recognized as ${courierName}. Physical checkpoint scans have not been reported yet.`,
-                customerName: "",
-                contact: "",
-                totalAmount: null,
-                paymentStatus: null,
-                paymentMethod: null,
-                items: [],
-                lastUpdate: "Awaiting Scan",
-                timeline: [
-                  {
-                    status: "Pending",
-                    title: "Awaiting Carrier Scan",
-                    activity: `Consignment number is recognized as ${courierName}, but no physical transit checkpoints have been logged in the carrier network yet. You can track directly on the official portal.`,
-                    date: "Pending Update",
-                    courierName,
-                  },
-                ],
-              },
-              source: "direct_courier_query_pending",
+              source: "trackparcel_direct_query",
             })
           }
         }
+      }
+
+      // Recognized carrier format, but carrier has not yet logged physical scans
+      if (tpCarrier) {
+        const displayName = getCarrierDisplayName(tpCarrier)
+        return NextResponse.json({
+          success: true,
+          data: {
+            version: 2,
+            orderId: cleanToken,
+            deliveryStatus: "Pending First Scan",
+            trackingId: cleanToken,
+            courierPartnerName: displayName,
+            courierServiceName: displayName,
+            courierTrackingUrl: generateCourierTrackingUrl(tpCarrier, cleanToken),
+            currentLocation: "Awaiting First Scan",
+            destination: "Delivery Destination",
+            origin: "Origin Facility",
+            expectedDelivery: null,
+            additionalInfo: `Tracking number recognized as ${displayName}. Physical checkpoint scans have not been reported yet.`,
+            customerName: "",
+            contact: "",
+            totalAmount: null,
+            paymentStatus: null,
+            paymentMethod: null,
+            items: [],
+            lastUpdate: "Awaiting Scan",
+            timeline: [
+              {
+                status: "Pending",
+                title: "Awaiting Carrier Scan",
+                activity: `Consignment number is recognized as ${displayName}, but no physical transit checkpoints have been logged in the carrier network yet. You can track directly on the official portal.`,
+                date: "Pending Update",
+                courierName: displayName,
+              },
+            ],
+          },
+          source: "direct_courier_query_pending",
+        })
       }
 
       return NextResponse.json({ success: false, message: "Shipment not found" }, { status: 404 })
@@ -190,7 +215,7 @@ export async function GET(
       : sale.shipping_address || sale.customer_address || "Customer Address"
 
     // ========================================================
-    // GUARDRAIL 2: Freeze "Delivered" Tracking IDs Permanently
+    // GUARDRAIL 1: Freeze "Delivered" Tracking IDs Permanently (0 external API calls)
     // ========================================================
     const isAlreadyDelivered = Boolean(
       sale.is_tracking_frozen ||
@@ -198,60 +223,43 @@ export async function GET(
       sale.delivery_status?.toLowerCase() === "completed"
     )
 
-    if (isAlreadyDelivered && sale.tracking_cache_payload) {
-      try {
-        const cachedData =
-          typeof sale.tracking_cache_payload === "string"
-            ? JSON.parse(sale.tracking_cache_payload)
-            : sale.tracking_cache_payload
+    const cachedData = parseCachedPayload(sale.tracking_cache_payload)
 
-        // Only serve cache if it's the modern version without dummy "from/to" fields
-        const isV2Cache = cachedData && cachedData.version === 2 && !cachedData.timeline?.[0]?.from
-        if (isV2Cache) {
-          cachedData.courierTrackingUrl = courierTrackingUrl || cachedData.courierTrackingUrl
-          return NextResponse.json({ success: true, data: cachedData, source: "database_frozen" })
-        }
-      } catch (parseErr) {
-        console.warn("Failed to parse frozen tracking_cache_payload:", parseErr)
+    if (isAlreadyDelivered && cachedData) {
+      const isV2Cache = cachedData.version === 2 && !cachedData.timeline?.[0]?.from
+      if (isV2Cache) {
+        cachedData.courierTrackingUrl = courierTrackingUrl || cachedData.courierTrackingUrl
+        return NextResponse.json({ success: true, data: cachedData, source: "database_frozen" })
       }
     }
 
     // ========================================================
-    // GUARDRAIL 1: Aggressive Caching (TTL: 45 Minutes)
+    // GUARDRAIL 2: Aggressive Caching (TTL: 45 Minutes for active shipments)
     // ========================================================
     const CACHE_TTL_MINUTES = 45
-    if (sale.tracking_cache_payload && sale.tracking_last_polled_at) {
-      const ageMinutes =
-        (Date.now() - new Date(sale.tracking_last_polled_at).getTime()) / (1000 * 60)
+    const ageMinutes =
+      sale.tracking_age_minutes !== null && sale.tracking_age_minutes !== undefined
+        ? Number(sale.tracking_age_minutes)
+        : Infinity
 
-      if (ageMinutes < CACHE_TTL_MINUTES) {
-        try {
-          const cachedData =
-            typeof sale.tracking_cache_payload === "string"
-              ? JSON.parse(sale.tracking_cache_payload)
-              : sale.tracking_cache_payload
-
-          const isV2Cache = cachedData && cachedData.version === 2 && !cachedData.timeline?.[0]?.from
-          if (isV2Cache) {
-            cachedData.courierTrackingUrl = courierTrackingUrl || cachedData.courierTrackingUrl
-            return NextResponse.json({ success: true, data: cachedData, source: "database_cache" })
-          }
-        } catch (parseErr) {
-          console.warn("Failed to parse cached tracking_cache_payload:", parseErr)
-        }
+    if (cachedData && !isNaN(ageMinutes) && ageMinutes < CACHE_TTL_MINUTES) {
+      const isV2Cache = cachedData.version === 2 && !cachedData.timeline?.[0]?.from
+      if (isV2Cache) {
+        cachedData.courierTrackingUrl = courierTrackingUrl || cachedData.courierTrackingUrl
+        return NextResponse.json({ success: true, data: cachedData, source: "database_cache" })
       }
     }
 
     // ========================================================
-    // Check Courier Slug & Query TrackCourier API
+    // TrackParcel API (Multi-carrier external tracking)
     // ========================================================
-    const { slug, isA1Parcel } = resolveCourierSlug(courierServiceName, trackingId)
+    const { carrier: tpCarrier, isInternalOrDirect } = resolveTrackParcelCarrier(courierServiceName, trackingId)
 
-    if (!isA1Parcel && slug && trackingId) {
-      const tcRes = await fetchFromTrackCourier(slug, trackingId)
+    if (!isInternalOrDirect && tpCarrier && trackingId && process.env.TRACKPARCEL_API_KEY) {
+      const tpRes = await fetchFromTrackParcel(tpCarrier, trackingId)
 
-      if (tcRes.success && tcRes.data) {
-        const normalized = normalizeTrackCourierResponse(tcRes.data, sale, trackingId, slug)
+      if (tpRes.success && tpRes.data) {
+        const normalized = normalizeTrackParcelResponse(tpRes.data, sale, trackingId, tpCarrier)
 
         if (normalized.hasLiveCheckpoints) {
           const destinationToUse =
@@ -290,10 +298,11 @@ export async function GET(
 
           // Save payload and freeze if delivered
           try {
+            const jsonPayload = typeof sql.json === "function" ? sql.json(liveData) : JSON.stringify(liveData)
             await sql`
               UPDATE sales
               SET
-                tracking_cache_payload = ${JSON.stringify(liveData)},
+                tracking_cache_payload = ${jsonPayload},
                 tracking_last_polled_at = NOW(),
                 delivery_status = CASE WHEN ${isNowDelivered} THEN 'Delivered' ELSE delivery_status END,
                 delivered_at = CASE WHEN ${isNowDelivered} AND delivered_at IS NULL THEN NOW() ELSE delivered_at END,
@@ -304,14 +313,16 @@ export async function GET(
             console.warn("Failed to update tracking cache in sales table:", dbErr)
           }
 
-          return NextResponse.json({ success: true, data: liveData, source: "trackcourier_live" })
+          return NextResponse.json({ success: true, data: liveData, source: "trackparcel_live" })
         }
       }
     }
 
     // ========================================================
-    // Internal MotoClub Fallback Timeline (A1 Parcel, Pre-scan, or Error)
+    // Internal MotoClub Fallback Timeline (Local Courier, Pre-scan, or Offline)
     // ========================================================
+    const isA1Parcel = (sale.courier_service_name || "").toLowerCase().includes("a1 parcel")
+
     const trackingEventsRows = await sql`
       SELECT status, location, description, event_at
       FROM tracking_events
@@ -427,10 +438,11 @@ export async function GET(
 
     // Cache fallback data for 15 minutes to prevent rapid reload spam
     try {
+      const fallbackPayload = typeof sql.json === "function" ? sql.json(fallbackData) : JSON.stringify(fallbackData)
       await sql`
         UPDATE sales
         SET
-          tracking_cache_payload = ${JSON.stringify(fallbackData)},
+          tracking_cache_payload = ${fallbackPayload},
           tracking_last_polled_at = NOW()
         WHERE id = ${sale.id}
           AND tracking_cache_payload IS NULL
