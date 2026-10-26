@@ -90,6 +90,7 @@ export async function getStaffRequests(params: {
         FROM staff_requests sr
         JOIN staff s ON sr.staff_id = s.id
         WHERE sr.device_id = ${deviceId} AND sr.staff_id = ${staffId} AND sr.request_type = ${params.requestType} AND sr.status = ${params.status}
+          AND COALESCE(sr.is_direct, false) = false
         ORDER BY sr.created_at DESC
       `
     } else if (staffId && params.requestType) {
@@ -98,6 +99,7 @@ export async function getStaffRequests(params: {
         FROM staff_requests sr
         JOIN staff s ON sr.staff_id = s.id
         WHERE sr.device_id = ${deviceId} AND sr.staff_id = ${staffId} AND sr.request_type = ${params.requestType}
+          AND COALESCE(sr.is_direct, false) = false
         ORDER BY sr.created_at DESC
       `
     } else if (staffId) {
@@ -106,6 +108,7 @@ export async function getStaffRequests(params: {
         FROM staff_requests sr
         JOIN staff s ON sr.staff_id = s.id
         WHERE sr.device_id = ${deviceId} AND sr.staff_id = ${staffId}
+          AND COALESCE(sr.is_direct, false) = false
         ORDER BY sr.created_at DESC
       `
     } else if (params.requestType) {
@@ -114,6 +117,7 @@ export async function getStaffRequests(params: {
         FROM staff_requests sr
         JOIN staff s ON sr.staff_id = s.id
         WHERE sr.device_id = ${deviceId} AND sr.request_type = ${params.requestType}
+          AND COALESCE(sr.is_direct, false) = false
         ORDER BY sr.created_at DESC
       `
     } else {
@@ -122,6 +126,7 @@ export async function getStaffRequests(params: {
         FROM staff_requests sr
         JOIN staff s ON sr.staff_id = s.id
         WHERE sr.device_id = ${deviceId}
+          AND COALESCE(sr.is_direct, false) = false
         ORDER BY sr.created_at DESC
       `
     }
