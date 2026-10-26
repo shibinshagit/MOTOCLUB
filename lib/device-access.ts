@@ -6,8 +6,8 @@ import { getStaffSession } from "@/lib/staff-session"
 
 export type ServerActor =
   | { kind: "platform_admin" }
-  | { kind: "staff_admin"; deviceId: number }
-  | { kind: "staff"; deviceId: number }
+  | { kind: "staff_admin"; deviceId: number; role?: string }
+  | { kind: "staff"; deviceId: number; role?: string }
   | { kind: "device"; deviceId: number }
 
 /** Who is making this request, decided only from server-side sessions/cookies. */
@@ -22,8 +22,8 @@ export async function getServerActor(): Promise<ServerActor | null> {
   const staff = await getStaffSession()
   if (staff?.deviceId) {
     return staff.role === "admin"
-      ? { kind: "staff_admin", deviceId: Number(staff.deviceId) }
-      : { kind: "staff", deviceId: Number(staff.deviceId) }
+      ? { kind: "staff_admin", deviceId: Number(staff.deviceId), role: staff.role }
+      : { kind: "staff", deviceId: Number(staff.deviceId), role: staff.role }
   }
 
   const authToken = (await cookies()).get("authToken")?.value
