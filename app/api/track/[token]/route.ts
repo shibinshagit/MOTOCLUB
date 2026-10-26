@@ -37,7 +37,11 @@ function parseCachedPayload(payload: any): any {
       return null
     }
   }
-  return data && typeof data === "object" ? data : null
+  if (!data || typeof data !== "object") return null
+  if (!Array.isArray(data.timeline)) {
+    data.timeline = []
+  }
+  return data
 }
 
 
@@ -226,7 +230,11 @@ export async function GET(
     const cachedData = parseCachedPayload(sale.tracking_cache_payload)
 
     if (isAlreadyDelivered && cachedData) {
-      const isV2Cache = cachedData.version === 2 && !cachedData.timeline?.[0]?.from
+      const isV2Cache =
+        cachedData.version === 2 &&
+        Array.isArray(cachedData.timeline) &&
+        cachedData.timeline.length > 0 &&
+        !cachedData.timeline[0]?.from
       if (isV2Cache) {
         cachedData.courierTrackingUrl = courierTrackingUrl || cachedData.courierTrackingUrl
         return NextResponse.json({ success: true, data: cachedData, source: "database_frozen" })
@@ -243,7 +251,11 @@ export async function GET(
         : Infinity
 
     if (cachedData && !isNaN(ageMinutes) && ageMinutes < CACHE_TTL_MINUTES) {
-      const isV2Cache = cachedData.version === 2 && !cachedData.timeline?.[0]?.from
+      const isV2Cache =
+        cachedData.version === 2 &&
+        Array.isArray(cachedData.timeline) &&
+        cachedData.timeline.length > 0 &&
+        !cachedData.timeline[0]?.from
       if (isV2Cache) {
         cachedData.courierTrackingUrl = courierTrackingUrl || cachedData.courierTrackingUrl
         return NextResponse.json({ success: true, data: cachedData, source: "database_cache" })
