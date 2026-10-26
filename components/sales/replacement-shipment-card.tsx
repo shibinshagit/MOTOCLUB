@@ -411,7 +411,7 @@ export function ReplacementShipmentCard({
               <label className="font-semibold text-slate-700">Courier Service Name</label>
               <Input
                 type="text"
-                placeholder="e.g. Express, Trackon, BlueDart"
+                placeholder="e.g. Express, Trackon Courier, BlueDart"
                 value={newCourierServiceName}
                 onChange={(e) => setNewCourierServiceName(e.target.value)}
                 className="h-9 text-xs"

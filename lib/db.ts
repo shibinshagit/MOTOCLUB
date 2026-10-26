@@ -113,6 +113,8 @@ const createSqlClient = () => {
   }
 
   wrappedSql.begin = sqlFn.begin ? sqlFn.begin.bind(sqlFn) : undefined;
+  wrappedSql.json = sqlFn.json ? sqlFn.json.bind(sqlFn) : undefined;
+  wrappedSql.array = sqlFn.array ? sqlFn.array.bind(sqlFn) : undefined;
   
   ;(async () => {
     try {

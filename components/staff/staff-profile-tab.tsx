@@ -594,7 +594,7 @@ export default function StaffProfileTab() {
                             <div className="text-right">
                               <span className="text-[10px] text-slate-400 font-semibold uppercase block">Amount Paid</span>
                               <span className="text-sm font-bold text-slate-900">
-                                {currency} {Number(item.amount || item.paid_amount || 0).toFixed(2)}
+                                {currency} {Number(item.net_salary ?? item.amount ?? item.paid_amount ?? 0).toFixed(2)}
                               </span>
                             </div>
                           </div>
@@ -630,7 +630,7 @@ export default function StaffProfileTab() {
                                 {item.payment_type || item.type || "Salary"}
                               </td>
                               <td className="px-4 py-3 text-right font-bold text-slate-900">
-                                {currency} {Number(item.amount || item.paid_amount || 0).toFixed(2)}
+                                {currency} {Number(item.net_salary ?? item.amount ?? item.paid_amount ?? 0).toFixed(2)}
                               </td>
                               <td className="px-4 py-3 text-center">
                                 <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">

@@ -38,7 +38,8 @@ import {
   getStaffPayrollSummary,
   createSalaryPayment,
   updateSalaryPaymentStatus,
-  getSalaryPaymentHistory
+  getSalaryPaymentHistory,
+  paySalaryAdvanceDirectly
 } from "@/app/actions/salary-actions"
 import {
   getStaffRequests,
@@ -83,6 +84,17 @@ export default function PayrollRequestsTab({ deviceId, currency = "INR", initial
     status: "Approved"
   })
   const [isSubmittingPay, setIsSubmittingPay] = useState(false)
+
+  // Direct Pay Advance Modal state
+  const [isPayAdvanceOpen, setIsPayAdvanceOpen] = useState(false)
+  const [selectedStaffForAdvance, setSelectedStaffForAdvance] = useState<any>(null)
+  const [advanceForm, setAdvanceForm] = useState({
+    amount: "",
+    paymentDate: new Date().toISOString().split("T")[0],
+    paymentMethod: "Cash",
+    notes: ""
+  })
+  const [isSubmittingAdvance, setIsSubmittingAdvance] = useState(false)
 
   // Requests state
   const [requests, setRequests] = useState<any[]>([])
@@ -185,6 +197,54 @@ export default function PayrollRequestsTab({ deviceId, currency = "INR", initial
       status: "Approved"
     })
     setIsPaySalaryOpen(true)
+  }
+
+  // Open Pay Advance Modal for a staff member
+  const handleOpenAdvanceModal = (staff: any) => {
+    setSelectedStaffForAdvance(staff)
+    setAdvanceForm({
+      amount: "",
+      paymentDate: new Date().toISOString().split("T")[0],
+      paymentMethod: "Cash",
+      notes: ""
+    })
+    setIsPayAdvanceOpen(true)
+  }
+
+  // Submit Direct Pay Advance
+  const handlePayAdvanceSubmit = async () => {
+    if (!selectedStaffForAdvance || !deviceId) return
+    const amt = Number(advanceForm.amount)
+    if (isNaN(amt) || amt <= 0) {
+      notifyError(toast, "Please enter a valid advance amount")
+      return
+    }
+
+    setIsSubmittingAdvance(true)
+    try {
+      const res = await paySalaryAdvanceDirectly({
+        staffId: selectedStaffForAdvance.staffId,
+        deviceId,
+        amount: amt,
+        paymentDate: advanceForm.paymentDate,
+        paymentMethod: advanceForm.paymentMethod,
+        notes: advanceForm.notes
+      })
+
+      if (res.success) {
+        notifySuccess(toast, res.message || "Salary advance paid successfully", "Success")
+        setIsPayAdvanceOpen(false)
+        fetchPayroll()
+        fetchRequests()
+        fetchHistory()
+      } else {
+        notifyError(toast, res.message || "Failed to pay advance", "Error")
+      }
+    } catch (err: any) {
+      notifyError(toast, err.message || "Failed to submit advance payment", "Error")
+    } finally {
+      setIsSubmittingAdvance(false)
+    }
   }
 
   // Calculate Net Salary
@@ -453,15 +513,26 @@ export default function PayrollRequestsTab({ deviceId, currency = "INR", initial
                           {staff.paidAmount > 0 ? formatCurr(staff.paidAmount) : "-"}
                         </td>
                         <td className="p-3 text-right">
-                          <Button
-                            size="sm"
-                            variant={staff.paymentStatus === "Unpaid" ? "default" : "outline"}
-                            onClick={() => handleOpenPayModal(staff)}
-                            className="h-8 text-xs"
-                          >
-                            <Banknote className="h-3.5 w-3.5 mr-1" />
-                            {staff.paymentStatus === "Unpaid" ? "Pay Salary" : "Edit / Manage"}
-                          </Button>
+                          <div className="flex items-center justify-end gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleOpenAdvanceModal(staff)}
+                              className="h-8 text-xs border-amber-300 text-amber-800 hover:bg-amber-50"
+                            >
+                              <CreditCard className="h-3.5 w-3.5 mr-1 text-amber-600" />
+                              Pay Advance
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant={staff.paymentStatus === "Unpaid" ? "default" : "outline"}
+                              onClick={() => handleOpenPayModal(staff)}
+                              className="h-8 text-xs"
+                            >
+                              <Banknote className="h-3.5 w-3.5 mr-1" />
+                              {staff.paymentStatus === "Unpaid" ? "Pay Salary" : "Edit / Manage"}
+                            </Button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -670,36 +741,63 @@ export default function PayrollRequestsTab({ deviceId, currency = "INR", initial
                 <thead>
                   <tr className="bg-slate-50 border-b text-xs uppercase text-slate-500 font-semibold">
                     <th className="p-3">Payment Date</th>
-                    <th className="p-3">Month</th>
+                    <th className="p-3">Payment Type</th>
                     <th className="p-3">Staff Name</th>
-                    <th className="p-3">Base Salary</th>
-                    <th className="p-3">Bonus</th>
-                    <th className="p-3">Deductions</th>
+                    <th className="p-3">Month</th>
+                    <th className="p-3">Details / Notes</th>
                     <th className="p-3">Net Paid</th>
                     <th className="p-3">Method</th>
                     <th className="p-3">Status</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {history.map((pmt: any) => (
-                    <tr key={pmt.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="p-3 text-xs text-slate-600">
-                        {formatDateVal(pmt.payment_date)}
-                      </td>
-                      <td className="p-3 font-semibold text-slate-900">{pmt.payment_month}</td>
-                      <td className="p-3 font-medium text-slate-900">{pmt.staff_name}</td>
-                      <td className="p-3">{formatCurr(Number(pmt.base_salary))}</td>
-                      <td className="p-3 text-emerald-700">+{formatCurr(Number(pmt.bonus || 0))}</td>
-                      <td className="p-3 text-amber-700">
-                        -{formatCurr(Number(pmt.advance_deduction || 0) + Number(pmt.other_deductions || 0))}
-                      </td>
-                      <td className="p-3 font-bold text-slate-900">{formatCurr(Number(pmt.net_salary))}</td>
-                      <td className="p-3 text-xs text-slate-600">{pmt.payment_method}</td>
-                      <td className="p-3">
-                        <Badge className="bg-emerald-100 text-emerald-800">{pmt.status}</Badge>
-                      </td>
-                    </tr>
-                  ))}
+                  {history.map((pmt: any) => {
+                    const isAdvance = pmt.payment_type?.includes("Advance") || pmt.id?.toString().startsWith("req_")
+                    return (
+                      <tr key={pmt.id} className="hover:bg-slate-50 transition-colors">
+                        <td className="p-3 text-xs text-slate-600">
+                          {formatDateVal(pmt.payment_date)}
+                        </td>
+                        <td className="p-3">
+                          {isAdvance ? (
+                            <Badge variant="outline" className="border-amber-300 text-amber-800 bg-amber-50 text-[11px] font-semibold">
+                              💵 {pmt.payment_type || "Salary Advance"}
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="border-emerald-300 text-emerald-800 bg-emerald-50 text-[11px] font-semibold">
+                              💼 Regular Salary
+                            </Badge>
+                          )}
+                        </td>
+                        <td className="p-3">
+                          <p className="font-semibold text-slate-900">{pmt.staff_name}</p>
+                          {pmt.position && <p className="text-xs text-slate-500">{pmt.position}</p>}
+                        </td>
+                        <td className="p-3 text-xs font-medium text-slate-700">{pmt.payment_month || "-"}</td>
+                        <td className="p-3 text-xs text-slate-600 max-w-[220px] truncate" title={pmt.remarks || pmt.notes || ""}>
+                          {isAdvance ? (
+                            <span>{pmt.remarks || pmt.notes || "Salary advance payout"}</span>
+                          ) : (
+                            <span>
+                              Base: {formatCurr(pmt.base_salary)}
+                              {Number(pmt.bonus || 0) > 0 && ` | +Bonus: ${formatCurr(pmt.bonus)}`}
+                              {(Number(pmt.advance_deduction || 0) > 0 || Number(pmt.other_deductions || 0) > 0) &&
+                                ` | -Ded: ${formatCurr(Number(pmt.advance_deduction || 0) + Number(pmt.other_deductions || 0))}`}
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-3 font-bold text-slate-900">
+                          {formatCurr(Number(pmt.net_salary ?? pmt.amount ?? 0))}
+                        </td>
+                        <td className="p-3 text-xs text-slate-600">{pmt.payment_method || "Cash"}</td>
+                        <td className="p-3">
+                          <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">
+                            {pmt.status || "Paid"}
+                          </Badge>
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             )}
@@ -857,6 +955,107 @@ export default function PayrollRequestsTab({ deviceId, currency = "INR", initial
             <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={handlePaySalarySubmit} disabled={isSubmittingPay}>
               {isSubmittingPay && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}
               Confirm Salary Payment
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Direct Pay Advance Modal */}
+      <Dialog open={isPayAdvanceOpen} onOpenChange={setIsPayAdvanceOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-slate-900">
+              <CreditCard className="h-5 w-5 text-amber-600" />
+              Pay Advance - {selectedStaffForAdvance?.name}
+            </DialogTitle>
+            <DialogDescription>
+              Directly pay a salary advance. This payout will be logged as an expense under 'Salary & Wages' and tracked for monthly salary deduction.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="bg-slate-50 p-3 rounded-lg text-xs space-y-1.5 border border-slate-200">
+              <div className="flex justify-between items-center">
+                <span className="font-semibold text-slate-600">Staff Position:</span>
+                <span className="font-medium text-slate-900">{selectedStaffForAdvance?.position || "Staff"}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="font-semibold text-slate-600">Base Salary:</span>
+                <span className="font-bold text-slate-900">{formatCurr(selectedStaffForAdvance?.baseSalary || 0)}</span>
+              </div>
+              {Number(selectedStaffForAdvance?.advanceTaken || 0) > 0 && (
+                <div className="flex justify-between items-center pt-1 border-t border-slate-200">
+                  <span className="font-semibold text-amber-700">Current Advances Taken:</span>
+                  <span className="font-bold text-amber-800">{formatCurr(selectedStaffForAdvance?.advanceTaken || 0)}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs font-semibold">Advance Amount ({currency}) *</Label>
+                <Input
+                  type="number"
+                  placeholder="e.g. 500"
+                  value={advanceForm.amount}
+                  onChange={(e) => setAdvanceForm({ ...advanceForm, amount: e.target.value })}
+                  className="text-xs font-bold text-slate-900 mt-1"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <Label className="text-xs font-semibold">Payment Date *</Label>
+                <Input
+                  type="date"
+                  value={advanceForm.paymentDate}
+                  onChange={(e) => setAdvanceForm({ ...advanceForm, paymentDate: e.target.value })}
+                  className="text-xs mt-1"
+                />
+              </div>
+            </div>
+
+            <div>
+              <Label className="text-xs font-semibold">Payment Method</Label>
+              <Select
+                value={advanceForm.paymentMethod}
+                onValueChange={(val) => setAdvanceForm({ ...advanceForm, paymentMethod: val })}
+              >
+                <SelectTrigger className="text-xs mt-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Cash">Cash</SelectItem>
+                  <SelectItem value="Bank Transfer">Bank Transfer</SelectItem>
+                  <SelectItem value="Cheque">Cheque</SelectItem>
+                  <SelectItem value="Online Transfer">Online Transfer</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <Label className="text-xs font-semibold">Note / Remarks</Label>
+              <Textarea
+                placeholder="Enter note or reason for advance payment (e.g. Festival advance, emergency medical...)"
+                value={advanceForm.notes}
+                onChange={(e) => setAdvanceForm({ ...advanceForm, notes: e.target.value })}
+                className="text-xs h-20 mt-1"
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setIsPayAdvanceOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+              onClick={handlePayAdvanceSubmit}
+              disabled={isSubmittingAdvance || !advanceForm.amount || Number(advanceForm.amount) <= 0}
+            >
+              {isSubmittingAdvance && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}
+              <Banknote className="h-3.5 w-3.5 mr-1" />
+              Confirm Pay Advance
             </Button>
           </DialogFooter>
         </DialogContent>

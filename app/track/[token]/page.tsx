@@ -198,6 +198,8 @@ export default function CustomerTrackingPage() {
     }
   }
 
+  const timeline = Array.isArray(data?.timeline) ? data.timeline : []
+
   return (
     <div className="min-h-screen bg-[#F4F7FC] text-slate-900 flex flex-col items-center py-6 px-4">
       {/* Top Header */}
@@ -412,12 +414,17 @@ export default function CustomerTrackingPage() {
                   </p>
                 </div>
                 <span className="text-xs font-bold text-slate-700 bg-slate-100 px-2.5 py-1 rounded-full font-mono">
-                  {data.timeline.length} {data.timeline.length === 1 ? "Scan" : "Scans"}
+                  {timeline.length} {timeline.length === 1 ? "Scan" : "Scans"}
                 </span>
               </div>
 
               <div className="relative space-y-4">
-                {data.timeline.map((event, idx) => {
+                {timeline.length === 0 ? (
+                  <div className="p-6 text-center text-xs text-slate-400 bg-slate-50 rounded-2xl border border-slate-200">
+                    Awaiting scan checkpoints from carrier.
+                  </div>
+                ) : (
+                  timeline.map((event, idx) => {
                   const style = getTimelineIconStyle(event.title || event.status, idx)
                   return (
                     <div key={idx} className="flex items-start gap-4 relative">
@@ -428,7 +435,7 @@ export default function CustomerTrackingPage() {
                         >
                           {style.icon}
                         </div>
-                        {idx < data.timeline.length - 1 && (
+                        {idx < timeline.length - 1 && (
                           <div className="w-0.5 bg-slate-200 flex-1 my-1.5 min-h-[44px]" />
                         )}
                       </div>
@@ -471,7 +478,7 @@ export default function CustomerTrackingPage() {
                       </div>
                     </div>
                   )
-                })}
+                }))}
               </div>
             </div>
           </>

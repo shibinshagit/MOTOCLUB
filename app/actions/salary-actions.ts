@@ -61,6 +61,20 @@ export async function ensureSalaryTables() {
     `
 
     await sql`
+      ALTER TABLE staff_requests 
+      ADD COLUMN IF NOT EXISTS is_direct BOOLEAN DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50) DEFAULT 'Cash'
+    `
+
+    // Backfill any prior direct advances so they are flagged as direct
+    await sql`
+      UPDATE staff_requests
+      SET is_direct = TRUE
+      WHERE (reason ILIKE '%direct advance%' OR admin_remarks ILIKE '%direct advance%')
+        AND (is_direct IS NULL OR is_direct = FALSE)
+    `
+
+    await sql`
       CREATE TABLE IF NOT EXISTS staff_purchase_settlements (
         id SERIAL PRIMARY KEY,
         sale_id INTEGER NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
@@ -475,7 +489,8 @@ export async function getSalaryPaymentHistory(deviceId: number, staffId?: number
     let targetStaffId = staffId
     if (!targetStaffId) {
       const session = await getStaffSession()
-      if (session?.staffId) {
+      // Only lock to session staffId if logged in as a normal staff member viewing their own profile
+      if (session?.role === 'staff' && session?.staffId) {
         targetStaffId = session.staffId
       }
     }
@@ -492,7 +507,10 @@ export async function getSalaryPaymentHistory(deviceId: number, staffId?: number
         ORDER BY sp.payment_month DESC, sp.created_at DESC
       `
       advancePaidRequests = await sql`
-        SELECT sr.id, sr.staff_id, sr.device_id, sr.amount, sr.status, sr.request_type, sr.reason as remarks, sr.created_at, sr.approved_at as payment_date, s.name as staff_name, s.position
+        SELECT sr.id, sr.staff_id, sr.device_id, sr.amount, sr.status, sr.request_type,
+               sr.reason as remarks, sr.created_at, sr.approved_at, COALESCE(sr.approved_at, sr.created_at) as payment_date,
+               sr.is_direct, COALESCE(sr.payment_method, 'Cash') as payment_method,
+               s.name as staff_name, s.position
         FROM staff_requests sr
         JOIN staff s ON sr.staff_id = s.id
         WHERE sr.device_id = ${deviceId} AND sr.staff_id = ${targetStaffId}
@@ -509,7 +527,10 @@ export async function getSalaryPaymentHistory(deviceId: number, staffId?: number
         ORDER BY sp.payment_month DESC, sp.created_at DESC
       `
       advancePaidRequests = await sql`
-        SELECT sr.id, sr.staff_id, sr.device_id, sr.amount, sr.status, sr.request_type, sr.reason as remarks, sr.created_at, sr.approved_at as payment_date, s.name as staff_name, s.position
+        SELECT sr.id, sr.staff_id, sr.device_id, sr.amount, sr.status, sr.request_type,
+               sr.reason as remarks, sr.created_at, sr.approved_at, COALESCE(sr.approved_at, sr.created_at) as payment_date,
+               sr.is_direct, COALESCE(sr.payment_method, 'Cash') as payment_method,
+               s.name as staff_name, s.position
         FROM staff_requests sr
         JOIN staff s ON sr.staff_id = s.id
         WHERE sr.device_id = ${deviceId}
@@ -519,31 +540,79 @@ export async function getSalaryPaymentHistory(deviceId: number, staffId?: number
       `
     }
 
-    const formattedPayments = payments.map((pmt: any) => ({
-      ...pmt,
-      payment_type: pmt.payment_type || "Regular Salary",
-      payment_date: pmt.payment_date ? (pmt.payment_date instanceof Date ? pmt.payment_date.toISOString().split("T")[0] : String(pmt.payment_date)) : "",
-      created_at: pmt.created_at ? (pmt.created_at instanceof Date ? pmt.created_at.toISOString() : String(pmt.created_at)) : "",
-      updated_at: pmt.updated_at ? (pmt.updated_at instanceof Date ? pmt.updated_at.toISOString() : String(pmt.updated_at)) : ""
-    }))
+    const formattedPayments = payments.map((pmt: any) => {
+      const netPaid = Number(pmt.net_salary ?? pmt.amount ?? 0)
+      return {
+        ...pmt,
+        amount: netPaid,
+        paid_amount: netPaid,
+        net_salary: netPaid,
+        payment_type: pmt.payment_type || "Regular Salary",
+        payment_date: pmt.payment_date ? (pmt.payment_date instanceof Date ? pmt.payment_date.toISOString().split("T")[0] : String(pmt.payment_date).split("T")[0]) : "",
+        created_at: pmt.created_at ? (pmt.created_at instanceof Date ? pmt.created_at.toISOString() : String(pmt.created_at)) : "",
+        updated_at: pmt.updated_at ? (pmt.updated_at instanceof Date ? pmt.updated_at.toISOString() : String(pmt.updated_at)) : ""
+      }
+    })
 
-    const formattedAdvances = advancePaidRequests.map((req: any) => ({
-      id: `req_${req.id}`,
-      staff_id: req.staff_id,
-      device_id: req.device_id,
-      staff_name: req.staff_name,
-      position: req.position,
-      amount: req.amount,
-      status: req.status,
-      payment_type: req.request_type === "salary_advance" ? "Salary Advance (Paid)" : "Credit Request (Approved)",
-      payment_date: req.payment_date ? (req.payment_date instanceof Date ? req.payment_date.toISOString().split("T")[0] : String(req.payment_date)) : (req.created_at instanceof Date ? req.created_at.toISOString().split("T")[0] : String(req.created_at)),
-      created_at: req.created_at ? (req.created_at instanceof Date ? req.created_at.toISOString() : String(req.created_at)) : "",
-      remarks: req.remarks || (req.request_type === "salary_advance" ? "Salary advance payout" : "Approved credit request")
-    }))
+    const formattedAdvances = advancePaidRequests.map((req: any) => {
+      const payDate = req.payment_date
+        ? (req.payment_date instanceof Date ? req.payment_date.toISOString().split("T")[0] : String(req.payment_date).split("T")[0])
+        : (req.created_at ? (req.created_at instanceof Date ? req.created_at.toISOString().split("T")[0] : String(req.created_at).split("T")[0]) : "")
+      const payMonth = payDate ? payDate.slice(0, 7) : "-"
 
-    const combinedHistory = [...formattedPayments, ...formattedAdvances].sort(
-      (a, b) => new Date(b.created_at || b.payment_date).getTime() - new Date(a.created_at || a.payment_date).getTime()
-    )
+      return {
+        id: `req_${req.id}`,
+        staff_id: req.staff_id,
+        device_id: req.device_id,
+        staff_name: req.staff_name,
+        position: req.position,
+        payment_month: payMonth,
+        base_salary: Number(req.amount) || 0,
+        bonus: 0,
+        advance_deduction: 0,
+        other_deductions: 0,
+        net_salary: Number(req.amount) || 0,
+        amount: Number(req.amount) || 0,
+        status: req.status || "Paid",
+        payment_method: req.payment_method || "Cash",
+        payment_type: req.is_direct
+          ? "Salary Advance (Direct)"
+          : (req.request_type === "salary_advance" ? "Salary Advance (Request)" : "Staff Purchase Credit"),
+        payment_date: payDate,
+        created_at: req.created_at ? (req.created_at instanceof Date ? req.created_at.toISOString() : String(req.created_at)) : "",
+        approved_at: req.approved_at ? (req.approved_at instanceof Date ? req.approved_at.toISOString() : String(req.approved_at)) : "",
+        remarks: req.remarks || (req.request_type === "salary_advance" ? "Salary advance payout" : "Approved credit request")
+      }
+    })
+
+    const getMonthKey = (item: any) => {
+      if (item.payment_month && item.payment_month !== "-") return item.payment_month
+      if (item.payment_date) return String(item.payment_date).slice(0, 7)
+      if (item.created_at) return String(item.created_at).slice(0, 7)
+      return ""
+    }
+
+    const combinedHistory = [...formattedPayments, ...formattedAdvances].sort((a, b) => {
+      const monthA = getMonthKey(a)
+      const monthB = getMonthKey(b)
+      if (monthA !== monthB) {
+        return monthB.localeCompare(monthA)
+      }
+
+      const isAdvA = a.payment_type?.toLowerCase().includes("advance") || a.id?.toString().startsWith("req_")
+      const isAdvB = b.payment_type?.toLowerCase().includes("advance") || b.id?.toString().startsWith("req_")
+
+      // Within the same period/month: advances appear before regular salary
+      if (isAdvA && !isAdvB) return -1
+      if (!isAdvA && isAdvB) return 1
+
+      // In the order payments were given (chronological order)
+      const timeA = new Date(a.approved_at || a.created_at || a.payment_date).getTime()
+      const timeB = new Date(b.approved_at || b.created_at || b.payment_date).getTime()
+      if (timeA !== timeB) return timeA - timeB
+
+      return String(a.id).localeCompare(String(b.id))
+    })
 
     return { success: true, data: combinedHistory }
   } catch (error: any) {
@@ -551,3 +620,81 @@ export async function getSalaryPaymentHistory(deviceId: number, staffId?: number
     return { success: false, message: error.message || "Failed to fetch salary history", data: [] }
   }
 }
+
+// Pay salary advance directly to a staff member (without prior request)
+export async function paySalaryAdvanceDirectly(data: {
+  staffId: number
+  deviceId: number
+  amount: number
+  paymentDate?: string
+  paymentMethod?: string
+  notes?: string
+}) {
+  await ensureSalaryTables()
+  try {
+    if (!data.staffId || !data.deviceId) {
+      return { success: false, message: "Staff ID and Device ID are required" }
+    }
+
+    const amount = Number(data.amount)
+    if (isNaN(amount) || amount <= 0) {
+      return { success: false, message: "Please specify a valid advance amount" }
+    }
+
+    const session = await getStaffSession()
+    const approvedBy = session?.staffId || null
+    const companyId = await getDeviceCompanyId(data.deviceId)
+
+    const staffInfo = await sql`SELECT name, position FROM staff WHERE id = ${data.staffId} LIMIT 1`
+    if (staffInfo.length === 0) {
+      return { success: false, message: "Staff member not found" }
+    }
+    const staffName = staffInfo[0].name
+
+    const paymentDateStr = data.paymentDate || new Date().toISOString().split("T")[0]
+    const paymentMethod = data.paymentMethod || "Cash"
+    const notes = data.notes?.trim() || "Direct advance payout by admin"
+
+    const requestResult = await sql`
+      INSERT INTO staff_requests (
+        staff_id, device_id, company_id, request_type, amount,
+        reason, status, admin_remarks, approved_by, approved_at,
+        created_at, updated_at, is_direct, payment_method
+      )
+      VALUES (
+        ${data.staffId}, ${data.deviceId}, ${companyId}, 'salary_advance', ${amount},
+        ${notes}, 'Paid', ${notes}, ${approvedBy}, NOW(),
+        NOW(), NOW(), true, ${paymentMethod}
+      )
+      RETURNING id
+    `
+
+    const requestId = requestResult[0].id
+
+    await sql`
+      INSERT INTO financial_transactions (
+        transaction_date, transaction_type, transaction_name, category_name,
+        reference_type, reference_id, amount, debit_amount, status, payment_method,
+        description, notes, device_id, company_id, created_by
+      )
+      VALUES (
+        ${paymentDateStr}::date, 'expense', ${`Salary Advance Paid - ${staffName}`}, 'Salary & Wages',
+        'salary_advance', ${requestId}, ${amount}, ${amount}, 'Completed', ${paymentMethod},
+        ${`Salary advance paid on ${paymentDateStr}`},
+        ${notes}, ${data.deviceId}, ${companyId}, ${approvedBy || data.staffId}
+      )
+    `
+
+    revalidatePath("/dashboard")
+    revalidatePath("/staff/dashboard")
+    return {
+      success: true,
+      message: `Successfully paid salary advance of ${amount} to ${staffName}.`,
+      requestId
+    }
+  } catch (error: any) {
+    console.error("paySalaryAdvanceDirectly error:", error)
+    return { success: false, message: error.message || "Failed to process salary advance" }
+  }
+}
+
