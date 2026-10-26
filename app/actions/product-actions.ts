@@ -2236,9 +2236,13 @@ interface CreateProductParams {
 
 // Update the createProduct function to check for duplicates within user's products
 export async function createProduct(formData: FormData) {
-  // Staff (non-admin) sessions may only use existing products; enforce it here, not just in the UI
+  // Staff (non-admin) sessions may only use existing products, except purchase_manager and logistics
   const actor = await getServerActor()
-  if (actor?.kind === "staff") {
+  if (!actor) {
+    const message = "You do not have permission to create products"
+    return { success: false, error: message, message }
+  }
+  if (actor.kind === "staff" && actor.role !== "purchase_manager" && actor.role !== "logistics") {
     const message = "You do not have permission to create products"
     return { success: false, error: message, message }
   }
@@ -2253,7 +2257,8 @@ export async function createProduct(formData: FormData) {
   const mrp = Number.parseFloat(formData.get("mrp") as string) || 0
   const stock = Number.parseInt(formData.get("stock") as string) || 0
   const shelf = formData.get("shelf") as string
-  const userId = formData.get("user_id") ? Number.parseInt(formData.get("user_id") as string) : undefined
+  const rawUserId = formData.get("user_id") ? Number.parseInt(formData.get("user_id") as string) : undefined
+  const userId = actor.kind === "platform_admin" ? (rawUserId || 1) : (actor.deviceId || rawUserId || 1)
   const barcode = formData.get("barcode") as string
   const imageFile = formData.get("image") as File | null
   const imageFiles = formData.getAll("images").filter((item): item is File => item instanceof File && item.size > 0)
@@ -3154,7 +3159,7 @@ export async function deleteProduct(id: number) {
   try {
     const actor = await getServerActor()
     if (!actor) return { success: false, message: "Not authorized to delete products" }
-    if (actor.kind === "staff") {
+    if (actor.kind === "staff" && actor.role !== "purchase_manager" && actor.role !== "logistics") {
       return { success: false, message: "Only administrators can delete products" }
     }
 
