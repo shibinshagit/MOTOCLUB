@@ -432,7 +432,7 @@ export default function SalesExcelTable({
   const [serverSales, setServerSales] = useState<any[]>([])
   const [totalServerCount, setTotalServerCount] = useState(0)
   const [totalServerPages, setTotalServerPages] = useState(0)
-  const [serverCardCounts, setServerCardCounts] = useState<{ total: number; today?: number; pending: number; critical: number } | null>(
+  const [serverCardCounts, setServerCardCounts] = useState<{ total: number; today?: number; pending: number; critical: number; total_amount?: number } | null>(
     null,
   )
   const [isFetchingServer, setIsFetchingServer] = useState(false)
@@ -632,15 +632,16 @@ export default function SalesExcelTable({
     }
   }, [])
 
-  const totalCount = onlyPosUpdated ? totalServerCount : (serverCardCounts ? serverCardCounts.total : totalServerCount)
+  const totalOrderCount = serverCardCounts ? serverCardCounts.total : totalServerCount
+  const totalCount = onlyPosUpdated ? totalServerCount : totalOrderCount
   const todayCount = serverCardCounts?.today ?? displaySales.filter(isTodaySale).length
   const pendingCount = serverCardCounts ? serverCardCounts.pending : 0
   const criticalCount = serverCardCounts ? serverCardCounts.critical : 0
   const pendingSalesCount = pendingCount
 
   const totalSalesAmount = useMemo(
-    () => displaySales.reduce((sum, sale) => sum + Number(sale.total_amount || 0), 0),
-    [displaySales],
+    () => serverCardCounts?.total_amount ?? displaySales.reduce((sum, sale) => sum + Number(sale.total_amount || 0), 0),
+    [serverCardCounts?.total_amount, displaySales],
   )
   const todaySalesAmount = useMemo(
     () =>
@@ -989,6 +990,18 @@ export default function SalesExcelTable({
           deviceId={deviceId}
           globalDateRange={globalDateRange}
           formatCurrency={formatCurrency}
+          ordersSummary={
+            serverCardCounts
+              ? {
+                  total: serverCardCounts.total,
+                  total_amount: serverCardCounts.total_amount ?? totalSalesAmount,
+                }
+              : undefined
+          }
+          onTotalOrdersClick={() => {
+            setCardFilter("all")
+            setPage(1)
+          }}
         />
       ) : isLogistics ? (
         <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
@@ -1026,7 +1039,7 @@ export default function SalesExcelTable({
             <div className="mt-2 flex items-baseline justify-between gap-2 min-w-0">
               <div className="min-w-0">
                 <div className="text-xl font-extrabold text-slate-900 leading-tight">
-                  {totalCount} <span className="text-xs font-normal text-slate-500">{totalCount === 1 ? "Order" : "Orders"}</span>
+                  {totalOrderCount} <span className="text-xs font-normal text-slate-500">{totalOrderCount === 1 ? "Order" : "Orders"}</span>
                 </div>
                 <div className="text-xs font-semibold text-violet-700 mt-0.5 truncate">
                   {formatCurrency(totalSalesAmount)}
@@ -1181,7 +1194,7 @@ export default function SalesExcelTable({
           <div className="mt-2 flex items-baseline justify-between gap-2 min-w-0">
             <div className="min-w-0">
               <div className="text-xl font-extrabold text-slate-900 leading-tight">
-                {totalCount} <span className="text-xs font-normal text-slate-500">{totalCount === 1 ? "Order" : "Orders"}</span>
+                {totalOrderCount} <span className="text-xs font-normal text-slate-500">{totalOrderCount === 1 ? "Order" : "Orders"}</span>
               </div>
               <div className="text-xs font-semibold text-violet-700 mt-0.5 truncate">
                 {formatCurrency(totalSalesAmount)}

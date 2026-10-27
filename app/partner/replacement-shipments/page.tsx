@@ -19,20 +19,22 @@ export default async function PartnerReplacementShipmentsPage({
 
   const result = await sql`
     SELECT 
+      s.id as partner_id,
       s.name as partner_name,
       d.name as device_name,
+      d.id as device_id,
       c.name as company_name,
       d.logo_url as device_logo_url,
       s.linked_partner_id
     FROM staff s
     JOIN devices d ON s.device_id = d.id
     LEFT JOIN companies c ON d.company_id = c.id
-    WHERE s.id = ${session.staffId}
+    WHERE s.id = ${session.staffId} AND s.is_active = true
     LIMIT 1
   `
 
   if (result.length === 0) {
-    redirect("/")
+    redirect("/?deactivated=true")
   }
 
   const data = result[0]

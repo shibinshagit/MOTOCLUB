@@ -2,18 +2,18 @@
 
 import type React from "react"
 import { useState, useEffect } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { EyeIcon, EyeOffIcon, LockIcon, Loader2, PhoneIcon } from "lucide-react"
 import { login } from "@/app/actions/auth-actions"
-import { useToast } from "@/components/ui/use-toast"
+import { toast } from "@/components/ui/use-toast"
 import { notifySuccess } from "@/lib/notifications"
 import { FormAlert } from "@/components/ui/form-alert"
 import { useAppDispatch, useAppSelector } from "@/store/hooks"
-import { setDeviceData, selectDevice } from "@/store/slices/deviceSlice"
-import { setStaff, activateStaff } from "@/store/slices/staffSlice"
+import { setDeviceData, clearDeviceData, selectDevice } from "@/store/slices/deviceSlice"
+import { setStaff, activateStaff, clearStaff } from "@/store/slices/staffSlice"
 
 export default function LoginForm() {
   const [showPassword, setShowPassword] = useState(false)
@@ -21,26 +21,86 @@ export default function LoginForm() {
   const [error, setError] = useState<string | null>(null)
 
   const router = useRouter()
-  const { toast } = useToast()
+  const searchParams = useSearchParams()
   const dispatch = useAppDispatch()
   const device = useAppSelector(selectDevice)
 
+  const isDeactivated = searchParams.get("deactivated") === "true" || searchParams.get("restricted") === "true"
+
   useEffect(() => {
+    // If kicked out due to deactivation, immediately wipe all stored sessions and stop
+    if (isDeactivated) {
+      dispatch(clearDeviceData())
+      dispatch(clearStaff())
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("deviceState")
+        if (device.id) {
+          localStorage.removeItem(`staff_session_device_${device.id}`)
+        }
+        window.history.replaceState({}, "", "/")
+      }
+      toast({
+        title: "Entry restricted",
+        description: "Your account has been deactivated. Please contact your admin.",
+      })
+      return
+    }
+
     // Only redirect if we have a confirmed authenticated state
-    if (device.id && device.user?.token) {
-      if (device.user.role === "STAFF") {
+    if (!device.id || !device.user?.token) return
+
+    let cancelled = false
+
+    const checkAndRedirect = async () => {
+      const userRole = device.user?.role?.toUpperCase() || ""
+
+      // For staff, partner, purchase manager, and logistics, verify active status in database before redirecting!
+      if (device.user?.id && ["STAFF", "PARTNER", "PURCHASE_MANAGER", "LOGISTICS"].includes(userRole)) {
+        try {
+          const { verifyStaffActiveStatus, clearStaffSession } = await import("@/app/actions/staff-actions")
+          const res = await verifyStaffActiveStatus(device.user.id, device.id)
+          if (cancelled) return
+
+          if (!res.active || res.restricted) {
+            dispatch(clearDeviceData())
+            dispatch(clearStaff())
+            if (typeof window !== "undefined") {
+              localStorage.removeItem("deviceState")
+              localStorage.removeItem(`staff_session_device_${device.id}`)
+            }
+            await clearStaffSession(device.id)
+            toast({
+              title: "Entry restricted",
+              description: "Your account has been deactivated. Please contact your admin.",
+            })
+            return
+          }
+        } catch (_) {
+          return
+        }
+      }
+
+      if (cancelled) return
+
+      if (userRole === "STAFF") {
         router.replace("/staff/dashboard")
-      } else if (device.user.role === "PARTNER") {
+      } else if (userRole === "PARTNER") {
         router.replace("/partner/dashboard")
-      } else if (device.user.role === "PURCHASE_MANAGER") {
+      } else if (userRole === "PURCHASE_MANAGER") {
         router.replace("/purchase-manager/dashboard")
-      } else if (device.user.role === "LOGISTICS") {
+      } else if (userRole === "LOGISTICS") {
         router.replace("/logistics/dashboard")
       } else {
         router.replace("/dashboard")
       }
     }
-  }, [device.id, device.user?.token, device.user?.role, router])
+
+    checkAndRedirect()
+
+    return () => {
+      cancelled = true
+    }
+  }, [device.id, device.user?.id, device.user?.token, device.user?.role, isDeactivated, dispatch, router])
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()

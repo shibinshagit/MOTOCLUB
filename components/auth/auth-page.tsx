@@ -1,5 +1,6 @@
 "use client"
 
+import React from "react"
 import { BrandLogo } from "@/components/brand-logo"
 import { useBranding } from "@/components/branding-provider"
 import { LegalLinks } from "@/components/legal/legal-page"
@@ -38,7 +39,9 @@ export default function AuthPage() {
 
           {/* Minimal Centered Login Card with Soft Shadow */}
           <div className="rounded-2xl border border-slate-200/90 bg-white/95 backdrop-blur-md p-6 sm:p-8 shadow-xl shadow-slate-200/60">
-            <LoginForm />
+            <React.Suspense fallback={<div className="py-12 flex justify-center"><div className="h-6 w-6 animate-spin rounded-full border-2 border-indigo-600 border-t-transparent" /></div>}>
+              <LoginForm />
+            </React.Suspense>
           </div>
         </div>
       </div>

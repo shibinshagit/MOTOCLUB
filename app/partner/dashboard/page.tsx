@@ -22,6 +22,7 @@ export default async function PartnerDashboardPage({
   // Fetch full details
   const result = await sql`
     SELECT 
+      s.id as partner_id,
       s.name as partner_name,
       d.name as device_name,
       c.name as company_name,
@@ -31,12 +32,12 @@ export default async function PartnerDashboardPage({
     FROM staff s
     JOIN devices d ON s.device_id = d.id
     LEFT JOIN companies c ON d.company_id = c.id
-    WHERE s.id = ${session.staffId}
+    WHERE s.id = ${session.staffId} AND s.is_active = true
     LIMIT 1
   `
 
   if (result.length === 0) {
-    redirect("/")
+    redirect("/?deactivated=true")
   }
 
   const data = result[0]

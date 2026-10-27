@@ -340,8 +340,8 @@ export async function getStaffForAuthentication(deviceId: number) {
     const staff = await sql`
       SELECT id, name, position, role, is_active, restricted_pages, restricted_values
       FROM staff
-      WHERE device_id = ${deviceId}
-      ORDER BY is_active DESC, name ASC
+      WHERE device_id = ${deviceId} AND is_active = true
+      ORDER BY name ASC
     `
 
     return { success: true, data: staff }
@@ -643,8 +643,8 @@ export async function restoreStaffSession(staffId: number, deviceId: number) {
     const allStaff = await sql`
       SELECT id, name, position, role, is_active, restricted_pages, restricted_values
       FROM staff
-      WHERE device_id = ${deviceId}
-      ORDER BY is_active DESC, name ASC
+      WHERE device_id = ${deviceId} AND is_active = true
+      ORDER BY name ASC
     `
 
     return {
@@ -658,7 +658,7 @@ export async function restoreStaffSession(staffId: number, deviceId: number) {
   }
 }
 
-export async function clearStaffSession(deviceId: number) {
+export async function clearStaffSession(deviceId?: number | null) {
   try {
     await clearStaffSessionCookie()
     return { success: true }
@@ -674,7 +674,7 @@ export async function getStaffDashboardStats(deviceId: number, fromDate?: string
   try {
     const session = await getStaffSession()
     if (!session) {
-      return { success: false, message: "Unauthorized", data: null }
+      return { success: false, restricted: true, message: "Entry restricted", data: null }
     }
 
     // Calculate date boundaries
@@ -805,6 +805,24 @@ export async function getDevicesLogisticPhones(deviceIds: number[]): Promise<Rec
   } catch (error) {
     console.error("Error fetching device logistic phones:", error)
     return {}
+  }
+}
+
+export async function verifyStaffActiveStatus(staffId: number, deviceId?: number | null) {
+  try {
+    if (!staffId) return { success: false, active: false, restricted: true, message: "Entry restricted" }
+    const staff = deviceId
+      ? await sql`SELECT is_active FROM staff WHERE id = ${staffId} AND device_id = ${deviceId} LIMIT 1`
+      : await sql`SELECT is_active FROM staff WHERE id = ${staffId} LIMIT 1`
+    if (staff.length === 0 || !staff[0].is_active) {
+      try {
+        await clearStaffSessionCookie()
+      } catch {}
+      return { success: false, active: false, restricted: true, message: "Entry restricted" }
+    }
+    return { success: true, active: true }
+  } catch {
+    return { success: true, active: true }
   }
 }
 

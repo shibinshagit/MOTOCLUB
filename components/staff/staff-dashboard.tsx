@@ -24,7 +24,7 @@ import {
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { staffLogout } from "@/app/actions/staff-auth-actions"
-import { getStaffDashboardStats } from "@/app/actions/staff-actions"
+import { getStaffDashboardStats, verifyStaffActiveStatus } from "@/app/actions/staff-actions"
 import { useAppDispatch, useAppSelector } from "@/store/hooks"
 import { clearDeviceData, selectDevice } from "@/store/slices/deviceSlice"
 import { clearStaff, selectActiveStaff } from "@/store/slices/staffSlice"
@@ -82,17 +82,76 @@ export default function StaffDashboard() {
               setFetchedStaffName(res.data.staffName)
             }
           } else {
+            if (res.restricted || res.message === "Unauthorized" || res.message === "Entry restricted" || res.message?.toLowerCase().includes("inactive")) {
+              if (typeof window !== "undefined") {
+                localStorage.removeItem("deviceState")
+                if (device?.id) {
+                  localStorage.removeItem(`staff_session_device_${device.id}`)
+                }
+              }
+              dispatch(clearStaff())
+              dispatch(clearDeviceData())
+              toast({
+                title: "Entry restricted",
+                description: "Your staff account has been deactivated.",
+              })
+              window.location.href = "/?deactivated=true"
+              return
+            }
             setStatsError(res.message || "Failed to load stats")
           }
         })
-        .catch(err => {
-          setStatsError(err.message || "Failed to load stats")
+        .catch(() => {
+          // Avoid red error toasts during background fetches
         })
         .finally(() => {
           setIsLoadingStats(false)
         })
     }
-  }, [device?.id, dateRange.from, dateRange.to])
+  }, [device?.id, dateRange.from, dateRange.to, dispatch, router, toast])
+
+  // Periodically verify staff is still active in database (handles "before refreshing")
+  useEffect(() => {
+    if (!device?.id || !activeStaff?.id) return
+
+    let isChecking = false
+
+    const checkActive = async () => {
+      if (typeof document !== "undefined" && document.hidden) return
+      if (isChecking) return
+      isChecking = true
+      try {
+        const res = await verifyStaffActiveStatus(activeStaff.id, device.id)
+        if (!res.active || res.restricted) {
+          if (typeof window !== "undefined") {
+            localStorage.removeItem("deviceState")
+            if (device?.id) {
+              localStorage.removeItem(`staff_session_device_${device.id}`)
+            }
+          }
+          dispatch(clearStaff())
+          dispatch(clearDeviceData())
+          toast({
+            title: "Entry restricted",
+            description: "Your staff account has been deactivated.",
+          })
+          window.location.href = "/?deactivated=true"
+          return
+        }
+      } catch (_) {
+      } finally {
+        isChecking = false
+      }
+    }
+
+    const interval = setInterval(checkActive, 8000)
+    window.addEventListener("focus", checkActive)
+
+    return () => {
+      clearInterval(interval)
+      window.removeEventListener("focus", checkActive)
+    }
+  }, [device?.id, activeStaff?.id, dispatch])
 
   // Fetch dashboard stats when tab changes to home, device changes, or date range changes
   useEffect(() => {

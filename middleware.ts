@@ -22,8 +22,27 @@ const SECRET_KEY = new TextEncoder().encode(
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
+  // Silently satisfy browser DevTools and well-known probes without hitting the page router
+  if (pathname.startsWith("/.well-known/")) {
+    return new NextResponse("{}", {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    })
+  }
+
   // Check if the path is public
   if (isPublicPath(pathname)) {
+    return NextResponse.next()
+  }
+
+  // Never redirect Next.js Server Actions or POST requests in middleware.
+  // Server actions handle authorization internally.
+  // Redirecting action requests causes Next.js to fail forwarding with [TypeError: fetch failed].
+  if (
+    request.method === "POST" ||
+    request.headers.get("next-action") ||
+    request.headers.get("x-action-id")
+  ) {
     return NextResponse.next()
   }
 
@@ -99,7 +118,12 @@ export async function middleware(request: NextRequest) {
   return NextResponse.next()
 }
 
-// Match dashboard and staff routes
+// Match dashboard, staff, partner routes, and well-known probes
 export const config = {
-  matcher: ["/dashboard/:path*", "/staff/:path*", "/partner/:path*"],
+  matcher: [
+    "/.well-known/:path*",
+    "/dashboard/:path*",
+    "/staff/:path*",
+    "/partner/:path*",
+  ],
 }

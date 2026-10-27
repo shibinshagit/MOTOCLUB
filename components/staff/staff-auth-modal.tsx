@@ -55,11 +55,11 @@ export default function StaffAuthModal({ deviceId, isOpen, onAuthenticated, onLo
           throw new Error(result.message || "Failed to load staff")
         }
 
-        const loadedStaff = (result.data || []) as LoginStaff[]
+        const loadedStaff = ((result.data || []) as LoginStaff[]).filter((member) => member.is_active)
         setStaffList(loadedStaff)
 
-        const firstActive = loadedStaff.find((member) => member.is_active)
-        setSelectedStaffId(firstActive?.id || loadedStaff[0]?.id || null)
+        const firstActive = loadedStaff[0]
+        setSelectedStaffId(firstActive?.id || null)
       } catch (error) {
         notifyError(toast, error instanceof Error ? error.message : "Failed to load staff list", "Unable to load staff")
       } finally {

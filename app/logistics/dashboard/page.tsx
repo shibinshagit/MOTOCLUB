@@ -9,6 +9,7 @@ import { selectDevice, loadFromStorage, clearDeviceData } from "@/store/slices/d
 import { clearStaff, selectActiveStaff, setStaff, activateStaff } from "@/store/slices/staffSlice"
 import { getStaffForAuthentication } from "@/app/actions/staff-actions"
 import { staffLogout } from "@/app/actions/staff-auth-actions"
+import { toast } from "@/components/ui/use-toast"
 
 function LogisticsPageContent() {
   const [mounted, setMounted] = useState(false)
@@ -41,15 +42,34 @@ function LogisticsPageContent() {
 
         const staffRes = await getStaffForAuthentication(device.id)
         if (!staffRes.success || !staffRes.data?.length) {
-          router.replace("/")
+          if (typeof window !== "undefined") {
+            localStorage.removeItem("deviceState")
+            localStorage.removeItem(sessionKey)
+          }
+          dispatch(clearDeviceData())
+          dispatch(clearStaff())
+          toast({
+            title: "Entry restricted",
+            description: "Your staff account has been deactivated.",
+          })
+          window.location.href = "/?deactivated=true"
           return
         }
 
-        const staffList = staffRes.data as any[]
+        const staffList = (staffRes.data as any[]).filter((member) => member.is_active)
         const matchedStaff = staffList.find((member) => member.id === storedStaffId)
-        if (!matchedStaff) {
-          localStorage.removeItem(sessionKey)
-          router.replace("/")
+        if (!matchedStaff || !matchedStaff.is_active) {
+          if (typeof window !== "undefined") {
+            localStorage.removeItem("deviceState")
+            localStorage.removeItem(sessionKey)
+          }
+          dispatch(clearDeviceData())
+          dispatch(clearStaff())
+          toast({
+            title: "Entry restricted",
+            description: "Your staff account has been deactivated.",
+          })
+          window.location.href = "/?deactivated=true"
           return
         }
 
@@ -70,6 +90,25 @@ function LogisticsPageContent() {
 
     restoreSession()
   }, [mounted, device?.id, activeStaff, isRestoringSession, dispatch, router])
+
+  // Kick out deactivated staff immediately
+  useEffect(() => {
+    if (activeStaff && !activeStaff.is_active) {
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("deviceState")
+        if (device?.id) {
+          localStorage.removeItem(`staff_session_device_${device.id}`)
+        }
+      }
+      dispatch(clearDeviceData())
+      dispatch(clearStaff())
+      toast({
+        title: "Entry restricted",
+        description: "Your staff account has been deactivated.",
+      })
+      window.location.href = "/?deactivated=true"
+    }
+  }, [activeStaff, device?.id, dispatch])
 
   const handleLogout = async () => {
     try {
