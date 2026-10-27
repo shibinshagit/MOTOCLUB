@@ -1,12 +1,13 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { LayoutDashboard, UserCircle, Menu, X, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { BrandLogo } from "@/components/brand-logo"
 import { LogoutButton } from "./logout-button"
+import { toast } from "@/components/ui/use-toast"
 
 export function PartnerDashboardShell({
   data,
@@ -14,7 +15,9 @@ export function PartnerDashboardShell({
   children,
 }: {
   data: {
+    partner_id?: number
     partner_name: string
+    device_id?: number
     device_name?: string
     company_name?: string
   }
@@ -23,6 +26,55 @@ export function PartnerDashboardShell({
 }) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const pathname = usePathname()
+  const partnerId = data.partner_id
+  const deviceId = data.device_id
+
+  // Periodically verify partner active status in database (handles "before refreshing")
+  useEffect(() => {
+    if (!partnerId) return
+
+    let isChecking = false
+
+    const checkActive = async () => {
+      if (typeof document !== "undefined" && document.hidden) return
+      if (isChecking) return
+      isChecking = true
+      try {
+        const { verifyStaffActiveStatus } = await import("@/app/actions/staff-actions")
+        const res = await verifyStaffActiveStatus(partnerId, deviceId)
+        if (!res.active || res.restricted) {
+          if (typeof window !== "undefined") {
+            localStorage.removeItem("deviceState")
+            if (deviceId) {
+              localStorage.removeItem(`staff_session_device_${deviceId}`)
+            }
+          }
+          try {
+            const { clearStaffSession } = await import("@/app/actions/staff-actions")
+            await clearStaffSession(deviceId || 0)
+          } catch (_) {}
+
+          toast({
+            title: "Entry restricted",
+            description: "Your partner account has been deactivated.",
+          })
+          window.location.href = "/?deactivated=true"
+          return
+        }
+      } catch (_) {
+      } finally {
+        isChecking = false
+      }
+    }
+
+    const interval = setInterval(checkActive, 8000)
+    window.addEventListener("focus", checkActive)
+
+    return () => {
+      clearInterval(interval)
+      window.removeEventListener("focus", checkActive)
+    }
+  }, [partnerId, deviceId])
 
   const isDashboardActive = pathname === "/partner/dashboard"
   const isReplacementsActive = pathname === "/partner/replacement-shipments"

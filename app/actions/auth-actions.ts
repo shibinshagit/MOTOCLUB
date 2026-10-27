@@ -124,7 +124,8 @@ export async function login(formData: FormData) {
       FROM staff s
       LEFT JOIN devices d ON s.device_id = d.id
       LEFT JOIN companies c ON d.company_id = c.id
-      WHERE s.phone = ${phone} AND s.staff_password_hash = ${password_hash}
+      WHERE (s.phone = ${phone} OR s.email = ${phone}) AND s.staff_password_hash = ${password_hash}
+      ORDER BY s.is_active DESC
       LIMIT 1
     `
 
@@ -134,7 +135,7 @@ export async function login(formData: FormData) {
       if (!staff.staff_active) {
         return {
           success: false,
-          message: "Your staff account has been deactivated. Please contact your admin.",
+          message: "Entry restricted: Your account has been deactivated. Please contact your admin.",
         }
       }
 

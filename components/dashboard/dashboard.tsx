@@ -345,15 +345,26 @@ export function Dashboard({
 
         const staffRes = await getStaffForAuthentication(device.id)
         if (!staffRes.success || !staffRes.data?.length) {
+          localStorage.removeItem(sessionKey)
+          dispatchRef.current(clearStaff())
           setStaffAuthOpen(true)
           return
         }
 
-        const staffList = staffRes.data as any[]
+        const staffList = (staffRes.data as any[]).filter((member) => member.is_active)
         const matchedStaff = staffList.find((member) => member.id === storedStaffId)
-        if (!matchedStaff) {
-          localStorage.removeItem(sessionKey)
-          setStaffAuthOpen(true)
+        if (!matchedStaff || !matchedStaff.is_active) {
+          if (typeof window !== "undefined") {
+            localStorage.removeItem("deviceState")
+            localStorage.removeItem(sessionKey)
+          }
+          dispatchRef.current(clearDeviceData())
+          dispatchRef.current(clearStaff())
+          toast({
+            title: "Entry restricted",
+            description: "Your staff account has been deactivated.",
+          })
+          window.location.href = "/?deactivated=true"
           return
         }
 
@@ -373,7 +384,68 @@ export function Dashboard({
     }
 
     restoreStaffSession()
-  }, [mounted, user?.id, device?.id, activeStaff, isRestoringStaffSession, getStaffSessionKey])
+  }, [mounted, user?.id, device?.id, activeStaff, isRestoringStaffSession, getStaffSessionKey, toast])
+
+  // If active staff is or becomes inactive, wipe session and redirect to login immediately
+  useEffect(() => {
+    if (activeStaff && !activeStaff.is_active) {
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("deviceState")
+        if (device?.id) {
+          localStorage.removeItem(getStaffSessionKey(device.id))
+        }
+      }
+      dispatchRef.current(clearDeviceData())
+      dispatchRef.current(clearStaff())
+      toast({
+        title: "Entry restricted",
+        description: "Your staff account has been deactivated.",
+      })
+      window.location.href = "/?deactivated=true"
+    }
+  }, [activeStaff, device?.id, getStaffSessionKey])
+
+  // Periodically verify active staff status in database (handles "before refreshing")
+  useEffect(() => {
+    if (!device?.id || !activeStaff?.id) return
+
+    let isChecking = false
+
+    const checkActive = async () => {
+      if (typeof document !== "undefined" && document.hidden) return
+      if (isChecking) return
+      isChecking = true
+      try {
+        const { verifyStaffActiveStatus } = await import("@/app/actions/staff-actions")
+        const res = await verifyStaffActiveStatus(activeStaff.id, device.id)
+        if (!res.active || res.restricted) {
+          if (typeof window !== "undefined") {
+            localStorage.removeItem("deviceState")
+            localStorage.removeItem(getStaffSessionKey(device.id))
+          }
+          dispatchRef.current(clearDeviceData())
+          dispatchRef.current(clearStaff())
+          toast({
+            title: "Entry restricted",
+            description: "Your staff account has been deactivated.",
+          })
+          window.location.href = "/?deactivated=true"
+          return
+        }
+      } catch (_) {
+      } finally {
+        isChecking = false
+      }
+    }
+
+    const interval = setInterval(checkActive, 8000)
+    window.addEventListener("focus", checkActive)
+
+    return () => {
+      clearInterval(interval)
+      window.removeEventListener("focus", checkActive)
+    }
+  }, [device?.id, activeStaff?.id, getStaffSessionKey])
 
   // Tab parameter synchronization
   useEffect(() => {

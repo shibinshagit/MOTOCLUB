@@ -1,5 +1,6 @@
 import { cookies } from "next/headers"
 import { SignJWT, jwtVerify, type JWTPayload } from "jose"
+import { sql } from "@/lib/db"
 
 const STAFF_SESSION_COOKIE = "ims_staff_session"
 const SECRET_KEY = new TextEncoder().encode(
@@ -49,7 +50,24 @@ export async function getStaffSession(): Promise<StaffSessionPayload | null> {
     if (!token) return null
     
     const { payload } = await jwtVerify(token, SECRET_KEY)
-    return payload as StaffSessionPayload
+    const session = payload as StaffSessionPayload
+
+    // Immediately kick out deactivated staff
+    if (session?.staffId) {
+      const staffCheck = await sql`
+        SELECT is_active FROM staff WHERE id = ${session.staffId} LIMIT 1
+      `
+      if (staffCheck.length === 0 || !staffCheck[0].is_active) {
+        try {
+          await clearStaffSessionCookie()
+        } catch {
+          // Ignore when called during Server Component render where cookies are read-only
+        }
+        return null
+      }
+    }
+
+    return session
   } catch (error) {
     return null
   }

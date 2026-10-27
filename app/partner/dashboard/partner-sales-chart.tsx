@@ -38,7 +38,22 @@ export function PartnerSalesChart({
   const [error, setError] = useState<string | null>(null)
   const [chartType, setChartType] = useState<'bar' | 'line'>('line')
 
+  const isFirstRender = React.useRef(true)
+
   useEffect(() => {
+    if (initialData && initialData.length > 0) {
+      setData(initialData)
+    }
+  }, [initialData])
+
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false
+      if (initialData && initialData.length > 0) {
+        return
+      }
+    }
+
     let mounted = true
     
     async function fetchData() {
