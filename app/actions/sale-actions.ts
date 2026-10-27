@@ -1279,17 +1279,43 @@ export async function getSalesSummaryCards(
               AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
               AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
           )::int as total_count,
+          COALESCE(SUM(s.total_amount) FILTER (
+            WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
+              AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled'
+              AND LOWER(COALESCE(s.delivery_status, '')) NOT IN ('returned', 'failed')
+              AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
+              AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
+          ), 0)::numeric as total_amount,
           COUNT(*) FILTER (
             WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
               AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled'
               AND LOWER(COALESCE(s.delivery_status, '')) NOT IN ('returned', 'failed')
               AND COALESCE(s.sale_date, s.created_at)::date = CURRENT_DATE
+              AND (${onlyPosUpdated} = false OR s.is_pos_updated = true)
+              AND (
+                ${isLogistics} = false
+                OR (
+                  COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
+                  AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
+                  AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed', 'pickup')
+                  AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+                )
+              )
+              AND (
+                ${isPurchaseManager} = false
+                OR LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+              )
           )::int as today_count,
           COUNT(*) FILTER (
             WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
               AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
               AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed', 'pickup')
               AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+              AND (${onlyPosUpdated} = false OR s.is_pos_updated = true)
+              AND (
+                ${isPurchaseManager} = false
+                OR LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+              )
               AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
               AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
           )::int as pending_count,
@@ -1302,6 +1328,20 @@ export async function getSalesSummaryCards(
                 OR (s.total_amount > 0 AND s.received_amount >= s.total_amount)
               )
               AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) IN ('pending', 'paid', 'packed', 'sent')
+              AND (${onlyPosUpdated} = false OR s.is_pos_updated = true)
+              AND (
+                ${isLogistics} = false
+                OR (
+                  COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
+                  AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
+                  AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed', 'pickup')
+                  AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+                )
+              )
+              AND (
+                ${isPurchaseManager} = false
+                OR LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+              )
               AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
               AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
           )::int as critical_count
@@ -1314,20 +1354,6 @@ export async function getSalesSummaryCards(
             (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
             AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
             OR COALESCE(s.sale_date, s.created_at)::date = CURRENT_DATE
-          )
-          AND (${onlyPosUpdated} = false OR s.is_pos_updated = true)
-          AND (
-            ${isLogistics} = false
-            OR (
-              COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
-              AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
-              AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed', 'pickup')
-              AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
-            )
-          )
-          AND (
-            ${isPurchaseManager} = false
-            OR LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
           )
           AND (
             ${typeFilter} = 'all'
@@ -1364,13 +1390,14 @@ export async function getSalesSummaryCards(
             OR CAST(s.total_amount AS TEXT) LIKE ${searchPattern}
           )
       `
-      return rows[0] || { total_count: 0, today_count: 0, pending_count: 0, critical_count: 0 }
+      return rows[0] || { total_count: 0, total_amount: 0, today_count: 0, pending_count: 0, critical_count: 0 }
     })
 
     return {
       success: true,
       counts: {
         total: Number(cardCounts.total_count || 0),
+        total_amount: Number(cardCounts.total_amount || 0),
         today: Number(cardCounts.today_count || 0),
         pending: Number(cardCounts.pending_count || 0),
         critical: Number(cardCounts.critical_count || 0),
@@ -1380,7 +1407,7 @@ export async function getSalesSummaryCards(
     console.error("Get sales summary cards error:", error)
     return {
       success: false,
-      counts: { total: 0, today: 0, pending: 0, critical: 0 },
+      counts: { total: 0, total_amount: 0, today: 0, pending: 0, critical: 0 },
     }
   }
 }
