@@ -284,6 +284,8 @@ export default function SalesExcelTable({
       ? propIsLogistics
       : activeStaff?.role === "logistics" || Boolean(pathname?.startsWith("/logistics"))
 
+  const tableColSpan = (isPurchaseManager ? 8 : 13) + (showActions || isLogistics ? 1 : 0)
+
   const { toast } = useToast()
   const [internalSearchTerm, setInternalSearchTerm] = useState("")
   const [isGeneratingReport, setIsGeneratingReport] = useState(false)
@@ -1630,28 +1632,28 @@ export default function SalesExcelTable({
                   <th className="whitespace-nowrap px-1 py-1.5 text-center w-8"></th>
                   <th className="whitespace-nowrap px-2 py-1.5 text-xs font-bold text-slate-600 text-center">#</th>
                   {headerCell("saleId", "Order #")}
-                  {headerCell("status", "Status")}
+                  {!isPurchaseManager && headerCell("status", "Status")}
                   {headerCell("delivery", "Delivery Status")}
                   {headerCell("date", "Date & Time")}
                   {headerCell("customer", "Customer")}
                   {headerCell("staff", "Staff Member")}
-                  {headerCell("payment", "Payment")}
-                  {headerCell("total", "Total", "right")}
-                  {headerCell("received", "Received", "right")}
-                  {headerCell("balance", "Balance", "right")}
+                  {!isPurchaseManager && headerCell("payment", "Payment")}
+                  {!isPurchaseManager && headerCell("total", "Total", "right")}
+                  {!isPurchaseManager && headerCell("received", "Received", "right")}
+                  {!isPurchaseManager && headerCell("balance", "Balance", "right")}
                   {(showActions || isLogistics) && <th className={stickyActionHeaderClass}>Action</th>}
                 </tr>
               </thead>
               <tbody className={isFetchingServer && hasFetchedServer ? "opacity-60 transition-opacity" : "transition-opacity"}>
                 {!hasFetchedServer ? (
                   <tr>
-                    <td colSpan={showActions || isLogistics ? 14 : 13}>
+                    <td colSpan={tableColSpan}>
                       <TableSkeleton />
                     </td>
                   </tr>
                 ) : serverError && displaySales.length === 0 ? (
                   <tr>
-                    <td colSpan={showActions || isLogistics ? 14 : 13} className="px-4 py-8 text-center text-sm text-rose-600">
+                    <td colSpan={tableColSpan} className="px-4 py-8 text-center text-sm text-rose-600">
                       {serverError}
                       <Button variant="outline" size="sm" className="ml-3 h-7 text-xs" onClick={() => fetchServerSales()}>
                         Retry
@@ -1660,7 +1662,7 @@ export default function SalesExcelTable({
                   </tr>
                 ) : displaySales.length === 0 ? (
                   <tr>
-                    <td colSpan={showActions || isLogistics ? 14 : 13} className="px-4 py-12 text-center text-sm text-muted-foreground">
+                    <td colSpan={tableColSpan} className="px-4 py-12 text-center text-sm text-muted-foreground">
                       {debouncedSearch || cardFilter !== "all" || typeFilter !== "all"
                         ? "No sales match the current filters"
                         : `No sales found for ${periodLabel}`}
@@ -1857,9 +1859,11 @@ export default function SalesExcelTable({
                             )}
                           </div>
                         </td>
-                        <td className="whitespace-nowrap px-3 py-1.5">
-                          <SaleStatusBadge status={getSaleStatusLabel(sale)} />
-                        </td>
+                        {!isPurchaseManager && (
+                          <td className="whitespace-nowrap px-3 py-1.5">
+                            <SaleStatusBadge status={getSaleStatusLabel(sale)} />
+                          </td>
+                        )}
                         <td className="whitespace-nowrap px-3 py-1.5" onClick={(e) => e.stopPropagation()}>
                           <DeliveryStatusSelect
                             saleId={sale.id}
@@ -1902,25 +1906,33 @@ export default function SalesExcelTable({
                             onUpdate={onRefreshSales}
                           />
                         </td>
-                        <td className="whitespace-nowrap px-3 py-1.5 text-slate-600">
-                          {getPaymentMethodDisplay(sale)}
-                        </td>
-                        <td className="whitespace-nowrap px-3 py-1.5 text-right font-medium text-slate-800">
-                          <div className="group/total inline-flex flex-col items-end cursor-default">
-                            <span className="font-bold text-slate-900">{formatCurrency(Number(sale.total_amount))}</span>
-                            {!hideCogs && (
-                              <span className="text-[11px] font-semibold text-emerald-700 opacity-0 group-hover/total:opacity-100 transition-opacity select-none">
-                                {formatCurrency(profitAmount)}
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="whitespace-nowrap px-3 py-1.5 text-right text-emerald-700">
-                          {received > 0 ? formatCurrency(received) : "—"}
-                        </td>
-                        <td className="whitespace-nowrap px-3 py-1.5 text-right text-amber-700 font-semibold">
-                          {remaining > 0 ? formatCurrency(remaining) : "—"}
-                        </td>
+                        {!isPurchaseManager && (
+                          <td className="whitespace-nowrap px-3 py-1.5 text-slate-600">
+                            {getPaymentMethodDisplay(sale)}
+                          </td>
+                        )}
+                        {!isPurchaseManager && (
+                          <td className="whitespace-nowrap px-3 py-1.5 text-right font-medium text-slate-800">
+                            <div className="group/total inline-flex flex-col items-end cursor-default">
+                              <span className="font-bold text-slate-900">{formatCurrency(Number(sale.total_amount))}</span>
+                              {!hideCogs && (
+                                <span className="text-[11px] font-semibold text-emerald-700 opacity-0 group-hover/total:opacity-100 transition-opacity select-none">
+                                  {formatCurrency(profitAmount)}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                        )}
+                        {!isPurchaseManager && (
+                          <td className="whitespace-nowrap px-3 py-1.5 text-right text-emerald-700">
+                            {received > 0 ? formatCurrency(received) : "—"}
+                          </td>
+                        )}
+                        {!isPurchaseManager && (
+                          <td className="whitespace-nowrap px-3 py-1.5 text-right text-amber-700 font-semibold">
+                            {remaining > 0 ? formatCurrency(remaining) : "—"}
+                          </td>
+                        )}
                         {(showActions || isLogistics) && (
                           <td className={stickyActionCellClass(baseBgClass)}>
                             {isLogistics ? (
@@ -1974,7 +1986,7 @@ export default function SalesExcelTable({
 
                     const expandedRow = (
                       <tr key={`expand-${sale.id}`} className="bg-slate-50 border-b border-slate-200">
-                        <td colSpan={showActions || isLogistics ? 14 : 13} className="p-3" onClick={(e) => e.stopPropagation()}>
+                        <td colSpan={tableColSpan} className="p-3" onClick={(e) => e.stopPropagation()}>
                           <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs space-y-3">
                             <div className="flex flex-wrap items-center justify-between border-b border-slate-100 pb-2 gap-2">
                               <div className="flex items-center gap-2">
@@ -2242,21 +2254,23 @@ export default function SalesExcelTable({
                         </div>
                       </div>
 
-                      <div className="text-right shrink-0">
-                        <div className="group/total inline-flex flex-col items-end cursor-default">
-                          <div className="text-sm font-extrabold text-slate-900 leading-tight">
-                            {formatCurrency(Number(sale.total_amount))}
+                      {!isPurchaseManager && (
+                        <div className="text-right shrink-0">
+                          <div className="group/total inline-flex flex-col items-end cursor-default">
+                            <div className="text-sm font-extrabold text-slate-900 leading-tight">
+                              {formatCurrency(Number(sale.total_amount))}
+                            </div>
+                            {!hideCogs && (
+                              <span className="text-[11px] font-semibold text-emerald-700 opacity-0 group-hover/total:opacity-100 transition-opacity select-none">
+                                {formatCurrency(profitAmount)}
+                              </span>
+                            )}
                           </div>
-                          {!hideCogs && (
-                            <span className="text-[11px] font-semibold text-emerald-700 opacity-0 group-hover/total:opacity-100 transition-opacity select-none">
-                              {formatCurrency(profitAmount)}
-                            </span>
-                          )}
+                          <div className="mt-0.5">
+                            <SaleStatusBadge status={statusLabel} />
+                          </div>
                         </div>
-                        <div className="mt-0.5">
-                          <SaleStatusBadge status={statusLabel} />
-                        </div>
-                      </div>
+                      )}
                     </div>
 
                     {/* CUSTOMER & DATE */}
@@ -2306,7 +2320,7 @@ export default function SalesExcelTable({
                           {sale.items_summary || sale.products_text || "1 order item"}
                         </span>
                       </div>
-                      {!hideCogs && (
+                      {!hideCogs && !isPurchaseManager && (
                         <span className="shrink-0 text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
                           Profit: {formatCurrency(profitAmount)}
                         </span>
@@ -2464,28 +2478,30 @@ export default function SalesExcelTable({
                         </div>
 
                         {/* FINANCIAL SUMMARY */}
-                        <div className="grid grid-cols-2 gap-2 bg-white p-2.5 rounded border border-slate-200">
-                          <div>
-                            <span className="text-[11px] text-slate-500 block">Total Amount</span>
-                            <span className="font-bold text-slate-900">{formatCurrency(Number(sale.total_amount))}</span>
+                        {!isPurchaseManager && (
+                          <div className="grid grid-cols-2 gap-2 bg-white p-2.5 rounded border border-slate-200">
+                            <div>
+                              <span className="text-[11px] text-slate-500 block">Total Amount</span>
+                              <span className="font-bold text-slate-900">{formatCurrency(Number(sale.total_amount))}</span>
+                            </div>
+                            <div>
+                              <span className="text-[11px] text-slate-500 block">Received Amount</span>
+                              <span className="font-bold text-emerald-700">
+                                {received > 0 ? formatCurrency(received) : "—"}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-[11px] text-slate-500 block">Balance Remaining</span>
+                              <span className="font-bold text-amber-700">
+                                {remaining > 0 ? formatCurrency(remaining) : "0"}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-[11px] text-slate-500 block">Calculated Profit</span>
+                              <span className="font-bold text-emerald-700">{formatCurrency(profitAmount)}</span>
+                            </div>
                           </div>
-                          <div>
-                            <span className="text-[11px] text-slate-500 block">Received Amount</span>
-                            <span className="font-bold text-emerald-700">
-                              {received > 0 ? formatCurrency(received) : "—"}
-                            </span>
-                          </div>
-                          <div>
-                            <span className="text-[11px] text-slate-500 block">Balance Remaining</span>
-                            <span className="font-bold text-amber-700">
-                              {remaining > 0 ? formatCurrency(remaining) : "0"}
-                            </span>
-                          </div>
-                          <div>
-                            <span className="text-[11px] text-slate-500 block">Calculated Profit</span>
-                            <span className="font-bold text-emerald-700">{formatCurrency(profitAmount)}</span>
-                          </div>
-                        </div>
+                        )}
 
                         {/* CUSTOMER & SHIPPING ADDRESS */}
                         <div className="bg-white p-2.5 rounded border border-slate-200 space-y-1">
