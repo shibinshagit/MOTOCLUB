@@ -338,6 +338,21 @@ export async function getSupplierPaymentById(paymentId: number) {
       }
     }
 
+    // Parse notes to separate user-entered note from internal metadata JSON
+    let cleanNotes = ""
+    if (paymentRecord.notes) {
+      try {
+        const parsed = JSON.parse(paymentRecord.notes)
+        if (parsed && typeof parsed === "object" && "userNotes" in parsed) {
+          cleanNotes = parsed.userNotes?.trim() || ""
+        } else {
+          cleanNotes = String(paymentRecord.notes).trim()
+        }
+      } catch {
+        cleanNotes = String(paymentRecord.notes).trim()
+      }
+    }
+
     const paymentData = {
       id: paymentRecord.id,
       supplier_id: supplierId, // reference_id is the supplier_id!
@@ -345,7 +360,7 @@ export async function getSupplierPaymentById(paymentId: number) {
       amount: Number(paymentRecord.amount),
       payment_method: paymentRecord.payment_method || "Cash",
       payment_date: paymentRecord.transaction_date,
-      notes: paymentRecord.notes,
+      notes: cleanNotes,
       description: paymentRecord.description,
       reference_number: `SP-${paymentRecord.id}`,
       affected_purchases: affectedPurchases,

@@ -1273,7 +1273,7 @@ export async function getFinancialSummary(
           remaining: Math.max(0, remaining),
           sale_id: tx.reference_type === 'sale' ? tx.reference_id : undefined,
           purchase_id: tx.reference_type === 'purchase' ? tx.reference_id : undefined,
-          supplier_payment_id: tx.reference_type === 'supplier' ? tx.reference_id : undefined,
+          supplier_payment_id: tx.transaction_type === 'supplier_payment' || tx.reference_type === 'supplier' ? tx.id : undefined,
           transfer_id: tx.reference_type === 'transfer' ? tx.reference_id : undefined,
           reference_id: tx.reference_id,
         }

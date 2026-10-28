@@ -98,6 +98,19 @@ export default function ViewSupplierPaymentModal({
     }
   }
 
+  const getCleanUserNote = (notes?: string | null): string => {
+    if (!notes) return ""
+    try {
+      const parsed = JSON.parse(notes)
+      if (parsed && typeof parsed === "object" && "userNotes" in parsed) {
+        return parsed.userNotes?.trim() || ""
+      }
+    } catch {
+      // not JSON
+    }
+    return notes.trim()
+  }
+
   // Fetch payment data using server action
   useEffect(() => {
     const fetchPayment = async () => {
@@ -423,10 +436,10 @@ export default function ViewSupplierPaymentModal({
             </div>
           </div>
           
-          ${payment.notes || payment.description ? `
+          ${getCleanUserNote(payment.notes) ? `
             <div class="description-section">
               <h3>Notes</h3>
-              <p>${payment.notes || payment.description}</p>
+              <p>${getCleanUserNote(payment.notes)}</p>
             </div>
           ` : ''}
           
@@ -660,15 +673,15 @@ export default function ViewSupplierPaymentModal({
               </CardContent>
             </Card>
 
-            {/* Notes/Description */}
-            {(payment.notes || payment.description) && (
+            {/* Notes */}
+            {Boolean(getCleanUserNote(payment.notes)) && (
               <Card className="shadow-sm border-gray-200 bg-white">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-lg font-semibold text-gray-800">Notes</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <p className="text-gray-700 bg-gray-50 p-4 rounded-lg">
-                    {payment.notes || payment.description}
+                    {getCleanUserNote(payment.notes)}
                   </p>
                 </CardContent>
               </Card>

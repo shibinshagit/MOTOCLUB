@@ -2021,10 +2021,8 @@ const renderTransactionList = (
             } else if (isManual) {
               setViewManualTransactionId(transaction.id)
             } else if (isSupplierPayment) {
-              const paymentId = transaction.supplier_payment_id ||
-                               transaction.reference_id ||
-                               transaction.id
-              setViewSupplierPaymentId(paymentId)
+              const paymentId = transaction.id || transaction.supplier_payment_id
+              setViewSupplierPaymentId(paymentId ?? null)
             }
           }
 
