@@ -86,7 +86,16 @@ export default function EditSupplierPaymentModal({
       setAmount(payment.amount.toString())
       setPaymentMethod(payment.payment_method)
       setPaymentDate(formatDateForInput(payment.payment_date))
-      setNotes(payment.notes || "")
+      let cleanNote = payment.notes || ""
+      try {
+        const parsed = JSON.parse(cleanNote)
+        if (parsed && typeof parsed === "object" && "userNotes" in parsed) {
+          cleanNote = parsed.userNotes?.trim() || ""
+        }
+      } catch {
+        // not JSON
+      }
+      setNotes(cleanNote)
       setSupplierName(payment.supplier_name)
 
     } catch (err) {
