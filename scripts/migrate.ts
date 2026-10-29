@@ -965,6 +965,13 @@ async function createTables() {
         updated_at TIMESTAMP DEFAULT NOW()
       )
     `
+    await sql`
+      INSERT INTO crm_agencies (company_id, name, code, status, api_key_hash)
+      SELECT id, 'Direct / In-Store Manual Entry', 'MANUAL', 'active', NULL
+      FROM companies
+      WHERE id NOT IN (SELECT company_id FROM crm_agencies WHERE code = 'MANUAL')
+      ON CONFLICT DO NOTHING
+    `
   })
 
   await run("crm_leads", async () => {

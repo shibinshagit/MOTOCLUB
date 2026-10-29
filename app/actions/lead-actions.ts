@@ -47,7 +47,7 @@ export async function getLeads(params: {
   const offset = (params.page - 1) * pageSize
 
   const searchObj = params.search ? `%${params.search}%` : null;
-  
+
   const countResult = await sql`
     SELECT COUNT(l.id)
     FROM crm_leads l
@@ -244,7 +244,7 @@ export async function updateLeadStatus(leadId: number, status: string) {
     await sql.begin(async (tx: any) => {
       const old = await tx`SELECT status FROM crm_leads WHERE id = ${leadId} AND company_id = ${session.companyId} AND (device_id IS NULL OR device_id = ${session.deviceId})`
       if (old.length === 0) throw new Error("Not found")
-      
+
       await tx`UPDATE crm_leads SET status = ${status}, updated_at = NOW() WHERE id = ${leadId}`
       await logLeadActivity(tx, {
         lead_id: leadId,
@@ -257,7 +257,7 @@ export async function updateLeadStatus(leadId: number, status: string) {
     })
     revalidatePath("/dashboard")
     return { success: true, message: "Status updated" }
-  } catch(e) {
+  } catch (e) {
     return { success: false, message: "Lead not found or unauthorized" }
   }
 }
@@ -270,7 +270,7 @@ export async function updateLeadNotes(leadId: number, notes: string) {
     await sql.begin(async (tx: any) => {
       const old = await tx`SELECT id FROM crm_leads WHERE id = ${leadId} AND company_id = ${session.companyId} AND (device_id IS NULL OR device_id = ${session.deviceId})`
       if (old.length === 0) throw new Error("Not found")
-      
+
       await tx`UPDATE crm_leads SET notes = ${notes}, updated_at = NOW() WHERE id = ${leadId}`
       await logLeadActivity(tx, {
         lead_id: leadId,
@@ -281,7 +281,7 @@ export async function updateLeadNotes(leadId: number, notes: string) {
     })
     revalidatePath("/dashboard")
     return { success: true, message: "Notes updated" }
-  } catch(e) {
+  } catch (e) {
     return { success: false, message: "Lead not found or unauthorized" }
   }
 }
@@ -337,7 +337,7 @@ export async function saveLeadFollowUpAndVehicle(leadId: number, params: {
     })
     revalidatePath("/dashboard")
     return { success: true, message: "Follow-up & vehicle details saved" }
-  } catch(e) {
+  } catch (e) {
     return { success: false, message: "Lead not found or unauthorized" }
   }
 }
@@ -349,7 +349,7 @@ export async function setLeadFollowUp(leadId: number, date: string | null) {
 export async function getCompanyStaff() {
   const session = await getStaffSession()
   if (!session) return { success: false, data: [] }
-  
+
   const staff = await sql`
     SELECT id, name, role
     FROM staff
@@ -379,9 +379,9 @@ export async function assignLead(leadId: number, staffId: number | null) {
     await sql.begin(async (tx: any) => {
       const old = await tx`SELECT assigned_to, status FROM crm_leads WHERE id = ${leadId} AND company_id = ${session.companyId} AND (device_id IS NULL OR device_id = ${session.deviceId})`
       if (old.length === 0) throw new Error("Not found")
-      
+
       const newStatus = (old[0].status === 'New' && staffId !== null) ? 'Assigned' : old[0].status
-      
+
       await tx`UPDATE crm_leads SET assigned_to = ${staffId}, status = ${newStatus}, updated_at = NOW() WHERE id = ${leadId}`
       await logLeadActivity(tx, {
         lead_id: leadId,
@@ -396,7 +396,7 @@ export async function assignLead(leadId: number, staffId: number | null) {
     })
     revalidatePath("/dashboard")
     return { success: true, message: staffId === null ? "Lead unassigned" : "Lead assigned successfully" }
-  } catch(e) {
+  } catch (e) {
     return { success: false, message: "Lead not found or unauthorized" }
   }
 }
@@ -441,7 +441,7 @@ export async function convertLeadToCustomer(leadId: number) {
         FOR UPDATE
       `
       if (leads.length === 0) throw new Error("Lead not found or unauthorized")
-      
+
       const lead = leads[0];
 
       if (lead.converted_customer_id) {
@@ -452,7 +452,7 @@ export async function convertLeadToCustomer(leadId: number) {
 
       // 2. Try to match existing customer
       let customerId: number | null = null;
-      
+
       if (lead.phone || lead.email) {
         const matches = await tx`
           SELECT id FROM customers 
@@ -506,7 +506,7 @@ export async function convertLeadToCustomer(leadId: number) {
     });
 
     revalidatePath("/dashboard");
-    
+
     if (isAlreadyConverted) {
       return { success: true, alreadyConverted: true, customerId: resultCustomerId };
     }
@@ -515,6 +515,141 @@ export async function convertLeadToCustomer(leadId: number) {
   } catch (error: any) {
     console.error("convertLeadToCustomer error:", error)
     return { success: false, message: error.message || "Failed to convert lead" }
+  }
+}
+
+export type CreateManualLeadInput = {
+  name: string
+  phone?: string | null
+  email?: string | null
+  source?: string | null
+  campaign?: string | null
+  vehicle?: string | null
+  year?: string | null
+  message?: string | null
+  notes?: string | null
+  status?: string
+  assigned_to?: number | null
+  next_follow_up_at?: string | null
+  products?: { product_id: number; product_variant_id?: number | null }[]
+}
+
+export async function createManualLead(input: CreateManualLeadInput) {
+  const session = await getStaffSession()
+  if (!session) return { success: false, message: "Unauthorized" }
+
+  const companyId = session.companyId
+  const deviceId = session.deviceId
+
+  const cleanName = input.name?.trim()
+  if (!cleanName) {
+    return { success: false, message: "Customer name is required" }
+  }
+
+  const cleanPhone = input.phone?.trim() || null
+  const cleanEmail = input.email?.trim() || null
+  const cleanSource = input.source?.trim() || "Walk-in"
+  const cleanCampaign = input.campaign?.trim() || null
+  const cleanVehicle = input.vehicle?.trim() || null
+  const cleanYear = input.year?.trim() || null
+  const cleanMessage = input.message?.trim() || null
+  const cleanNotes = input.notes?.trim() || null
+  const cleanStatus = input.status?.trim() || "New"
+  const assignedTo = input.assigned_to ? Number(input.assigned_to) : null
+  const nextFollowUpAt = input.next_follow_up_at ? new Date(input.next_follow_up_at).toISOString() : null
+  const products = Array.isArray(input.products) ? input.products : []
+
+  const leadNumber = `LD-${Date.now().toString().slice(-6)}${Math.floor(Math.random() * 1000)}`
+  const externalLeadId = `MANUAL-${Date.now()}-${Math.floor(Math.random() * 10000)}`
+
+  try {
+    const leadRow = await sql.begin(async (tx: any) => {
+      // 1. Get or create internal manual agency for this company
+      let agencyRows = await tx`
+        SELECT id FROM crm_agencies 
+        WHERE company_id = ${companyId} AND code = 'MANUAL'
+        LIMIT 1
+      `
+      let agencyId: number
+      if (agencyRows.length === 0) {
+        const newAgency = await tx`
+          INSERT INTO crm_agencies (
+            company_id, device_id, name, code, status, api_key_hash, created_at, updated_at
+          )
+          VALUES (
+            ${companyId}, ${deviceId}, 'Direct / In-Store Manual Entry', 'MANUAL', 'active', NULL, NOW(), NOW()
+          )
+          RETURNING id
+        `
+        agencyId = Number(newAgency[0].id)
+      } else {
+        agencyId = Number(agencyRows[0].id)
+      }
+
+      // 2. Validate product references if any
+      for (const ref of products) {
+        const productRows = await tx`
+          SELECT p.id FROM products p
+          WHERE p.id = ${ref.product_id}
+            AND p.created_by IN (SELECT d.id FROM devices d WHERE d.company_id = ${companyId})
+        `
+        if (productRows.length === 0) {
+          throw new Error(`Product #${ref.product_id} not found in this company's catalog`)
+        }
+      }
+
+      // 3. Insert lead into crm_leads
+      const result = await tx`
+        INSERT INTO crm_leads (
+          lead_number, agency_id, company_id, device_id, external_lead_id,
+          name, phone, email, source, campaign, ad_name, message, notes,
+          vehicle, year, status, assigned_to, next_follow_up_at,
+          created_at, updated_at
+        )
+        VALUES (
+          ${leadNumber}, ${agencyId}, ${companyId}, ${deviceId}, ${externalLeadId},
+          ${cleanName}, ${cleanPhone}, ${cleanEmail}, ${cleanSource}, ${cleanCampaign},
+          'Direct / Manual Entry', ${cleanMessage}, ${cleanNotes},
+          ${cleanVehicle}, ${cleanYear}, ${cleanStatus}, ${assignedTo}, ${nextFollowUpAt},
+          NOW(), NOW()
+        )
+        RETURNING id, lead_number
+      `
+      const insertedLead = result[0]
+
+      // 4. Attach interested products
+      for (const ref of products) {
+        await tx`
+          INSERT INTO crm_lead_products (lead_id, product_id, product_variant_id)
+          VALUES (${insertedLead.id}, ${ref.product_id}, ${ref.product_variant_id || null})
+          ON CONFLICT DO NOTHING
+        `
+      }
+
+      // 5. Activity log
+      await logLeadActivity(tx, {
+        lead_id: insertedLead.id,
+        company_id: companyId,
+        staff_id: session.staffId,
+        activity_type: 'LEAD_CREATED',
+        new_status: cleanStatus,
+        new_assigned_to: assignedTo,
+        note: `Lead manually entered by staff.`
+      })
+
+      return insertedLead
+    })
+
+    revalidatePath("/dashboard")
+    return {
+      success: true,
+      message: "Lead created successfully",
+      leadId: Number(leadRow.id),
+      leadNumber: String(leadRow.lead_number)
+    }
+  } catch (error: any) {
+    console.error("createManualLead error:", error)
+    return { success: false, message: error.message || "Failed to create manual lead" }
   }
 }
 

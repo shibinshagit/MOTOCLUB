@@ -20,18 +20,23 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { TableRowsInput } from "@/components/ui/table-rows-input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Loader2, Search, Phone, Calendar, Briefcase, Clock, Activity as ActivityIcon, UserCheck, Car } from "lucide-react"
+import { Loader2, Search, Phone, Calendar, Briefcase, Clock, Activity as ActivityIcon, UserCheck, Car, Plus } from "lucide-react"
 import { format, isPast, isToday } from "date-fns"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
 import { useToast } from "@/components/ui/use-toast"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { JobCardModal } from "@/components/shared/job-card/job-card-modal"
+import { useAppSelector } from "@/store/hooks"
+import { selectActiveStaff } from "@/store/slices/staffSlice"
+import { CreateLeadModal } from "./create-lead-modal"
 
 const STATUSES = ['All', 'New', 'Assigned', 'Contacted', 'Follow Up', 'Interested', 'Converted', 'Lost', 'Invalid']
 const MUTABLE_STATUSES = ['New', 'Assigned', 'Contacted', 'Follow Up', 'Interested', 'Converted', 'Lost', 'Invalid']
 
 export default function StaffLeadsTab() {
+  const activeStaff = useAppSelector(selectActiveStaff)
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const [leads, setLeads] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [summary, setSummary] = useState<any>({})
@@ -306,11 +311,11 @@ export default function StaffLeadsTab() {
         </Card>
       </div>
 
-      <div className="flex flex-col md:flex-row gap-3">
+      <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center">
         <div className="relative flex-1">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input 
-            placeholder="Search leads by name, phone, email..." 
+            placeholder="Search leads by name, phone, email, vehicle..." 
             className="pl-8" 
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -345,13 +350,29 @@ export default function StaffLeadsTab() {
             </SelectContent>
           </Select>
         </div>
+        <Button 
+          onClick={() => setIsCreateModalOpen(true)}
+          className="bg-blue-600 hover:bg-blue-700 text-white gap-1.5 shrink-0 shadow-sm"
+        >
+          <Plus className="h-4 w-4" />
+          Add Lead
+        </Button>
       </div>
 
       {loading ? (
         <div className="flex justify-center p-8"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>
       ) : leads.length === 0 ? (
-        <div className="text-center p-8 border rounded-lg bg-gray-50/50">
+        <div className="text-center p-8 border rounded-lg bg-gray-50/50 space-y-3">
           <p className="text-muted-foreground">No leads found.</p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIsCreateModalOpen(true)}
+            className="text-blue-600 border-blue-200 hover:bg-blue-50"
+          >
+            <Plus className="h-4 w-4 mr-1.5" />
+            Add First Lead
+          </Button>
         </div>
       ) : (
         <>
@@ -771,6 +792,17 @@ export default function StaffLeadsTab() {
           canCreateProducts={false}
         />
       )}
+
+      <CreateLeadModal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+        onSuccess={() => {
+          fetchLeads()
+          fetchSummary()
+        }}
+        staffList={staffList}
+        currentStaffId={activeStaff?.id}
+      />
     </div>
   )
 }
