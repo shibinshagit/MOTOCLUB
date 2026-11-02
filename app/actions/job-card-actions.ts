@@ -80,6 +80,7 @@ export interface JobCardInput {
   typeOfSale?: string
   paymentStatus?: string
   paymentMethod?: string
+  fulfillmentType?: "ship" | "pickup"
 
   products: JobCardProductInput[]
   crmLeadId?: number
@@ -296,7 +297,12 @@ export async function createJobCard(input: JobCardInput) {
                   const s = (input.paymentStatus || "").toLowerCase()
                   return s === "paid" || s === "completed" ? 0 : totalAmount
                 })()},
-                'ship',
+                ${(() => {
+                  const t = (input.typeOfSale || "").toLowerCase().trim()
+                  if (t === "courier") return "ship"
+                  if (t === "walk in") return "pickup"
+                  return (input.courierPaidExtra && Number(input.courierPaidExtra) > 0) ? "ship" : "pickup"
+                })()},
                 'Pending',
                 false,
                 NOW(),
@@ -340,6 +346,16 @@ export async function createJobCard(input: JobCardInput) {
           )
         `
       }
+
+      // Deduct stock for all products immediately on Job Card creation
+      await applyStockTransition(
+        saleId,
+        deviceId,
+        true,
+        "sale_deducted",
+        `Job Card #${saleId} created - stock deducted`,
+        tx,
+      )
 
       if (input.crmLeadId && session) {
         await tx`
@@ -501,7 +517,11 @@ export async function updateJobCard(id: number, input: any) {
           shipping_pincode = ${input.shippingPincode || null},
           courier_paid_extra = ${input.courierPaidExtra || 0},
           balance_amount = ${balanceAmount},
-          fulfillment_type = COALESCE(fulfillment_type, 'ship'),
+          fulfillment_type = CASE 
+            WHEN LOWER(TRIM(COALESCE(${input.typeOfSale || null}, type_of_sale, ''))) = 'courier' THEN 'ship'
+            WHEN LOWER(TRIM(COALESCE(${input.typeOfSale || null}, type_of_sale, ''))) = 'walk in' THEN 'pickup'
+            ELSE COALESCE(fulfillment_type, 'pickup')
+          END,
           delivery_status = COALESCE(delivery_status, 'Pending'),
           payment_method = COALESCE(${input.paymentMethod || null}, payment_method, 'UPI'),
           type_of_sale = COALESCE(${input.typeOfSale || null}, type_of_sale)
@@ -529,7 +549,11 @@ export async function updateJobCard(id: number, input: any) {
           shipping_pincode = ${input.shippingPincode || null},
           courier_paid_extra = ${input.courierPaidExtra || 0},
           balance_amount = ${balanceAmount},
-          fulfillment_type = COALESCE(fulfillment_type, 'ship'),
+          fulfillment_type = CASE 
+            WHEN LOWER(TRIM(COALESCE(${input.typeOfSale || null}, type_of_sale, ''))) = 'courier' THEN 'ship'
+            WHEN LOWER(TRIM(COALESCE(${input.typeOfSale || null}, type_of_sale, ''))) = 'walk in' THEN 'pickup'
+            ELSE COALESCE(fulfillment_type, 'pickup')
+          END,
           delivery_status = COALESCE(delivery_status, 'Pending'),
           payment_method = COALESCE(${input.paymentMethod || null}, payment_method, 'UPI'),
           type_of_sale = COALESCE(${input.typeOfSale || null}, type_of_sale)

@@ -1119,7 +1119,7 @@ export async function updatePurchase(formData: FormData) {
 
       // Get current items to handle stock changes properly
       const currentItems = await tx`
-        SELECT product_id, quantity FROM purchase_items WHERE purchase_id = ${purchaseId}
+        SELECT id, product_id, product_variant_id, batch_id, quantity FROM purchase_items WHERE purchase_id = ${purchaseId}
       `
 
       // Calculate final received amount based on status
@@ -1172,72 +1172,6 @@ export async function updatePurchase(formData: FormData) {
         newPurchaseStatus,
       })
 
-      // Create maps for easier lookup
-      const currentItemsMap = new Map()
-      currentItems.forEach((item: any) => {
-        currentItemsMap.set(item.product_id, item.quantity)
-      })
-
-      const newItemsMap = new Map()
-      items.forEach((item: any) => {
-        newItemsMap.set(item.product_id, item.quantity)
-      })
-
-      // Get all unique product IDs from both old and new items
-      const allProductIds = new Set([...currentItemsMap.keys(), ...newItemsMap.keys()])
-
-      // Calculate net changes and update stock accordingly
-      const stockChanges = []
-
-      for (const productId of allProductIds) {
-        const oldQuantity = wasStockAdded ? currentItemsMap.get(productId) || 0 : 0
-        const newQuantity = shouldAddStock ? newItemsMap.get(productId) || 0 : 0
-        const netChange = newQuantity - oldQuantity
-
-        if (netChange !== 0) {
-          stockChanges.push({
-            product_id: productId,
-            net_change: netChange,
-            old_quantity: oldQuantity,
-            new_quantity: newQuantity,
-          })
-
-          // Update the product stock for this device
-          await adjustDeviceProductStock(productId, null, null, deviceId, Number(netChange), tx)
-
-          // Create a single stock history entry for the net change
-          try {
-            let historyNote = ""
-            let historyType = ""
-
-            if (netChange > 0) {
-              historyNote = `Stock increased by ${netChange} from purchase #${purchaseId} update - ${supplier}`
-              historyType = "purchase" // was "purchase_update"
-            } else {
-              historyNote = `Stock decreased by ${Math.abs(netChange)} from purchase #${purchaseId} update - ${supplier}`
-              historyType = "adjustment" // was "purchase_update"
-            }
-
-            await tx`
-              INSERT INTO product_stock_history (
-                product_id, quantity, type, reference_id, reference_type, notes, created_by, device_id
-              ) VALUES (
-                ${productId}, ${netChange}, ${historyType}, ${purchaseId}, 'purchase', 
-                ${historyNote}, ${userId}, ${deviceId}
-              )
-            `
-          } catch (error) {
-            console.error("Failed to add stock history for purchase update:", error)
-            // Continue execution even if this fails
-          }
-        }
-      }
-
-      console.log("Stock changes applied:", stockChanges)
-
-      // Delete existing items and add new ones
-      await tx`DELETE FROM purchase_items WHERE purchase_id = ${purchaseId}`
-
       let itemIndex = 0;
       for (let item of items) {
         const alloc = costAllocations[itemIndex]
@@ -1282,8 +1216,41 @@ export async function updatePurchase(formData: FormData) {
           WHERE id = ${item.product_id}
         `
 
-        let batchId = item.batch_id || null;
-        if (shouldAddStock) {
+        // Resolve Batch: reuse existing batch for this purchase item/product to avoid duplicate batches
+        let batchId: number | null = item.batch_id ? Number(item.batch_id) : null;
+        if (batchId) {
+          const existingBatch = await tx`
+            SELECT id FROM product_batches WHERE id = ${batchId} AND purchase_id = ${purchaseId}
+          `;
+          if (existingBatch.length === 0) batchId = null;
+        }
+
+        if (!batchId) {
+          const matchingBatch = await tx`
+            SELECT id FROM product_batches 
+            WHERE purchase_id = ${purchaseId} 
+              AND product_id = ${item.product_id} 
+              AND product_variant_id = ${variantId}
+            ORDER BY id ASC LIMIT 1
+          `;
+          if (matchingBatch.length > 0) {
+            batchId = Number(matchingBatch[0].id);
+          }
+        }
+
+        if (batchId) {
+          // Update existing batch details and quantity
+          await tx`
+            UPDATE product_batches
+            SET cost_price = ${unitAcquisitionCost},
+                selling_price = ${item.price},
+                quantity_purchased = ${item.quantity},
+                status = ${shouldAddStock ? 'active' : 'inactive'},
+                updated_at = NOW()
+            WHERE id = ${batchId}
+          `;
+        } else if (shouldAddStock) {
+          // Create a new batch only if none existed
           const batchNo = `BATCH-PUR-${purchaseId}-${itemIndex}-${Date.now()}`;
           const newBatch = await tx`
             INSERT INTO product_batches (
@@ -1294,12 +1261,123 @@ export async function updatePurchase(formData: FormData) {
               ${item.quantity}, ${item.quantity}, 'active', ${purchaseId}
             ) RETURNING id
           `;
-          batchId = newBatch[0].id;
-          await adjustDeviceProductStock(item.product_id, variantId, batchId, deviceId, Number(item.quantity), tx)
+          batchId = Number(newBatch[0].id);
         }
+
         item.variant_id = variantId;
         item.batch_id = batchId;
+        item.unit_acquisition_cost = unitAcquisitionCost;
+        item.item_courier_charge = itemCourierCharge;
+        item.item_discount_amount = itemDiscountAmount;
+      }
 
+      // Handle stock movement cleanly without duplicate additions
+      if (wasStockAdded && shouldAddStock) {
+        // Case 1: Was delivered and stays delivered -> apply net quantity change per product/batch
+        for (let item of items) {
+          const oldItem = currentItems.find((ci: any) => 
+            ci.product_id === item.product_id && (ci.product_variant_id === item.variant_id || !ci.product_variant_id)
+          );
+          const oldQty = oldItem ? Number(oldItem.quantity) || 0 : 0;
+          const newQty = Number(item.quantity) || 0;
+          const netChange = newQty - oldQty;
+
+          if (netChange !== 0) {
+            await adjustDeviceProductStock(item.product_id, item.variant_id, item.batch_id, deviceId, netChange, tx);
+            try {
+              const historyType = netChange > 0 ? "purchase" : "adjustment";
+              const historyNote = netChange > 0
+                ? `Stock increased by ${netChange} from purchase #${purchaseId} update - ${supplier}`
+                : `Stock decreased by ${Math.abs(netChange)} from purchase #${purchaseId} update - ${supplier}`;
+
+              await tx`
+                INSERT INTO product_stock_history (
+                  product_id, product_variant_id, batch_id, quantity, type, reference_id, reference_type, notes, created_by, device_id
+                ) VALUES (
+                  ${item.product_id}, ${item.variant_id}, ${item.batch_id}, ${netChange}, ${historyType}, ${purchaseId}, 'purchase',
+                  ${historyNote}, ${userId}, ${deviceId}
+                )
+              `;
+            } catch (hErr) {
+              console.error("Failed to add stock history for purchase update:", hErr);
+            }
+          }
+        }
+
+        // Items removed entirely from the purchase
+        for (let oldItem of currentItems) {
+          const isPresent = items.some((it: any) => it.product_id === oldItem.product_id);
+          if (!isPresent) {
+            const removeQty = Number(oldItem.quantity) || 0;
+            if (removeQty > 0) {
+              await adjustDeviceProductStock(oldItem.product_id, oldItem.product_variant_id, oldItem.batch_id, deviceId, -removeQty, tx);
+              try {
+                await tx`
+                  INSERT INTO product_stock_history (
+                    product_id, product_variant_id, batch_id, quantity, type, reference_id, reference_type, notes, created_by, device_id
+                  ) VALUES (
+                    ${oldItem.product_id}, ${oldItem.product_variant_id}, ${oldItem.batch_id}, ${-removeQty}, 'adjustment', ${purchaseId}, 'purchase',
+                    ${`Stock decreased by ${removeQty} (item removed from purchase #${purchaseId}) - ${supplier}`}, ${userId}, ${deviceId}
+                  )
+                `;
+              } catch (hErr) {
+                console.error("Failed to add stock history for removed item:", hErr);
+              }
+              if (oldItem.batch_id) {
+                await tx`UPDATE product_batches SET status = 'inactive', remaining_quantity = 0 WHERE id = ${oldItem.batch_id}`;
+              }
+            }
+          }
+        }
+      } else if (!wasStockAdded && shouldAddStock) {
+        // Case 2: Status changed from Ordered -> Delivered -> add full stock
+        for (let item of items) {
+          const qty = Number(item.quantity) || 0;
+          if (qty > 0) {
+            await adjustDeviceProductStock(item.product_id, item.variant_id, item.batch_id, deviceId, qty, tx);
+            try {
+              await tx`
+                INSERT INTO product_stock_history (
+                  product_id, product_variant_id, batch_id, quantity, type, reference_id, reference_type, notes, created_by, device_id
+                ) VALUES (
+                  ${item.product_id}, ${item.variant_id}, ${item.batch_id}, ${qty}, 'purchase', ${purchaseId}, 'purchase',
+                  ${`Stock added from purchase #${purchaseId} - ${supplier}`}, ${userId}, ${deviceId}
+                )
+              `;
+            } catch (hErr) {
+              console.error("Failed to add stock history for delivered purchase:", hErr);
+            }
+          }
+        }
+      } else if (wasStockAdded && !shouldAddStock) {
+        // Case 3: Status changed from Delivered -> Cancelled/Ordered -> reverse full stock
+        for (let oldItem of currentItems) {
+          const qty = Number(oldItem.quantity) || 0;
+          if (qty > 0) {
+            await adjustDeviceProductStock(oldItem.product_id, oldItem.product_variant_id, oldItem.batch_id, deviceId, -qty, tx);
+            try {
+              await tx`
+                INSERT INTO product_stock_history (
+                  product_id, product_variant_id, batch_id, quantity, type, reference_id, reference_type, notes, created_by, device_id
+                ) VALUES (
+                  ${oldItem.product_id}, ${oldItem.product_variant_id}, ${oldItem.batch_id}, ${-qty}, 'adjustment', ${purchaseId}, 'purchase',
+                  ${`Stock reversed from purchase #${purchaseId} (status: ${status}/${purchaseStatus}) - ${supplier}`}, ${userId}, ${deviceId}
+                )
+              `;
+            } catch (hErr) {
+              console.error("Failed to add stock history for reversed purchase:", hErr);
+            }
+            if (oldItem.batch_id) {
+              await tx`UPDATE product_batches SET status = 'inactive', remaining_quantity = 0 WHERE id = ${oldItem.batch_id}`;
+            }
+          }
+        }
+      }
+
+      // Delete existing items and add updated ones
+      await tx`DELETE FROM purchase_items WHERE purchase_id = ${purchaseId}`
+
+      for (let item of items) {
         const pVariantId = item.variant_id || null
         const pBatchId = item.batch_id || null
         const pQty = Number(item.quantity) || 0
@@ -1314,7 +1392,7 @@ export async function updatePurchase(formData: FormData) {
             tax_percentage, tax_amount, line_total, courier_charge, discount, unit_cost
           ) VALUES (
             ${purchaseId}, ${item.product_id}, ${pVariantId}, ${pBatchId}, ${pQty}, ${pPrice},
-            ${pTaxPct}, ${pTaxAmt}, ${pLineTotal}, ${itemCourierCharge}, ${itemDiscountAmount}, ${unitAcquisitionCost}
+            ${pTaxPct}, ${pTaxAmt}, ${pLineTotal}, ${item.item_courier_charge}, ${item.item_discount_amount}, ${item.unit_acquisition_cost}
           )
         `
       }
@@ -1375,43 +1453,64 @@ export async function deletePurchase(purchaseId: number, deviceId: number) {
 
       // Get items to restore stock if needed
       const items = await tx`
-        SELECT product_id, quantity FROM purchase_items WHERE purchase_id = ${purchaseId}
+        SELECT product_id, product_variant_id, batch_id, quantity FROM purchase_items WHERE purchase_id = ${purchaseId}
       `
 
       // If stock was previously added, remove it
       if (wasStockAdded) {
         console.log("Removing stock for deleted purchase items:", items)
         for (let item of items) {
-          await adjustDeviceProductStock(item.product_id, (item as any).variant_id || null, (item as any).batch_id || null, deviceId, -Number(item.quantity), tx)
+          const qty = Number(item.quantity) || 0
+          if (qty > 0) {
+            await adjustDeviceProductStock(
+              item.product_id, 
+              item.product_variant_id || null, 
+              item.batch_id || null, 
+              deviceId, 
+              -qty, 
+              tx
+            )
 
-          // Record negative adjustment
-          try {
-            await tx`
-              INSERT INTO product_stock_history (
-                product_id,
-                quantity,
-                type,
-                reference_id,
-                reference_type,
-                notes,
-                created_by,
-                device_id
-              )
-              VALUES (
-                ${item.product_id},
-                ${-item.quantity},
-                'adjustment',
-                ${purchaseId},
-                'purchase',
-                ${"Stock removed due to purchase #" + purchaseId + " deletion"},
-                ${purchase.created_by},
-                ${deviceId}
-              )
-            `
-          } catch (error) {
-            console.error("Failed to add stock history for deleted purchase:", error)
+            // Record negative adjustment
+            try {
+              await tx`
+                INSERT INTO product_stock_history (
+                  product_id,
+                  product_variant_id,
+                  batch_id,
+                  quantity,
+                  type,
+                  reference_id,
+                  reference_type,
+                  notes,
+                  created_by,
+                  device_id
+                )
+                VALUES (
+                  ${item.product_id},
+                  ${item.product_variant_id || null},
+                  ${item.batch_id || null},
+                  ${-qty},
+                  'adjustment',
+                  ${purchaseId},
+                  'purchase',
+                  ${"Stock removed due to purchase #" + purchaseId + " deletion"},
+                  ${purchase.created_by},
+                  ${deviceId}
+                )
+              `
+            } catch (error) {
+              console.error("Failed to add stock history for deleted purchase:", error)
+            }
           }
         }
+
+        // Mark purchase batches cancelled/inactive
+        await tx`
+          UPDATE product_batches
+          SET status = 'cancelled', remaining_quantity = 0, updated_at = NOW()
+          WHERE purchase_id = ${purchaseId}
+        `
       }
 
       // Delete financial transactions

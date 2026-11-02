@@ -205,11 +205,21 @@ export function normalizeSaleShippingInput(input?: SaleShippingInput | null) {
 }
 
 export function mapSaleShippingFromRecord(record: Record<string, unknown>): SaleShippingRecord {
-  const isJobCard = record.sale_type === "job_card" || String(record.tracking_id || "").startsWith("JC-")
-  const hasCourier = Number(record.courier_paid_extra) > 0
-  const defaultFulfillment = (isJobCard || hasCourier) ? "ship" : "pickup"
+  const isJobCard = record.sale_type === "job_card" || String(record.tracking_id || "").startsWith("JC-") || String(record.tracking_id || "").startsWith("DOD")
+  const typeOfSale = String(record.type_of_sale || "").trim().toLowerCase()
+  const isWalkIn = typeOfSale === "walk in"
+  const isCourier = typeOfSale === "courier"
+  const hasCourier = Number(record.courier_paid_extra) > 0 || isCourier
   const mappedFulfillment = record.fulfillment_type as FulfillmentType
-  const fulfillmentType = (mappedFulfillment === "ship" || hasCourier) ? "ship" : (mappedFulfillment || defaultFulfillment)
+
+  let fulfillmentType: FulfillmentType = "pickup"
+  if (isWalkIn) {
+    fulfillmentType = "pickup"
+  } else if (mappedFulfillment === "ship" || hasCourier || (isJobCard && !isWalkIn)) {
+    fulfillmentType = "ship"
+  } else if (mappedFulfillment === "pickup") {
+    fulfillmentType = "pickup"
+  }
   return {
     fulfillmentType,
     deliveryStatus: (record.delivery_status as string) || "Pending",

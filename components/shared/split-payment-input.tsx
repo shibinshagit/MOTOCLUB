@@ -56,7 +56,7 @@ export function SplitPaymentInput({
         ...p,
         rowId: p.id ? String(p.id) : `row-${idx}-${Date.now()}`,
         amount: Number(p.amount) || 0,
-        paymentMethod: (!isEditMode && (!p.paymentMethod || p.paymentMethod === "Cash")) ? "UPI" : (p.paymentMethod || "UPI"),
+        paymentMethod: p.paymentMethod || "UPI",
         referenceNumber: p.referenceNumber || "",
       }))
     }
@@ -78,7 +78,7 @@ export function SplitPaymentInput({
         ...p,
         rowId: p.id ? String(p.id) : `row-${idx}-${Date.now()}`,
         amount: Number(p.amount) || 0,
-        paymentMethod: (!isEditMode && (!p.paymentMethod || p.paymentMethod === "Cash")) ? "UPI" : (p.paymentMethod || "UPI"),
+        paymentMethod: p.paymentMethod || "UPI",
         referenceNumber: p.referenceNumber || "",
       }))
       // Check if deep equal to avoid infinite loop
@@ -110,14 +110,14 @@ export function SplitPaymentInput({
       }
       setRows([resetRow])
     }
-  }, [payments, isEditMode, paymentStatus, totalAmount])
+  }, [payments, paymentStatus, totalAmount])
 
-  // When creating a new sale (!isEditMode), ensure parent is synced with default UPI row
+  // When creating a new sale (!isEditMode), ensure parent is synced with default UPI row if empty
   const hasInitialNotifiedRef = React.useRef(false)
   useEffect(() => {
     if (!isEditMode && !hasInitialNotifiedRef.current) {
       hasInitialNotifiedRef.current = true
-      if (!payments || payments.length === 0 || (payments.length === 1 && payments[0].paymentMethod === "Cash" && Number(payments[0].amount) === 0)) {
+      if (!payments || payments.length === 0) {
         const isPendingOrCredit = paymentStatus === "Pending" || paymentStatus === "Credit" || paymentStatus === "COD" || paymentStatus === "Cancelled" || !paymentStatus
         const initialRow: SplitPaymentRow = {
           rowId: `row-0-${Date.now()}`,

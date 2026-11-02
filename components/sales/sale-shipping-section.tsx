@@ -237,7 +237,7 @@ export default function SaleShippingSection({
     })
   }
 
-  if (isJobCard && !forceFullForm) {
+  if (isJobCard && shipping.fulfillmentType !== "pickup" && !forceFullForm) {
     return (
       <div className={cn("rounded-lg border border-blue-100 bg-blue-50/30 overflow-hidden", className)}>
         <div className="bg-blue-100/50 px-3 py-2 border-b border-blue-100 flex items-center">
