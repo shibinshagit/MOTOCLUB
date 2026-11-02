@@ -347,6 +347,16 @@ export async function createJobCard(input: JobCardInput) {
         `
       }
 
+      // Deduct stock for all products immediately on Job Card creation
+      await applyStockTransition(
+        saleId,
+        deviceId,
+        true,
+        "sale_deducted",
+        `Job Card #${saleId} created - stock deducted`,
+        tx,
+      )
+
       if (input.crmLeadId && session) {
         await tx`
           UPDATE crm_leads

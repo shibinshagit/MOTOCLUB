@@ -819,10 +819,20 @@ export default function SaleTab({
         updatedCost = totalCost / totalAllocatedQty
         updatedPrice = totalPrice / totalAllocatedQty
       }
-    } else if (allocations.length > 0 && !product.autoAllocate) {
-      // If manual, we don't automatically override allocations on quantity change,
-      // but we do recalculate total based on the newly typed quantity and existing base price.
-      // Alternatively, the user can open the allocator to adjust.
+    } else if (allocations.length > 0) {
+      if (allocations.length === 1) {
+        allocations = [{ ...allocations[0], quantity: safeRequested }]
+      } else {
+        const currentSum = allocations.reduce((sum, a) => sum + (Number(a.quantity) || 0), 0)
+        const diff = safeRequested - currentSum
+        if (diff !== 0) {
+          const last = { ...allocations[allocations.length - 1] }
+          if (Number(last.quantity) + diff > 0) {
+            last.quantity = Number(last.quantity) + diff
+            allocations = [...allocations.slice(0, -1), last]
+          }
+        }
+      }
     }
 
     updateProductRow(product.id, {
@@ -1195,6 +1205,7 @@ export default function SaleTab({
             batchNumber: item.batch_number,
             isBatchManaged: item.is_batch_managed,
             allocations: item.allocations || [],
+            autoAllocate: true,
           }
         })
 

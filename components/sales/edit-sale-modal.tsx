@@ -696,6 +696,11 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, company
         serviceId: p.serviceId,
         productVariantId: p.productVariantId,
         batchId: p.batchId,
+        allocations: (p as any).allocations?.length
+          ? (p as any).allocations
+          : p.batchId
+          ? [{ batchId: p.batchId, quantity: p.quantity, costPrice: p.cost || 0, sellingPrice: p.price }]
+          : [],
       }))
 
     if (validItems.length === 0) {

@@ -131,7 +131,7 @@ function shippingFieldsChanged(original: any, shipping: ReturnType<typeof normal
 export async function isSaleStockDeducted(
   status: string | null | undefined,
   deliveryStatus: string | null | undefined,
-  fulfillmentType: string | null | undefined
+  fulfillmentType?: string | null | undefined
 ): Promise<boolean> {
   const normStatus = String(status || "").toLowerCase()
   if (normStatus === "cancelled") return false
@@ -139,22 +139,8 @@ export async function isSaleStockDeducted(
   const normDelivery = String(deliveryStatus || "").toLowerCase()
   if (normDelivery === "returned" || normDelivery === "cancelled" || normDelivery === "failed") return false
 
-  const normFulfillment = String(fulfillmentType || "").toLowerCase()
-
-  // Counter sales or pickup sales (normal in-store POS sales) ALWAYS deduct stock upon sale creation unless cancelled
-  if (normFulfillment === "counter" || normFulfillment === "pickup" || normFulfillment === "") {
-    return true
-  }
-
-  // Shipping sales deduct stock when paid, completed, credit, or when delivery status is beyond pending
-  const nonDeductedShippingStatuses = ["pending"]
-  if (normFulfillment === "ship") {
-    if (["completed", "paid", "credit"].includes(normStatus)) {
-      return true
-    }
-    return !nonDeductedShippingStatuses.includes(normDelivery)
-  }
-
+  // All sales and job cards deduct stock immediately upon creation,
+  // regardless of payment status, payment method, or fulfillment type (walk-in or courier).
   return true
 }
 
@@ -3066,6 +3052,8 @@ export async function updateSale(saleData: any) {
         ? await getSaleStockLines(saleData.id, sql, true)
         : new Map()
 
+      const stockDeviceId = Number(original.device_id || saleData.deviceId || 0)
+
       // RESTORE STOCK: If the sale WAS deducted, we restore all allocated stock back to inventory
       if (wasDeducted) {
         console.log("Restoring stock from previous allocations...")
@@ -3076,7 +3064,7 @@ export async function updateSale(saleData: any) {
             alloc.batch_id, 
             alloc.quantity, 
             "add", 
-            saleData.deviceId
+            stockDeviceId
           )
           if (stockResult.success) {
             await createStockHistoryEntry(
@@ -3087,7 +3075,7 @@ export async function updateSale(saleData: any) {
               alloc.quantity,
               saleData.id,
               "sale",
-              saleData.deviceId,
+              stockDeviceId,
               `Sale #${saleData.id} edited - stock temporarily restored`
             )
           }
@@ -3145,7 +3133,40 @@ export async function updateSale(saleData: any) {
 
         // RE-ALLOCATE: Always create new allocations. Deduct stock if it is currently DEDUCTED (Shipped/Delivered).
         if (!isNowCancelled) {
-          const allocations = item.allocations || [];
+          const targetQty = Number(item.quantity) || 0;
+          let allocations = Array.isArray(item.allocations) ? [...item.allocations] : [];
+          const allocSum = allocations.reduce((s: number, a: any) => s + (Number(a.quantity) || 0), 0);
+
+          // If allocations don't match item quantity, reconcile them!
+          if (targetQty > 0) {
+            if (allocations.length > 0) {
+              if (allocSum < targetQty) {
+                // Add the difference to the last allocation so full quantity is accounted for
+                allocations[allocations.length - 1].quantity = Number(allocations[allocations.length - 1].quantity) + (targetQty - allocSum);
+              } else if (allocSum > targetQty) {
+                // Trim excess allocations from the end
+                let toRemove = allocSum - targetQty;
+                for (let i = allocations.length - 1; i >= 0 && toRemove > 0; i--) {
+                  const deduct = Math.min(Number(allocations[i].quantity), toRemove);
+                  allocations[i].quantity -= deduct;
+                  toRemove -= deduct;
+                }
+                allocations = allocations.filter((a: any) => Number(a.quantity) > 0);
+              }
+            } else {
+              // No allocations provided by client: check if item had a previous batch allocation or if item has batchId
+              const prevAlloc = existingAllocations.find((ea: any) => Number(ea.sale_item_id) === Number(item.id));
+              const batchToUse = item.batchId || (prevAlloc ? prevAlloc.batch_id : null);
+              if (batchToUse) {
+                allocations = [{
+                  batchId: Number(batchToUse),
+                  quantity: targetQty,
+                  costPrice: prevAlloc?.cost_price || item.cost || 0,
+                  sellingPrice: prevAlloc?.selling_price || item.price || 0,
+                }];
+              }
+            }
+          }
           
           for (const alloc of allocations) {
             if (alloc.quantity <= 0) continue;
@@ -3169,7 +3190,6 @@ export async function updateSale(saleData: any) {
               VALUES (${insertedItemId}, ${alloc.batchId}, ${alloc.quantity}, ${alloc.costPrice || item.cost || 0}, ${alloc.sellingPrice || item.price})
             `
             
-            
             // Deduct stock if applicable
             if (isNowDeducted) {
               const stockResult = await updateProductStock(
@@ -3178,7 +3198,7 @@ export async function updateSale(saleData: any) {
                 alloc.batchId, 
                 alloc.quantity, 
                 "subtract", 
-                saleData.deviceId
+                stockDeviceId
               )
               
               if (stockResult.success) {
@@ -3190,7 +3210,7 @@ export async function updateSale(saleData: any) {
                   -alloc.quantity,
                   saleData.id,
                   "sale",
-                  saleData.deviceId,
+                  stockDeviceId,
                   `Sale #${saleData.id} edited - stock deducted for allocation`
                 )
               }
@@ -3802,7 +3822,7 @@ export async function deleteSale(saleId: number, deviceId?: number) {
   try {
     return await executeWithRetry(async () => {
       const saleRows = await sql`
-        SELECT id, device_id, status, sale_type
+        SELECT id, device_id, status, delivery_status, fulfillment_type, sale_type
         FROM sales
         WHERE id = ${saleId}
         LIMIT 1
