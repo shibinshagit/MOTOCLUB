@@ -685,7 +685,7 @@ export async function getUserSales(deviceId: number, options: GetUserSalesOption
           } else {
             sale.payments = [
               {
-                paymentMethod: sale.payment_method || "Cash",
+                paymentMethod: sale.payment_method || "UPI",
                 amount: Number(sale.received_amount) || 0,
               },
             ]
@@ -1885,7 +1885,7 @@ export async function getSaleDetails(saleId: number) {
       replacements: replacementsList,
       payments: paymentsList.length > 0 ? paymentsList : [
         {
-          paymentMethod: saleResult[0].payment_method || "Cash",
+          paymentMethod: saleResult[0].payment_method || "UPI",
           amount: receivedAmount,
         }
       ],
@@ -1936,7 +1936,7 @@ export async function addSale(saleData: any) {
     const total = productTotal + courierPaidExtra
 
     let newOrderStatus = saleData.status || "Completed"
-    let newPaymentMethod = saleData.paymentMethod || "Cash"
+    let newPaymentMethod = saleData.paymentMethod || "UPI"
 
     const isCod = (m?: string | null) => {
       const s = (m || "").toUpperCase().trim()
@@ -2076,7 +2076,7 @@ export async function addSale(saleData: any) {
         ${newPaymentStatus},
         ${saleData.saleDate || new Date()},
         ${saleData.deviceId},
-        ${saleData.paymentMethod || "Cash"},
+        ${saleData.paymentMethod || "UPI"},
         ${discountAmount},
         ${receivedAmount},
         ${saleData.staffId || null},
@@ -2150,7 +2150,7 @@ export async function addSale(saleData: any) {
                 INSERT INTO transaction_payments (
                   sale_id, payment_method, amount, reference_number, notes, payment_date
                 ) VALUES (
-                  ${saleId}, ${p.paymentMethod || "Cash"}, ${amt}, ${p.referenceNumber || null}, ${p.notes || null}, ${saleData.saleDate || new Date()}
+                  ${saleId}, ${p.paymentMethod || "UPI"}, ${amt}, ${p.referenceNumber || null}, ${p.notes || null}, ${saleData.saleDate || new Date()}
                 )
               `
             }
@@ -2394,7 +2394,7 @@ export async function addSale(saleData: any) {
         receivedAmount,
         outstandingAmount: balanceAmount,
         status: newPaymentStatus,
-        paymentMethod: saleData.paymentMethod || "Cash",
+        paymentMethod: saleData.paymentMethod || "UPI",
         deviceId: saleData.deviceId,
         userId: saleData.userId,
         customerId: saleData.customerId,
@@ -2414,7 +2414,7 @@ export async function addSale(saleData: any) {
         deviceId: saleData.deviceId,
         userId: saleData.userId,
         saleDate: new Date(saleData.saleDate || new Date()),
-        paymentMethod: saleData.paymentMethod || "Cash",
+        paymentMethod: saleData.paymentMethod || "UPI",
         status: newPaymentStatus,
         fulfillmentType: shipping.fulfillment_type,
         courierPaidExtra,
@@ -2503,7 +2503,7 @@ function calculateSaleChanges(
 
   // Use explicit paymentStatus if provided, otherwise fallback to "Paid"
   let newOrderStatus = newData.status || original.status || "Completed"
-  let newPaymentMethod = newData.paymentMethod || original.payment_method || "Cash"
+  let newPaymentMethod = newData.paymentMethod || original.payment_method || "UPI"
   let newPaymentStatus = newData.paymentStatus || original.payment_status || "Paid"
   
   const isCodMethod = (m?: string | null) => {
@@ -2884,7 +2884,7 @@ export async function updateSale(saleData: any) {
                 sale_date = ${changes.newDate},
                 updated_at = ${new Date()},
                 is_pos_updated = true,
-                payment_method = ${saleData.paymentMethod || "Cash"},
+                payment_method = ${saleData.paymentMethod || "UPI"},
                 discount = ${changes.newDiscount},
                 received_amount = ${changes.newReceived},
                 staff_id = ${saleData.staffId || null},
@@ -2932,7 +2932,7 @@ export async function updateSale(saleData: any) {
                 sale_date = ${changes.newDate},
                 updated_at = ${new Date()},
                 is_pos_updated = true,
-                payment_method = ${saleData.paymentMethod || "Cash"},
+                payment_method = ${saleData.paymentMethod || "UPI"},
                 discount = ${changes.newDiscount},
                 received_amount = ${changes.newReceived},
                 staff_id = ${saleData.staffId || null},
@@ -3007,7 +3007,7 @@ export async function updateSale(saleData: any) {
                   INSERT INTO transaction_payments (
                     sale_id, payment_method, amount, reference_number, notes, payment_date
                   ) VALUES (
-                    ${saleData.id}, ${p.paymentMethod || "Cash"}, ${pAmt}, ${p.referenceNumber || null}, ${p.notes || null}, ${changes.newDate || new Date()}
+                    ${saleData.id}, ${p.paymentMethod || "UPI"}, ${pAmt}, ${p.referenceNumber || null}, ${p.notes || null}, ${changes.newDate || new Date()}
                   )
                 `
               }
@@ -3022,7 +3022,7 @@ export async function updateSale(saleData: any) {
                 INSERT INTO transaction_payments (
                   sale_id, payment_method, amount, payment_date
                 ) VALUES (
-                  ${saleData.id}, ${saleData.paymentMethod || "Cash"}, ${tpAmount}, ${changes.newDate || new Date()}
+                  ${saleData.id}, ${saleData.paymentMethod || "UPI"}, ${tpAmount}, ${changes.newDate || new Date()}
                 )
               `
             }
@@ -3319,7 +3319,7 @@ export async function updateSale(saleData: any) {
           deviceId: saleData.deviceId,
           userId: saleData.userId,
           saleDate: changes.newDate,
-          paymentMethod: saleData.paymentMethod || "Cash",
+          paymentMethod: saleData.paymentMethod || "UPI",
           status: changes.newStatus,
           fulfillmentType: shipping.fulfillment_type,
           courierPaidExtra,

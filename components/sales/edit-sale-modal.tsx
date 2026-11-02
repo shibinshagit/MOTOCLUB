@@ -1289,6 +1289,12 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, company
                           id="payment-method"
                         >
                           <div className="flex items-center space-x-2 bg-white p-2 rounded-md border border-gray-200">
+                              <RadioGroupItem value="UPI" id="upi" />
+                              <Label htmlFor="upi" className="cursor-pointer text-gray-700 text-sm">
+                                UPI
+                              </Label>
+                            </div>
+                            <div className="flex items-center space-x-2 bg-white p-2 rounded-md border border-gray-200">
                               <RadioGroupItem value="Cash" id="cash" />
                               <Label htmlFor="cash" className="cursor-pointer text-gray-700 text-sm">
                                 Cash
@@ -1298,12 +1304,6 @@ export default function EditSaleModal({ isOpen, onClose, saleId, userId, company
                               <RadioGroupItem value="Card" id="card" />
                               <Label htmlFor="card" className="cursor-pointer text-gray-700 text-sm">
                                 Card
-                              </Label>
-                            </div>
-                            <div className="flex items-center space-x-2 bg-white p-2 rounded-md border border-gray-200">
-                              <RadioGroupItem value="UPI" id="upi" />
-                              <Label htmlFor="upi" className="cursor-pointer text-gray-700 text-sm">
-                                UPI
                               </Label>
                             </div>
                             <div className="flex items-center space-x-2 bg-white p-2 rounded-md border border-gray-200">

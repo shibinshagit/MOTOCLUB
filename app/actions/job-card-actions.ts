@@ -79,6 +79,7 @@ export interface JobCardInput {
 
   typeOfSale?: string
   paymentStatus?: string
+  paymentMethod?: string
 
   products: JobCardProductInput[]
   crmLeadId?: number
@@ -220,6 +221,7 @@ export async function createJobCard(input: JobCardInput) {
                 total_cost,
                 status,
                 payment_status,
+                payment_method,
                 device_id,
                 received_amount,
                 staff_id,
@@ -266,6 +268,7 @@ export async function createJobCard(input: JobCardInput) {
                   if (/^pending$/i.test(s)) return "Pending"
                   return s || "Pending"
                 })()},
+                ${input.paymentMethod || 'UPI'},
                 ${deviceId},
                 ${(() => {
                   const s = (input.paymentStatus || "").toLowerCase()
@@ -500,6 +503,7 @@ export async function updateJobCard(id: number, input: any) {
           balance_amount = ${balanceAmount},
           fulfillment_type = COALESCE(fulfillment_type, 'ship'),
           delivery_status = COALESCE(delivery_status, 'Pending'),
+          payment_method = COALESCE(${input.paymentMethod || null}, payment_method, 'UPI'),
           type_of_sale = COALESCE(${input.typeOfSale || null}, type_of_sale)
         WHERE id = ${id} AND staff_id = ${staffId}
         RETURNING tracking_id
@@ -527,6 +531,7 @@ export async function updateJobCard(id: number, input: any) {
           balance_amount = ${balanceAmount},
           fulfillment_type = COALESCE(fulfillment_type, 'ship'),
           delivery_status = COALESCE(delivery_status, 'Pending'),
+          payment_method = COALESCE(${input.paymentMethod || null}, payment_method, 'UPI'),
           type_of_sale = COALESCE(${input.typeOfSale || null}, type_of_sale)
         WHERE id = ${id}
         RETURNING tracking_id
