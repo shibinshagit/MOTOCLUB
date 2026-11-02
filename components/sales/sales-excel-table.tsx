@@ -300,7 +300,12 @@ export default function SalesExcelTable({
 
   const openFulfillmentModal = useCallback(async (sale: any) => {
     const initialShipping = mapSaleShippingFromRecord(sale)
-    initialShipping.fulfillmentType = "ship"
+    const typeOfSale = String(sale.type_of_sale || "").trim().toLowerCase()
+    if (typeOfSale === "walk in") {
+      initialShipping.fulfillmentType = "pickup"
+    } else if (typeOfSale === "courier") {
+      initialShipping.fulfillmentType = "ship"
+    }
     if (!initialShipping.shippingAddress) {
       initialShipping.shippingAddress = sale.shipping_address || sale.customer_address || ""
     }
@@ -315,7 +320,12 @@ export default function SalesExcelTable({
       if (res.success && res.data) {
         const fullSale = res.data.sale ? { ...res.data.sale, items: res.data.items, payments: res.data.payments } : res.data
         const updatedShipping = mapSaleShippingFromRecord(fullSale)
-        updatedShipping.fulfillmentType = "ship"
+        const updatedTypeOfSale = String(fullSale.type_of_sale || typeOfSale || "").trim().toLowerCase()
+        if (updatedTypeOfSale === "walk in") {
+          updatedShipping.fulfillmentType = "pickup"
+        } else if (updatedTypeOfSale === "courier") {
+          updatedShipping.fulfillmentType = "ship"
+        }
         if (!updatedShipping.shippingAddress) {
           updatedShipping.shippingAddress = fullSale.shipping_address || fullSale.customer_address || ""
         }

@@ -575,6 +575,7 @@ export function JobCardForm({
         customerPhone,
         customerId,
         typeOfSale,
+        fulfillmentType: (typeOfSale || "").toLowerCase().trim() === "courier" ? ("ship" as const) : ("pickup" as const),
         paymentStatus: paymentStatus || "Pending",
         paymentMethod: "UPI",
         deviceId,

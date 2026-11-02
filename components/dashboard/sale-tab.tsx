@@ -446,13 +446,13 @@ export default function SaleTab({
         if (Array.isArray(parsed) && parsed.length > 0) {
           const sanitized = parsed.map((d) => {
             if (!d.isEditMode) {
-              const updatedPm = (!d.paymentMethod || d.paymentMethod === "Cash") ? "UPI" : d.paymentMethod
+              const updatedPm = d.paymentMethod || "UPI"
               const updatedPayments = Array.isArray(d.payments) && d.payments.length > 0
                 ? d.payments.map((p) => ({
                     ...p,
-                    paymentMethod: (!p.paymentMethod || p.paymentMethod === "Cash") ? "UPI" : p.paymentMethod,
+                    paymentMethod: p.paymentMethod || "UPI",
                   }))
-                : [{ paymentMethod: "UPI", amount: 0 }]
+                : [{ paymentMethod: updatedPm, amount: 0 }]
               return {
                 ...d,
                 paymentMethod: updatedPm,
