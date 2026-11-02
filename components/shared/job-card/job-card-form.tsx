@@ -576,6 +576,7 @@ export function JobCardForm({
         customerId,
         typeOfSale,
         paymentStatus: paymentStatus || "Pending",
+        paymentMethod: "UPI",
         deviceId,
         staffId: activeStaff?.id || null,
         crmLeadId,

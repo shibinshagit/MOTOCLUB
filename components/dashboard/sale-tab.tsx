@@ -270,7 +270,7 @@ export default function SaleTab({
   const [staffName, setStaffName] = useState<string>("")
   const [status, setStatus] = useState<string>("Pending")
   const [paymentStatus, setPaymentStatus] = useState<string>("Pending")
-  const [paymentMethod, setPaymentMethod] = useState<string>("Cash")
+  const [paymentMethod, setPaymentMethod] = useState<string>("UPI")
   const [payments, setPayments] = useState<PaymentRecordInput[]>([])
   const [isPaymentValid, setIsPaymentValid] = useState<boolean>(true)
   const [products, setProducts] = useState<ProductRow[]>([
@@ -403,7 +403,7 @@ export default function SaleTab({
       staffName: activeStaff?.name || "",
       status: "Pending",
       paymentStatus: "Pending",
-      paymentMethod: "Cash",
+      paymentMethod: "UPI",
       receivedAmount: 0,
       advanceAmount: 0,
       balanceAmount: 0,
@@ -411,7 +411,7 @@ export default function SaleTab({
       notes: "",
       shipping: { fulfillmentType: "pickup", deliveryStatus: "Pending" },
       products: [createEmptyProductRow()],
-      payments: [],
+      payments: [{ paymentMethod: "UPI", amount: 0 }],
       isEditMode: false,
       editingSaleId: null,
       originalSaleStatus: "",
@@ -444,8 +444,25 @@ export default function SaleTab({
       if (rawDrafts) {
         const parsed = JSON.parse(rawDrafts) as SaleDraftSnapshot[]
         if (Array.isArray(parsed) && parsed.length > 0) {
-          setSaleDrafts(parsed)
-          const validActiveId = parsed.some((d) => d.id === rawActiveId) ? String(rawActiveId) : parsed[0].id
+          const sanitized = parsed.map((d) => {
+            if (!d.isEditMode) {
+              const updatedPm = (!d.paymentMethod || d.paymentMethod === "Cash") ? "UPI" : d.paymentMethod
+              const updatedPayments = Array.isArray(d.payments) && d.payments.length > 0
+                ? d.payments.map((p) => ({
+                    ...p,
+                    paymentMethod: (!p.paymentMethod || p.paymentMethod === "Cash") ? "UPI" : p.paymentMethod,
+                  }))
+                : [{ paymentMethod: "UPI", amount: 0 }]
+              return {
+                ...d,
+                paymentMethod: updatedPm,
+                payments: updatedPayments,
+              }
+            }
+            return d
+          })
+          setSaleDrafts(sanitized)
+          const validActiveId = sanitized.some((d) => d.id === rawActiveId) ? String(rawActiveId) : sanitized[0].id
           setActiveDraftId(validActiveId)
           setDraftsHydrated(true)
           return
@@ -486,7 +503,7 @@ export default function SaleTab({
     setStaffName(activeDraft.staffName || "")
     setStatus(activeDraft.status || "Pending")
     setPaymentStatus(activeDraft.paymentStatus || "Pending")
-    setPaymentMethod(activeDraft.paymentMethod || "Cash")
+    setPaymentMethod(activeDraft.paymentMethod || "UPI")
     setReceivedAmount(Number(activeDraft.receivedAmount) || 0)
     setAdvanceAmount(Number(activeDraft.advanceAmount) || 0)
     setBalanceAmount(Number(activeDraft.balanceAmount) || 0)
@@ -1110,9 +1127,9 @@ export default function SaleTab({
     }
     setStatus("Pending")
     setPaymentStatus("Pending")
-    setPaymentMethod("Cash")
+    setPaymentMethod("UPI")
     setProducts(resetProducts)
-    setPayments([])
+    setPayments([{ paymentMethod: "UPI", amount: 0 }])
     setDiscountAmount(0)
     setReceivedAmount(0)
     setNotes("")
@@ -1152,7 +1169,7 @@ export default function SaleTab({
           resolvedStaffName = activeStaff.name
         }
 
-        const resolvedPaymentMethod = "payment_method" in sale ? (sale.payment_method || "Cash") : "Cash"
+        const resolvedPaymentMethod = "payment_method" in sale ? (sale.payment_method || "UPI") : "UPI"
 
         // Set product rows with actual costs
         const productRows = items.map((item: any) => {
@@ -2673,7 +2690,7 @@ export default function SaleTab({
                                     setReceivedAmount(sumPaid)
                                     setBalanceAmount(Math.max(0, totalAmount - sumPaid))
                                     if (updatedPayments.length > 0) {
-                                      setPaymentMethod(updatedPayments[0].paymentMethod || "Cash")
+                                      setPaymentMethod(updatedPayments[0].paymentMethod || "UPI")
                                     }
                                   }}
                                   paymentStatus={paymentStatus}

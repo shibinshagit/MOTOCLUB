@@ -8,8 +8,8 @@ import { Label } from "@/components/ui/label"
 import { PaymentRecordInput } from "@/types/payment"
 
 export const PAYMENT_METHOD_OPTIONS = [
-  { value: "Cash", label: "Cash" },
   { value: "UPI", label: "UPI" },
+  { value: "Cash", label: "Cash" },
   { value: "Card", label: "Card" },
   { value: "Bank Transfer", label: "Bank Transfer" },
   { value: "Cheque", label: "Cheque" },
@@ -56,7 +56,7 @@ export function SplitPaymentInput({
         ...p,
         rowId: p.id ? String(p.id) : `row-${idx}-${Date.now()}`,
         amount: Number(p.amount) || 0,
-        paymentMethod: p.paymentMethod || "Cash",
+        paymentMethod: (!isEditMode && (!p.paymentMethod || p.paymentMethod === "Cash")) ? "UPI" : (p.paymentMethod || "UPI"),
         referenceNumber: p.referenceNumber || "",
       }))
     }
@@ -64,7 +64,7 @@ export function SplitPaymentInput({
     return [
       {
         rowId: `row-0-${Date.now()}`,
-        paymentMethod: "Cash",
+        paymentMethod: "UPI",
         amount: isPendingOrCredit ? 0 : (totalAmount > 0 ? totalAmount : 0),
         referenceNumber: "",
       },
@@ -74,6 +74,13 @@ export function SplitPaymentInput({
   // Synchronize internal rows when payments prop changes externally (e.g. loading edit data)
   useEffect(() => {
     if (payments && payments.length > 0) {
+      const mappedPayments = payments.map((p, idx) => ({
+        ...p,
+        rowId: p.id ? String(p.id) : `row-${idx}-${Date.now()}`,
+        amount: Number(p.amount) || 0,
+        paymentMethod: (!isEditMode && (!p.paymentMethod || p.paymentMethod === "Cash")) ? "UPI" : (p.paymentMethod || "UPI"),
+        referenceNumber: p.referenceNumber || "",
+      }))
       // Check if deep equal to avoid infinite loop
       const currentSerialized = JSON.stringify(
         rows.map((r) => ({
@@ -83,7 +90,7 @@ export function SplitPaymentInput({
         }))
       )
       const propSerialized = JSON.stringify(
-        payments.map((p) => ({
+        mappedPayments.map((p) => ({
           method: p.paymentMethod,
           amount: Number(p.amount) || 0,
           ref: p.referenceNumber || "",
@@ -91,18 +98,38 @@ export function SplitPaymentInput({
       )
 
       if (currentSerialized !== propSerialized) {
-        setRows(
-          payments.map((p, idx) => ({
-            ...p,
-            rowId: p.id ? String(p.id) : `row-${idx}-${Date.now()}`,
-            amount: Number(p.amount) || 0,
-            paymentMethod: p.paymentMethod || "Cash",
-            referenceNumber: p.referenceNumber || "",
-          }))
-        )
+        setRows(mappedPayments)
+      }
+    } else if (!payments || payments.length === 0) {
+      const isPendingOrCredit = paymentStatus === "Pending" || paymentStatus === "Credit" || paymentStatus === "COD" || paymentStatus === "Cancelled" || !paymentStatus
+      const resetRow: SplitPaymentRow = {
+        rowId: `row-0-${Date.now()}`,
+        paymentMethod: "UPI",
+        amount: isPendingOrCredit ? 0 : (totalAmount > 0 ? totalAmount : 0),
+        referenceNumber: "",
+      }
+      setRows([resetRow])
+    }
+  }, [payments, isEditMode, paymentStatus, totalAmount])
+
+  // When creating a new sale (!isEditMode), ensure parent is synced with default UPI row
+  const hasInitialNotifiedRef = React.useRef(false)
+  useEffect(() => {
+    if (!isEditMode && !hasInitialNotifiedRef.current) {
+      hasInitialNotifiedRef.current = true
+      if (!payments || payments.length === 0 || (payments.length === 1 && payments[0].paymentMethod === "Cash" && Number(payments[0].amount) === 0)) {
+        const isPendingOrCredit = paymentStatus === "Pending" || paymentStatus === "Credit" || paymentStatus === "COD" || paymentStatus === "Cancelled" || !paymentStatus
+        const initialRow: SplitPaymentRow = {
+          rowId: `row-0-${Date.now()}`,
+          paymentMethod: "UPI",
+          amount: isPendingOrCredit ? 0 : (totalAmount > 0 ? totalAmount : 0),
+          referenceNumber: "",
+        }
+        setRows([initialRow])
+        notifyParent([initialRow])
       }
     }
-  }, [payments])
+  }, [isEditMode])
 
   const isPendingOrCancelled = paymentStatus === "Pending" || paymentStatus === "Cancelled"
 
@@ -139,7 +166,7 @@ export function SplitPaymentInput({
         const updated = [
           {
             rowId: rows[0]?.rowId || `row-0-${Date.now()}`,
-            paymentMethod: rows[0]?.paymentMethod || "Cash",
+            paymentMethod: rows[0]?.paymentMethod || "UPI",
             amount: totalAmount,
             referenceNumber: rows[0]?.referenceNumber || "",
           },
@@ -432,7 +459,7 @@ export function SplitPaymentInput({
                   const updated = [
                     {
                       rowId: rows[0]?.rowId || `row-0-${Date.now()}`,
-                      paymentMethod: rows[0]?.paymentMethod || "Cash",
+                      paymentMethod: rows[0]?.paymentMethod || "UPI",
                       amount: totalAmount > 0 ? totalAmount : 0,
                       referenceNumber: rows[0]?.referenceNumber || "",
                     },
