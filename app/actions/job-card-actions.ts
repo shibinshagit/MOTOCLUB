@@ -134,7 +134,7 @@ export async function createJobCard(input: JobCardInput) {
       formData.append("landmark", input.shippingLandmark || "")
       formData.append("address_type", input.shippingAddressType || "Home")
       formData.append("pincode", input.shippingPincode || "")
-      formData.append("user_id", String(session?.companyId || deviceId))
+      formData.append("user_id", String(deviceId))
       
       const res = await addCustomer(formData)
       if (res.success && res.data) {
@@ -449,7 +449,7 @@ export async function updateJobCard(id: number, input: any) {
       formData.append("landmark", input.shippingLandmark || "")
       formData.append("address_type", input.shippingAddressType || "Home")
       formData.append("pincode", input.shippingPincode || "")
-      formData.append("user_id", String(session?.companyId || deviceId))
+      formData.append("user_id", String(deviceId))
       
       const res = await addCustomer(formData)
       if (res.success && res.data) {
