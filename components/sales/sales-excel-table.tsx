@@ -796,9 +796,11 @@ export default function SalesExcelTable({
     // Pre-open window immediately to avoid popup blockers when resolving async data
     const printWindow = typeof window !== "undefined" ? window.open("", "_blank") : null
     if (printWindow) {
+      printWindow.document.open()
       printWindow.document.write(
-        "<!DOCTYPE html><html><head><title>Loading Summary...</title></head><body style='font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;padding:32px;color:#334155;text-align:center;'><h2 style='font-size:18px;margin-bottom:8px;'>Generating Sales Summary Report</h2><p style='font-size:14px;color:#64748b;'>Loading report data, please wait a moment...</p></body></html>"
+        "<!DOCTYPE html><html><head><title>Sales Summary Report</title><style>@media print { body { display: none !important; } }</style></head><body style='font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;padding:32px;color:#334155;text-align:center;'><h2 style='font-size:18px;margin-bottom:8px;'>Generating Sales Summary Report</h2><p style='font-size:14px;color:#64748b;'>Loading report data, please wait a moment...</p></body></html>"
       )
+      printWindow.document.close()
     }
 
     setIsGeneratingReport(true)
