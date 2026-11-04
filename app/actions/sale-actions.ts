@@ -809,6 +809,26 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
              WHERE si.sale_id = s.id), ''
           ) as products_text,
           COALESCE(
+            (SELECT JSON_AGG(
+               JSON_BUILD_OBJECT(
+                 'id', si.id,
+                 'product_id', si.product_id,
+                 'product_variant_id', si.product_variant_id,
+                 'product_name', COALESCE(p.name, sv.name, si.notes, 'Item'),
+                 'variant_name', CASE WHEN pv.name IS NOT NULL AND pv.name != '' AND LOWER(TRIM(pv.name)) NOT IN ('default', 'default variant', 'default-variant') THEN pv.name ELSE '' END,
+                 'quantity', si.quantity,
+                 'price', si.price,
+                 'cost', COALESCE(si.cost, pv.wholesale_price, p.wholesale_price, 0)
+               )
+               ORDER BY si.id ASC
+             )
+             FROM sale_items si
+             LEFT JOIN products p ON si.product_id = p.id AND NOT EXISTS (SELECT 1 FROM services s2 WHERE s2.id = si.product_id)
+             LEFT JOIN services sv ON si.product_id = sv.id
+             LEFT JOIN product_variants pv ON si.product_variant_id = pv.id
+             WHERE si.sale_id = s.id), '[]'::json
+          ) as items,
+          COALESCE(
             (SELECT STRING_AGG(COALESCE(p.name, sv.name, si.notes, ''), ', ')
              FROM sale_items si
              LEFT JOIN products p ON si.product_id = p.id AND NOT EXISTS (SELECT 1 FROM services s2 WHERE s2.id = si.product_id)
@@ -1181,6 +1201,26 @@ export async function getSalesByIds(deviceId: number, saleIds: number[]) {
              LEFT JOIN product_variants pv ON si.product_variant_id = pv.id
              WHERE si.sale_id = s.id), ''
           ) as products_text,
+          COALESCE(
+            (SELECT JSON_AGG(
+               JSON_BUILD_OBJECT(
+                 'id', si.id,
+                 'product_id', si.product_id,
+                 'product_variant_id', si.product_variant_id,
+                 'product_name', COALESCE(p.name, sv.name, si.notes, 'Item'),
+                 'variant_name', CASE WHEN pv.name IS NOT NULL AND pv.name != '' AND LOWER(TRIM(pv.name)) NOT IN ('default', 'default variant', 'default-variant') THEN pv.name ELSE '' END,
+                 'quantity', si.quantity,
+                 'price', si.price,
+                 'cost', COALESCE(si.cost, pv.wholesale_price, p.wholesale_price, 0)
+               )
+               ORDER BY si.id ASC
+             )
+             FROM sale_items si
+             LEFT JOIN products p ON si.product_id = p.id AND NOT EXISTS (SELECT 1 FROM services s2 WHERE s2.id = si.product_id)
+             LEFT JOIN services sv ON si.product_id = sv.id
+             LEFT JOIN product_variants pv ON si.product_variant_id = pv.id
+             WHERE si.sale_id = s.id), '[]'::json
+          ) as items,
           COALESCE(
             (SELECT STRING_AGG(COALESCE(p.name, sv.name, si.notes, ''), ', ')
              FROM sale_items si

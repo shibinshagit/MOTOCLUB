@@ -1,6 +1,13 @@
 import { format } from "date-fns"
 import { parseSaleDate } from "@/lib/utils"
 
+export interface SaleSummaryItem {
+  name: string
+  quantity: number
+  cost: number
+  sellingPrice: number
+}
+
 export interface SaleSummaryRow {
   saleId: string
   saleDate: string
@@ -8,9 +15,11 @@ export interface SaleSummaryRow {
   customerPhone: string
   combinedCustomer: string
   productList: string
+  items: SaleSummaryItem[]
   cost: number
   sellingPrice: number
   totalPrice: number
+  courierCharge: number
   partnerCourier: number
   profit: number
 }
@@ -20,6 +29,7 @@ export interface SalesSummaryTotals {
   totalCost: number
   totalSelling: number
   totalPrice: number
+  totalCourierCharge: number
   totalPartnerCourier: number
   totalProfit: number
 }
@@ -59,36 +69,77 @@ export function extractSaleSummaryRow(sale: any): SaleSummaryRow {
     .filter(Boolean)
     .join("\n")
 
-  let rawProductList = sale.products_text?.trim() || sale.items_summary?.trim()
+  // Parse items
+  let rawItems = sale.items
+  if (typeof rawItems === "string") {
+    try {
+      rawItems = JSON.parse(rawItems)
+    } catch {
+      rawItems = []
+    }
+  }
 
-  if (!rawProductList && Array.isArray(sale.items) && sale.items.length > 0) {
-    rawProductList = sale.items
-      .map((item: any) => {
-        const name = item.product_name || item.name || item.title || item.notes || "Item"
-        const variant = item.variant_name || item.variant || ""
-        const qty = item.quantity || 1
-        return `${name}${variant && variant !== "Default Variant" && variant !== "Default" ? ` - ${variant}` : ""} × ${qty}`
+  const items: SaleSummaryItem[] = []
+  if (Array.isArray(rawItems) && rawItems.length > 0) {
+    for (const item of rawItems) {
+      const name = item.product_name || item.name || item.title || item.notes || "Item"
+      const variant = item.variant_name || item.variant || ""
+      const cleanVariant =
+        variant &&
+        variant !== "Default Variant" &&
+        variant !== "Default" &&
+        variant !== "default" &&
+        variant !== "default variant"
+          ? ` - ${variant}`
+          : ""
+      const qty = Number(item.quantity || 1)
+      const unitCost = Number(item.cost ?? item.cost_price ?? item.actual_cost ?? 0)
+      const unitPrice = Number(item.price ?? 0)
+
+      items.push({
+        name: `${name}${cleanVariant} × ${qty}`,
+        quantity: qty,
+        cost: Number((qty * unitCost).toFixed(2)),
+        sellingPrice: Number((qty * unitPrice).toFixed(2)),
       })
-      .join("\n")
+    }
   }
 
-  if (!rawProductList) {
-    rawProductList = "Item × 1"
-  }
-
-  const productList = rawProductList
-    .replace(/ - Default Variant/g, "")
-    .replace(/ - Default/g, "")
-
-  const itemsCost =
-    sale.items?.reduce(
-      (sum: number, i: any) => sum + Number(i.cost || i.cost_price || 0) * Number(i.quantity || 1),
+  // Fallback if items array is missing or empty
+  if (items.length === 0) {
+    let rawProductList = sale.products_text?.trim() || sale.items_summary?.trim() || "Item × 1"
+    const lines = rawProductList
+      .split("\n")
+      .map((l: string) => l.trim())
+      .filter(Boolean)
+    const fallbackLines = lines.length > 0 ? lines : [rawProductList]
+    const defaultCost = Number(sale.total_cost || 0)
+    const defaultSelling = Math.max(
       0,
-    ) || 0
-  const cost = Number(sale.total_cost || 0) > 0 ? Number(sale.total_cost) : itemsCost
-  const customerCourier = Number(sale.courier_paid_extra || 0)
+      Number(sale.total_amount || 0) - Number(sale.courier_paid_extra || 0),
+    )
+
+    fallbackLines.forEach((line: string, idx: number) => {
+      items.push({
+        name: line.replace(/ - Default Variant/g, "").replace(/ - Default/g, ""),
+        quantity: 1,
+        cost: idx === 0 ? defaultCost : 0,
+        sellingPrice: idx === 0 ? defaultSelling : 0,
+      })
+    })
+  }
+
+  const productList = items.map((i) => i.name).join("\n")
+
+  const calculatedItemsCost = items.reduce((sum, i) => sum + i.cost, 0)
+  const cost = Number(sale.total_cost || 0) > 0 ? Number(sale.total_cost) : calculatedItemsCost
+  const courierCharge = Number(sale.courier_paid_extra || 0)
   const totalPrice = Number(sale.total_amount || 0)
-  const sellingPrice = Math.max(0, totalPrice - customerCourier)
+
+  const calculatedItemsSelling = items.reduce((sum, i) => sum + i.sellingPrice, 0)
+  const sellingPrice =
+    calculatedItemsSelling > 0 ? calculatedItemsSelling : Math.max(0, totalPrice - courierCharge)
+
   const partnerCourier = Number(sale.expense_courier || 0)
 
   const isCancelledOrReturned =
@@ -98,7 +149,11 @@ export function extractSaleSummaryRow(sale: any): SaleSummaryRow {
     sale.delivery_status?.toLowerCase() === "returned" ||
     sale.payment_status?.toLowerCase() === "cancelled"
 
-  const profit = isCancelledOrReturned ? 0 : totalPrice - cost - partnerCourier
+  // Option 1: Profit is Total Price - Total Cost - Courier Expense
+  // (If courier expense is 0, this equals Total Price - Total Cost)
+  const profit = isCancelledOrReturned
+    ? 0
+    : Number((totalPrice - cost - partnerCourier).toFixed(2))
 
   return {
     saleId,
@@ -107,10 +162,12 @@ export function extractSaleSummaryRow(sale: any): SaleSummaryRow {
     customerPhone,
     combinedCustomer,
     productList,
-    cost,
-    sellingPrice,
-    totalPrice,
-    partnerCourier,
+    items,
+    cost: Number(cost.toFixed(2)),
+    sellingPrice: Number(sellingPrice.toFixed(2)),
+    totalPrice: Number(totalPrice.toFixed(2)),
+    courierCharge: Number(courierCharge.toFixed(2)),
+    partnerCourier: Number(partnerCourier.toFixed(2)),
     profit,
   }
 }
@@ -119,17 +176,19 @@ export function computeSalesSummaryTotals(rows: SaleSummaryRow[]): SalesSummaryT
   return rows.reduce(
     (acc, row) => ({
       totalOrders: acc.totalOrders + 1,
-      totalCost: acc.totalCost + row.cost,
-      totalSelling: acc.totalSelling + row.sellingPrice,
-      totalPrice: acc.totalPrice + row.totalPrice,
-      totalPartnerCourier: acc.totalPartnerCourier + row.partnerCourier,
-      totalProfit: acc.totalProfit + row.profit,
+      totalCost: Number((acc.totalCost + row.cost).toFixed(2)),
+      totalSelling: Number((acc.totalSelling + row.sellingPrice).toFixed(2)),
+      totalPrice: Number((acc.totalPrice + row.totalPrice).toFixed(2)),
+      totalCourierCharge: Number((acc.totalCourierCharge + row.courierCharge).toFixed(2)),
+      totalPartnerCourier: Number((acc.totalPartnerCourier + row.partnerCourier).toFixed(2)),
+      totalProfit: Number((acc.totalProfit + row.profit).toFixed(2)),
     }),
     {
       totalOrders: 0,
       totalCost: 0,
       totalSelling: 0,
       totalPrice: 0,
+      totalCourierCharge: 0,
       totalPartnerCourier: 0,
       totalProfit: 0,
     },
@@ -187,60 +246,118 @@ export async function downloadSalesSummaryPDF(
   doc.text(`Date Range: ${cleanPeriod}`, 105, 21, { align: "center" })
   doc.text(`Generated on: ${new Date().toLocaleDateString()}`, 105, 26, { align: "center" })
 
-  const tableBody = rows.map((row) => [
-    row.combinedCustomer,
-    row.productList,
-    formatPdfCurrency(row.cost, formatCurrency),
-    formatPdfCurrency(row.sellingPrice, formatCurrency),
-    formatPdfCurrency(row.totalPrice, formatCurrency),
-    formatPdfCurrency(row.partnerCourier, formatCurrency),
-    formatPdfCurrency(row.profit, formatCurrency),
-  ])
+  const tableBody: any[] = []
+
+  for (const row of rows) {
+    const numItems = row.items.length
+    const totalOrderRows = numItems + 1 // items + 1 Total row
+
+    // Row 0: First item
+    const firstItem = row.items[0] || { name: "Item × 1", cost: row.cost, sellingPrice: row.sellingPrice }
+    tableBody.push([
+      {
+        content: row.combinedCustomer,
+        rowSpan: totalOrderRows,
+        styles: { valign: "middle", fontStyle: "bold" },
+      },
+      firstItem.name,
+      { content: formatPdfCurrency(firstItem.cost, formatCurrency), styles: { halign: "right" } },
+      { content: formatPdfCurrency(firstItem.sellingPrice, formatCurrency), styles: { halign: "right" } },
+      {
+        content: formatPdfCurrency(row.courierCharge, formatCurrency),
+        rowSpan: totalOrderRows,
+        styles: { valign: "middle", halign: "right" },
+      },
+      {
+        content: formatPdfCurrency(row.totalPrice, formatCurrency),
+        rowSpan: totalOrderRows,
+        styles: { valign: "middle", halign: "right", fontStyle: "bold" },
+      },
+      {
+        content: formatPdfCurrency(row.profit, formatCurrency),
+        rowSpan: totalOrderRows,
+        styles: { valign: "middle", halign: "right", fontStyle: "bold", textColor: [22, 101, 52] },
+      },
+    ])
+
+    // Rows 1 to numItems - 1: Subsequent items
+    for (let i = 1; i < numItems; i++) {
+      const item = row.items[i]
+      tableBody.push([
+        item.name,
+        { content: formatPdfCurrency(item.cost, formatCurrency), styles: { halign: "right" } },
+        { content: formatPdfCurrency(item.sellingPrice, formatCurrency), styles: { halign: "right" } },
+      ])
+    }
+
+    // Order Total row
+    tableBody.push([
+      { content: "Total", styles: { fontStyle: "bold", fillColor: [241, 245, 249] } },
+      {
+        content: formatPdfCurrency(row.cost, formatCurrency),
+        styles: { fontStyle: "bold", halign: "right", fillColor: [241, 245, 249] },
+      },
+      {
+        content: formatPdfCurrency(row.sellingPrice, formatCurrency),
+        styles: { fontStyle: "bold", halign: "right", fillColor: [241, 245, 249] },
+      },
+    ])
+  }
 
   // Summary Totals row
   tableBody.push([
-    `Total Orders: ${totals.totalOrders}`,
-    "SUMMARY TOTALS",
-    formatPdfCurrency(totals.totalCost, formatCurrency),
-    formatPdfCurrency(totals.totalSelling, formatCurrency),
-    formatPdfCurrency(totals.totalPrice, formatCurrency),
-    formatPdfCurrency(totals.totalPartnerCourier, formatCurrency),
-    formatPdfCurrency(totals.totalProfit, formatCurrency),
+    { content: `Total Orders: ${totals.totalOrders}`, styles: { fontStyle: "bold", fillColor: [226, 232, 240] } },
+    { content: "SUMMARY TOTALS", styles: { fontStyle: "bold", fillColor: [226, 232, 240] } },
+    {
+      content: formatPdfCurrency(totals.totalCost, formatCurrency),
+      styles: { fontStyle: "bold", halign: "right", fillColor: [226, 232, 240] },
+    },
+    {
+      content: formatPdfCurrency(totals.totalSelling, formatCurrency),
+      styles: { fontStyle: "bold", halign: "right", fillColor: [226, 232, 240] },
+    },
+    {
+      content: formatPdfCurrency(totals.totalCourierCharge, formatCurrency),
+      styles: { fontStyle: "bold", halign: "right", fillColor: [226, 232, 240] },
+    },
+    {
+      content: formatPdfCurrency(totals.totalPrice, formatCurrency),
+      styles: { fontStyle: "bold", halign: "right", fillColor: [226, 232, 240] },
+    },
+    {
+      content: formatPdfCurrency(totals.totalProfit, formatCurrency),
+      styles: { fontStyle: "bold", halign: "right", fillColor: [226, 232, 240], textColor: [22, 101, 52] },
+    },
   ])
 
   autoTable(doc, {
     startY: 30,
-    head: [["Sale / Customer", "Product List", "Cost", "Selling", "Total Price", "Partner Courier", "Profit"]],
+    margin: { left: 10, right: 10, top: 28, bottom: 10 },
+    tableWidth: 190,
+    head: [["Sale / Customer", "Product List", "Cost", "Selling", "Courier Charge", "Total Price", "Profit"]],
     body: tableBody,
     theme: "grid",
     headStyles: {
       fillColor: [15, 23, 42],
       textColor: [255, 255, 255],
       fontStyle: "bold",
-      fontSize: 8.5,
+      fontSize: 8,
       halign: "left",
     },
     bodyStyles: {
       fontSize: 7.5,
       cellPadding: { top: 2, bottom: 2, left: 1.5, right: 1.5 },
-      valign: "top",
+      valign: "middle",
       overflow: "linebreak",
     },
     columnStyles: {
       0: { cellWidth: 32 },
-      1: { cellWidth: 42 },
+      1: { cellWidth: 46 },
       2: { cellWidth: 20, halign: "right" },
       3: { cellWidth: 20, halign: "right" },
-      4: { cellWidth: 22, halign: "right" },
+      4: { cellWidth: 24, halign: "right" },
       5: { cellWidth: 24, halign: "right" },
-      6: { cellWidth: 24, halign: "right", fontStyle: "bold" },
-    },
-    didParseCell: function (data: any) {
-      if (data.row.index === tableBody.length - 1) {
-        data.cell.styles.fontStyle = "bold"
-        data.cell.styles.fillColor = [241, 245, 249]
-        data.cell.styles.fontSize = 8
-      }
+      6: { cellWidth: 24, halign: "right" },
     },
   })
 
@@ -336,16 +453,9 @@ export function printSalesSummaryReport(
       text-align: right;
     }
     .print-table td {
-      padding: 8px 10px;
+      padding: 6px 10px;
       border: 1px solid #e2e8f0;
       vertical-align: top;
-    }
-    .print-table tr:nth-child(even) td {
-      background-color: #f8fafc;
-    }
-    .cell-multiline {
-      white-space: pre-line;
-      line-height: 1.45;
     }
     .sale-cust-cell {
       white-space: pre-line;
@@ -418,30 +528,62 @@ export function printSalesSummaryReport(
         <th style="width: 28%;">Product List</th>
         <th class="num-col" style="width: 10%;">Cost</th>
         <th class="num-col" style="width: 10%;">Selling</th>
+        <th class="num-col" style="width: 11%;">Courier Charge</th>
         <th class="num-col" style="width: 11%;">Total Price</th>
-        <th class="num-col" style="width: 11%;">Partner Courier</th>
         <th class="num-col" style="width: 10%;">Profit</th>
       </tr>
     </thead>
     <tbody>
       ${rows
-        .map(
-          (row) => `
+        .map((row) => {
+          const numItems = row.items.length
+          const rowspan = numItems + 1
+          const firstItem = row.items[0] || { name: "Item × 1", cost: row.cost, sellingPrice: row.sellingPrice }
+          const restItems = row.items.slice(1)
+
+          let out = `
         <tr>
-          <td class="sale-cust-cell"><span class="sale-cust-id">${escapeHtml(row.saleId)}</span>\n${escapeHtml(
-            row.saleDate,
-          )}\n${escapeHtml(row.customerName)}${
-            row.customerPhone ? `\n${escapeHtml(row.customerPhone)}` : ""
-          }</td>
-          <td class="cell-multiline">${escapeHtml(row.productList)}</td>
-          <td class="num-col">${escapeHtml(formatCurrency(row.cost))}</td>
-          <td class="num-col">${escapeHtml(formatCurrency(row.sellingPrice))}</td>
-          <td class="num-col">${escapeHtml(formatCurrency(row.totalPrice))}</td>
-          <td class="num-col">${escapeHtml(formatCurrency(row.partnerCourier))}</td>
-          <td class="num-col" style="font-weight: 700;">${escapeHtml(formatCurrency(row.profit))}</td>
+          <td class="sale-cust-cell" rowspan="${rowspan}">
+            <span class="sale-cust-id">${escapeHtml(row.saleId)}</span><br/>
+            ${escapeHtml(row.saleDate)}<br/>
+            ${escapeHtml(row.customerName)}
+            ${row.customerPhone ? `<br/>${escapeHtml(row.customerPhone)}` : ""}
+          </td>
+          <td>${escapeHtml(firstItem.name)}</td>
+          <td class="num-col">${escapeHtml(formatCurrency(firstItem.cost))}</td>
+          <td class="num-col">${escapeHtml(formatCurrency(firstItem.sellingPrice))}</td>
+          <td class="num-col" rowspan="${rowspan}" style="vertical-align: middle;">${escapeHtml(
+            formatCurrency(row.courierCharge),
+          )}</td>
+          <td class="num-col" rowspan="${rowspan}" style="font-weight: 700; vertical-align: middle;">${escapeHtml(
+            formatCurrency(row.totalPrice),
+          )}</td>
+          <td class="num-col" rowspan="${rowspan}" style="font-weight: 700; color: #16a34a; vertical-align: middle;">${escapeHtml(
+            formatCurrency(row.profit),
+          )}</td>
         </tr>
-      `,
-        )
+          `
+
+          for (const item of restItems) {
+            out += `
+        <tr>
+          <td>${escapeHtml(item.name)}</td>
+          <td class="num-col">${escapeHtml(formatCurrency(item.cost))}</td>
+          <td class="num-col">${escapeHtml(formatCurrency(item.sellingPrice))}</td>
+        </tr>
+            `
+          }
+
+          out += `
+        <tr style="background-color: #f1f5f9; font-weight: 700;">
+          <td style="font-weight: 700;">Total</td>
+          <td class="num-col" style="font-weight: 700;">${escapeHtml(formatCurrency(row.cost))}</td>
+          <td class="num-col" style="font-weight: 700;">${escapeHtml(formatCurrency(row.sellingPrice))}</td>
+        </tr>
+          `
+
+          return out
+        })
         .join("")}
     </tbody>
   </table>
@@ -461,12 +603,12 @@ export function printSalesSummaryReport(
         <div class="totals-val">${escapeHtml(formatCurrency(totals.totalSelling))}</div>
       </div>
       <div class="totals-item">
-        <div class="totals-label">Total Price</div>
-        <div class="totals-val">${escapeHtml(formatCurrency(totals.totalPrice))}</div>
+        <div class="totals-label">Total Courier Charge</div>
+        <div class="totals-val">${escapeHtml(formatCurrency(totals.totalCourierCharge))}</div>
       </div>
       <div class="totals-item">
-        <div class="totals-label">Total Partner Courier</div>
-        <div class="totals-val">${escapeHtml(formatCurrency(totals.totalPartnerCourier))}</div>
+        <div class="totals-label">Total Price</div>
+        <div class="totals-val">${escapeHtml(formatCurrency(totals.totalPrice))}</div>
       </div>
       <div class="totals-item">
         <div class="totals-label">Total Profit</div>
@@ -476,17 +618,31 @@ export function printSalesSummaryReport(
   </div>
 
   <script>
-    window.onload = function() {
-      setTimeout(function() {
+    function triggerPrint() {
+      try {
+        window.focus();
         window.print();
-      }, 250);
-    };
+      } catch (e) {
+        console.error("Print error:", e);
+      }
+    }
+    if (document.readyState === 'complete') {
+      setTimeout(triggerPrint, 250);
+    } else {
+      window.addEventListener('load', function() {
+        setTimeout(triggerPrint, 250);
+      });
+    }
   </script>
 </body>
 </html>`
 
+  printWindow.document.open()
   printWindow.document.write(html)
   printWindow.document.close()
+  try {
+    printWindow.document.title = `Sales Summary Report - ${cleanPeriod}`
+  } catch {}
 }
 
 export function downloadSalesSummaryExcel(
@@ -502,28 +658,62 @@ export function downloadSalesSummaryExcel(
     "Product List",
     "Cost",
     "Selling",
+    "Courier Charge",
     "Total Price",
-    "Partner Courier",
     "Profit",
   ]
 
-  const dataRows = rows.map((row) => [
-    row.combinedCustomer.replace(/\n/g, ", "),
-    row.productList.replace(/\n/g, "; "),
-    row.cost,
-    row.sellingPrice,
-    row.totalPrice,
-    row.partnerCourier,
-    row.profit,
-  ])
+  const dataRows: (string | number)[][] = []
+
+  for (const row of rows) {
+    const custClean = row.combinedCustomer.replace(/\n/g, ", ")
+    const numItems = row.items.length
+    const firstItem = row.items[0] || { name: "Item × 1", cost: row.cost, sellingPrice: row.sellingPrice }
+
+    // First item row
+    dataRows.push([
+      custClean,
+      firstItem.name,
+      firstItem.cost,
+      firstItem.sellingPrice,
+      row.courierCharge,
+      row.totalPrice,
+      row.profit,
+    ])
+
+    // Subsequent item rows
+    for (let i = 1; i < numItems; i++) {
+      const item = row.items[i]
+      dataRows.push([
+        "",
+        item.name,
+        item.cost,
+        item.sellingPrice,
+        "",
+        "",
+        "",
+      ])
+    }
+
+    // Order Total row
+    dataRows.push([
+      "",
+      "Total",
+      row.cost,
+      row.sellingPrice,
+      row.courierCharge,
+      row.totalPrice,
+      row.profit,
+    ])
+  }
 
   const totalsRow = [
     `Total Orders: ${totals.totalOrders}`,
     "SUMMARY TOTALS",
     totals.totalCost,
     totals.totalSelling,
+    totals.totalCourierCharge,
     totals.totalPrice,
-    totals.totalPartnerCourier,
     totals.totalProfit,
   ]
 
@@ -555,4 +745,3 @@ export function downloadSalesSummaryExcel(
   link.click()
   document.body.removeChild(link)
 }
-
