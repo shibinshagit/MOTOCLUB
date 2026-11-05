@@ -75,6 +75,7 @@ import {
   Package,
   ArrowRight,
   Save,
+  Truck,
 } from "lucide-react"
 import { SalesBreakdownModal } from "@/components/shared/sales-breakdown-modal"
 import {
@@ -427,7 +428,7 @@ export default function SalesExcelTable({
     [formatCurrency, getPaymentMethodDisplay, getRemainingAmount],
   )
 
-  const [cardFilter, setCardFilter] = useState<"all" | "today" | "pending" | "critical">("all")
+  const [cardFilter, setCardFilter] = useState<"all" | "today" | "pending" | "critical" | "direct">("all")
   const [typeFilter, setTypeFilter] = useState<"all" | "normal" | "job_card">("all")
   const [typeOfSaleFilter, setTypeOfSaleFilter] = useState<"all" | "walk in" | "courier" | "pending_payments">("all")
   const [selectedSales, setSelectedSales] = useState<number[]>([])
@@ -443,9 +444,15 @@ export default function SalesExcelTable({
   const [serverSales, setServerSales] = useState<any[]>([])
   const [totalServerCount, setTotalServerCount] = useState(0)
   const [totalServerPages, setTotalServerPages] = useState(0)
-  const [serverCardCounts, setServerCardCounts] = useState<{ total: number; today?: number; pending: number; critical: number; total_amount?: number } | null>(
-    null,
-  )
+  const [serverCardCounts, setServerCardCounts] = useState<{
+    total: number
+    today?: number
+    pending: number
+    critical: number
+    total_amount?: number
+    direct?: number
+    direct_amount?: number
+  } | null>(null)
   const [isFetchingServer, setIsFetchingServer] = useState(false)
   const [expandedCache, setExpandedCache] = useState<Record<number, any>>({})
   const [loadingExpandedId, setLoadingExpandedId] = useState<number | null>(null)
@@ -648,6 +655,8 @@ export default function SalesExcelTable({
   const todayCount = serverCardCounts?.today ?? displaySales.filter(isTodaySale).length
   const pendingCount = serverCardCounts ? serverCardCounts.pending : 0
   const criticalCount = serverCardCounts ? serverCardCounts.critical : 0
+  const directCount = serverCardCounts?.direct ?? 0
+  const directSalesAmount = serverCardCounts?.direct_amount ?? 0
   const pendingSalesCount = pendingCount
 
   const totalSalesAmount = useMemo(
@@ -1017,7 +1026,7 @@ export default function SalesExcelTable({
           }}
         />
       ) : isLogistics ? (
-        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
           {/* LOGISTICS CARD 1 — TOTAL ORDERS */}
           <button
             type="button"
@@ -1054,9 +1063,6 @@ export default function SalesExcelTable({
                 <div className="text-xl font-extrabold text-slate-900 leading-tight">
                   {totalOrderCount} <span className="text-xs font-normal text-slate-500">{totalOrderCount === 1 ? "Order" : "Orders"}</span>
                 </div>
-                <div className="text-xs font-semibold text-violet-700 mt-0.5 truncate">
-                  {formatCurrency(totalSalesAmount)}
-                </div>
               </div>
               {cardFilter === "all" && (
                 <span className="text-[10px] font-bold text-violet-700 bg-violet-100 px-2 py-0.5 rounded-full border border-violet-200 shrink-0">
@@ -1089,12 +1095,41 @@ export default function SalesExcelTable({
                 <div className="text-xl font-extrabold text-slate-900 leading-tight">
                   {pendingCount} <span className="text-xs font-normal text-slate-500">{pendingCount === 1 ? "Order" : "Orders"}</span>
                 </div>
-                <div className="text-xs font-semibold text-amber-700 mt-0.5 truncate">
-                  {formatCurrency(pendingSalesAmount)}
-                </div>
               </div>
               {cardFilter === "pending" && (
                 <span className="text-[10px] font-bold text-amber-800 bg-amber-200 px-2 py-0.5 rounded-full border border-amber-300 shrink-0">
+                  Active Filter
+                </span>
+              )}
+            </div>
+          </button>
+
+          {/* LOGISTICS CARD 3 — DIRECT ORDERS */}
+          <button
+            type="button"
+            onClick={() => {
+              setCardFilter("direct")
+              setPage(1)
+            }}
+            className={cn(
+              "flex flex-col justify-between rounded-xl border p-3.5 text-left transition-all cursor-pointer shadow-xs hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400 min-w-0",
+              cardFilter === "direct"
+                ? "border-blue-500 bg-blue-50/90 ring-2 ring-blue-400/30"
+                : "border-slate-200 bg-white hover:border-blue-300 hover:bg-slate-50/50",
+            )}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-blue-700">Direct Orders</span>
+              <Truck className="h-4 w-4 text-blue-600 shrink-0" />
+            </div>
+            <div className="mt-2 flex items-baseline justify-between gap-2 min-w-0">
+              <div className="min-w-0">
+                <div className="text-xl font-extrabold text-slate-900 leading-tight">
+                  {directCount} <span className="text-xs font-normal text-slate-500">{directCount === 1 ? "Order" : "Orders"}</span>
+                </div>
+              </div>
+              {cardFilter === "direct" && (
+                <span className="text-[10px] font-bold text-blue-800 bg-blue-100 px-2 py-0.5 rounded-full border border-blue-200 shrink-0">
                   Active Filter
                 </span>
               )}
@@ -1860,6 +1895,7 @@ export default function SalesExcelTable({
                             currentStaffId={sale.staff_id}
                             currentStaffName={sale.staff_name}
                             onUpdate={onRefreshSales}
+                            disabled={isPurchaseManager || isLogistics}
                           />
                         </td>
                         {!isPurchaseManager && !isLogistics && (
@@ -1998,6 +2034,7 @@ export default function SalesExcelTable({
                                     currentStaffId={sale.staff_id}
                                     currentStaffName={sale.staff_name}
                                     onUpdate={onRefreshSales}
+                                    disabled={isPurchaseManager || isLogistics}
                                   />
                                 </div>
                                 {(sale.shipping_street || sale.shipping_address || sale.customer_address) && (
@@ -2266,6 +2303,7 @@ export default function SalesExcelTable({
                         currentStaffId={sale.staff_id}
                         currentStaffName={sale.staff_name}
                         onUpdate={onRefreshSales}
+                        disabled={isPurchaseManager || isLogistics}
                       />
                     </div>
 

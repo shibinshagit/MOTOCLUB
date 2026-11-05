@@ -14,6 +14,7 @@ interface StaffOwnerSelectProps {
   currentStaffName?: string
   staffList?: any[]
   onUpdate?: () => void
+  disabled?: boolean
 }
 
 // In-memory cache to prevent repeated fetching across rows
@@ -26,6 +27,7 @@ export function StaffOwnerSelect({
   currentStaffName,
   staffList: propStaffList,
   onUpdate,
+  disabled = false,
 }: StaffOwnerSelectProps) {
   const { toast } = useToast()
   const [internalStaffList, setInternalStaffList] = useState<any[]>(
@@ -146,6 +148,26 @@ export function StaffOwnerSelect({
     (s.name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
     (s.position || "").toLowerCase().includes(searchTerm.toLowerCase())
   )
+
+  if (disabled) {
+    return (
+      <div
+        className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-gradient-to-r from-slate-50 to-indigo-50/40 border border-slate-200/90 rounded-lg text-xs font-semibold text-slate-800 shadow-2xs max-w-[170px]"
+        title={`Assigned Owner: ${displayName}`}
+      >
+        {selectedStaffId === "" && (!currentStaffName || currentStaffName === "Store / Admin") ? (
+          <div className="h-5 w-5 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center text-[10px] font-bold shrink-0">
+            <UserCheck className="h-3 w-3" />
+          </div>
+        ) : (
+          <div className="h-5 w-5 rounded-full bg-gradient-to-br from-blue-600 to-indigo-700 text-white flex items-center justify-center text-[9px] font-extrabold shadow-2xs shrink-0">
+            {initials}
+          </div>
+        )}
+        <span className="truncate max-w-[110px] text-slate-800 font-semibold">{displayName}</span>
+      </div>
+    )
+  }
 
   return (
     <div ref={containerRef} className="relative inline-block text-left" onClick={(e) => e.stopPropagation()}>
