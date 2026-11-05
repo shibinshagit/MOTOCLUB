@@ -75,6 +75,7 @@ import {
   Package,
   ArrowRight,
   Save,
+  Truck,
 } from "lucide-react"
 import { SalesBreakdownModal } from "@/components/shared/sales-breakdown-modal"
 import {
@@ -284,7 +285,8 @@ export default function SalesExcelTable({
       ? propIsLogistics
       : activeStaff?.role === "logistics" || Boolean(pathname?.startsWith("/logistics"))
 
-  const tableColSpan = (isPurchaseManager ? 8 : 13) + (showActions || isLogistics ? 1 : 0)
+  const isFinancialHidden = isPurchaseManager || isLogistics
+  const tableColSpan = (isFinancialHidden ? 8 : 13) + (showActions || isLogistics ? 1 : 0)
 
   const { toast } = useToast()
   const [internalSearchTerm, setInternalSearchTerm] = useState("")
@@ -426,7 +428,7 @@ export default function SalesExcelTable({
     [formatCurrency, getPaymentMethodDisplay, getRemainingAmount],
   )
 
-  const [cardFilter, setCardFilter] = useState<"all" | "today" | "pending" | "critical">("all")
+  const [cardFilter, setCardFilter] = useState<"all" | "today" | "pending" | "critical" | "direct">("all")
   const [typeFilter, setTypeFilter] = useState<"all" | "normal" | "job_card">("all")
   const [typeOfSaleFilter, setTypeOfSaleFilter] = useState<"all" | "walk in" | "courier" | "pending_payments">("all")
   const [selectedSales, setSelectedSales] = useState<number[]>([])
@@ -442,9 +444,15 @@ export default function SalesExcelTable({
   const [serverSales, setServerSales] = useState<any[]>([])
   const [totalServerCount, setTotalServerCount] = useState(0)
   const [totalServerPages, setTotalServerPages] = useState(0)
-  const [serverCardCounts, setServerCardCounts] = useState<{ total: number; today?: number; pending: number; critical: number; total_amount?: number } | null>(
-    null,
-  )
+  const [serverCardCounts, setServerCardCounts] = useState<{
+    total: number
+    today?: number
+    pending: number
+    critical: number
+    total_amount?: number
+    direct?: number
+    direct_amount?: number
+  } | null>(null)
   const [isFetchingServer, setIsFetchingServer] = useState(false)
   const [expandedCache, setExpandedCache] = useState<Record<number, any>>({})
   const [loadingExpandedId, setLoadingExpandedId] = useState<number | null>(null)
@@ -647,6 +655,8 @@ export default function SalesExcelTable({
   const todayCount = serverCardCounts?.today ?? displaySales.filter(isTodaySale).length
   const pendingCount = serverCardCounts ? serverCardCounts.pending : 0
   const criticalCount = serverCardCounts ? serverCardCounts.critical : 0
+  const directCount = serverCardCounts?.direct ?? 0
+  const directSalesAmount = serverCardCounts?.direct_amount ?? 0
   const pendingSalesCount = pendingCount
 
   const totalSalesAmount = useMemo(
@@ -1016,7 +1026,7 @@ export default function SalesExcelTable({
           }}
         />
       ) : isLogistics ? (
-        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
           {/* LOGISTICS CARD 1 — TOTAL ORDERS */}
           <button
             type="button"
@@ -1053,9 +1063,6 @@ export default function SalesExcelTable({
                 <div className="text-xl font-extrabold text-slate-900 leading-tight">
                   {totalOrderCount} <span className="text-xs font-normal text-slate-500">{totalOrderCount === 1 ? "Order" : "Orders"}</span>
                 </div>
-                <div className="text-xs font-semibold text-violet-700 mt-0.5 truncate">
-                  {formatCurrency(totalSalesAmount)}
-                </div>
               </div>
               {cardFilter === "all" && (
                 <span className="text-[10px] font-bold text-violet-700 bg-violet-100 px-2 py-0.5 rounded-full border border-violet-200 shrink-0">
@@ -1065,42 +1072,7 @@ export default function SalesExcelTable({
             </div>
           </button>
 
-          {/* LOGISTICS CARD 2 — TODAY'S ORDERS */}
-          <button
-            type="button"
-            onClick={() => {
-              setCardFilter("today")
-              setPage(1)
-            }}
-            className={cn(
-              "flex flex-col justify-between rounded-xl border p-3.5 text-left transition-all cursor-pointer shadow-xs hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400 min-w-0",
-              cardFilter === "today"
-                ? "border-blue-500 bg-blue-50/90 ring-2 ring-blue-400/30"
-                : "border-slate-200 bg-white hover:border-blue-300 hover:bg-slate-50/50",
-            )}
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-blue-700">Today&apos;s Orders</span>
-              <Calendar className="h-4 w-4 text-blue-600 shrink-0" />
-            </div>
-            <div className="mt-2 flex items-baseline justify-between gap-2 min-w-0">
-              <div className="min-w-0">
-                <div className="text-xl font-extrabold text-slate-900 leading-tight">
-                  {todayCount} <span className="text-xs font-normal text-slate-500">{todayCount === 1 ? "Order" : "Orders"}</span>
-                </div>
-                <div className="text-xs font-semibold text-blue-700 mt-0.5 truncate">
-                  {formatCurrency(todaySalesAmount)}
-                </div>
-              </div>
-              {cardFilter === "today" && (
-                <span className="text-[10px] font-bold text-blue-800 bg-blue-100 px-2 py-0.5 rounded-full border border-blue-200 shrink-0">
-                  Active Filter
-                </span>
-              )}
-            </div>
-          </button>
-
-          {/* LOGISTICS CARD 3 — PENDING ORDERS */}
+          {/* LOGISTICS CARD 2 — PENDING ORDERS */}
           <button
             type="button"
             onClick={() => {
@@ -1123,9 +1095,6 @@ export default function SalesExcelTable({
                 <div className="text-xl font-extrabold text-slate-900 leading-tight">
                   {pendingCount} <span className="text-xs font-normal text-slate-500">{pendingCount === 1 ? "Order" : "Orders"}</span>
                 </div>
-                <div className="text-xs font-semibold text-amber-700 mt-0.5 truncate">
-                  {formatCurrency(pendingSalesAmount)}
-                </div>
               </div>
               {cardFilter === "pending" && (
                 <span className="text-[10px] font-bold text-amber-800 bg-amber-200 px-2 py-0.5 rounded-full border border-amber-300 shrink-0">
@@ -1135,35 +1104,32 @@ export default function SalesExcelTable({
             </div>
           </button>
 
-          {/* LOGISTICS CARD 4 — CRITICAL ORDERS */}
+          {/* LOGISTICS CARD 3 — DIRECT ORDERS */}
           <button
             type="button"
             onClick={() => {
-              setCardFilter("critical")
+              setCardFilter("direct")
               setPage(1)
             }}
             className={cn(
-              "flex flex-col justify-between rounded-xl border p-3.5 text-left transition-all cursor-pointer shadow-xs hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-rose-400 min-w-0",
-              cardFilter === "critical"
-                ? "border-rose-500 bg-rose-50/90 ring-2 ring-rose-400/30"
-                : "border-slate-200 bg-white hover:border-rose-300 hover:bg-slate-50/50",
+              "flex flex-col justify-between rounded-xl border p-3.5 text-left transition-all cursor-pointer shadow-xs hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400 min-w-0",
+              cardFilter === "direct"
+                ? "border-blue-500 bg-blue-50/90 ring-2 ring-blue-400/30"
+                : "border-slate-200 bg-white hover:border-blue-300 hover:bg-slate-50/50",
             )}
           >
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-rose-700">Critical Orders</span>
-              <AlertTriangle className="h-4 w-4 text-rose-600 shrink-0" />
+              <span className="text-[11px] font-bold uppercase tracking-wider text-blue-700">Direct Orders</span>
+              <Truck className="h-4 w-4 text-blue-600 shrink-0" />
             </div>
             <div className="mt-2 flex items-baseline justify-between gap-2 min-w-0">
               <div className="min-w-0">
                 <div className="text-xl font-extrabold text-slate-900 leading-tight">
-                  {criticalCount} <span className="text-xs font-normal text-slate-500">{criticalCount === 1 ? "Order" : "Orders"}</span>
-                </div>
-                <div className="text-xs font-semibold text-rose-700 mt-0.5 truncate">
-                  {formatCurrency(criticalSalesAmount)}
+                  {directCount} <span className="text-xs font-normal text-slate-500">{directCount === 1 ? "Order" : "Orders"}</span>
                 </div>
               </div>
-              {cardFilter === "critical" && (
-                <span className="text-[10px] font-bold text-rose-800 bg-rose-200 px-2 py-0.5 rounded-full border border-rose-300 shrink-0">
+              {cardFilter === "direct" && (
+                <span className="text-[10px] font-bold text-blue-800 bg-blue-100 px-2 py-0.5 rounded-full border border-blue-200 shrink-0">
                   Active Filter
                 </span>
               )}
@@ -1657,15 +1623,15 @@ export default function SalesExcelTable({
                   <th className="whitespace-nowrap px-1 py-1.5 text-center w-8"></th>
                   <th className="whitespace-nowrap px-2 py-1.5 text-xs font-bold text-slate-600 text-center">#</th>
                   {headerCell("saleId", "Order #")}
-                  {!isPurchaseManager && headerCell("status", "Status")}
+                  {!isPurchaseManager && !isLogistics && headerCell("status", "Status")}
                   {headerCell("delivery", "Delivery Status")}
                   {headerCell("date", "Date & Time")}
                   {headerCell("customer", "Customer")}
                   {headerCell("staff", "Staff Member")}
-                  {!isPurchaseManager && headerCell("payment", "Payment")}
-                  {!isPurchaseManager && headerCell("total", "Total", "right")}
-                  {!isPurchaseManager && headerCell("received", "Received", "right")}
-                  {!isPurchaseManager && headerCell("balance", "Balance", "right")}
+                  {!isPurchaseManager && !isLogistics && headerCell("payment", "Payment")}
+                  {!isPurchaseManager && !isLogistics && headerCell("total", "Total", "right")}
+                  {!isPurchaseManager && !isLogistics && headerCell("received", "Received", "right")}
+                  {!isPurchaseManager && !isLogistics && headerCell("balance", "Balance", "right")}
                   {(showActions || isLogistics) && <th className={stickyActionHeaderClass}>Action</th>}
                 </tr>
               </thead>
@@ -1884,7 +1850,7 @@ export default function SalesExcelTable({
                             )}
                           </div>
                         </td>
-                        {!isPurchaseManager && (
+                        {!isPurchaseManager && !isLogistics && (
                           <td className="whitespace-nowrap px-3 py-1.5">
                             <SaleStatusBadge status={getSaleStatusLabel(sale)} />
                           </td>
@@ -1929,14 +1895,15 @@ export default function SalesExcelTable({
                             currentStaffId={sale.staff_id}
                             currentStaffName={sale.staff_name}
                             onUpdate={onRefreshSales}
+                            disabled={isPurchaseManager || isLogistics}
                           />
                         </td>
-                        {!isPurchaseManager && (
+                        {!isPurchaseManager && !isLogistics && (
                           <td className="whitespace-nowrap px-3 py-1.5 text-slate-600">
                             {getPaymentMethodDisplay(sale)}
                           </td>
                         )}
-                        {!isPurchaseManager && (
+                        {!isPurchaseManager && !isLogistics && (
                           <td className="whitespace-nowrap px-3 py-1.5 text-right font-medium text-slate-800">
                             <div className="group/total inline-flex flex-col items-end cursor-default">
                               <span className="font-bold text-slate-900">{formatCurrency(Number(sale.total_amount))}</span>
@@ -1948,12 +1915,12 @@ export default function SalesExcelTable({
                             </div>
                           </td>
                         )}
-                        {!isPurchaseManager && (
+                        {!isPurchaseManager && !isLogistics && (
                           <td className="whitespace-nowrap px-3 py-1.5 text-right text-emerald-700">
                             {received > 0 ? formatCurrency(received) : "—"}
                           </td>
                         )}
-                        {!isPurchaseManager && (
+                        {!isPurchaseManager && !isLogistics && (
                           <td className="whitespace-nowrap px-3 py-1.5 text-right text-amber-700 font-semibold">
                             {remaining > 0 ? formatCurrency(remaining) : "—"}
                           </td>
@@ -2067,6 +2034,7 @@ export default function SalesExcelTable({
                                     currentStaffId={sale.staff_id}
                                     currentStaffName={sale.staff_name}
                                     onUpdate={onRefreshSales}
+                                    disabled={isPurchaseManager || isLogistics}
                                   />
                                 </div>
                                 {(sale.shipping_street || sale.shipping_address || sale.customer_address) && (
@@ -2279,7 +2247,7 @@ export default function SalesExcelTable({
                         </div>
                       </div>
 
-                      {!isPurchaseManager && (
+                      {!isPurchaseManager && !isLogistics && (
                         <div className="text-right shrink-0">
                           <div className="group/total inline-flex flex-col items-end cursor-default">
                             <div className="text-sm font-extrabold text-slate-900 leading-tight">
@@ -2335,6 +2303,7 @@ export default function SalesExcelTable({
                         currentStaffId={sale.staff_id}
                         currentStaffName={sale.staff_name}
                         onUpdate={onRefreshSales}
+                        disabled={isPurchaseManager || isLogistics}
                       />
                     </div>
 
@@ -2345,7 +2314,7 @@ export default function SalesExcelTable({
                           {sale.items_summary || sale.products_text || "1 order item"}
                         </span>
                       </div>
-                      {!hideCogs && !isPurchaseManager && (
+                      {!hideCogs && !isPurchaseManager && !isLogistics && (
                         <span className="shrink-0 text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
                           Profit: {formatCurrency(profitAmount)}
                         </span>
@@ -2503,7 +2472,7 @@ export default function SalesExcelTable({
                         </div>
 
                         {/* FINANCIAL SUMMARY */}
-                        {!isPurchaseManager && (
+                        {!isPurchaseManager && !isLogistics && (
                           <div className="grid grid-cols-2 gap-2 bg-white p-2.5 rounded border border-slate-200">
                             <div>
                               <span className="text-[11px] text-slate-500 block">Total Amount</span>
