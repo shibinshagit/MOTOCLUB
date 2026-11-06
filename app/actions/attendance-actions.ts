@@ -103,6 +103,7 @@ export async function getFilteredAttendance(
     endDate: string
     staffId?: string
     status?: string
+    role?: string
   }
 ) {
   try {
@@ -130,13 +131,17 @@ export async function getFilteredAttendance(
         AND a.date <= ${filters.endDate}::date
       WHERE s.device_id = ${deviceId} 
         AND s.is_active = true
-        AND s.role IN ('staff', 'admin')
+        AND s.role IN ('staff', 'admin', 'purchase_manager', 'logistics')
       ORDER BY s.name ASC, a.date DESC
     `
 
     // Apply filters in memory
     if (filters.staffId && filters.staffId.toLowerCase() !== "all") {
       attendance = attendance.filter((a: any) => String(a.staff_id) === String(filters.staffId))
+    }
+
+    if (filters.role && filters.role.toLowerCase() !== "all") {
+      attendance = attendance.filter((a: any) => String(a.staff_role || "").toLowerCase() === filters.role!.toLowerCase())
     }
 
     console.log(`[ATTENDANCE QUERY] DeviceID: ${deviceId}, Filters:`, filters);

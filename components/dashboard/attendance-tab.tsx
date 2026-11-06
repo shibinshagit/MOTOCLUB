@@ -55,6 +55,33 @@ export default function AttendanceTab() {
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear().toString())
   const [searchTerm, setSearchTerm] = useState("")
   const [statusFilter, setStatusFilter] = useState("All")
+  const [roleFilter, setRoleFilter] = useState("All")
+
+  const getRoleBadge = (role?: string) => {
+    const r = (role || "staff").toLowerCase()
+    if (r === "purchase_manager") {
+      return {
+        label: "Purchase Manager",
+        className: "bg-purple-50 text-purple-700 border-purple-200",
+      }
+    }
+    if (r === "logistics") {
+      return {
+        label: "Logistics",
+        className: "bg-blue-50 text-blue-700 border-blue-200",
+      }
+    }
+    if (r === "admin") {
+      return {
+        label: "Admin",
+        className: "bg-amber-50 text-amber-700 border-amber-200",
+      }
+    }
+    return {
+      label: "Staff",
+      className: "bg-slate-100 text-slate-700 border-slate-200",
+    }
+  }
 
   useEffect(() => {
     if (globalDateRange?.from && globalDateRange?.to) {
@@ -128,7 +155,8 @@ export default function AttendanceTab() {
     const res = await getFilteredAttendance(device.id, {
       startDate: start,
       endDate: end,
-      status: statusFilter
+      status: statusFilter,
+      role: roleFilter,
     })
     
     if (res.success && res.data) {
@@ -140,7 +168,7 @@ export default function AttendanceTab() {
 
   useEffect(() => {
     fetchAttendance()
-  }, [device?.id, dateRange, customStartDate, customEndDate, selectedMonth, selectedYear, statusFilter, activeStaff?.id])
+  }, [device?.id, dateRange, customStartDate, customEndDate, selectedMonth, selectedYear, statusFilter, roleFilter, activeStaff?.id])
 
   const handleEditClick = (record: AttendanceRecord) => {
     setEditingRecord(record)
@@ -205,8 +233,11 @@ export default function AttendanceTab() {
   const filteredAttendance = attendance.filter(a => {
     const matchesSearch = (a.staff_name || "").toLowerCase().includes(searchTerm.toLowerCase()) || 
                           (a.staff_phone || "").includes(searchTerm) ||
+                          (a.staff_role || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+                          getRoleBadge(a.staff_role).label.toLowerCase().includes(searchTerm.toLowerCase()) ||
                           (a.remarks || "").toLowerCase().includes(searchTerm.toLowerCase())
-    return matchesSearch
+    const matchesRole = roleFilter === "All" || (a.staff_role || "").toLowerCase() === roleFilter.toLowerCase()
+    return matchesSearch && matchesRole
   })
 
   const formatTime = (val: Date | string | null) => {
@@ -245,6 +276,7 @@ export default function AttendanceTab() {
         formatDate(record.date),
         record.staff_name || "",
         record.staff_phone || "",
+        getRoleBadge(record.staff_role).label,
         (record as any).branch_name || "",
         formatTime(record.check_in),
         formatTime(record.check_out),
@@ -384,6 +416,16 @@ export default function AttendanceTab() {
                   <SelectItem value="Note">Daily Note / Remark</SelectItem>
                 </SelectContent>
               </Select>
+              <Select value={roleFilter} onValueChange={setRoleFilter}>
+                <SelectTrigger className="w-[160px]"><SelectValue placeholder="Role" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="All">All Roles</SelectItem>
+                  <SelectItem value="staff">Staff</SelectItem>
+                  <SelectItem value="purchase_manager">Purchase Manager</SelectItem>
+                  <SelectItem value="logistics">Logistics</SelectItem>
+                  <SelectItem value="admin">Admin</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
         </CardHeader>
@@ -406,6 +448,7 @@ export default function AttendanceTab() {
                       <th className="px-4 py-3 font-medium">Date</th>
                     )}
                     <th className="px-4 py-3 font-medium">Staff Name</th>
+                    <th className="px-4 py-3 font-medium">Role</th>
                     <th className="px-4 py-3 font-medium">Phone</th>
                     <th className="px-4 py-3 font-medium">Branch</th>
                     <th className="px-4 py-3 font-medium">Status</th>
@@ -428,6 +471,11 @@ export default function AttendanceTab() {
                         <td className="px-4 py-3 font-medium whitespace-nowrap">{formatDate(record.date)}</td>
                       )}
                       <td className="px-4 py-3 font-medium">{record.staff_name}</td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold border ${getRoleBadge(record.staff_role).className}`}>
+                          {getRoleBadge(record.staff_role).label}
+                        </span>
+                      </td>
                       <td className="px-4 py-3 text-gray-600">{record.staff_phone}</td>
                       <td className="px-4 py-3 text-gray-600">{(record as any).branch_name}</td>
                       <td className="px-4 py-3">
@@ -480,6 +528,11 @@ export default function AttendanceTab() {
         <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
             <DialogTitle>Edit Attendance</DialogTitle>
+            {editingRecord && (
+              <p className="text-xs text-slate-500 mt-1">
+                Marking for <span className="font-semibold text-slate-800">{editingRecord.staff_name}</span> ({getRoleBadge(editingRecord.staff_role).label}) on {formatDate(editingRecord.date)}
+              </p>
+            )}
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2 mb-2">
