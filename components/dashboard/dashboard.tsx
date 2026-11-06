@@ -25,6 +25,7 @@ import {
   RotateCcw,
   LayoutDashboard,
   ClipboardList,
+  ArrowLeft,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/components/ui/use-toast"
@@ -58,6 +59,7 @@ import AdminDashboardView from "@/components/admin/dashboard/admin-dashboard-vie
 import GlobalDateFilter from "./global-date-filter"
 import StaffAuthModal from "../staff/staff-auth-modal"
 import ProductsToPurchaseTab from "@/components/purchase-manager/products-to-purchase-tab"
+import StaffProfileTab from "@/components/staff/staff-profile-tab"
 import { BrandLogo } from "@/components/brand-logo"
 import { useStaffRestrictions } from "@/hooks/use-staff-restrictions"
 import { type StaffPageId } from "@/lib/staff-restrictions"
@@ -77,7 +79,7 @@ import { activateStaff, clearStaff, selectActiveStaff, setStaff } from "@/store/
 import { getStaffForAuthentication } from "@/app/actions/staff-actions"
 import { selectDateRange } from "@/store/slices/dateRangeSlice"
 
-type TabType = "sale" | "sales" | "sales-orders" | "purchase" | "product" | "trending" | "customer" | "transfer" | "accounting" | "supplier" | "platform" | "master" | "attendance" | "requests" | "returns" | "admin-dashboard" | "products-to-purchase"
+type TabType = "sale" | "sales" | "sales-orders" | "purchase" | "product" | "trending" | "customer" | "transfer" | "accounting" | "supplier" | "platform" | "master" | "attendance" | "requests" | "returns" | "admin-dashboard" | "products-to-purchase" | "profile"
 
 const DEFAULT_CONTENT_TAB: TabType = "sale"
 
@@ -145,7 +147,7 @@ export function Dashboard({
     if (param === "sales" || param === "sales-orders" || param === "home") return "sale"
     if (
       param &&
-      ["sale", "sales", "purchase", "product", "trending", "customer", "transfer", "accounting", "supplier", "platform", "master", "attendance", "requests", "returns", "admin-dashboard", "products-to-purchase"].includes(
+      ["sale", "sales", "purchase", "product", "trending", "customer", "transfer", "accounting", "supplier", "platform", "master", "attendance", "requests", "returns", "admin-dashboard", "products-to-purchase", "profile"].includes(
         param,
       )
     ) {
@@ -193,6 +195,11 @@ export function Dashboard({
       // Admin Dashboard is strictly reserved for Admin sessions
       if (tabId === "admin-dashboard") {
         return Boolean(isAdminSession)
+      }
+      
+      // Profile page is available for any authenticated staff session
+      if (tabId === "profile") {
+        return Boolean(activeStaff)
       }
       
       // Allow products-to-purchase if onlyPosUpdatedSales is true and not explicitly hidden
@@ -720,6 +727,29 @@ export function Dashboard({
           return <MasterDataTab userId={device?.id ?? 0} />
         case "admin-dashboard":
           return <AdminDashboardView deviceId={deviceId || 0} companyId={companyId} />
+        case "profile":
+          return (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between pb-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    const fallbackTab = lastContentTab && lastContentTab !== "profile" ? lastContentTab : "sale"
+                    setActiveTab(fallbackTab)
+                    const url = new URL(window.location.href)
+                    url.searchParams.set("tab", fallbackTab)
+                    window.history.pushState({}, "", url.toString())
+                  }}
+                  className="text-xs font-semibold text-slate-700 hover:text-slate-900 bg-white border border-slate-200 shadow-2xs hover:bg-slate-50"
+                >
+                  <ArrowLeft className="mr-1.5 h-3.5 w-3.5" />
+                  Back to Dashboard
+                </Button>
+              </div>
+              <StaffProfileTab />
+            </div>
+          )
         default:
           return <ErrorTab name={activeTab} />
       }
@@ -885,6 +915,19 @@ export function Dashboard({
                     </div>
                     <DropdownMenuSeparator className="bg-gray-200" />
                     <DropdownMenuItem
+                      onClick={() => {
+                        setLastContentTab(activeTab === "profile" ? "sale" : activeTab)
+                        setActiveTab("profile")
+                        const url = new URL(window.location.href)
+                        url.searchParams.set("tab", "profile")
+                        window.history.pushState({}, "", url.toString())
+                      }}
+                      className="cursor-pointer text-slate-700 hover:bg-slate-100 font-medium"
+                    >
+                      <User className="mr-2 h-4 w-4 text-blue-600" />
+                      My Profile
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
                       onClick={handleStaffLogout}
                       className="cursor-pointer text-amber-700 hover:bg-amber-50"
                     >
@@ -977,6 +1020,19 @@ export function Dashboard({
                       </p>
                     </div>
                     <DropdownMenuSeparator className="bg-gray-200" />
+                    <DropdownMenuItem
+                      onClick={() => {
+                        setLastContentTab(activeTab === "profile" ? "sale" : activeTab)
+                        setActiveTab("profile")
+                        const url = new URL(window.location.href)
+                        url.searchParams.set("tab", "profile")
+                        window.history.pushState({}, "", url.toString())
+                      }}
+                      className="cursor-pointer text-slate-700 hover:bg-slate-100 font-medium"
+                    >
+                      <User className="mr-2 h-4 w-4 text-blue-600" />
+                      My Profile
+                    </DropdownMenuItem>
                     <DropdownMenuItem
                       onClick={handleStaffLogout}
                       className="cursor-pointer text-amber-700 hover:bg-amber-50"
