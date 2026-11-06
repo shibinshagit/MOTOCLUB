@@ -197,7 +197,7 @@ export default function StaffProfileTab() {
     if (!device?.id) return
     setIsLoadingRequests(true)
     try {
-      const res = await getStaffRequests({ deviceId: device.id })
+      const res = await getStaffRequests({ deviceId: device.id, staffId: activeStaff?.id })
       if (res.success) {
         setRequests(res.data || [])
       }
@@ -250,6 +250,7 @@ export default function StaffProfileTab() {
     setIsSubmitting(true)
     try {
       const res = await createStaffRequest({
+        staffId: activeStaff?.id || undefined,
         deviceId: device?.id || undefined,
         requestType: requestForm.requestType,
         amount: Number(requestForm.amount),
