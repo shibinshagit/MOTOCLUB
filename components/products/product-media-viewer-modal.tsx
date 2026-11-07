@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react"
-import { createPortal } from "react-dom"
+import * as DialogPrimitive from "@radix-ui/react-dialog"
 import {
   X,
   ChevronLeft,
@@ -82,11 +82,14 @@ export function ProductMediaViewerModal({
   const [isDragging, setIsDragging] = useState(false)
   const [mounted, setMounted] = useState(false)
 
-  const backdropRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
-  const stageRef = useRef<HTMLDivElement>(null)
+  const stageRef = useRef<HTMLDivElement | null>(null)
+  const stageCleanupRef = useRef<(() => void) | null>(null)
   const dragStartRef = useRef({ x: 0, y: 0 })
+  const mouseDownPosRef = useRef({ x: 0, y: 0, time: 0 })
   const touchStartRef = useRef<{ x: number; y: number; time: number } | null>(null)
+  const pinchDistRef = useRef<number | null>(null)
+  const pinchStartZoomRef = useRef(1)
 
   useEffect(() => {
     setMounted(true)
@@ -153,13 +156,14 @@ export function ProductMediaViewerModal({
 
   const handleToggleZoom = useCallback(() => {
     if (!isImage) return
-    if (zoomLevel > 1) {
-      setZoomLevel(1)
-      setPan({ x: 0, y: 0 })
-    } else {
-      setZoomLevel(2)
-    }
-  }, [isImage, zoomLevel])
+    setZoomLevel((prev) => {
+      if (prev > 1) {
+        setPan({ x: 0, y: 0 })
+        return 1
+      }
+      return 2
+    })
+  }, [isImage])
 
   const handleRotate = useCallback(() => {
     if (!isImage) return
@@ -185,28 +189,31 @@ export function ProductMediaViewerModal({
     }
   }, [currentItem, currentIndex, isVideo, productName])
 
-  // Mouse wheel zoom on stage (preventing window scroll)
-  useEffect(() => {
-    const stage = stageRef.current
-    if (!stage || !isOpen || !isImage) return
-
-    const handleWheel = (e: WheelEvent) => {
-      e.preventDefault()
-      const delta = e.deltaY < 0 ? 0.3 : -0.3
-      setZoomLevel((prev) => {
-        const next = Math.min(4, Math.max(1, +(prev + delta).toFixed(2)))
-        if (next === 1) {
-          setPan({ x: 0, y: 0 })
-        }
-        return next
-      })
+  // Direct ref callback ensuring wheel zoom event listener is ALWAYS attached
+  const setStageRef = useCallback((node: HTMLDivElement | null) => {
+    if (stageCleanupRef.current) {
+      stageCleanupRef.current()
+      stageCleanupRef.current = null
     }
-
-    stage.addEventListener("wheel", handleWheel, { passive: false })
-    return () => {
-      stage.removeEventListener("wheel", handleWheel)
+    stageRef.current = node
+    if (node) {
+      const handleWheel = (e: WheelEvent) => {
+        e.preventDefault()
+        const delta = e.deltaY < 0 ? 0.25 : -0.25
+        setZoomLevel((prev) => {
+          const next = Math.min(4, Math.max(1, +(prev + delta).toFixed(2)))
+          if (next === 1) {
+            setPan({ x: 0, y: 0 })
+          }
+          return next
+        })
+      }
+      node.addEventListener("wheel", handleWheel, { passive: false })
+      stageCleanupRef.current = () => {
+        node.removeEventListener("wheel", handleWheel)
+      }
     }
-  }, [isOpen, isImage])
+  }, [])
 
   // Keyboard navigation
   useEffect(() => {
@@ -240,32 +247,72 @@ export function ProductMediaViewerModal({
     return () => window.removeEventListener("keydown", handleKeyDown)
   }, [isOpen, onClose, handlePrev, handleNext, handleZoomIn, handleZoomOut, resetZoom])
 
-  // Mouse drag handlers for panning
-  const handleMouseDown = (e: React.MouseEvent) => {
-    if (e.button !== 0 || zoomLevel <= 1 || !isImage) return
-    e.preventDefault()
-    setIsDragging(true)
-    dragStartRef.current = {
-      x: e.clientX - pan.x,
-      y: e.clientY - pan.y,
+  // Mouse drag handler on the image
+  const handleImageMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0 || !isImage) return
+    mouseDownPosRef.current = { x: e.clientX, y: e.clientY, time: Date.now() }
+    if (zoomLevel > 1) {
+      setIsDragging(true)
+      dragStartRef.current = {
+        x: e.clientX - pan.x,
+        y: e.clientY - pan.y,
+      }
     }
   }
 
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDragging || zoomLevel <= 1 || !isImage) return
-    e.preventDefault()
-    const newX = e.clientX - dragStartRef.current.x
-    const newY = e.clientY - dragStartRef.current.y
-    setPan({ x: newX, y: newY })
+  // Click on image: single click toggles zoom, drag will not trigger this
+  const handleImageClick = (e: React.MouseEvent) => {
+    if (!isImage) return
+    const dist = Math.hypot(
+      e.clientX - mouseDownPosRef.current.x,
+      e.clientY - mouseDownPosRef.current.y
+    )
+    if (dist < 6) {
+      handleToggleZoom()
+    }
   }
 
-  const handleMouseUp = () => {
-    setIsDragging(false)
-  }
+  // Window-level smooth dragging with bounded pan
+  useEffect(() => {
+    if (!isDragging) return
 
-  // Touch handlers for mobile
+    const handleMouseMove = (e: MouseEvent) => {
+      const newX = e.clientX - dragStartRef.current.x
+      const newY = e.clientY - dragStartRef.current.y
+
+      const stage = stageRef.current
+      const maxPanX = stage ? Math.max(100, (stage.clientWidth * (zoomLevel - 0.6)) / 2) : 400 * zoomLevel
+      const maxPanY = stage ? Math.max(80, (stage.clientHeight * (zoomLevel - 0.6)) / 2) : 300 * zoomLevel
+
+      setPan({
+        x: Math.max(-maxPanX, Math.min(maxPanX, newX)),
+        y: Math.max(-maxPanY, Math.min(maxPanY, newY)),
+      })
+    }
+
+    const handleMouseUp = () => {
+      setIsDragging(false)
+    }
+
+    window.addEventListener("mousemove", handleMouseMove)
+    window.addEventListener("mouseup", handleMouseUp)
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove)
+      window.removeEventListener("mouseup", handleMouseUp)
+    }
+  }, [isDragging, zoomLevel])
+
+  // Touch handlers for mobile (pinch-to-zoom + 1-finger pan/swipe)
   const handleTouchStart = (e: React.TouchEvent) => {
-    if (e.touches.length === 1) {
+    if (e.touches.length === 2 && isImage) {
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      )
+      pinchDistRef.current = dist
+      pinchStartZoomRef.current = zoomLevel
+      setIsDragging(false)
+    } else if (e.touches.length === 1) {
       const touch = e.touches[0]
       touchStartRef.current = {
         x: touch.clientX,
@@ -283,7 +330,16 @@ export function ProductMediaViewerModal({
   }
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    if (e.touches.length === 1 && isDragging && zoomLevel > 1 && isImage) {
+    if (e.touches.length === 2 && pinchDistRef.current !== null && isImage) {
+      const currentDist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      )
+      const scaleRatio = currentDist / pinchDistRef.current
+      const nextZoom = Math.min(4, Math.max(1, +(pinchStartZoomRef.current * scaleRatio).toFixed(2)))
+      setZoomLevel(nextZoom)
+      if (nextZoom === 1) setPan({ x: 0, y: 0 })
+    } else if (e.touches.length === 1 && isDragging && zoomLevel > 1 && isImage) {
       const touch = e.touches[0]
       const newX = touch.clientX - dragStartRef.current.x
       const newY = touch.clientY - dragStartRef.current.y
@@ -292,294 +348,299 @@ export function ProductMediaViewerModal({
   }
 
   const handleTouchEnd = (e: React.TouchEvent) => {
-    setIsDragging(false)
-    if (zoomLevel === 1 && touchStartRef.current) {
-      const touch = e.changedTouches[0]
-      const diffX = touch.clientX - touchStartRef.current.x
-      const diffY = touch.clientY - touchStartRef.current.y
-      const elapsed = Date.now() - touchStartRef.current.time
+    if (e.touches.length < 2) {
+      pinchDistRef.current = null
+    }
+    if (e.touches.length === 0) {
+      setIsDragging(false)
+      if (zoomLevel === 1 && touchStartRef.current) {
+        const touch = e.changedTouches[0]
+        const diffX = touch.clientX - touchStartRef.current.x
+        const diffY = touch.clientY - touchStartRef.current.y
+        const elapsed = Date.now() - touchStartRef.current.time
 
-      if (elapsed < 400 && Math.abs(diffX) > 50 && Math.abs(diffX) > Math.abs(diffY) * 1.5) {
-        if (diffX < 0) {
-          handleNext()
-        } else {
-          handlePrev()
+        if (elapsed < 400 && Math.abs(diffX) > 50 && Math.abs(diffX) > Math.abs(diffY) * 1.5) {
+          if (diffX < 0) {
+            handleNext()
+          } else {
+            handlePrev()
+          }
         }
       }
-    }
-    touchStartRef.current = null
-  }
-
-  // Backdrop click handler to close modal when clicking outside
-  const handleBackdropClick = (e: React.MouseEvent) => {
-    if (e.target === backdropRef.current) {
-      onClose()
+      touchStartRef.current = null
     }
   }
 
   if (!isOpen || !mounted) return null
 
-  const modalContent = (
-    <div
-      ref={backdropRef}
-      onClick={handleBackdropClick}
-      className="fixed inset-0 z-[200] flex items-center justify-center p-3 sm:p-6 bg-black/60 backdrop-blur-sm select-none animate-in fade-in duration-150"
-    >
-      {/* Centered Modal Card */}
-      <div
-        ref={containerRef}
-        onClick={(e) => e.stopPropagation()}
-        className="relative flex flex-col w-full max-w-3xl max-h-[90vh] bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-in zoom-in-95 duration-150"
-      >
-        {/* Modal Header */}
-        <div className="flex items-center justify-between border-b border-slate-200 px-4 sm:px-6 py-3 bg-white shrink-0">
-          <div className="flex min-w-0 items-center gap-2.5">
-            <h3 className="truncate text-sm sm:text-base font-bold text-slate-800">
-              {productName}
-            </h3>
-            {productSku ? (
-              <span className="hidden rounded bg-slate-100 px-2 py-0.5 font-mono text-[11px] font-semibold text-slate-600 border border-slate-200 sm:inline-block">
-                {productSku}
-              </span>
-            ) : null}
-            {allItems.length > 0 ? (
-              <span className="rounded-full bg-brand-blue/10 px-2.5 py-0.5 text-xs font-semibold text-brand-blue border border-brand-blue/20">
-                {currentIndex + 1} of {allItems.length}
-              </span>
-            ) : null}
+  return (
+    <DialogPrimitive.Root open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Overlay className="fixed inset-0 z-[200] bg-black/60 backdrop-blur-sm select-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 duration-150" />
+        <DialogPrimitive.Content
+          ref={containerRef}
+          className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[200] flex flex-col w-[calc(100%-1.5rem)] sm:w-[calc(100%-3rem)] max-w-3xl max-h-[90vh] bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 duration-150 select-none"
+        >
+          <DialogPrimitive.Title className="sr-only">
+            {productName}
+          </DialogPrimitive.Title>
+          <DialogPrimitive.Description className="sr-only">
+            Media viewer with zoom, pan, and rotation controls for {productName}
+          </DialogPrimitive.Description>
+
+          {/* Modal Header */}
+          <div className="flex items-center justify-between border-b border-slate-200 px-4 sm:px-6 py-3 bg-white shrink-0">
+            <div className="flex min-w-0 items-center gap-2.5">
+              <h3 className="truncate text-sm sm:text-base font-bold text-slate-800">
+                {productName}
+              </h3>
+              {productSku ? (
+                <span className="hidden rounded bg-slate-100 px-2 py-0.5 font-mono text-[11px] font-semibold text-slate-600 border border-slate-200 sm:inline-block">
+                  {productSku}
+                </span>
+              ) : null}
+              {allItems.length > 0 ? (
+                <span className="rounded-full bg-brand-blue/10 px-2.5 py-0.5 text-xs font-semibold text-brand-blue border border-brand-blue/20">
+                  {currentIndex + 1} of {allItems.length}
+                </span>
+              ) : null}
+            </div>
+
+            {/* Action Toolbar */}
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              {isImage ? (
+                <div className="flex items-center rounded-lg border border-slate-200 bg-slate-50 p-0.5">
+                  <button
+                    type="button"
+                    onClick={handleZoomOut}
+                    disabled={zoomLevel <= 1}
+                    className="rounded p-1 text-slate-600 hover:bg-white hover:text-slate-900 disabled:opacity-30 disabled:hover:bg-transparent transition"
+                    title="Zoom Out (-)"
+                    aria-label="Zoom Out"
+                  >
+                    <ZoomOut className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={resetZoom}
+                    className="px-2 py-0.5 text-xs font-mono font-semibold text-slate-700 hover:bg-white rounded transition"
+                    title="Reset Zoom (0 or R)"
+                    aria-label="Reset Zoom"
+                  >
+                    {Math.round(zoomLevel * 100)}%
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleZoomIn}
+                    disabled={zoomLevel >= 4}
+                    className="rounded p-1 text-slate-600 hover:bg-white hover:text-slate-900 disabled:opacity-30 disabled:hover:bg-transparent transition"
+                    title="Zoom In (+)"
+                    aria-label="Zoom In"
+                  >
+                    <ZoomIn className="h-4 w-4" />
+                  </button>
+                </div>
+              ) : null}
+
+              {isImage ? (
+                <button
+                  type="button"
+                  onClick={handleRotate}
+                  className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition"
+                  title="Rotate 90° Clockwise"
+                  aria-label="Rotate image"
+                >
+                  <RotateCw className="h-4 w-4" />
+                </button>
+              ) : null}
+
+              {currentItem?.url ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleDownload}
+                    className="hidden sm:flex items-center justify-center rounded-lg border border-slate-200 bg-white p-1.5 text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition"
+                    title="Download Media"
+                    aria-label="Download Media"
+                  >
+                    <Download className="h-4 w-4" />
+                  </button>
+                  <a
+                    href={currentItem.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="hidden sm:flex items-center justify-center rounded-lg border border-slate-200 bg-white p-1.5 text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition"
+                    title="Open in New Tab"
+                    aria-label="Open in new tab"
+                  >
+                    <ExternalLink className="h-4 w-4" />
+                  </a>
+                </>
+              ) : null}
+
+              <DialogPrimitive.Close asChild>
+                <button
+                  type="button"
+                  className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition"
+                  title="Close (Esc)"
+                  aria-label="Close"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </DialogPrimitive.Close>
+            </div>
           </div>
 
-          {/* Action Toolbar */}
-          <div className="flex items-center gap-1.5 sm:gap-2">
-            {isImage ? (
-              <div className="flex items-center rounded-lg border border-slate-200 bg-slate-50 p-0.5">
-                <button
-                  type="button"
-                  onClick={handleZoomOut}
-                  disabled={zoomLevel <= 1}
-                  className="rounded p-1 text-slate-600 hover:bg-white hover:text-slate-900 disabled:opacity-30 disabled:hover:bg-transparent transition"
-                  title="Zoom Out (-)"
-                  aria-label="Zoom Out"
-                >
-                  <ZoomOut className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={resetZoom}
-                  className="px-2 py-0.5 text-xs font-mono font-semibold text-slate-700 hover:bg-white rounded transition"
-                  title="Reset Zoom (0 or R)"
-                  aria-label="Reset Zoom"
-                >
-                  {Math.round(zoomLevel * 100)}%
-                </button>
-                <button
-                  type="button"
-                  onClick={handleZoomIn}
-                  disabled={zoomLevel >= 4}
-                  className="rounded p-1 text-slate-600 hover:bg-white hover:text-slate-900 disabled:opacity-30 disabled:hover:bg-transparent transition"
-                  title="Zoom In (+)"
-                  aria-label="Zoom In"
-                >
-                  <ZoomIn className="h-4 w-4" />
-                </button>
+          {/* Media Viewing Stage */}
+          <div
+            ref={setStageRef}
+            className="relative flex-1 min-h-[340px] sm:min-h-[460px] max-h-[62vh] bg-slate-950 flex items-center justify-center overflow-hidden touch-none"
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+          >
+            {allItems.length === 0 ? (
+              <div className="flex flex-col items-center justify-center text-center text-slate-400 p-8">
+                <ImageIcon className="h-16 w-16 mb-2 stroke-[1.2] text-slate-600" />
+                <p className="text-sm font-medium">No media uploaded for this product</p>
               </div>
-            ) : null}
+            ) : isVideo ? (
+              <div className="relative max-h-full max-w-full flex items-center justify-center p-4">
+                <video
+                  key={currentItem.url}
+                  controls
+                  autoPlay
+                  playsInline
+                  className="max-h-[56vh] max-w-[85vw] sm:max-w-[75vw] rounded-xl shadow-2xl bg-black border border-white/10"
+                >
+                  <source src={currentItem.url} />
+                  Your browser does not support the video tag.
+                </video>
+              </div>
+            ) : (
+              <div
+                className="relative flex items-center justify-center h-full w-full p-4 select-none"
+                style={{
+                  cursor:
+                    zoomLevel > 1
+                      ? isDragging
+                        ? "grabbing"
+                        : "grab"
+                      : "zoom-in",
+                }}
+                onMouseDown={handleImageMouseDown}
+                onClick={handleImageClick}
+                onDoubleClick={handleToggleZoom}
+              >
+                <img
+                  key={currentItem.url}
+                  src={currentItem.url}
+                  alt={currentItem.title || productName}
+                  draggable={false}
+                  className="max-h-[56vh] max-w-[85%] object-contain select-none drop-shadow-xl rounded pointer-events-none"
+                  style={{
+                    transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${zoomLevel}) rotate(${rotation}deg)`,
+                    transition: isDragging ? "none" : "transform 150ms cubic-bezier(0.2, 0, 0, 1)",
+                    transformOrigin: "center center",
+                  }}
+                />
+              </div>
+            )}
 
-            {isImage ? (
+            {/* Previous Arrow Button */}
+            {allItems.length > 1 ? (
               <button
                 type="button"
-                onClick={handleRotate}
-                className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition"
-                title="Rotate 90° Clockwise"
-                aria-label="Rotate image"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  handlePrev()
+                }}
+                className="absolute left-3 top-1/2 -translate-y-1/2 z-30 flex h-10 w-10 sm:h-11 sm:w-11 items-center justify-center rounded-full bg-slate-900/80 border border-white/20 text-white backdrop-blur-md shadow-xl hover:bg-slate-800 hover:scale-105 active:scale-95 transition"
+                title="Previous (Left Arrow)"
+                aria-label="Previous Media"
               >
-                <RotateCw className="h-4 w-4" />
+                <ChevronLeft className="h-5 w-5 sm:h-6 sm:w-6" />
               </button>
             ) : null}
 
-            {currentItem?.url ? (
-              <>
-                <button
-                  type="button"
-                  onClick={handleDownload}
-                  className="hidden sm:flex items-center justify-center rounded-lg border border-slate-200 bg-white p-1.5 text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition"
-                  title="Download Media"
-                  aria-label="Download Media"
-                >
-                  <Download className="h-4 w-4" />
-                </button>
-                <a
-                  href={currentItem.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="hidden sm:flex items-center justify-center rounded-lg border border-slate-200 bg-white p-1.5 text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition"
-                  title="Open in New Tab"
-                  aria-label="Open in new tab"
-                >
-                  <ExternalLink className="h-4 w-4" />
-                </a>
-              </>
+            {/* Next Arrow Button */}
+            {allItems.length > 1 ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  handleNext()
+                }}
+                className="absolute right-3 top-1/2 -translate-y-1/2 z-30 flex h-10 w-10 sm:h-11 sm:w-11 items-center justify-center rounded-full bg-slate-900/80 border border-white/20 text-white backdrop-blur-md shadow-xl hover:bg-slate-800 hover:scale-105 active:scale-95 transition"
+                title="Next (Right Arrow)"
+                aria-label="Next Media"
+              >
+                <ChevronRight className="h-5 w-5 sm:h-6 sm:w-6" />
+              </button>
             ) : null}
 
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition"
-              title="Close (Esc)"
-              aria-label="Close"
-            >
-              <X className="h-5 w-5" />
-            </button>
-          </div>
-        </div>
-
-        {/* Media Viewing Stage */}
-        <div
-          ref={stageRef}
-          className="relative flex-1 min-h-[340px] sm:min-h-[460px] max-h-[62vh] bg-slate-950 flex items-center justify-center overflow-hidden"
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onTouchStart={handleTouchStart}
-          onTouchMove={handleTouchMove}
-          onTouchEnd={handleTouchEnd}
-        >
-          {allItems.length === 0 ? (
-            <div className="flex flex-col items-center justify-center text-center text-slate-400 p-8">
-              <ImageIcon className="h-16 w-16 mb-2 stroke-[1.2] text-slate-600" />
-              <p className="text-sm font-medium">No media uploaded for this product</p>
-            </div>
-          ) : isVideo ? (
-            <div className="relative max-h-full max-w-full flex items-center justify-center p-4">
-              <video
-                key={currentItem.url}
-                controls
-                autoPlay
-                playsInline
-                className="max-h-[56vh] max-w-[85vw] sm:max-w-[75vw] rounded-xl shadow-2xl bg-black border border-white/10"
+            {/* Stage Overlays (Zoom / Mode Info) */}
+            {isImage && zoomLevel > 1 ? (
+              <button
+                type="button"
+                onClick={resetZoom}
+                className="absolute bottom-3 right-3 flex items-center gap-1 rounded bg-black/75 px-2.5 py-1 text-[11px] font-mono text-cyan-400 backdrop-blur-sm border border-white/10 hover:bg-black/90 transition shadow-sm cursor-pointer"
+                title="Click to reset zoom (100%)"
               >
-                <source src={currentItem.url} />
-                Your browser does not support the video tag.
-              </video>
-            </div>
-          ) : (
-            <div
-              className="relative flex items-center justify-center h-full w-full p-4"
-              style={{
-                cursor:
-                  zoomLevel > 1
-                    ? isDragging
-                      ? "grabbing"
-                      : "grab"
-                    : "zoom-in",
-              }}
-              onDoubleClick={handleToggleZoom}
-            >
-              <img
-                key={currentItem.url}
-                src={currentItem.url}
-                alt={currentItem.title || productName}
-                draggable={false}
-                className="max-h-[56vh] max-w-[85%] object-contain select-none drop-shadow-xl rounded"
-                style={{
-                  transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${zoomLevel}) rotate(${rotation}deg)`,
-                  transition: isDragging ? "none" : "transform 200ms cubic-bezier(0.2, 0, 0, 1)",
-                  transformOrigin: "center center",
-                }}
-              />
-            </div>
-          )}
+                <span>Zoom {Math.round(zoomLevel * 100)}% (Reset)</span>
+              </button>
+            ) : null}
 
-          {/* Previous Arrow Button */}
-          {allItems.length > 1 ? (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation()
-                handlePrev()
-              }}
-              className="absolute left-3 top-1/2 -translate-y-1/2 z-30 flex h-10 w-10 sm:h-11 sm:w-11 items-center justify-center rounded-full bg-slate-900/80 border border-white/20 text-white backdrop-blur-md shadow-xl hover:bg-slate-800 hover:scale-105 active:scale-95 transition"
-              title="Previous (Left Arrow)"
-              aria-label="Previous Media"
-            >
-              <ChevronLeft className="h-5 w-5 sm:h-6 sm:w-6" />
-            </button>
-          ) : null}
-
-          {/* Next Arrow Button */}
-          {allItems.length > 1 ? (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation()
-                handleNext()
-              }}
-              className="absolute right-3 top-1/2 -translate-y-1/2 z-30 flex h-10 w-10 sm:h-11 sm:w-11 items-center justify-center rounded-full bg-slate-900/80 border border-white/20 text-white backdrop-blur-md shadow-xl hover:bg-slate-800 hover:scale-105 active:scale-95 transition"
-              title="Next (Right Arrow)"
-              aria-label="Next Media"
-            >
-              <ChevronRight className="h-5 w-5 sm:h-6 sm:w-6" />
-            </button>
-          ) : null}
-
-          {/* Stage Overlays (Zoom / Mode Info) */}
-          {isImage && zoomLevel > 1 ? (
-            <div className="absolute bottom-3 right-3 flex items-center gap-1 rounded bg-black/75 px-2 py-1 text-[11px] font-mono text-cyan-400 backdrop-blur-sm border border-white/10">
-              <span>Zoom {Math.round(zoomLevel * 100)}%</span>
-            </div>
-          ) : null}
-
-          {isImage ? (
-            <div className="absolute bottom-3 left-3 hidden sm:flex items-center gap-1 rounded bg-black/60 px-2 py-1 text-[10px] text-slate-300 backdrop-blur-sm border border-white/10">
-              <span>Scroll to zoom • Double-click to toggle • Drag to pan</span>
-            </div>
-          ) : null}
-        </div>
-
-        {/* Modal Footer / Thumbnail Strip (only if multiple items) */}
-        {allItems.length > 1 ? (
-          <div className="flex items-center justify-center border-t border-slate-200 bg-slate-50 px-4 sm:px-6 py-2.5 shrink-0">
-            <div className="flex min-w-0 items-center justify-center gap-2 overflow-x-auto py-0.5 no-scrollbar">
-              {allItems.map((item, idx) => {
-                const isActive = idx === currentIndex
-                return (
-                  <button
-                    key={`${item.url}-${idx}`}
-                    type="button"
-                    onClick={() => {
-                      setCurrentIndex(idx)
-                      resetZoom()
-                    }}
-                    className={`group relative h-12 w-12 shrink-0 overflow-hidden rounded-lg border-2 transition-all ${
-                      isActive
-                        ? "border-brand-blue ring-2 ring-brand-blue/30 scale-105 shadow-sm"
-                        : "border-slate-200 opacity-60 hover:opacity-100 hover:border-slate-300"
-                    }`}
-                    title={item.title || `Media ${idx + 1}`}
-                  >
-                    {item.type === "video" ? (
-                      <div className="relative h-full w-full bg-slate-800 flex items-center justify-center">
-                        <video src={item.url} className="h-full w-full object-cover" />
-                        <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
-                          <Play className="h-3 w-3 text-white fill-white" />
-                        </div>
-                      </div>
-                    ) : (
-                      <img
-                        src={item.url}
-                        alt={item.title || `Media ${idx + 1}`}
-                        className="h-full w-full object-cover"
-                      />
-                    )}
-                  </button>
-                )
-              })}
-            </div>
+            {isImage ? (
+              <div className="absolute bottom-3 left-3 hidden sm:flex items-center gap-1 rounded bg-black/60 px-2.5 py-1 text-[10px] text-slate-300 backdrop-blur-sm border border-white/10 pointer-events-none">
+                <span>Click image or scroll to zoom • Drag to pan</span>
+              </div>
+            ) : null}
           </div>
-        ) : null}
-      </div>
-    </div>
-  )
 
-  return createPortal(modalContent, document.body)
+          {/* Modal Footer / Thumbnail Strip (only if multiple items) */}
+          {allItems.length > 1 ? (
+            <div className="flex items-center justify-center border-t border-slate-200 bg-slate-50 px-4 sm:px-6 py-2.5 shrink-0">
+              <div className="flex min-w-0 items-center justify-center gap-2 overflow-x-auto py-0.5 no-scrollbar">
+                {allItems.map((item, idx) => {
+                  const isActive = idx === currentIndex
+                  return (
+                    <button
+                      key={`${item.url}-${idx}`}
+                      type="button"
+                      onClick={() => {
+                        setCurrentIndex(idx)
+                        resetZoom()
+                      }}
+                      className={`group relative h-12 w-12 shrink-0 overflow-hidden rounded-lg border-2 transition-all ${
+                        isActive
+                          ? "border-brand-blue ring-2 ring-brand-blue/30 scale-105 shadow-sm"
+                          : "border-slate-200 opacity-60 hover:opacity-100 hover:border-slate-300"
+                      }`}
+                      title={item.title || `Media ${idx + 1}`}
+                    >
+                      {item.type === "video" ? (
+                        <div className="relative h-full w-full bg-slate-800 flex items-center justify-center">
+                          <video src={item.url} className="h-full w-full object-cover" />
+                          <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                            <Play className="h-3 w-3 text-white fill-white" />
+                          </div>
+                        </div>
+                      ) : (
+                        <img
+                          src={item.url}
+                          alt={item.title || `Media ${idx + 1}`}
+                          className="h-full w-full object-cover"
+                        />
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          ) : null}
+        </DialogPrimitive.Content>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
+  )
 }
