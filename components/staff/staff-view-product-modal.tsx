@@ -140,6 +140,13 @@ export default function StaffViewProductModal({
   }, [product?.id])
 
   useEffect(() => {
+    if (!isOpen) {
+      setIsMediaViewerOpen(false)
+      setIsMediaEditOpen(false)
+    }
+  }, [isOpen])
+
+  useEffect(() => {
     if (product?.barcode && isOpen && typeof window !== "undefined") {
       import("jsbarcode")
         .then((JsBarcode) => {
