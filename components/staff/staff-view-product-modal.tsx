@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useEffect, type ReactNode } from "react"
 import { Button } from "@/components/ui/button"
+import { Switch } from "@/components/ui/switch"
 import { format } from "date-fns"
 import { 
   Loader2, 
@@ -27,6 +28,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { ShareProductButton } from "@/components/shared/share-product-button"
 import { useAppSelector } from "@/store/hooks"
 import { selectDevice, selectDeviceCurrency } from "@/store/slices/deviceSlice"
+import { selectActiveStaff } from "@/store/slices/staffSlice"
+import { 
+  updateProductTrendingStatus, 
+  updateProductPlatformStatus, 
+  type PlatformKey, 
+  type PlatformStatus 
+} from "@/app/actions/product-actions"
+import { notifyError, notifySuccess } from "@/lib/notifications"
 import StaffMediaEditModal from "./staff-media-edit-modal"
 import { ProductMediaViewerModal } from "@/components/products/product-media-viewer-modal"
 
@@ -36,6 +45,7 @@ interface StaffViewProductModalProps {
   product: any
   currency?: string
   onProductUpdated?: (updatedProduct: any) => void
+  isMediaManager?: boolean
 }
 
 function InfoItem({
@@ -92,28 +102,98 @@ export default function StaffViewProductModal({
   product,
   currency: currencyProp,
   onProductUpdated,
+  isMediaManager: isMediaManagerProp,
 }: StaffViewProductModalProps) {
   const { toast } = useToast()
   const device = useAppSelector(selectDevice)
   const deviceCurrency = useAppSelector(selectDeviceCurrency)
+  const activeStaff = useAppSelector(selectActiveStaff)
+  const isMediaManager = isMediaManagerProp ?? Boolean(activeStaff?.role === "media_manager")
+
   const currency = currencyProp || deviceCurrency || "INR"
   const currentDeviceId = device?.id || undefined
+
+  const [localProduct, setLocalProduct] = useState<any>(null)
+  useEffect(() => {
+    if (product) {
+      setLocalProduct(product)
+    }
+  }, [product])
+
+  const activeProduct = product || localProduct
+
   const [isMediaEditOpen, setIsMediaEditOpen] = useState(false)
   const [isMediaViewerOpen, setIsMediaViewerOpen] = useState(false)
   const [selectedImageIndex, setSelectedImageIndex] = useState(0)
   const [activeMediaTab, setActiveMediaTab] = useState<"images" | "video">("images")
 
-  const msp = Number(product?.variants?.[0]?.msp || 0)
-  const retailPrice = Number(product?.msp ?? product?.price ?? 0)
+  const [isUpdatingTrending, setIsUpdatingTrending] = useState(false)
+  const [updatingPlatform, setUpdatingPlatform] = useState<string | null>(null)
+
+  const msp = Number(activeProduct?.variants?.[0]?.msp || activeProduct?.msp || 0)
+  const retailPrice = Number(activeProduct?.msp ?? activeProduct?.price ?? 0)
+  const barcodeValue = activeProduct?.barcode || activeProduct?.variants?.[0]?.barcode || product?.barcode || ""
+
+  const handleToggleTrending = async () => {
+    if (!activeProduct?.id) return
+    const nextStatus = !activeProduct.trending
+    setIsUpdatingTrending(true)
+    try {
+      const res = await updateProductTrendingStatus(activeProduct.id, nextStatus, currentDeviceId)
+      if (res.success && res.data) {
+        const updated = { ...activeProduct, ...res.data, trending: nextStatus }
+        setLocalProduct(updated)
+        if (onProductUpdated) onProductUpdated(updated)
+        notifySuccess(toast, res.message || (nextStatus ? "Product marked as trending" : "Product removed from trending"))
+      } else {
+        notifyError(toast, res.message || "Failed to update trending status")
+      }
+    } catch (err) {
+      notifyError(toast, "Failed to update trending status")
+    } finally {
+      setIsUpdatingTrending(false)
+    }
+  }
+
+  const handleTogglePlatformStatus = async (platformKey: PlatformKey, currentStatus: string) => {
+    if (!activeProduct?.id) return
+    const nextStatus: PlatformStatus = currentStatus === "active" ? "not_listed" : "active"
+    setUpdatingPlatform(platformKey)
+    try {
+      const res = await updateProductPlatformStatus(activeProduct.id, platformKey, nextStatus, currentDeviceId)
+      if (res.success && res.data) {
+        const updated = { ...activeProduct, ...res.data }
+        setLocalProduct(updated)
+        if (onProductUpdated) onProductUpdated(updated)
+        notifySuccess(
+          toast,
+          `Updated ${platformKey === "own_ecom" ? "E-Commerce" : platformKey.toUpperCase()} status to ${nextStatus === "active" ? "Listed" : "Not Listed"}`,
+        )
+      } else {
+        notifyError(toast, res.message || "Failed to update platform status")
+      }
+    } catch (err) {
+      notifyError(toast, "Failed to update platform status")
+    } finally {
+      setUpdatingPlatform(null)
+    }
+  }
+
+  const platformStatuses = [
+    { key: "amazon" as PlatformKey, label: "Amazon", status: activeProduct?.amazon_status || "not_listed" },
+    { key: "flipkart" as PlatformKey, label: "Flipkart", status: activeProduct?.flipkart_status || "not_listed" },
+    { key: "meesho" as PlatformKey, label: "Meesho", status: activeProduct?.meesho_status || "not_listed" },
+    { key: "own_ecom" as PlatformKey, label: "Own Ecom", status: activeProduct?.own_ecom_status || "active" },
+  ]
 
   const mediaImageUrls = useMemo(() => {
-    if (!product) return []
+    if (!activeProduct) return []
     let urls: string[] = []
-    if (Array.isArray(product.image_urls)) {
-      urls = product.image_urls.filter((url: unknown) => typeof url === "string" && url.trim().length > 0) as string[]
-    } else if (typeof product.image_urls === "string" && product.image_urls.trim()) {
+    if (Array.isArray(activeProduct.image_urls)) {
+      urls = activeProduct.image_urls.filter((url: unknown) => typeof url === "string" && url.trim().length > 0) as string[]
+    } else if (typeof activeProduct.image_urls === "string" && activeProduct.image_urls.trim()) {
       try {
-        const parsed = JSON.parse(product.image_urls)
+        const parsed = JSON.parse(activeProduct.image_urls)
         if (Array.isArray(parsed)) {
           urls = parsed.filter((url) => typeof url === "string" && url.trim().length > 0)
         }
@@ -121,23 +201,23 @@ export default function StaffViewProductModal({
         urls = []
       }
     }
-    if (urls.length === 0 && product.image_url) {
-      urls = [product.image_url]
+    if (urls.length === 0 && activeProduct.image_url) {
+      urls = [activeProduct.image_url]
     }
     return urls.slice(0, 8)
-  }, [product])
+  }, [activeProduct])
 
-  const mediaVideoUrl = typeof product?.video_url === "string" && product.video_url.trim() ? product.video_url.trim() : null
+  const mediaVideoUrl = typeof activeProduct?.video_url === "string" && activeProduct.video_url.trim() ? activeProduct.video_url.trim() : null
 
   const productLinks = useMemo(() => {
-    if (!product) return []
-    return parseProductLinks(product.link)
-  }, [product])
+    if (!activeProduct) return []
+    return parseProductLinks(activeProduct.links || activeProduct.link)
+  }, [activeProduct])
 
   useEffect(() => {
     setSelectedImageIndex(0)
     setActiveMediaTab("images")
-  }, [product?.id])
+  }, [activeProduct?.id])
 
   useEffect(() => {
     if (!isOpen) {
@@ -147,7 +227,7 @@ export default function StaffViewProductModal({
   }, [isOpen])
 
   useEffect(() => {
-    if (product?.barcode && isOpen && typeof window !== "undefined") {
+    if (barcodeValue && isOpen && typeof window !== "undefined") {
       import("jsbarcode")
         .then((JsBarcode) => {
           const container = document.getElementById("staffBarcodeContainer")
@@ -155,7 +235,7 @@ export default function StaffViewProductModal({
             container.innerHTML = ""
             const canvas = document.createElement("canvas")
             container.appendChild(canvas)
-            JsBarcode.default(canvas, product.barcode, {
+            JsBarcode.default(canvas, barcodeValue, {
               format: "CODE128",
               width: 2,
               height: 55,
@@ -165,7 +245,7 @@ export default function StaffViewProductModal({
         })
         .catch((err) => console.error("Failed to load JsBarcode:", err))
     }
-  }, [product?.barcode, isOpen])
+  }, [barcodeValue, isOpen])
 
   const formatMoney = (amount: number | string) => {
     const num = typeof amount === "string" ? Number.parseFloat(amount) : amount
@@ -174,14 +254,14 @@ export default function StaffViewProductModal({
   }
 
   const stockBadge = () => {
-    if (product.stock === null) {
+    if (activeProduct?.stock === null) {
       return (
         <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-600 border border-slate-200">
           Hidden
         </span>
       )
     }
-    const stock = Math.max(0, Number(product.stock) || 0)
+    const stock = Math.max(0, Number(activeProduct?.stock) || 0)
     if (stock <= 0) {
       return (
         <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-red-50 text-red-700 border border-red-200 shadow-sm">
@@ -203,7 +283,7 @@ export default function StaffViewProductModal({
     )
   }
 
-  if (!product) return null
+  if (!activeProduct) return null
 
   const mainImageUrl = mediaImageUrls[selectedImageIndex] || mediaImageUrls[0] || null
 
@@ -219,17 +299,17 @@ export default function StaffViewProductModal({
               </div>
               <div className="min-w-0 flex-1">
                 <DialogTitle className="text-base sm:text-lg font-bold text-slate-900 truncate">
-                  {product.name}
+                  {activeProduct.name || "Product Details"}
                 </DialogTitle>
                 <div className="flex items-center gap-2 mt-0.5 text-xs text-slate-500">
-                  {product.category && (
+                  {activeProduct.category && (
                     <span className="font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md">
-                      {product.category}
+                      {activeProduct.category}
                     </span>
                   )}
-                  {product.company_name && (
+                  {activeProduct.company_name && (
                     <span className="font-medium text-slate-500">
-                      Brand: <strong className="text-slate-700">{product.company_name}</strong>
+                      Brand: <strong className="text-slate-700">{activeProduct.company_name}</strong>
                     </span>
                   )}
                 </div>
@@ -275,7 +355,7 @@ export default function StaffViewProductModal({
                     >
                       <img
                         src={mainImageUrl}
-                        alt={product.name}
+                        alt={activeProduct.name || "Product"}
                         className="w-full h-full object-contain p-2 transition-transform duration-300 group-hover/img:scale-105"
                       />
                       <div className="absolute inset-0 flex items-center justify-center bg-black/20 opacity-0 group-hover/img:opacity-100 transition-opacity">
@@ -356,101 +436,289 @@ export default function StaffViewProductModal({
               <div className="lg:col-span-7 flex flex-col justify-between space-y-4">
                 
                 {/* Price & Primary Metrics Cards */}
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                  
-                  {/* Selling Price Card */}
-                  <div className="col-span-2 sm:col-span-1 rounded-2xl bg-gradient-to-br from-slate-900 via-indigo-950 to-violet-950 text-white p-4 shadow-md flex flex-col justify-between min-h-[90px]">
-                    <span className="text-[11px] font-semibold uppercase tracking-wider text-violet-200/80">Selling Price</span>
-                    <p className="text-xl sm:text-2xl font-black tracking-tight text-white mt-1">
-                      {formatMoney(retailPrice)}
-                    </p>
-                  </div>
+                {isMediaManager ? (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                    {/* MRP Card */}
+                    <div className="rounded-2xl border border-violet-100 bg-violet-50/70 p-3 sm:p-4 shadow-xs flex flex-col justify-between min-h-[85px]">
+                      <span className="text-[11px] font-semibold uppercase tracking-wider text-violet-700">MRP</span>
+                      <p className="text-lg sm:text-xl font-bold text-violet-900 mt-1">
+                        {formatMoney(activeProduct.mrp || activeProduct.price || 0)}
+                      </p>
+                    </div>
 
-                  {/* Available Stock Card */}
-                  <div className="rounded-2xl bg-white border border-slate-200 p-4 shadow-sm flex flex-col justify-between min-h-[90px]">
-                    <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Available Stock</span>
-                    <p className="text-xl sm:text-2xl font-black text-slate-800 mt-1">
-                      {product.stock === null ? "—" : Math.max(0, Number(product.stock) || 0)}
-                    </p>
-                  </div>
+                    {/* Cost Card */}
+                    <div className="rounded-2xl border border-slate-200 bg-slate-100/70 p-3 sm:p-4 shadow-xs flex flex-col justify-between min-h-[85px]">
+                      <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-600">Cost</span>
+                      <p className="text-lg sm:text-xl font-bold text-slate-900 mt-1">
+                        {formatMoney(activeProduct.cost_price ?? activeProduct.wholesale_price ?? 0)}
+                      </p>
+                    </div>
 
-                  {/* MSP Card (if available) */}
-                  <div className="rounded-2xl bg-white border border-slate-200 p-4 shadow-sm flex flex-col justify-between min-h-[90px]">
-                    <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">MSP</span>
-                    <p className="text-xl sm:text-2xl font-black text-indigo-600 mt-1">
-                      {msp > 0 ? formatMoney(msp) : formatMoney(retailPrice)}
-                    </p>
-                  </div>
-                </div>
+                    {/* Stock Card */}
+                    <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 p-3 sm:p-4 shadow-xs flex flex-col justify-between min-h-[85px]">
+                      <span className="text-[11px] font-semibold uppercase tracking-wider text-emerald-700">Stock</span>
+                      <p className="text-lg sm:text-xl font-bold text-emerald-900 mt-1">
+                        {activeProduct.stock === null ? "—" : Math.max(0, Number(activeProduct.stock) || 0)}
+                      </p>
+                    </div>
 
-                {/* E-Commerce Direct Link Box */}
-                <div className="rounded-xl border border-indigo-100 bg-indigo-50/50 p-3 flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2 min-w-0 flex-1">
-                    <ExternalLink className="h-4 w-4 text-indigo-600 shrink-0" />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[10px] font-semibold uppercase tracking-wider text-indigo-500">E-Commerce Product Link</p>
-                      <a
-                        href={getEcommerceProductUrl(product.id)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs sm:text-sm font-semibold text-indigo-700 hover:underline truncate block"
-                      >
-                        {getEcommerceProductUrl(product.id)}
-                      </a>
+                    {/* MSP Card */}
+                    <div className="rounded-2xl border border-blue-100 bg-blue-50/70 p-3 sm:p-4 shadow-xs flex flex-col justify-between min-h-[85px]">
+                      <span className="text-[11px] font-semibold uppercase tracking-wider text-blue-700">MSP</span>
+                      <p className="text-lg sm:text-xl font-bold text-blue-900 mt-1">
+                        {formatMoney(activeProduct.msp || msp || 0)}
+                      </p>
                     </div>
                   </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={async () => {
-                      await navigator.clipboard.writeText(getEcommerceProductUrl(product.id))
-                      toast({ title: "Link Copied", description: "Product URL copied to clipboard." })
-                    }}
-                    className="h-8 text-xs border-indigo-200 text-indigo-700 bg-white hover:bg-indigo-50 shrink-0"
-                  >
-                    <Copy className="h-3.5 w-3.5 mr-1" /> Copy Link
-                  </Button>
-                </div>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    {/* Selling Price Card */}
+                    <div className="col-span-2 sm:col-span-1 rounded-2xl bg-gradient-to-br from-slate-900 via-indigo-950 to-violet-950 text-white p-4 shadow-md flex flex-col justify-between min-h-[90px]">
+                      <span className="text-[11px] font-semibold uppercase tracking-wider text-violet-200/80">Selling Price</span>
+                      <p className="text-xl sm:text-2xl font-black tracking-tight text-white mt-1">
+                        {formatMoney(retailPrice)}
+                      </p>
+                    </div>
+
+                    {/* Available Stock Card */}
+                    <div className="rounded-2xl bg-white border border-slate-200 p-4 shadow-sm flex flex-col justify-between min-h-[90px]">
+                      <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Available Stock</span>
+                      <p className="text-xl sm:text-2xl font-black text-slate-800 mt-1">
+                        {activeProduct.stock === null ? "—" : Math.max(0, Number(activeProduct.stock) || 0)}
+                      </p>
+                    </div>
+
+                    {/* MSP Card (if available) */}
+                    <div className="rounded-2xl bg-white border border-slate-200 p-4 shadow-sm flex flex-col justify-between min-h-[90px]">
+                      <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">MSP</span>
+                      <p className="text-xl sm:text-2xl font-black text-indigo-600 mt-1">
+                        {msp > 0 ? formatMoney(msp) : formatMoney(retailPrice)}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Trending Enabling Option (Media Manager) */}
+                {isMediaManager && (
+                  <div className="rounded-xl border border-slate-200 bg-white p-3.5 flex items-center justify-between shadow-xs">
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Trending</p>
+                      <p className="mt-0.5 text-xs text-slate-600">
+                        {activeProduct.trending ? "This product appears in Trending Products" : "Mark this product as trending"}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <Switch
+                        checked={Boolean(activeProduct.trending)}
+                        disabled={isUpdatingTrending}
+                        onCheckedChange={handleToggleTrending}
+                        aria-label="Mark product as trending"
+                      />
+                      <span
+                        className={cn(
+                          "inline-flex w-[70px] justify-center items-center rounded-full border px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider",
+                          activeProduct.trending
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                            : "border-slate-200 bg-slate-50 text-slate-500",
+                        )}
+                      >
+                        {activeProduct.trending ? "ON ●" : "OFF ○"}
+                      </span>
+                    </div>
+                  </div>
+                )}
 
                 {/* Information Grid */}
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-                  <InfoItem label="Product Name" value={product.name} copyText={product.name} className="col-span-2" />
-                  <InfoItem label="Category" value={product.category || "—"} />
-                  {product.shelf ? <InfoItem label="Shelf Location" value={product.shelf} icon={<MapPin className="h-3.5 w-3.5" />} /> : null}
-                  {product.color ? <InfoItem label="Colour" value={product.color} /> : null}
-                  {product.size ? <InfoItem label="Size" value={product.size} /> : null}
-                  {product.suitable_for ? <InfoItem label="Suitable for" value={product.suitable_for} className="col-span-2 sm:col-span-3" /> : null}
+                  <InfoItem label="Product Name" value={activeProduct.name} copyText={activeProduct.name} className="col-span-2" />
+                  <InfoItem label="Category" value={activeProduct.category || "—"} />
+                  {activeProduct.shelf ? <InfoItem label="Shelf Location" value={activeProduct.shelf} icon={<MapPin className="h-3.5 w-3.5" />} /> : null}
+                  {activeProduct.color ? <InfoItem label="Colour" value={activeProduct.color} /> : null}
+                  {activeProduct.size ? <InfoItem label="Size" value={activeProduct.size} /> : null}
+                  {activeProduct.suitable_for ? <InfoItem label="Suitable for" value={activeProduct.suitable_for} className="col-span-2 sm:col-span-3" /> : null}
+                  {isMediaManager && (
+                    <>
+                      <InfoItem
+                        label="Created Date"
+                        value={activeProduct.created_at ? format(new Date(activeProduct.created_at), "dd-MM-yyyy") : "—"}
+                      />
+                      <InfoItem
+                        label="Updated Date"
+                        value={activeProduct.updated_at ? format(new Date(activeProduct.updated_at), "dd-MM-yyyy") : "—"}
+                      />
+                    </>
+                  )}
                 </div>
 
+                {/* E-Commerce Direct Link Box (Staff) or Full E-Commerce / Marketplace Section (Media Manager) */}
+                {isMediaManager ? (
+                  <div className="rounded-xl border border-slate-200 bg-white p-3.5 sm:p-4 space-y-3.5 shadow-xs">
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 mb-2">E-Commerce Store Listing</p>
+                      <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-lg bg-slate-50/70 border border-slate-200/80">
+                        <div className="flex items-center gap-3">
+                          <Switch
+                            checked={(activeProduct.own_ecom_status || "active") !== "not_listed"}
+                            disabled={updatingPlatform === "own_ecom"}
+                            onCheckedChange={() => handleTogglePlatformStatus("own_ecom", activeProduct.own_ecom_status || "active")}
+                            aria-label="Toggle e-commerce store listing"
+                          />
+                          <span
+                            className={cn(
+                              "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium",
+                              (activeProduct.own_ecom_status || "active") === "not_listed"
+                                ? "border-amber-200 bg-amber-50 text-amber-700"
+                                : "border-emerald-200 bg-emerald-50 text-emerald-700",
+                            )}
+                          >
+                            {(activeProduct.own_ecom_status || "active") === "not_listed" ? "○ Unlisted from Store" : "● Listed on Store"}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <a
+                            href={getEcommerceProductUrl(activeProduct.id)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 break-all text-xs font-medium text-brand-blue hover:underline bg-white px-2.5 py-1 rounded border border-slate-200 shadow-xs"
+                          >
+                            <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+                            <span>{getEcommerceProductUrl(activeProduct.id)}</span>
+                          </a>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                await navigator.clipboard.writeText(getEcommerceProductUrl(activeProduct.id))
+                                toast({ title: "Copied", description: "E-Commerce product link copied to clipboard." })
+                              } catch {
+                                toast({ title: "Copy failed", description: "Could not copy link to clipboard.", variant: "destructive" })
+                              }
+                            }}
+                            className="shrink-0 rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700 border border-slate-200 bg-white"
+                            title="Copy e-commerce link"
+                          >
+                            <Copy className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Marketplace Platforms (Amazon, Flipkart, Meesho) */}
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 mb-2">Marketplace & Store Listing</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        {platformStatuses
+                          .filter((p) => p.key !== "own_ecom")
+                          .map((platform) => (
+                            <div key={platform.key} className="rounded-lg border border-slate-200 p-2.5 bg-slate-50/50 flex flex-col justify-between gap-1.5">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-semibold text-slate-700">{platform.label}</span>
+                                <Switch
+                                  checked={platform.status === "active"}
+                                  disabled={updatingPlatform === platform.key}
+                                  onCheckedChange={() => handleTogglePlatformStatus(platform.key, platform.status)}
+                                  aria-label={`Toggle ${platform.label} listing`}
+                                />
+                              </div>
+                              <span
+                                className={cn(
+                                  "inline-flex w-fit rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
+                                  platform.status === "active"
+                                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                    : "border-slate-200 bg-white text-slate-500",
+                                )}
+                              >
+                                {platform.status === "active" ? "Active ●" : "Not Listed ○"}
+                              </span>
+                            </div>
+                          ))}
+                      </div>
+                    </div>
+
+                    {/* External Product Links */}
+                    {productLinks.length > 0 && (
+                      <div className="pt-1">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 mb-1">External Links</p>
+                        <div className="space-y-1">
+                          {productLinks.map((entry, index) => (
+                            <div key={index} className="flex items-center gap-2 text-xs">
+                              <span className="font-medium text-slate-600">{entry.name}:</span>
+                              <a href={entry.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline truncate">
+                                {entry.url}
+                              </a>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-indigo-100 bg-indigo-50/50 p-3 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      <ExternalLink className="h-4 w-4 text-indigo-600 shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-indigo-500">E-Commerce Product Link</p>
+                        <a
+                          href={getEcommerceProductUrl(activeProduct.id)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs sm:text-sm font-semibold text-indigo-700 hover:underline truncate block"
+                        >
+                          {getEcommerceProductUrl(activeProduct.id)}
+                        </a>
+                      </div>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={async () => {
+                        await navigator.clipboard.writeText(getEcommerceProductUrl(activeProduct.id))
+                        toast({ title: "Link Copied", description: "Product URL copied to clipboard." })
+                      }}
+                      className="h-8 text-xs border-indigo-200 text-indigo-700 bg-white hover:bg-indigo-50 shrink-0"
+                    >
+                      <Copy className="h-3.5 w-3.5 mr-1" /> Copy Link
+                    </Button>
+                  </div>
+                )}
+
                 {/* Description */}
-                {product.description && (
+                {activeProduct.description && (
                   <div className="p-3.5 rounded-xl bg-white border border-slate-200">
                     <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">Description</p>
-                    <p className="text-xs sm:text-sm text-slate-700 whitespace-pre-line leading-relaxed">{product.description}</p>
+                    <p className="text-xs sm:text-sm text-slate-700 whitespace-pre-line leading-relaxed">{activeProduct.description}</p>
                   </div>
                 )}
               </div>
             </div>
 
             {/* Barcode Banner */}
-            {product.barcode && (
+            {barcodeValue ? (
               <div className="rounded-2xl border border-slate-200 bg-white p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
                 <div>
                   <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">Product Barcode</h4>
-                  <p className="text-sm font-mono font-bold text-slate-800 mt-0.5">{product.barcode}</p>
+                  <p className="text-sm font-mono font-bold text-slate-800 mt-0.5">{barcodeValue}</p>
                 </div>
                 <div className="flex flex-col items-center">
                   <div id="staffBarcodeContainer" className="bg-white p-1 rounded" />
                 </div>
               </div>
-            )}
+            ) : isMediaManager ? (
+              <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-4 flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">Product Barcode</h4>
+                  <p className="text-xs text-slate-400 mt-0.5">No barcode assigned to this product</p>
+                </div>
+              </div>
+            ) : null}
 
             {/* Product Variants Table */}
-            {product.has_variants && product.variants && product.variants.length > 0 && (
+            {activeProduct.has_variants && activeProduct.variants && activeProduct.variants.length > 0 && (
               <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-sm">
                 <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex items-center justify-between">
                   <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">Product Variants</h3>
-                  <span className="text-xs font-semibold text-slate-500">{product.variants.length} Variants</span>
+                  <span className="text-xs font-semibold text-slate-500">{activeProduct.variants.length} Variants</span>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm text-left">
@@ -465,7 +733,7 @@ export default function StaffViewProductModal({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {product.variants.map((v: any, index: number) => (
+                      {activeProduct.variants.map((v: any, index: number) => (
                         <tr key={v.id} className={cn("hover:bg-slate-50", index % 2 === 1 && "bg-slate-50/50")}>
                           <td className="px-4 py-2.5 font-semibold text-slate-800">{v.variant_name || v.name}</td>
                           <td className="px-4 py-2.5 font-mono text-xs text-slate-500">{v.sku || "—"}</td>
@@ -477,12 +745,12 @@ export default function StaffViewProductModal({
                           <td className="px-4 py-2.5 text-center">
                             <ShareProductButton 
                               product={{
-                                ...product,
+                                ...activeProduct,
                                 variantName: v.variant_name || v.name,
                                 sellingPrice: v.selling_price !== null && v.selling_price !== undefined ? v.selling_price : retailPrice,
                                 stock: v.device_stock || 0,
-                                barcode: v.barcode || product.barcode,
-                                sku: v.sku || product.sku
+                                barcode: v.barcode || activeProduct.barcode,
+                                sku: v.sku || activeProduct.sku
                               }} 
                               currency={currency} 
                               currentDeviceId={currentDeviceId} 
@@ -499,11 +767,11 @@ export default function StaffViewProductModal({
             )}
 
             {/* Batch Inventory Table */}
-            {product.is_batch_managed && product.batches && product.batches.length > 0 && (
+            {activeProduct.is_batch_managed && activeProduct.batches && activeProduct.batches.length > 0 && (
               <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-sm">
                 <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex items-center justify-between">
                   <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">Active Inventory Batches</h3>
-                  <span className="text-xs font-semibold text-slate-500">{product.batches.length} Batches</span>
+                  <span className="text-xs font-semibold text-slate-500">{activeProduct.batches.length} Batches</span>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm text-left">
@@ -518,7 +786,7 @@ export default function StaffViewProductModal({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {product.batches.map((b: any, index: number) => {
+                      {activeProduct.batches.map((b: any, index: number) => {
                         const mfg = b.mfg_date ? format(new Date(b.mfg_date), "dd-MM-yyyy") : "—"
                         const exp = b.expiry_date ? format(new Date(b.expiry_date), "dd-MM-yyyy") : "—"
                         const totalStock = Array.isArray(b.stocks) ? b.stocks.reduce((acc: number, cur: any) => acc + Number(cur.stock || 0), 0) : 0
@@ -547,7 +815,7 @@ export default function StaffViewProductModal({
           {/* Modal Footer */}
           <div className="border-t border-slate-200 bg-white px-6 py-3.5 shrink-0 flex justify-between items-center">
             <div className="flex items-center gap-2">
-              <ShareProductButton product={product} currency={currency} currentDeviceId={currentDeviceId} />
+              <ShareProductButton product={activeProduct} currency={currency} currentDeviceId={currentDeviceId} />
               <Button
                 variant="outline"
                 size="sm"
@@ -581,15 +849,15 @@ export default function StaffViewProductModal({
         imageUrls={mediaImageUrls}
         videoUrl={mediaVideoUrl}
         initialIndex={activeMediaTab === "video" ? mediaImageUrls.length : selectedImageIndex}
-        productName={product?.name}
-        productSku={product?.barcode || product?.sku}
+        productName={activeProduct?.name}
+        productSku={barcodeValue || activeProduct?.sku}
       />
 
       {isMediaEditOpen && (
         <StaffMediaEditModal
           isOpen={isMediaEditOpen}
           onClose={() => setIsMediaEditOpen(false)}
-          product={product}
+          product={activeProduct}
           onSuccess={(updatedProduct) => {
             if (onProductUpdated) {
               onProductUpdated(updatedProduct)

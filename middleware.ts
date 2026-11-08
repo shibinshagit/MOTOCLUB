@@ -67,6 +67,27 @@ export async function middleware(request: NextRequest) {
     }
   }
 
+  // Handle media-manager routes specifically
+  if (pathname.startsWith("/media-manager")) {
+    const staffToken = request.cookies.get("ims_staff_session")?.value
+
+    if (!staffToken) {
+      return NextResponse.redirect(new URL("/", request.url))
+    }
+
+    try {
+      const { payload } = await jwtVerify(staffToken, SECRET_KEY)
+      const role = (payload as any).role as string | undefined
+
+      if (role !== "media_manager") {
+        return NextResponse.redirect(new URL("/", request.url))
+      }
+      return NextResponse.next()
+    } catch (error) {
+      return NextResponse.redirect(new URL("/", request.url))
+    }
+  }
+
   // Handle staff routes specifically
   if (pathname.startsWith("/staff")) {
     const staffToken = request.cookies.get("ims_staff_session")?.value
@@ -82,6 +103,9 @@ export async function middleware(request: NextRequest) {
       
       if (role === "partner") {
         return NextResponse.redirect(new URL("/partner/dashboard", request.url))
+      }
+      if (role === "media_manager") {
+        return NextResponse.redirect(new URL("/media-manager/dashboard", request.url))
       }
       return NextResponse.next()
     } catch (error) {
@@ -108,6 +132,10 @@ export async function middleware(request: NextRequest) {
         if (role === "partner") {
           return NextResponse.redirect(new URL("/partner/dashboard", request.url))
         }
+
+        if (role === "media_manager") {
+          return NextResponse.redirect(new URL("/media-manager/dashboard", request.url))
+        }
       } catch {
         // Token invalid/expired — let client-side handle it
       }
@@ -118,12 +146,13 @@ export async function middleware(request: NextRequest) {
   return NextResponse.next()
 }
 
-// Match dashboard, staff, partner routes, and well-known probes
+// Match dashboard, staff, partner, media-manager routes, and well-known probes
 export const config = {
   matcher: [
     "/.well-known/:path*",
     "/dashboard/:path*",
     "/staff/:path*",
     "/partner/:path*",
+    "/media-manager/:path*",
   ],
 }

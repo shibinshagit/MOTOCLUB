@@ -32,6 +32,8 @@ interface ProductDetailBaseProps {
   currency?: string
   privacyMode?: boolean
   userId?: number
+  hidePrintTags?: boolean
+  hideStockHistory?: boolean
 }
 
 export type ProductDetailPanelProps = ProductDetailBaseProps
@@ -125,6 +127,8 @@ export function ProductDetailPanel({
   currency: currencyProp,
   privacyMode = false,
   userId,
+  hidePrintTags = false,
+  hideStockHistory = false,
 }: ProductDetailPanelProps) {
   const { isValueHidden } = useStaffRestrictions()
   const hideCogs = isValueHidden("cogs")
@@ -277,7 +281,9 @@ export function ProductDetailPanel({
 
       try {
         setIsLoading(true)
-        await loadStockHistory(5)
+        if (!hideStockHistory) {
+          await loadStockHistory(5)
+        }
 
         const stockByDevice = await getProductStockByDevice(product.id, userId || product.created_by || 1)
         if (stockByDevice.success) {
@@ -323,7 +329,7 @@ export function ProductDetailPanel({
         })
         .catch((err) => console.error("Failed to load JsBarcode:", err))
     }
-  }, [product?.id, currencyProp, product.barcode, userId, product.created_by])
+  }, [product?.id, currencyProp, product.barcode, userId, product.created_by, hideStockHistory])
 
   useEffect(() => {
     setHistoryFilter("current")
@@ -451,7 +457,7 @@ export function ProductDetailPanel({
 
   if (!product) return null
 
-  const toolbarActions = showPrintOptions ? (
+  const toolbarActions = !hidePrintTags && showPrintOptions ? (
     <>
       <div className="flex items-center gap-2">
         <Label htmlFor="copies" className="sr-only">
@@ -489,23 +495,27 @@ export function ProductDetailPanel({
     </>
   ) : (
     <>
-      <Button
-        size="sm"
-        onClick={() => setIsTagPreviewOpen(true)}
-        className="h-8 px-3 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-sm"
-      >
-        <Printer className="mr-1.5 h-3.5 w-3.5" />
-        Print Tag
-      </Button>
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => setShowPrintOptions(true)}
-        className="h-8 border-slate-200 bg-white px-3 text-xs"
-      >
-        <Copy className="mr-1.5 h-3.5 w-3.5" />
-        Multiple
-      </Button>
+      {!hidePrintTags ? (
+        <>
+          <Button
+            size="sm"
+            onClick={() => setIsTagPreviewOpen(true)}
+            className="h-8 px-3 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-sm"
+          >
+            <Printer className="mr-1.5 h-3.5 w-3.5" />
+            Print Tag
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowPrintOptions(true)}
+            className="h-8 border-slate-200 bg-white px-3 text-xs"
+          >
+            <Copy className="mr-1.5 h-3.5 w-3.5" />
+            Multiple
+          </Button>
+        </>
+      ) : null}
       <ShareProductButton product={product} currency={currency} currentDeviceId={currentDeviceId} />
       {onAdjustStock && !hideStockCount ? (
         <Button
@@ -929,7 +939,7 @@ export function ProductDetailPanel({
             </PanelSection>
           ) : null}
 
-          {!hideStockCount ? (
+          {!hideStockHistory && !hideStockCount ? (
             <PanelSection
               title="Stock history"
               action={

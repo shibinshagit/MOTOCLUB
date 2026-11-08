@@ -21,7 +21,7 @@ export interface NotificationItem {
 
 export type NotificationFilter = "all" | "checked" | "unchecked"
 
-export type NotificationRole = "staff" | "admin" | "all"
+export type NotificationRole = "staff" | "admin" | "media_manager" | "all"
 
 /**
  * Fetch notifications for a device with optional filter and role scope
@@ -37,7 +37,7 @@ export async function getNotifications(
       return { success: false, data: [], unreadCount: 0, message: "Invalid device ID" }
     }
 
-    const isStaffRole = role === "staff"
+    const isStaffRole = role === "staff" || role === "media_manager"
     const isAdminRole = role === "admin"
 
     let rows: any[] = []
@@ -140,7 +140,7 @@ export async function getUnreadNotificationCount(
       return { success: false, count: 0 }
     }
 
-    const isStaffRole = role === "staff"
+    const isStaffRole = role === "staff" || role === "media_manager"
     const isAdminRole = role === "admin"
 
     const result = await sql`
@@ -214,7 +214,7 @@ export async function markAllNotificationsAsChecked(
   role?: NotificationRole,
 ): Promise<{ success: boolean; unreadCount: number }> {
   try {
-    const isStaffRole = role === "staff"
+    const isStaffRole = role === "staff" || role === "media_manager"
     const isAdminRole = role === "admin"
 
     await sql`

@@ -71,6 +71,12 @@ export default function AttendanceTab() {
         className: "bg-blue-50 text-blue-700 border-blue-200",
       }
     }
+    if (r === "media_manager") {
+      return {
+        label: "Media Manager",
+        className: "bg-teal-50 text-teal-700 border-teal-200",
+      }
+    }
     if (r === "admin") {
       return {
         label: "Admin",
@@ -423,6 +429,7 @@ export default function AttendanceTab() {
                   <SelectItem value="staff">Staff</SelectItem>
                   <SelectItem value="purchase_manager">Purchase Manager</SelectItem>
                   <SelectItem value="logistics">Logistics</SelectItem>
+                  <SelectItem value="media_manager">Media Manager</SelectItem>
                   <SelectItem value="admin">Admin</SelectItem>
                 </SelectContent>
               </Select>

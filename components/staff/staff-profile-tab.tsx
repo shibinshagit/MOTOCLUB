@@ -383,7 +383,7 @@ export default function StaffProfileTab() {
               <div className="flex flex-wrap items-center gap-2">
                 <h1 className="text-xl sm:text-2xl font-bold tracking-tight truncate max-w-[180px] sm:max-w-none">{activeStaff?.name || "Staff Member"}</h1>
                 <Badge className="bg-blue-500/20 text-blue-300 border-blue-400/30 text-xs shrink-0">
-                  {activeStaff?.role || "Staff"}
+                  {activeStaff?.role === "media_manager" ? "Media Manager" : activeStaff?.role || "Staff"}
                 </Badge>
               </div>
               <div className="flex flex-wrap items-center gap-3 mt-1.5 text-xs text-slate-300">

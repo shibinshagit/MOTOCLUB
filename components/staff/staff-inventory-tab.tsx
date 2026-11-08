@@ -32,8 +32,11 @@ import StaffMediaEditModal from "./staff-media-edit-modal"
 import { ShareProductButton } from "@/components/shared/share-product-button"
 import { useSelector } from "react-redux"
 import { selectDeviceCurrency, selectDeviceId } from "@/store/slices/deviceSlice"
+import { selectActiveStaff } from "@/store/slices/staffSlice"
 
-interface StaffInventoryTabProps {}
+interface StaffInventoryTabProps {
+  isMediaManager?: boolean
+}
 
 function SummaryCard({ title, value, icon, tone }: any) {
   const tones = {
@@ -55,10 +58,12 @@ function SummaryCard({ title, value, icon, tone }: any) {
   )
 }
 
-export default function StaffInventoryTab({}: StaffInventoryTabProps) {
+export default function StaffInventoryTab({ isMediaManager: isMediaManagerProp }: StaffInventoryTabProps = {}) {
   const { toast } = useToast()
   const currency = useSelector((state: any) => selectDeviceCurrency(state)) as string
   const deviceId = useSelector((state: any) => selectDeviceId(state)) as number | undefined
+  const activeStaff = useSelector((state: any) => selectActiveStaff(state))
+  const isMediaManager = isMediaManagerProp ?? Boolean(activeStaff?.role === "media_manager")
 
   const [products, setProducts] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -490,42 +495,71 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
                     </div>
 
                     {/* Pricing & Stock Row */}
-                    <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100 flex items-center justify-between">
-                      <div>
-                        <p className="text-[10px] text-slate-400 font-semibold uppercase">Price</p>
-                        <div className="flex items-baseline gap-1.5">
-                          <span className="text-sm font-bold text-slate-900">
-                            {currency} {sellingPrice.toFixed(2)}
+                    {isMediaManager ? (
+                      <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                        <div>
+                          <p className="text-[10px] text-slate-400 font-semibold uppercase">MRP</p>
+                          <span className="font-bold text-slate-800">
+                            {currency} {Number(product.mrp || product.price || 0).toFixed(2)}
                           </span>
-                          {msp > 0 && msp !== sellingPrice && (
-                            <span className="text-[11px] text-slate-400 line-through">
-                              {currency} {msp.toFixed(2)}
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-slate-400 font-semibold uppercase">Cost</p>
+                          <span className="font-bold text-slate-800">
+                            {currency} {Number(product.cost_price ?? product.wholesale_price ?? 0).toFixed(2)}
+                          </span>
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-slate-400 font-semibold uppercase">Stock</p>
+                          <span className="font-bold text-slate-800">
+                            {product.stock === null ? "—" : product.stock}
+                          </span>
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-slate-400 font-semibold uppercase">MSP</p>
+                          <span className="font-bold text-indigo-600">
+                            {Number(product.msp || 0) > 0 ? `${currency} ${Number(product.msp).toFixed(2)}` : "—"}
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100 flex items-center justify-between">
+                        <div>
+                          <p className="text-[10px] text-slate-400 font-semibold uppercase">Price</p>
+                          <div className="flex items-baseline gap-1.5">
+                            <span className="text-sm font-bold text-slate-900">
+                              {currency} {sellingPrice.toFixed(2)}
+                            </span>
+                            {msp > 0 && msp !== sellingPrice && (
+                              <span className="text-[11px] text-slate-400 line-through">
+                                {currency} {msp.toFixed(2)}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="text-right">
+                          <p className="text-[10px] text-slate-400 font-semibold uppercase mb-0.5">Stock ({product.stock === null ? 0 : product.stock})</p>
+                          {product.stock === null ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
+                              Hidden
+                            </span>
+                          ) : product.stock <= 0 ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-red-50 text-red-700 border border-red-200">
+                              Out of Stock
+                            </span>
+                          ) : product.stock <= 5 ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200">
+                              Low Stock
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              In Stock
                             </span>
                           )}
                         </div>
                       </div>
-
-                      <div className="text-right">
-                        <p className="text-[10px] text-slate-400 font-semibold uppercase mb-0.5">Stock ({product.stock === null ? 0 : product.stock})</p>
-                        {product.stock === null ? (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
-                            Hidden
-                          </span>
-                        ) : product.stock <= 0 ? (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-red-50 text-red-700 border border-red-200">
-                            Out of Stock
-                          </span>
-                        ) : product.stock <= 5 ? (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200">
-                            Low Stock
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
-                            In Stock
-                          </span>
-                        )}
-                      </div>
-                    </div>
+                    )}
 
                     {/* Action Row */}
                     <div className="flex items-center gap-2 pt-1" onClick={(e) => e.stopPropagation()}>
@@ -567,9 +601,20 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
                   <th className="px-6 py-4 font-semibold">Product</th>
                   <th className="px-6 py-4 font-semibold">Category</th>
                   <th className="px-6 py-4 font-semibold">Barcode</th>
-                  <th className="px-6 py-4 font-semibold text-right">Price</th>
-                  <th className="px-6 py-4 font-semibold text-right">MSP</th>
-                  <th className="px-6 py-4 font-semibold text-right">Available Stock</th>
+                  {isMediaManager ? (
+                    <>
+                      <th className="px-4 py-4 font-semibold text-right">MRP</th>
+                      <th className="px-4 py-4 font-semibold text-right">Cost</th>
+                      <th className="px-4 py-4 font-semibold text-right">Stock</th>
+                      <th className="px-4 py-4 font-semibold text-right">MSP</th>
+                    </>
+                  ) : (
+                    <>
+                      <th className="px-6 py-4 font-semibold text-right">Price</th>
+                      <th className="px-6 py-4 font-semibold text-right">MSP</th>
+                      <th className="px-6 py-4 font-semibold text-right">Available Stock</th>
+                    </>
+                  )}
                   <th className="px-6 py-4 font-semibold text-center">Status</th>
                   <th className="px-6 py-4 font-semibold text-center">Action</th>
                 </tr>
@@ -589,16 +634,27 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
                       </td>
                       <td className="px-6 py-4"><div className="h-4 bg-slate-200 rounded w-20" /></td>
                       <td className="px-6 py-4"><div className="h-4 bg-slate-200 rounded w-24" /></td>
-                      <td className="px-6 py-4 text-right"><div className="h-4 bg-slate-200 rounded w-16 ml-auto" /></td>
-                      <td className="px-6 py-4 text-right"><div className="h-4 bg-slate-200 rounded w-16 ml-auto" /></td>
-                      <td className="px-6 py-4 text-right"><div className="h-4 bg-slate-200 rounded w-12 ml-auto" /></td>
+                      {isMediaManager ? (
+                        <>
+                          <td className="px-4 py-4 text-right"><div className="h-4 bg-slate-200 rounded w-16 ml-auto" /></td>
+                          <td className="px-4 py-4 text-right"><div className="h-4 bg-slate-200 rounded w-16 ml-auto" /></td>
+                          <td className="px-4 py-4 text-right"><div className="h-4 bg-slate-200 rounded w-12 ml-auto" /></td>
+                          <td className="px-4 py-4 text-right"><div className="h-4 bg-slate-200 rounded w-16 ml-auto" /></td>
+                        </>
+                      ) : (
+                        <>
+                          <td className="px-6 py-4 text-right"><div className="h-4 bg-slate-200 rounded w-16 ml-auto" /></td>
+                          <td className="px-6 py-4 text-right"><div className="h-4 bg-slate-200 rounded w-16 ml-auto" /></td>
+                          <td className="px-6 py-4 text-right"><div className="h-4 bg-slate-200 rounded w-12 ml-auto" /></td>
+                        </>
+                      )}
                       <td className="px-6 py-4 text-center"><div className="h-6 bg-slate-200 rounded-full w-20 mx-auto" /></td>
                       <td className="px-6 py-4 text-center"><div className="h-8 bg-slate-200 rounded w-28 mx-auto" /></td>
                     </tr>
                   ))
                 ) : hasError ? (
                   <tr>
-                    <td colSpan={8} className="px-6 py-12 text-center text-slate-500">
+                    <td colSpan={isMediaManager ? 9 : 8} className="px-6 py-12 text-center text-slate-500">
                       <AlertTriangle className="h-8 w-8 mx-auto mb-2 text-amber-500" />
                       <p className="font-semibold text-slate-700">{errorMessage || "Unable to load products."}</p>
                       <Button variant="outline" size="sm" onClick={() => loadInventory()} className="mt-3 text-xs">
@@ -608,7 +664,7 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
                   </tr>
                 ) : products.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="px-6 py-12 text-center text-slate-500">
+                    <td colSpan={isMediaManager ? 9 : 8} className="px-6 py-12 text-center text-slate-500">
                       <Package className="h-8 w-8 mx-auto mb-2 text-slate-300" />
                       <p className="font-medium">No products found{debouncedSearch ? ` for "${debouncedSearch}"` : ""}</p>
                       {debouncedSearch && (
@@ -656,21 +712,40 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
                       </td>
                       <td className="px-6 py-3 text-slate-600">{product.category || "—"}</td>
                       <td className="px-6 py-3 font-mono text-xs text-slate-500">{product.barcode || product.variants?.[0]?.barcode || "—"}</td>
-                      <td className="px-6 py-3 text-right font-medium text-slate-800">
-                        {(() => {
-                          const sellingPrice = Number(product.msp ?? product.price ?? 0)
-                          return `${currency} ${sellingPrice.toFixed(2)}`
-                        })()}
-                      </td>
-                      <td className="px-6 py-3 text-right font-medium text-slate-600">
-                        {(() => {
-                          const msp = Number(product.msp || product.variants?.[0]?.msp || 0)
-                          return msp > 0 ? `${currency} ${msp.toFixed(2)}` : "—"
-                        })()}
-                      </td>
-                      <td className="px-6 py-3 text-right font-bold text-slate-700">
-                        {product.stock === null ? "—" : product.stock}
-                      </td>
+                      {isMediaManager ? (
+                        <>
+                          <td className="px-4 py-3 text-right font-medium text-slate-800">
+                            {currency} {Number(product.mrp || product.price || 0).toFixed(2)}
+                          </td>
+                          <td className="px-4 py-3 text-right font-medium text-slate-800">
+                            {currency} {Number(product.cost_price ?? product.wholesale_price ?? 0).toFixed(2)}
+                          </td>
+                          <td className="px-4 py-3 text-right font-bold text-slate-700">
+                            {product.stock === null ? "—" : product.stock}
+                          </td>
+                          <td className="px-4 py-3 text-right font-medium text-indigo-600">
+                            {Number(product.msp || 0) > 0 ? `${currency} ${Number(product.msp).toFixed(2)}` : "—"}
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td className="px-6 py-3 text-right font-medium text-slate-800">
+                            {(() => {
+                              const sellingPrice = Number(product.msp ?? product.price ?? 0)
+                              return `${currency} ${sellingPrice.toFixed(2)}`
+                            })()}
+                          </td>
+                          <td className="px-6 py-3 text-right font-medium text-slate-600">
+                            {(() => {
+                              const msp = Number(product.msp || product.variants?.[0]?.msp || 0)
+                              return msp > 0 ? `${currency} ${msp.toFixed(2)}` : "—"
+                            })()}
+                          </td>
+                          <td className="px-6 py-3 text-right font-bold text-slate-700">
+                            {product.stock === null ? "—" : product.stock}
+                          </td>
+                        </>
+                      )}
                       <td className="px-6 py-3 text-center">
                         {product.stock === null ? (
                           <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200">
@@ -791,6 +866,7 @@ export default function StaffInventoryTab({}: StaffInventoryTabProps) {
         product={selectedProduct} 
         currency={currency}
         onProductUpdated={handleProductUpdated}
+        isMediaManager={isMediaManager}
       />
 
       {mediaEditProduct && (
