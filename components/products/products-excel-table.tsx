@@ -76,7 +76,7 @@ interface ProductsExcelTableProps {
   hideStockCount: boolean
   currency: string
   onViewProduct: (product: any) => void
-  onEditProduct: (product: any) => void
+  onEditProduct?: (product: any) => void
   page?: number
   pageSize?: number
   totalCount?: number
@@ -389,16 +389,29 @@ function ProductsExcelTable({
                       </>
                     )}
                     <td className={cn(stickyActionCellClass(index % 2 === 0 ? "bg-white" : "bg-slate-50/60"), "align-top")}>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          onEditProduct(product)
-                        }}
-                        className="text-sm font-medium text-brand-blue hover:underline"
-                      >
-                        Edit
-                      </button>
+                      {onEditProduct ? (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            onEditProduct(product)
+                          }}
+                          className="text-sm font-medium text-brand-blue hover:underline"
+                        >
+                          Edit
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            onViewProduct(product)
+                          }}
+                          className="text-sm font-medium text-brand-blue hover:underline"
+                        >
+                          View
+                        </button>
+                      )}
                     </td>
                   </tr>
                 )

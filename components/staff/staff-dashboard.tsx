@@ -20,9 +20,11 @@ import {
   TrendingUp,
   Activity,
   Briefcase,
-  Loader2
+  Loader2,
+  Flame
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
 import { staffLogout } from "@/app/actions/staff-auth-actions"
 import { getStaffDashboardStats, verifyStaffActiveStatus } from "@/app/actions/staff-actions"
 import { useAppDispatch, useAppSelector } from "@/store/hooks"
@@ -40,12 +42,31 @@ import { StaffCustomerTab } from "./customers/staff-customer-tab"
 import { StaffSalesChart } from "./staff-sales-chart"
 import StaffProfileTab from "./staff-profile-tab"
 import StaffLeadsTab from "./leads/staff-leads-tab"
+import TrendingInlineView from "@/components/products/trending-inline-view"
 import GlobalDateFilter from "@/components/dashboard/global-date-filter"
 
-type Tab = "home" | "profile" | "customers" | "inventory" | "leads"
+type Tab = "home" | "profile" | "customers" | "inventory" | "leads" | "trending"
 
-export default function StaffDashboard() {
-  const [activeTab, setActiveTab] = useState<Tab>("home")
+interface StaffDashboardProps {
+  initialTab?: Tab
+}
+
+export default function StaffDashboard({ initialTab }: StaffDashboardProps = {}) {
+  const router = useRouter()
+  const { toast } = useToast()
+  const dispatch = useAppDispatch()
+  const device = useAppSelector(selectDevice)
+  const activeStaff = useAppSelector(selectActiveStaff)
+  const dateRange = useAppSelector(selectDateRange)
+
+  const isMediaManager = activeStaff?.role === "media_manager"
+  const isNormalStaff = activeStaff?.role === "staff"
+
+  const [activeTab, setActiveTab] = useState<Tab>(() => {
+    if (initialTab) return initialTab
+    if (activeStaff?.role === "media_manager") return "inventory"
+    return "home"
+  })
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [isJobCardModalOpen, setIsJobCardModalOpen] = useState(false)
   const [selectedCustomerForJobCard, setSelectedCustomerForJobCard] = useState<any>(null)
@@ -57,18 +78,22 @@ export default function StaffDashboard() {
   const [refreshKey, setRefreshKey] = useState(0)
   const [mounted, setMounted] = useState(false)
   const [unreadLeadCount, setUnreadLeadCount] = useState<number>(0)
-  const router = useRouter()
-  const { toast } = useToast()
-  const dispatch = useAppDispatch()
-  const device = useAppSelector(selectDevice)
-  const activeStaff = useAppSelector(selectActiveStaff)
-  const dateRange = useAppSelector(selectDateRange)
-
-  const isNormalStaff = activeStaff?.role === "staff"
 
   useEffect(() => {
     setMounted(true)
   }, [])
+
+  useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab)
+    }
+  }, [initialTab])
+
+  useEffect(() => {
+    if (isMediaManager && (activeTab === "home" || activeTab === "leads")) {
+      setActiveTab("inventory")
+    }
+  }, [isMediaManager, activeTab])
 
   const fetchStats = useCallback(() => {
     if (device?.id) {
@@ -155,10 +180,10 @@ export default function StaffDashboard() {
 
   // Fetch dashboard stats when tab changes to home, device changes, or date range changes
   useEffect(() => {
-    if (activeTab === "home") {
+    if (activeTab === "home" && !isMediaManager) {
       fetchStats()
     }
-  }, [activeTab, fetchStats])
+  }, [activeTab, fetchStats, isMediaManager])
 
   const refreshDashboard = useCallback(() => {
     fetchStats()
@@ -211,61 +236,108 @@ export default function StaffDashboard() {
     return "Selected Period"
   }
 
-  const NavigationMenu = () => (
-    <nav className="flex-1 space-y-1 p-2">
-      <Button
-        variant={activeTab === "home" ? "secondary" : "ghost"}
-        className="w-full justify-start"
-        onClick={() => { setActiveTab("home"); setIsMobileMenuOpen(false) }}
-      >
-        <LayoutDashboard className="mr-3 h-5 w-5" />
-        Dashboard Home
-      </Button>
+  const NavigationMenu = () => {
+    if (isMediaManager) {
+      return (
+        <nav className="flex-1 space-y-1 p-2">
+          <Button
+            variant={activeTab === "inventory" ? "secondary" : "ghost"}
+            className="w-full justify-start"
+            onClick={() => { setActiveTab("inventory"); setIsMobileMenuOpen(false) }}
+          >
+            <Package className="mr-3 h-5 w-5" />
+            Inventory
+          </Button>
 
-      <Button
-        variant={activeTab === "customers" ? "secondary" : "ghost"}
-        className="w-full justify-start"
-        onClick={() => { setActiveTab("customers"); setIsMobileMenuOpen(false) }}
-      >
-        <Users className="mr-3 h-5 w-5" />
-        Customer List
-      </Button>
+          <Button
+            variant={activeTab === "trending" ? "secondary" : "ghost"}
+            className={cn(
+              "w-full justify-start",
+              activeTab === "trending" ? "bg-orange-100 text-orange-700 font-semibold" : "text-orange-600 hover:text-orange-700 hover:bg-orange-50"
+            )}
+            onClick={() => { setActiveTab("trending"); setIsMobileMenuOpen(false) }}
+          >
+            <Flame className="mr-3 h-5 w-5 text-orange-500" />
+            Trending Products
+          </Button>
 
-      <Button
-        variant={activeTab === "leads" ? "secondary" : "ghost"}
-        className="w-full justify-between"
-        onClick={() => { setActiveTab("leads"); setIsMobileMenuOpen(false) }}
-      >
-        <div className="flex items-center">
-          <Briefcase className="mr-3 h-5 w-5" />
-          CRM Leads
-        </div>
-        {isNormalStaff && unreadLeadCount > 0 && (
-          <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-bold text-white shadow-sm ring-1 ring-white">
-            {unreadLeadCount > 99 ? "99+" : unreadLeadCount}
-          </span>
-        )}
-      </Button>
+          <Button
+            variant={activeTab === "customers" ? "secondary" : "ghost"}
+            className="w-full justify-start"
+            onClick={() => { setActiveTab("customers"); setIsMobileMenuOpen(false) }}
+          >
+            <Users className="mr-3 h-5 w-5" />
+            Customer List
+          </Button>
 
-      <Button
-        variant={activeTab === "inventory" ? "secondary" : "ghost"}
-        className="w-full justify-start"
-        onClick={() => { setActiveTab("inventory"); setIsMobileMenuOpen(false) }}
-      >
-        <Package className="mr-3 h-5 w-5" />
-        Inventory
-      </Button>
+          <Button
+            variant={activeTab === "profile" ? "secondary" : "ghost"}
+            className="w-full justify-start"
+            onClick={() => { setActiveTab("profile"); setIsMobileMenuOpen(false) }}
+          >
+            <UserCircle className="mr-3 h-5 w-5 text-blue-600" />
+            My Profile
+          </Button>
+        </nav>
+      )
+    }
 
-      <Button
-        variant={activeTab === "profile" ? "secondary" : "ghost"}
-        className="w-full justify-start"
-        onClick={() => { setActiveTab("profile"); setIsMobileMenuOpen(false) }}
-      >
-        <UserCircle className="mr-3 h-5 w-5 text-blue-600" />
-        My Profile
-      </Button>
-    </nav>
-  )
+    return (
+      <nav className="flex-1 space-y-1 p-2">
+        <Button
+          variant={activeTab === "home" ? "secondary" : "ghost"}
+          className="w-full justify-start"
+          onClick={() => { setActiveTab("home"); setIsMobileMenuOpen(false) }}
+        >
+          <LayoutDashboard className="mr-3 h-5 w-5" />
+          Dashboard Home
+        </Button>
+
+        <Button
+          variant={activeTab === "customers" ? "secondary" : "ghost"}
+          className="w-full justify-start"
+          onClick={() => { setActiveTab("customers"); setIsMobileMenuOpen(false) }}
+        >
+          <Users className="mr-3 h-5 w-5" />
+          Customer List
+        </Button>
+
+        <Button
+          variant={activeTab === "leads" ? "secondary" : "ghost"}
+          className="w-full justify-between"
+          onClick={() => { setActiveTab("leads"); setIsMobileMenuOpen(false) }}
+        >
+          <div className="flex items-center">
+            <Briefcase className="mr-3 h-5 w-5" />
+            CRM Leads
+          </div>
+          {isNormalStaff && unreadLeadCount > 0 && (
+            <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-bold text-white shadow-sm ring-1 ring-white">
+              {unreadLeadCount > 99 ? "99+" : unreadLeadCount}
+            </span>
+          )}
+        </Button>
+
+        <Button
+          variant={activeTab === "inventory" ? "secondary" : "ghost"}
+          className="w-full justify-start"
+          onClick={() => { setActiveTab("inventory"); setIsMobileMenuOpen(false) }}
+        >
+          <Package className="mr-3 h-5 w-5" />
+          Inventory
+        </Button>
+
+        <Button
+          variant={activeTab === "profile" ? "secondary" : "ghost"}
+          className="w-full justify-start"
+          onClick={() => { setActiveTab("profile"); setIsMobileMenuOpen(false) }}
+        >
+          <UserCircle className="mr-3 h-5 w-5 text-blue-600" />
+          My Profile
+        </Button>
+      </nav>
+    )
+  }
 
   // Stat card with loading state
   const StatCard = ({ 
@@ -367,7 +439,7 @@ export default function StaffDashboard() {
                 {userName || "Staff"}
               </span>
               <span className="text-xs text-slate-500 truncate">
-                {activeStaff?.position || (activeStaff?.role ? activeStaff.role.charAt(0).toUpperCase() + activeStaff.role.slice(1) : "Staff")}
+                {activeStaff?.position || (activeStaff?.role === "media_manager" ? "Media Manager" : activeStaff?.role ? activeStaff.role.charAt(0).toUpperCase() + activeStaff.role.slice(1) : "Staff")}
               </span>
             </div>
           </div>
@@ -430,7 +502,7 @@ export default function StaffDashboard() {
                     {userName || "Staff"}
                   </span>
                   <span className="text-xs text-slate-500 truncate">
-                    {activeStaff?.position || (activeStaff?.role ? activeStaff.role.charAt(0).toUpperCase() + activeStaff.role.slice(1) : "Staff")}
+                    {activeStaff?.position || (activeStaff?.role === "media_manager" ? "Media Manager" : activeStaff?.role ? activeStaff.role.charAt(0).toUpperCase() + activeStaff.role.slice(1) : "Staff")}
                   </span>
                 </div>
               </div>
@@ -610,7 +682,13 @@ export default function StaffDashboard() {
 
             {activeTab === "inventory" && (
               <div className="h-[calc(100vh-2rem)] md:h-[calc(100vh-3rem)] -mx-3 -mt-3 sm:-mx-6 sm:-mt-6">
-                <StaffInventoryTab />
+                <StaffInventoryTab isMediaManager={isMediaManager} />
+              </div>
+            )}
+
+            {activeTab === "trending" && (
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                <TrendingInlineView userId={device?.id || 0} isMediaManager={isMediaManager} />
               </div>
             )}
 

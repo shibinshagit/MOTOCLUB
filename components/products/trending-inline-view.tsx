@@ -21,13 +21,17 @@ import { useToast } from "@/components/ui/use-toast"
 import { notifyError } from "@/lib/notifications"
 import { useSelector } from "react-redux"
 import { selectDeviceCurrency } from "@/store/slices/deviceSlice"
+import { selectActiveStaff } from "@/store/slices/staffSlice"
 
 interface TrendingInlineViewProps {
   userId: number
+  isMediaManager?: boolean
 }
 
-export default function TrendingInlineView({ userId }: TrendingInlineViewProps) {
+export default function TrendingInlineView({ userId, isMediaManager: isMediaManagerProp }: TrendingInlineViewProps) {
   const currency = useSelector(selectDeviceCurrency)
+  const activeStaff = useSelector(selectActiveStaff)
+  const isMediaManager = isMediaManagerProp ?? (activeStaff?.role === "media_manager")
   const { toast } = useToast()
 
   const [products, setProducts] = useState<any[]>([])
@@ -165,26 +169,41 @@ export default function TrendingInlineView({ userId }: TrendingInlineViewProps) 
             onSelectionChange={setSelectedIds}
             bulkActionToolbar={bulkActionToolbar}
             onViewProduct={(p: any) => setDetailProduct(p)}
-            onEditProduct={(p: any) => {
-              setSelectedProduct(p)
-              setIsEditModalOpen(true)
-            }}
+            onEditProduct={
+              isMediaManager
+                ? undefined
+                : (p: any) => {
+                    setSelectedProduct(p)
+                    setIsEditModalOpen(true)
+                  }
+            }
           />
         </div>
       )}
 
       {detailProduct && (
         <ProductDetailSlider
+          portaled={true}
           product={detailProduct}
           onClose={() => setDetailProduct(null)}
-          onEdit={() => {
-            setSelectedProduct(detailProduct)
-            setIsEditModalOpen(true)
-          }}
-          onAdjustStock={() => {
-            setSelectedProduct(detailProduct)
-            setIsAdjustStockModalOpen(true)
-          }}
+          onEdit={
+            isMediaManager
+              ? undefined
+              : () => {
+                  setSelectedProduct(detailProduct)
+                  setIsEditModalOpen(true)
+                }
+          }
+          onAdjustStock={
+            isMediaManager
+              ? undefined
+              : () => {
+                  setSelectedProduct(detailProduct)
+                  setIsAdjustStockModalOpen(true)
+                }
+          }
+          hidePrintTags={isMediaManager}
+          hideStockHistory={isMediaManager}
         />
       )}
 

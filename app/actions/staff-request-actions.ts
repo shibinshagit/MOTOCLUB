@@ -76,7 +76,7 @@ export async function getStaffRequests(params: {
   try {
     const session = await getStaffSession()
     const deviceId = params.deviceId || session?.deviceId
-    const staffId = params.staffId || (session?.role === 'staff' ? session.staffId : undefined)
+    const staffId = params.staffId || ((session?.role === 'staff' || session?.role === 'media_manager') ? session.staffId : undefined)
 
     if (!deviceId) {
       return { success: false, message: "Device ID is required", data: [] }
@@ -298,8 +298,8 @@ export async function getStaffPurchaseDetails(staffId?: number, deviceId?: numbe
   noStore()
   try {
     const session = await getStaffSession()
-    // Enforce authentication: staff role users can only fetch their own purchases
-    const resolvedStaffId = (session?.role === 'staff')
+    // Enforce authentication: staff/media_manager role users can only fetch their own purchases
+    const resolvedStaffId = (session?.role === 'staff' || session?.role === 'media_manager')
       ? session.staffId
       : ((staffId && staffId > 0) ? staffId : session?.staffId)
     const resolvedDeviceId = deviceId || session?.deviceId

@@ -987,8 +987,8 @@ export async function getProducts(
         mrp: finalMrp,
         price: finalPrice,
         shelf: defaultVariant?.shelf ?? product.shelf ?? null,
-        barcode: defaultVariant?.barcode ?? null,
-        sku: defaultVariant?.sku ?? null,
+        barcode: defaultVariant?.barcode || product.barcode || null,
+        sku: defaultVariant?.sku || product.sku || null,
         has_variants: variants.length > 1,
       }
     })
@@ -1780,8 +1780,8 @@ export async function getPaginatedProducts({
         mrp: finalMrp,
         price: finalPrice,
         shelf: defaultVariant?.shelf ?? product.shelf ?? null,
-        barcode: defaultVariant?.barcode ?? null,
-        sku: defaultVariant?.sku ?? null,
+        barcode: defaultVariant?.barcode || product.barcode || null,
+        sku: defaultVariant?.sku || product.sku || null,
         has_variants: variants.length > 1,
       }
     })

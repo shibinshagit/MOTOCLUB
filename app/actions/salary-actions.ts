@@ -489,8 +489,8 @@ export async function getSalaryPaymentHistory(deviceId: number, staffId?: number
     let targetStaffId = staffId
     if (!targetStaffId) {
       const session = await getStaffSession()
-      // Only lock to session staffId if logged in as a normal staff member viewing their own profile
-      if (session?.role === 'staff' && session?.staffId) {
+      // Only lock to session staffId if logged in as a normal staff or media manager member viewing their own profile
+      if ((session?.role === 'staff' || session?.role === 'media_manager') && session?.staffId) {
         targetStaffId = session.staffId
       }
     }

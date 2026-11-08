@@ -42,7 +42,7 @@ export const STAFF_VALUE_OPTIONS: { id: StaffValueRestriction; label: string }[]
 export const DEFAULT_STAFF_VALUE_RESTRICTIONS: StaffValueRestriction[] = ["cogs", "stock_count"]
 
 export type StaffRestrictionSource = {
-  role?: "admin" | "staff" | string | null
+  role?: "admin" | "staff" | "partner" | "purchase_manager" | "logistics" | "media_manager" | string | null
   restricted_pages?: StaffPageId[] | string[] | null
   restricted_values?: StaffValueRestriction[] | string[] | null
 }
@@ -82,6 +82,7 @@ export function canStaffAccessPage(
   page: StaffPageId,
 ): boolean {
   if (!staff) return true
+  if (staff.role === "media_manager") return true
   if (staff.role === "purchase_manager" && page === "attendance") return false
   return !getRestrictedPages(staff).includes(page)
 }
