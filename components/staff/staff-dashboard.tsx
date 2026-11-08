@@ -21,7 +21,9 @@ import {
   Activity,
   Briefcase,
   Loader2,
-  Flame
+  Flame,
+  Truck,
+  Store
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -43,9 +45,11 @@ import { StaffSalesChart } from "./staff-sales-chart"
 import StaffProfileTab from "./staff-profile-tab"
 import StaffLeadsTab from "./leads/staff-leads-tab"
 import TrendingInlineView from "@/components/products/trending-inline-view"
+import SupplierTab from "@/components/dashboard/supplier-tab"
+import PlatformTab from "@/components/dashboard/platform-tab"
 import GlobalDateFilter from "@/components/dashboard/global-date-filter"
 
-type Tab = "home" | "profile" | "customers" | "inventory" | "leads" | "trending"
+type Tab = "home" | "profile" | "customers" | "inventory" | "leads" | "trending" | "supplier" | "platform"
 
 interface StaffDashboardProps {
   initialTab?: Tab
@@ -259,6 +263,24 @@ export default function StaffDashboard({ initialTab }: StaffDashboardProps = {})
           >
             <Flame className="mr-3 h-5 w-5 text-orange-500" />
             Trending Products
+          </Button>
+
+          <Button
+            variant={activeTab === "supplier" ? "secondary" : "ghost"}
+            className="w-full justify-start"
+            onClick={() => { setActiveTab("supplier"); setIsMobileMenuOpen(false) }}
+          >
+            <Truck className="mr-3 h-5 w-5" />
+            Suppliers
+          </Button>
+
+          <Button
+            variant={activeTab === "platform" ? "secondary" : "ghost"}
+            className="w-full justify-start"
+            onClick={() => { setActiveTab("platform"); setIsMobileMenuOpen(false) }}
+          >
+            <Store className="mr-3 h-5 w-5" />
+            Platforms
           </Button>
 
           <Button
@@ -690,6 +712,16 @@ export default function StaffDashboard({ initialTab }: StaffDashboardProps = {})
               <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                 <TrendingInlineView userId={device?.id || 0} isMediaManager={isMediaManager} />
               </div>
+            )}
+
+            {activeTab === "supplier" && (
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                <SupplierTab userId={device?.id || 0} />
+              </div>
+            )}
+
+            {activeTab === "platform" && (
+              <PlatformTab userId={device?.id || 0} />
             )}
 
             {activeTab === "leads" && (
