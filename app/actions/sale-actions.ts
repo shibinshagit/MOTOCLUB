@@ -705,6 +705,7 @@ export interface GetPaginatedSalesOptions {
   onlyPosUpdated?: boolean
   excludePendingAndPickup?: boolean
   isPurchaseManager?: boolean
+  purchaseManagerShowAllOrders?: boolean
   isLogistics?: boolean
 }
 
@@ -730,6 +731,7 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
   const cardFilter = options.cardFilter || "all"
   const onlyPosUpdated = options.onlyPosUpdated || false
   const isPurchaseManager = options.isPurchaseManager || false
+  const purchaseManagerShowAllOrders = options.purchaseManagerShowAllOrders || false
   const isLogistics = options.isLogistics ?? options.excludePendingAndPickup ?? false
 
   try {
@@ -902,7 +904,7 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
               AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
             )
           )
-          AND (${onlyPosUpdated} = false OR s.is_pos_updated = true)
+          AND (${onlyPosUpdated} = false OR ${purchaseManagerShowAllOrders} = true OR s.is_pos_updated = true)
           AND (
             ${isLogistics} = false
             OR (
@@ -914,6 +916,7 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
           )
           AND (
             ${isPurchaseManager} = false
+            OR ${purchaseManagerShowAllOrders} = true
             OR LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
           )
           AND (
@@ -1017,7 +1020,7 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
               AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
             )
           )
-          AND (${onlyPosUpdated} = false OR s.is_pos_updated = true)
+          AND (${onlyPosUpdated} = false OR ${purchaseManagerShowAllOrders} = true OR s.is_pos_updated = true)
           AND (
             ${isLogistics} = false
             OR (
@@ -1029,6 +1032,7 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
           )
           AND (
             ${isPurchaseManager} = false
+            OR ${purchaseManagerShowAllOrders} = true
             OR LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
           )
           AND (
@@ -1286,6 +1290,7 @@ export async function getSalesSummaryCards(
     onlyPosUpdated?: boolean
     excludePendingAndPickup?: boolean
     isPurchaseManager?: boolean
+    purchaseManagerShowAllOrders?: boolean
     isLogistics?: boolean
   } = {}
 ) {
@@ -1304,6 +1309,7 @@ export async function getSalesSummaryCards(
   const typeOfSaleFilter = options.typeOfSaleFilter || "all"
   const onlyPosUpdated = options.onlyPosUpdated || false
   const isPurchaseManager = options.isPurchaseManager || false
+  const purchaseManagerShowAllOrders = options.purchaseManagerShowAllOrders || false
   const isLogistics = options.isLogistics ?? options.excludePendingAndPickup ?? false
 
   try {
@@ -1311,19 +1317,29 @@ export async function getSalesSummaryCards(
       const rows = await sql`
         SELECT
           COUNT(*) FILTER (
-            WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
-              AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled'
-              AND LOWER(COALESCE(s.delivery_status, '')) NOT IN ('returned', 'failed')
-              AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
+            WHERE (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
               AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
           )::int as total_count,
           COALESCE(SUM(s.total_amount) FILTER (
-            WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
-              AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled'
-              AND LOWER(COALESCE(s.delivery_status, '')) NOT IN ('returned', 'failed')
-              AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
+            WHERE (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
               AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
           ), 0)::numeric as total_amount,
+          COUNT(*) FILTER (
+            WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
+              AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled'
+              AND s.is_pos_updated = true
+              AND LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+              AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
+              AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
+          )::int as orders_to_check_count,
+          COALESCE(SUM(s.total_amount) FILTER (
+            WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
+              AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled'
+              AND s.is_pos_updated = true
+              AND LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+              AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
+              AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
+          ), 0)::numeric as orders_to_check_amount,
           COUNT(*) FILTER (
             WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
               AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled'
@@ -1470,7 +1486,7 @@ export async function getSalesSummaryCards(
             OR CAST(s.total_amount AS TEXT) LIKE ${searchPattern}
           )
       `
-      return rows[0] || { total_count: 0, total_amount: 0, today_count: 0, pending_count: 0, critical_count: 0, direct_count: 0, direct_amount: 0 }
+      return rows[0] || { total_count: 0, total_amount: 0, orders_to_check_count: 0, orders_to_check_amount: 0, today_count: 0, pending_count: 0, critical_count: 0, direct_count: 0, direct_amount: 0 }
     })
 
     return {
@@ -1478,6 +1494,8 @@ export async function getSalesSummaryCards(
       counts: {
         total: Number(cardCounts.total_count || 0),
         total_amount: Number(cardCounts.total_amount || 0),
+        orders_to_check: Number(cardCounts.orders_to_check_count || 0),
+        orders_to_check_amount: Number(cardCounts.orders_to_check_amount || 0),
         today: Number(cardCounts.today_count || 0),
         pending: Number(cardCounts.pending_count || 0),
         critical: Number(cardCounts.critical_count || 0),
@@ -1489,7 +1507,7 @@ export async function getSalesSummaryCards(
     console.error("Get sales summary cards error:", error)
     return {
       success: false,
-      counts: { total: 0, total_amount: 0, today: 0, pending: 0, critical: 0, direct: 0, direct_amount: 0 },
+      counts: { total: 0, total_amount: 0, orders_to_check: 0, orders_to_check_amount: 0, today: 0, pending: 0, critical: 0, direct: 0, direct_amount: 0 },
     }
   }
 }
