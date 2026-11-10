@@ -30,6 +30,8 @@ import { DraftIndicator } from "@/components/shared/draft-indicator"
 import { useConfirm } from "@/hooks/use-confirm"
 import { useCallback, useMemo, useRef } from "react"
 import { smartCapChange } from "@/lib/text-format"
+import { SplitPaymentInput, isCodMethod } from "@/components/shared/split-payment-input"
+import { PaymentRecordInput } from "@/types/payment"
 
 interface ProductRow {
   id: string
@@ -130,24 +132,23 @@ export function JobCardForm({
     is_default: false
   })
 
-  const [courierPaidExtra, setCourierPaidExtra] = useState<number | "">("")
+  const [courierPaidExtra, setCourierPaidExtra] = useState<number | "">(0)
+  const [paymentMethod, setPaymentMethod] = useState<string>("UPI")
+  const [payments, setPayments] = useState<PaymentRecordInput[]>([
+    { paymentMethod: "UPI", amount: 0 },
+  ])
+  const [isPaymentValid, setIsPaymentValid] = useState<boolean>(true)
+  const [receivedAmount, setReceivedAmount] = useState<number>(0)
+  const [balanceAmount, setBalanceAmount] = useState<number>(0)
 
-  // Load default courier paid from localStorage if creating a new job card
+  // Clear legacy localStorage key so it never restores a stuck 100
   useEffect(() => {
-    if (!editSaleId) {
-      const saved = localStorage.getItem("defaultCourierPaidExtra")
-      if (saved) {
-        setCourierPaidExtra(Number(saved))
-      }
+    try {
+      localStorage.removeItem("defaultCourierPaidExtra")
+    } catch {
+      // ignore
     }
-  }, [editSaleId])
-
-  // Save courier paid to localStorage when it changes
-  useEffect(() => {
-    if (courierPaidExtra !== "" && courierPaidExtra !== null) {
-      localStorage.setItem("defaultCourierPaidExtra", String(courierPaidExtra))
-    }
-  }, [courierPaidExtra])
+  }, [])
 
   const [products, setProducts] = useState<ProductRow[]>([
     {
@@ -183,6 +184,8 @@ export function JobCardForm({
     shippingNotes,
     courierPaidExtra,
     paymentStatus,
+    paymentMethod,
+    payments,
     products,
   }), [
     customerId,
@@ -201,6 +204,8 @@ export function JobCardForm({
     shippingNotes,
     courierPaidExtra,
     paymentStatus,
+    paymentMethod,
+    payments,
     products,
   ])
 
@@ -272,6 +277,12 @@ export function JobCardForm({
       }
       if (draft.paymentStatus) {
         setPaymentStatus(draft.paymentStatus)
+      }
+      if (draft.paymentMethod) {
+        setPaymentMethod(draft.paymentMethod)
+      }
+      if (Array.isArray(draft.payments) && draft.payments.length > 0) {
+        setPayments(draft.payments)
       }
       if (Array.isArray(draft.products) && draft.products.length > 0) {
         setProducts(draft.products)
@@ -366,9 +377,24 @@ export function JobCardForm({
       setShippingPincode(sale.shipping_pincode || "")
       setShippingPhone(formatPhoneNumber(sale.customer_phone_override || sale.customer_phone || ""))
       setShippingNotes(sale.shipping_notes || "")
-      setCourierPaidExtra(sale.courier_paid_extra > 0 ? sale.courier_paid_extra : "")
+      setCourierPaidExtra(Number(sale.courier_paid_extra) || 0)
       setOriginalDeliveryStatus(sale.delivery_status || "Pending")
       setPaymentStatus(sale.payment_status || "Pending")
+      setPaymentMethod(sale.payment_method || "UPI")
+      if (Array.isArray(res.data.payments) && res.data.payments.length > 0) {
+        setPayments(res.data.payments)
+      } else {
+        const amt =
+          sale.payment_status === "Paid"
+            ? Number(sale.total_amount) || 0
+            : Number(sale.received_amount) || 0
+        setPayments([
+          {
+            paymentMethod: sale.payment_method || "UPI",
+            amount: amt,
+          },
+        ])
+      }
       if (sale.customer_id) {
         getCustomerAddresses(sale.customer_id).then((addrRes) => {
           if (addrRes.success && addrRes.data && addrRes.data.length > 0) {
@@ -567,6 +593,11 @@ export function JobCardForm({
       }
     }
 
+    if (!isPaymentValid) {
+      toast({ title: "Validation Error", description: "Please resolve payment amount errors before submitting", variant: "destructive" })
+      return
+    }
+
     setIsLoading(true)
 
     try {
@@ -577,7 +608,16 @@ export function JobCardForm({
         typeOfSale,
         fulfillmentType: (typeOfSale || "").toLowerCase().trim() === "courier" ? ("ship" as const) : ("pickup" as const),
         paymentStatus: paymentStatus || "Pending",
-        paymentMethod: "UPI",
+        paymentMethod: paymentMethod || payments[0]?.paymentMethod || "UPI",
+        payments: payments.map(p => ({
+          id: p.id,
+          paymentMethod: p.paymentMethod || "UPI",
+          amount: Number(p.amount) || 0,
+          referenceNumber: p.referenceNumber?.trim() || undefined,
+          notes: p.notes?.trim() || undefined,
+        })),
+        receivedAmount,
+        balanceAmount,
         deviceId,
         staffId: activeStaff?.id || null,
         crmLeadId,
@@ -591,7 +631,7 @@ export function JobCardForm({
         shippingAddressType,
         shippingPincode,
         shippingNotes,
-        courierPaidExtra: courierPaidExtra ? Number(courierPaidExtra) : undefined,
+        courierPaidExtra: Number(courierPaidExtra) || 0,
         products: validProducts.map(p => ({
           productId: p.productId!,
           productName: p.productName,
@@ -655,8 +695,13 @@ export function JobCardForm({
     setShippingPhone("")
     setShippingNotes("")
     setCustomerAddresses([])
-    setCourierPaidExtra("")
+    setCourierPaidExtra(0)
     setPaymentStatus("Pending")
+    setPaymentMethod("UPI")
+    setPayments([{ paymentMethod: "UPI", amount: 0 }])
+    setIsPaymentValid(true)
+    setReceivedAmount(0)
+    setBalanceAmount(0)
     setProducts([{
       id: crypto.randomUUID(),
       productId: null,
@@ -709,6 +754,8 @@ export function JobCardForm({
   const calculateSubtotal = () => {
     return products.reduce((sum, p) => sum + (p.price * p.quantity), 0)
   }
+  const subtotal = calculateSubtotal()
+  const grandTotal = subtotal + (Number(courierPaidExtra) || 0)
 
   if (isSuccess && successData) {
     if (successData.showWhatsappConfirmation) {
@@ -731,7 +778,7 @@ export function JobCardForm({
           customerPhone={successData.saleData.customerPhone}
           shippingAddress={addressParts.join(", ")}
           products={successData.saleData.products}
-          totalAmount={calculateSubtotal() + (Number(courierPaidExtra) || 0)}
+          totalAmount={grandTotal}
           onComplete={editSaleId && onClose ? onClose : resetForm}
         />
       )
@@ -1342,55 +1389,83 @@ export function JobCardForm({
             <Plus className="h-4 w-4 mr-2 text-gray-500" /> Add Product Row
           </Button>
 
-          {/* Totals & Notes Section */}
-          <div className="flex flex-col lg:flex-row justify-between items-stretch lg:items-start gap-4 pt-4">
-            <div className="flex-1 w-full lg:max-w-lg">
+          {/* Notes, Payment Details & Totals Section (Full Width Stack) */}
+          <div className="space-y-4 pt-4 border-t border-gray-100">
+            {/* Top: Order Notes / Instructions (Full Width) */}
+            <div className="w-full">
               <Label className="text-xs font-medium text-gray-700 mb-1 block">Order Notes / Instructions</Label>
               <textarea
-                className="flex min-h-[100px] w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm ring-offset-white placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-950 disabled:cursor-not-allowed disabled:opacity-50 resize-none"
+                className="flex min-h-[80px] w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm ring-offset-white placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-950 disabled:cursor-not-allowed disabled:opacity-50 resize-none"
                 placeholder="Any special instructions for this order..."
                 value={shippingNotes}
                 onChange={(e) => setShippingNotes(e.target.value)}
               />
             </div>
 
-            <div className="w-full lg:max-w-sm p-4 bg-gray-50 rounded-lg border border-gray-100 shrink-0 space-y-3">
-              <div className="space-y-1">
-                <Label className="text-xs font-medium text-gray-700">Payment Status</Label>
-                <select
-                  value={paymentStatus}
-                  onChange={(e) => setPaymentStatus(e.target.value)}
-                  className="flex h-9 w-full items-center justify-between rounded-md border border-gray-300 bg-white px-3 py-1 text-xs text-gray-900 focus:outline-none focus:ring-1 focus:ring-slate-400 font-medium"
-                >
-                  <option value="Pending">Pending</option>
-                  <option value="Credit">Credit</option>
-                  <option value="COD">COD</option>
-                  <option value="Partial">Partial</option>
-                  <option value="Paid">Paid</option>
-                </select>
+            {/* Middle: Payment Details Section (Full Width) */}
+            <div className="w-full p-4 bg-white rounded-lg border border-gray-200 shadow-sm">
+              <SplitPaymentInput
+                totalAmount={grandTotal}
+                payments={payments}
+                isEditMode={!!editSaleId}
+                onChange={(updatedPayments, isValid) => {
+                  setPayments(updatedPayments)
+                  setIsPaymentValid(isValid)
+                  const totalAlloc = updatedPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0)
+                  const sumPaid = updatedPayments.reduce((sum, p) => {
+                    if (!editSaleId && isCodMethod(p.paymentMethod)) {
+                      if (grandTotal > 0 && totalAlloc >= grandTotal) {
+                        return sum
+                      }
+                      return sum + (Number(p.amount) || 0)
+                    }
+                    return sum + (Number(p.amount) || 0)
+                  }, 0)
+                  setReceivedAmount(sumPaid)
+                  setBalanceAmount(Math.max(0, grandTotal - sumPaid))
+                  if (updatedPayments.length > 0) {
+                    setPaymentMethod(updatedPayments[0].paymentMethod || "UPI")
+                  }
+                }}
+                paymentStatus={paymentStatus}
+                onPaymentStatusChange={(newStatus) => {
+                  setPaymentStatus(newStatus)
+                }}
+                currencySymbol={currency}
+              />
+            </div>
+
+            {/* Bottom: Order Pricing Breakdown (Items Subtotal, Courier Charge, Grand Total - Full Width) */}
+            <div className="w-full p-4 bg-gray-50/80 rounded-lg border border-gray-200 space-y-3">
+              <div className="flex justify-between items-center text-xs text-gray-700">
+                <span className="font-medium">Items Subtotal:</span>
+                <span className="font-semibold text-gray-900">{currency} {subtotal.toFixed(2)}</span>
               </div>
 
-              <div className="space-y-1">
-                <Label className="text-xs font-medium text-gray-700">Courier Paid (Extra)</Label>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-500 font-medium">
+              <div className="flex justify-between items-center text-xs text-gray-700">
+                <Label htmlFor="courier-charge-input" className="font-medium cursor-pointer">Courier Charge:</Label>
+                <div className="relative w-36">
+                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-500 font-medium">
                     {currency}
                   </span>
                   <Input
+                    id="courier-charge-input"
                     type="number"
                     min="0"
                     step="0.01"
                     placeholder="0.00"
                     value={courierPaidExtra}
                     onChange={(e) => setCourierPaidExtra(e.target.value === "" ? "" : Number(e.target.value))}
-                    className="pl-12 text-right border-gray-200 focus-visible:ring-gray-300"
+                    className="h-8 pl-8 text-right text-xs bg-white border-gray-300 focus-visible:ring-gray-300"
                   />
                 </div>
               </div>
+
               <div className="h-px bg-gray-200 w-full" />
-              <div className="flex justify-between font-bold text-gray-900 text-sm sm:text-base">
-                <span>Estimated Total:</span>
-                <span>{currency} {(calculateSubtotal() + (Number(courierPaidExtra) || 0)).toFixed(2)}</span>
+
+              <div className="flex justify-between items-center font-bold text-sm sm:text-base text-gray-900 bg-blue-50/80 p-2.5 rounded-md border border-blue-100">
+                <span className="text-blue-900 font-semibold">Grand Total:</span>
+                <span className="text-blue-700 font-bold">{currency} {grandTotal.toFixed(2)}</span>
               </div>
             </div>
           </div>

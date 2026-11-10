@@ -67,10 +67,21 @@ export default function StaffDashboard({ initialTab }: StaffDashboardProps = {})
   const isNormalStaff = activeStaff?.role === "staff"
 
   const [activeTab, setActiveTab] = useState<Tab>(() => {
-    if (initialTab) return initialTab
+    if (initialTab) {
+      if (activeStaff?.role === "media_manager" && (initialTab === "supplier" || initialTab === "customers")) {
+        return "inventory"
+      }
+      return initialTab
+    }
     if (activeStaff?.role === "media_manager") return "inventory"
     return "home"
   })
+
+  useEffect(() => {
+    if (isMediaManager && (activeTab === "supplier" || activeTab === "customers")) {
+      setActiveTab("inventory")
+    }
+  }, [isMediaManager, activeTab])
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [isJobCardModalOpen, setIsJobCardModalOpen] = useState(false)
   const [selectedCustomerForJobCard, setSelectedCustomerForJobCard] = useState<any>(null)
@@ -266,30 +277,12 @@ export default function StaffDashboard({ initialTab }: StaffDashboardProps = {})
           </Button>
 
           <Button
-            variant={activeTab === "supplier" ? "secondary" : "ghost"}
-            className="w-full justify-start"
-            onClick={() => { setActiveTab("supplier"); setIsMobileMenuOpen(false) }}
-          >
-            <Truck className="mr-3 h-5 w-5" />
-            Suppliers
-          </Button>
-
-          <Button
             variant={activeTab === "platform" ? "secondary" : "ghost"}
             className="w-full justify-start"
             onClick={() => { setActiveTab("platform"); setIsMobileMenuOpen(false) }}
           >
             <Store className="mr-3 h-5 w-5" />
             Platforms
-          </Button>
-
-          <Button
-            variant={activeTab === "customers" ? "secondary" : "ghost"}
-            className="w-full justify-start"
-            onClick={() => { setActiveTab("customers"); setIsMobileMenuOpen(false) }}
-          >
-            <Users className="mr-3 h-5 w-5" />
-            Customer List
           </Button>
 
           <Button
@@ -691,7 +684,7 @@ export default function StaffDashboard({ initialTab }: StaffDashboardProps = {})
               <StaffProfileTab />
             )}
 
-            {activeTab === "customers" && (
+            {activeTab === "customers" && !isMediaManager && (
               <StaffCustomerTab 
                 onTabChange={setActiveTab}
                 onOpenCreateJobCard={(customer) => {
@@ -714,7 +707,7 @@ export default function StaffDashboard({ initialTab }: StaffDashboardProps = {})
               </div>
             )}
 
-            {activeTab === "supplier" && (
+            {activeTab === "supplier" && !isMediaManager && (
               <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                 <SupplierTab userId={device?.id || 0} />
               </div>

@@ -7,6 +7,7 @@ import { getStaffSession } from "@/lib/staff-session"
 import { addCustomer, syncCustomerShippingAddress } from "./customer-actions"
 import { isSaleStockDeducted } from "./sale-actions"
 import { applyStockTransition, getSaleStockLines, applyStockDelta } from "@/lib/sale-stock"
+import { PaymentRecordInput } from "@/types/payment"
 
 /**
  * Validates one job card line against the database and returns the identifiers that are stored on the
@@ -80,6 +81,10 @@ export interface JobCardInput {
   typeOfSale?: string
   paymentStatus?: string
   paymentMethod?: string
+  payments?: PaymentRecordInput[]
+  receivedAmount?: number
+  advanceAmount?: number
+  balanceAmount?: number
   fulfillmentType?: "ship" | "pickup"
 
   products: JobCardProductInput[]
@@ -164,9 +169,77 @@ export async function createJobCard(input: JobCardInput) {
       itemsSubtotal += p.price * p.quantity
       totalCost += p.costPrice * p.quantity
     }
-    const totalAmount = itemsSubtotal + (Number(input.courierPaidExtra) || 0)
+    const courierPaidExtra = Number(input.courierPaidExtra) || 0
+    const totalAmount = itemsSubtotal + courierPaidExtra
 
-        const txResult = await sql.begin(async (tx: any) => {
+    const isCod = (method?: string | null) => {
+      const s = (method || "").toUpperCase().trim()
+      return s === "COD" || s === "CASH ON DELIVERY"
+    }
+
+    const primaryPaymentMethod =
+      (Array.isArray(input.payments) && input.payments.length > 0 && input.payments[0].paymentMethod)
+        ? input.payments[0].paymentMethod
+        : (input.paymentMethod || "UPI")
+
+    const hasCodPayment =
+      isCod(primaryPaymentMethod) ||
+      (Array.isArray(input.payments) && input.payments.some((p: any) => isCod(p.paymentMethod)))
+
+    const totalAllocated =
+      Array.isArray(input.payments) && input.payments.length > 0
+        ? input.payments.reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0)
+        : (Number(input.receivedAmount) || 0)
+
+    let receivedAmount = 0
+    if (Array.isArray(input.payments) && input.payments.length > 0) {
+      receivedAmount = input.payments.reduce((s: number, p: any) => {
+        if (isCod(p.paymentMethod) && totalAmount > 0 && totalAllocated >= totalAmount) {
+          return s
+        }
+        return s + (Number(p.amount) || 0)
+      }, 0)
+    } else if (isCod(primaryPaymentMethod)) {
+      receivedAmount = Number(input.advanceAmount) || 0
+    } else {
+      receivedAmount = Number(input.receivedAmount) || 0
+    }
+
+    receivedAmount = Math.min(Math.max(0, receivedAmount), totalAmount)
+    let advanceAmount = 0
+    if (hasCodPayment) {
+      advanceAmount = receivedAmount
+    }
+    let balanceAmount = Math.max(0, totalAmount - receivedAmount)
+
+    const rawStatus = (input.paymentStatus || "").toString().trim()
+    let resolvedPaymentStatus = "Pending"
+    if (/^paid$/i.test(rawStatus) || /^completed$/i.test(rawStatus)) {
+      resolvedPaymentStatus = "Paid"
+      if (!input.payments || input.payments.length === 0) {
+        receivedAmount = totalAmount
+        balanceAmount = 0
+      }
+    } else if (/^credit$/i.test(rawStatus)) {
+      resolvedPaymentStatus = "Credit"
+    } else if (/^cod$/i.test(rawStatus)) {
+      resolvedPaymentStatus = "COD"
+    } else if (/^partial$/i.test(rawStatus)) {
+      resolvedPaymentStatus = "Partial"
+    } else if (/^pending$/i.test(rawStatus)) {
+      resolvedPaymentStatus = "Pending"
+    } else {
+      if (receivedAmount >= totalAmount && totalAmount > 0) resolvedPaymentStatus = "Paid"
+      else if (receivedAmount > 0) resolvedPaymentStatus = "Partial"
+      else resolvedPaymentStatus = "Pending"
+    }
+
+    const orderStatus =
+      resolvedPaymentStatus === "Paid" ? "Completed" :
+      resolvedPaymentStatus === "Credit" ? "Credit" :
+      resolvedPaymentStatus === "Partial" ? "Partial" : "Pending"
+
+    const txResult = await sql.begin(async (tx: any) => {
       // 1. CRM Lead Validation and Locking
       if (input.crmLeadId && session) {
         const leadRes = await tx`
@@ -214,7 +287,7 @@ export async function createJobCard(input: JobCardInput) {
             }
             trackingId = 'DOD' + String(nextNum).padStart(3, '0')
 
-            // Insert Sale (Status: Pending)
+            // Insert Sale
             const saleRows = await sp`
               INSERT INTO sales (
                 customer_id,
@@ -253,28 +326,11 @@ export async function createJobCard(input: JobCardInput) {
                 ${resolvedCustomerId || null},
                 ${totalAmount},
                 ${totalCost},
-                ${(() => {
-                  const s = (input.paymentStatus || "").toLowerCase()
-                  if (s === "paid" || s === "completed") return "Completed"
-                  if (s === "credit") return "Credit"
-                  if (s === "partial") return "Partial"
-                  return "Pending"
-                })()},
-                ${(() => {
-                  const s = (input.paymentStatus || "").trim()
-                  if (/^paid$/i.test(s) || /^completed$/i.test(s)) return "Paid"
-                  if (/^credit$/i.test(s)) return "Credit"
-                  if (/^cod$/i.test(s)) return "COD"
-                  if (/^partial$/i.test(s)) return "Partial"
-                  if (/^pending$/i.test(s)) return "Pending"
-                  return s || "Pending"
-                })()},
-                ${input.paymentMethod || 'UPI'},
+                ${orderStatus},
+                ${resolvedPaymentStatus},
+                ${primaryPaymentMethod},
                 ${deviceId},
-                ${(() => {
-                  const s = (input.paymentStatus || "").toLowerCase()
-                  return s === "paid" || s === "completed" ? totalAmount : 0
-                })()},
+                ${receivedAmount},
                 ${staffId},
                 'job_card',
                 ${input.typeOfSale || 'walk in'},
@@ -290,18 +346,15 @@ export async function createJobCard(input: JobCardInput) {
                 ${input.shippingLandmark || null},
                 ${input.shippingAddressType || 'Home'},
                 ${input.shippingPincode || null},
-                ${input.courierPaidExtra || 0},
+                ${courierPaidExtra},
                 ${createdBy},
-                0,
-                ${(() => {
-                  const s = (input.paymentStatus || "").toLowerCase()
-                  return s === "paid" || s === "completed" ? 0 : totalAmount
-                })()},
+                ${advanceAmount},
+                ${balanceAmount},
                 ${(() => {
                   const t = (input.typeOfSale || "").toLowerCase().trim()
                   if (t === "courier") return "ship"
                   if (t === "walk in") return "pickup"
-                  return (input.courierPaidExtra && Number(input.courierPaidExtra) > 0) ? "ship" : "pickup"
+                  return (courierPaidExtra > 0) ? "ship" : "pickup"
                 })()},
                 'Pending',
                 false,
@@ -311,6 +364,30 @@ export async function createJobCard(input: JobCardInput) {
               RETURNING id
             `
             saleId = saleRows[0].id
+
+            // Insert into transaction_payments
+            if (Array.isArray(input.payments) && input.payments.length > 0) {
+              for (const p of input.payments) {
+                const amt = Number(p.amount) || 0
+                if (amt > 0) {
+                  await sp`
+                    INSERT INTO transaction_payments (
+                      sale_id, payment_method, amount, reference_number, notes, payment_date
+                    ) VALUES (
+                      ${saleId}, ${p.paymentMethod || "UPI"}, ${amt}, ${p.referenceNumber || null}, ${p.notes || null}, NOW()
+                    )
+                  `
+                }
+              }
+            } else if (resolvedPaymentStatus === "Paid" && receivedAmount > 0) {
+              await sp`
+                INSERT INTO transaction_payments (
+                  sale_id, payment_method, amount, payment_date
+                ) VALUES (
+                  ${saleId}, ${primaryPaymentMethod}, ${receivedAmount}, NOW()
+                )
+              `
+            }
           })
           updateSuccess = true
         } catch (err: any) {
@@ -466,6 +543,20 @@ export async function updateJobCard(id: number, input: any) {
     }
 
     // 3. Determine payment status & received/balance amounts
+    const isCod = (method?: string | null) => {
+      const s = (method || "").toUpperCase().trim()
+      return s === "COD" || s === "CASH ON DELIVERY"
+    }
+
+    const primaryPaymentMethod =
+      (Array.isArray(input.payments) && input.payments.length > 0 && input.payments[0].paymentMethod)
+        ? input.payments[0].paymentMethod
+        : (input.paymentMethod || existingSale[0]?.payment_method || "UPI")
+
+    const hasCodPayment =
+      isCod(primaryPaymentMethod) ||
+      (Array.isArray(input.payments) && input.payments.some((p: any) => isCod(p.paymentMethod)))
+
     const rawInputStatus = input.paymentStatus ? input.paymentStatus.trim() : null
     let nextPaymentStatus = rawInputStatus || existingSale[0]?.payment_status || 'Pending'
     if (/^paid$/i.test(nextPaymentStatus) || /^completed$/i.test(nextPaymentStatus)) {
@@ -481,12 +572,27 @@ export async function updateJobCard(id: number, input: any) {
     }
 
     let updatedReceived = Number(existingSale[0]?.received_amount) || 0
-    if (rawInputStatus) {
+    let advanceAmount = Number(existingSale[0]?.advance_amount) || 0
+
+    if (Array.isArray(input.payments) && input.payments.length > 0) {
+      const totalAllocated = input.payments.reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0)
+      updatedReceived = input.payments.reduce((s: number, p: any) => {
+        if (isCod(p.paymentMethod) && totalAmount > 0 && totalAllocated >= totalAmount) {
+          return s
+        }
+        return s + (Number(p.amount) || 0)
+      }, 0)
+    } else if (rawInputStatus) {
       if (nextPaymentStatus === 'Paid') {
         updatedReceived = totalAmount
       } else if (nextPaymentStatus === 'Credit' || nextPaymentStatus === 'Pending' || nextPaymentStatus === 'COD') {
         updatedReceived = 0
       }
+    }
+
+    updatedReceived = Math.min(Math.max(0, updatedReceived), totalAmount)
+    if (hasCodPayment) {
+      advanceAmount = updatedReceived
     }
     const balanceAmount = Math.max(0, totalAmount - updatedReceived)
     const nextOrderStatus =
@@ -505,6 +611,7 @@ export async function updateJobCard(id: number, input: any) {
           status = ${nextOrderStatus},
           payment_status = ${nextPaymentStatus},
           received_amount = ${updatedReceived},
+          advance_amount = ${advanceAmount},
           customer_name_override = ${customerNameOverride},
           customer_phone_override = ${customerPhoneOverride},
           shipping_city = ${input.shippingCity || null},
@@ -523,7 +630,7 @@ export async function updateJobCard(id: number, input: any) {
             ELSE COALESCE(fulfillment_type, 'pickup')
           END,
           delivery_status = COALESCE(delivery_status, 'Pending'),
-          payment_method = COALESCE(${input.paymentMethod || null}, payment_method, 'UPI'),
+          payment_method = COALESCE(${primaryPaymentMethod}, payment_method, 'UPI'),
           type_of_sale = COALESCE(${input.typeOfSale || null}, type_of_sale)
         WHERE id = ${id} AND staff_id = ${staffId}
         RETURNING tracking_id
@@ -537,6 +644,7 @@ export async function updateJobCard(id: number, input: any) {
           status = ${nextOrderStatus},
           payment_status = ${nextPaymentStatus},
           received_amount = ${updatedReceived},
+          advance_amount = ${advanceAmount},
           customer_name_override = ${customerNameOverride},
           customer_phone_override = ${customerPhoneOverride},
           shipping_city = ${input.shippingCity || null},
@@ -555,7 +663,7 @@ export async function updateJobCard(id: number, input: any) {
             ELSE COALESCE(fulfillment_type, 'pickup')
           END,
           delivery_status = COALESCE(delivery_status, 'Pending'),
-          payment_method = COALESCE(${input.paymentMethod || null}, payment_method, 'UPI'),
+          payment_method = COALESCE(${primaryPaymentMethod}, payment_method, 'UPI'),
           type_of_sale = COALESCE(${input.typeOfSale || null}, type_of_sale)
         WHERE id = ${id}
         RETURNING tracking_id
@@ -623,6 +731,32 @@ export async function updateJobCard(id: number, input: any) {
       if (stockDeducted && beforeLines) {
         const afterLines = await getSaleStockLines(id, tx)
         await applyStockDelta(id, saleDeviceId, beforeLines, afterLines, `Job Card #${id} edited`, tx)
+      }
+
+      // Sync transaction_payments if payments provided
+      if (Array.isArray(input.payments)) {
+        await tx`DELETE FROM transaction_payments WHERE sale_id = ${id}`
+        for (const p of input.payments) {
+          const amt = Number(p.amount) || 0
+          if (amt > 0) {
+            await tx`
+              INSERT INTO transaction_payments (
+                sale_id, payment_method, amount, reference_number, notes, payment_date
+              ) VALUES (
+                ${id}, ${p.paymentMethod || "UPI"}, ${amt}, ${p.referenceNumber || null}, ${p.notes || null}, NOW()
+              )
+            `
+          }
+        }
+      } else if (rawInputStatus && nextPaymentStatus === "Paid" && updatedReceived > 0) {
+        await tx`DELETE FROM transaction_payments WHERE sale_id = ${id}`
+        await tx`
+          INSERT INTO transaction_payments (
+            sale_id, payment_method, amount, payment_date
+          ) VALUES (
+            ${id}, ${primaryPaymentMethod}, ${updatedReceived}, NOW()
+          )
+        `
       }
     })
 

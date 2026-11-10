@@ -429,6 +429,7 @@ export default function SalesExcelTable({
   )
 
   const [cardFilter, setCardFilter] = useState<"all" | "today" | "pending" | "critical" | "direct">("all")
+  const [purchaseManagerCardMode, setPurchaseManagerCardMode] = useState<"orders_to_check" | "all_orders">("orders_to_check")
   const [typeFilter, setTypeFilter] = useState<"all" | "normal" | "job_card">("all")
   const [typeOfSaleFilter, setTypeOfSaleFilter] = useState<"all" | "walk in" | "courier" | "pending_payments">("all")
   const [selectedSales, setSelectedSales] = useState<number[]>([])
@@ -511,9 +512,10 @@ export default function SalesExcelTable({
           typeOfSaleFilter,
           cardFilter,
           searchTerm: debouncedSearch,
-          onlyPosUpdated,
+          onlyPosUpdated: isPurchaseManager && purchaseManagerCardMode === "all_orders" ? false : onlyPosUpdated,
           isLogistics,
           isPurchaseManager,
+          purchaseManagerShowAllOrders: isPurchaseManager && purchaseManagerCardMode === "all_orders",
         }),
         getSalesSummaryCards(deviceId!, {
           dateFrom: globalDateRange?.from,
@@ -557,7 +559,7 @@ export default function SalesExcelTable({
         setHasFetchedServer(true)
       }
     }
-  }, [deviceId, page, pageSize, globalDateRange?.from, globalDateRange?.to, typeFilter, typeOfSaleFilter, cardFilter, debouncedSearch, onlyPosUpdated, isLogistics, isPurchaseManager])
+  }, [deviceId, page, pageSize, globalDateRange?.from, globalDateRange?.to, typeFilter, typeOfSaleFilter, cardFilter, debouncedSearch, onlyPosUpdated, isLogistics, isPurchaseManager, purchaseManagerCardMode])
 
   // A new date range starts again from the first page and clears selection.
   useEffect(() => {
@@ -607,7 +609,7 @@ export default function SalesExcelTable({
 
   // The list is always server-paginated/filtered; rows are already the current page.
   const displaySales = useMemo(() => {
-    if (isPurchaseManager) {
+    if (isPurchaseManager && purchaseManagerCardMode === "orders_to_check") {
       return serverSales.filter((s: any) => {
         const dStatus = (s.delivery_status || "pending").trim().toLowerCase()
         return dStatus === "pending" || dStatus === "paid"
@@ -629,7 +631,7 @@ export default function SalesExcelTable({
       })
     }
     return serverSales
-  }, [serverSales, isLogistics, isPurchaseManager])
+  }, [serverSales, isLogistics, isPurchaseManager, purchaseManagerCardMode])
 
   const selectedSalesList = useMemo(() => {
     return displaySales.filter((s) => selectedSales.includes(s.id))
@@ -1012,15 +1014,24 @@ export default function SalesExcelTable({
           deviceId={deviceId}
           globalDateRange={globalDateRange}
           formatCurrency={formatCurrency}
+          activeCard={purchaseManagerCardMode}
           ordersSummary={
             serverCardCounts
               ? {
                   total: serverCardCounts.total,
                   total_amount: serverCardCounts.total_amount ?? totalSalesAmount,
+                  orders_to_check: (serverCardCounts as any).orders_to_check ?? 0,
+                  orders_to_check_amount: (serverCardCounts as any).orders_to_check_amount ?? 0,
                 }
               : undefined
           }
+          onOrdersToCheckClick={() => {
+            setPurchaseManagerCardMode("orders_to_check")
+            setCardFilter("all")
+            setPage(1)
+          }}
           onTotalOrdersClick={() => {
+            setPurchaseManagerCardMode("all_orders")
             setCardFilter("all")
             setPage(1)
           }}

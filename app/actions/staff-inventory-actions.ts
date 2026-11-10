@@ -85,7 +85,7 @@ export async function getStaffInventoryStats() {
       return {
         success: false,
         message: "Unauthorized",
-        stats: { total: 0, available: 0, low: 0, out: 0 },
+        stats: { total: 0, available: 0, low: 0, out: 0, mediaUploaded: 0, mediaNeedUpdate: 0, mediaChangedToday: 0 },
       }
     }
     const deviceId = session.deviceId
@@ -95,7 +95,38 @@ export async function getStaffInventoryStats() {
         COUNT(*)::int AS total,
         COUNT(CASE WHEN COALESCE(ds.stock, 0) > 0 THEN 1 END)::int AS available,
         COUNT(CASE WHEN COALESCE(ds.stock, 0) > 0 AND COALESCE(ds.stock, 0) <= 5 THEN 1 END)::int AS low,
-        COUNT(CASE WHEN COALESCE(ds.stock, 0) <= 0 THEN 1 END)::int AS out
+        COUNT(CASE WHEN COALESCE(ds.stock, 0) <= 0 THEN 1 END)::int AS out,
+        COUNT(CASE WHEN (
+          (p.image_url IS NOT NULL AND TRIM(p.image_url) != '')
+          OR (p.video_url IS NOT NULL AND TRIM(p.video_url) != '')
+          OR (
+            p.image_urls IS NOT NULL 
+            AND REPLACE(TRIM(p.image_urls::text), ' ', '') NOT IN ('[]', 'null', '""', '')
+            AND LENGTH(REPLACE(TRIM(p.image_urls::text), ' ', '')) > 2
+          )
+        ) THEN 1 END)::int AS media_uploaded,
+        COUNT(CASE WHEN NOT (
+          (p.image_url IS NOT NULL AND TRIM(p.image_url) != '')
+          OR (p.video_url IS NOT NULL AND TRIM(p.video_url) != '')
+          OR (
+            p.image_urls IS NOT NULL 
+            AND REPLACE(TRIM(p.image_urls::text), ' ', '') NOT IN ('[]', 'null', '""', '')
+            AND LENGTH(REPLACE(TRIM(p.image_urls::text), ' ', '')) > 2
+          )
+        ) THEN 1 END)::int AS media_need_update,
+        COUNT(CASE WHEN (
+          p.updated_at IS NOT NULL 
+          AND p.updated_at::date = CURRENT_DATE
+          AND (
+            (p.image_url IS NOT NULL AND TRIM(p.image_url) != '')
+            OR (p.video_url IS NOT NULL AND TRIM(p.video_url) != '')
+            OR (
+              p.image_urls IS NOT NULL 
+              AND REPLACE(TRIM(p.image_urls::text), ' ', '') NOT IN ('[]', 'null', '""', '')
+              AND LENGTH(REPLACE(TRIM(p.image_urls::text), ' ', '')) > 2
+            )
+          )
+        ) THEN 1 END)::int AS media_changed_today
       FROM products p
       LEFT JOIN (
         SELECT product_id, SUM(stock) as stock FROM (
@@ -120,13 +151,16 @@ export async function getStaffInventoryStats() {
         available: Number(row.available || 0),
         low: Number(row.low || 0),
         out: Number(row.out || 0),
+        mediaUploaded: Number(row.media_uploaded || 0),
+        mediaNeedUpdate: Number(row.media_need_update || 0),
+        mediaChangedToday: Number(row.media_changed_today || 0),
       },
     }
   } catch (error) {
     console.error("Get staff inventory stats error:", error)
     return {
       success: false,
-      stats: { total: 0, available: 0, low: 0, out: 0 },
+      stats: { total: 0, available: 0, low: 0, out: 0, mediaUploaded: 0, mediaNeedUpdate: 0, mediaChangedToday: 0 },
     }
   }
 }

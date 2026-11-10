@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Receipt, CreditCard, CheckCircle2, Package, Info } from "lucide-react"
+import { Receipt, CreditCard, CheckCircle2, Package, Info, ClipboardCheck } from "lucide-react"
 import { getPurchaseSummary } from "@/app/actions/purchase-actions"
 import { getSalesSummaryCards } from "@/app/actions/sale-actions"
 import { SalesBreakdownModal } from "@/components/shared/sales-breakdown-modal"
@@ -19,6 +19,8 @@ export interface PurchaseManagerSummaryData {
 export interface OrdersSummaryData {
   total: number
   total_amount?: number
+  orders_to_check?: number
+  orders_to_check_amount?: number
 }
 
 interface PurchaseManagerKpiCardsProps {
@@ -29,6 +31,8 @@ interface PurchaseManagerKpiCardsProps {
   formatCurrency?: (amount: number) => string
   refreshKey?: number
   className?: string
+  activeCard?: "orders_to_check" | "all_orders" | null
+  onOrdersToCheckClick?: () => void
   onTotalOrdersClick?: () => void
 }
 
@@ -42,6 +46,8 @@ export default function PurchaseManagerKpiCards({
   formatCurrency,
   refreshKey = 0,
   className,
+  activeCard,
+  onOrdersToCheckClick,
   onTotalOrdersClick,
 }: PurchaseManagerKpiCardsProps) {
   const reduxDeviceId = useAppSelector(selectDeviceId)
@@ -114,6 +120,8 @@ export default function PurchaseManagerKpiCards({
           setFetchedOrdersSummary({
             total: res.counts.total,
             total_amount: res.counts.total_amount,
+            orders_to_check: (res.counts as any).orders_to_check ?? 0,
+            orders_to_check_amount: (res.counts as any).orders_to_check_amount ?? 0,
           })
         }
       })
@@ -135,18 +143,65 @@ export default function PurchaseManagerKpiCards({
     return formatMoney(Number(amt || 0), deviceCurrency)
   }
 
+  const ordersToCheckCount = activeOrdersSummary?.orders_to_check ?? 0
+  const ordersToCheckAmount = activeOrdersSummary?.orders_to_check_amount ?? 0
   const ordersCount = activeOrdersSummary?.total ?? 0
   const ordersAmount = activeOrdersSummary?.total_amount ?? 0
 
   return (
     <>
-      <div className={cn("grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-4", className)}>
-        {/* CARD 1 — TOTAL ORDERS (Same count & logic as Admin) */}
+      <div className={cn("grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5", className)}>
+        {/* CARD 1 — ORDERS TO CHECK */}
+        <div
+          role={onOrdersToCheckClick ? "button" : undefined}
+          onClick={onOrdersToCheckClick}
+          className={cn(
+            "flex flex-col justify-between rounded-xl border p-3.5 sm:p-4 text-left transition-all shadow-xs min-w-0 min-h-[96px]",
+            activeCard === "orders_to_check"
+              ? "border-amber-400 bg-amber-50 ring-2 ring-amber-300"
+              : "border-amber-200 bg-amber-50/90",
+            onOrdersToCheckClick ? "cursor-pointer hover:border-amber-300 hover:shadow-sm" : ""
+          )}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-amber-700">
+              Orders to Check
+            </span>
+            <ClipboardCheck className="h-4 w-4 text-amber-600 shrink-0" />
+          </div>
+          <div className="mt-2 flex items-baseline justify-between gap-2 min-w-0">
+            <div className="min-w-0">
+              <div className="text-xl font-extrabold text-slate-900 leading-tight">
+                {isLoadingOrders && !activeOrdersSummary ? (
+                  <div className="h-6 w-24 bg-amber-200/60 rounded animate-pulse" />
+                ) : (
+                  <>
+                    {ordersToCheckCount}{" "}
+                    <span className="text-xs font-normal text-slate-500">
+                      {ordersToCheckCount === 1 ? "Order" : "Orders"}
+                    </span>
+                  </>
+                )}
+              </div>
+              <div className="text-xs font-semibold text-amber-700 mt-0.5 truncate">
+                {isLoadingOrders && !activeOrdersSummary ? DASH : formatAmount(ordersToCheckAmount)}
+              </div>
+            </div>
+            <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-200 shrink-0">
+              To Check
+            </span>
+          </div>
+        </div>
+
+        {/* CARD 2 — TOTAL ORDERS (Same count & logic as Admin) */}
         <div
           role={onTotalOrdersClick ? "button" : undefined}
           onClick={onTotalOrdersClick}
           className={cn(
-            "flex flex-col justify-between rounded-xl border border-violet-200 bg-violet-50/90 p-3.5 sm:p-4 text-left transition-all shadow-xs min-w-0 min-h-[96px]",
+            "flex flex-col justify-between rounded-xl border p-3.5 sm:p-4 text-left transition-all shadow-xs min-w-0 min-h-[96px]",
+            activeCard === "all_orders"
+              ? "border-violet-400 bg-violet-50 ring-2 ring-violet-300"
+              : "border-violet-200 bg-violet-50/90",
             onTotalOrdersClick ? "cursor-pointer hover:border-violet-300 hover:shadow-sm" : ""
           )}
         >

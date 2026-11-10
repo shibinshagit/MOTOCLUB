@@ -204,6 +204,7 @@ export default function TrendingInlineView({ userId, isMediaManager: isMediaMana
           }
           hidePrintTags={isMediaManager}
           hideStockHistory={isMediaManager}
+          hideManageMedia={isMediaManager}
         />
       )}
 
