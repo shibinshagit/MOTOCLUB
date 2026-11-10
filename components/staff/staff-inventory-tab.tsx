@@ -10,6 +10,8 @@ import {
   RefreshCw, 
   Loader2, 
   ImageIcon, 
+  ImageOff,
+  Clock,
   X,
   ChevronLeft,
   ChevronRight,
@@ -44,6 +46,7 @@ function SummaryCard({ title, value, icon, tone }: any) {
     emerald: "bg-emerald-50 text-emerald-600 border-emerald-100",
     amber: "bg-amber-50 text-amber-600 border-amber-100",
     red: "bg-red-50 text-red-600 border-red-100",
+    violet: "bg-violet-50 text-violet-600 border-violet-100",
   }
   return (
     <div className={cn("rounded-xl border p-3 sm:p-4 flex items-center justify-between min-w-0", (tones as any)[tone])}>
@@ -85,7 +88,15 @@ export default function StaffInventoryTab({ isMediaManager: isMediaManagerProp }
 
   const [selectedProduct, setSelectedProduct] = useState<any>(null)
   const [mediaEditProduct, setMediaEditProduct] = useState<any>(null)
-  const [stats, setStats] = useState({ total: 0, available: 0, low: 0, out: 0 })
+  const [stats, setStats] = useState({
+    total: 0,
+    available: 0,
+    low: 0,
+    out: 0,
+    mediaUploaded: 0,
+    mediaNeedUpdate: 0,
+    mediaChangedToday: 0,
+  })
 
   const isFirstMount = useRef(true)
   const activeFetchIdRef = useRef(0)
@@ -258,10 +269,41 @@ export default function StaffInventoryTab({ isMediaManager: isMediaManagerProp }
         
         {/* Stats */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-4 sm:mb-6">
-          <SummaryCard title="Total Products" value={stats.total} icon={<Package className="h-5 w-5 sm:h-6 sm:w-6" />} tone="blue" />
-          <SummaryCard title="In Stock" value={stats.available} icon={<PackageOpen className="h-5 w-5 sm:h-6 sm:w-6" />} tone="emerald" />
-          <SummaryCard title="Low Stock" value={stats.low} icon={<AlertTriangle className="h-5 w-5 sm:h-6 sm:w-6" />} tone="amber" />
-          <SummaryCard title="Out of Stock" value={stats.out} icon={<AlertCircle className="h-5 w-5 sm:h-6 sm:w-6" />} tone="red" />
+          {isMediaManager ? (
+            <>
+              <SummaryCard
+                title="Media Uploaded"
+                value={stats.mediaUploaded ?? 0}
+                icon={<ImageIcon className="h-5 w-5 sm:h-6 sm:w-6" />}
+                tone="emerald"
+              />
+              <SummaryCard
+                title="Needs Media Update"
+                value={stats.mediaNeedUpdate ?? 0}
+                icon={<ImageOff className="h-5 w-5 sm:h-6 sm:w-6" />}
+                tone="amber"
+              />
+              <SummaryCard
+                title="Media Changed Today"
+                value={stats.mediaChangedToday ?? 0}
+                icon={<Clock className="h-5 w-5 sm:h-6 sm:w-6" />}
+                tone="violet"
+              />
+              <SummaryCard
+                title="Total Products"
+                value={stats.total}
+                icon={<Package className="h-5 w-5 sm:h-6 sm:w-6" />}
+                tone="blue"
+              />
+            </>
+          ) : (
+            <>
+              <SummaryCard title="Total Products" value={stats.total} icon={<Package className="h-5 w-5 sm:h-6 sm:w-6" />} tone="blue" />
+              <SummaryCard title="In Stock" value={stats.available} icon={<PackageOpen className="h-5 w-5 sm:h-6 sm:w-6" />} tone="emerald" />
+              <SummaryCard title="Low Stock" value={stats.low} icon={<AlertTriangle className="h-5 w-5 sm:h-6 sm:w-6" />} tone="amber" />
+              <SummaryCard title="Out of Stock" value={stats.out} icon={<AlertCircle className="h-5 w-5 sm:h-6 sm:w-6" />} tone="red" />
+            </>
+          )}
         </div>
 
         {/* Toolbar */}
