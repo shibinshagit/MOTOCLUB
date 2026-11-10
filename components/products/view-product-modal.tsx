@@ -34,6 +34,7 @@ interface ProductDetailBaseProps {
   userId?: number
   hidePrintTags?: boolean
   hideStockHistory?: boolean
+  hideManageMedia?: boolean
 }
 
 export type ProductDetailPanelProps = ProductDetailBaseProps
@@ -129,6 +130,7 @@ export function ProductDetailPanel({
   userId,
   hidePrintTags = false,
   hideStockHistory = false,
+  hideManageMedia = false,
 }: ProductDetailPanelProps) {
   const { isValueHidden } = useStaffRestrictions()
   const hideCogs = isValueHidden("cogs")
@@ -690,15 +692,17 @@ export function ProductDetailPanel({
                     <Eye className="h-3.5 w-3.5 text-slate-500" />
                     View Media
                   </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-9 shrink-0 border-slate-200 bg-white px-3 text-xs"
-                    onClick={() => setIsMediaManageOpen(true)}
-                  >
-                    Manage Media
-                  </Button>
+                  {!hideManageMedia && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-9 shrink-0 border-slate-200 bg-white px-3 text-xs"
+                      onClick={() => setIsMediaManageOpen(true)}
+                    >
+                      Manage Media
+                    </Button>
+                  )}
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3 p-4 md:grid-cols-4">
@@ -1118,7 +1122,7 @@ export function ProductDetailPanel({
           productName={currentProduct?.name}
           productSku={currentProduct?.barcode || currentProduct?.sku}
         />
-        {isMediaManageOpen && (
+        {!hideManageMedia && isMediaManageOpen && (
           <StaffMediaEditModal
             isOpen={isMediaManageOpen}
             onClose={() => setIsMediaManageOpen(false)}
