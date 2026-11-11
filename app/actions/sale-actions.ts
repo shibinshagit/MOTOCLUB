@@ -740,6 +740,7 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
         SELECT 
           s.id,
           s.is_pos_updated,
+          s.is_ready_to_ship,
           COALESCE(s.sale_date, s.created_at) as sale_date,
           s.created_at,
           s.status,
@@ -912,12 +913,20 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
               AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
               AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed', 'pickup')
               AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+              AND (
+                s.is_ready_to_ship = true
+                OR LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+              )
             )
           )
           AND (
             ${isPurchaseManager} = false
             OR ${purchaseManagerShowAllOrders} = true
-            OR LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+            OR (
+              LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+              AND s.is_ready_to_ship IS NOT TRUE
+              AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) != 'direct'
+            )
           )
           AND (
             ${searchPattern}::text IS NULL
@@ -1028,12 +1037,20 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
               AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
               AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed', 'pickup')
               AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+              AND (
+                s.is_ready_to_ship = true
+                OR LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+              )
             )
           )
           AND (
             ${isPurchaseManager} = false
             OR ${purchaseManagerShowAllOrders} = true
-            OR LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+            OR (
+              LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+              AND s.is_ready_to_ship IS NOT TRUE
+              AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) != 'direct'
+            )
           )
           AND (
             ${searchPattern}::text IS NULL
@@ -1147,6 +1164,7 @@ export async function getSalesByIds(deviceId: number, saleIds: number[]) {
         SELECT 
           s.id,
           s.is_pos_updated,
+          s.is_ready_to_ship,
           COALESCE(s.sale_date, s.created_at) as sale_date,
           s.created_at,
           s.status,
@@ -1329,6 +1347,8 @@ export async function getSalesSummaryCards(
               AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled'
               AND s.is_pos_updated = true
               AND LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+              AND s.is_ready_to_ship IS NOT TRUE
+              AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) != 'direct'
               AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
               AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
           )::int as orders_to_check_count,
@@ -1337,6 +1357,8 @@ export async function getSalesSummaryCards(
               AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled'
               AND s.is_pos_updated = true
               AND LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+              AND s.is_ready_to_ship IS NOT TRUE
+              AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) != 'direct'
               AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
               AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
           ), 0)::numeric as orders_to_check_amount,
@@ -1353,11 +1375,19 @@ export async function getSalesSummaryCards(
                   AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
                   AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed', 'pickup')
                   AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+                  AND (
+                    s.is_ready_to_ship = true
+                    OR LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                  )
                 )
               )
               AND (
                 ${isPurchaseManager} = false
-                OR LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+                OR (
+                  s.is_ready_to_ship IS NOT TRUE
+                  AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) != 'direct'
+                  AND LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+                )
               )
           )::int as today_count,
           COUNT(*) FILTER (
@@ -1365,10 +1395,21 @@ export async function getSalesSummaryCards(
               AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
               AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed', 'pickup')
               AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+              AND (
+                ${isLogistics} = false
+                OR (
+                  s.is_ready_to_ship = true
+                  OR LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                )
+              )
               AND (${onlyPosUpdated} = false OR s.is_pos_updated = true)
               AND (
                 ${isPurchaseManager} = false
-                OR LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+                OR (
+                  s.is_ready_to_ship IS NOT TRUE
+                  AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) != 'direct'
+                  AND LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+                )
               )
               AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
               AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
@@ -1390,11 +1431,19 @@ export async function getSalesSummaryCards(
                   AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
                   AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed', 'pickup')
                   AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+                  AND (
+                    s.is_ready_to_ship = true
+                    OR LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                  )
                 )
               )
               AND (
                 ${isPurchaseManager} = false
-                OR LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+                OR (
+                  s.is_ready_to_ship IS NOT TRUE
+                  AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) != 'direct'
+                  AND LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+                )
               )
               AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
               AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
@@ -1411,11 +1460,19 @@ export async function getSalesSummaryCards(
                   AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
                   AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed', 'pickup')
                   AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+                  AND (
+                    s.is_ready_to_ship = true
+                    OR LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                  )
                 )
               )
               AND (
                 ${isPurchaseManager} = false
-                OR LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+                OR (
+                  s.is_ready_to_ship IS NOT TRUE
+                  AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) != 'direct'
+                  AND LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+                )
               )
               AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
               AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
@@ -1432,11 +1489,19 @@ export async function getSalesSummaryCards(
                   AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
                   AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed', 'pickup')
                   AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+                  AND (
+                    s.is_ready_to_ship = true
+                    OR LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                  )
                 )
               )
               AND (
                 ${isPurchaseManager} = false
-                OR LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+                OR (
+                  s.is_ready_to_ship IS NOT TRUE
+                  AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) != 'direct'
+                  AND LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+                )
               )
               AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
               AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
@@ -2164,7 +2229,7 @@ export async function addSale(saleData: any) {
         packaging_type_id, packaging_type_name,
         tracking_id, shipping_address, shipping_city, shipping_district, shipping_state, shipping_street, shipping_landmark, shipping_address_type, shipping_pincode, weight_kg, length_cm, width_cm, height_cm,
         courier_paid_extra, expense_courier, expense_packing, shipped_at, delivered_at, shipping_notes,
-        advance_amount, balance_amount, is_pos_updated, type_of_sale
+        advance_amount, balance_amount, is_pos_updated, type_of_sale, is_ready_to_ship, ready_to_ship_at
       )
       VALUES (
         ${saleData.customerId || null},
@@ -2210,7 +2275,9 @@ export async function addSale(saleData: any) {
         ${advanceAmount},
         ${balanceAmount},
         false,
-        ${saleData.typeOfSale || 'walk in'}
+        ${saleData.typeOfSale || 'walk in'},
+        ${(shipping.delivery_status || "").trim().toLowerCase() === "direct"},
+        ${(shipping.delivery_status || "").trim().toLowerCase() === "direct" ? new Date() : null}
       )
       RETURNING id
     `
@@ -2965,6 +3032,7 @@ export async function updateSale(saleData: any) {
     const origDelivery = (original.delivery_status || "").trim().toLowerCase()
     const newDelivery = (shipping.delivery_status || "").trim().toLowerCase()
     const isNewShip = newDelivery === "shipping" || newDelivery === "shipped"
+    const isDirect = newDelivery === "direct"
     const wasShip = origDelivery === "shipping" || origDelivery === "shipped"
     let targetShippingDate = original.shipping_date || null
     if (!wasShip && isNewShip) {
@@ -2990,6 +3058,8 @@ export async function updateSale(saleData: any) {
                 staff_id = ${saleData.staffId || null},
                 fulfillment_type = ${shipping.fulfillment_type},
                 delivery_status = ${shipping.delivery_status},
+                is_ready_to_ship = CASE WHEN ${isDirect} THEN true ELSE is_ready_to_ship END,
+                ready_to_ship_at = CASE WHEN ${isDirect} THEN COALESCE(ready_to_ship_at, NOW()) ELSE ready_to_ship_at END,
                 shipping_date = CASE WHEN ${isNewShip} THEN COALESCE(shipping_date, NOW()) ELSE shipping_date END,
                 courier_partner_id = ${shipping.courier_partner_id},
                 courier_service_id = ${shipping.courier_service_id},
@@ -3038,6 +3108,8 @@ export async function updateSale(saleData: any) {
                 staff_id = ${saleData.staffId || null},
                 fulfillment_type = ${shipping.fulfillment_type},
                 delivery_status = ${shipping.delivery_status},
+                is_ready_to_ship = CASE WHEN ${isDirect} THEN true ELSE is_ready_to_ship END,
+                ready_to_ship_at = CASE WHEN ${isDirect} THEN COALESCE(ready_to_ship_at, NOW()) ELSE ready_to_ship_at END,
                 shipping_date = CASE WHEN ${isNewShip} THEN COALESCE(shipping_date, NOW()) ELSE shipping_date END,
                 courier_partner_id = ${shipping.courier_partner_id},
                 courier_service_id = ${shipping.courier_service_id},
@@ -3720,6 +3792,7 @@ export async function updateSaleDeliveryStatus(
 
     const newDeliveryStatus = (deliveryStatus || "").trim().toLowerCase()
     const isNewShipping = newDeliveryStatus === "shipping" || newDeliveryStatus === "shipped"
+    const isDirect = newDeliveryStatus === "direct"
 
     const updated = await sql`
       UPDATE sales
@@ -3728,6 +3801,8 @@ export async function updateSaleDeliveryStatus(
           delivered_at = ${deliveredAt},
           tracking_id = ${targetTrackingId},
           shipping_date = CASE WHEN ${isNewShipping} THEN COALESCE(shipping_date, NOW()) ELSE shipping_date END,
+          is_ready_to_ship = CASE WHEN ${isDirect} THEN true ELSE is_ready_to_ship END,
+          ready_to_ship_at = CASE WHEN ${isDirect} THEN COALESCE(ready_to_ship_at, NOW()) ELSE ready_to_ship_at END,
           updated_at = NOW()
       WHERE id = ${saleId}
       RETURNING shipping_date
@@ -3758,6 +3833,44 @@ export async function updateSaleDeliveryStatus(
     }
   } catch (error) {
     console.error("updateSaleDeliveryStatus error:", error)
+    return {
+      success: false as const,
+      message: `Database error: ${error instanceof Error ? error.message : "Unknown error"}`,
+    }
+  }
+}
+
+export async function markSaleReadyToShip(saleId: number, deviceId?: number) {
+  if (!saleId) {
+    return { success: false as const, message: "Sale ID is required" }
+  }
+
+  try {
+    const updated = await sql`
+      UPDATE sales
+      SET is_ready_to_ship = true,
+          ready_to_ship_at = NOW(),
+          updated_at = NOW()
+      WHERE id = ${saleId}
+      RETURNING id, delivery_status, is_ready_to_ship
+    `
+
+    if (updated.length === 0) {
+      return { success: false as const, message: "Sale not found" }
+    }
+
+    revalidatePath("/dashboard")
+    revalidatePath("/staff/dashboard")
+    revalidatePath("/logistics/dashboard")
+    revalidatePath("/purchase-manager/dashboard")
+
+    return {
+      success: true as const,
+      message: "Order marked ready to ship",
+      sale: updated[0],
+    }
+  } catch (error) {
+    console.error("markSaleReadyToShip error:", error)
     return {
       success: false as const,
       message: `Database error: ${error instanceof Error ? error.message : "Unknown error"}`,
@@ -3866,6 +3979,7 @@ export async function updateSaleFulfillmentDetails(saleId: number, shippingData:
 
     const shippedAt = (["Shipped", "Shipping", "Courier", "In transit", "Delivered"].includes(String(shippingData.deliveryStatus)) ? new Date() : null)
     const deliveredAt = (shippingData.deliveryStatus === "Delivered" ? new Date() : null)
+    const isDirect = (shippingData.deliveryStatus || "").trim().toLowerCase() === "direct"
 
     await sql`
       UPDATE sales
@@ -3894,6 +4008,8 @@ export async function updateSaleFulfillmentDetails(saleId: number, shippingData:
         shipping_pincode = ${shippingData.shippingPincode || null},
         fulfillment_type = ${shippingData.fulfillmentType || 'ship'},
         delivery_status = COALESCE(${shippingData.deliveryStatus}, delivery_status),
+        is_ready_to_ship = CASE WHEN ${isDirect} THEN true ELSE is_ready_to_ship END,
+        ready_to_ship_at = CASE WHEN ${isDirect} THEN COALESCE(ready_to_ship_at, NOW()) ELSE ready_to_ship_at END,
         shipped_at = COALESCE(shipped_at, ${shippedAt}),
         delivered_at = COALESCE(delivered_at, ${deliveredAt}),
         shipping_date = COALESCE(shipping_date, ${shippingData.shippingDate ? new Date(shippingData.shippingDate) : null}),

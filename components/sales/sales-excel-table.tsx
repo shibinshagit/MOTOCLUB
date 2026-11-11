@@ -37,6 +37,7 @@ import {
   getSalesSummaryCards,
   getSalesByIds,
   updateSaleFulfillmentDetails,
+  markSaleReadyToShip,
 } from "@/app/actions/sale-actions"
 import {
   Dialog,
@@ -76,6 +77,7 @@ import {
   ArrowRight,
   Save,
   Truck,
+  PackageCheck,
 } from "lucide-react"
 import { SalesBreakdownModal } from "@/components/shared/sales-breakdown-modal"
 import {
@@ -286,7 +288,6 @@ export default function SalesExcelTable({
       : activeStaff?.role === "logistics" || Boolean(pathname?.startsWith("/logistics"))
 
   const isFinancialHidden = isPurchaseManager || isLogistics
-  const tableColSpan = (isFinancialHidden ? 8 : 13) + (showActions || isLogistics ? 1 : 0)
 
   const { toast } = useToast()
   const [internalSearchTerm, setInternalSearchTerm] = useState("")
@@ -430,6 +431,10 @@ export default function SalesExcelTable({
 
   const [cardFilter, setCardFilter] = useState<"all" | "today" | "pending" | "critical" | "direct">("all")
   const [purchaseManagerCardMode, setPurchaseManagerCardMode] = useState<"orders_to_check" | "all_orders">("orders_to_check")
+  const canShowActions = isPurchaseManager
+    ? purchaseManagerCardMode === "orders_to_check"
+    : (showActions || isLogistics)
+  const tableColSpan = (isFinancialHidden ? 8 : 13) + (canShowActions ? 1 : 0)
   const [typeFilter, setTypeFilter] = useState<"all" | "normal" | "job_card">("all")
   const [typeOfSaleFilter, setTypeOfSaleFilter] = useState<"all" | "walk in" | "courier" | "pending_payments">("all")
   const [selectedSales, setSelectedSales] = useState<number[]>([])
@@ -607,12 +612,39 @@ export default function SalesExcelTable({
     }
   }
 
+  const [markingReadySaleId, setMarkingReadySaleId] = useState<number | null>(null)
+
+  const handleMarkReadyToShip = async (sale: any) => {
+    if (!sale?.id) return
+    try {
+      setMarkingReadySaleId(sale.id)
+      const res = await markSaleReadyToShip(sale.id, deviceId)
+      if (res.success) {
+        notifySuccess(toast, `Order #${sale.id} marked ready to ship for logistics`)
+        setServerSales((prev) => prev.filter((s) => s.id !== sale.id))
+        fetchServerSales()
+        if (onRefreshSales) {
+          onRefreshSales()
+        }
+      } else {
+        notifyError(toast, res.message || "Failed to mark order ready to ship")
+      }
+    } catch (err: any) {
+      console.error("handleMarkReadyToShip error:", err)
+      notifyError(toast, err?.message || "Failed to mark order ready to ship")
+    } finally {
+      setMarkingReadySaleId(null)
+    }
+  }
+
   // The list is always server-paginated/filtered; rows are already the current page.
   const displaySales = useMemo(() => {
     if (isPurchaseManager && purchaseManagerCardMode === "orders_to_check") {
       return serverSales.filter((s: any) => {
         const dStatus = (s.delivery_status || "pending").trim().toLowerCase()
-        return dStatus === "pending" || dStatus === "paid"
+        const isReady = Boolean(s.is_ready_to_ship)
+        const isDirect = dStatus === "direct"
+        return (dStatus === "pending" || dStatus === "paid") && !isReady && !isDirect
       })
     }
     if (isLogistics) {
@@ -622,11 +654,14 @@ export default function SalesExcelTable({
         const fType = (s.fulfillment_type || "").trim().toLowerCase()
         const status = (s.status || "").trim().toLowerCase()
         const pStatus = (s.payment_status || "").trim().toLowerCase()
+        const isDirect = dStatus === "direct"
+        const isReady = Boolean(s.is_ready_to_ship) || isDirect
         return (
           !excluded.has(dStatus) &&
           !excluded.has(status) &&
           !excluded.has(pStatus) &&
-          fType !== "pickup"
+          fType !== "pickup" &&
+          isReady
         )
       })
     }
@@ -1643,7 +1678,7 @@ export default function SalesExcelTable({
                   {!isPurchaseManager && !isLogistics && headerCell("total", "Total", "right")}
                   {!isPurchaseManager && !isLogistics && headerCell("received", "Received", "right")}
                   {!isPurchaseManager && !isLogistics && headerCell("balance", "Balance", "right")}
-                  {(showActions || isLogistics) && <th className={stickyActionHeaderClass}>Action</th>}
+                  {canShowActions && <th className={stickyActionHeaderClass}>Action</th>}
                 </tr>
               </thead>
               <tbody className={isFetchingServer && hasFetchedServer ? "opacity-60 transition-opacity" : "transition-opacity"}>
@@ -1936,9 +1971,30 @@ export default function SalesExcelTable({
                             {remaining > 0 ? formatCurrency(remaining) : "—"}
                           </td>
                         )}
-                        {(showActions || isLogistics) && (
+                        {canShowActions && (
                           <td className={stickyActionCellClass(baseBgClass)}>
-                            {isLogistics ? (
+                            {isPurchaseManager ? (
+                              <div className="flex items-center justify-center">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  disabled={markingReadySaleId === sale.id}
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    handleMarkReadyToShip(sale)
+                                  }}
+                                  className="h-7 px-2.5 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white shadow-2xs gap-1.5 cursor-pointer rounded-md transition-colors"
+                                  title="Mark order Ready to Ship for Logistics"
+                                >
+                                  {markingReadySaleId === sale.id ? (
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  ) : (
+                                    <PackageCheck className="h-3.5 w-3.5" />
+                                  )}
+                                  <span>Ready to Ship</span>
+                                </Button>
+                              </div>
+                            ) : isLogistics ? (
                               <div className="flex items-center justify-center">
                                 <Button
                                   type="button"
@@ -2080,6 +2136,22 @@ export default function SalesExcelTable({
                                 />
 
                                 <div className="pt-2 flex flex-wrap gap-1.5">
+                                  {isPurchaseManager && purchaseManagerCardMode === "orders_to_check" && (
+                                    <Button
+                                      size="sm"
+                                      disabled={markingReadySaleId === sale.id}
+                                      onClick={() => handleMarkReadyToShip(sale)}
+                                      className="h-7 text-xs px-2.5 font-semibold bg-blue-600 hover:bg-blue-700 text-white gap-1.5 cursor-pointer"
+                                      title="Mark order Ready to Ship for Logistics"
+                                    >
+                                      {markingReadySaleId === sale.id ? (
+                                        <Loader2 className="h-3 w-3 animate-spin" />
+                                      ) : (
+                                        <PackageCheck className="h-3 w-3" />
+                                      )}
+                                      Ready to Ship
+                                    </Button>
+                                  )}
                                   {showActions && (
                                     <Button
                                       size="sm"

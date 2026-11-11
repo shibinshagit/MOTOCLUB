@@ -1239,6 +1239,8 @@ async function upgradeLegacyColumns() {
     ["sales.tracking_last_polled_at", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS tracking_last_polled_at TIMESTAMP`],
     ["sales.is_tracking_frozen", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS is_tracking_frozen BOOLEAN DEFAULT false`],
     ["sales.is_pos_updated", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS is_pos_updated BOOLEAN DEFAULT false`],
+    ["sales.is_ready_to_ship", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS is_ready_to_ship BOOLEAN DEFAULT false`],
+    ["sales.ready_to_ship_at", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS ready_to_ship_at TIMESTAMP`],
     ["sales.type_of_sale", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS type_of_sale VARCHAR(50) DEFAULT 'walk in'`],
     ["orders.sync_status", () => sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS sync_status VARCHAR(50) DEFAULT 'PENDING'`],
     ["orders.synced_at", () => sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS synced_at TIMESTAMP`],
@@ -1250,6 +1252,16 @@ async function upgradeLegacyColumns() {
   for (const [label, fn] of columns) {
     await runSafe(label, fn)
   }
+
+  await runSafe("sales.is_ready_to_ship backfill for Direct orders", async () => {
+    await sql`
+      UPDATE sales
+      SET is_ready_to_ship = true,
+          ready_to_ship_at = COALESCE(ready_to_ship_at, NOW())
+      WHERE LOWER(TRIM(COALESCE(delivery_status, ''))) = 'direct'
+        AND (is_ready_to_ship IS NOT TRUE)
+    `
+  })
 
   await runSafe("purchases.created_at from purchase_date", async () => {
     await sql`
