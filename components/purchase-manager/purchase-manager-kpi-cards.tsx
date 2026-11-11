@@ -144,9 +144,7 @@ export default function PurchaseManagerKpiCards({
   }
 
   const ordersToCheckCount = activeOrdersSummary?.orders_to_check ?? 0
-  const ordersToCheckAmount = activeOrdersSummary?.orders_to_check_amount ?? 0
   const ordersCount = activeOrdersSummary?.total ?? 0
-  const ordersAmount = activeOrdersSummary?.total_amount ?? 0
 
   return (
     <>
@@ -182,9 +180,6 @@ export default function PurchaseManagerKpiCards({
                     </span>
                   </>
                 )}
-              </div>
-              <div className="text-xs font-semibold text-amber-700 mt-0.5 truncate">
-                {isLoadingOrders && !activeOrdersSummary ? DASH : formatAmount(ordersToCheckAmount)}
               </div>
             </div>
             <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-200 shrink-0">
@@ -237,9 +232,6 @@ export default function PurchaseManagerKpiCards({
                     </span>
                   </>
                 )}
-              </div>
-              <div className="text-xs font-semibold text-violet-700 mt-0.5 truncate">
-                {isLoadingOrders && !activeOrdersSummary ? DASH : formatAmount(ordersAmount)}
               </div>
             </div>
             <span className="text-[10px] font-bold text-violet-700 bg-violet-100 px-2 py-0.5 rounded-full border border-violet-200 shrink-0">
