@@ -707,6 +707,7 @@ export interface GetPaginatedSalesOptions {
   isPurchaseManager?: boolean
   purchaseManagerShowAllOrders?: boolean
   isLogistics?: boolean
+  logisticsShowAllOrders?: boolean
 }
 
 export async function getPaginatedUserSales(deviceId: number, options: GetPaginatedSalesOptions = {}) {
@@ -733,6 +734,7 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
   const isPurchaseManager = options.isPurchaseManager || false
   const purchaseManagerShowAllOrders = options.purchaseManagerShowAllOrders || false
   const isLogistics = options.isLogistics ?? options.excludePendingAndPickup ?? false
+  const logisticsShowAllOrders = options.logisticsShowAllOrders || false
 
   try {
     const result = await executeWithRetry(async () => {
@@ -905,17 +907,21 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
               AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
             )
           )
-          AND (${onlyPosUpdated} = false OR ${purchaseManagerShowAllOrders} = true OR s.is_pos_updated = true)
+          AND (${onlyPosUpdated} = false OR ${purchaseManagerShowAllOrders} = true OR ${logisticsShowAllOrders} = true OR s.is_pos_updated = true)
           AND (
             ${isLogistics} = false
+            OR ${logisticsShowAllOrders} = true
             OR (
               COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
               AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
-              AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed', 'pickup')
-              AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+              AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed')
               AND (
                 s.is_ready_to_ship = true
-                OR LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                OR (
+                  LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                  AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+                  AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) != 'pickup'
+                )
               )
             )
           )
@@ -1029,17 +1035,21 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
               AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
             )
           )
-          AND (${onlyPosUpdated} = false OR ${purchaseManagerShowAllOrders} = true OR s.is_pos_updated = true)
+          AND (${onlyPosUpdated} = false OR ${purchaseManagerShowAllOrders} = true OR ${logisticsShowAllOrders} = true OR s.is_pos_updated = true)
           AND (
             ${isLogistics} = false
+            OR ${logisticsShowAllOrders} = true
             OR (
               COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
               AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
-              AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed', 'pickup')
-              AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+              AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed')
               AND (
                 s.is_ready_to_ship = true
-                OR LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                OR (
+                  LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                  AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+                  AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) != 'pickup'
+                )
               )
             )
           )
@@ -1364,6 +1374,22 @@ export async function getSalesSummaryCards(
           ), 0)::numeric as orders_to_check_amount,
           COUNT(*) FILTER (
             WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
+              AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
+              AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed')
+              AND (${onlyPosUpdated} = false OR s.is_pos_updated = true)
+              AND (
+                s.is_ready_to_ship = true
+                OR (
+                  LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                  AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+                  AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) != 'pickup'
+                )
+              )
+              AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
+              AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
+          )::int as ready_to_ship_count,
+          COUNT(*) FILTER (
+            WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
               AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled'
               AND LOWER(COALESCE(s.delivery_status, '')) NOT IN ('returned', 'failed')
               AND COALESCE(s.sale_date, s.created_at)::date = CURRENT_DATE
@@ -1373,11 +1399,14 @@ export async function getSalesSummaryCards(
                 OR (
                   COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
                   AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
-                  AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed', 'pickup')
-                  AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+                  AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed')
                   AND (
                     s.is_ready_to_ship = true
-                    OR LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                    OR (
+                      LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                      AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+                      AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) != 'pickup'
+                    )
                   )
                 )
               )
@@ -1393,13 +1422,16 @@ export async function getSalesSummaryCards(
           COUNT(*) FILTER (
             WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
               AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
-              AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed', 'pickup')
-              AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+              AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed')
               AND (
                 ${isLogistics} = false
                 OR (
                   s.is_ready_to_ship = true
-                  OR LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                  OR (
+                    LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                    AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+                    AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) != 'pickup'
+                  )
                 )
               )
               AND (${onlyPosUpdated} = false OR s.is_pos_updated = true)
@@ -1429,11 +1461,14 @@ export async function getSalesSummaryCards(
                 OR (
                   COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
                   AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
-                  AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed', 'pickup')
-                  AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+                  AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed')
                   AND (
                     s.is_ready_to_ship = true
-                    OR LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                    OR (
+                      LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                      AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+                      AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) != 'pickup'
+                    )
                   )
                 )
               )
@@ -1458,11 +1493,14 @@ export async function getSalesSummaryCards(
                 OR (
                   COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
                   AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
-                  AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed', 'pickup')
-                  AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+                  AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed')
                   AND (
                     s.is_ready_to_ship = true
-                    OR LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                    OR (
+                      LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                      AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+                      AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) != 'pickup'
+                    )
                   )
                 )
               )
@@ -1487,11 +1525,14 @@ export async function getSalesSummaryCards(
                 OR (
                   COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
                   AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
-                  AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed', 'pickup')
-                  AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+                  AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed')
                   AND (
                     s.is_ready_to_ship = true
-                    OR LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                    OR (
+                      LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                      AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+                      AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) != 'pickup'
+                    )
                   )
                 )
               )
@@ -1551,7 +1592,7 @@ export async function getSalesSummaryCards(
             OR CAST(s.total_amount AS TEXT) LIKE ${searchPattern}
           )
       `
-      return rows[0] || { total_count: 0, total_amount: 0, orders_to_check_count: 0, orders_to_check_amount: 0, today_count: 0, pending_count: 0, critical_count: 0, direct_count: 0, direct_amount: 0 }
+      return rows[0] || { total_count: 0, total_amount: 0, orders_to_check_count: 0, orders_to_check_amount: 0, ready_to_ship_count: 0, today_count: 0, pending_count: 0, critical_count: 0, direct_count: 0, direct_amount: 0 }
     })
 
     return {
@@ -1561,6 +1602,7 @@ export async function getSalesSummaryCards(
         total_amount: Number(cardCounts.total_amount || 0),
         orders_to_check: Number(cardCounts.orders_to_check_count || 0),
         orders_to_check_amount: Number(cardCounts.orders_to_check_amount || 0),
+        ready_to_ship: Number(cardCounts.ready_to_ship_count || 0),
         today: Number(cardCounts.today_count || 0),
         pending: Number(cardCounts.pending_count || 0),
         critical: Number(cardCounts.critical_count || 0),
@@ -1572,7 +1614,7 @@ export async function getSalesSummaryCards(
     console.error("Get sales summary cards error:", error)
     return {
       success: false,
-      counts: { total: 0, total_amount: 0, orders_to_check: 0, orders_to_check_amount: 0, today: 0, pending: 0, critical: 0, direct: 0, direct_amount: 0 },
+      counts: { total: 0, total_amount: 0, orders_to_check: 0, orders_to_check_amount: 0, ready_to_ship: 0, today: 0, pending: 0, critical: 0, direct: 0, direct_amount: 0 },
     }
   }
 }

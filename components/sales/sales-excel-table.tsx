@@ -431,9 +431,12 @@ export default function SalesExcelTable({
 
   const [cardFilter, setCardFilter] = useState<"all" | "today" | "pending" | "critical" | "direct">("all")
   const [purchaseManagerCardMode, setPurchaseManagerCardMode] = useState<"orders_to_check" | "all_orders">("orders_to_check")
+  const [logisticsCardMode, setLogisticsCardMode] = useState<"ready_to_ship" | "all_orders">("ready_to_ship")
   const canShowActions = isPurchaseManager
     ? purchaseManagerCardMode === "orders_to_check"
-    : (showActions || isLogistics)
+    : isLogistics
+      ? logisticsCardMode !== "all_orders"
+      : showActions
   const tableColSpan = (isFinancialHidden ? 8 : 13) + (canShowActions ? 1 : 0)
   const [typeFilter, setTypeFilter] = useState<"all" | "normal" | "job_card">("all")
   const [typeOfSaleFilter, setTypeOfSaleFilter] = useState<"all" | "walk in" | "courier" | "pending_payments">("all")
@@ -517,8 +520,13 @@ export default function SalesExcelTable({
           typeOfSaleFilter,
           cardFilter,
           searchTerm: debouncedSearch,
-          onlyPosUpdated: isPurchaseManager && purchaseManagerCardMode === "all_orders" ? false : onlyPosUpdated,
+          onlyPosUpdated:
+            (isPurchaseManager && purchaseManagerCardMode === "all_orders") ||
+            (isLogistics && logisticsCardMode === "all_orders")
+              ? false
+              : onlyPosUpdated,
           isLogistics,
+          logisticsShowAllOrders: isLogistics && logisticsCardMode === "all_orders",
           isPurchaseManager,
           purchaseManagerShowAllOrders: isPurchaseManager && purchaseManagerCardMode === "all_orders",
         }),
@@ -564,7 +572,7 @@ export default function SalesExcelTable({
         setHasFetchedServer(true)
       }
     }
-  }, [deviceId, page, pageSize, globalDateRange?.from, globalDateRange?.to, typeFilter, typeOfSaleFilter, cardFilter, debouncedSearch, onlyPosUpdated, isLogistics, isPurchaseManager, purchaseManagerCardMode])
+  }, [deviceId, page, pageSize, globalDateRange?.from, globalDateRange?.to, typeFilter, typeOfSaleFilter, cardFilter, debouncedSearch, onlyPosUpdated, isLogistics, isPurchaseManager, purchaseManagerCardMode, logisticsCardMode])
 
   // A new date range starts again from the first page and clears selection.
   useEffect(() => {
@@ -647,26 +655,33 @@ export default function SalesExcelTable({
         return (dStatus === "pending" || dStatus === "paid") && !isReady && !isDirect
       })
     }
-    if (isLogistics) {
-      const excluded = new Set(["delivered", "returned", "failed", "pickup", "cancelled"])
+    if (isLogistics && logisticsCardMode === "ready_to_ship") {
+      const excluded = new Set(["delivered", "returned", "failed", "cancelled"])
       return serverSales.filter((s: any) => {
         const dStatus = (s.delivery_status || "pending").trim().toLowerCase()
         const fType = (s.fulfillment_type || "").trim().toLowerCase()
         const status = (s.status || "").trim().toLowerCase()
         const pStatus = (s.payment_status || "").trim().toLowerCase()
         const isDirect = dStatus === "direct"
-        const isReady = Boolean(s.is_ready_to_ship) || isDirect
-        return (
-          !excluded.has(dStatus) &&
-          !excluded.has(status) &&
-          !excluded.has(pStatus) &&
-          fType !== "pickup" &&
-          isReady
-        )
+        const isReady = Boolean(s.is_ready_to_ship)
+
+        if (excluded.has(dStatus) || excluded.has(status) || excluded.has(pStatus)) {
+          return false
+        }
+
+        if (isReady) {
+          return true
+        }
+
+        if (isDirect && fType !== "pickup" && dStatus !== "pickup") {
+          return true
+        }
+
+        return false
       })
     }
     return serverSales
-  }, [serverSales, isLogistics, isPurchaseManager, purchaseManagerCardMode])
+  }, [serverSales, isLogistics, isPurchaseManager, purchaseManagerCardMode, logisticsCardMode])
 
   const selectedSalesList = useMemo(() => {
     return displaySales.filter((s) => selectedSales.includes(s.id))
@@ -688,6 +703,7 @@ export default function SalesExcelTable({
   }, [])
 
   const totalOrderCount = serverCardCounts ? serverCardCounts.total : totalServerCount
+  const readyToShipCount = (serverCardCounts as any)?.ready_to_ship ?? (isLogistics ? totalServerCount : 0)
   const totalCount = onlyPosUpdated ? totalServerCount : totalOrderCount
   const todayCount = serverCardCounts?.today ?? displaySales.filter(isTodaySale).length
   const pendingCount = serverCardCounts ? serverCardCounts.pending : 0
@@ -1072,17 +1088,51 @@ export default function SalesExcelTable({
           }}
         />
       ) : isLogistics ? (
-        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
-          {/* LOGISTICS CARD 1 — TOTAL ORDERS */}
+        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+          {/* LOGISTICS CARD 1 — READY TO SHIP (DEFAULT ACTIVE) */}
           <button
             type="button"
             onClick={() => {
+              setLogisticsCardMode("ready_to_ship")
+              setCardFilter("all")
+              setPage(1)
+            }}
+            className={cn(
+              "flex flex-col justify-between rounded-xl border p-3.5 text-left transition-all cursor-pointer shadow-xs hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-400 min-w-0",
+              logisticsCardMode === "ready_to_ship" && cardFilter === "all"
+                ? "border-emerald-500 bg-emerald-50/90 ring-2 ring-emerald-400/30"
+                : "border-slate-200 bg-white hover:border-emerald-300 hover:bg-slate-50/50",
+            )}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">Ready to Ship</span>
+              <PackageCheck className="h-4 w-4 text-emerald-600 shrink-0" />
+            </div>
+            <div className="mt-2 flex items-baseline justify-between gap-2 min-w-0">
+              <div className="min-w-0">
+                <div className="text-xl font-extrabold text-slate-900 leading-tight">
+                  {readyToShipCount} <span className="text-xs font-normal text-slate-500">{readyToShipCount === 1 ? "Order" : "Orders"}</span>
+                </div>
+              </div>
+              {logisticsCardMode === "ready_to_ship" && cardFilter === "all" && (
+                <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-200 shrink-0">
+                  Ready to Ship
+                </span>
+              )}
+            </div>
+          </button>
+
+          {/* LOGISTICS CARD 2 — TOTAL ORDERS (CLICK SHOWS ALL ORDERS) */}
+          <button
+            type="button"
+            onClick={() => {
+              setLogisticsCardMode("all_orders")
               setCardFilter("all")
               setPage(1)
             }}
             className={cn(
               "flex flex-col justify-between rounded-xl border p-3.5 text-left transition-all cursor-pointer shadow-xs hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-400 min-w-0",
-              cardFilter === "all"
+              logisticsCardMode === "all_orders" && cardFilter === "all"
                 ? "border-violet-500 bg-violet-50/90 ring-2 ring-violet-400/30"
                 : "border-slate-200 bg-white hover:border-violet-300 hover:bg-slate-50/50",
             )}
@@ -1110,7 +1160,7 @@ export default function SalesExcelTable({
                   {totalOrderCount} <span className="text-xs font-normal text-slate-500">{totalOrderCount === 1 ? "Order" : "Orders"}</span>
                 </div>
               </div>
-              {cardFilter === "all" && (
+              {logisticsCardMode === "all_orders" && cardFilter === "all" && (
                 <span className="text-[10px] font-bold text-violet-700 bg-violet-100 px-2 py-0.5 rounded-full border border-violet-200 shrink-0">
                   All Orders
                 </span>
@@ -1118,10 +1168,11 @@ export default function SalesExcelTable({
             </div>
           </button>
 
-          {/* LOGISTICS CARD 2 — PENDING ORDERS */}
+          {/* LOGISTICS CARD 3 — PENDING ORDERS */}
           <button
             type="button"
             onClick={() => {
+              setLogisticsCardMode("ready_to_ship")
               setCardFilter("pending")
               setPage(1)
             }}
@@ -1150,10 +1201,11 @@ export default function SalesExcelTable({
             </div>
           </button>
 
-          {/* LOGISTICS CARD 3 — DIRECT ORDERS */}
+          {/* LOGISTICS CARD 4 — DIRECT ORDERS */}
           <button
             type="button"
             onClick={() => {
+              setLogisticsCardMode("ready_to_ship")
               setCardFilter("direct")
               setPage(1)
             }}
@@ -2442,7 +2494,7 @@ export default function SalesExcelTable({
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <SaleDocumentActions sale={sale} size="card" />
 
-                        {isLogistics && (
+                        {isLogistics && logisticsCardMode !== "all_orders" && (
                           <Button
                             size="sm"
                             onClick={() => openFulfillmentModal(sale)}
@@ -2485,7 +2537,7 @@ export default function SalesExcelTable({
                               <Eye className="h-4 w-4 mr-2 text-slate-500" /> View Modal
                             </DropdownMenuItem>
                           )}
-                          {isLogistics && (
+                          {isLogistics && logisticsCardMode !== "all_orders" && (
                             <DropdownMenuItem onClick={() => openFulfillmentModal(sale)}>
                               <Package className="h-4 w-4 mr-2 text-indigo-600" /> Fulfillment Details
                             </DropdownMenuItem>
