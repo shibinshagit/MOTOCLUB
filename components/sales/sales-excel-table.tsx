@@ -1088,7 +1088,7 @@ export default function SalesExcelTable({
           }}
         />
       ) : isLogistics ? (
-        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
           {/* LOGISTICS CARD 1 — READY TO SHIP (DEFAULT ACTIVE) */}
           <button
             type="button"
@@ -1228,6 +1228,39 @@ export default function SalesExcelTable({
               </div>
               {cardFilter === "direct" && (
                 <span className="text-[10px] font-bold text-blue-800 bg-blue-100 px-2 py-0.5 rounded-full border border-blue-200 shrink-0">
+                  Active Filter
+                </span>
+              )}
+            </div>
+          </button>
+
+          {/* LOGISTICS CARD 5 — CRITICAL ORDERS */}
+          <button
+            type="button"
+            onClick={() => {
+              setLogisticsCardMode("ready_to_ship")
+              setCardFilter("critical")
+              setPage(1)
+            }}
+            className={cn(
+              "flex flex-col justify-between rounded-xl border p-3.5 text-left transition-all cursor-pointer shadow-xs hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-rose-400 min-w-0",
+              cardFilter === "critical"
+                ? "border-rose-500 bg-rose-50/90 ring-2 ring-rose-400/30"
+                : "border-slate-200 bg-white hover:border-rose-300 hover:bg-slate-50/50",
+            )}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-rose-700">Critical Orders</span>
+              <AlertTriangle className="h-4 w-4 text-rose-600 shrink-0" />
+            </div>
+            <div className="mt-2 flex items-baseline justify-between gap-2 min-w-0">
+              <div className="min-w-0">
+                <div className="text-xl font-extrabold text-slate-900 leading-tight">
+                  {criticalCount} <span className="text-xs font-normal text-slate-500">{criticalCount === 1 ? "Order" : "Orders"}</span>
+                </div>
+              </div>
+              {cardFilter === "critical" && (
+                <span className="text-[10px] font-bold text-rose-800 bg-rose-100 px-2 py-0.5 rounded-full border border-rose-200 shrink-0">
                   Active Filter
                 </span>
               )}
