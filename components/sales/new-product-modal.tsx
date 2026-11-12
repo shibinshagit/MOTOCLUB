@@ -32,6 +32,8 @@ import {
   shouldIgnoreParentDialogClose,
 } from "@/lib/nested-dialog"
 import { useStaffRestrictions } from "@/hooks/use-staff-restrictions"
+import { useAppSelector } from "@/store/hooks"
+import { selectActiveStaff } from "@/store/slices/staffSlice"
 import { cn } from "@/lib/utils"
 import { FormAlert } from "@/components/ui/form-alert"
 import { Switch } from "@/components/ui/switch"
@@ -221,6 +223,7 @@ export default function NewProductModal({
   elevated = false,
 }: NewProductModalProps) {
   const { isValueHidden } = useStaffRestrictions()
+  const activeStaff = useAppSelector(selectActiveStaff)
   const hideCogs = isValueHidden("cogs")
   const hideStockCount = isValueHidden("stock_count")
   const { toast } = useToast()
@@ -988,6 +991,7 @@ export default function NewProductModal({
       
       
       if (userId) submitFormData.append("user_id", userId.toString())
+      if (activeStaff?.id) submitFormData.append("staff_id", activeStaff.id.toString())
       submitFormData.append("amazon_status", platformStatus.amazon)
       submitFormData.append("flipkart_status", platformStatus.flipkart)
       submitFormData.append("meesho_status", platformStatus.meesho)

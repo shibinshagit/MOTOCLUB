@@ -2237,14 +2237,35 @@ interface CreateProductParams {
 // Update the createProduct function to check for duplicates within user's products
 export async function createProduct(formData: FormData) {
   // Staff (non-admin) sessions may only use existing products, except purchase_manager and logistics
-  const actor = await getServerActor()
+  let actor = await getServerActor()
+
+  // Resilient fallback: If cookie is missing but staff_id and user_id are supplied, verify via database
+  if (!actor) {
+    const rawUserId = formData.get("user_id") ? Number.parseInt(formData.get("user_id") as string) : undefined
+    const rawStaffId = formData.get("staff_id") ? Number.parseInt(formData.get("staff_id") as string) : undefined
+    if (rawStaffId && rawUserId) {
+      const staffRows = await sql`
+        SELECT id, role, is_active FROM staff WHERE id = ${rawStaffId} AND device_id = ${rawUserId} AND is_active = true LIMIT 1
+      `
+      if (staffRows.length > 0) {
+        const sRole = (staffRows[0].role || "staff").trim().toLowerCase()
+        actor = sRole === "admin"
+          ? { kind: "staff_admin", deviceId: rawUserId, role: sRole }
+          : { kind: "staff", deviceId: rawUserId, role: sRole }
+      }
+    }
+  }
+
   if (!actor) {
     const message = "You do not have permission to create products"
     return { success: false, error: message, message }
   }
-  if (actor.kind === "staff" && actor.role !== "purchase_manager" && actor.role !== "logistics") {
-    const message = "You do not have permission to create products"
-    return { success: false, error: message, message }
+  if (actor.kind === "staff") {
+    const role = (actor.role || "").trim().toLowerCase()
+    if (role !== "purchase_manager" && role !== "logistics") {
+      const message = "You do not have permission to create products"
+      return { success: false, error: message, message }
+    }
   }
   const name = formData.get("name") as string
   const companyName = formData.get("company_name") as string
@@ -3159,8 +3180,11 @@ export async function deleteProduct(id: number) {
   try {
     const actor = await getServerActor()
     if (!actor) return { success: false, message: "Not authorized to delete products" }
-    if (actor.kind === "staff" && actor.role !== "purchase_manager" && actor.role !== "logistics") {
-      return { success: false, message: "Only administrators can delete products" }
+    if (actor.kind === "staff") {
+      const role = (actor.role || "").trim().toLowerCase()
+      if (role !== "purchase_manager" && role !== "logistics") {
+        return { success: false, message: "Only administrators can delete products" }
+      }
     }
 
     await sql.begin("isolation level serializable", async (tx: any) => {

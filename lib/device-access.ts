@@ -21,9 +21,10 @@ export async function getServerActor(): Promise<ServerActor | null> {
 
   const staff = await getStaffSession()
   if (staff?.deviceId) {
-    return staff.role === "admin"
-      ? { kind: "staff_admin", deviceId: Number(staff.deviceId), role: staff.role }
-      : { kind: "staff", deviceId: Number(staff.deviceId), role: staff.role }
+    const role = (staff.role || "staff").trim().toLowerCase()
+    return role === "admin"
+      ? { kind: "staff_admin", deviceId: Number(staff.deviceId), role }
+      : { kind: "staff", deviceId: Number(staff.deviceId), role }
   }
 
   const authToken = (await cookies()).get("authToken")?.value

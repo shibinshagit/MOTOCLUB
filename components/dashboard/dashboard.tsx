@@ -382,6 +382,12 @@ export function Dashboard({
             allStaff: staffList,
           }),
         )
+        try {
+          const { restoreStaffSession: restoreServerStaffSession } = await import("@/app/actions/staff-actions")
+          await restoreServerStaffSession(storedStaffId, device.id)
+        } catch (e) {
+          console.warn("Failed to sync server staff session cookie", e)
+        }
         setStaffAuthOpen(false)
       } catch {
         setStaffAuthOpen(true)

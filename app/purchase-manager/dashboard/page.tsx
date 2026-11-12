@@ -7,7 +7,7 @@ import Dashboard from "@/components/dashboard/dashboard"
 import { useAppDispatch, useAppSelector } from "@/store/hooks"
 import { selectDevice, loadFromStorage, clearDeviceData } from "@/store/slices/deviceSlice"
 import { clearStaff, selectActiveStaff, setStaff, activateStaff } from "@/store/slices/staffSlice"
-import { getStaffForAuthentication } from "@/app/actions/staff-actions"
+import { getStaffForAuthentication, restoreStaffSession } from "@/app/actions/staff-actions"
 import { staffLogout } from "@/app/actions/staff-auth-actions"
 import { toast } from "@/components/ui/use-toast"
 
@@ -80,6 +80,8 @@ function PurchaseManagerPageContent() {
             allStaff: staffList,
           }),
         )
+        // Ensure server-side HTTP-only session cookie is restored/refreshed
+        await restoreStaffSession(storedStaffId, device.id)
       } catch (error) {
         console.error("Failed to restore session:", error)
         router.replace("/")

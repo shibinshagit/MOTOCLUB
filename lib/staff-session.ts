@@ -52,10 +52,10 @@ export async function getStaffSession(): Promise<StaffSessionPayload | null> {
     const { payload } = await jwtVerify(token, SECRET_KEY)
     const session = payload as StaffSessionPayload
 
-    // Immediately kick out deactivated staff
+    // Immediately kick out deactivated staff and sync live role from DB
     if (session?.staffId) {
       const staffCheck = await sql`
-        SELECT is_active FROM staff WHERE id = ${session.staffId} LIMIT 1
+        SELECT is_active, role FROM staff WHERE id = ${session.staffId} LIMIT 1
       `
       if (staffCheck.length === 0 || !staffCheck[0].is_active) {
         try {
@@ -64,6 +64,9 @@ export async function getStaffSession(): Promise<StaffSessionPayload | null> {
           // Ignore when called during Server Component render where cookies are read-only
         }
         return null
+      }
+      if (staffCheck[0].role) {
+        session.role = staffCheck[0].role
       }
     }
 
