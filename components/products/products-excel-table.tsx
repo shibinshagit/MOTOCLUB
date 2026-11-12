@@ -11,6 +11,7 @@ import {
 } from "@/components/sales/excel-column-filter"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
+import { ShareProductButton } from "@/components/shared/share-product-button"
 
 function StatusBadge({ stock }: { stock: number }) {
   if (stock < 0) {
@@ -389,29 +390,39 @@ function ProductsExcelTable({
                       </>
                     )}
                     <td className={cn(stickyActionCellClass(index % 2 === 0 ? "bg-white" : "bg-slate-50/60"), "align-top")}>
-                      {onEditProduct ? (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            onEditProduct(product)
-                          }}
-                          className="text-sm font-medium text-brand-blue hover:underline"
-                        >
-                          Edit
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            onViewProduct(product)
-                          }}
-                          className="text-sm font-medium text-brand-blue hover:underline"
-                        >
-                          View
-                        </button>
-                      )}
+                      <div className="flex items-center gap-2">
+                        {onEditProduct ? (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              onEditProduct(product)
+                            }}
+                            className="text-sm font-medium text-brand-blue hover:underline"
+                          >
+                            Edit
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              onViewProduct(product)
+                            }}
+                            className="text-sm font-medium text-brand-blue hover:underline"
+                          >
+                            View
+                          </button>
+                        )}
+                        <span onClick={(e) => e.stopPropagation()}>
+                          <ShareProductButton
+                            product={product}
+                            currency={currency}
+                            className="h-7 border-violet-200 bg-white px-2.5 text-xs text-violet-700 hover:bg-violet-50"
+                            label="Share"
+                          />
+                        </span>
+                      </div>
                     </td>
                   </tr>
                 )

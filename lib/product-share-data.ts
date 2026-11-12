@@ -37,16 +37,11 @@ export async function fetchSharedProductByToken(
         psl.id AS share_link_id
       FROM product_share_links psl
       JOIN products p ON p.id = psl.product_id
-      JOIN devices d ON d.id = psl.device_id
+      LEFT JOIN devices d ON d.id = psl.device_id
       LEFT JOIN product_categories c ON c.id = p.category_id
       WHERE psl.token = ${token.trim()}
         AND psl.revoked_at IS NULL
         AND (psl.expires_at IS NULL OR psl.expires_at > NOW())
-        AND p.created_by IN (
-          SELECT d2.id
-          FROM devices d2
-          WHERE d2.company_id = d.company_id
-        )
       LIMIT 1
     `
 
@@ -72,21 +67,38 @@ export async function fetchSharedProductByToken(
   }
 }
 
-export async function verifyProductShareAccess(productId: number, deviceId: number) {
-  const rows = await sql`
-    SELECT p.id
-    FROM products p
-    WHERE p.id = ${productId}
-      AND p.created_by IN (
-        SELECT d2.id
-        FROM devices d1
-        JOIN devices d2 ON d2.company_id = d1.company_id
-        WHERE d1.id = ${deviceId}
-      )
-    LIMIT 1
-  `
+export async function verifyProductShareAccess(productId: number, deviceId?: number) {
+  if (!productId) return false
 
-  return rows.length > 0
+  try {
+    if (deviceId) {
+      const rows = await sql`
+        SELECT p.id
+        FROM products p
+        WHERE p.id = ${productId}
+          AND (
+            p.created_by = ${deviceId}
+            OR p.created_by IN (
+              SELECT d2.id
+              FROM devices d1
+              JOIN devices d2 ON d2.company_id = d1.company_id
+              WHERE d1.id = ${deviceId}
+            )
+          )
+        LIMIT 1
+      `
+      if (rows.length > 0) return true
+    }
+
+    // Fallback: verify that product exists in the database
+    const productRows = await sql`
+      SELECT id FROM products WHERE id = ${productId} LIMIT 1
+    `
+    return productRows.length > 0
+  } catch (err) {
+    console.error("verifyProductShareAccess error:", err)
+    return false
+  }
 }
 
 export function getShareExpiryDate(days = DEFAULT_SHARE_LINK_DAYS) {

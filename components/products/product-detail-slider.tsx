@@ -32,6 +32,10 @@ export function ProductDetailSlider({
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        // If a higher-level dialog or modal is open (e.g. Share Product), let it handle Escape
+        if (document.querySelector("[data-radix-dialog-content], [role='dialog']")) {
+          return
+        }
         onClose()
       }
     }

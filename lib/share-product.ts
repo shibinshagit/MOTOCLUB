@@ -2,10 +2,11 @@ export interface ShareProductOptions {
   includeStock?: boolean;
   productUrl?: string;
   currency?: string;
+  customStock?: number | null;
 }
 
 export function formatShareProductMessage(product: any, options: ShareProductOptions = {}): string {
-  const { includeStock = false, productUrl = "", currency = "AED" } = options;
+  const { includeStock = false, productUrl = "", currency = "AED", customStock = null } = options;
   const parts: string[] = [];
 
   parts.push(`Product: ${product.name || "Unknown Product"}`);
@@ -30,9 +31,7 @@ export function formatShareProductMessage(product: any, options: ShareProductOpt
     parts.push(`Price: ${currency} ${Number(price).toFixed(2)}`);
   }
 
-  if (product.barcode) {
-    parts.push(`Barcode: ${product.barcode}`);
-  }
+  // Note: Barcode is deliberately omitted from product sharing per user requirements
 
   if (product.sku) {
     parts.push(`SKU: ${product.sku}`);
@@ -43,7 +42,29 @@ export function formatShareProductMessage(product: any, options: ShareProductOpt
   }
 
   if (includeStock) {
-    const stock = Number(product.stock) || 0;
+    let stock = 0;
+    if (customStock !== null && customStock !== undefined && !isNaN(Number(customStock))) {
+      stock = Number(customStock);
+    } else if (product.stock !== undefined && product.stock !== null && !isNaN(Number(product.stock))) {
+      stock = Number(product.stock);
+    } else if (product.current_stock !== undefined && product.current_stock !== null && !isNaN(Number(product.current_stock))) {
+      stock = Number(product.current_stock);
+    } else if (product.device_stock !== undefined && product.device_stock !== null && !isNaN(Number(product.device_stock))) {
+      stock = Number(product.device_stock);
+    } else if (product.company_total_stock !== undefined && product.company_total_stock !== null && !isNaN(Number(product.company_total_stock))) {
+      stock = Number(product.company_total_stock);
+    } else if (product.quantity !== undefined && product.quantity !== null && !isNaN(Number(product.quantity))) {
+      stock = Number(product.quantity);
+    } else if (Array.isArray(product.variants) && product.variants.length > 0) {
+      stock = product.variants.reduce((acc: number, v: any) => acc + (Number(v.stock ?? v.device_stock ?? v.current_stock) || 0), 0);
+    } else if (Array.isArray(product.batches) && product.batches.length > 0) {
+      stock = product.batches.reduce((acc: number, b: any) => {
+        const bStock = Array.isArray(b.stocks)
+          ? b.stocks.reduce((sAcc: number, s: any) => sAcc + Number(s.stock || 0), 0)
+          : Number(b.stock || 0);
+        return acc + (isNaN(bStock) ? 0 : bStock);
+      }, 0);
+    }
     parts.push(`Available Stock: ${stock > 0 ? stock : "Out of stock"}`);
   }
 
