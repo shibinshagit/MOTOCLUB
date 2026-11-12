@@ -3,6 +3,7 @@
 import React from "react"
 import { BrandLogo } from "@/components/brand-logo"
 import { useBranding } from "@/components/branding-provider"
+import { LegalLinks } from "@/components/legal/legal-page"
 import LoginForm from "./login-form"
 
 export default function AuthPage() {
@@ -50,6 +51,7 @@ export default function AuthPage() {
         <p>
           © {new Date().getFullYear()} {platformName}. All rights reserved.
         </p>
+        <LegalLinks className="mt-2" />
       </footer>
     </div>
   )

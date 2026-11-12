@@ -1016,10 +1016,10 @@ export function ProductDetailPanel({
                               index % 2 === 0 ? "bg-white" : "bg-slate-50/60",
                             )}
                           >
-                            <td className="whitespace-nowrap px-4 py-2.5 text-slate-700">
+                            <td className="whitespace-nowrap px-4 py-2.5 text-slate-700 align-top">
                               {format(new Date(item.date), "dd-MM-yyyy")}
                             </td>
-                            <td className="px-4 py-2.5">
+                            <td className="px-4 py-2.5 align-top">
                               <span
                                 className={cn(
                                   "inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium",
@@ -1029,10 +1029,10 @@ export function ProductDetailPanel({
                                 {privacyMode ? "***" : typeInfo.label}
                               </span>
                             </td>
-                            <td className="px-4 py-2.5 text-slate-700">
+                            <td className="px-4 py-2.5 text-slate-700 align-top">
                               {privacyMode ? "***" : item.device_name || "Unknown"}
                             </td>
-                            <td className="px-4 py-2.5 text-center">
+                            <td className="px-4 py-2.5 text-center align-top">
                               {privacyMode ? (
                                 <span className="text-slate-400">***</span>
                               ) : (
@@ -1042,7 +1042,10 @@ export function ProductDetailPanel({
                                 </span>
                               )}
                             </td>
-                            <td className="max-w-[200px] truncate px-4 py-2.5 text-slate-600">
+                            <td
+                              className="min-w-[240px] max-w-xl px-4 py-2.5 text-slate-700 whitespace-pre-wrap break-words leading-relaxed align-top"
+                              title={item.notes || undefined}
+                            >
                               {privacyMode ? "***" : item.notes || "—"}
                             </td>
                           </tr>
