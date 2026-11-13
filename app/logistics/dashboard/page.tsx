@@ -146,6 +146,7 @@ function LogisticsPageContent() {
       showSalesActions={false}
       showSalesViewModal={false}
       hideProductsToPurchaseTab={true}
+      hideTransferTab={true}
       isLogistics={true}
     />
   )

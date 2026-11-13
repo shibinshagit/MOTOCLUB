@@ -88,6 +88,7 @@ interface DashboardProps {
   onlyPosUpdatedSales?: boolean
   hideProductsToPurchaseTab?: boolean
   hideAttendanceTab?: boolean
+  hideTransferTab?: boolean
   showSalesActions?: boolean
   showSalesViewModal?: boolean
   isLogistics?: boolean
@@ -120,6 +121,7 @@ export function Dashboard({
   onlyPosUpdatedSales,
   hideProductsToPurchaseTab,
   hideAttendanceTab,
+  hideTransferTab,
   showSalesActions = true,
   showSalesViewModal,
   isLogistics: isLogisticsProp,
@@ -209,6 +211,11 @@ export function Dashboard({
 
       // Disallow attendance if hideAttendanceTab is true or if user is purchase manager
       if (tabId === "attendance" && (hideAttendanceTab || activeStaff?.role === "purchase_manager")) {
+        return false
+      }
+
+      // Disallow transfer if hideTransferTab is true or user is logistics
+      if (tabId === "transfer" && (hideTransferTab || isLogistics || activeStaff?.role === "logistics")) {
         return false
       }
 
@@ -724,6 +731,9 @@ export function Dashboard({
             />
           )
         case "transfer":
+          if (hideTransferTab || isLogistics || activeStaff?.role === "logistics") {
+            return null
+          }
           return <TransferTab userId={device?.id ?? 0} />
         case "accounting":
           return <AccountingTab userId={device?.id ?? 0} companyId={companyId} deviceId={deviceId || 0} />

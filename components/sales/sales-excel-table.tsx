@@ -1153,7 +1153,7 @@ export default function SalesExcelTable({
         />
       ) : isLogistics ? (
         <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-          {/* LOGISTICS CARD 1 — READY TO SHIP (DEFAULT ACTIVE) */}
+          {/* LOGISTICS CARD 1 — ORDERS TO DELIVER (DEFAULT ACTIVE) */}
           <button
             type="button"
             onClick={() => {
@@ -1169,7 +1169,7 @@ export default function SalesExcelTable({
             )}
           >
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">Ready to Ship</span>
+              <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">Orders to Deliver</span>
               <PackageCheck className="h-4 w-4 text-emerald-600 shrink-0" />
             </div>
             <div className="mt-2 flex items-baseline justify-between gap-2 min-w-0">
@@ -1180,7 +1180,7 @@ export default function SalesExcelTable({
               </div>
               {logisticsCardMode === "ready_to_ship" && cardFilter === "all" && (
                 <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-200 shrink-0">
-                  Ready to Ship
+                  Orders to Deliver
                 </span>
               )}
             </div>
