@@ -892,13 +892,16 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
             OR (
               ${cardFilter} = 'critical'
               AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
-              AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned', 'pending')
+              AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
               AND (
                 LOWER(COALESCE(s.payment_status, '')) IN ('paid', 'completed', 'partial', 'credit', 'cod')
                 OR LOWER(COALESCE(s.status, '')) IN ('credit', 'partial')
                 OR (s.total_amount > 0 AND s.received_amount >= s.total_amount)
               )
-              AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) IN ('pending', 'paid', 'packed', 'sent')
+              AND (
+                LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) IN ('pending', 'paid', 'packed', 'sent')
+                OR LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+              )
             )
             OR (
               ${cardFilter} = 'direct'
@@ -914,13 +917,26 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
             OR (
               COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
               AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
-              AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed')
               AND (
-                s.is_ready_to_ship = true
-                OR (
+                -- 1. Direct Order
+                (
                   LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
                   AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
                   AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) != 'pickup'
+                )
+                -- 2. Only Job Card Courier Order
+                OR (
+                  (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%' OR s.tracking_id LIKE 'DOD%')
+                  AND (
+                    LOWER(COALESCE(s.type_of_sale, '')) = 'courier'
+                    OR LOWER(COALESCE(s.fulfillment_type, '')) = 'ship'
+                    OR COALESCE(s.courier_paid_extra, 0) > 0
+                  )
+                  AND (
+                    s.is_ready_to_ship = true
+                    OR LOWER(TRIM(COALESCE(s.delivery_status, ''))) IN ('packed', 'sent', 'direct', 'shipped', 'shipping', 'delivered')
+                  )
+                  AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed')
                 )
               )
             )
@@ -1020,13 +1036,16 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
             OR (
               ${cardFilter} = 'critical'
               AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
-              AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned', 'pending')
+              AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
               AND (
                 LOWER(COALESCE(s.payment_status, '')) IN ('paid', 'completed', 'partial', 'credit', 'cod')
                 OR LOWER(COALESCE(s.status, '')) IN ('credit', 'partial')
                 OR (s.total_amount > 0 AND s.received_amount >= s.total_amount)
               )
-              AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) IN ('pending', 'paid', 'packed', 'sent')
+              AND (
+                LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) IN ('pending', 'paid', 'packed', 'sent')
+                OR LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+              )
             )
             OR (
               ${cardFilter} = 'direct'
@@ -1042,13 +1061,26 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
             OR (
               COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
               AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
-              AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed')
               AND (
-                s.is_ready_to_ship = true
-                OR (
+                -- 1. Direct Order
+                (
                   LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
                   AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
                   AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) != 'pickup'
+                )
+                -- 2. Only Job Card Courier Order
+                OR (
+                  (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%' OR s.tracking_id LIKE 'DOD%')
+                  AND (
+                    LOWER(COALESCE(s.type_of_sale, '')) = 'courier'
+                    OR LOWER(COALESCE(s.fulfillment_type, '')) = 'ship'
+                    OR COALESCE(s.courier_paid_extra, 0) > 0
+                  )
+                  AND (
+                    s.is_ready_to_ship = true
+                    OR LOWER(TRIM(COALESCE(s.delivery_status, ''))) IN ('packed', 'sent', 'direct', 'shipped', 'shipping', 'delivered')
+                  )
+                  AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed')
                 )
               )
             )
@@ -1378,11 +1410,38 @@ export async function getSalesSummaryCards(
               AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed')
               AND (${onlyPosUpdated} = false OR s.is_pos_updated = true)
               AND (
-                s.is_ready_to_ship = true
+                ${isLogistics} = false
                 OR (
-                  LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
-                  AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
-                  AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) != 'pickup'
+                  -- 1. Direct Order
+                  (
+                    LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                    AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+                    AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) != 'pickup'
+                  )
+                  -- 2. Only Job Card Courier Order
+                  OR (
+                    (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%' OR s.tracking_id LIKE 'DOD%')
+                    AND (
+                      LOWER(COALESCE(s.type_of_sale, '')) = 'courier'
+                      OR LOWER(COALESCE(s.fulfillment_type, '')) = 'ship'
+                      OR COALESCE(s.courier_paid_extra, 0) > 0
+                    )
+                    AND (
+                      s.is_ready_to_ship = true
+                      OR LOWER(TRIM(COALESCE(s.delivery_status, ''))) IN ('packed', 'sent', 'direct', 'shipped', 'shipping', 'delivered')
+                    )
+                  )
+                )
+              )
+              AND (
+                ${isLogistics} = true
+                OR (
+                  s.is_ready_to_ship = true
+                  OR (
+                    LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                    AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+                    AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) != 'pickup'
+                  )
                 )
               )
               AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
@@ -1422,15 +1481,29 @@ export async function getSalesSummaryCards(
           COUNT(*) FILTER (
             WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
               AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
-              AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed')
+              AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed', 'pickup')
+              AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
               AND (
                 ${isLogistics} = false
                 OR (
-                  s.is_ready_to_ship = true
-                  OR (
+                  -- 1. Direct Order
+                  (
                     LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
                     AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
                     AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) != 'pickup'
+                  )
+                  -- 2. Only Job Card Courier Order
+                  OR (
+                    (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%' OR s.tracking_id LIKE 'DOD%')
+                    AND (
+                      LOWER(COALESCE(s.type_of_sale, '')) = 'courier'
+                      OR LOWER(COALESCE(s.fulfillment_type, '')) = 'ship'
+                      OR COALESCE(s.courier_paid_extra, 0) > 0
+                    )
+                    AND (
+                      s.is_ready_to_ship = true
+                      OR LOWER(TRIM(COALESCE(s.delivery_status, ''))) IN ('packed', 'sent', 'direct', 'shipped', 'shipping', 'delivered')
+                    )
                   )
                 )
               )
@@ -1448,13 +1521,16 @@ export async function getSalesSummaryCards(
           )::int as pending_count,
           COUNT(*) FILTER (
             WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
-              AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned', 'pending')
+              AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
               AND (
                 LOWER(COALESCE(s.payment_status, '')) IN ('paid', 'completed', 'partial', 'credit', 'cod')
                 OR LOWER(COALESCE(s.status, '')) IN ('credit', 'partial')
                 OR (s.total_amount > 0 AND s.received_amount >= s.total_amount)
               )
-              AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) IN ('pending', 'paid', 'packed', 'sent')
+              AND (
+                LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) IN ('pending', 'paid', 'packed', 'sent')
+                OR LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+              )
               AND (${onlyPosUpdated} = false OR s.is_pos_updated = true)
               AND (
                 ${isLogistics} = false
@@ -1463,11 +1539,24 @@ export async function getSalesSummaryCards(
                   AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
                   AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed')
                   AND (
-                    s.is_ready_to_ship = true
-                    OR (
+                    -- 1. Direct Order
+                    (
                       LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
                       AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
                       AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) != 'pickup'
+                    )
+                    -- 2. Only Job Card Courier Order
+                    OR (
+                      (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%' OR s.tracking_id LIKE 'DOD%')
+                      AND (
+                        LOWER(COALESCE(s.type_of_sale, '')) = 'courier'
+                        OR LOWER(COALESCE(s.fulfillment_type, '')) = 'ship'
+                        OR COALESCE(s.courier_paid_extra, 0) > 0
+                      )
+                      AND (
+                        s.is_ready_to_ship = true
+                        OR LOWER(TRIM(COALESCE(s.delivery_status, ''))) IN ('packed', 'sent', 'direct', 'shipped', 'shipping', 'delivered')
+                      )
                     )
                   )
                 )
@@ -2318,8 +2407,8 @@ export async function addSale(saleData: any) {
         ${balanceAmount},
         false,
         ${saleData.typeOfSale || 'walk in'},
-        ${(shipping.delivery_status || "").trim().toLowerCase() === "direct"},
-        ${(shipping.delivery_status || "").trim().toLowerCase() === "direct" ? new Date() : null}
+        ${["packed", "sent", "direct", "shipped", "shipping", "delivered"].includes((shipping.delivery_status || "").trim().toLowerCase())},
+        ${["packed", "sent", "direct", "shipped", "shipping", "delivered"].includes((shipping.delivery_status || "").trim().toLowerCase()) ? new Date() : null}
       )
       RETURNING id
     `
@@ -3074,7 +3163,7 @@ export async function updateSale(saleData: any) {
     const origDelivery = (original.delivery_status || "").trim().toLowerCase()
     const newDelivery = (shipping.delivery_status || "").trim().toLowerCase()
     const isNewShip = newDelivery === "shipping" || newDelivery === "shipped"
-    const isDirect = newDelivery === "direct"
+    const isAutoReadyToShip = ["packed", "sent", "direct", "shipped", "shipping", "delivered"].includes(newDelivery)
     const wasShip = origDelivery === "shipping" || origDelivery === "shipped"
     let targetShippingDate = original.shipping_date || null
     if (!wasShip && isNewShip) {
@@ -3100,8 +3189,8 @@ export async function updateSale(saleData: any) {
                 staff_id = ${saleData.staffId || null},
                 fulfillment_type = ${shipping.fulfillment_type},
                 delivery_status = ${shipping.delivery_status},
-                is_ready_to_ship = CASE WHEN ${isDirect} THEN true ELSE is_ready_to_ship END,
-                ready_to_ship_at = CASE WHEN ${isDirect} THEN COALESCE(ready_to_ship_at, NOW()) ELSE ready_to_ship_at END,
+                is_ready_to_ship = CASE WHEN ${isAutoReadyToShip} THEN true ELSE is_ready_to_ship END,
+                ready_to_ship_at = CASE WHEN ${isAutoReadyToShip} THEN COALESCE(ready_to_ship_at, NOW()) ELSE ready_to_ship_at END,
                 shipping_date = CASE WHEN ${isNewShip} THEN COALESCE(shipping_date, NOW()) ELSE shipping_date END,
                 courier_partner_id = ${shipping.courier_partner_id},
                 courier_service_id = ${shipping.courier_service_id},
@@ -3150,8 +3239,8 @@ export async function updateSale(saleData: any) {
                 staff_id = ${saleData.staffId || null},
                 fulfillment_type = ${shipping.fulfillment_type},
                 delivery_status = ${shipping.delivery_status},
-                is_ready_to_ship = CASE WHEN ${isDirect} THEN true ELSE is_ready_to_ship END,
-                ready_to_ship_at = CASE WHEN ${isDirect} THEN COALESCE(ready_to_ship_at, NOW()) ELSE ready_to_ship_at END,
+                is_ready_to_ship = CASE WHEN ${isAutoReadyToShip} THEN true ELSE is_ready_to_ship END,
+                ready_to_ship_at = CASE WHEN ${isAutoReadyToShip} THEN COALESCE(ready_to_ship_at, NOW()) ELSE ready_to_ship_at END,
                 shipping_date = CASE WHEN ${isNewShip} THEN COALESCE(shipping_date, NOW()) ELSE shipping_date END,
                 courier_partner_id = ${shipping.courier_partner_id},
                 courier_service_id = ${shipping.courier_service_id},
@@ -3834,7 +3923,7 @@ export async function updateSaleDeliveryStatus(
 
     const newDeliveryStatus = (deliveryStatus || "").trim().toLowerCase()
     const isNewShipping = newDeliveryStatus === "shipping" || newDeliveryStatus === "shipped"
-    const isDirect = newDeliveryStatus === "direct"
+    const isAutoReadyToShip = ["packed", "sent", "direct", "shipped", "shipping", "delivered"].includes(newDeliveryStatus)
 
     const updated = await sql`
       UPDATE sales
@@ -3843,8 +3932,8 @@ export async function updateSaleDeliveryStatus(
           delivered_at = ${deliveredAt},
           tracking_id = ${targetTrackingId},
           shipping_date = CASE WHEN ${isNewShipping} THEN COALESCE(shipping_date, NOW()) ELSE shipping_date END,
-          is_ready_to_ship = CASE WHEN ${isDirect} THEN true ELSE is_ready_to_ship END,
-          ready_to_ship_at = CASE WHEN ${isDirect} THEN COALESCE(ready_to_ship_at, NOW()) ELSE ready_to_ship_at END,
+          is_ready_to_ship = CASE WHEN ${isAutoReadyToShip} THEN true ELSE is_ready_to_ship END,
+          ready_to_ship_at = CASE WHEN ${isAutoReadyToShip} THEN COALESCE(ready_to_ship_at, NOW()) ELSE ready_to_ship_at END,
           updated_at = NOW()
       WHERE id = ${saleId}
       RETURNING shipping_date
@@ -4021,7 +4110,8 @@ export async function updateSaleFulfillmentDetails(saleId: number, shippingData:
 
     const shippedAt = (["Shipped", "Shipping", "Courier", "In transit", "Delivered"].includes(String(shippingData.deliveryStatus)) ? new Date() : null)
     const deliveredAt = (shippingData.deliveryStatus === "Delivered" ? new Date() : null)
-    const isDirect = (shippingData.deliveryStatus || "").trim().toLowerCase() === "direct"
+    const targetDeliveryStatus = (shippingData.deliveryStatus || "").trim().toLowerCase()
+    const isAutoReadyToShip = ["packed", "sent", "direct", "shipped", "shipping", "delivered"].includes(targetDeliveryStatus)
 
     await sql`
       UPDATE sales
@@ -4050,8 +4140,8 @@ export async function updateSaleFulfillmentDetails(saleId: number, shippingData:
         shipping_pincode = ${shippingData.shippingPincode || null},
         fulfillment_type = ${shippingData.fulfillmentType || 'ship'},
         delivery_status = COALESCE(${shippingData.deliveryStatus}, delivery_status),
-        is_ready_to_ship = CASE WHEN ${isDirect} THEN true ELSE is_ready_to_ship END,
-        ready_to_ship_at = CASE WHEN ${isDirect} THEN COALESCE(ready_to_ship_at, NOW()) ELSE ready_to_ship_at END,
+        is_ready_to_ship = CASE WHEN ${isAutoReadyToShip} THEN true ELSE is_ready_to_ship END,
+        ready_to_ship_at = CASE WHEN ${isAutoReadyToShip} THEN COALESCE(ready_to_ship_at, NOW()) ELSE ready_to_ship_at END,
         shipped_at = COALESCE(shipped_at, ${shippedAt}),
         delivered_at = COALESCE(delivered_at, ${deliveredAt}),
         shipping_date = COALESCE(shipping_date, ${shippingData.shippingDate ? new Date(shippingData.shippingDate) : null}),

@@ -16,18 +16,110 @@ import {
 } from "@/lib/sale-shipping"
 import type { MasterDataItem } from "@/lib/master-data"
 
+export interface ShippingMetaCacheItem {
+  partners: { id: number; name: string; linked_partner_id?: number | null; tracking_url_template?: string | null }[]
+  services: { id: number; name: string }[]
+  packaging: MasterDataItem[]
+  timestamp: number
+}
+
+export const shippingMetaCacheByDevice = new Map<number, ShippingMetaCacheItem>()
+const inFlightRequests = new Map<number, Promise<ShippingMetaCacheItem>>()
+
+export async function fetchShippingMeta(deviceId: number): Promise<ShippingMetaCacheItem> {
+  if (!deviceId || deviceId <= 0) {
+    return { partners: [], services: [], packaging: [], timestamp: Date.now() }
+  }
+
+  const cached = shippingMetaCacheByDevice.get(deviceId)
+  if (cached && Date.now() - cached.timestamp < 5 * 60 * 1000) {
+    return cached
+  }
+
+  if (inFlightRequests.has(deviceId)) {
+    return inFlightRequests.get(deviceId)!
+  }
+
+  const promise = (async () => {
+    try {
+      const { getDeviceStaff } = await import("@/app/actions/staff-actions")
+      const { getMasterDataItems } = await import("@/app/actions/master-data-actions")
+      const { getDeviceServices } = await import("@/app/actions/service-actions")
+
+      const [staffResult, courierMasterResult, packagingResult, servicesResult] = await Promise.all([
+        getDeviceStaff(deviceId),
+        getMasterDataItems(deviceId, "courier"),
+        getMasterDataItems(deviceId, "packaging"),
+        getDeviceServices(deviceId),
+      ])
+
+      let partners: { id: number; name: string; linked_partner_id?: number | null; tracking_url_template?: string | null }[] = []
+      if (staffResult.success && Array.isArray(staffResult.data)) {
+        partners = staffResult.data
+          .filter((s: any) => s.role === "partner" && s.is_active !== false)
+          .map((s: any) => ({
+            id: s.id,
+            name: s.name,
+            linked_partner_id: s.linked_partner_id,
+          }))
+      }
+
+      const staffNames = new Set(partners.map((p) => p.name.toLowerCase().trim()))
+      const servicesList: { id: number; name: string }[] = []
+
+      if (courierMasterResult.success && Array.isArray(courierMasterResult.data)) {
+        courierMasterResult.data.forEach((item: any) => {
+          if (item.is_active !== false && item.name && !staffNames.has(String(item.name).toLowerCase().trim())) {
+            servicesList.push({ id: item.id, name: item.name })
+          }
+        })
+      }
+
+      if (servicesResult.success && Array.isArray(servicesResult.data)) {
+        servicesResult.data.forEach((s: any) => {
+          if (s.name && !servicesList.some((existing) => existing.name.toLowerCase() === s.name.toLowerCase())) {
+            servicesList.push({ id: s.id, name: s.name })
+          }
+        })
+      }
+
+      let packagingList: MasterDataItem[] = []
+      if (packagingResult.success && Array.isArray(packagingResult.data)) {
+        packagingList = packagingResult.data.filter((item: any) => item.is_active !== false)
+      }
+
+      const data: ShippingMetaCacheItem = {
+        partners,
+        services: servicesList,
+        packaging: packagingList,
+        timestamp: Date.now(),
+      }
+      shippingMetaCacheByDevice.set(deviceId, data)
+      return data
+    } finally {
+      inFlightRequests.delete(deviceId)
+    }
+  })()
+
+  inFlightRequests.set(deviceId, promise)
+  return promise
+}
+
 interface SaleShippingSectionProps {
   deviceId?: number | null
   value: SaleShippingInput
   onChange: (value: SaleShippingInput) => void
   customerAddress?: string
   currency?: string
+  formatCurrency?: (amount: number) => string
   className?: string
   isJobCard?: boolean
   customerName?: string
   customerPhone?: string
   forceFullForm?: boolean
   hidePickupToggle?: boolean
+  isLogisticsFulfillment?: boolean
+  errors?: { courierPartner?: string; shippingAddress?: string }
 }
 
 export default function SaleShippingSection({
@@ -35,93 +127,111 @@ export default function SaleShippingSection({
   value,
   onChange,
   customerAddress,
-  currency = "AED",
+  currency = "INR",
+  formatCurrency,
   className,
   isJobCard = false,
   customerName = "",
   customerPhone = "",
   forceFullForm = false,
   hidePickupToggle = false,
+  isLogisticsFulfillment = false,
+  errors,
 }: SaleShippingSectionProps) {
   const shipping = { ...DEFAULT_SALE_SHIPPING, ...value }
-  const [courierPartners, setCourierPartners] = useState<{ id: number; name: string; linked_partner_id?: number | null; tracking_url_template?: string | null }[]>([])
-  const [courierServices, setCourierServices] = useState<{ id: number; name: string }[]>([])
-  const [packagingTypes, setPackagingTypes] = useState<MasterDataItem[]>([])
+  const cachedMeta = deviceId ? shippingMetaCacheByDevice.get(deviceId) : null
+
+  const [courierPartners, setCourierPartners] = useState<{ id: number; name: string; linked_partner_id?: number | null; tracking_url_template?: string | null }[]>(
+    () => cachedMeta?.partners || []
+  )
+  const [courierServices, setCourierServices] = useState<{ id: number; name: string }[]>(
+    () => cachedMeta?.services || []
+  )
+  const [packagingTypes, setPackagingTypes] = useState<MasterDataItem[]>(
+    () => cachedMeta?.packaging || []
+  )
   
   const [isCreatingService, setIsCreatingService] = useState(false)
   const [newServiceName, setNewServiceName] = useState("")
   const [newServicePrice, setNewServicePrice] = useState("0")
 
+  const initialHasDims = Boolean(value.lengthCm || value.widthCm || value.heightCm)
+  const [weightMode, setWeightMode] = useState<"direct" | "volumetric">(() => {
+    return initialHasDims ? "volumetric" : "direct"
+  })
+  const [actualScaleWeight, setActualScaleWeight] = useState<number>(() => {
+    const w = Number(value.weightKg) || 0
+    if (initialHasDims) {
+      const l = Number(value.lengthCm) || 0
+      const wi = Number(value.widthCm) || 0
+      const h = Number(value.heightCm) || 0
+      const vol = (l > 0 && wi > 0 && h > 0) ? Math.round(((l * wi * h) / 5000) * 1000) / 1000 : 0
+      return w > vol ? w : 0
+    }
+    return w
+  })
+
   useEffect(() => {
-    console.log("[SaleShippingSection] Mounted with deviceId:", deviceId)
+    const hasDims = Boolean(value.lengthCm || value.widthCm || value.heightCm)
+    if (hasDims) {
+      setWeightMode("volumetric")
+      const l = Number(value.lengthCm) || 0
+      const wi = Number(value.widthCm) || 0
+      const h = Number(value.heightCm) || 0
+      const vol = (l > 0 && wi > 0 && h > 0) ? Math.round(((l * wi * h) / 5000) * 1000) / 1000 : 0
+      const w = Number(value.weightKg) || 0
+      if (w > vol) {
+        setActualScaleWeight(w)
+      }
+    } else if (value.weightKg != null && !hasDims) {
+      setWeightMode("direct")
+      setActualScaleWeight(Number(value.weightKg) || 0)
+    }
+  }, [value.lengthCm, value.widthCm, value.heightCm, value.weightKg])
+
+  const volumetricWeight = useMemo(() => {
+    const l = Number(shipping.lengthCm) || 0
+    const w = Number(shipping.widthCm) || 0
+    const h = Number(shipping.heightCm) || 0
+    if (l > 0 && w > 0 && h > 0) {
+      return Math.round(((l * w * h) / 5000) * 1000) / 1000
+    }
+    return 0
+  }, [shipping.lengthCm, shipping.widthCm, shipping.heightCm])
+
+  const billableWeight = useMemo(() => {
+    if (weightMode === "direct") {
+      return Number(shipping.weightKg) || 0
+    }
+    return Math.max(actualScaleWeight, volumetricWeight)
+  }, [weightMode, shipping.weightKg, actualScaleWeight, volumetricWeight])
+
+  useEffect(() => {
     if (!deviceId) return
 
     let isMounted = true
+    const cached = shippingMetaCacheByDevice.get(deviceId)
+    const isFresh = cached && Date.now() - cached.timestamp < 5 * 60 * 1000
 
-    const loadData = async () => {
-      try {
-        const { getDeviceStaff } = await import("@/app/actions/staff-actions")
-        const { getMasterDataItems } = await import("@/app/actions/master-data-actions")
-        const { getDeviceServices } = await import("@/app/actions/service-actions")
-
-        const [staffResult, courierMasterResult, packagingResult, servicesResult] = await Promise.all([
-          getDeviceStaff(deviceId),
-          getMasterDataItems(deviceId, "courier"),
-          getMasterDataItems(deviceId, "packaging"),
-          getDeviceServices(deviceId),
-        ])
-
-        if (!isMounted) return
-
-        // 1. COURIER PARTNERS: Get active staff members with role = 'partner'
-        let partners: { id: number; name: string; linked_partner_id?: number | null; tracking_url_template?: string | null }[] = []
-        if (staffResult.success && Array.isArray(staffResult.data)) {
-          partners = staffResult.data
-            .filter((s: any) => s.role === "partner" && s.is_active !== false)
-            .map((s: any) => ({
-              id: s.id,
-              name: s.name,
-              linked_partner_id: s.linked_partner_id,
-            }))
-        }
-        setCourierPartners(partners)
-
-        // 2. COURIER SERVICES: Get master data courier items (excluding partner staff names) + services table items
-        const staffNames = new Set(partners.map((p) => p.name.toLowerCase().trim()))
-        const servicesList: { id: number; name: string }[] = []
-
-        if (courierMasterResult.success && Array.isArray(courierMasterResult.data)) {
-          courierMasterResult.data.forEach((item: any) => {
-            if (item.is_active !== false && item.name && !staffNames.has(String(item.name).toLowerCase().trim())) {
-              servicesList.push({ id: item.id, name: item.name })
-            }
-          })
-        }
-
-        if (servicesResult.success && Array.isArray(servicesResult.data)) {
-          servicesResult.data.forEach((s: any) => {
-            if (s.name && !servicesList.some((existing) => existing.name.toLowerCase() === s.name.toLowerCase())) {
-              servicesList.push({ id: s.id, name: s.name })
-            }
-          })
-        }
-
-        setCourierServices(servicesList)
-
-        if (packagingResult.success && Array.isArray(packagingResult.data)) {
-          setPackagingTypes(packagingResult.data.filter((item: any) => item.is_active !== false))
-        }
-      } catch (error) {
-        console.error("[SaleShippingSection] Error fetching shipping data:", error)
-      }
+    if (isFresh && courierPartners.length > 0) {
+      return
     }
 
-    loadData()
+    fetchShippingMeta(deviceId)
+      .then((data) => {
+        if (!isMounted) return
+        setCourierPartners(data.partners)
+        setCourierServices(data.services)
+        setPackagingTypes(data.packaging)
+      })
+      .catch((error) => {
+        console.error("[SaleShippingSection] Error fetching shipping data:", error)
+      })
 
     return () => {
       isMounted = false
     }
-  }, [deviceId])
+  }, [deviceId, courierPartners.length])
 
   const selectedCourierPartner = useMemo(
     () => courierPartners.find((courier) => courier.id === shipping.courierPartnerId) || null,
@@ -209,6 +319,12 @@ export default function SaleShippingSection({
       if (result.success && result.data) {
         const newService = { id: result.data.id, name: result.data.name }
         setCourierServices((prev) => [...prev, newService])
+        if (deviceId) {
+          const cached = shippingMetaCacheByDevice.get(deviceId)
+          if (cached) {
+            cached.services = [...cached.services, newService]
+          }
+        }
         patch({
           courierServiceId: newService.id,
           courierServiceName: newService.name,
@@ -235,6 +351,44 @@ export default function SaleShippingSection({
       packagingTypeName: packaging?.name || "",
       expensePacking: defaultCost ?? shipping.expensePacking ?? 0,
     })
+  }
+
+  const handleDimensionChange = (key: "lengthCm" | "widthCm" | "heightCm", valStr: string) => {
+    const val = valStr === "" ? null : Number.parseFloat(valStr)
+    const l = key === "lengthCm" ? (val || 0) : (Number(shipping.lengthCm) || 0)
+    const w = key === "widthCm" ? (val || 0) : (Number(shipping.widthCm) || 0)
+    const h = key === "heightCm" ? (val || 0) : (Number(shipping.heightCm) || 0)
+    const vol = (l > 0 && w > 0 && h > 0) ? Math.round(((l * w * h) / 5000) * 1000) / 1000 : 0
+    const finalW = Math.max(actualScaleWeight, vol)
+    patch({
+      [key]: val,
+      weightKg: finalW > 0 ? finalW : null,
+    })
+  }
+
+  const handleActualWeightChange = (valStr: string) => {
+    const parsed = valStr === "" ? 0 : Number.parseFloat(valStr) || 0
+    setActualScaleWeight(parsed)
+    const finalW = Math.max(parsed, volumetricWeight)
+    patch({
+      weightKg: finalW > 0 ? finalW : null,
+    })
+  }
+
+  const handleWeightModeToggle = (mode: "direct" | "volumetric") => {
+    setWeightMode(mode)
+    if (mode === "direct") {
+      const w = actualScaleWeight > 0 ? actualScaleWeight : (Number(shipping.weightKg) || null)
+      patch({
+        weightKg: w,
+        lengthCm: null,
+        widthCm: null,
+        heightCm: null,
+      })
+    } else {
+      const finalW = Math.max(actualScaleWeight, volumetricWeight)
+      patch({ weightKg: finalW > 0 ? finalW : null })
+    }
   }
 
   if (isJobCard && shipping.fulfillmentType !== "pickup" && !forceFullForm) {
@@ -273,6 +427,11 @@ export default function SaleShippingSection({
                         {courier.name}
                       </option>
                     ))}
+                    {shipping.courierPartnerId && !courierPartners.some((c) => c.id === shipping.courierPartnerId) && (
+                      <option value={shipping.courierPartnerId}>
+                        {selectedCourierPartner?.name || `Partner #${shipping.courierPartnerId}`}
+                      </option>
+                    )}
                   </select>
                 </div>
                 
@@ -401,27 +560,39 @@ export default function SaleShippingSection({
               <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
                 DELIVERY STATUS
               </Label>
-              <select
-                value={shipping.deliveryStatus || "Pending"}
-                onChange={(e) => patch({ deliveryStatus: e.target.value })}
-                className="flex h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900/10 cursor-pointer"
-              >
-                {DELIVERY_STATUSES.map((status) => (
-                  <option key={status} value={status}>
-                    {status}
-                  </option>
-                ))}
-              </select>
+              {isLogisticsFulfillment ? (
+                <div className="flex h-10 w-full items-center rounded-xl border border-slate-200 bg-slate-100 px-3 text-xs font-bold text-slate-700">
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full bg-amber-500" />
+                    {shipping.deliveryStatus || "Ready to Ship"}
+                  </span>
+                </div>
+              ) : (
+                <select
+                  value={shipping.deliveryStatus || "Pending"}
+                  onChange={(e) => patch({ deliveryStatus: e.target.value })}
+                  className="flex h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900/10 cursor-pointer"
+                >
+                  {DELIVERY_STATUSES.map((status) => (
+                    <option key={status} value={status}>
+                      {status}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
 
             <div className="space-y-1.5">
               <Label className="text-[11px] font-extrabold uppercase tracking-wider text-slate-800">
-                COURIER PARTNER
+                COURIER PARTNER <span className="text-red-500">*</span>
               </Label>
               <select
                 value={shipping.courierPartnerId ? String(shipping.courierPartnerId) : ""}
                 onChange={(e) => handleCourierPartnerChange(e.target.value)}
-                className="flex h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900/10 cursor-pointer"
+                className={cn(
+                  "flex h-10 w-full rounded-xl border bg-white px-3 text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900/10 cursor-pointer",
+                  errors?.courierPartner ? "border-red-500 ring-1 ring-red-500 bg-red-50/20" : "border-slate-200"
+                )}
               >
                 <option value="" className="font-normal">Select partner</option>
                 {courierPartners.map((courier) => (
@@ -429,7 +600,15 @@ export default function SaleShippingSection({
                     {courier.name}
                   </option>
                 ))}
+                {shipping.courierPartnerId && !courierPartners.some((c) => c.id === shipping.courierPartnerId) && (
+                  <option value={shipping.courierPartnerId}>
+                    {selectedCourierPartner?.name || `Partner #${shipping.courierPartnerId}`}
+                  </option>
+                )}
               </select>
+              {errors?.courierPartner && (
+                <p className="text-[11px] font-medium text-red-500">{errors.courierPartner}</p>
+              )}
             </div>
 
             <div className="space-y-1.5">
@@ -461,6 +640,11 @@ export default function SaleShippingSection({
                       {service.name}
                     </option>
                   ))}
+                  {shipping.courierServiceId && !courierServices.some((s) => s.id === shipping.courierServiceId) && (
+                    <option value={shipping.courierServiceId}>
+                      {shipping.courierServiceName || `Service #${shipping.courierServiceId}`}
+                    </option>
+                  )}
                   <option value="create_new">+ Create New Courier Service</option>
                 </select>
               )}
@@ -481,6 +665,11 @@ export default function SaleShippingSection({
                     {packaging.name}
                   </option>
                 ))}
+                {shipping.packagingTypeId && !packagingTypes.some((p) => p.id === shipping.packagingTypeId) && (
+                  <option value={shipping.packagingTypeId}>
+                    {shipping.packagingTypeName || `Packaging #${shipping.packagingTypeId}`}
+                  </option>
+                )}
               </select>
             </div>
           </div>
@@ -502,79 +691,166 @@ export default function SaleShippingSection({
 
           {/* Row 3: Shipping Address */}
           <div className="space-y-1.5">
-            <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-              SHIPPING ADDRESS
+            <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-700">
+              SHIPPING ADDRESS <span className="text-red-500">*</span>
             </Label>
             <Textarea
               value={shipping.shippingAddress || ""}
               onChange={(e) => patch({ shippingAddress: e.target.value })}
               placeholder="Delivery address"
-              className="min-h-[85px] w-full rounded-xl border border-slate-200 bg-white p-3 text-xs font-medium text-slate-800 focus-visible:ring-2 focus-visible:ring-indigo-500/20"
+              className={cn(
+                "min-h-[85px] w-full rounded-xl border bg-white p-3 text-xs font-medium text-slate-800 focus-visible:ring-2 focus-visible:ring-indigo-500/20",
+                errors?.shippingAddress ? "border-red-500 ring-1 ring-red-500 bg-red-50/20" : "border-slate-200"
+              )}
             />
+            {errors?.shippingAddress && (
+              <p className="text-[11px] font-medium text-red-500">{errors.shippingAddress}</p>
+            )}
           </div>
 
-          {/* Row 4: Weight (kg), Length (cm), Width (cm), Height (cm) */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div className="space-y-1.5">
-              <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                WEIGHT (KG)
-              </Label>
-              <Input
-                type="number"
-                min="0"
-                step="0.001"
-                value={shipping.weightKg ?? ""}
-                onChange={(e) =>
-                  patch({ weightKg: e.target.value === "" ? null : Number.parseFloat(e.target.value) })
-                }
-                className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-800 focus-visible:ring-2 focus-visible:ring-indigo-500/20"
-              />
+          {/* Row 4: Weight Input Mode Toggle & Fields */}
+          <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5 sm:p-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-2.5">
+              <div>
+                <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-700">
+                  Weight Mode
+                </Label>
+              </div>
+
+              {/* Toggle Buttons */}
+              <div className="inline-flex rounded-xl border border-slate-200 bg-white p-0.5 shadow-2xs">
+                <button
+                  type="button"
+                  onClick={() => handleWeightModeToggle("direct")}
+                  className={cn(
+                    "rounded-lg px-3 py-1.5 text-xs font-semibold transition-all",
+                    weightMode === "direct"
+                      ? "bg-indigo-600 text-white shadow-xs"
+                      : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
+                  )}
+                >
+                  Direct Weight
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleWeightModeToggle("volumetric")}
+                  className={cn(
+                    "rounded-lg px-3 py-1.5 text-xs font-semibold transition-all",
+                    weightMode === "volumetric"
+                      ? "bg-indigo-600 text-white shadow-xs"
+                      : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
+                  )}
+                >
+                  Volumetric
+                </button>
+              </div>
             </div>
-            <div className="space-y-1.5">
-              <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                LENGTH (CM)
-              </Label>
-              <Input
-                type="number"
-                min="0"
-                step="0.01"
-                value={shipping.lengthCm ?? ""}
-                onChange={(e) =>
-                  patch({ lengthCm: e.target.value === "" ? null : Number.parseFloat(e.target.value) })
-                }
-                className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-800 focus-visible:ring-2 focus-visible:ring-indigo-500/20"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                WIDTH (CM)
-              </Label>
-              <Input
-                type="number"
-                min="0"
-                step="0.01"
-                value={shipping.widthCm ?? ""}
-                onChange={(e) =>
-                  patch({ widthCm: e.target.value === "" ? null : Number.parseFloat(e.target.value) })
-                }
-                className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-800 focus-visible:ring-2 focus-visible:ring-indigo-500/20"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                HEIGHT (CM)
-              </Label>
-              <Input
-                type="number"
-                min="0"
-                step="0.01"
-                value={shipping.heightCm ?? ""}
-                onChange={(e) =>
-                  patch({ heightCm: e.target.value === "" ? null : Number.parseFloat(e.target.value) })
-                }
-                className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-800 focus-visible:ring-2 focus-visible:ring-indigo-500/20"
-              />
-            </div>
+
+            {weightMode === "direct" ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-700">
+                    WEIGHT (KG)
+                  </Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.001"
+                    placeholder="e.g. 1.25"
+                    value={shipping.weightKg ?? ""}
+                    onChange={(e) => {
+                      const val = e.target.value === "" ? null : Number.parseFloat(e.target.value)
+                      setActualScaleWeight(val || 0)
+                      patch({ weightKg: val })
+                    }}
+                    className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-800 focus-visible:ring-2 focus-visible:ring-indigo-500/20"
+                  />
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-700">
+                      LENGTH (CM)
+                    </Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.1"
+                      placeholder="Length in cm"
+                      value={shipping.lengthCm ?? ""}
+                      onChange={(e) => handleDimensionChange("lengthCm", e.target.value)}
+                      className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-800 focus-visible:ring-2 focus-visible:ring-indigo-500/20"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-700">
+                      WIDTH (CM)
+                    </Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.1"
+                      placeholder="Width in cm"
+                      value={shipping.widthCm ?? ""}
+                      onChange={(e) => handleDimensionChange("widthCm", e.target.value)}
+                      className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-800 focus-visible:ring-2 focus-visible:ring-indigo-500/20"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-700">
+                      HEIGHT (CM)
+                    </Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.1"
+                      placeholder="Height in cm"
+                      value={shipping.heightCm ?? ""}
+                      onChange={(e) => handleDimensionChange("heightCm", e.target.value)}
+                      className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-800 focus-visible:ring-2 focus-visible:ring-indigo-500/20"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-700">
+                      ACTUAL WEIGHT (KG) <span className="text-slate-400 font-normal">(Optional)</span>
+                    </Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.001"
+                      placeholder="Dead weight (kg)"
+                      value={actualScaleWeight > 0 ? actualScaleWeight : ""}
+                      onChange={(e) => handleActualWeightChange(e.target.value)}
+                      className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-800 focus-visible:ring-2 focus-visible:ring-indigo-500/20"
+                    />
+                  </div>
+                </div>
+
+                {/* Volumetric Weight & Comparison Banner */}
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-indigo-100 bg-indigo-50/70 p-3 text-xs text-indigo-950">
+                  <div className="flex items-center gap-5 flex-wrap">
+                    <div>
+                      <span className="text-[10px] uppercase font-semibold text-indigo-600 block">Volumetric Weight</span>
+                      <span className="font-bold text-slate-800">{volumetricWeight > 0 ? `${volumetricWeight.toFixed(3)} kg` : "—"}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] uppercase font-semibold text-indigo-600 block">Actual Scale Weight</span>
+                      <span className="font-bold text-slate-800">{actualScaleWeight > 0 ? `${actualScaleWeight.toFixed(3)} kg` : "—"}</span>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg bg-indigo-600 px-3 py-1.5 text-white">
+                    <span className="text-[10px] uppercase tracking-wider block opacity-85 font-medium">Applied Billable Weight</span>
+                    <span className="font-black text-sm">{billableWeight > 0 ? `${billableWeight.toFixed(3)} kg` : "—"}</span>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Row 5: Courier Paid (Extra), Expense: Courier, Expense: Packing */}
@@ -584,14 +860,22 @@ export default function SaleShippingSection({
                 <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
                   COURIER PAID (EXTRA)
                 </Label>
-                <Input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={shipping.courierPaidExtra ?? 0}
-                  onChange={(e) => patch({ courierPaidExtra: Number.parseFloat(e.target.value) || 0 })}
-                  className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-800 focus-visible:ring-2 focus-visible:ring-indigo-500/20"
-                />
+                {isLogisticsFulfillment ? (
+                  <div className="flex h-10 w-full items-center rounded-xl border border-slate-200 bg-slate-100 px-3 text-xs font-bold text-slate-700">
+                    {formatCurrency
+                      ? formatCurrency(Number(shipping.courierPaidExtra || 0))
+                      : `${currency} ${Number(shipping.courierPaidExtra || 0).toFixed(2)}`}
+                  </div>
+                ) : (
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={shipping.courierPaidExtra ?? 0}
+                    onChange={(e) => patch({ courierPaidExtra: Number.parseFloat(e.target.value) || 0 })}
+                    className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-800 focus-visible:ring-2 focus-visible:ring-indigo-500/20"
+                  />
+                )}
               </div>
               <div className="space-y-1.5">
                 <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">

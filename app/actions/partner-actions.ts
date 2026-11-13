@@ -683,6 +683,7 @@ export async function updatePartnerDeliveryStatus(
 
     const newDeliveryStatus = (deliveryStatus || "").trim().toLowerCase()
     const isNewShipping = newDeliveryStatus === "shipping" || newDeliveryStatus === "shipped"
+    const isAutoReadyToShip = ["packed", "sent", "direct", "shipped", "shipping", "delivered"].includes(newDeliveryStatus)
 
     let targetTrackingId: string | null = existing[0].tracking_id || null
     if (trackingId !== undefined) {
@@ -702,6 +703,8 @@ export async function updatePartnerDeliveryStatus(
           tracking_id = ${targetTrackingId},
           courier_service_name = ${targetCourierServiceName},
           shipping_date = CASE WHEN ${isNewShipping} THEN COALESCE(shipping_date, NOW()) ELSE shipping_date END,
+          is_ready_to_ship = CASE WHEN ${isAutoReadyToShip} THEN true ELSE is_ready_to_ship END,
+          ready_to_ship_at = CASE WHEN ${isAutoReadyToShip} THEN COALESCE(ready_to_ship_at, NOW()) ELSE ready_to_ship_at END,
           updated_at = NOW()
       WHERE id = ${saleId}
       RETURNING shipping_date, shipping_city
@@ -1024,6 +1027,14 @@ export async function updatePartnerFullShippingDetails(orderId: number, isReplac
           shipping_address = ${shippingData.shippingAddress || null},
           fulfillment_type = ${shippingData.fulfillmentType || 'ship'},
           delivery_status = COALESCE(${shippingData.deliveryStatus}, delivery_status),
+          is_ready_to_ship = CASE 
+            WHEN LOWER(TRIM(COALESCE(${shippingData.deliveryStatus}, ''))) IN ('packed', 'sent', 'direct', 'shipped', 'shipping', 'delivered') THEN true 
+            ELSE is_ready_to_ship 
+          END,
+          ready_to_ship_at = CASE 
+            WHEN LOWER(TRIM(COALESCE(${shippingData.deliveryStatus}, ''))) IN ('packed', 'sent', 'direct', 'shipped', 'shipping', 'delivered') THEN COALESCE(ready_to_ship_at, NOW()) 
+            ELSE ready_to_ship_at 
+          END,
           updated_at = NOW()
         WHERE id = ${orderId}
       `;

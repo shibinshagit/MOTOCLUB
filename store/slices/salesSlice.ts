@@ -62,7 +62,7 @@ const initialState: SalesState = {
   showFilters: false,
 
   // UI states
-  currency: "AED",
+  currency: "INR",
 }
 
 const salesSlice = createSlice({

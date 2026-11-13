@@ -35,7 +35,8 @@ export function DeliveryStatusSelect({
   paymentStatus,
   isJobCard,
   userRole,
-  onStatusChange
+  onStatusChange,
+  onOpenFulfillment,
 }: {
   saleId: number
   deviceId: number
@@ -48,6 +49,7 @@ export function DeliveryStatusSelect({
   isJobCard?: boolean
   userRole?: "admin" | "staff"
   onStatusChange?: (newStatus: string) => void
+  onOpenFulfillment?: () => void
 }) {
   const { toast } = useToast()
   const [loading, setLoading] = useState(false)
@@ -240,6 +242,11 @@ export function DeliveryStatusSelect({
     }
 
     if (newStatus === "Shipped" || newStatus === "Shipping") {
+      if (onOpenFulfillment) {
+        onOpenFulfillment()
+        e.target.value = status // Keep select on current status until fulfillment modal confirms
+        return
+      }
       setIsTrackingModalOpen(true)
       return // Halt update until tracking ID is entered
     }

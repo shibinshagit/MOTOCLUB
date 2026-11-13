@@ -324,7 +324,7 @@ export function isCriticalSale(sale: any): boolean {
   if (!isPaid && !isPartialOrCredit) return false
 
   const dStatus = (sale.delivery_status || "Pending").trim().toLowerCase()
-  const allowedCriticalStatuses = ["pending", "paid", "packed", "sent"]
+  const allowedCriticalStatuses = ["pending", "paid", "packed", "sent", "direct"]
 
   return allowedCriticalStatuses.includes(dStatus)
 }

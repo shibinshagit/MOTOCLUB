@@ -629,7 +629,15 @@ export async function updateJobCard(id: number, input: any) {
             WHEN LOWER(TRIM(COALESCE(${input.typeOfSale || null}, type_of_sale, ''))) = 'walk in' THEN 'pickup'
             ELSE COALESCE(fulfillment_type, 'pickup')
           END,
-          delivery_status = COALESCE(delivery_status, 'Pending'),
+          delivery_status = COALESCE(${input.deliveryStatus || input.delivery_status || null}, delivery_status, 'Pending'),
+          is_ready_to_ship = CASE 
+            WHEN LOWER(TRIM(COALESCE(${input.deliveryStatus || input.delivery_status || null}, delivery_status, ''))) IN ('packed', 'sent', 'direct', 'shipped', 'shipping', 'delivered') THEN true 
+            ELSE is_ready_to_ship 
+          END,
+          ready_to_ship_at = CASE 
+            WHEN LOWER(TRIM(COALESCE(${input.deliveryStatus || input.delivery_status || null}, delivery_status, ''))) IN ('packed', 'sent', 'direct', 'shipped', 'shipping', 'delivered') THEN COALESCE(ready_to_ship_at, NOW()) 
+            ELSE ready_to_ship_at 
+          END,
           payment_method = COALESCE(${primaryPaymentMethod}, payment_method, 'UPI'),
           type_of_sale = COALESCE(${input.typeOfSale || null}, type_of_sale)
         WHERE id = ${id} AND staff_id = ${staffId}
@@ -662,7 +670,15 @@ export async function updateJobCard(id: number, input: any) {
             WHEN LOWER(TRIM(COALESCE(${input.typeOfSale || null}, type_of_sale, ''))) = 'walk in' THEN 'pickup'
             ELSE COALESCE(fulfillment_type, 'pickup')
           END,
-          delivery_status = COALESCE(delivery_status, 'Pending'),
+          delivery_status = COALESCE(${input.deliveryStatus || input.delivery_status || null}, delivery_status, 'Pending'),
+          is_ready_to_ship = CASE 
+            WHEN LOWER(TRIM(COALESCE(${input.deliveryStatus || input.delivery_status || null}, delivery_status, ''))) IN ('packed', 'sent', 'direct', 'shipped', 'shipping', 'delivered') THEN true 
+            ELSE is_ready_to_ship 
+          END,
+          ready_to_ship_at = CASE 
+            WHEN LOWER(TRIM(COALESCE(${input.deliveryStatus || input.delivery_status || null}, delivery_status, ''))) IN ('packed', 'sent', 'direct', 'shipped', 'shipping', 'delivered') THEN COALESCE(ready_to_ship_at, NOW()) 
+            ELSE ready_to_ship_at 
+          END,
           payment_method = COALESCE(${primaryPaymentMethod}, payment_method, 'UPI'),
           type_of_sale = COALESCE(${input.typeOfSale || null}, type_of_sale)
         WHERE id = ${id}
@@ -1154,7 +1170,15 @@ export async function markJobCardPaid(saleId: number, deviceId: number) {
           payment_status = 'Paid',
           delivery_status = ${newDelivery},
           received_amount = total_amount,
-          balance_amount = 0
+          balance_amount = 0,
+          is_ready_to_ship = CASE 
+            WHEN LOWER(TRIM(${newDelivery})) IN ('packed', 'sent', 'direct', 'shipped', 'shipping', 'delivered') THEN true 
+            ELSE is_ready_to_ship 
+          END,
+          ready_to_ship_at = CASE 
+            WHEN LOWER(TRIM(${newDelivery})) IN ('packed', 'sent', 'direct', 'shipped', 'shipping', 'delivered') THEN COALESCE(ready_to_ship_at, NOW()) 
+            ELSE ready_to_ship_at 
+          END
         WHERE id = ${saleId}
       `
 

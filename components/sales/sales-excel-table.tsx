@@ -47,7 +47,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog"
-import SaleShippingSection from "@/components/sales/sale-shipping-section"
+import SaleShippingSection, { fetchShippingMeta } from "@/components/sales/sale-shipping-section"
 import {
   Search,
   X,
@@ -78,6 +78,7 @@ import {
   Save,
   Truck,
   PackageCheck,
+  FilePenLine,
 } from "lucide-react"
 import { SalesBreakdownModal } from "@/components/shared/sales-breakdown-modal"
 import {
@@ -294,91 +295,6 @@ export default function SalesExcelTable({
   const [isGeneratingReport, setIsGeneratingReport] = useState(false)
   const [isCreateJobCardOpen, setIsCreateJobCardOpen] = useState(false)
   const [editingJobCardId, setEditingJobCardId] = useState<number | null>(null)
-  const [fulfillmentModal, setFulfillmentModal] = useState<{
-    isOpen: boolean
-    sale: any
-    shippingData: SaleShippingInput
-  } | null>(null)
-  const [isSavingFulfillment, setIsSavingFulfillment] = useState(false)
-
-  const openFulfillmentModal = useCallback(async (sale: any) => {
-    const initialShipping = mapSaleShippingFromRecord(sale)
-    const typeOfSale = String(sale.type_of_sale || "").trim().toLowerCase()
-    if (typeOfSale === "walk in") {
-      initialShipping.fulfillmentType = "pickup"
-    } else if (typeOfSale === "courier") {
-      initialShipping.fulfillmentType = "ship"
-    }
-    if (!initialShipping.shippingAddress) {
-      initialShipping.shippingAddress = sale.shipping_address || sale.customer_address || ""
-    }
-    setFulfillmentModal({
-      isOpen: true,
-      sale,
-      shippingData: initialShipping,
-    })
-
-    try {
-      const res = await getSaleDetails(sale.id)
-      if (res.success && res.data) {
-        const fullSale = res.data.sale ? { ...res.data.sale, items: res.data.items, payments: res.data.payments } : res.data
-        const updatedShipping = mapSaleShippingFromRecord(fullSale)
-        const updatedTypeOfSale = String(fullSale.type_of_sale || typeOfSale || "").trim().toLowerCase()
-        if (updatedTypeOfSale === "walk in") {
-          updatedShipping.fulfillmentType = "pickup"
-        } else if (updatedTypeOfSale === "courier") {
-          updatedShipping.fulfillmentType = "ship"
-        }
-        if (!updatedShipping.shippingAddress) {
-          updatedShipping.shippingAddress = fullSale.shipping_address || fullSale.customer_address || ""
-        }
-        setFulfillmentModal((prev) => {
-          if (!prev || prev.sale.id !== sale.id) return prev
-          return {
-            ...prev,
-            sale: { ...prev.sale, ...fullSale },
-            shippingData: updatedShipping,
-          }
-        })
-      }
-    } catch (err) {
-      console.warn("Could not fetch extra details for fulfillment modal:", err)
-    }
-  }, [])
-
-  const handleCloseFulfillmentModal = () => {
-    setFulfillmentModal(null)
-  }
-
-  const handleSaveFulfillment = async () => {
-    if (!fulfillmentModal) return
-    setIsSavingFulfillment(true)
-    try {
-      const res = await updateSaleFulfillmentDetails(fulfillmentModal.sale.id, fulfillmentModal.shippingData)
-      if (res.success) {
-        toast({
-          title: "Success",
-          description: "Fulfillment details saved successfully",
-        })
-        handleCloseFulfillmentModal()
-        fetchServerSales()
-      } else {
-        toast({
-          title: "Error",
-          description: res.message || "Failed to save fulfillment details",
-          variant: "destructive",
-        })
-      }
-    } catch (err) {
-      toast({
-        title: "Error",
-        description: "An error occurred while saving fulfillment details",
-        variant: "destructive",
-      })
-    } finally {
-      setIsSavingFulfillment(false)
-    }
-  }
 
   const handleRowEdit = (sale: any) => {
     if (isJobCardSale(sale)) {
@@ -585,6 +501,143 @@ export default function SalesExcelTable({
     fetchServerSales()
   }, [fetchServerSales, refreshKey])
 
+  // Preload shipping metadata in background so fulfillment modal opens with 0ms lag
+  useEffect(() => {
+    if (deviceId) {
+      fetchShippingMeta(deviceId).catch(() => {})
+    }
+  }, [deviceId])
+
+  const [fulfillmentModal, setFulfillmentModal] = useState<{
+    isOpen: boolean
+    sale: any
+    shippingData: SaleShippingInput
+  } | null>(null)
+  const [isSavingFulfillment, setIsSavingFulfillment] = useState(false)
+  const [fulfillmentErrors, setFulfillmentErrors] = useState<{ courierPartner?: string; shippingAddress?: string }>({})
+
+  const openFulfillmentModal = useCallback((sale: any, targetStatus?: string) => {
+    setFulfillmentErrors({})
+    const cached = loadedSalesCache[sale.id]
+    const currentSale = cached ? { ...sale, ...cached } : sale
+    const initialShipping = mapSaleShippingFromRecord(currentSale)
+    if (targetStatus === "Shipped" || targetStatus === "Shipping") {
+      initialShipping.fulfillmentType = "ship"
+      initialShipping.deliveryStatus = "Shipped"
+    } else if (targetStatus) {
+      initialShipping.deliveryStatus = targetStatus
+    }
+    const typeOfSale = String(currentSale.type_of_sale || "").trim().toLowerCase()
+    if (typeOfSale === "walk in" && !targetStatus) {
+      initialShipping.fulfillmentType = "pickup"
+    } else if (typeOfSale === "courier" || targetStatus === "Shipped" || targetStatus === "Shipping") {
+      initialShipping.fulfillmentType = "ship"
+    }
+    if (!initialShipping.shippingAddress) {
+      initialShipping.shippingAddress = currentSale.shipping_address || currentSale.customer_address || ""
+    }
+    setFulfillmentModal({
+      isOpen: true,
+      sale: currentSale,
+      shippingData: initialShipping,
+    })
+  }, [loadedSalesCache])
+
+  const handleCloseFulfillmentModal = () => {
+    setFulfillmentErrors({})
+    setFulfillmentModal(null)
+  }
+
+  const handleMoveToShipped = async () => {
+    if (!fulfillmentModal) return
+    const errors: { courierPartner?: string; shippingAddress?: string } = {}
+
+    if (!fulfillmentModal.shippingData.courierPartnerId) {
+      errors.courierPartner = "Please select a Courier Partner"
+    }
+
+    const address = (fulfillmentModal.shippingData.shippingAddress || "").trim()
+    if (!address) {
+      errors.shippingAddress = "Shipping address is required"
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setFulfillmentErrors(errors)
+      toast({
+        title: "Required Fields Missing",
+        description: errors.courierPartner || errors.shippingAddress,
+        variant: "destructive",
+      })
+      return
+    }
+
+    setFulfillmentErrors({})
+    setIsSavingFulfillment(true)
+    try {
+      const payload = {
+        ...fulfillmentModal.shippingData,
+        deliveryStatus: "Shipped",
+      }
+      const res = await updateSaleFulfillmentDetails(fulfillmentModal.sale.id, payload)
+      if (res.success) {
+        toast({
+          title: "Order Moved to Shipped",
+          description: `Order #${fulfillmentModal.sale.id} has been moved to Shipped successfully.`,
+        })
+
+        const updatedFields = {
+          delivery_status: "Shipped",
+          courier_partner_id: payload.courierPartnerId,
+          courier_service_id: payload.courierServiceId,
+          courier_service_name: payload.courierServiceName,
+          packaging_type_id: payload.packagingTypeId,
+          packaging_type_name: payload.packagingTypeName,
+          tracking_id: payload.trackingId,
+          shipping_address: payload.shippingAddress,
+          weight_kg: payload.weightKg,
+          length_cm: payload.lengthCm,
+          width_cm: payload.widthCm,
+          height_cm: payload.heightCm,
+          expense_courier: payload.expenseCourier,
+          expense_packing: payload.expensePacking,
+          shipping_notes: payload.shippingNotes,
+        }
+
+        // Optimistically update table data so row and cache reflect changes immediately with 0ms lag
+        setServerSales((prev) =>
+          prev.map((s) => (s.id === fulfillmentModal.sale.id ? { ...s, ...updatedFields } : s))
+        )
+        setLoadedSalesCache((prev) => ({
+          ...prev,
+          [fulfillmentModal.sale.id]: {
+            ...(prev[fulfillmentModal.sale.id] || {}),
+            ...fulfillmentModal.sale,
+            ...updatedFields,
+          },
+        }))
+
+        handleCloseFulfillmentModal()
+        fetchServerSales()
+        onRefreshSales?.()
+      } else {
+        toast({
+          title: "Error",
+          description: res.message || "Failed to update fulfillment details",
+          variant: "destructive",
+        })
+      }
+    } catch (err) {
+      console.error("Error moving order to Shipped:", err)
+      toast({
+        title: "Error",
+        description: "An unexpected error occurred while moving order to Shipped",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSavingFulfillment(false)
+    }
+  }
+
   const handleDeliveryStatusChange = useCallback(
     (saleId: number, newStatus: string) => {
       setServerSales((prev) =>
@@ -650,7 +703,8 @@ export default function SalesExcelTable({
     if (isPurchaseManager && purchaseManagerCardMode === "orders_to_check") {
       return serverSales.filter((s: any) => {
         const dStatus = (s.delivery_status || "pending").trim().toLowerCase()
-        const isReady = Boolean(s.is_ready_to_ship)
+        const isAutoReadyStatus = ["packed", "sent", "direct", "shipped", "shipping", "delivered"].includes(dStatus)
+        const isReady = Boolean(s.is_ready_to_ship) || isAutoReadyStatus
         const isDirect = dStatus === "direct"
         return (dStatus === "pending" || dStatus === "paid") && !isReady && !isDirect
       })
@@ -662,18 +716,28 @@ export default function SalesExcelTable({
         const fType = (s.fulfillment_type || "").trim().toLowerCase()
         const status = (s.status || "").trim().toLowerCase()
         const pStatus = (s.payment_status || "").trim().toLowerCase()
-        const isDirect = dStatus === "direct"
-        const isReady = Boolean(s.is_ready_to_ship)
+        const isDirect = (dStatus === "direct" || Boolean(s.is_direct)) && fType !== "pickup" && dStatus !== "pickup"
+        const isAutoReadyStatus = ["packed", "sent", "direct", "shipped", "shipping", "delivered"].includes(dStatus)
+        const isReady = Boolean(s.is_ready_to_ship) || isAutoReadyStatus
+
+        const isJobCard = isJobCardSale(s)
+        const isCourier =
+          (s.type_of_sale || "").trim().toLowerCase() === "courier" ||
+          fType === "ship" ||
+          Number(s.courier_paid_extra) > 0
+        const isJobCardCourier = isJobCard && isCourier
 
         if (excluded.has(dStatus) || excluded.has(status) || excluded.has(pStatus)) {
           return false
         }
 
-        if (isReady) {
+        // 1. Direct orders (excluding store pickup)
+        if (isDirect) {
           return true
         }
 
-        if (isDirect && fType !== "pickup" && dStatus !== "pickup") {
+        // 2. Only Job Card Courier sales marked ready to ship
+        if (isJobCardCourier && isReady) {
           return true
         }
 
@@ -995,7 +1059,7 @@ export default function SalesExcelTable({
   }
 
   const stickyActionHeaderClass =
-    "min-w-[5.5rem] whitespace-nowrap border-l border-slate-200 bg-[#F1F4F9] px-3 py-1.5 text-right"
+    "min-w-[5.5rem] whitespace-nowrap border-l border-slate-200 bg-[#F1F4F9] px-3 py-1.5 text-left"
   const stickyActionCellClass = (rowBg: string) =>
     `min-w-[5.5rem] whitespace-nowrap border-l border-slate-200 px-3 py-1.5 text-right ${rowBg}`
 
@@ -1863,6 +1927,7 @@ export default function SalesExcelTable({
                     const rowClass = `${baseBgClass} ${borderLeftClass} ${isSelected ? "bg-violet-100" : ""}`
                     const isJobCard = isJobCardSale(sale)
                     const profitAmount = getSaleProfit(sale)
+                    const isDirectOrder = (sale.delivery_status || "").trim().toLowerCase() === "direct" || Boolean(sale.is_direct)
 
                     const mainRow = (
                       <tr
@@ -1999,6 +2064,7 @@ export default function SalesExcelTable({
                             isJobCard={isJobCard}
                             userRole="admin"
                             onStatusChange={(newStatus) => handleDeliveryStatusChange(sale.id, newStatus)}
+                            onOpenFulfillment={() => openFulfillmentModal(sale, "Shipped")}
                           />
                         </td>
                         <td className="whitespace-nowrap px-3 py-1.5 text-slate-700">
@@ -2081,18 +2147,22 @@ export default function SalesExcelTable({
                               </div>
                             ) : isLogistics ? (
                               <div className="flex items-center justify-center">
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  onClick={(event) => {
-                                    event.stopPropagation()
-                                    openFulfillmentModal(sale)
-                                  }}
-                                  className="h-7 w-7 p-0 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white shadow-2xs hover:shadow-xs transition-transform hover:scale-105 active:scale-95 flex items-center justify-center cursor-pointer"
-                                  title="Fulfillment Details"
-                                >
-                                  <ArrowRight className="h-3.5 w-3.5" />
-                                </Button>
+                                {!isDirectOrder ? (
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    onClick={(event) => {
+                                      event.stopPropagation()
+                                      openFulfillmentModal(sale)
+                                    }}
+                                    className="h-7 w-7 p-0 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white shadow-2xs hover:shadow-xs transition-transform hover:scale-105 active:scale-95 flex items-center justify-center cursor-pointer"
+                                    title="Fulfillment Details"
+                                  >
+                                    <FilePenLine className="h-3.5 w-3.5" />
+                                  </Button>
+                                ) : (
+                                  <span className="text-xs text-slate-400 select-none font-medium">—</span>
+                                )}
                               </div>
                             ) : (
                               <div className="flex items-center justify-end gap-1.5">
@@ -2359,6 +2429,7 @@ export default function SalesExcelTable({
                 const isSelected = selectedSales.includes(sale.id)
                 const isExpanded = expandedSaleId === sale.id
                 const profitAmount = getSaleProfit(sale)
+                const isDirectOrder = (sale.delivery_status || "").trim().toLowerCase() === "direct" || Boolean(sale.is_direct)
 
                 return (
                   <div
@@ -2504,6 +2575,7 @@ export default function SalesExcelTable({
                           isJobCard={isJobCard}
                           userRole="admin"
                           onStatusChange={(newStatus) => handleDeliveryStatusChange(sale.id, newStatus)}
+                          onOpenFulfillment={() => openFulfillmentModal(sale, "Shipped")}
                         />
                       </div>
 
@@ -2527,15 +2599,15 @@ export default function SalesExcelTable({
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <SaleDocumentActions sale={sale} size="card" />
 
-                        {isLogistics && logisticsCardMode !== "all_orders" && (
+                        {isLogistics && logisticsCardMode !== "all_orders" && !isDirectOrder && (
                           <Button
                             size="sm"
                             onClick={() => openFulfillmentModal(sale)}
                             className="h-8 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white gap-1.5 rounded-lg px-2.5 shadow-2xs cursor-pointer"
                             title="Open Fulfillment Details"
                           >
+                            <FilePenLine className="h-3.5 w-3.5" />
                             <span>Fulfillment</span>
-                            <ArrowRight className="h-3.5 w-3.5" />
                           </Button>
                         )}
 
@@ -2570,9 +2642,9 @@ export default function SalesExcelTable({
                               <Eye className="h-4 w-4 mr-2 text-slate-500" /> View Modal
                             </DropdownMenuItem>
                           )}
-                          {isLogistics && logisticsCardMode !== "all_orders" && (
+                          {isLogistics && logisticsCardMode !== "all_orders" && !isDirectOrder && (
                             <DropdownMenuItem onClick={() => openFulfillmentModal(sale)}>
-                              <Package className="h-4 w-4 mr-2 text-indigo-600" /> Fulfillment Details
+                              <FilePenLine className="h-4 w-4 mr-2 text-indigo-600" /> Fulfillment Details
                             </DropdownMenuItem>
                           )}
                           {showActions && (
@@ -2791,33 +2863,41 @@ export default function SalesExcelTable({
           <div className="p-6 max-h-[70vh] overflow-y-auto">
             {fulfillmentModal && (
               <SaleShippingSection
+                key={fulfillmentModal.sale?.id}
                 deviceId={deviceId || fulfillmentModal.sale?.device_id || 0}
                 value={fulfillmentModal.shippingData}
-                onChange={(val) => setFulfillmentModal((prev) => (prev ? { ...prev, shippingData: val } : null))}
+                onChange={(val) => {
+                  setFulfillmentErrors({})
+                  setFulfillmentModal((prev) => (prev ? { ...prev, shippingData: val } : null))
+                }}
                 customerAddress={fulfillmentModal.sale?.shipping_address || fulfillmentModal.sale?.customer_address}
                 customerName={fulfillmentModal.sale?.customer_name || fulfillmentModal.sale?.customer_name_override}
                 customerPhone={fulfillmentModal.sale?.customer_phone || fulfillmentModal.sale?.customer_phone_override}
                 isJobCard={isJobCardSale(fulfillmentModal.sale)}
                 forceFullForm={true}
                 hidePickupToggle={true}
+                isLogisticsFulfillment={true}
+                formatCurrency={formatCurrency}
+                currency="INR"
+                errors={fulfillmentErrors}
               />
             )}
           </div>
-          <DialogFooter className="bg-white border-t border-slate-200 px-6 py-4 flex flex-row justify-end gap-2 sticky bottom-0 z-10">
+          <DialogFooter className="bg-white border-t border-slate-200 px-6 py-4 flex flex-row items-center justify-between sticky bottom-0 z-10">
             <Button 
               variant="outline" 
               onClick={handleCloseFulfillmentModal}
               disabled={isSavingFulfillment}
             >
-              Back
+              Cancel
             </Button>
             <Button 
-              onClick={handleSaveFulfillment}
+              onClick={handleMoveToShipped}
               disabled={isSavingFulfillment}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white gap-2"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2 font-semibold shadow-xs"
             >
-              {isSavingFulfillment ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              Save Details
+              {isSavingFulfillment ? <Loader2 className="h-4 w-4 animate-spin" /> : <Truck className="h-4 w-4" />}
+              Move to Shipped
             </Button>
           </DialogFooter>
         </DialogContent>
