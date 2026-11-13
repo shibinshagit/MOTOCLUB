@@ -213,6 +213,7 @@ async function createTables() {
         price DECIMAL(10, 2) NOT NULL,
         wholesale_price DECIMAL(10, 2) DEFAULT 0,
         msp DECIMAL(10, 2) DEFAULT 0,
+        mrp DECIMAL(12, 2) DEFAULT 0,
         barcode VARCHAR(255),
         image_url TEXT,
         image_urls JSONB DEFAULT '[]',
@@ -1131,6 +1132,17 @@ async function upgradeLegacyColumns() {
     ["products.trending", () => sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS trending BOOLEAN DEFAULT false`],
     ["products.has_variants", () => sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS has_variants BOOLEAN DEFAULT false NOT NULL`],
     ["products.is_batch_managed", () => sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS is_batch_managed BOOLEAN DEFAULT false NOT NULL`],
+    ["products.mrp", () => sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS mrp DECIMAL(12, 2) DEFAULT 0`],
+    ["products.mrp_backfill", () => sql`
+      UPDATE products p
+      SET mrp = pv.mrp
+      FROM (
+        SELECT DISTINCT ON (product_id) product_id, mrp
+        FROM product_variants
+        ORDER BY product_id, id ASC
+      ) pv
+      WHERE p.id = pv.product_id AND (p.mrp IS NULL OR p.mrp = 0)
+    `],
     ["product_stock_history.device_id", () => sql`ALTER TABLE product_stock_history ADD COLUMN IF NOT EXISTS device_id INTEGER`],
     ["product_stock_history.product_variant_id", () => sql`ALTER TABLE product_stock_history ADD COLUMN IF NOT EXISTS product_variant_id INTEGER`],
     ["product_stock_history.batch_id", () => sql`ALTER TABLE product_stock_history ADD COLUMN IF NOT EXISTS batch_id INTEGER`],

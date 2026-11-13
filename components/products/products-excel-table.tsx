@@ -46,7 +46,8 @@ type ColumnKey =
   | "name"
   | "company"
   | "category"
-  | "retail"
+  | "mrp"
+  | "msp"
   | "cost"
   | "stock"
   | "other"
@@ -135,7 +136,8 @@ function ProductsExcelTable({
       name: (p: any) => p.name || "",
       company: (p: any) => p.company_name || "No Company",
       category: (p: any) => p.category || "Uncategorized",
-      retail: (p: any) => formatMoney(p.mrp || p.price || p.msp || 0),
+      mrp: (p: any) => formatMoney(p.mrp || p.price || 0),
+      msp: (p: any) => Number(p.msp || 0) > 0 ? formatMoney(p.msp) : "—",
       cost: (p: any) => formatMoney(p.cost_price ?? p.wholesale_price ?? 0),
       stock: (p: any) => String(Number(p.stock || 0)),
       other: (p: any) => String(Number(p.other_devices_stock || 0)),
@@ -219,7 +221,7 @@ function ProductsExcelTable({
   const stickyActionCellClass = (rowBg: string) =>
     `sticky right-0 z-10 min-w-[5.5rem] whitespace-nowrap border-l border-slate-200 px-4 py-2.5 text-right shadow-[-8px_0_12px_-8px_rgba(15,23,42,0.12)] group-hover:bg-violet-50/50 ${rowBg}`
 
-  const colCount = 1 + (enableMultiSelect ? 1 : 0) + 3 + (hideCogs ? 0 : 1) + (hideStockCount ? 0 : 3) + 1
+  const colCount = 1 + (enableMultiSelect ? 1 : 0) + 3 + 1 + 1 + (hideCogs ? 0 : 1) + (hideStockCount ? 0 : 3) + 1
   const startIndex = (page - 1) * pageSize
 
   const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -287,7 +289,8 @@ function ProductsExcelTable({
               {headerCell("name", "Product")}
               {headerCell("company", "Company")}
               {headerCell("category", "Category")}
-              {headerCell("retail", "Retail", "right")}
+              {headerCell("mrp", "MRP", "right")}
+              {headerCell("msp", "MSP", "right")}
               {!hideCogs && headerCell("cost", "Cost", "right")}
               {!hideStockCount && headerCell("stock", "Stock", "right")}
               {!hideStockCount && headerCell("other", "Other", "right")}
@@ -368,7 +371,10 @@ function ProductsExcelTable({
                       {product.category || "Uncategorized"}
                     </td>
                     <td className="whitespace-nowrap px-4 py-2.5 align-top text-right font-medium text-slate-800">
-                      {formatMoney(product.mrp || product.price || product.msp || 0)}
+                      {formatMoney(product.mrp || product.price || 0)}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-2.5 align-top text-right text-indigo-600 font-medium">
+                      {Number(product.msp || 0) > 0 ? formatMoney(product.msp) : "—"}
                     </td>
                     {!hideCogs && (
                       <td className="whitespace-nowrap px-4 py-2.5 align-top text-right text-slate-600">

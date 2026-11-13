@@ -212,6 +212,7 @@ interface Product {
   description?: string
   price: number
   wholesale_price?: number
+  cost_price?: number
   msp?: number
   mrp?: number
   stock: number
@@ -456,13 +457,22 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
             sku: product.sku || "",
             barcode: product.barcode || "",
             shelf: product.shelf || "",
-            wholesale_price: product.wholesale_price || 0,
-            price: product.msp || product.price || 0,
-            mrp: product.mrp || 0,
+            wholesale_price: product.cost_price ?? product.wholesale_price ?? 0,
+            price: product.msp !== undefined && product.msp !== null && Number(product.msp) > 0 ? Number(product.msp) : (Number(product.price) || 0),
+            msp: product.msp ?? 0,
+            mrp: product.mrp ?? 0,
             stock: product.stock || 0,
             minimum_stock: 0,
             batch_number: "AUTO_GENERATE"
           }]
+        } else {
+          initialVariants = initialVariants.map((v: any) => ({
+            ...v,
+            wholesale_price: v.wholesale_price ?? v.cost_price ?? product.wholesale_price ?? 0,
+            price: v.msp !== undefined && v.msp !== null && Number(v.msp) > 0 ? Number(v.msp) : (Number(v.price) || Number(product.msp) || 0),
+            msp: v.msp !== undefined && v.msp !== null ? Number(v.msp) : (Number(v.price) || Number(product.msp) || 0),
+            mrp: v.mrp ?? product.mrp ?? 0,
+          }))
         }
         setVariants(initialVariants)
         
@@ -1412,7 +1422,7 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
                               newVariants[idx] = { ...newVariants[idx], price: val, msp: val }
                               setVariants(newVariants)
                             }}
-                            placeholder="Selling Price"
+                            placeholder="MSP"
                             className="h-9 border-slate-300"
                           />
                           {fieldErrors[`variant_${idx}_msp`] && <p className="text-[11px] text-rose-500 mt-1">{fieldErrors[`variant_${idx}_msp`]}</p>}

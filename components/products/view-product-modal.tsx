@@ -213,7 +213,7 @@ export function ProductDetailPanel({
 
   const encodedWholesalePrice = encodeNumberAsLetters(Math.round(wholesalePrice))
 
-  // Get MSP (Maximum Selling Price)
+  // Get MSP (Minimum Selling Price)
   const msp = typeof currentProduct.msp === "number" ? currentProduct.msp : Number.parseFloat(currentProduct.msp || "0") || 0
   const currentDeviceId = Number(userId || currentProduct.created_by || 1)
   const mediaImageUrls = useMemo(() => {
@@ -824,7 +824,7 @@ export function ProductDetailPanel({
                       <th className="whitespace-nowrap px-4 py-2.5 text-left">Variant Name</th>
                       <th className="whitespace-nowrap px-4 py-2.5 text-left">SKU</th>
                       <th className="whitespace-nowrap px-4 py-2.5 text-left">Barcode</th>
-                      <th className="whitespace-nowrap px-4 py-2.5 text-right">Price</th>
+                      <th className="whitespace-nowrap px-4 py-2.5 text-right">MRP</th>
                       <th className="whitespace-nowrap px-4 py-2.5 text-right">Cost</th>
                     </tr>
                   </thead>
@@ -841,7 +841,7 @@ export function ProductDetailPanel({
                         <td className="px-4 py-2.5 text-slate-600">{v.sku || "—"}</td>
                         <td className="px-4 py-2.5 text-slate-600">{v.barcode || "—"}</td>
                         <td className="px-4 py-2.5 text-right text-slate-800">
-                          {v.price !== null && v.price !== undefined ? `${currency} ${Number(v.price).toFixed(2)}` : `Default (${currency} ${Number(product.price || 0).toFixed(2)})`}
+                          {v.mrp !== null && v.mrp !== undefined && Number(v.mrp) > 0 ? `${currency} ${Number(v.mrp).toFixed(2)}` : (v.price !== null && v.price !== undefined ? `${currency} ${Number(v.price).toFixed(2)}` : `Default (${currency} ${Number(product.mrp || product.price || 0).toFixed(2)})`)}
                         </td>
                         <td className="px-4 py-2.5 text-right text-slate-800">
                           {!hideCogs && (v.wholesale_price !== null && v.wholesale_price !== undefined ? `${currency} ${Number(v.wholesale_price).toFixed(2)}` : `Default (${currency} ${Number(product.wholesale_price || 0).toFixed(2)})`)}
@@ -866,7 +866,7 @@ export function ProductDetailPanel({
                       <th className="whitespace-nowrap px-4 py-2.5 text-left">Mfg. Date</th>
                       <th className="whitespace-nowrap px-4 py-2.5 text-left">Expiry Date</th>
                       <th className="whitespace-nowrap px-4 py-2.5 text-right">Purchase Price</th>
-                      <th className="whitespace-nowrap px-4 py-2.5 text-right">Selling Price</th>
+                      <th className="whitespace-nowrap px-4 py-2.5 text-right">MRP</th>
                       <th className="whitespace-nowrap px-4 py-2.5 text-right">Stock</th>
                     </tr>
                   </thead>

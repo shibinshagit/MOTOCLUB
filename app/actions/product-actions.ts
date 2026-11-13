@@ -963,12 +963,12 @@ export async function getProducts(
       const variants = variantsByProductId.get(Number(product.id)) || []
       const defaultVariant = variants[0] || null
       const costPriceVal = defaultVariant ? (Number(defaultVariant.cost_price ?? defaultVariant.wholesale_price) || 0) : (Number(product.wholesale_price) || 0)
-      const mspPriceVal = defaultVariant ? (Number(defaultVariant.msp ?? defaultVariant.price) || 0) : (Number(product.msp ?? product.price) || 0)
-      const mrpPriceVal = defaultVariant ? (Number(defaultVariant.mrp) || 0) : (Number(product.mrp) || 0)
-
-      const finalMrp = mrpPriceVal > 0 ? mrpPriceVal : (Number(product.mrp) || 0)
-      const finalMsp = mspPriceVal > 0 ? mspPriceVal : (Number(product.msp ?? product.price) || 0)
-      const finalPrice = finalMrp > 0 ? finalMrp : finalMsp
+      const explicitMrp = Number(defaultVariant?.mrp || product.mrp || 0)
+      const fallbackPrice = Number(product.price || defaultVariant?.price || 0)
+      const finalMrp = explicitMrp > 0 ? explicitMrp : fallbackPrice
+      const explicitMsp = Number(defaultVariant?.msp || product.msp || 0)
+      const finalMsp = explicitMsp
+      const finalPrice = finalMrp > 0 ? finalMrp : (finalMsp > 0 ? finalMsp : 0)
 
       return {
         ...product,
@@ -1757,12 +1757,12 @@ export async function getPaginatedProducts({
       const variants = variantsByProductId.get(Number(product.id)) || []
       const defaultVariant = variants[0] || null
       const costPriceVal = defaultVariant ? (Number(defaultVariant.cost_price ?? defaultVariant.wholesale_price) || 0) : (Number(product.wholesale_price) || 0)
-      const mspPriceVal = defaultVariant ? (Number(defaultVariant.msp ?? defaultVariant.price) || 0) : (Number(product.msp ?? product.price) || 0)
-      const mrpPriceVal = defaultVariant ? (Number(defaultVariant.mrp) || 0) : (Number(product.mrp) || 0)
-
-      const finalMrp = mrpPriceVal > 0 ? mrpPriceVal : (Number(product.mrp) || 0)
-      const finalMsp = mspPriceVal > 0 ? mspPriceVal : (Number(product.msp ?? product.price) || 0)
-      const finalPrice = finalMrp > 0 ? finalMrp : finalMsp
+      const explicitMrp = Number(defaultVariant?.mrp || product.mrp || 0)
+      const fallbackPrice = Number(product.price || defaultVariant?.price || 0)
+      const finalMrp = explicitMrp > 0 ? explicitMrp : fallbackPrice
+      const explicitMsp = Number(defaultVariant?.msp || product.msp || 0)
+      const finalMsp = explicitMsp
+      const finalPrice = finalMrp > 0 ? finalMrp : (finalMsp > 0 ? finalMsp : 0)
 
       return {
         ...product,
@@ -2082,6 +2082,19 @@ export async function getProductById(id: number, userId?: number) {
       return { success: false, message: "Product not found", data: null }
     }
 
+    const variantsResult = await sql`
+      SELECT * FROM product_variants 
+      WHERE product_id = ${result[0].id} 
+      ORDER BY id ASC
+    `
+    const defaultVariant = variantsResult[0] || null
+    const costPriceVal = defaultVariant ? (Number(defaultVariant.cost_price ?? defaultVariant.wholesale_price) || 0) : (Number(result[0].wholesale_price) || 0)
+    const explicitMrp = Number(defaultVariant?.mrp || result[0].mrp || 0)
+    const fallbackPrice = Number(result[0].price || defaultVariant?.price || 0)
+    const finalMrp = explicitMrp > 0 ? explicitMrp : fallbackPrice
+    const explicitMsp = Number(defaultVariant?.msp || result[0].msp || 0)
+    const finalMsp = explicitMsp
+
     let resolvedStock = 0
     if (userId) {
       resolvedStock = await getDeviceProductStock(result[0].id, userId)
@@ -2090,7 +2103,12 @@ export async function getProductById(id: number, userId?: number) {
     // Include category from either category_id or legacy category field
     const product = {
       ...result[0],
-      price: Number(result[0].mrp || result[0].price || result[0].msp || 0),
+      variants: variantsResult,
+      cost_price: costPriceVal,
+      wholesale_price: costPriceVal,
+      msp: finalMsp,
+      mrp: finalMrp,
+      price: finalMrp > 0 ? finalMrp : (finalMsp > 0 ? finalMsp : 0),
       stock: resolvedStock,
       category: result[0].category_name || result[0].category || "",
     }
@@ -2428,6 +2446,7 @@ export async function createProduct(formData: FormData) {
             price,
             wholesale_price,
             msp,
+            mrp,
             barcode,
             color,
             size,
@@ -2455,6 +2474,7 @@ export async function createProduct(formData: FormData) {
             ${Number.isNaN(price) ? (productVariants[0]?.mspPrice || 0) : price},
             ${wholesalePrice || productVariants[0]?.costPrice || 0},
             ${msp || productVariants[0]?.mspPrice || 0},
+            ${mrp || productVariants[0]?.mrp || 0},
             ${barcode || productVariants[0]?.barcode || null},
             ${color},
             ${size},
@@ -2789,6 +2809,12 @@ export async function updateProduct(formData: FormData) {
 
     const stockDeviceId = userId || currentProduct[0].created_by
 
+    const defaultVar = productVariants[0]
+    const resolvedCost = defaultVar ? (Number(defaultVar.wholesale_price ?? defaultVar.cost_price ?? defaultVar.costPrice) || 0) : wholesalePrice
+    const resolvedMsp = defaultVar ? (Number(defaultVar.msp ?? defaultVar.price ?? defaultVar.mspPrice) || 0) : msp
+    const resolvedMrp = defaultVar ? (Number(defaultVar.mrp) || 0) : mrp
+    const resolvedPrice = !Number.isNaN(price) && price > 0 ? price : (resolvedMsp > 0 ? resolvedMsp : resolvedMrp)
+
     // Update the product with all new fields
     let result
 
@@ -2801,6 +2827,10 @@ export async function updateProduct(formData: FormData) {
           category = ${category || ""},
           category_id = ${categoryId},
           description = ${description}, 
+          price = ${resolvedPrice},
+          wholesale_price = ${resolvedCost},
+          msp = ${resolvedMsp},
+          mrp = ${resolvedMrp},
           image_url = ${imageUrl},
           image_urls = ${JSON.stringify(finalImageUrls)}::text::jsonb,
           video_url = ${videoUrl},
@@ -2830,6 +2860,10 @@ export async function updateProduct(formData: FormData) {
           category = ${category || ""},
           category_id = ${categoryId},
           description = ${description}, 
+          price = ${resolvedPrice},
+          wholesale_price = ${resolvedCost},
+          msp = ${resolvedMsp},
+          mrp = ${resolvedMrp},
           image_url = ${imageUrl},
           image_urls = ${JSON.stringify(finalImageUrls)}::text::jsonb,
           video_url = ${videoUrl},
@@ -2894,7 +2928,7 @@ export async function updateProduct(formData: FormData) {
                 cost_price = ${variant.wholesale_price ?? variant.cost_price ?? variant.costPrice ?? 0},
                 wholesale_price = ${variant.wholesale_price ?? variant.cost_price ?? variant.costPrice ?? 0},
                 price = ${variant.price ?? variant.mspPrice ?? variant.msp ?? 0},
-                msp = ${variant.price ?? variant.mspPrice ?? variant.msp ?? 0},
+                msp = ${variant.msp ?? variant.mspPrice ?? variant.price ?? 0},
                 mrp = ${variant.mrp ?? 0},
                 minimum_stock = ${variant.minimum_stock ?? variant.minimumStock ?? 0},
                 shelf = ${variant.shelf || ""}
@@ -2953,7 +2987,7 @@ export async function updateProduct(formData: FormData) {
               ) VALUES (
                 ${id}, ${variant.variant_name || variant.name || ""}, ${variant.sku || ""}, ${variant.barcode || ""},
                 ${variant.wholesale_price ?? variant.cost_price ?? variant.costPrice ?? 0}, ${variant.wholesale_price ?? variant.cost_price ?? variant.costPrice ?? 0}, ${variant.price ?? variant.mspPrice ?? variant.msp ?? 0},
-                ${variant.price ?? variant.mspPrice ?? variant.msp ?? 0}, ${variant.mrp ?? 0}, ${variant.minimum_stock ?? variant.minimumStock ?? 0},
+                ${variant.msp ?? variant.mspPrice ?? variant.price ?? 0}, ${variant.mrp ?? 0}, ${variant.minimum_stock ?? variant.minimumStock ?? 0},
                 ${variant.shelf || ""}, 'active'
               ) RETURNING *
             `
@@ -3754,6 +3788,19 @@ export async function getProductByBarcode(barcode: string, userId?: number) {
       return { success: false, message: "Product not found", data: null }
     }
 
+    const variantsResult = await sql`
+      SELECT * FROM product_variants 
+      WHERE product_id = ${result[0].id} 
+      ORDER BY id ASC
+    `
+    const defaultVariant = variantsResult[0] || null
+    const costPriceVal = defaultVariant ? (Number(defaultVariant.cost_price ?? defaultVariant.wholesale_price) || 0) : (Number(result[0].wholesale_price) || 0)
+    const explicitMrp = Number(defaultVariant?.mrp || result[0].mrp || 0)
+    const fallbackPrice = Number(result[0].price || defaultVariant?.price || 0)
+    const finalMrp = explicitMrp > 0 ? explicitMrp : fallbackPrice
+    const explicitMsp = Number(defaultVariant?.msp || result[0].msp || 0)
+    const finalMsp = explicitMsp
+
     let resolvedStock = 0
     if (userId) {
       resolvedStock = await getDeviceProductStock(result[0].id, userId)
@@ -3762,7 +3809,12 @@ export async function getProductByBarcode(barcode: string, userId?: number) {
     // Include category from either category_id or legacy category field
     const product = {
       ...result[0],
-      price: Number(result[0].mrp || result[0].price || result[0].msp || 0),
+      variants: variantsResult,
+      cost_price: costPriceVal,
+      wholesale_price: costPriceVal,
+      msp: finalMsp,
+      mrp: finalMrp,
+      price: finalMrp > 0 ? finalMrp : (finalMsp > 0 ? finalMsp : 0),
       stock: resolvedStock,
       category: result[0].category_name || result[0].category || "",
     }

@@ -63,6 +63,7 @@ export function filterProductForStaff<T extends Record<string, unknown>>(
   if (isStaffValueHidden(staff, "cogs")) {
     filtered.wholesale_price = null
     if ("cost" in filtered) filtered.cost = null
+    if ("cost_price" in filtered) filtered.cost_price = null
   }
   if (isStaffValueHidden(staff, "stock_count")) {
     filtered.stock = null

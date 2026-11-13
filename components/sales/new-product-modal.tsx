@@ -1360,7 +1360,7 @@ export default function NewProductModal({
                               newVariants[idx].price = e.target.value === "" ? null : Number(e.target.value)
                               setVariants(newVariants)
                             }}
-                            placeholder="Selling Price"
+                            placeholder="MSP"
                             className="h-9 border-slate-300"
                           />
                           {fieldErrors[`variant_${idx}_msp`] && <p className="text-[11px] text-rose-500 mt-1">{fieldErrors[`variant_${idx}_msp`]}</p>}
