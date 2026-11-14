@@ -1010,7 +1010,18 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
               END
             WHEN ${isLogistics} = true AND ${cardFilter} = 'all' AND ${logisticsShowAllOrders} = false THEN
               CASE 
-                -- Tier 1: In-progress / new orders to deliver (Pending, Paid, Packed, Sent, Direct)
+                -- Direct orders: Tier 2 if missing courier or tracking (or starts with DOD/JC), else Tier 3
+                WHEN LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) = 'direct' THEN
+                  CASE
+                    WHEN (
+                      s.tracking_id IS NULL OR TRIM(s.tracking_id) = ''
+                      OR UPPER(TRIM(s.tracking_id)) LIKE 'DOD%'
+                      OR UPPER(TRIM(s.tracking_id)) LIKE 'JC-%'
+                      OR (s.courier_service_name IS NULL AND s.courier_service_id IS NULL AND s.courier_partner_id IS NULL)
+                    ) THEN 2
+                    ELSE 3
+                  END
+                -- Tier 1: In-progress / new orders to deliver (Pending, Paid, Packed, Sent)
                 WHEN LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('shipped', 'shipping', 'delivered') THEN 1
                 -- Tier 2: Shipped but missing courier service or genuine tracking ID
                 WHEN LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) IN ('shipped', 'shipping', 'delivered')
@@ -1044,7 +1055,18 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
               END
             WHEN ${isLogistics} = true AND ${cardFilter} = 'all' AND ${logisticsShowAllOrders} = false THEN
               CASE 
-                -- Tier 1: In-progress / new orders to deliver (Pending, Paid, Packed, Sent, Direct)
+                -- Direct orders: Tier 2 if missing courier or tracking (or starts with DOD/JC), else Tier 3
+                WHEN LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) = 'direct' THEN
+                  CASE
+                    WHEN (
+                      s.tracking_id IS NULL OR TRIM(s.tracking_id) = ''
+                      OR UPPER(TRIM(s.tracking_id)) LIKE 'DOD%'
+                      OR UPPER(TRIM(s.tracking_id)) LIKE 'JC-%'
+                      OR (s.courier_service_name IS NULL AND s.courier_service_id IS NULL AND s.courier_partner_id IS NULL)
+                    ) THEN 2
+                    ELSE 3
+                  END
+                -- Tier 1: In-progress / new orders to deliver (Pending, Paid, Packed, Sent)
                 WHEN LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('shipped', 'shipping', 'delivered') THEN 1
                 -- Tier 2: Shipped but missing courier service or genuine tracking ID
                 WHEN LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) IN ('shipped', 'shipping', 'delivered')

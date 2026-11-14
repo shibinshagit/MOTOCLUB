@@ -95,6 +95,7 @@ import { downloadSalesSummaryPDF, printSalesSummaryReport, downloadSalesSummaryE
 import { JobCardModal } from "@/components/shared/job-card/job-card-modal"
 import SaleDocumentActions from "@/components/sales/sale-document-actions"
 import { MoveToDirectModal } from "@/components/sales/move-to-direct-modal"
+import { DirectFulfillmentModal } from "@/components/sales/direct-fulfillment-modal"
 
 function getSaleStatusLabel(sale: any): string {
   if (sale.status === "Returned") {
@@ -213,10 +214,8 @@ function buildInitialFilters(sales: any[], getters: Record<ColumnKey, (sale: any
 function getLogisticsDeliveryTier(sale: any): 1 | 2 | 3 {
   if (!sale) return 1
   const deliveryStatus = (sale.delivery_status || "").trim().toLowerCase()
+  const isDirect = deliveryStatus === "direct"
   const isShipped = deliveryStatus === "shipped" || deliveryStatus === "shipping" || deliveryStatus === "delivered"
-
-  // Tier 1: In-progress / new orders to deliver (Pending, Paid, Packed, Sent, Direct)
-  if (!isShipped) return 1
 
   const cleanTracking = (sale.tracking_id || "").trim()
   const upperTracking = cleanTracking.toUpperCase()
@@ -228,6 +227,14 @@ function getLogisticsDeliveryTier(sale: any): 1 | 2 | 3 {
     sale.courier_service_id ||
     sale.courier_partner_id
   )
+
+  // Direct orders: Tier 2 (Orange) if courier service or genuine tracking ID (non-DOD) is missing; Tier 3 (Green) if both are present
+  if (isDirect) {
+    return hasRealTracking && hasCourierService ? 3 : 2
+  }
+
+  // Tier 1: In-progress / new orders to deliver (Pending, Paid, Packed, Sent)
+  if (!isShipped) return 1
 
   // Tier 3: Shipped and both Real Tracking ID & Courier Partner/Service are present
   if (hasRealTracking && hasCourierService) return 3
@@ -326,6 +333,7 @@ export default function SalesExcelTable({
   const [isCreateJobCardOpen, setIsCreateJobCardOpen] = useState(false)
   const [editingJobCardId, setEditingJobCardId] = useState<number | null>(null)
   const [moveToDirectSale, setMoveToDirectSale] = useState<any | null>(null)
+  const [directFulfillmentSale, setDirectFulfillmentSale] = useState<any | null>(null)
 
   const handleRowEdit = (sale: any) => {
     if (isJobCardSale(sale)) {
@@ -2335,7 +2343,19 @@ export default function SalesExcelTable({
                                     <FilePenLine className="h-3.5 w-3.5" />
                                   </Button>
                                 ) : (
-                                  <span className="text-xs text-slate-400 select-none font-medium">—</span>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    onClick={(event) => {
+                                      event.stopPropagation()
+                                      setDirectFulfillmentSale(sale)
+                                    }}
+                                    className="h-7 w-7 p-0 rounded-full bg-purple-600 hover:bg-purple-700 text-white shadow-2xs hover:shadow-xs transition-transform hover:scale-105 active:scale-95 flex items-center justify-center cursor-pointer"
+                                    title="Direct Order Details"
+                                    aria-label="Direct Order Details"
+                                  >
+                                    <Forward className="h-3.5 w-3.5" />
+                                  </Button>
                                 )}
                               </div>
                             ) : (
@@ -2493,6 +2513,17 @@ export default function SalesExcelTable({
                                         </Button>
                                       )}
                                     </>
+                                  )}
+                                  {isLogistics && isDirectOrder && (
+                                    <Button
+                                      size="sm"
+                                      onClick={() => setDirectFulfillmentSale(sale)}
+                                      className="h-7 text-xs px-2.5 font-semibold bg-purple-600 hover:bg-purple-700 text-white gap-1.5 cursor-pointer"
+                                      title="Direct Order Details"
+                                    >
+                                      <Forward className="h-3 w-3" />
+                                      Direct Details
+                                    </Button>
                                   )}
                                   {showActions && (
                                     <Button
@@ -2886,16 +2917,28 @@ export default function SalesExcelTable({
                           </Button>
                         )}
 
-                        {isLogistics && logisticsCardMode !== "all_orders" && !isDirectOrder && (
-                          <Button
-                            size="sm"
-                            onClick={() => openFulfillmentModal(sale)}
-                            className="h-8 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white gap-1.5 rounded-lg px-2.5 shadow-2xs cursor-pointer"
-                            title="Open Fulfillment Details"
-                          >
-                            <FilePenLine className="h-3.5 w-3.5" />
-                            <span>Fulfillment</span>
-                          </Button>
+                        {isLogistics && logisticsCardMode !== "all_orders" && (
+                          !isDirectOrder ? (
+                            <Button
+                              size="sm"
+                              onClick={() => openFulfillmentModal(sale)}
+                              className="h-8 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white gap-1.5 rounded-lg px-2.5 shadow-2xs cursor-pointer"
+                              title="Open Fulfillment Details"
+                            >
+                              <FilePenLine className="h-3.5 w-3.5" />
+                              <span>Fulfillment</span>
+                            </Button>
+                          ) : (
+                            <Button
+                              size="sm"
+                              onClick={() => setDirectFulfillmentSale(sale)}
+                              className="h-8 text-xs font-semibold bg-purple-600 hover:bg-purple-700 text-white gap-1.5 rounded-lg px-2.5 shadow-2xs cursor-pointer"
+                              title="Direct Order Details"
+                            >
+                              <Forward className="h-3.5 w-3.5" />
+                              <span>Direct Details</span>
+                            </Button>
+                          )
                         )}
 
                         <Button
@@ -2929,10 +2972,16 @@ export default function SalesExcelTable({
                               <Eye className="h-4 w-4 mr-2 text-slate-500" /> View Modal
                             </DropdownMenuItem>
                           )}
-                          {isLogistics && logisticsCardMode !== "all_orders" && !isDirectOrder && (
-                            <DropdownMenuItem onClick={() => openFulfillmentModal(sale)}>
-                              <FilePenLine className="h-4 w-4 mr-2 text-indigo-600" /> Fulfillment Details
-                            </DropdownMenuItem>
+                          {isLogistics && logisticsCardMode !== "all_orders" && (
+                            !isDirectOrder ? (
+                              <DropdownMenuItem onClick={() => openFulfillmentModal(sale)}>
+                                <FilePenLine className="h-4 w-4 mr-2 text-indigo-600" /> Fulfillment Details
+                              </DropdownMenuItem>
+                            ) : (
+                              <DropdownMenuItem onClick={() => setDirectFulfillmentSale(sale)}>
+                                <Forward className="h-4 w-4 mr-2 text-purple-600" /> Direct Details
+                              </DropdownMenuItem>
+                            )
                           )}
                           {isPurchaseManager && purchaseManagerCardMode === "orders_to_check" && canMoveToDirect && (
                             <DropdownMenuItem onClick={() => setMoveToDirectSale(sale)}>
@@ -3204,6 +3253,22 @@ export default function SalesExcelTable({
           userId={deviceId || moveToDirectSale.device_id || activeStaff?.device_id || activeStaff?.id || 0}
           onSuccess={() => {
             setMoveToDirectSale(null)
+            fetchServerSales()
+            if (onRefreshSales) {
+              onRefreshSales()
+            }
+          }}
+        />
+      )}
+
+      {directFulfillmentSale && (
+        <DirectFulfillmentModal
+          isOpen={Boolean(directFulfillmentSale)}
+          onClose={() => setDirectFulfillmentSale(null)}
+          sale={directFulfillmentSale}
+          deviceId={deviceId || directFulfillmentSale.device_id || activeStaff?.device_id || 0}
+          onSuccess={() => {
+            setDirectFulfillmentSale(null)
             fetchServerSales()
             if (onRefreshSales) {
               onRefreshSales()
