@@ -1003,6 +1003,11 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
           )
         ORDER BY 
           CASE 
+            WHEN ${isPurchaseManager} = true AND ${purchaseManagerShowAllOrders} = false THEN
+              CASE 
+                WHEN LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct' THEN 2
+                ELSE 1
+              END
             WHEN ${isLogistics} = true AND ${cardFilter} = 'all' AND ${logisticsShowAllOrders} = false THEN
               CASE 
                 -- Tier 1: In-progress / new orders to deliver (Pending, Paid, Packed, Sent, Direct)
@@ -1032,6 +1037,11 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
               JSON_BUILD_OBJECT('id', s.id, 'isJobCard', (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%'))
               ORDER BY 
           CASE 
+            WHEN ${isPurchaseManager} = true AND ${purchaseManagerShowAllOrders} = false THEN
+              CASE 
+                WHEN LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct' THEN 2
+                ELSE 1
+              END
             WHEN ${isLogistics} = true AND ${cardFilter} = 'all' AND ${logisticsShowAllOrders} = false THEN
               CASE 
                 -- Tier 1: In-progress / new orders to deliver (Pending, Paid, Packed, Sent, Direct)

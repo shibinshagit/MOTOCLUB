@@ -731,7 +731,7 @@ export default function SalesExcelTable({
   // The list is always server-paginated/filtered; rows are already the current page.
   const displaySales = useMemo(() => {
     if (isPurchaseManager && purchaseManagerCardMode === "orders_to_check") {
-      return serverSales.filter((s: any) => {
+      const filtered = serverSales.filter((s: any) => {
         const dStatus = (s.delivery_status || "pending").trim().toLowerCase()
         const isDirect = dStatus === "direct"
         if (isDirect) {
@@ -743,6 +743,15 @@ export default function SalesExcelTable({
         const isReady = Boolean(s.is_ready_to_ship) || isAutoReadyStatus
         return (dStatus === "pending" || dStatus === "paid") && !isReady
       })
+
+      // Incomplete Direct orders sink to the bottom of the list in Purchase Manager Orders to Check
+      return [...filtered].sort((a: any, b: any) => {
+        const aIsDirect = (a.delivery_status || "").trim().toLowerCase() === "direct"
+        const bIsDirect = (b.delivery_status || "").trim().toLowerCase() === "direct"
+        if (aIsDirect && !bIsDirect) return 1
+        if (!aIsDirect && bIsDirect) return -1
+        return 0
+      })
     }
     if (isLogistics && logisticsCardMode === "ready_to_ship") {
       const excluded = new Set(["delivered", "returned", "failed", "cancelled"])
@@ -751,7 +760,7 @@ export default function SalesExcelTable({
         const fType = (s.fulfillment_type || "").trim().toLowerCase()
         const status = (s.status || "").trim().toLowerCase()
         const pStatus = (s.payment_status || "").trim().toLowerCase()
-        const isDirect = (dStatus === "direct" || Boolean(s.is_direct)) && fType !== "pickup" && dStatus !== "pickup"
+        const isDirect = dStatus === "direct" && fType !== "pickup" && dStatus !== "pickup"
         const isAutoReadyStatus = ["packed", "sent", "direct", "shipped", "shipping", "delivered"].includes(dStatus)
         const isReady = Boolean(s.is_ready_to_ship) || isAutoReadyStatus
 
@@ -1953,13 +1962,38 @@ export default function SalesExcelTable({
                       statusClass = "default"
                     }
 
+                    const isDirect = (sale.delivery_status || "").trim().toLowerCase() === "direct"
+                    const hasCourierService = Boolean(sale.courier_service_name && sale.courier_service_name.trim())
+                    const hasSupplier = Boolean(sale.dropship_supplier && sale.dropship_supplier.trim())
+                    const isDirectIncomplete = isDirect && (!hasCourierService || !hasSupplier)
+                    const isDirectOrder = isDirect
+                    const isJobCard = isJobCardSale(sale)
+                    const isCourier =
+                      (sale.type_of_sale || "").trim().toLowerCase() === "courier" ||
+                      (sale.fulfillment_type || "").trim().toLowerCase() === "ship" ||
+                      Number(sale.courier_paid_extra) > 0
+                    const isJobCardCourier = isJobCard && isCourier
+                    const canMoveToDirect = (!isDirectOrder && isJobCardCourier) || (isDirectOrder && (!hasCourierService || !hasSupplier))
+
                     let baseBgClass =
                       index % 2 === 0
                         ? "bg-white hover:bg-slate-100 text-slate-800"
                         : "bg-slate-50 hover:bg-slate-100 text-slate-800"
                     let borderLeftClass = ""
 
-                    if (isLogistics) {
+                    if (isPurchaseManager) {
+                      if (isDirectIncomplete) {
+                        baseBgClass = "bg-amber-100 text-amber-950 hover:bg-amber-200 font-medium"
+                        borderLeftClass = "border-l-4 border-l-amber-500"
+                      } else {
+                        // In Purchase Manager, normal rows have no special color (clean alternating white/slate)
+                        baseBgClass =
+                          index % 2 === 0
+                            ? "bg-white hover:bg-slate-100 text-slate-800"
+                            : "bg-slate-50 hover:bg-slate-100 text-slate-800"
+                        borderLeftClass = ""
+                      }
+                    } else if (isLogistics) {
                       const deliveryStatusLower = (sale.delivery_status || "").trim().toLowerCase()
                       const isReturned =
                         deliveryStatusLower === "returned" ||
@@ -2014,17 +2048,7 @@ export default function SalesExcelTable({
                     const isSelected = selectedSales.includes(sale.id)
                     const isExpanded = expandedSaleId === sale.id
                     const rowClass = `${baseBgClass} ${borderLeftClass} ${isSelected ? "bg-violet-100" : ""}`
-                    const isJobCard = isJobCardSale(sale)
                     const profitAmount = getSaleProfit(sale)
-                    const isDirectOrder = (sale.delivery_status || "").trim().toLowerCase() === "direct" || Boolean(sale.is_direct)
-                    const isCourier =
-                      (sale.type_of_sale || "").trim().toLowerCase() === "courier" ||
-                      (sale.fulfillment_type || "").trim().toLowerCase() === "ship" ||
-                      Number(sale.courier_paid_extra) > 0
-                    const isJobCardCourier = isJobCard && isCourier
-                    const hasCourierService = Boolean(sale.courier_service_name && sale.courier_service_name.trim())
-                    const hasSupplier = Boolean(sale.dropship_supplier && sale.dropship_supplier.trim())
-                    const canMoveToDirect = (!isDirectOrder && isJobCardCourier) || (isDirectOrder && (!hasCourierService || !hasSupplier))
 
                     const mainRow = (
                       <tr
@@ -2557,7 +2581,7 @@ export default function SalesExcelTable({
                 const isSelected = selectedSales.includes(sale.id)
                 const isExpanded = expandedSaleId === sale.id
                 const profitAmount = getSaleProfit(sale)
-                const isDirectOrder = (sale.delivery_status || "").trim().toLowerCase() === "direct" || Boolean(sale.is_direct)
+                const isDirectOrder = (sale.delivery_status || "").trim().toLowerCase() === "direct"
                 const isCourier =
                   (sale.type_of_sale || "").trim().toLowerCase() === "courier" ||
                   (sale.fulfillment_type || "").trim().toLowerCase() === "ship" ||
@@ -2568,7 +2592,14 @@ export default function SalesExcelTable({
                 const canMoveToDirect = (!isDirectOrder && isJobCardCourier) || (isDirectOrder && (!hasCourierService || !hasSupplier))
 
                 let mobileTierClass = ""
-                if (isLogistics) {
+                if (isPurchaseManager) {
+                  const isDirectIncomplete = isDirectOrder && (!hasCourierService || !hasSupplier)
+                  if (isDirectIncomplete) {
+                    mobileTierClass = "bg-amber-50/90 border-l-4 border-l-amber-500"
+                  } else {
+                    mobileTierClass = "" // Neutral row in Purchase Manager
+                  }
+                } else if (isLogistics) {
                   const deliveryStatusLower = (sale.delivery_status || "").trim().toLowerCase()
                   const isReturned =
                     deliveryStatusLower === "returned" ||
