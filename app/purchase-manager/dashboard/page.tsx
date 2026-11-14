@@ -146,6 +146,8 @@ function PurchaseManagerPageContent() {
       showSalesActions={false}
       showSalesViewModal={false}
       hideAttendanceTab={true}
+      hideTransferTab={true}
+      hideCustomerTab={true}
     />
   )
 }

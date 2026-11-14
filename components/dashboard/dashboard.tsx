@@ -89,6 +89,7 @@ interface DashboardProps {
   hideProductsToPurchaseTab?: boolean
   hideAttendanceTab?: boolean
   hideTransferTab?: boolean
+  hideCustomerTab?: boolean
   showSalesActions?: boolean
   showSalesViewModal?: boolean
   isLogistics?: boolean
@@ -122,6 +123,7 @@ export function Dashboard({
   hideProductsToPurchaseTab,
   hideAttendanceTab,
   hideTransferTab,
+  hideCustomerTab,
   showSalesActions = true,
   showSalesViewModal,
   isLogistics: isLogisticsProp,
@@ -210,12 +212,17 @@ export function Dashboard({
       }
 
       // Disallow attendance if hideAttendanceTab is true or if user is purchase manager
-      if (tabId === "attendance" && (hideAttendanceTab || activeStaff?.role === "purchase_manager")) {
+      if (tabId === "attendance" && (hideAttendanceTab || isPurchaseManager || activeStaff?.role === "purchase_manager")) {
         return false
       }
 
-      // Disallow transfer if hideTransferTab is true or user is logistics
-      if (tabId === "transfer" && (hideTransferTab || isLogistics || activeStaff?.role === "logistics")) {
+      // Disallow transfer if hideTransferTab is true, user is logistics, or user is purchase manager
+      if (tabId === "transfer" && (hideTransferTab || isLogistics || activeStaff?.role === "logistics" || isPurchaseManager || activeStaff?.role === "purchase_manager")) {
+        return false
+      }
+
+      // Disallow customer if hideCustomerTab is true or user is purchase manager
+      if (tabId === "customer" && (hideCustomerTab || isPurchaseManager || activeStaff?.role === "purchase_manager")) {
         return false
       }
 
@@ -714,11 +721,14 @@ export function Dashboard({
             />
           )
         case "customer":
+          if (hideCustomerTab || isPurchaseManager || activeStaff?.role === "purchase_manager") {
+            return null
+          }
           return (
             <CustomerTab userId={device?.id ?? 0} companyId={companyId} />
           )
         case "attendance":
-          if (hideAttendanceTab || isPurchaseManager) {
+          if (hideAttendanceTab || isPurchaseManager || activeStaff?.role === "purchase_manager") {
             return null
           }
           return <AttendanceTab />
@@ -731,7 +741,7 @@ export function Dashboard({
             />
           )
         case "transfer":
-          if (hideTransferTab || isLogistics || activeStaff?.role === "logistics") {
+          if (hideTransferTab || isLogistics || activeStaff?.role === "logistics" || isPurchaseManager || activeStaff?.role === "purchase_manager") {
             return null
           }
           return <TransferTab userId={device?.id ?? 0} />
