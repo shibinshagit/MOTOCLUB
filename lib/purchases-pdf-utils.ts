@@ -90,10 +90,11 @@ export async function downloadPurchasesPDF(
     totalBalanceSum += remaining
 
     // Combined column "Purchase":
-    // Row 1: Purchase number
+    // Row 1: Purchase number and type
     // Row 2: Supplier name
     // Row 3: Date
-    const purchaseInfo = `#${purchase.id}\n${purchase.supplier || "—"}\n${dateStr}`
+    const typeStr = purchase.purchase_type || "Stock"
+    const purchaseInfo = `#${purchase.id} [${typeStr}]\n${purchase.supplier || "—"}\n${dateStr}`
 
     return [
       String(index + 1),

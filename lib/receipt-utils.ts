@@ -1236,6 +1236,10 @@ export function printPurchaseReceipt(purchase: any, items: any[], currency = "AE
                     <span class="info-value status-${purchase.purchase_status?.toLowerCase() || "pending"}">${purchase.purchase_status || "Pending"}</span>
                   </div>
                   <div>
+                    <span class="info-label">Type:</span>
+                    <span class="info-value">${purchase.purchase_type || "Stock"}</span>
+                  </div>
+                  <div>
                     <span class="info-label">Method:</span>
                     <span class="info-value">${purchase.payment_method || "Cash"}</span>
                   </div>

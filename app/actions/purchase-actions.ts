@@ -94,6 +94,7 @@ async function queryDevicePurchases(deviceId: number, options: GetUserPurchasesO
         OR p.supplier_invoice_number ILIKE ${searchPattern}
         OR p.status ILIKE ${searchPattern}
         OR p.purchase_status ILIKE ${searchPattern}
+        OR p.purchase_type ILIKE ${searchPattern}
         OR p.notes ILIKE ${searchPattern}
         OR CAST(p.id AS TEXT) ILIKE ${purchaseNumberPattern}
       )
@@ -118,6 +119,7 @@ export type PurchaseColumnKey =
   | "paid"
   | "balance"
   | "delivery"
+  | "type"
 
 export type PurchaseColumnFilters = Partial<Record<PurchaseColumnKey, { contains?: string; selected?: string[] }>>
 
@@ -132,6 +134,7 @@ const PURCHASE_COLUMN_KEYS: PurchaseColumnKey[] = [
   "paid",
   "balance",
   "delivery",
+  "type",
 ]
 
 function purchaseItemsSummarySql(alias: string) {
@@ -176,6 +179,7 @@ const PURCHASE_COLUMN_EXPR: Record<PurchaseColumnKey, string> = {
   paid: numText(P_PAID),
   balance: numText(P_REMAINING),
   delivery: `COALESCE(NULLIF(p.purchase_status, ''), 'Delivered')`,
+  type: `COALESCE(NULLIF(p.purchase_type, ''), 'Stock')`,
 }
 
 // Newest-first ordering for dropdown options of high-cardinality columns (others sort by value).
@@ -218,14 +222,15 @@ const PURCHASE_BASE_WHERE = `
     OR p.supplier_invoice_number ILIKE $4
     OR p.status ILIKE $4
     OR p.purchase_status ILIKE $4
+    OR p.purchase_type ILIKE $4
     OR p.notes ILIKE $4
     OR CAST(p.id AS TEXT) ILIKE $5
   )`
 
-// $6..$15 contains (one per column), $16..$25 selected values as a JSON array (NULL = no filter)
+// $6..$(5+N) contains (one per column), $(6+N)..$(5+2N) selected values as a JSON array (NULL = no filter)
 const PURCHASE_COLUMN_WHERE = PURCHASE_COLUMN_KEYS.map((key, i) => {
   const c = 6 + i
-  const sel = 16 + i
+  const sel = 6 + PURCHASE_COLUMN_KEYS.length + i
   const expr = PURCHASE_COLUMN_EXPR[key]
   // The selected-values parameter is cast through text so the driver binds a plain string, then parsed as JSON.
   return `($${c}::text IS NULL OR POSITION(LOWER($${c}) IN LOWER(${expr})) > 0)
@@ -540,6 +545,7 @@ export async function createPurchase(formData: FormData) {
   const totalAmount = Number.parseFloat(formData.get("total_amount") as string)
   const status = (formData.get("status") as string) || "Credit"
   const purchaseStatus = (formData.get("purchase_status") as string) || "Delivered"
+  const purchaseType = (formData.get("purchase_type") as string)?.trim() || "Stock"
   const paymentMethod = (formData.get("payment_method") as string) || null
   const userId = Number.parseInt(formData.get("user_id") as string)
   const deviceId = Number.parseInt(formData.get("device_id") as string)
@@ -650,12 +656,12 @@ export async function createPurchase(formData: FormData) {
       // Create the purchase
       const purchaseResult = await tx`
         INSERT INTO purchases (
-          supplier, total_amount, status, payment_method, purchase_status, 
+          supplier, total_amount, status, payment_method, purchase_status, purchase_type,
           created_by, device_id, purchase_date, received_amount,
           courier_charge, courier_charge_percentage, discount, notes
         )
         VALUES (
-          ${supplier}, ${totalAmount}, ${status}, ${primaryPaymentMethod}, ${purchaseStatus}, 
+          ${supplier}, ${totalAmount}, ${status}, ${primaryPaymentMethod}, ${purchaseStatus}, ${purchaseType},
           ${userId}, ${deviceId}, ${purchaseDate}, ${finalReceivedAmount},
           ${courierCharge}, ${courierChargePercentage}, ${discount}, ${notes}
         )
@@ -1032,6 +1038,7 @@ export async function updatePurchase(formData: FormData) {
   const totalAmount = Number.parseFloat(formData.get("total_amount") as string)
   const status = (formData.get("status") as string) || "Credit"
   const purchaseStatus = (formData.get("purchase_status") as string) || "Delivered"
+  const purchaseType = (formData.get("purchase_type") as string)?.trim() || null
   const paymentMethod = (formData.get("payment_method") as string) || null
   const userId = Number.parseInt(formData.get("user_id") as string)
   const deviceId = Number.parseInt(formData.get("device_id") as string)
@@ -1138,6 +1145,7 @@ export async function updatePurchase(formData: FormData) {
         SET supplier = ${supplier}, total_amount = ${totalAmount}, 
             status = ${status}, purchase_date = ${purchaseDate},
             purchase_status = ${purchaseStatus}, payment_method = ${paymentMethod},
+            purchase_type = COALESCE(${purchaseType}, purchase_type),
             received_amount = ${finalReceivedAmount},
             courier_charge = ${courierCharge},
             courier_charge_percentage = ${courierChargePercentage},

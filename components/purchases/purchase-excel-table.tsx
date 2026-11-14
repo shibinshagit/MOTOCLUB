@@ -25,6 +25,7 @@ import {
 import { useAppSelector } from "@/store/hooks"
 import { selectActiveStaff } from "@/store/slices/staffSlice"
 import PurchaseManagerKpiCards from "@/components/purchase-manager/purchase-manager-kpi-cards"
+import { cn } from "@/lib/utils"
 
 function PaymentStatusBadge({ status }: { status: string }) {
   const normalized = status === "Partial" ? "Cancelled" : status
@@ -63,6 +64,22 @@ function DeliveryStatusBadge({ status }: { status: string }) {
   )
 }
 
+function PurchaseTypeBadge({ type }: { type?: string }) {
+  const isDropship = (type || "").toLowerCase() === "dropship"
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-semibold border",
+        isDropship
+          ? "bg-purple-50 text-purple-700 border-purple-200"
+          : "bg-blue-50 text-blue-700 border-blue-200"
+      )}
+    >
+      {isDropship ? "Dropship" : "Stock"}
+    </span>
+  )
+}
+
 type ColumnKey =
   | "purchaseId"
   | "status"
@@ -74,6 +91,7 @@ type ColumnKey =
   | "paid"
   | "balance"
   | "delivery"
+  | "type"
 
 type ColumnFilters = Record<ColumnKey, ExcelColumnFilterValue>
 
@@ -89,6 +107,7 @@ const COLUMN_KEYS: ColumnKey[] = [
   "paid",
   "balance",
   "delivery",
+  "type",
 ]
 const MONEY_COLUMNS: ColumnKey[] = ["total", "paid", "balance"]
 
@@ -212,6 +231,8 @@ export default function PurchaseExcelTable({
           return getRemainingAmount(purchase).toFixed(2)
         case "delivery":
           return purchase.purchase_status || "Delivered"
+        case "type":
+          return purchase.purchase_type || "Stock"
       }
     },
     [getPaymentMethodDisplay, getPaidAmount, getRemainingAmount],
@@ -653,19 +674,20 @@ export default function PurchaseExcelTable({
                 {headerCell("paid", "Paid", "right")}
                 {headerCell("balance", "Balance", "right")}
                 {headerCell("delivery", "Delivery")}
+                {headerCell("type", "Type")}
                 <th className={stickyActionHeaderClass}>Action</th>
               </tr>
             </thead>
             <tbody className={isFetching && hasFetched ? "opacity-60 transition-opacity" : "transition-opacity"}>
               {showInitialSkeleton ? (
                 <tr>
-                  <td colSpan={12}>
+                  <td colSpan={13}>
                     <TableSkeleton />
                   </td>
                 </tr>
               ) : fetchError && displayPurchases.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="px-4 py-8 text-center text-sm text-rose-600">
+                  <td colSpan={13} className="px-4 py-8 text-center text-sm text-rose-600">
                     {fetchError}
                     <Button variant="outline" size="sm" className="ml-3 h-7 text-xs" onClick={retry}>
                       Retry
@@ -674,7 +696,7 @@ export default function PurchaseExcelTable({
                 </tr>
               ) : displayPurchases.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="px-4 py-12 text-center text-sm text-muted-foreground">
+                  <td colSpan={13} className="px-4 py-12 text-center text-sm text-muted-foreground">
                     {hasActiveQuery
                       ? "No purchases match the current search or column filters"
                       : `No purchases found for ${periodLabel}`}
@@ -722,6 +744,9 @@ export default function PurchaseExcelTable({
                       </td>
                       <td className="whitespace-nowrap px-3 py-1.5">
                         <DeliveryStatusBadge status={purchase.purchase_status || "Delivered"} />
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-1.5">
+                        <PurchaseTypeBadge type={purchase.purchase_type} />
                       </td>
                       <td className={stickyActionCellClass(index % 2 === 0 ? "bg-white" : "bg-slate-50/60")}>
                         <button
@@ -789,6 +814,7 @@ export default function PurchaseExcelTable({
                     <div className="flex flex-col gap-1 min-w-0">
                       <div className="flex items-center gap-1.5">
                         <span className="font-extrabold text-blue-700 text-sm">#{purchase.id}</span>
+                        <PurchaseTypeBadge type={purchase.purchase_type} />
                       </div>
                       <PaymentStatusBadge status={paymentStatus} />
                     </div>

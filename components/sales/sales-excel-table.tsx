@@ -79,6 +79,7 @@ import {
   Truck,
   PackageCheck,
   FilePenLine,
+  SendHorizontal,
 } from "lucide-react"
 import { SalesBreakdownModal } from "@/components/shared/sales-breakdown-modal"
 import {
@@ -2214,15 +2215,15 @@ export default function SalesExcelTable({
                                     event.stopPropagation()
                                     handleMarkReadyToShip(sale)
                                   }}
-                                  className="h-7 px-2.5 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white shadow-2xs gap-1.5 cursor-pointer rounded-md transition-colors"
+                                  className="h-7 w-7 p-0 rounded-md bg-blue-600 hover:bg-blue-700 text-white shadow-2xs hover:shadow-xs transition-transform hover:scale-105 active:scale-95 flex items-center justify-center cursor-pointer"
                                   title="Mark order Ready to Ship for Logistics"
+                                  aria-label="Mark Ready to Ship"
                                 >
                                   {markingReadySaleId === sale.id ? (
                                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
                                   ) : (
-                                    <PackageCheck className="h-3.5 w-3.5" />
+                                    <SendHorizontal className="h-3.5 w-3.5" />
                                   )}
-                                  <span>Ready to Ship</span>
                                 </Button>
                               </div>
                             ) : isLogistics ? (

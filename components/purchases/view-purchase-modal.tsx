@@ -23,6 +23,7 @@ import { getProductById } from "@/app/actions/product-actions"
 import { ProductDetailSlider } from "@/components/products/product-detail-slider"
 import ReturnPurchaseModal from "@/components/purchases/return-purchase-modal"
 import { getCurrencySymbol } from "@/lib/currency-utils"
+import { cn } from "@/lib/utils"
 
 interface ViewPurchaseModalProps {
   isOpen: boolean
@@ -68,6 +69,22 @@ function DeliveryStatusBadge({ status }: { status: string }) {
       }`}
     >
       {status || "Delivered"}
+    </span>
+  )
+}
+
+function PurchaseTypeBadge({ type }: { type?: string }) {
+  const isDropship = (type || "").toLowerCase() === "dropship"
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold",
+        isDropship
+          ? "bg-purple-50 text-purple-700 border-purple-200"
+          : "bg-blue-50 text-blue-700 border-blue-200"
+      )}
+    >
+      {isDropship ? "Dropship" : "Stock"}
     </span>
   )
 }
@@ -482,6 +499,7 @@ export default function ViewPurchaseModal({
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
                   <InfoCell label="Purchase #" value={`#${purchaseData.id}`} />
+                  <InfoCell label="Purchase Type" value={<PurchaseTypeBadge type={purchaseData.purchase_type} />} />
                   <InfoCell label="Date" value={formatPurchaseDate(purchaseData.purchase_date)} />
                   <InfoCell label="Payment" value={<PaymentStatusBadge status={paymentStatus} />} />
                   <InfoCell

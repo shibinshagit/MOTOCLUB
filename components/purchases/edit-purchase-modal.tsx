@@ -21,6 +21,7 @@ import { useDispatch } from "react-redux"
 import { addProduct } from "@/store/slices/productSlice"
 import { allocatePurchaseCosts, calculatePurchaseCourierCharge } from "@/lib/purchase-courier"
 import { markInventoryStale } from "@/lib/inventory-sync"
+import { cn } from "@/lib/utils"
 
 interface EditPurchaseModalProps {
   isOpen: boolean
@@ -76,6 +77,7 @@ export default function EditPurchaseModal({
   const [supplier, setSupplier] = useState("")
   const [status, setStatus] = useState<string>("Credit")
   const [purchaseStatus, setPurchaseStatus] = useState<string>("Delivered")
+  const [purchaseType, setPurchaseType] = useState<string>("Stock")
   const [paymentMethod, setPaymentMethod] = useState<string>("Cash")
   const [receivedAmount, setReceivedAmount] = useState<number>(0)
   const [products, setProducts] = useState<ProductRow[]>([])
@@ -135,6 +137,7 @@ export default function EditPurchaseModal({
     setSupplier("")
     setStatus("Credit")
     setPurchaseStatus("Delivered")
+    setPurchaseType("Stock")
     setPaymentMethod("Cash")
     setReceivedAmount(0)
     setProducts([])
@@ -203,6 +206,7 @@ export default function EditPurchaseModal({
       setStatus(statusMap[purchase.status] || purchase.status || "Credit")
       
       setPurchaseStatus(purchase.purchase_status || "Delivered")
+      setPurchaseType(purchase.purchase_type || "Stock")
       setPaymentMethod(purchase.payment_method || "Cash")
       setReceivedAmount(Number(purchase.received_amount) || 0)
 
@@ -297,6 +301,7 @@ export default function EditPurchaseModal({
       formData.append("total_amount", totalAmount.toString())
       formData.append("status", status)
       formData.append("purchase_status", purchaseStatus)
+      formData.append("purchase_type", purchaseType || "Stock")
       formData.append("payment_method", paymentMethod)
       formData.append("user_id", userId.toString())
       formData.append("device_id", deviceId.toString())
@@ -577,22 +582,46 @@ export default function EditPurchaseModal({
                       </div>
                     )}
 
-                    {/* Paid Amount - only show for Credit */}
-                    {status === "Credit" && (
+                    {/* Purchase Type and Paid Amount in same row */}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label className="text-sm font-medium text-gray-700">Purchase Type</Label>
+                        <div className="h-9 mt-1 flex items-center">
+                          <span
+                            className={cn(
+                              "inline-flex items-center rounded-md px-2.5 py-1 text-xs font-semibold border",
+                              (purchaseType || "").toLowerCase() === "dropship"
+                                ? "bg-purple-50 text-purple-700 border-purple-200"
+                                : "bg-blue-50 text-blue-700 border-blue-200"
+                            )}
+                          >
+                            {purchaseType || "Stock"}
+                          </span>
+                        </div>
+                      </div>
                       <div>
                         <Label className="text-sm font-medium text-gray-700">Paid Amount</Label>
-                        <Input
-                          type="number"
-                          min="0"
-                          max={totalAmount}
-                          step="0.01"
-                          value={receivedAmount}
-                          onChange={(e) => setReceivedAmount(Number.parseFloat(e.target.value) || 0)}
-                          className="h-9 mt-1 bg-white border-gray-300 text-gray-900"
-                          placeholder="0.00"
-                        />
+                        {status === "Credit" ? (
+                          <Input
+                            type="number"
+                            min="0"
+                            max={totalAmount}
+                            step="0.01"
+                            value={receivedAmount}
+                            onChange={(e) => setReceivedAmount(Number.parseFloat(e.target.value) || 0)}
+                            className="h-9 mt-1 bg-white border-gray-300 text-gray-900"
+                            placeholder="0.00"
+                          />
+                        ) : (
+                          <Input
+                            type="number"
+                            value={totalAmount > 0 ? totalAmount.toFixed(2) : "0.00"}
+                            disabled
+                            className="h-9 mt-1 bg-gray-100 border-gray-200 text-gray-500 cursor-not-allowed"
+                          />
+                        )}
                       </div>
-                    )}
+                    </div>
 
                     {/* Calculation Summary */}
                     <div className="border-t border-gray-200 pt-3 mt-4">
