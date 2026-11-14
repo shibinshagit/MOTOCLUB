@@ -286,19 +286,19 @@ export function DeliveryStatusSelect({
     await handleUpdateStatus("Sent")
   }
 
-  // Get color based on status for the border
-  const getBorderColor = () => {
+  // Get color based on status for border and background
+  const getStatusClasses = () => {
     switch (status) {
-      case "Pending": return "border-yellow-300"
-      case "Paid": return "border-blue-300"
-      case "Packed": return "border-indigo-300"
-      case "Sent": return "border-purple-300"
-      case "Direct": return "border-blue-400"
-      case "Shipped": return "border-cyan-300"
-      case "Shipping": return "border-cyan-300"
-      case "Delivered": return "border-green-400"
-      case "Returned": return "border-red-300"
-      default: return "border-gray-300"
+      case "Pending": return "border-yellow-300 bg-white text-slate-800"
+      case "Paid": return "border-blue-300 bg-white text-slate-800"
+      case "Packed": return "border-indigo-300 bg-white text-slate-800"
+      case "Sent": return "border-purple-300 bg-white text-slate-800"
+      case "Direct": return "border-blue-400 bg-white text-slate-800"
+      case "Shipped": return "border-cyan-300 bg-white text-slate-800"
+      case "Shipping": return "border-cyan-300 bg-white text-slate-800"
+      case "Delivered": return "border-emerald-500 bg-emerald-50 text-emerald-900 font-medium"
+      case "Returned": return "border-rose-500 bg-rose-50 text-rose-900 font-medium"
+      default: return "border-gray-300 bg-white text-slate-800"
     }
   }
 
@@ -320,7 +320,7 @@ export function DeliveryStatusSelect({
           disabled={isDropdownDisabled}
           value={status}
           onChange={handleChange}
-          className={`text-xs px-2 py-1 rounded-md border bg-white focus:outline-none focus:ring-2 focus:ring-primary/50 transition-colors ${getBorderColor()} ${isDropdownDisabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+          className={`text-xs px-2 py-1 rounded-md border focus:outline-none focus:ring-2 focus:ring-primary/50 transition-colors ${getStatusClasses()} ${isDropdownDisabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
           onClick={(e) => e.stopPropagation()}
         >
           {uniqueOptions.map((opt) => (

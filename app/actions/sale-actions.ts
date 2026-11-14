@@ -978,7 +978,26 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
                 )
             )
           )
-        ORDER BY COALESCE(s.sale_date, s.created_at) DESC, s.id DESC
+        ORDER BY 
+          CASE 
+            WHEN ${isLogistics} = true AND ${cardFilter} = 'all' AND ${logisticsShowAllOrders} = false THEN
+              CASE 
+                -- Tier 1: In-progress / new orders to deliver (Pending, Paid, Packed, Sent, Direct)
+                WHEN LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('shipped', 'shipping', 'delivered') THEN 1
+                -- Tier 2: Shipped but missing courier service or genuine tracking ID
+                WHEN LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) IN ('shipped', 'shipping', 'delivered')
+                  AND (
+                    s.tracking_id IS NULL OR TRIM(s.tracking_id) = ''
+                    OR UPPER(TRIM(s.tracking_id)) LIKE 'DOD%'
+                    OR UPPER(TRIM(s.tracking_id)) LIKE 'JC-%'
+                    OR (s.courier_service_name IS NULL AND s.courier_service_id IS NULL AND s.courier_partner_id IS NULL)
+                  ) THEN 2
+                -- Tier 3: Shipped and completely updated with courier and tracking
+                ELSE 3
+              END
+            ELSE 1
+          END ASC,
+          COALESCE(s.sale_date, s.created_at) DESC, s.id DESC
         LIMIT ${pageSize} OFFSET ${offset}
       `
 
@@ -988,7 +1007,26 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
           COALESCE(
             JSON_AGG(
               JSON_BUILD_OBJECT('id', s.id, 'isJobCard', (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%'))
-              ORDER BY COALESCE(s.sale_date, s.created_at) DESC, s.id DESC
+              ORDER BY 
+          CASE 
+            WHEN ${isLogistics} = true AND ${cardFilter} = 'all' AND ${logisticsShowAllOrders} = false THEN
+              CASE 
+                -- Tier 1: In-progress / new orders to deliver (Pending, Paid, Packed, Sent, Direct)
+                WHEN LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('shipped', 'shipping', 'delivered') THEN 1
+                -- Tier 2: Shipped but missing courier service or genuine tracking ID
+                WHEN LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) IN ('shipped', 'shipping', 'delivered')
+                  AND (
+                    s.tracking_id IS NULL OR TRIM(s.tracking_id) = ''
+                    OR UPPER(TRIM(s.tracking_id)) LIKE 'DOD%'
+                    OR UPPER(TRIM(s.tracking_id)) LIKE 'JC-%'
+                    OR (s.courier_service_name IS NULL AND s.courier_service_id IS NULL AND s.courier_partner_id IS NULL)
+                  ) THEN 2
+                -- Tier 3: Shipped and completely updated with courier and tracking
+                ELSE 3
+              END
+            ELSE 1
+          END ASC,
+          COALESCE(s.sale_date, s.created_at) DESC, s.id DESC
             ) FILTER (WHERE s.id IS NOT NULL),
             '[]'::json
           ) as all_matching

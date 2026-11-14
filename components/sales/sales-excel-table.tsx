@@ -206,6 +206,32 @@ function buildInitialFilters(sales: any[], getters: Record<ColumnKey, (sale: any
   return filters
 }
 
+function getLogisticsDeliveryTier(sale: any): 1 | 2 | 3 {
+  if (!sale) return 1
+  const deliveryStatus = (sale.delivery_status || "").trim().toLowerCase()
+  const isShipped = deliveryStatus === "shipped" || deliveryStatus === "shipping" || deliveryStatus === "delivered"
+
+  // Tier 1: In-progress / new orders to deliver (Pending, Paid, Packed, Sent, Direct)
+  if (!isShipped) return 1
+
+  const cleanTracking = (sale.tracking_id || "").trim()
+  const upperTracking = cleanTracking.toUpperCase()
+  const isAutoJobCardTracking = upperTracking.startsWith("DOD") || upperTracking.startsWith("JC-")
+  const hasRealTracking = Boolean(cleanTracking && !isAutoJobCardTracking)
+
+  const hasCourierService = Boolean(
+    (sale.courier_service_name && sale.courier_service_name.trim()) ||
+    sale.courier_service_id ||
+    sale.courier_partner_id
+  )
+
+  // Tier 3: Shipped and both Real Tracking ID & Courier Partner/Service are present
+  if (hasRealTracking && hasCourierService) return 3
+
+  // Tier 2: Shipped but either Tracking ID or Courier Service is missing
+  return 2
+}
+
 interface SalesExcelTableProps {
   searchTerm?: string
   onSearchTermChange?: (term: string) => void
@@ -711,7 +737,7 @@ export default function SalesExcelTable({
     }
     if (isLogistics && logisticsCardMode === "ready_to_ship") {
       const excluded = new Set(["delivered", "returned", "failed", "cancelled"])
-      return serverSales.filter((s: any) => {
+      const filtered = serverSales.filter((s: any) => {
         const dStatus = (s.delivery_status || "pending").trim().toLowerCase()
         const fType = (s.fulfillment_type || "").trim().toLowerCase()
         const status = (s.status || "").trim().toLowerCase()
@@ -743,9 +769,22 @@ export default function SalesExcelTable({
 
         return false
       })
+
+      if (cardFilter === "all") {
+        return [...filtered].sort((a: any, b: any) => {
+          const tierA = getLogisticsDeliveryTier(a)
+          const tierB = getLogisticsDeliveryTier(b)
+          if (tierA !== tierB) return tierA - tierB
+          const timeA = new Date(a.sale_date || a.created_at || 0).getTime()
+          const timeB = new Date(b.sale_date || b.created_at || 0).getTime()
+          return timeB - timeA
+        })
+      }
+
+      return filtered
     }
     return serverSales
-  }, [serverSales, isLogistics, isPurchaseManager, purchaseManagerCardMode, logisticsCardMode])
+  }, [serverSales, isLogistics, isPurchaseManager, purchaseManagerCardMode, logisticsCardMode, cardFilter])
 
   const selectedSalesList = useMemo(() => {
     return displaySales.filter((s) => selectedSales.includes(s.id))
@@ -1911,15 +1950,56 @@ export default function SalesExcelTable({
                         : "bg-slate-50 hover:bg-slate-100 text-slate-800"
                     let borderLeftClass = ""
 
-                    if (statusClass === "red") {
-                      baseBgClass = "bg-rose-100 text-rose-950 hover:bg-rose-200 font-medium"
-                      borderLeftClass = "border-l-4 border-l-rose-500"
-                    } else if (statusClass === "blue") {
-                      baseBgClass = "bg-blue-100 text-blue-950 hover:bg-blue-200 font-medium"
-                      borderLeftClass = "border-l-4 border-l-blue-500"
-                    } else if (statusClass === "green") {
-                      baseBgClass = "bg-emerald-100 text-emerald-950 hover:bg-emerald-200 font-medium"
-                      borderLeftClass = "border-l-4 border-l-emerald-500"
+                    if (isLogistics) {
+                      const deliveryStatusLower = (sale.delivery_status || "").trim().toLowerCase()
+                      const isReturned =
+                        deliveryStatusLower === "returned" ||
+                        saleStatusLower === "returned" ||
+                        sale.status === "Returned" ||
+                        isCancelledOrReturned
+                      const isDelivered =
+                        deliveryStatusLower === "delivered" ||
+                        deliveryStatusLower === "completed" ||
+                        deliveryStatusLower === "complete"
+
+                      if (isReturned) {
+                        // Returned orders in logistics: Red
+                        baseBgClass = "bg-rose-100 text-rose-950 hover:bg-rose-200 font-medium"
+                        borderLeftClass = "border-l-4 border-l-rose-500"
+                      } else if (isDelivered) {
+                        // Delivered orders in logistics: Green
+                        baseBgClass = "bg-emerald-100 text-emerald-950 hover:bg-emerald-200 font-medium"
+                        borderLeftClass = "border-l-4 border-l-emerald-500"
+                      } else {
+                        const tier = getLogisticsDeliveryTier(sale)
+                        if (tier === 1) {
+                          // In-progress / new orders: NO color (neutral)
+                          baseBgClass =
+                            index % 2 === 0
+                              ? "bg-white hover:bg-slate-100 text-slate-800"
+                              : "bg-slate-50 hover:bg-slate-100 text-slate-800"
+                          borderLeftClass = ""
+                        } else if (tier === 2) {
+                          // Shipped but missing courier service or genuine tracking ID: Saffron / Amber / Orange
+                          baseBgClass = "bg-amber-100 text-amber-950 hover:bg-amber-200 font-medium"
+                          borderLeftClass = "border-l-4 border-l-amber-500"
+                        } else if (tier === 3) {
+                          // Shipped and completely updated with courier and tracking ID: Green
+                          baseBgClass = "bg-emerald-100 text-emerald-950 hover:bg-emerald-200 font-medium"
+                          borderLeftClass = "border-l-4 border-l-emerald-500"
+                        }
+                      }
+                    } else {
+                      if (statusClass === "red") {
+                        baseBgClass = "bg-rose-100 text-rose-950 hover:bg-rose-200 font-medium"
+                        borderLeftClass = "border-l-4 border-l-rose-500"
+                      } else if (statusClass === "blue") {
+                        baseBgClass = "bg-blue-100 text-blue-950 hover:bg-blue-200 font-medium"
+                        borderLeftClass = "border-l-4 border-l-blue-500"
+                      } else if (statusClass === "green") {
+                        baseBgClass = "bg-emerald-100 text-emerald-950 hover:bg-emerald-200 font-medium"
+                        borderLeftClass = "border-l-4 border-l-emerald-500"
+                      }
                     }
 
                     const isSelected = selectedSales.includes(sale.id)
@@ -2431,12 +2511,40 @@ export default function SalesExcelTable({
                 const profitAmount = getSaleProfit(sale)
                 const isDirectOrder = (sale.delivery_status || "").trim().toLowerCase() === "direct" || Boolean(sale.is_direct)
 
+                let mobileTierClass = ""
+                if (isLogistics) {
+                  const deliveryStatusLower = (sale.delivery_status || "").trim().toLowerCase()
+                  const isReturned =
+                    deliveryStatusLower === "returned" ||
+                    (sale.status || "").trim().toLowerCase() === "returned" ||
+                    isCancelledOrReturned
+                  const isDelivered =
+                    deliveryStatusLower === "delivered" ||
+                    deliveryStatusLower === "completed" ||
+                    deliveryStatusLower === "complete"
+
+                  if (isReturned) {
+                    mobileTierClass = "bg-rose-50/90 border-l-4 border-l-rose-500"
+                  } else if (isDelivered) {
+                    mobileTierClass = "bg-emerald-50/90 border-l-4 border-l-emerald-500"
+                  } else {
+                    const tier = getLogisticsDeliveryTier(sale)
+                    if (tier === 2) {
+                      mobileTierClass = "bg-amber-50/90 border-l-4 border-l-amber-500"
+                    } else if (tier === 3) {
+                      mobileTierClass = "bg-emerald-50/90 border-l-4 border-l-emerald-500"
+                    }
+                  }
+                } else if (isPending) {
+                  mobileTierClass = "bg-amber-50/40"
+                }
+
                 return (
                   <div
                     key={sale.id}
                     className={cn(
                       "p-3.5 bg-white transition-colors space-y-2.5",
-                      isPending ? "bg-amber-50/40" : "",
+                      mobileTierClass,
                       isSelected ? "bg-violet-50/70 border-l-4 border-l-violet-600" : "",
                     )}
                   >
