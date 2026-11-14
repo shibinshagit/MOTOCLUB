@@ -80,6 +80,7 @@ import {
   PackageCheck,
   FilePenLine,
   SendHorizontal,
+  Forward,
 } from "lucide-react"
 import { SalesBreakdownModal } from "@/components/shared/sales-breakdown-modal"
 import {
@@ -1982,16 +1983,51 @@ export default function SalesExcelTable({
                     let borderLeftClass = ""
 
                     if (isPurchaseManager) {
-                      if (isDirectIncomplete) {
-                        baseBgClass = "bg-amber-100 text-amber-950 hover:bg-amber-200 font-medium"
-                        borderLeftClass = "border-l-4 border-l-amber-500"
+                      if (purchaseManagerCardMode === "all_orders") {
+                        const dStatusLower = (sale.delivery_status || "").trim().toLowerCase()
+                        const isReturned =
+                          dStatusLower === "returned" ||
+                          saleStatusLower === "returned" ||
+                          sale.status === "Returned" ||
+                          isCancelledOrReturned
+                        const isDelivered =
+                          dStatusLower === "delivered" ||
+                          dStatusLower === "completed" ||
+                          dStatusLower === "complete"
+                        const isOrangeStatus =
+                          dStatusLower === "direct" ||
+                          dStatusLower === "shipped" ||
+                          dStatusLower === "shipping"
+
+                        if (isReturned) {
+                          baseBgClass = "bg-rose-100 text-rose-950 hover:bg-rose-200 font-medium"
+                          borderLeftClass = "border-l-4 border-l-rose-500"
+                        } else if (isDelivered) {
+                          baseBgClass = "bg-emerald-100 text-emerald-950 hover:bg-emerald-200 font-medium"
+                          borderLeftClass = "border-l-4 border-l-emerald-500"
+                        } else if (isOrangeStatus) {
+                          baseBgClass = "bg-amber-100 text-amber-950 hover:bg-amber-200 font-medium"
+                          borderLeftClass = "border-l-4 border-l-amber-500"
+                        } else {
+                          baseBgClass =
+                            index % 2 === 0
+                              ? "bg-white hover:bg-slate-100 text-slate-800"
+                              : "bg-slate-50 hover:bg-slate-100 text-slate-800"
+                          borderLeftClass = ""
+                        }
                       } else {
-                        // In Purchase Manager, normal rows have no special color (clean alternating white/slate)
-                        baseBgClass =
-                          index % 2 === 0
-                            ? "bg-white hover:bg-slate-100 text-slate-800"
-                            : "bg-slate-50 hover:bg-slate-100 text-slate-800"
-                        borderLeftClass = ""
+                        // purchaseManagerCardMode === "orders_to_check"
+                        if (isDirectIncomplete) {
+                          baseBgClass = "bg-amber-100 text-amber-950 hover:bg-amber-200 font-medium"
+                          borderLeftClass = "border-l-4 border-l-amber-500"
+                        } else {
+                          // In Purchase Manager, normal rows have no special color (clean alternating white/slate)
+                          baseBgClass =
+                            index % 2 === 0
+                              ? "bg-white hover:bg-slate-100 text-slate-800"
+                              : "bg-slate-50 hover:bg-slate-100 text-slate-800"
+                          borderLeftClass = ""
+                        }
                       }
                     } else if (isLogistics) {
                       const deliveryStatusLower = (sale.delivery_status || "").trim().toLowerCase()
@@ -2275,12 +2311,11 @@ export default function SalesExcelTable({
                                       event.stopPropagation()
                                       setMoveToDirectSale(sale)
                                     }}
-                                    className="h-7 px-2 text-xs font-semibold bg-purple-600 hover:bg-purple-700 text-white rounded-md shadow-2xs hover:shadow-xs transition-transform hover:scale-105 active:scale-95 flex items-center justify-center gap-1 cursor-pointer"
+                                    className="h-7 w-7 p-0 rounded-full bg-purple-600 hover:bg-purple-700 text-white shadow-2xs hover:shadow-xs transition-transform hover:scale-105 active:scale-95 flex items-center justify-center cursor-pointer"
                                     title="Move to Direct (Dropship)"
                                     aria-label="Move to Direct"
                                   >
-                                    <Truck className="h-3.5 w-3.5" />
-                                    <span className="text-[11px] font-medium">Direct</span>
+                                    <Forward className="h-3.5 w-3.5" />
                                   </Button>
                                 )}
                               </div>
@@ -2453,7 +2488,7 @@ export default function SalesExcelTable({
                                           className="h-7 text-xs px-2.5 font-semibold bg-purple-600 hover:bg-purple-700 text-white gap-1.5 cursor-pointer"
                                           title="Move to Direct (Dropship)"
                                         >
-                                          <Truck className="h-3 w-3" />
+                                          <Forward className="h-3 w-3" />
                                           Move to Direct
                                         </Button>
                                       )}
@@ -2593,11 +2628,37 @@ export default function SalesExcelTable({
 
                 let mobileTierClass = ""
                 if (isPurchaseManager) {
-                  const isDirectIncomplete = isDirectOrder && (!hasCourierService || !hasSupplier)
-                  if (isDirectIncomplete) {
-                    mobileTierClass = "bg-amber-50/90 border-l-4 border-l-amber-500"
+                  if (purchaseManagerCardMode === "all_orders") {
+                    const dStatusLower = (sale.delivery_status || "").trim().toLowerCase()
+                    const isReturned =
+                      dStatusLower === "returned" ||
+                      (sale.status || "").trim().toLowerCase() === "returned" ||
+                      isCancelledOrReturned
+                    const isDelivered =
+                      dStatusLower === "delivered" ||
+                      dStatusLower === "completed" ||
+                      dStatusLower === "complete"
+                    const isOrangeStatus =
+                      dStatusLower === "direct" ||
+                      dStatusLower === "shipped" ||
+                      dStatusLower === "shipping"
+
+                    if (isReturned) {
+                      mobileTierClass = "bg-rose-50/90 border-l-4 border-l-rose-500"
+                    } else if (isDelivered) {
+                      mobileTierClass = "bg-emerald-50/90 border-l-4 border-l-emerald-500"
+                    } else if (isOrangeStatus) {
+                      mobileTierClass = "bg-amber-50/90 border-l-4 border-l-amber-500"
+                    } else {
+                      mobileTierClass = "" // Neutral row in Purchase Manager
+                    }
                   } else {
-                    mobileTierClass = "" // Neutral row in Purchase Manager
+                    const isDirectIncomplete = isDirectOrder && (!hasCourierService || !hasSupplier)
+                    if (isDirectIncomplete) {
+                      mobileTierClass = "bg-amber-50/90 border-l-4 border-l-amber-500"
+                    } else {
+                      mobileTierClass = "" // Neutral row in Purchase Manager
+                    }
                   }
                 } else if (isLogistics) {
                   const deliveryStatusLower = (sale.delivery_status || "").trim().toLowerCase()
@@ -2820,7 +2881,7 @@ export default function SalesExcelTable({
                             className="h-8 text-xs font-semibold bg-purple-600 hover:bg-purple-700 text-white gap-1.5 rounded-lg px-2.5 shadow-2xs cursor-pointer"
                             title="Move to Direct (Dropship)"
                           >
-                            <Truck className="h-3.5 w-3.5" />
+                            <Forward className="h-3.5 w-3.5" />
                             <span>Move to Direct</span>
                           </Button>
                         )}
@@ -2875,7 +2936,7 @@ export default function SalesExcelTable({
                           )}
                           {isPurchaseManager && purchaseManagerCardMode === "orders_to_check" && canMoveToDirect && (
                             <DropdownMenuItem onClick={() => setMoveToDirectSale(sale)}>
-                              <Truck className="h-4 w-4 mr-2 text-purple-600" /> Move to Direct
+                              <Forward className="h-4 w-4 mr-2 text-purple-600" /> Move to Direct
                             </DropdownMenuItem>
                           )}
                           {showActions && (

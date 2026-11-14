@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Loader2, Package, Truck, Plus, X, AlertCircle } from "lucide-react"
+import { Loader2, Package, Truck, Plus, X, AlertCircle, Forward } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 import { notifyError, notifySuccess } from "@/lib/notifications"
 import { getSaleDetails, moveSaleToDirectPurchase } from "@/app/actions/sale-actions"
@@ -382,7 +382,7 @@ export function MoveToDirectModal({
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <div className="p-1.5 rounded-lg bg-purple-100 text-purple-700">
-                <Truck className="h-5 w-5" />
+                <Forward className="h-5 w-5" />
               </div>
               <div>
                 <DialogTitle className="text-base font-bold text-slate-900">

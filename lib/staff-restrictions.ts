@@ -84,7 +84,7 @@ export function canStaffAccessPage(
   if (!staff) return true
   if (staff.role === "media_manager") return true
   if (staff.role === "purchase_manager" && (page === "attendance" || page === "transfer" || page === "customer")) return false
-  if (staff.role === "logistics" && page === "transfer") return false
+  if (staff.role === "logistics" && (page === "transfer" || page === "supplier" || page === "attendance")) return false
   return !getRestrictedPages(staff).includes(page)
 }
 

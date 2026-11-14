@@ -211,8 +211,13 @@ export function Dashboard({
         return Boolean(onlyPosUpdatedSales && !hideProductsToPurchaseTab)
       }
 
-      // Disallow attendance if hideAttendanceTab is true or if user is purchase manager
-      if (tabId === "attendance" && (hideAttendanceTab || isPurchaseManager || activeStaff?.role === "purchase_manager")) {
+      // Disallow attendance if hideAttendanceTab is true, user is logistics, or user is purchase manager
+      if (tabId === "attendance" && (hideAttendanceTab || isLogistics || activeStaff?.role === "logistics" || isPurchaseManager || activeStaff?.role === "purchase_manager")) {
+        return false
+      }
+
+      // Disallow supplier if user is logistics
+      if (tabId === "supplier" && (isLogistics || activeStaff?.role === "logistics")) {
         return false
       }
 
@@ -244,7 +249,7 @@ export function Dashboard({
       // 2. Staff level check (Device Admin restrictions)
       return canAccessPage(mappedTabId as StaffPageId)
     },
-    [device, activeStaff, canAccessPage],
+    [device, activeStaff, canAccessPage, isLogistics, isPurchaseManager, hideAttendanceTab, hideTransferTab, hideCustomerTab],
   )
 
   // Navigation items configuration
@@ -728,11 +733,14 @@ export function Dashboard({
             <CustomerTab userId={device?.id ?? 0} companyId={companyId} />
           )
         case "attendance":
-          if (hideAttendanceTab || isPurchaseManager || activeStaff?.role === "purchase_manager") {
+          if (hideAttendanceTab || isLogistics || activeStaff?.role === "logistics" || isPurchaseManager || activeStaff?.role === "purchase_manager") {
             return null
           }
           return <AttendanceTab />
         case "supplier":
+          if (isLogistics || activeStaff?.role === "logistics") {
+            return null
+          }
           return (
             <SupplierTab
               userId={device?.id ?? 0}
