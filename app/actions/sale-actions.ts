@@ -3,7 +3,7 @@
 import { addDays, parseISO, format } from "date-fns"
 import { sql, getLastError, resetConnectionState, executeWithRetry } from "@/lib/db"
 import { revalidatePath, unstable_noStore as noStore } from "next/cache"
-import { recordSaleTransaction, recordSaleAdjustment, deleteSaleTransaction, syncSaleShippingTransactions } from "./simplified-accounting"
+import { recordSaleTransaction, recordSaleAdjustment, deleteSaleTransaction, syncSaleShippingTransactions, recordPurchaseTransaction } from "./simplified-accounting"
 import { filterSalesForStaff } from "@/lib/staff-restrictions-server"
 import { normalizeSaleShippingInput } from "@/lib/sale-shipping"
 import { getStaffSession } from "@/lib/staff-session"
@@ -797,6 +797,14 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
           COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name,
           COALESCE(NULLIF(s.customer_phone_override, ''), c.phone, '') as customer_phone,
           st.name as staff_name,
+          (
+            SELECT p.supplier
+            FROM purchases p
+            WHERE p.purchase_type = 'Dropship'
+              AND p.notes LIKE '%Job Card #' || s.id || '%'
+            ORDER BY p.id DESC
+            LIMIT 1
+          ) as dropship_supplier,
           COALESCE(
             (SELECT STRING_AGG(
                CONCAT(
@@ -945,9 +953,24 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
             ${isPurchaseManager} = false
             OR ${purchaseManagerShowAllOrders} = true
             OR (
-              LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
-              AND s.is_ready_to_ship IS NOT TRUE
-              AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) != 'direct'
+              (
+                LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+                AND s.is_ready_to_ship IS NOT TRUE
+                AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) != 'direct'
+              )
+              OR (
+                LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                AND (
+                  COALESCE(NULLIF(TRIM(s.courier_service_name), ''), '') = ''
+                  OR NOT EXISTS (
+                    SELECT 1 FROM purchases p
+                    WHERE p.purchase_type = 'Dropship'
+                      AND p.notes LIKE '%Job Card #' || s.id || '%'
+                      AND p.supplier IS NOT NULL
+                      AND TRIM(p.supplier) != ''
+                  )
+                )
+              )
             )
           )
           AND (
@@ -1127,9 +1150,24 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
             ${isPurchaseManager} = false
             OR ${purchaseManagerShowAllOrders} = true
             OR (
-              LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
-              AND s.is_ready_to_ship IS NOT TRUE
-              AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) != 'direct'
+              (
+                LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+                AND s.is_ready_to_ship IS NOT TRUE
+                AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) != 'direct'
+              )
+              OR (
+                LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                AND (
+                  COALESCE(NULLIF(TRIM(s.courier_service_name), ''), '') = ''
+                  OR NOT EXISTS (
+                    SELECT 1 FROM purchases p
+                    WHERE p.purchase_type = 'Dropship'
+                      AND p.notes LIKE '%Job Card #' || s.id || '%'
+                      AND p.supplier IS NOT NULL
+                      AND TRIM(p.supplier) != ''
+                  )
+                )
+              )
             )
           )
           AND (
@@ -1299,6 +1337,14 @@ export async function getSalesByIds(deviceId: number, saleIds: number[]) {
           COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name,
           COALESCE(NULLIF(s.customer_phone_override, ''), c.phone, '') as customer_phone,
           st.name as staff_name,
+          (
+            SELECT p.supplier
+            FROM purchases p
+            WHERE p.purchase_type = 'Dropship'
+              AND p.notes LIKE '%Job Card #' || s.id || '%'
+            ORDER BY p.id DESC
+            LIMIT 1
+          ) as dropship_supplier,
           COALESCE(
             (SELECT STRING_AGG(
                CONCAT(
@@ -1426,9 +1472,26 @@ export async function getSalesSummaryCards(
             WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
               AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled'
               AND s.is_pos_updated = true
-              AND LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
-              AND s.is_ready_to_ship IS NOT TRUE
-              AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) != 'direct'
+              AND (
+                (
+                  LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+                  AND s.is_ready_to_ship IS NOT TRUE
+                  AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) != 'direct'
+                )
+                OR (
+                  LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                  AND (
+                    COALESCE(NULLIF(TRIM(s.courier_service_name), ''), '') = ''
+                    OR NOT EXISTS (
+                      SELECT 1 FROM purchases p
+                      WHERE p.purchase_type = 'Dropship'
+                        AND p.notes LIKE '%Job Card #' || s.id || '%'
+                        AND p.supplier IS NOT NULL
+                        AND TRIM(p.supplier) != ''
+                    )
+                  )
+                )
+              )
               AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
               AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
           )::int as orders_to_check_count,
@@ -1436,9 +1499,26 @@ export async function getSalesSummaryCards(
             WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
               AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled'
               AND s.is_pos_updated = true
-              AND LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
-              AND s.is_ready_to_ship IS NOT TRUE
-              AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) != 'direct'
+              AND (
+                (
+                  LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+                  AND s.is_ready_to_ship IS NOT TRUE
+                  AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) != 'direct'
+                )
+                OR (
+                  LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                  AND (
+                    COALESCE(NULLIF(TRIM(s.courier_service_name), ''), '') = ''
+                    OR NOT EXISTS (
+                      SELECT 1 FROM purchases p
+                      WHERE p.purchase_type = 'Dropship'
+                        AND p.notes LIKE '%Job Card #' || s.id || '%'
+                        AND p.supplier IS NOT NULL
+                        AND TRIM(p.supplier) != ''
+                    )
+                  )
+                )
+              )
               AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
               AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
           ), 0)::numeric as orders_to_check_amount,
@@ -2008,6 +2088,14 @@ export async function getSaleDetails(saleId: number) {
           c.pincode as customer_pincode,
           c.landmark as customer_landmark,
           st.name as staff_name,
+          (
+            SELECT p.supplier
+            FROM purchases p
+            WHERE p.purchase_type = 'Dropship'
+              AND p.notes LIKE '%Job Card #' || s.id || '%'
+            ORDER BY p.id DESC
+            LIMIT 1
+          ) as dropship_supplier,
           COALESCE(cp.name, md.name, '') as courier_partner_name,
           md.tracking_url_template as tracking_url_template
         FROM sales s
@@ -3811,9 +3899,25 @@ export async function updateSaleDeliveryStatus(
     const isJobCard = rows[0].sale_type === 'job_card'
     const isEcommerce = rows[0].source === 'ECOMMERCE' || rows[0].external_order_id != null
 
-    const allowedStatuses = ["Pending", "Paid", "Packed", "Sent", "Direct", "Courier", "Shipped", "Shipping", "Delivered", "Returned", "Failed"]
+    const statusMap: Record<string, string> = {
+      pending: "Pending",
+      paid: "Paid",
+      packed: "Packed",
+      sent: "Sent",
+      direct: "Direct",
+      courier: "Courier",
+      shipped: "Shipped",
+      shipping: "Shipping",
+      delivered: "Delivered",
+      returned: "Returned",
+      failed: "Failed",
+      pickup: "Pickup",
+    }
+    const cleanDeliveryStatus = statusMap[(deliveryStatus || "").trim().toLowerCase()] || (deliveryStatus || "").trim()
 
-    if (!allowedStatuses.includes(deliveryStatus)) {
+    const allowedStatuses = ["Pending", "Paid", "Packed", "Sent", "Direct", "Courier", "Shipped", "Shipping", "Delivered", "Returned", "Failed", "Pickup"]
+
+    if (!allowedStatuses.includes(cleanDeliveryStatus)) {
       return { success: false as const, message: `Invalid delivery status: ${deliveryStatus}` }
     }
 
@@ -3965,7 +4069,7 @@ export async function updateSaleDeliveryStatus(
 
     const updated = await sql`
       UPDATE sales
-      SET delivery_status = ${deliveryStatus},
+      SET delivery_status = ${cleanDeliveryStatus},
           shipped_at = ${shippedAt},
           delivered_at = ${deliveredAt},
           tracking_id = ${targetTrackingId},
@@ -3982,7 +4086,7 @@ export async function updateSaleDeliveryStatus(
     try {
       await sql`
         UPDATE orders
-        SET status = ${deliveryStatus.toLowerCase()},
+        SET status = ${cleanDeliveryStatus.toLowerCase()},
             updated_at = NOW()
         WHERE synced_sale_id = ${saleId}
       `
@@ -4577,5 +4681,246 @@ export async function saveProductPurchaseActionsBulk(
   } catch (error: any) {
     console.error("Failed to save bulk product purchase actions:", error)
     return { success: false, message: error.message }
+  }
+}
+
+export interface MoveSaleToDirectPurchaseInput {
+  saleId: number
+  deviceId: number
+  userId: number
+  supplier: string
+  courierServiceName?: string | null
+  courierServiceId?: number | null
+  trackingId?: string | null
+  courierCharge?: number
+  courierChargePercentage?: number
+  discount?: number
+  paymentStatus?: string
+  purchaseStatus?: string
+  paidAmount?: number
+  notes?: string | null
+  items: Array<{
+    product_id: number
+    variant_id?: number | null
+    quantity: number
+    unit_cost: number
+    tax_percentage?: number
+    tax_amount?: number
+    line_total?: number
+  }>
+}
+
+export async function moveSaleToDirectPurchase(input: MoveSaleToDirectPurchaseInput) {
+  if (!input.saleId || !input.deviceId || !input.userId) {
+    return { success: false, message: "Sale ID, Device ID, and User ID are required" }
+  }
+
+  const supplier = input.supplier?.trim()
+  if (!supplier) {
+    return { success: false, message: "Supplier is required to move order to Direct" }
+  }
+
+  if (!input.items || !input.items.length) {
+    return { success: false, message: "Order must contain at least one product" }
+  }
+
+  resetConnectionState()
+
+  try {
+    const outcome = await sql.begin(async (tx: any) => {
+      // 1. Fetch and lock the sale
+      const sales = await tx`
+        SELECT id, device_id, customer_id, total_amount, received_amount, delivery_status,
+               tracking_id, sale_date, payment_method, payment_status, fulfillment_type,
+               courier_paid_extra, expense_packing
+        FROM sales
+        WHERE id = ${input.saleId}
+        FOR UPDATE
+      `
+      if (!sales.length) {
+        throw new Error("Sale order not found")
+      }
+      const sale = sales[0]
+
+      // 2. Calculate purchase subtotal, tax, discount, and purchase total (payable to supplier for products)
+      let subtotal = 0
+      let totalTax = 0
+      for (const it of input.items) {
+        const qty = Number(it.quantity) || 0
+        const cost = Number(it.unit_cost) || 0
+        const taxPct = Number(it.tax_percentage) || 0
+        const taxAmt = it.tax_amount != null ? Number(it.tax_amount) : Math.round(qty * cost * (taxPct / 100) * 100) / 100
+        subtotal += qty * cost
+        totalTax += taxAmt
+      }
+      const discount = Math.max(0, Number(input.discount) || 0)
+      const purchaseTotal = Math.max(0, Math.round((subtotal + totalTax - discount) * 100) / 100)
+      const courierCharge = Math.max(0, Number(input.courierCharge) || 0)
+
+      let status = (input.paymentStatus || "").toLowerCase() === "paid" ? "Paid" : "Credit"
+      const purchaseStatus = (input.purchaseStatus || "").toLowerCase() === "delivered" ? "Delivered" : "Ordered"
+      const finalPaidAmount = status === "Paid" ? purchaseTotal : Math.min(purchaseTotal, Math.max(0, Number(input.paidAmount) || 0))
+      if (finalPaidAmount >= purchaseTotal && purchaseTotal > 0) {
+        status = "Paid"
+      }
+      const internalNotes = input.notes?.trim() || `Direct dropship fulfillment for Job Card #${input.saleId}`
+
+      // 3. Create or update the Dropship Purchase (courier charge is paid after delivery and recorded as sales order expense)
+      const existingPurchases = await tx`
+        SELECT id FROM purchases
+        WHERE purchase_type = 'Dropship'
+          AND notes LIKE ${`%Job Card #${input.saleId}%`}
+        ORDER BY id DESC LIMIT 1
+      `
+
+      let purchaseId: number
+      if (existingPurchases.length > 0) {
+        purchaseId = existingPurchases[0].id
+        await tx`
+          UPDATE purchases
+          SET supplier = ${supplier},
+              total_amount = ${purchaseTotal},
+              status = ${status},
+              purchase_status = ${purchaseStatus},
+              received_amount = ${finalPaidAmount},
+              discount = ${discount},
+              notes = ${internalNotes}
+          WHERE id = ${purchaseId}
+        `
+        await tx`DELETE FROM purchase_items WHERE purchase_id = ${purchaseId}`
+      } else {
+        const purchaseRows = await tx`
+          INSERT INTO purchases (
+            supplier, total_amount, status, payment_method, purchase_status, purchase_type,
+            created_by, device_id, purchase_date, received_amount,
+            courier_charge, courier_charge_percentage, discount, notes
+          )
+          VALUES (
+            ${supplier}, ${purchaseTotal}, ${status}, 'Cash', ${purchaseStatus}, 'Dropship',
+            ${input.userId}, ${input.deviceId}, NOW(), ${finalPaidAmount},
+            0, 0, ${discount}, ${internalNotes}
+          )
+          RETURNING id
+        `
+        purchaseId = purchaseRows[0].id
+      }
+
+      // 4. Insert items into purchase_items (NO product cost update, NO inventory addition)
+      for (const it of input.items) {
+        const qty = Number(it.quantity) || 0
+        const price = Number(it.unit_cost) || 0
+        const taxPct = Number(it.tax_percentage) || 0
+        const taxAmt = it.tax_amount != null ? Number(it.tax_amount) : Math.round(qty * price * (taxPct / 100) * 100) / 100
+        const lineTotal = it.line_total != null ? Number(it.line_total) : Math.round((qty * price + taxAmt) * 100) / 100
+
+        const itemProportion = subtotal > 0 ? (qty * price) / subtotal : (1 / input.items.length)
+        const itemDiscountAmount = Number((discount * itemProportion).toFixed(2))
+        const itemNetCost = lineTotal - itemDiscountAmount
+        const unitAcquisitionCost = qty > 0 ? Number((itemNetCost / qty).toFixed(2)) : price
+
+        await tx`
+          INSERT INTO purchase_items (
+            purchase_id, product_id, product_variant_id, batch_id, quantity, price,
+            tax_percentage, tax_amount, line_total, courier_charge, discount, unit_cost
+          )
+          VALUES (
+            ${purchaseId}, ${it.product_id}, ${it.variant_id || null}, null,
+            ${qty}, ${price}, ${taxPct}, ${taxAmt},
+            ${lineTotal}, 0, ${itemDiscountAmount}, ${unitAcquisitionCost}
+          )
+        `
+      }
+
+      // Record purchase in simplified accounting system
+      try {
+        await recordPurchaseTransaction({
+          purchaseId,
+          totalAmount: purchaseTotal,
+          receivedAmount: finalPaidAmount,
+          outstandingAmount: Math.max(0, purchaseTotal - finalPaidAmount),
+          status,
+          paymentMethod: "Cash",
+          supplierName: supplier,
+          deviceId: input.deviceId,
+          userId: input.userId,
+          purchaseDate: new Date(),
+        }, tx)
+      } catch (recErr) {
+        console.warn("recordPurchaseTransaction error in moveSaleToDirectPurchase:", recErr)
+      }
+
+      // 5. Restore stock on warehouse inventory since supplier ships directly (only on initial creation)
+      if (existingPurchases.length === 0) {
+        try {
+          await applyStockTransition(
+            input.saleId,
+            input.deviceId,
+            false,
+            "direct_transfer",
+            `Restored stock - Job Card #${input.saleId} moved to Direct Dropship (Purchase #${purchaseId})`,
+            tx
+          )
+        } catch (stockErr) {
+          console.warn("Stock transition warning in moveSaleToDirectPurchase:", stockErr)
+        }
+      }
+
+      // 6. Update sales order: delivery_status = 'Direct', courier details, and expense_courier
+      const resolvedCourierName = input.courierServiceName?.trim() || null
+      const trackingId = input.trackingId?.trim() || null
+
+      await tx`
+        UPDATE sales
+        SET delivery_status = 'Direct',
+            courier_service_name = COALESCE(${resolvedCourierName}, courier_service_name),
+            courier_service_id = COALESCE(${input.courierServiceId || null}, courier_service_id),
+            tracking_id = COALESCE(${trackingId}, tracking_id),
+            expense_courier = ${courierCharge},
+            is_ready_to_ship = true,
+            ready_to_ship_at = COALESCE(ready_to_ship_at, NOW()),
+            updated_at = NOW()
+        WHERE id = ${input.saleId}
+      `
+
+      // 7. Sync sale shipping transactions
+      try {
+        await syncSaleShippingTransactions({
+          saleId: input.saleId,
+          deviceId: sale.device_id || input.deviceId,
+          userId: input.userId,
+          saleDate: new Date(sale.sale_date || new Date()),
+          paymentMethod: sale.payment_method || "Cash",
+          status: sale.payment_status || "Pending",
+          fulfillmentType: sale.fulfillment_type || "ship",
+          courierPaidExtra: Number(sale.courier_paid_extra) || 0,
+          expenseCourier: courierCharge,
+          expensePacking: Number(sale.expense_packing) || 0,
+          receivedAmount: Number(sale.received_amount) || 0,
+          totalAmount: Number(sale.total_amount) || 0,
+        })
+      } catch (syncErr) {
+        console.warn("Sync shipping transaction warning:", syncErr)
+      }
+
+      return {
+        success: true,
+        purchaseId,
+        message: `Order #${input.saleId} moved to Direct. Dropship Purchase #${purchaseId} created.`,
+      }
+    })
+
+    try {
+      revalidatePath("/dashboard")
+    } catch (e) {
+      // safe ignore in non-browser context
+    }
+
+    return outcome
+  } catch (err: any) {
+    console.error("moveSaleToDirectPurchase error:", err)
+    return {
+      success: false,
+      message: err instanceof Error ? err.message : "Failed to move order to Direct",
+    }
   }
 }

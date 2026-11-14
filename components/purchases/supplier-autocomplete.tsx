@@ -72,14 +72,9 @@ export default function SupplierAutocomplete({
   }, [searchTerm, suppliers])
 
   const loadSuppliers = useCallback(async () => {
-    if (!userId) {
-      setSuppliers([])
-      return
-    }
-
     try {
       setLoading(true)
-      const result = await getSuppliers(userId)
+      const result = await getSuppliers(userId || 0)
       if (result.success && Array.isArray(result.data)) {
         setSuppliers(
           result.data.map((supplier: any) => ({

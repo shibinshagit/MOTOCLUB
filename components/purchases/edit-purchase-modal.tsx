@@ -98,7 +98,10 @@ export default function EditPurchaseModal({
     [subtotal, courierChargePercentage]
   )
   const courierCharge = customCourierCharge !== null ? customCourierCharge : autoCourierCharge
-  const totalAmount = useMemo(() => Number(subtotal) + Number(taxAmount) - Number(discountAmount) + Number(courierCharge), [subtotal, taxAmount, discountAmount, courierCharge])
+  // Purchase bill from supplier (without courier charge)
+  const purchaseTotal = useMemo(() => Math.max(0, Math.round((Number(subtotal) + Number(taxAmount) - Number(discountAmount)) * 100) / 100), [subtotal, taxAmount, discountAmount])
+  // Total cost including courier charge (paid after delivery)
+  const totalAmount = useMemo(() => Math.max(0, Math.round((purchaseTotal + Number(courierCharge)) * 100) / 100), [purchaseTotal, courierCharge])
 
   const purchaseItemsWithAllocations = useMemo(() => {
     const costAllocations = allocatePurchaseCosts(products, courierCharge, discountAmount)
@@ -263,12 +266,12 @@ export default function EditPurchaseModal({
       return "Please select a payment method"
     }
 
-    if (receivedAmount > totalAmount) {
-      return "Paid amount cannot be greater than total amount"
+    if (receivedAmount > purchaseTotal) {
+      return "Paid amount cannot be greater than purchase bill total"
     }
 
     return null
-  }, [supplier, products, status, paymentMethod, receivedAmount, totalAmount])
+  }, [supplier, products, status, paymentMethod, receivedAmount, purchaseTotal])
 
   // Form submission
   const handleSubmit = useCallback(async () => {
@@ -289,7 +292,7 @@ export default function EditPurchaseModal({
     try {
       let finalReceivedAmount = receivedAmount
       if (status === "Paid") {
-        finalReceivedAmount = totalAmount
+        finalReceivedAmount = purchaseTotal
       } else if (status === "Cancelled") {
         finalReceivedAmount = 0
       }
@@ -298,7 +301,7 @@ export default function EditPurchaseModal({
       formData.append("id", purchaseId.toString())
       formData.append("supplier", supplier)
       formData.append("purchase_date", date.toISOString())
-      formData.append("total_amount", totalAmount.toString())
+      formData.append("total_amount", purchaseTotal.toString())
       formData.append("status", status)
       formData.append("purchase_status", purchaseStatus)
       formData.append("purchase_type", purchaseType || "Stock")
@@ -600,22 +603,38 @@ export default function EditPurchaseModal({
                         </div>
                       </div>
                       <div>
-                        <Label className="text-sm font-medium text-gray-700">Paid Amount</Label>
+                        <div className="flex items-center justify-between">
+                          <Label className="text-sm font-medium text-gray-700">Paid Amount</Label>
+                          {status === "Credit" && (
+                            <button
+                              type="button"
+                              onClick={() => setReceivedAmount(purchaseTotal)}
+                              className="text-[11px] text-blue-600 hover:text-blue-800 font-medium cursor-pointer"
+                            >
+                              Pay Full ({localCurrency} {purchaseTotal.toFixed(2)})
+                            </button>
+                          )}
+                        </div>
                         {status === "Credit" ? (
-                          <Input
-                            type="number"
-                            min="0"
-                            max={totalAmount}
-                            step="0.01"
-                            value={receivedAmount}
-                            onChange={(e) => setReceivedAmount(Number.parseFloat(e.target.value) || 0)}
-                            className="h-9 mt-1 bg-white border-gray-300 text-gray-900"
-                            placeholder="0.00"
-                          />
+                          <>
+                            <Input
+                              type="number"
+                              min="0"
+                              max={purchaseTotal}
+                              step="0.01"
+                              value={receivedAmount}
+                              onChange={(e) => setReceivedAmount(Number.parseFloat(e.target.value) || 0)}
+                              className="h-9 mt-1 bg-white border-gray-300 text-gray-900"
+                              placeholder="0.00"
+                            />
+                            <p className="text-[11px] text-gray-500 mt-1">
+                              Remaining to Pay: {localCurrency} {(Math.max(0, purchaseTotal - receivedAmount)).toFixed(2)}
+                            </p>
+                          </>
                         ) : (
                           <Input
                             type="number"
-                            value={totalAmount > 0 ? totalAmount.toFixed(2) : "0.00"}
+                            value={purchaseTotal > 0 ? purchaseTotal.toFixed(2) : "0.00"}
                             disabled
                             className="h-9 mt-1 bg-gray-100 border-gray-200 text-gray-500 cursor-not-allowed"
                           />
@@ -707,8 +726,14 @@ export default function EditPurchaseModal({
                             className="w-16 h-7 text-xs text-center bg-white border-gray-300 text-gray-900"
                           />
                         </div>
+                        <div className="flex justify-between items-center text-gray-800 font-semibold border-t border-gray-100 pt-2">
+                          <span>Purchase Bill (Supplier):</span>
+                          <span>
+                            {localCurrency} {purchaseTotal.toFixed(2)}
+                          </span>
+                        </div>
                         <div className="flex justify-between font-bold text-blue-600 border-t border-gray-200 pt-2">
-                          <span>Grand Total:</span>
+                          <span>Grand Total (with Courier):</span>
                           <span>
                             {localCurrency} {totalAmount.toFixed(2)}
                           </span>

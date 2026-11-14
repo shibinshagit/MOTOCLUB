@@ -93,6 +93,7 @@ import { notifyWarning, notifySuccess, notifyError } from "@/lib/notifications"
 import { downloadSalesSummaryPDF, printSalesSummaryReport, downloadSalesSummaryExcel } from "@/lib/sales-summary-utils"
 import { JobCardModal } from "@/components/shared/job-card/job-card-modal"
 import SaleDocumentActions from "@/components/sales/sale-document-actions"
+import { MoveToDirectModal } from "@/components/sales/move-to-direct-modal"
 
 function getSaleStatusLabel(sale: any): string {
   if (sale.status === "Returned") {
@@ -168,6 +169,7 @@ function SaleStatusBadge({ status }: { status: string }) {
 }
 
 function DeliveryStatusBadge({ status }: { status: string }) {
+  const normalized = status?.toLowerCase() === "direct" ? "Direct" : status
   const styles: Record<string, string> = {
     Pickup: "bg-slate-50 text-slate-700 border-slate-200",
     Pending: "bg-amber-50 text-amber-700 border-amber-200",
@@ -186,10 +188,10 @@ function DeliveryStatusBadge({ status }: { status: string }) {
   return (
     <span
       className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${
-        styles[status] || "border-border bg-muted text-muted-foreground"
+        styles[normalized] || "border-border bg-muted text-muted-foreground"
       }`}
     >
-      {status}
+      {normalized}
     </span>
   )
 }
@@ -322,6 +324,7 @@ export default function SalesExcelTable({
   const [isGeneratingReport, setIsGeneratingReport] = useState(false)
   const [isCreateJobCardOpen, setIsCreateJobCardOpen] = useState(false)
   const [editingJobCardId, setEditingJobCardId] = useState<number | null>(null)
+  const [moveToDirectSale, setMoveToDirectSale] = useState<any | null>(null)
 
   const handleRowEdit = (sale: any) => {
     if (isJobCardSale(sale)) {
@@ -730,10 +733,15 @@ export default function SalesExcelTable({
     if (isPurchaseManager && purchaseManagerCardMode === "orders_to_check") {
       return serverSales.filter((s: any) => {
         const dStatus = (s.delivery_status || "pending").trim().toLowerCase()
-        const isAutoReadyStatus = ["packed", "sent", "direct", "shipped", "shipping", "delivered"].includes(dStatus)
-        const isReady = Boolean(s.is_ready_to_ship) || isAutoReadyStatus
         const isDirect = dStatus === "direct"
-        return (dStatus === "pending" || dStatus === "paid") && !isReady && !isDirect
+        if (isDirect) {
+          const courierFilled = Boolean(s.courier_service_name && s.courier_service_name.trim())
+          const supplierFilled = Boolean(s.dropship_supplier && s.dropship_supplier.trim())
+          return !(courierFilled && supplierFilled)
+        }
+        const isAutoReadyStatus = ["packed", "sent", "shipped", "shipping", "delivered"].includes(dStatus)
+        const isReady = Boolean(s.is_ready_to_ship) || isAutoReadyStatus
+        return (dStatus === "pending" || dStatus === "paid") && !isReady
       })
     }
     if (isLogistics && logisticsCardMode === "ready_to_ship") {
@@ -2009,6 +2017,14 @@ export default function SalesExcelTable({
                     const isJobCard = isJobCardSale(sale)
                     const profitAmount = getSaleProfit(sale)
                     const isDirectOrder = (sale.delivery_status || "").trim().toLowerCase() === "direct" || Boolean(sale.is_direct)
+                    const isCourier =
+                      (sale.type_of_sale || "").trim().toLowerCase() === "courier" ||
+                      (sale.fulfillment_type || "").trim().toLowerCase() === "ship" ||
+                      Number(sale.courier_paid_extra) > 0
+                    const isJobCardCourier = isJobCard && isCourier
+                    const hasCourierService = Boolean(sale.courier_service_name && sale.courier_service_name.trim())
+                    const hasSupplier = Boolean(sale.dropship_supplier && sale.dropship_supplier.trim())
+                    const canMoveToDirect = (!isDirectOrder && isJobCardCourier) || (isDirectOrder && (!hasCourierService || !hasSupplier))
 
                     const mainRow = (
                       <tr
@@ -2146,6 +2162,8 @@ export default function SalesExcelTable({
                             userRole="admin"
                             onStatusChange={(newStatus) => handleDeliveryStatusChange(sale.id, newStatus)}
                             onOpenFulfillment={() => openFulfillmentModal(sale, "Shipped")}
+                            onOpenMoveToDirect={() => setMoveToDirectSale(sale)}
+                            sale={sale}
                           />
                         </td>
                         <td className="whitespace-nowrap px-3 py-1.5 text-slate-700">
@@ -2206,7 +2224,7 @@ export default function SalesExcelTable({
                         {canShowActions && (
                           <td className={stickyActionCellClass(baseBgClass)}>
                             {isPurchaseManager ? (
-                              <div className="flex items-center justify-center">
+                              <div className="flex items-center justify-center gap-1">
                                 <Button
                                   type="button"
                                   size="sm"
@@ -2225,6 +2243,22 @@ export default function SalesExcelTable({
                                     <SendHorizontal className="h-3.5 w-3.5" />
                                   )}
                                 </Button>
+                                {canMoveToDirect && (
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    onClick={(event) => {
+                                      event.stopPropagation()
+                                      setMoveToDirectSale(sale)
+                                    }}
+                                    className="h-7 px-2 text-xs font-semibold bg-purple-600 hover:bg-purple-700 text-white rounded-md shadow-2xs hover:shadow-xs transition-transform hover:scale-105 active:scale-95 flex items-center justify-center gap-1 cursor-pointer"
+                                    title="Move to Direct (Dropship)"
+                                    aria-label="Move to Direct"
+                                  >
+                                    <Truck className="h-3.5 w-3.5" />
+                                    <span className="text-[11px] font-medium">Direct</span>
+                                  </Button>
+                                )}
                               </div>
                             ) : isLogistics ? (
                               <div className="flex items-center justify-center">
@@ -2373,20 +2407,33 @@ export default function SalesExcelTable({
 
                                 <div className="pt-2 flex flex-wrap gap-1.5">
                                   {isPurchaseManager && purchaseManagerCardMode === "orders_to_check" && (
-                                    <Button
-                                      size="sm"
-                                      disabled={markingReadySaleId === sale.id}
-                                      onClick={() => handleMarkReadyToShip(sale)}
-                                      className="h-7 text-xs px-2.5 font-semibold bg-blue-600 hover:bg-blue-700 text-white gap-1.5 cursor-pointer"
-                                      title="Mark order Ready to Ship for Logistics"
-                                    >
-                                      {markingReadySaleId === sale.id ? (
-                                        <Loader2 className="h-3 w-3 animate-spin" />
-                                      ) : (
-                                        <PackageCheck className="h-3 w-3" />
+                                    <>
+                                      <Button
+                                        size="sm"
+                                        disabled={markingReadySaleId === sale.id}
+                                        onClick={() => handleMarkReadyToShip(sale)}
+                                        className="h-7 text-xs px-2.5 font-semibold bg-blue-600 hover:bg-blue-700 text-white gap-1.5 cursor-pointer"
+                                        title="Mark order Ready to Ship for Logistics"
+                                      >
+                                        {markingReadySaleId === sale.id ? (
+                                          <Loader2 className="h-3 w-3 animate-spin" />
+                                        ) : (
+                                          <PackageCheck className="h-3 w-3" />
+                                        )}
+                                        Ready to Ship
+                                      </Button>
+                                      {canMoveToDirect && (
+                                        <Button
+                                          size="sm"
+                                          onClick={() => setMoveToDirectSale(sale)}
+                                          className="h-7 text-xs px-2.5 font-semibold bg-purple-600 hover:bg-purple-700 text-white gap-1.5 cursor-pointer"
+                                          title="Move to Direct (Dropship)"
+                                        >
+                                          <Truck className="h-3 w-3" />
+                                          Move to Direct
+                                        </Button>
                                       )}
-                                      Ready to Ship
-                                    </Button>
+                                    </>
                                   )}
                                   {showActions && (
                                     <Button
@@ -2511,6 +2558,14 @@ export default function SalesExcelTable({
                 const isExpanded = expandedSaleId === sale.id
                 const profitAmount = getSaleProfit(sale)
                 const isDirectOrder = (sale.delivery_status || "").trim().toLowerCase() === "direct" || Boolean(sale.is_direct)
+                const isCourier =
+                  (sale.type_of_sale || "").trim().toLowerCase() === "courier" ||
+                  (sale.fulfillment_type || "").trim().toLowerCase() === "ship" ||
+                  Number(sale.courier_paid_extra) > 0
+                const isJobCardCourier = isJobCard && isCourier
+                const hasCourierService = Boolean(sale.courier_service_name && sale.courier_service_name.trim())
+                const hasSupplier = Boolean(sale.dropship_supplier && sale.dropship_supplier.trim())
+                const canMoveToDirect = (!isDirectOrder && isJobCardCourier) || (isDirectOrder && (!hasCourierService || !hasSupplier))
 
                 let mobileTierClass = ""
                 if (isLogistics) {
@@ -2685,6 +2740,8 @@ export default function SalesExcelTable({
                           userRole="admin"
                           onStatusChange={(newStatus) => handleDeliveryStatusChange(sale.id, newStatus)}
                           onOpenFulfillment={() => openFulfillmentModal(sale, "Shipped")}
+                          onOpenMoveToDirect={() => setMoveToDirectSale(sale)}
+                          sale={sale}
                         />
                       </div>
 
@@ -2707,6 +2764,35 @@ export default function SalesExcelTable({
                     <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100">
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <SaleDocumentActions sale={sale} size="card" />
+
+                        {isPurchaseManager && purchaseManagerCardMode === "orders_to_check" && (
+                          <Button
+                            size="sm"
+                            disabled={markingReadySaleId === sale.id}
+                            onClick={() => handleMarkReadyToShip(sale)}
+                            className="h-8 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white gap-1.5 rounded-lg px-2.5 shadow-2xs cursor-pointer"
+                            title="Mark order Ready to Ship for Logistics"
+                          >
+                            {markingReadySaleId === sale.id ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <PackageCheck className="h-3.5 w-3.5" />
+                            )}
+                            <span>Ready to Ship</span>
+                          </Button>
+                        )}
+
+                        {isPurchaseManager && purchaseManagerCardMode === "orders_to_check" && canMoveToDirect && (
+                          <Button
+                            size="sm"
+                            onClick={() => setMoveToDirectSale(sale)}
+                            className="h-8 text-xs font-semibold bg-purple-600 hover:bg-purple-700 text-white gap-1.5 rounded-lg px-2.5 shadow-2xs cursor-pointer"
+                            title="Move to Direct (Dropship)"
+                          >
+                            <Truck className="h-3.5 w-3.5" />
+                            <span>Move to Direct</span>
+                          </Button>
+                        )}
 
                         {isLogistics && logisticsCardMode !== "all_orders" && !isDirectOrder && (
                           <Button
@@ -2754,6 +2840,11 @@ export default function SalesExcelTable({
                           {isLogistics && logisticsCardMode !== "all_orders" && !isDirectOrder && (
                             <DropdownMenuItem onClick={() => openFulfillmentModal(sale)}>
                               <FilePenLine className="h-4 w-4 mr-2 text-indigo-600" /> Fulfillment Details
+                            </DropdownMenuItem>
+                          )}
+                          {isPurchaseManager && purchaseManagerCardMode === "orders_to_check" && canMoveToDirect && (
+                            <DropdownMenuItem onClick={() => setMoveToDirectSale(sale)}>
+                              <Truck className="h-4 w-4 mr-2 text-purple-600" /> Move to Direct
                             </DropdownMenuItem>
                           )}
                           {showActions && (
@@ -3011,6 +3102,23 @@ export default function SalesExcelTable({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {moveToDirectSale && (
+        <MoveToDirectModal
+          isOpen={Boolean(moveToDirectSale)}
+          onClose={() => setMoveToDirectSale(null)}
+          sale={moveToDirectSale}
+          deviceId={deviceId || moveToDirectSale.device_id || activeStaff?.device_id || 0}
+          userId={deviceId || moveToDirectSale.device_id || activeStaff?.device_id || activeStaff?.id || 0}
+          onSuccess={() => {
+            setMoveToDirectSale(null)
+            fetchServerSales()
+            if (onRefreshSales) {
+              onRefreshSales()
+            }
+          }}
+        />
+      )}
     </div>
   )
 }

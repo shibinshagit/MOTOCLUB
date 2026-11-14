@@ -133,7 +133,10 @@ export default function NewPurchaseModal({
     [subtotal, courierChargePercentage]
   )
   const courierCharge = customCourierCharge !== null ? customCourierCharge : autoCourierCharge
-  const totalAmount = useMemo(() => Number(subtotal) + Number(taxAmount) - Number(discountAmount) + Number(courierCharge), [subtotal, taxAmount, discountAmount, courierCharge])
+  // Purchase bill from supplier (without courier charge)
+  const purchaseTotal = useMemo(() => Math.max(0, Math.round((Number(subtotal) + Number(taxAmount) - Number(discountAmount)) * 100) / 100), [subtotal, taxAmount, discountAmount])
+  // Total cost including courier charge (paid after delivery)
+  const totalAmount = useMemo(() => Math.max(0, Math.round((purchaseTotal + Number(courierCharge)) * 100) / 100), [purchaseTotal, courierCharge])
 
   interface AllocationItem {
     key: string
@@ -286,17 +289,17 @@ export default function NewPurchaseModal({
   // Only auto-adjust received amount based on status when totals change
   useEffect(() => {
     if (status === "Paid") {
-      setReceivedAmount(totalAmount)
+      setReceivedAmount(purchaseTotal)
     } else if (status === "Cancelled") {
       setReceivedAmount(0)
     }
-  }, [totalAmount, status])
+  }, [purchaseTotal, status])
 
   // Handle status change
   const handleStatusChange = (newStatus: string) => {
     setStatus(newStatus)
     if (newStatus === "Paid") {
-      setReceivedAmount(totalAmount)
+      setReceivedAmount(purchaseTotal)
     } else if (newStatus === "Cancelled") {
       setReceivedAmount(0)
     }
@@ -502,11 +505,11 @@ export default function NewPurchaseModal({
       return
     }
 
-    // Validate paid amount
-    if (receivedAmount > totalAmount) {
+    // Validate paid amount against purchase bill
+    if (receivedAmount > purchaseTotal) {
       setFormAlert({
         type: "error",
-        message: "Paid amount cannot be greater than total amount",
+        message: "Paid amount cannot be greater than purchase bill total",
       })
       return
     }
@@ -515,18 +518,20 @@ export default function NewPurchaseModal({
     isSubmittingRef.current = true
 
     try {
+      const finalReceived = status === "Paid" ? purchaseTotal : receivedAmount
+
       // Prepare form data
       const formData = new FormData()
       formData.append("supplier", supplier)
       formData.append("purchase_date", date.toISOString())
-      formData.append("total_amount", totalAmount.toString())
+      formData.append("total_amount", purchaseTotal.toString())
       formData.append("status", status)
       formData.append("purchase_status", purchaseStatus)
       formData.append("purchase_type", "Stock")
       formData.append("payment_method", paymentMethod)
       formData.append("user_id", userId.toString())
       formData.append("device_id", deviceId.toString())
-      formData.append("received_amount", receivedAmount.toString())
+      formData.append("received_amount", finalReceived.toString())
 
       // Prepare items
       formData.append("items", JSON.stringify(purchaseItems))
@@ -534,7 +539,7 @@ export default function NewPurchaseModal({
       formData.append("courier_charge_percentage", courierChargePercentage.toString())
       formData.append("discount", discountAmount.toString())
       if (useSupplierCreditOnPurchase && selectedSupplierCredit > 0) {
-        const creditToApply = Math.min(selectedSupplierCredit, Math.max(totalAmount - receivedAmount, 0))
+        const creditToApply = Math.min(selectedSupplierCredit, Math.max(purchaseTotal - finalReceived, 0))
         formData.append("credit_to_apply", creditToApply.toString())
       }
 
@@ -693,22 +698,38 @@ export default function NewPurchaseModal({
                     </div>
                   </div>
                   <div>
-                    <Label className="text-sm font-medium text-gray-700">Paid Amount</Label>
+                    <div className="flex items-center justify-between">
+                      <Label className="text-sm font-medium text-gray-700">Paid Amount</Label>
+                      {status === "Credit" && (
+                        <button
+                          type="button"
+                          onClick={() => setReceivedAmount(purchaseTotal)}
+                          className="text-[11px] text-blue-600 hover:text-blue-800 font-medium cursor-pointer"
+                        >
+                          Pay Full ({currencySymbol} {purchaseTotal.toFixed(2)})
+                        </button>
+                      )}
+                    </div>
                     {status === "Credit" ? (
-                      <Input
-                        type="number"
-                        min="0"
-                        max={totalAmount}
-                        step="0.01"
-                        value={receivedAmount}
-                        onChange={(e) => setReceivedAmount(Number.parseFloat(e.target.value) || 0)}
-                        className="h-9 mt-1 bg-white border-gray-300 text-gray-900"
-                        placeholder="0.00"
-                      />
+                      <>
+                        <Input
+                          type="number"
+                          min="0"
+                          max={purchaseTotal}
+                          step="0.01"
+                          value={receivedAmount}
+                          onChange={(e) => setReceivedAmount(Number.parseFloat(e.target.value) || 0)}
+                          className="h-9 mt-1 bg-white border-gray-300 text-gray-900"
+                          placeholder="0.00"
+                        />
+                        <p className="text-[11px] text-gray-500 mt-1">
+                          Remaining to Pay: {currencySymbol} {(Math.max(0, purchaseTotal - receivedAmount)).toFixed(2)}
+                        </p>
+                      </>
                     ) : (
                       <Input
                         type="number"
-                        value={totalAmount > 0 ? totalAmount.toFixed(2) : "0.00"}
+                        value={purchaseTotal > 0 ? purchaseTotal.toFixed(2) : "0.00"}
                         disabled
                         className="h-9 mt-1 bg-gray-100 border-gray-200 text-gray-500 cursor-not-allowed"
                       />
@@ -725,6 +746,14 @@ export default function NewPurchaseModal({
                         {currencySymbol} {subtotal.toFixed(2)}
                       </span>
                     </div>
+                    {taxAmount > 0 && (
+                      <div className="flex justify-between text-gray-600">
+                        <span>Tax:</span>
+                        <span>
+                          +{currencySymbol} {taxAmount.toFixed(2)}
+                        </span>
+                      </div>
+                    )}
                     <div className="flex justify-between items-center">
                       <span className="text-gray-600">Discount:</span>
                       <Input
@@ -736,6 +765,20 @@ export default function NewPurchaseModal({
                         className="w-16 h-7 text-xs text-center bg-white border-gray-300"
                       />
                     </div>
+                    <div className="flex justify-between text-gray-800 font-semibold border-t border-gray-100 pt-2">
+                      <span>Purchase Bill (Supplier):</span>
+                      <span>
+                        {currencySymbol} {purchaseTotal.toFixed(2)}
+                      </span>
+                    </div>
+                    {courierCharge > 0 && (
+                      <div className="flex justify-between text-purple-700 text-xs">
+                        <span>Courier Charge (Payable on delivery):</span>
+                        <span>
+                          +{currencySymbol} {courierCharge.toFixed(2)}
+                        </span>
+                      </div>
+                    )}
                     <div className="flex justify-between font-bold text-green-600 border-t border-gray-200 pt-2">
                       <span>Grand Total:</span>
                       <span>
@@ -743,11 +786,11 @@ export default function NewPurchaseModal({
                       </span>
                     </div>
 
-                    {selectedSupplierCredit > 0 && totalAmount > 0 && (
+                    {selectedSupplierCredit > 0 && purchaseTotal > 0 && (
                       <div className="p-2.5 bg-blue-50 border border-blue-200 rounded-md text-xs space-y-1.5 mt-2">
                         <div className="flex justify-between items-center text-gray-700">
                           <span>Purchase Total:</span>
-                          <span className="font-semibold">{currencySymbol} {totalAmount.toFixed(2)}</span>
+                          <span className="font-semibold">{currencySymbol} {purchaseTotal.toFixed(2)}</span>
                         </div>
                         <div className="flex justify-between items-center text-blue-800">
                           <span>Available Supplier Credit:</span>
@@ -769,11 +812,11 @@ export default function NewPurchaseModal({
                           <>
                             <div className="flex justify-between text-blue-700 font-medium pt-1 border-t border-blue-200">
                               <span>Supplier Credit Applied:</span>
-                              <span>- {currencySymbol} {Math.min(selectedSupplierCredit, Math.max(totalAmount - (status === "Paid" ? totalAmount : receivedAmount), 0)).toFixed(2)}</span>
+                              <span>- {currencySymbol} {Math.min(selectedSupplierCredit, Math.max(purchaseTotal - (status === "Paid" ? purchaseTotal : receivedAmount), 0)).toFixed(2)}</span>
                             </div>
                             <div className="flex justify-between text-gray-900 font-bold border-t border-blue-200 pt-1">
                               <span>Remaining to Pay:</span>
-                              <span>{currencySymbol} {Math.max(totalAmount - (status === "Paid" ? totalAmount : receivedAmount) - (useSupplierCreditOnPurchase ? selectedSupplierCredit : 0), 0).toFixed(2)}</span>
+                              <span>{currencySymbol} {Math.max(purchaseTotal - (status === "Paid" ? purchaseTotal : receivedAmount) - (useSupplierCreditOnPurchase ? selectedSupplierCredit : 0), 0).toFixed(2)}</span>
                             </div>
                           </>
                         )}

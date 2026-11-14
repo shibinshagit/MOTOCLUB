@@ -8,8 +8,8 @@ import { getSupplierCreditSummary } from "./supplier-payment-actions"
 export async function getSuppliers(userId: number, limit?: number, searchTerm?: string) {
   console.log("getSuppliers: Called with userId:", userId, "limit:", limit, "searchTerm:", searchTerm)
 
-  if (!userId) {
-    console.error("getSuppliers: No userId provided")
+  const effectiveUserId = Number(userId) || 0
+  if (!effectiveUserId) {
     return { success: false, message: "User ID is required", data: [] }
   }
 
@@ -18,75 +18,46 @@ export async function getSuppliers(userId: number, limit?: number, searchTerm?: 
   try {
     console.log("getSuppliers: Executing SQL query")
 
-    let suppliers: any[]
+    const searchPattern = searchTerm && searchTerm.trim() ? `%${searchTerm.toLowerCase()}%` : null
 
-    if (searchTerm && searchTerm.trim()) {
-      const searchPattern = `%${searchTerm.toLowerCase()}%`
-      suppliers = await sql`
+    const suppliers = await sql`
+      SELECT 
+        s.*,
+        COALESCE(p.total_purchases, 0) as total_purchases,
+        COALESCE(p.total_amount, 0) as total_amount,
+        GREATEST(COALESCE(ft.total_paid, 0), COALESCE(p.paid_amount, 0)) as paid_amount,
+        COALESCE(p.balance_amount, 0) as balance_amount
+      FROM suppliers s
+      LEFT JOIN LATERAL (
         SELECT 
-          s.*,
-          COALESCE(p.total_purchases, 0) as total_purchases,
-          COALESCE(p.total_amount, 0) as total_amount,
-          GREATEST(COALESCE(ft.total_paid, 0), COALESCE(p.paid_amount, 0)) as paid_amount,
-          COALESCE(p.balance_amount, 0) as balance_amount
-        FROM suppliers s
-        LEFT JOIN LATERAL (
-          SELECT 
-            COUNT(*) as total_purchases,
-            SUM(total_amount) as total_amount,
-            SUM(COALESCE(received_amount, 0)) as paid_amount,
-            SUM(CASE WHEN status != 'Cancelled' THEN (total_amount - COALESCE(received_amount, 0)) ELSE 0 END) as balance_amount
-          FROM purchases
-          WHERE created_by = ${userId} AND TRIM(supplier) = TRIM(s.name)
-        ) p ON true
-        LEFT JOIN LATERAL (
-          SELECT 
-            SUM(amount) as total_paid
-          FROM financial_transactions
-          WHERE reference_id = s.id 
-            AND transaction_type = 'supplier_payment'
-            AND created_by = ${userId}
-            AND (status IS NULL OR status != 'Cancelled')
-        ) ft ON true
-        WHERE s.created_by = ${userId}
-        AND (
-          LOWER(s.name) LIKE ${searchPattern} OR 
-          LOWER(s.phone) LIKE ${searchPattern} OR 
-          LOWER(s.email) LIKE ${searchPattern}
-        )
-        ORDER BY s.name ASC
-      `
-    } else {
-      suppliers = await sql`
+          COUNT(*) as total_purchases,
+          SUM(total_amount) as total_amount,
+          SUM(COALESCE(received_amount, 0)) as paid_amount,
+          SUM(CASE WHEN status != 'Cancelled' THEN (total_amount - COALESCE(received_amount, 0)) ELSE 0 END) as balance_amount
+        FROM purchases
+        WHERE (created_by = ${effectiveUserId} OR device_id = ${effectiveUserId}) AND TRIM(supplier) = TRIM(s.name)
+      ) p ON true
+      LEFT JOIN LATERAL (
         SELECT 
-          s.*,
-          COALESCE(p.total_purchases, 0) as total_purchases,
-          COALESCE(p.total_amount, 0) as total_amount,
-          GREATEST(COALESCE(ft.total_paid, 0), COALESCE(p.paid_amount, 0)) as paid_amount,
-          COALESCE(p.balance_amount, 0) as balance_amount
-        FROM suppliers s
-        LEFT JOIN LATERAL (
-          SELECT 
-            COUNT(*) as total_purchases,
-            SUM(total_amount) as total_amount,
-            SUM(COALESCE(received_amount, 0)) as paid_amount,
-            SUM(CASE WHEN status != 'Cancelled' THEN (total_amount - COALESCE(received_amount, 0)) ELSE 0 END) as balance_amount
-          FROM purchases
-          WHERE created_by = ${userId} AND TRIM(supplier) = TRIM(s.name)
-        ) p ON true
-        LEFT JOIN LATERAL (
-          SELECT 
-            SUM(amount) as total_paid
-          FROM financial_transactions
-          WHERE reference_id = s.id 
-            AND transaction_type = 'supplier_payment'
-            AND created_by = ${userId}
-            AND (status IS NULL OR status != 'Cancelled')
-        ) ft ON true
-        WHERE s.created_by = ${userId}
-        ORDER BY s.name ASC
-      `
-    }
+          SUM(amount) as total_paid
+        FROM financial_transactions
+        WHERE reference_id = s.id 
+          AND transaction_type = 'supplier_payment'
+          AND (created_by = ${effectiveUserId} OR device_id = ${effectiveUserId})
+          AND (status IS NULL OR status != 'Cancelled')
+      ) ft ON true
+      WHERE (
+        s.created_by = ${effectiveUserId}
+        OR s.created_by IN (SELECT device_id FROM staff WHERE id = ${effectiveUserId})
+      )
+      AND (
+        ${searchPattern}::text IS NULL
+        OR LOWER(s.name) LIKE ${searchPattern}
+        OR LOWER(s.phone) LIKE ${searchPattern}
+        OR LOWER(s.email) LIKE ${searchPattern}
+      )
+      ORDER BY s.name ASC
+    `
 
     // Batch fetch financial transactions for all suppliers to prevent N+1 query timeouts
     const supplierIds = suppliers.map((s: any) => s.id)
@@ -96,7 +67,7 @@ export async function getSuppliers(userId: number, limit?: number, searchTerm?: 
           FROM financial_transactions
           WHERE reference_id = ANY(${supplierIds})
             AND reference_type = 'supplier'
-            AND created_by = ${userId}
+            AND (created_by = ${effectiveUserId} OR device_id = ${effectiveUserId} OR created_by IN (SELECT device_id FROM staff WHERE id = ${effectiveUserId}))
             AND (status IS NULL OR status != 'Cancelled')
         `
       : []
@@ -480,7 +451,8 @@ export async function deleteSupplier(id: number, userId: number) {
 }
 
 export async function getSupplierNames(userId: number) {
-  if (!userId) {
+  const effectiveUserId = Number(userId) || 0
+  if (!effectiveUserId) {
     return { success: false, message: "User ID is required", data: [] }
   }
 
@@ -489,7 +461,10 @@ export async function getSupplierNames(userId: number) {
   try {
     const suppliers = await sql`
       SELECT name FROM suppliers
-      WHERE created_by = ${userId}
+      WHERE (
+        created_by = ${effectiveUserId}
+        OR created_by IN (SELECT device_id FROM staff WHERE id = ${effectiveUserId})
+      )
       ORDER BY name ASC
     `
 

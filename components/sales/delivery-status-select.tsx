@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button"
 import { TrackingDetailsModal } from "./tracking-details-modal"
 import { AlertTriangle, RotateCcw, Package } from "lucide-react"
 import { JobCardWhatsappConfirmation } from "@/components/shared/job-card/job-card-whatsapp-confirmation"
+import { MoveToDirectModal } from "./move-to-direct-modal"
 
 const VALID_TRANSITIONS: Record<string, string[]> = {
   "Pending": [], // No manual exits allowed
@@ -24,6 +25,23 @@ const VALID_TRANSITIONS: Record<string, string[]> = {
   "Failed": []
 }
 
+function normalizeDeliveryStatus(val?: string | null): string {
+  if (!val) return "Pending"
+  const trimmed = val.trim()
+  const lower = trimmed.toLowerCase()
+  if (lower === "direct") return "Direct"
+  if (lower === "shipping" || lower === "shipped") return "Shipped"
+  if (lower === "pending") return "Pending"
+  if (lower === "paid") return "Paid"
+  if (lower === "packed") return "Packed"
+  if (lower === "sent") return "Sent"
+  if (lower === "delivered") return "Delivered"
+  if (lower === "returned") return "Returned"
+  if (lower === "failed") return "Failed"
+  if (lower === "pickup") return "Pickup"
+  return trimmed
+}
+
 export function DeliveryStatusSelect({
   saleId,
   deviceId,
@@ -35,8 +53,10 @@ export function DeliveryStatusSelect({
   paymentStatus,
   isJobCard,
   userRole,
+  sale,
   onStatusChange,
   onOpenFulfillment,
+  onOpenMoveToDirect,
 }: {
   saleId: number
   deviceId: number
@@ -48,19 +68,20 @@ export function DeliveryStatusSelect({
   paymentStatus?: string
   isJobCard?: boolean
   userRole?: "admin" | "staff"
+  sale?: any
   onStatusChange?: (newStatus: string) => void
   onOpenFulfillment?: () => void
+  onOpenMoveToDirect?: () => void
 }) {
   const { toast } = useToast()
   const [loading, setLoading] = useState(false)
-  const initialStatus = currentStatus === "Shipping" ? "Shipped" : (currentStatus || "Pending")
+  const initialStatus = normalizeDeliveryStatus(currentStatus)
   const [status, setStatus] = useState(initialStatus)
   const [pendingOptimisticStatus, setPendingOptimisticStatus] = useState<string | null>(null)
 
   // Keep internal status state in sync when parent prop updates from server
   useEffect(() => {
-    const rawCurrent = currentStatus || "Pending"
-    const cleanCurrent = rawCurrent === "Shipping" ? "Shipped" : rawCurrent
+    const cleanCurrent = normalizeDeliveryStatus(currentStatus)
     if (pendingOptimisticStatus !== null) {
       if (cleanCurrent === pendingOptimisticStatus) {
         setPendingOptimisticStatus(null)
@@ -89,8 +110,8 @@ export function DeliveryStatusSelect({
 
   // Return Confirmation State
   const [returnConfirmOpen, setReturnConfirmOpen] = useState(false)
-  // Direct Delivery Confirmation State
-  const [directConfirmOpen, setDirectConfirmOpen] = useState(false)
+  // Move to Direct Modal State
+  const [isMoveToDirectOpen, setIsMoveToDirectOpen] = useState(false)
 
   const handleUpdateStatus = async (newStatus: string) => {
     const previousStatus = status
@@ -237,8 +258,13 @@ export function DeliveryStatusSelect({
     }
 
     if (newStatus === "Direct") {
-      setDirectConfirmOpen(true)
-      return // Show confirmation dialog first
+      e.target.value = status // Keep select on current status until confirmed via Move to Direct modal
+      if (onOpenMoveToDirect) {
+        onOpenMoveToDirect()
+        return
+      }
+      setIsMoveToDirectOpen(true)
+      return
     }
 
     if (newStatus === "Shipped" || newStatus === "Shipping") {
@@ -252,11 +278,6 @@ export function DeliveryStatusSelect({
     }
 
     await handleUpdateStatus(newStatus)
-  }
-
-  const handleConfirmDirect = async () => {
-    setDirectConfirmOpen(false)
-    await handleUpdateStatus("Direct")
   }
 
   const handleConfirmReturn = async () => {
@@ -304,8 +325,8 @@ export function DeliveryStatusSelect({
 
   // Enable all standard delivery status options for full flexibility
   const ALL_STATUS_OPTIONS = ["Pending", "Paid", "Packed", "Sent", "Direct", "Shipped", "Delivered", "Returned", "Failed", "Pickup"]
-  const currentMapped = status === "Shipping" ? "Shipped" : status
-  const currentServerMapped = currentStatus === "Shipping" ? "Shipped" : currentStatus
+  const currentMapped = normalizeDeliveryStatus(status)
+  const currentServerMapped = normalizeDeliveryStatus(currentStatus)
   const uniqueOptions = Array.from(new Set([currentMapped, currentServerMapped, ...ALL_STATUS_OPTIONS]))
     .filter((opt): opt is string => Boolean(opt) && opt !== "Shipping" && opt !== "shipping" && opt !== "In transit" && opt !== "in transit" && opt !== "Courier" && opt !== "courier")
 
@@ -318,7 +339,7 @@ export function DeliveryStatusSelect({
       >
         <select
           disabled={isDropdownDisabled}
-          value={status}
+          value={currentMapped}
           onChange={handleChange}
           className={`text-xs px-2 py-1 rounded-md border focus:outline-none focus:ring-2 focus:ring-primary/50 transition-colors ${getStatusClasses()} ${isDropdownDisabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
           onClick={(e) => e.stopPropagation()}
@@ -381,36 +402,30 @@ export function DeliveryStatusSelect({
         </DialogContent>
       </Dialog>
 
-      {/* Direct Delivery Confirmation Dialog */}
-      <Dialog open={directConfirmOpen} onOpenChange={(open) => !open && setDirectConfirmOpen(false)}>
-        <DialogContent onClick={(e) => e.stopPropagation()} className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-indigo-600">
-              <Package className="h-5 w-5" />
-              Direct Delivery
-            </DialogTitle>
-            <DialogDescription className="text-slate-600 mt-2">
-              This order will be marked for direct delivery from the partner/vendor to the customer.
-              <br /><br />
-              The invoice and delivery label will be available for this order.
-              <br /><br />
-              Continue?
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="gap-2 mt-4">
-            <Button variant="outline" onClick={() => setDirectConfirmOpen(false)} disabled={loading}>
-              Cancel
-            </Button>
-            <Button
-              onClick={handleConfirmDirect}
-              disabled={loading}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white"
-            >
-              {loading ? "Processing..." : "Confirm Direct Delivery"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Move to Direct Modal */}
+      {isMoveToDirectOpen && (
+        <MoveToDirectModal
+          isOpen={isMoveToDirectOpen}
+          onClose={() => setIsMoveToDirectOpen(false)}
+          sale={sale || {
+            id: saleId,
+            device_id: deviceId,
+            customer_name: customerName,
+            customer_phone: customerPhone,
+            tracking_id: trackingId,
+            payment_status: paymentStatus,
+          }}
+          deviceId={deviceId}
+          userId={deviceId}
+          onSuccess={() => {
+            setIsMoveToDirectOpen(false)
+            setStatus("Direct")
+            if (onStatusChange) {
+              onStatusChange("Direct")
+            }
+          }}
+        />
+      )}
 
       {/* Prepare Customer Notification Dialog */}
       {isTrackingModalOpen && (

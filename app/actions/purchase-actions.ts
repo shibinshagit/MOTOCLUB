@@ -728,25 +728,29 @@ export async function createPurchase(formData: FormData) {
           }
         }
 
-        if (variantId) {
+        const isDropship = (purchaseType || "").toLowerCase() === "dropship"
+
+        if (!isDropship) {
+          if (variantId) {
+            await tx`
+              UPDATE product_variants
+              SET cost_price = ${unitAcquisitionCost},
+                  wholesale_price = ${unitAcquisitionCost}
+              WHERE id = ${variantId}
+            `
+          }
+
           await tx`
-            UPDATE product_variants
-            SET cost_price = ${unitAcquisitionCost},
-                wholesale_price = ${unitAcquisitionCost}
-            WHERE id = ${variantId}
+            UPDATE products
+            SET wholesale_price = ${unitAcquisitionCost},
+                updated_at = NOW()
+            WHERE id = ${item.product_id}
           `
         }
 
-        await tx`
-          UPDATE products
-          SET wholesale_price = ${unitAcquisitionCost},
-              updated_at = NOW()
-          WHERE id = ${item.product_id}
-        `
-
-        // Every purchase MUST create a NEW BATCH — never reuse or merge.
+        // Every purchase MUST create a NEW BATCH — never reuse or merge (Stock purchases only).
         let batchId: number | null = null;
-        if (isDelivered && !isCancelled) {
+        if (!isDropship && isDelivered && !isCancelled) {
           const batchNo = `BATCH-PUR-${purchaseId}-${itemIndex}-${Date.now()}`;
           const newBatch = await tx`
             INSERT INTO product_batches (
@@ -774,8 +778,8 @@ export async function createPurchase(formData: FormData) {
           )
         `
 
-        // Only update stock when purchase status is Delivered AND not Cancelled
-        if (isDelivered && !isCancelled) {
+        // Only update stock when purchase status is Delivered AND not Cancelled AND NOT Dropship
+        if (!isDropship && isDelivered && !isCancelled) {
           await adjustDeviceProductStock(item.product_id, (item as any).variant_id || null, (item as any).batch_id || null, deviceId, Number(item.quantity), tx)
 
           // Add stock history entry for purchase
@@ -904,7 +908,7 @@ export async function markPurchaseDelivered(purchaseId: number, deviceId: number
       await tx`SET LOCAL statement_timeout = '15s'`
       await tx`SET LOCAL lock_timeout = '15s'`
       const purchases = await tx`
-        SELECT id, supplier, status, purchase_status, created_by, courier_charge, discount, total_amount
+        SELECT id, supplier, status, purchase_status, purchase_type, created_by, courier_charge, discount, total_amount
         FROM purchases WHERE id = ${purchaseId} AND device_id = ${deviceId}
         FOR UPDATE
       `
@@ -918,6 +922,17 @@ export async function markPurchaseDelivered(purchaseId: number, deviceId: number
       }
       if (String(purchase.purchase_status).toLowerCase() !== "ordered" || String(purchase.status).toLowerCase() === "cancelled") {
         return { success: false, message: "Only active ordered purchases can be delivered" }
+      }
+
+      // Dropship purchases do not hold warehouse inventory or alter master product costs
+      const isDropship = String(purchase.purchase_type || "").toLowerCase() === "dropship"
+      if (isDropship) {
+        const result = await tx`
+          UPDATE purchases SET purchase_status = 'Delivered', updated_at = NOW()
+          WHERE id = ${purchaseId} AND device_id = ${deviceId} AND purchase_status = 'Ordered' RETURNING *
+        `
+        if (!result.length) throw new Error("Purchase status changed while receiving")
+        return { success: true, data: result[0], message: "Purchase marked as delivered" }
       }
 
       console.log("[receive purchase] loading items")
@@ -1117,12 +1132,14 @@ export async function updatePurchase(formData: FormData) {
     const result = await sql.begin(async (tx: any) => {
       // Get current purchase details to check status change
       const currentPurchase = await tx`
-        SELECT status, purchase_status, received_amount, total_amount FROM purchases WHERE id = ${purchaseId} AND device_id = ${deviceId}
+        SELECT status, purchase_status, purchase_type, received_amount, total_amount FROM purchases WHERE id = ${purchaseId} AND device_id = ${deviceId}
       `
 
       if (currentPurchase.length === 0) {
         throw new Error("Purchase not found")
       }
+
+      const isDropship = (purchaseType || currentPurchase[0]?.purchase_type || "").toLowerCase() === "dropship"
 
       // Get current items to handle stock changes properly
       const currentItems = await tx`
@@ -1209,67 +1226,70 @@ export async function updatePurchase(formData: FormData) {
           }
         }
 
-        if (variantId) {
-          await tx`
-            UPDATE product_variants
-            SET cost_price = ${unitAcquisitionCost}, wholesale_price = ${unitAcquisitionCost}
-            WHERE id = ${variantId}
-          `
-        }
-
-        await tx`
-          UPDATE products
-          SET wholesale_price = ${unitAcquisitionCost},
-              updated_at = NOW()
-          WHERE id = ${item.product_id}
-        `
-
-        // Resolve Batch: reuse existing batch for this purchase item/product to avoid duplicate batches
         let batchId: number | null = item.batch_id ? Number(item.batch_id) : null;
-        if (batchId) {
-          const existingBatch = await tx`
-            SELECT id FROM product_batches WHERE id = ${batchId} AND purchase_id = ${purchaseId}
-          `;
-          if (existingBatch.length === 0) batchId = null;
-        }
 
-        if (!batchId) {
-          const matchingBatch = await tx`
-            SELECT id FROM product_batches 
-            WHERE purchase_id = ${purchaseId} 
-              AND product_id = ${item.product_id} 
-              AND product_variant_id = ${variantId}
-            ORDER BY id ASC LIMIT 1
-          `;
-          if (matchingBatch.length > 0) {
-            batchId = Number(matchingBatch[0].id);
+        if (!isDropship) {
+          if (variantId) {
+            await tx`
+              UPDATE product_variants
+              SET cost_price = ${unitAcquisitionCost}, wholesale_price = ${unitAcquisitionCost}
+              WHERE id = ${variantId}
+            `
           }
-        }
 
-        if (batchId) {
-          // Update existing batch details and quantity
           await tx`
-            UPDATE product_batches
-            SET cost_price = ${unitAcquisitionCost},
-                selling_price = ${item.price},
-                quantity_purchased = ${item.quantity},
-                status = ${shouldAddStock ? 'active' : 'inactive'},
+            UPDATE products
+            SET wholesale_price = ${unitAcquisitionCost},
                 updated_at = NOW()
-            WHERE id = ${batchId}
-          `;
-        } else if (shouldAddStock) {
-          // Create a new batch only if none existed
-          const batchNo = `BATCH-PUR-${purchaseId}-${itemIndex}-${Date.now()}`;
-          const newBatch = await tx`
-            INSERT INTO product_batches (
-              product_id, product_variant_id, batch_no, cost_price, selling_price,
-              quantity_purchased, remaining_quantity, status, purchase_id
-            ) VALUES (
-              ${item.product_id}, ${variantId}, ${batchNo}, ${unitAcquisitionCost}, ${item.price},
-              ${item.quantity}, ${item.quantity}, 'active', ${purchaseId}
-            ) RETURNING id
-          `;
-          batchId = Number(newBatch[0].id);
+            WHERE id = ${item.product_id}
+          `
+
+          // Resolve Batch: reuse existing batch for this purchase item/product to avoid duplicate batches
+          if (batchId) {
+            const existingBatch = await tx`
+              SELECT id FROM product_batches WHERE id = ${batchId} AND purchase_id = ${purchaseId}
+            `;
+            if (existingBatch.length === 0) batchId = null;
+          }
+
+          if (!batchId) {
+            const matchingBatch = await tx`
+              SELECT id FROM product_batches 
+              WHERE purchase_id = ${purchaseId} 
+                AND product_id = ${item.product_id} 
+                AND product_variant_id = ${variantId}
+              ORDER BY id ASC LIMIT 1
+            `;
+            if (matchingBatch.length > 0) {
+              batchId = Number(matchingBatch[0].id);
+            }
+          }
+
+          if (batchId) {
+            // Update existing batch details and quantity
+            await tx`
+              UPDATE product_batches
+              SET cost_price = ${unitAcquisitionCost},
+                  selling_price = ${item.price},
+                  quantity_purchased = ${item.quantity},
+                  status = ${shouldAddStock ? 'active' : 'inactive'},
+                  updated_at = NOW()
+              WHERE id = ${batchId}
+            `;
+          } else if (shouldAddStock) {
+            // Create a new batch only if none existed
+            const batchNo = `BATCH-PUR-${purchaseId}-${itemIndex}-${Date.now()}`;
+            const newBatch = await tx`
+              INSERT INTO product_batches (
+                product_id, product_variant_id, batch_no, cost_price, selling_price,
+                quantity_purchased, remaining_quantity, status, purchase_id
+              ) VALUES (
+                ${item.product_id}, ${variantId}, ${batchNo}, ${unitAcquisitionCost}, ${item.price},
+                ${item.quantity}, ${item.quantity}, 'active', ${purchaseId}
+              ) RETURNING id
+            `;
+            batchId = Number(newBatch[0].id);
+          }
         }
 
         item.variant_id = variantId;
@@ -1279,8 +1299,8 @@ export async function updatePurchase(formData: FormData) {
         item.item_discount_amount = itemDiscountAmount;
       }
 
-      // Handle stock movement cleanly without duplicate additions
-      if (wasStockAdded && shouldAddStock) {
+      // Handle stock movement cleanly without duplicate additions (Stock purchases only)
+      if (!isDropship && wasStockAdded && shouldAddStock) {
         // Case 1: Was delivered and stays delivered -> apply net quantity change per product/batch
         for (let item of items) {
           const oldItem = currentItems.find((ci: any) => 
@@ -1337,7 +1357,7 @@ export async function updatePurchase(formData: FormData) {
             }
           }
         }
-      } else if (!wasStockAdded && shouldAddStock) {
+      } else if (!isDropship && !wasStockAdded && shouldAddStock) {
         // Case 2: Status changed from Ordered -> Delivered -> add full stock
         for (let item of items) {
           const qty = Number(item.quantity) || 0;
@@ -1357,7 +1377,7 @@ export async function updatePurchase(formData: FormData) {
             }
           }
         }
-      } else if (wasStockAdded && !shouldAddStock) {
+      } else if (!isDropship && wasStockAdded && !shouldAddStock) {
         // Case 3: Status changed from Delivered -> Cancelled/Ordered -> reverse full stock
         for (let oldItem of currentItems) {
           const qty = Number(oldItem.quantity) || 0;
