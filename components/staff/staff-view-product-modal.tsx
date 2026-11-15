@@ -36,6 +36,7 @@ import {
   type PlatformStatus 
 } from "@/app/actions/product-actions"
 import { notifyError, notifySuccess } from "@/lib/notifications"
+import { canManageEcomAndTrending } from "@/lib/staff-restrictions"
 import StaffMediaEditModal from "./staff-media-edit-modal"
 import { ProductMediaViewerModal } from "@/components/products/product-media-viewer-modal"
 
@@ -109,6 +110,7 @@ export default function StaffViewProductModal({
   const deviceCurrency = useAppSelector(selectDeviceCurrency)
   const activeStaff = useAppSelector(selectActiveStaff)
   const isMediaManager = isMediaManagerProp ?? Boolean(activeStaff?.role === "media_manager")
+  const canManageEcom = isMediaManagerProp ?? canManageEcomAndTrending(activeStaff)
 
   const currency = currencyProp || deviceCurrency || "INR"
   const currentDeviceId = device?.id || undefined
@@ -131,7 +133,7 @@ export default function StaffViewProductModal({
   const [updatingPlatform, setUpdatingPlatform] = useState<string | null>(null)
 
   const msp = Number(activeProduct?.variants?.[0]?.msp || activeProduct?.msp || 0)
-  const retailPrice = Number(activeProduct?.msp ?? activeProduct?.price ?? 0)
+  const retailPrice = Number(activeProduct?.mrp || activeProduct?.price || activeProduct?.msp || 0)
   const barcodeValue = activeProduct?.barcode || activeProduct?.variants?.[0]?.barcode || product?.barcode || ""
 
   const handleToggleTrending = async () => {
@@ -437,28 +439,12 @@ export default function StaffViewProductModal({
                 
                 {/* Price & Primary Metrics Cards */}
                 {isMediaManager ? (
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                     {/* MRP Card */}
                     <div className="rounded-2xl border border-violet-100 bg-violet-50/70 p-3 sm:p-4 shadow-xs flex flex-col justify-between min-h-[85px]">
                       <span className="text-[11px] font-semibold uppercase tracking-wider text-violet-700">MRP</span>
                       <p className="text-lg sm:text-xl font-bold text-violet-900 mt-1">
                         {formatMoney(activeProduct.mrp || activeProduct.price || 0)}
-                      </p>
-                    </div>
-
-                    {/* Cost Card */}
-                    <div className="rounded-2xl border border-slate-200 bg-slate-100/70 p-3 sm:p-4 shadow-xs flex flex-col justify-between min-h-[85px]">
-                      <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-600">Cost</span>
-                      <p className="text-lg sm:text-xl font-bold text-slate-900 mt-1">
-                        {formatMoney(activeProduct.cost_price ?? activeProduct.wholesale_price ?? 0)}
-                      </p>
-                    </div>
-
-                    {/* Stock Card */}
-                    <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 p-3 sm:p-4 shadow-xs flex flex-col justify-between min-h-[85px]">
-                      <span className="text-[11px] font-semibold uppercase tracking-wider text-emerald-700">Stock</span>
-                      <p className="text-lg sm:text-xl font-bold text-emerald-900 mt-1">
-                        {activeProduct.stock === null ? "—" : Math.max(0, Number(activeProduct.stock) || 0)}
                       </p>
                     </div>
 
@@ -469,12 +455,20 @@ export default function StaffViewProductModal({
                         {formatMoney(activeProduct.msp || msp || 0)}
                       </p>
                     </div>
+
+                    {/* Stock Card */}
+                    <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 p-3 sm:p-4 shadow-xs flex flex-col justify-between min-h-[85px]">
+                      <span className="text-[11px] font-semibold uppercase tracking-wider text-emerald-700">Stock</span>
+                      <p className="text-lg sm:text-xl font-bold text-emerald-900 mt-1">
+                        {activeProduct.stock === null ? "—" : Math.max(0, Number(activeProduct.stock) || 0)}
+                      </p>
+                    </div>
                   </div>
                 ) : (
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                    {/* Selling Price Card */}
+                    {/* MRP Card */}
                     <div className="col-span-2 sm:col-span-1 rounded-2xl bg-gradient-to-br from-slate-900 via-indigo-950 to-violet-950 text-white p-4 shadow-md flex flex-col justify-between min-h-[90px]">
-                      <span className="text-[11px] font-semibold uppercase tracking-wider text-violet-200/80">Selling Price</span>
+                      <span className="text-[11px] font-semibold uppercase tracking-wider text-violet-200/80">MRP</span>
                       <p className="text-xl sm:text-2xl font-black tracking-tight text-white mt-1">
                         {formatMoney(retailPrice)}
                       </p>
@@ -492,14 +486,14 @@ export default function StaffViewProductModal({
                     <div className="rounded-2xl bg-white border border-slate-200 p-4 shadow-sm flex flex-col justify-between min-h-[90px]">
                       <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">MSP</span>
                       <p className="text-xl sm:text-2xl font-black text-indigo-600 mt-1">
-                        {msp > 0 ? formatMoney(msp) : formatMoney(retailPrice)}
+                        {msp > 0 ? formatMoney(msp) : "—"}
                       </p>
                     </div>
                   </div>
                 )}
 
-                {/* Trending Enabling Option (Media Manager) */}
-                {isMediaManager && (
+                {/* Trending Enabling Option */}
+                {canManageEcom && (
                   <div className="rounded-xl border border-slate-200 bg-white p-3.5 flex items-center justify-between shadow-xs">
                     <div>
                       <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Trending</p>
@@ -550,8 +544,8 @@ export default function StaffViewProductModal({
                   )}
                 </div>
 
-                {/* E-Commerce Direct Link Box (Staff) or Full E-Commerce / Marketplace Section (Media Manager) */}
-                {isMediaManager ? (
+                {/* E-Commerce Direct Link Box (Staff) or Full E-Commerce / Marketplace Section */}
+                {canManageEcom ? (
                   <div className="rounded-xl border border-slate-200 bg-white p-3.5 sm:p-4 space-y-3.5 shadow-xs">
                     <div>
                       <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 mb-2">E-Commerce Store Listing</p>
@@ -727,7 +721,7 @@ export default function StaffViewProductModal({
                         <th className="px-4 py-3">Variant Name</th>
                         <th className="px-4 py-3">SKU</th>
                         <th className="px-4 py-3">Barcode</th>
-                        <th className="px-4 py-3 text-right">Price</th>
+                        <th className="px-4 py-3 text-right">MRP</th>
                         <th className="px-4 py-3 text-right">Stock</th>
                         <th className="px-4 py-3 text-center">Action</th>
                       </tr>
@@ -739,7 +733,7 @@ export default function StaffViewProductModal({
                           <td className="px-4 py-2.5 font-mono text-xs text-slate-500">{v.sku || "—"}</td>
                           <td className="px-4 py-2.5 font-mono text-xs text-slate-500">{v.barcode || "—"}</td>
                           <td className="px-4 py-2.5 text-right font-semibold text-slate-800">
-                            {v.selling_price !== null && v.selling_price !== undefined ? `${currency} ${Number(v.selling_price).toFixed(2)}` : formatMoney(retailPrice)}
+                            {v.mrp !== null && v.mrp !== undefined && Number(v.mrp) > 0 ? formatMoney(v.mrp) : (v.selling_price !== null && v.selling_price !== undefined ? `${currency} ${Number(v.selling_price).toFixed(2)}` : formatMoney(retailPrice))}
                           </td>
                           <td className="px-4 py-2.5 text-right font-bold text-emerald-700">{v.device_stock || 0}</td>
                           <td className="px-4 py-2.5 text-center">
@@ -781,7 +775,7 @@ export default function StaffViewProductModal({
                         <th className="px-4 py-3">Variant</th>
                         <th className="px-4 py-3">Mfg. Date</th>
                         <th className="px-4 py-3">Expiry Date</th>
-                        <th className="px-4 py-3 text-right">Price</th>
+                        <th className="px-4 py-3 text-right">MRP</th>
                         <th className="px-4 py-3 text-right">Stock</th>
                       </tr>
                     </thead>

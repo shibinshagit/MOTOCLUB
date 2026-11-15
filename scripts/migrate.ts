@@ -213,6 +213,7 @@ async function createTables() {
         price DECIMAL(10, 2) NOT NULL,
         wholesale_price DECIMAL(10, 2) DEFAULT 0,
         msp DECIMAL(10, 2) DEFAULT 0,
+        mrp DECIMAL(12, 2) DEFAULT 0,
         barcode VARCHAR(255),
         image_url TEXT,
         image_urls JSONB DEFAULT '[]',
@@ -345,6 +346,7 @@ async function createTables() {
         invoice_number VARCHAR(255),
         supplier_invoice_number VARCHAR(255),
         notes TEXT,
+        purchase_type VARCHAR(50) DEFAULT 'Stock',
         received_amount DECIMAL(12,2) DEFAULT 0,
         purchase_date TIMESTAMP DEFAULT NOW(),
         device_id INTEGER,
@@ -1131,6 +1133,17 @@ async function upgradeLegacyColumns() {
     ["products.trending", () => sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS trending BOOLEAN DEFAULT false`],
     ["products.has_variants", () => sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS has_variants BOOLEAN DEFAULT false NOT NULL`],
     ["products.is_batch_managed", () => sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS is_batch_managed BOOLEAN DEFAULT false NOT NULL`],
+    ["products.mrp", () => sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS mrp DECIMAL(12, 2) DEFAULT 0`],
+    ["products.mrp_backfill", () => sql`
+      UPDATE products p
+      SET mrp = pv.mrp
+      FROM (
+        SELECT DISTINCT ON (product_id) product_id, mrp
+        FROM product_variants
+        ORDER BY product_id, id ASC
+      ) pv
+      WHERE p.id = pv.product_id AND (p.mrp IS NULL OR p.mrp = 0)
+    `],
     ["product_stock_history.device_id", () => sql`ALTER TABLE product_stock_history ADD COLUMN IF NOT EXISTS device_id INTEGER`],
     ["product_stock_history.product_variant_id", () => sql`ALTER TABLE product_stock_history ADD COLUMN IF NOT EXISTS product_variant_id INTEGER`],
     ["product_stock_history.batch_id", () => sql`ALTER TABLE product_stock_history ADD COLUMN IF NOT EXISTS batch_id INTEGER`],
@@ -1190,6 +1203,7 @@ async function upgradeLegacyColumns() {
     ["purchase_items.unit_cost", () => sql`ALTER TABLE purchase_items ADD COLUMN IF NOT EXISTS unit_cost DECIMAL(12,2) DEFAULT 0`],
     ["purchase_items.returned_quantity", () => sql`ALTER TABLE purchase_items ADD COLUMN IF NOT EXISTS returned_quantity INTEGER DEFAULT 0`],
     ["purchases.courier_charge_percentage", () => sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS courier_charge_percentage DECIMAL(5,2) DEFAULT 0`],
+    ["purchases.purchase_type", () => sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS purchase_type VARCHAR(50) DEFAULT 'Stock'`],
     ["devices.default_courier_charge_pct", () => sql`ALTER TABLE devices ADD COLUMN IF NOT EXISTS default_courier_charge_pct DECIMAL(5,2) DEFAULT 0`],
     ["staff.staff_password_hash", () => sql`ALTER TABLE staff ADD COLUMN IF NOT EXISTS staff_password_hash TEXT`],
     ["staff.role", () => sql`ALTER TABLE staff ADD COLUMN IF NOT EXISTS role VARCHAR(20) NOT NULL DEFAULT 'staff'`],
@@ -1239,6 +1253,8 @@ async function upgradeLegacyColumns() {
     ["sales.tracking_last_polled_at", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS tracking_last_polled_at TIMESTAMP`],
     ["sales.is_tracking_frozen", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS is_tracking_frozen BOOLEAN DEFAULT false`],
     ["sales.is_pos_updated", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS is_pos_updated BOOLEAN DEFAULT false`],
+    ["sales.is_ready_to_ship", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS is_ready_to_ship BOOLEAN DEFAULT false`],
+    ["sales.ready_to_ship_at", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS ready_to_ship_at TIMESTAMP`],
     ["sales.type_of_sale", () => sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS type_of_sale VARCHAR(50) DEFAULT 'walk in'`],
     ["orders.sync_status", () => sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS sync_status VARCHAR(50) DEFAULT 'PENDING'`],
     ["orders.synced_at", () => sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS synced_at TIMESTAMP`],
@@ -1250,6 +1266,16 @@ async function upgradeLegacyColumns() {
   for (const [label, fn] of columns) {
     await runSafe(label, fn)
   }
+
+  await runSafe("sales.is_ready_to_ship backfill for Direct orders", async () => {
+    await sql`
+      UPDATE sales
+      SET is_ready_to_ship = true,
+          ready_to_ship_at = COALESCE(ready_to_ship_at, NOW())
+      WHERE LOWER(TRIM(COALESCE(delivery_status, ''))) = 'direct'
+        AND (is_ready_to_ship IS NOT TRUE)
+    `
+  })
 
   await runSafe("purchases.created_at from purchase_date", async () => {
     await sql`
@@ -1264,6 +1290,14 @@ async function upgradeLegacyColumns() {
       UPDATE purchases
       SET updated_at = COALESCE(purchase_date, created_at, NOW())
       WHERE updated_at IS NULL
+    `
+  })
+
+  await runSafe("purchases.purchase_type backfill", async () => {
+    await sql`
+      UPDATE purchases
+      SET purchase_type = 'Stock'
+      WHERE purchase_type IS NULL
     `
   })
 

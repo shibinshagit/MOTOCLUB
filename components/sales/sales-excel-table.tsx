@@ -8,6 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { TableRowsInput } from "@/components/ui/table-rows-input"
 import { useAppSelector } from "@/store/hooks"
 import { selectActiveStaff } from "@/store/slices/staffSlice"
+import { selectUser } from "@/store/slices/deviceSlice"
 import PurchaseManagerKpiCards from "@/components/purchase-manager/purchase-manager-kpi-cards"
 import {
   ExcelColumnFilterHeader,
@@ -37,6 +38,7 @@ import {
   getSalesSummaryCards,
   getSalesByIds,
   updateSaleFulfillmentDetails,
+  markSaleReadyToShip,
 } from "@/app/actions/sale-actions"
 import {
   Dialog,
@@ -46,7 +48,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog"
-import SaleShippingSection from "@/components/sales/sale-shipping-section"
+import SaleShippingSection, { fetchShippingMeta } from "@/components/sales/sale-shipping-section"
 import {
   Search,
   X,
@@ -76,6 +78,10 @@ import {
   ArrowRight,
   Save,
   Truck,
+  PackageCheck,
+  FilePenLine,
+  SendHorizontal,
+  Forward,
 } from "lucide-react"
 import { SalesBreakdownModal } from "@/components/shared/sales-breakdown-modal"
 import {
@@ -86,9 +92,11 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { useToast } from "@/components/ui/use-toast"
 import { notifyWarning, notifySuccess, notifyError } from "@/lib/notifications"
-import { downloadSalesSummaryPDF, printSalesSummaryReport, downloadSalesSummaryExcel } from "@/lib/sales-summary-utils"
+import { downloadSalesSummaryPDF, printSalesSummaryReport, downloadSalesSummaryExcel, downloadSalesSummaryJSON } from "@/lib/sales-summary-utils"
 import { JobCardModal } from "@/components/shared/job-card/job-card-modal"
 import SaleDocumentActions from "@/components/sales/sale-document-actions"
+import { MoveToDirectModal } from "@/components/sales/move-to-direct-modal"
+import { DirectFulfillmentModal } from "@/components/sales/direct-fulfillment-modal"
 
 function getSaleStatusLabel(sale: any): string {
   if (sale.status === "Returned") {
@@ -164,6 +172,7 @@ function SaleStatusBadge({ status }: { status: string }) {
 }
 
 function DeliveryStatusBadge({ status }: { status: string }) {
+  const normalized = status?.toLowerCase() === "direct" ? "Direct" : status
   const styles: Record<string, string> = {
     Pickup: "bg-slate-50 text-slate-700 border-slate-200",
     Pending: "bg-amber-50 text-amber-700 border-amber-200",
@@ -182,10 +191,10 @@ function DeliveryStatusBadge({ status }: { status: string }) {
   return (
     <span
       className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${
-        styles[status] || "border-border bg-muted text-muted-foreground"
+        styles[normalized] || "border-border bg-muted text-muted-foreground"
       }`}
     >
-      {status}
+      {normalized}
     </span>
   )
 }
@@ -201,6 +210,38 @@ function buildInitialFilters(sales: any[], getters: Record<ColumnKey, (sale: any
     filters[key] = createEmptyColumnFilter(values)
   })
   return filters
+}
+
+function getLogisticsDeliveryTier(sale: any): 1 | 2 | 3 {
+  if (!sale) return 1
+  const deliveryStatus = (sale.delivery_status || "").trim().toLowerCase()
+  const isDirect = deliveryStatus === "direct"
+  const isShipped = deliveryStatus === "shipped" || deliveryStatus === "shipping" || deliveryStatus === "delivered"
+
+  const cleanTracking = (sale.tracking_id || "").trim()
+  const upperTracking = cleanTracking.toUpperCase()
+  const isAutoJobCardTracking = upperTracking.startsWith("DOD") || upperTracking.startsWith("JC-")
+  const hasRealTracking = Boolean(cleanTracking && !isAutoJobCardTracking)
+
+  const hasCourierService = Boolean(
+    (sale.courier_service_name && sale.courier_service_name.trim()) ||
+    sale.courier_service_id ||
+    sale.courier_partner_id
+  )
+
+  // Direct orders: Tier 2 (Orange) if courier service or genuine tracking ID (non-DOD) is missing; Tier 3 (Green) if both are present
+  if (isDirect) {
+    return hasRealTracking && hasCourierService ? 3 : 2
+  }
+
+  // Tier 1: In-progress / new orders to deliver (Pending, Paid, Packed, Sent)
+  if (!isShipped) return 1
+
+  // Tier 3: Shipped and both Real Tracking ID & Courier Partner/Service are present
+  if (hasRealTracking && hasCourierService) return 3
+
+  // Tier 2: Shipped but either Tracking ID or Courier Service is missing
+  return 2
 }
 
 interface SalesExcelTableProps {
@@ -275,6 +316,7 @@ export default function SalesExcelTable({
   showViewModal = true,
 }: SalesExcelTableProps) {
   const pathname = usePathname()
+  const user = useAppSelector(selectUser)
   const activeStaff = useAppSelector(selectActiveStaff)
   const isPurchaseManager =
     propIsPurchaseManager !== undefined
@@ -285,99 +327,24 @@ export default function SalesExcelTable({
       ? propIsLogistics
       : activeStaff?.role === "logistics" || Boolean(pathname?.startsWith("/logistics"))
 
+  const isAdmin = Boolean(
+    (activeStaff?.role === "admin" || (!activeStaff && user?.role?.toUpperCase() === "ADMIN")) &&
+    activeStaff?.role !== "staff" &&
+    activeStaff?.role !== "media_manager" &&
+    activeStaff?.role !== "purchase_manager" &&
+    activeStaff?.role !== "logistics" &&
+    activeStaff?.role !== "partner"
+  )
+
   const isFinancialHidden = isPurchaseManager || isLogistics
-  const tableColSpan = (isFinancialHidden ? 8 : 13) + (showActions || isLogistics ? 1 : 0)
 
   const { toast } = useToast()
   const [internalSearchTerm, setInternalSearchTerm] = useState("")
   const [isGeneratingReport, setIsGeneratingReport] = useState(false)
   const [isCreateJobCardOpen, setIsCreateJobCardOpen] = useState(false)
   const [editingJobCardId, setEditingJobCardId] = useState<number | null>(null)
-  const [fulfillmentModal, setFulfillmentModal] = useState<{
-    isOpen: boolean
-    sale: any
-    shippingData: SaleShippingInput
-  } | null>(null)
-  const [isSavingFulfillment, setIsSavingFulfillment] = useState(false)
-
-  const openFulfillmentModal = useCallback(async (sale: any) => {
-    const initialShipping = mapSaleShippingFromRecord(sale)
-    const typeOfSale = String(sale.type_of_sale || "").trim().toLowerCase()
-    if (typeOfSale === "walk in") {
-      initialShipping.fulfillmentType = "pickup"
-    } else if (typeOfSale === "courier") {
-      initialShipping.fulfillmentType = "ship"
-    }
-    if (!initialShipping.shippingAddress) {
-      initialShipping.shippingAddress = sale.shipping_address || sale.customer_address || ""
-    }
-    setFulfillmentModal({
-      isOpen: true,
-      sale,
-      shippingData: initialShipping,
-    })
-
-    try {
-      const res = await getSaleDetails(sale.id)
-      if (res.success && res.data) {
-        const fullSale = res.data.sale ? { ...res.data.sale, items: res.data.items, payments: res.data.payments } : res.data
-        const updatedShipping = mapSaleShippingFromRecord(fullSale)
-        const updatedTypeOfSale = String(fullSale.type_of_sale || typeOfSale || "").trim().toLowerCase()
-        if (updatedTypeOfSale === "walk in") {
-          updatedShipping.fulfillmentType = "pickup"
-        } else if (updatedTypeOfSale === "courier") {
-          updatedShipping.fulfillmentType = "ship"
-        }
-        if (!updatedShipping.shippingAddress) {
-          updatedShipping.shippingAddress = fullSale.shipping_address || fullSale.customer_address || ""
-        }
-        setFulfillmentModal((prev) => {
-          if (!prev || prev.sale.id !== sale.id) return prev
-          return {
-            ...prev,
-            sale: { ...prev.sale, ...fullSale },
-            shippingData: updatedShipping,
-          }
-        })
-      }
-    } catch (err) {
-      console.warn("Could not fetch extra details for fulfillment modal:", err)
-    }
-  }, [])
-
-  const handleCloseFulfillmentModal = () => {
-    setFulfillmentModal(null)
-  }
-
-  const handleSaveFulfillment = async () => {
-    if (!fulfillmentModal) return
-    setIsSavingFulfillment(true)
-    try {
-      const res = await updateSaleFulfillmentDetails(fulfillmentModal.sale.id, fulfillmentModal.shippingData)
-      if (res.success) {
-        toast({
-          title: "Success",
-          description: "Fulfillment details saved successfully",
-        })
-        handleCloseFulfillmentModal()
-        fetchServerSales()
-      } else {
-        toast({
-          title: "Error",
-          description: res.message || "Failed to save fulfillment details",
-          variant: "destructive",
-        })
-      }
-    } catch (err) {
-      toast({
-        title: "Error",
-        description: "An error occurred while saving fulfillment details",
-        variant: "destructive",
-      })
-    } finally {
-      setIsSavingFulfillment(false)
-    }
-  }
+  const [moveToDirectSale, setMoveToDirectSale] = useState<any | null>(null)
+  const [directFulfillmentSale, setDirectFulfillmentSale] = useState<any | null>(null)
 
   const handleRowEdit = (sale: any) => {
     if (isJobCardSale(sale)) {
@@ -430,6 +397,13 @@ export default function SalesExcelTable({
 
   const [cardFilter, setCardFilter] = useState<"all" | "today" | "pending" | "critical" | "direct">("all")
   const [purchaseManagerCardMode, setPurchaseManagerCardMode] = useState<"orders_to_check" | "all_orders">("orders_to_check")
+  const [logisticsCardMode, setLogisticsCardMode] = useState<"ready_to_ship" | "all_orders">("ready_to_ship")
+  const canShowActions = isPurchaseManager
+    ? purchaseManagerCardMode === "orders_to_check"
+    : isLogistics
+      ? logisticsCardMode !== "all_orders"
+      : showActions
+  const tableColSpan = (isFinancialHidden ? 8 : 13) + (canShowActions ? 1 : 0)
   const [typeFilter, setTypeFilter] = useState<"all" | "normal" | "job_card">("all")
   const [typeOfSaleFilter, setTypeOfSaleFilter] = useState<"all" | "walk in" | "courier" | "pending_payments">("all")
   const [selectedSales, setSelectedSales] = useState<number[]>([])
@@ -512,8 +486,13 @@ export default function SalesExcelTable({
           typeOfSaleFilter,
           cardFilter,
           searchTerm: debouncedSearch,
-          onlyPosUpdated: isPurchaseManager && purchaseManagerCardMode === "all_orders" ? false : onlyPosUpdated,
+          onlyPosUpdated:
+            (isPurchaseManager && purchaseManagerCardMode === "all_orders") ||
+            (isLogistics && logisticsCardMode === "all_orders")
+              ? false
+              : onlyPosUpdated,
           isLogistics,
+          logisticsShowAllOrders: isLogistics && logisticsCardMode === "all_orders",
           isPurchaseManager,
           purchaseManagerShowAllOrders: isPurchaseManager && purchaseManagerCardMode === "all_orders",
         }),
@@ -559,7 +538,7 @@ export default function SalesExcelTable({
         setHasFetchedServer(true)
       }
     }
-  }, [deviceId, page, pageSize, globalDateRange?.from, globalDateRange?.to, typeFilter, typeOfSaleFilter, cardFilter, debouncedSearch, onlyPosUpdated, isLogistics, isPurchaseManager, purchaseManagerCardMode])
+  }, [deviceId, page, pageSize, globalDateRange?.from, globalDateRange?.to, typeFilter, typeOfSaleFilter, cardFilter, debouncedSearch, onlyPosUpdated, isLogistics, isPurchaseManager, purchaseManagerCardMode, logisticsCardMode])
 
   // A new date range starts again from the first page and clears selection.
   useEffect(() => {
@@ -571,6 +550,143 @@ export default function SalesExcelTable({
   useEffect(() => {
     fetchServerSales()
   }, [fetchServerSales, refreshKey])
+
+  // Preload shipping metadata in background so fulfillment modal opens with 0ms lag
+  useEffect(() => {
+    if (deviceId) {
+      fetchShippingMeta(deviceId).catch(() => {})
+    }
+  }, [deviceId])
+
+  const [fulfillmentModal, setFulfillmentModal] = useState<{
+    isOpen: boolean
+    sale: any
+    shippingData: SaleShippingInput
+  } | null>(null)
+  const [isSavingFulfillment, setIsSavingFulfillment] = useState(false)
+  const [fulfillmentErrors, setFulfillmentErrors] = useState<{ courierPartner?: string; shippingAddress?: string }>({})
+
+  const openFulfillmentModal = useCallback((sale: any, targetStatus?: string) => {
+    setFulfillmentErrors({})
+    const cached = loadedSalesCache[sale.id]
+    const currentSale = cached ? { ...sale, ...cached } : sale
+    const initialShipping = mapSaleShippingFromRecord(currentSale)
+    if (targetStatus === "Shipped" || targetStatus === "Shipping") {
+      initialShipping.fulfillmentType = "ship"
+      initialShipping.deliveryStatus = "Shipped"
+    } else if (targetStatus) {
+      initialShipping.deliveryStatus = targetStatus
+    }
+    const typeOfSale = String(currentSale.type_of_sale || "").trim().toLowerCase()
+    if (typeOfSale === "walk in" && !targetStatus) {
+      initialShipping.fulfillmentType = "pickup"
+    } else if (typeOfSale === "courier" || targetStatus === "Shipped" || targetStatus === "Shipping") {
+      initialShipping.fulfillmentType = "ship"
+    }
+    if (!initialShipping.shippingAddress) {
+      initialShipping.shippingAddress = currentSale.shipping_address || currentSale.customer_address || ""
+    }
+    setFulfillmentModal({
+      isOpen: true,
+      sale: currentSale,
+      shippingData: initialShipping,
+    })
+  }, [loadedSalesCache])
+
+  const handleCloseFulfillmentModal = () => {
+    setFulfillmentErrors({})
+    setFulfillmentModal(null)
+  }
+
+  const handleMoveToShipped = async () => {
+    if (!fulfillmentModal) return
+    const errors: { courierPartner?: string; shippingAddress?: string } = {}
+
+    if (!fulfillmentModal.shippingData.courierPartnerId) {
+      errors.courierPartner = "Please select a Courier Partner"
+    }
+
+    const address = (fulfillmentModal.shippingData.shippingAddress || "").trim()
+    if (!address) {
+      errors.shippingAddress = "Shipping address is required"
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setFulfillmentErrors(errors)
+      toast({
+        title: "Required Fields Missing",
+        description: errors.courierPartner || errors.shippingAddress,
+        variant: "destructive",
+      })
+      return
+    }
+
+    setFulfillmentErrors({})
+    setIsSavingFulfillment(true)
+    try {
+      const payload = {
+        ...fulfillmentModal.shippingData,
+        deliveryStatus: "Shipped",
+      }
+      const res = await updateSaleFulfillmentDetails(fulfillmentModal.sale.id, payload)
+      if (res.success) {
+        toast({
+          title: "Order Moved to Shipped",
+          description: `Order #${fulfillmentModal.sale.id} has been moved to Shipped successfully.`,
+        })
+
+        const updatedFields = {
+          delivery_status: "Shipped",
+          courier_partner_id: payload.courierPartnerId,
+          courier_service_id: payload.courierServiceId,
+          courier_service_name: payload.courierServiceName,
+          packaging_type_id: payload.packagingTypeId,
+          packaging_type_name: payload.packagingTypeName,
+          tracking_id: payload.trackingId,
+          shipping_address: payload.shippingAddress,
+          weight_kg: payload.weightKg,
+          length_cm: payload.lengthCm,
+          width_cm: payload.widthCm,
+          height_cm: payload.heightCm,
+          expense_courier: payload.expenseCourier,
+          expense_packing: payload.expensePacking,
+          shipping_notes: payload.shippingNotes,
+        }
+
+        // Optimistically update table data so row and cache reflect changes immediately with 0ms lag
+        setServerSales((prev) =>
+          prev.map((s) => (s.id === fulfillmentModal.sale.id ? { ...s, ...updatedFields } : s))
+        )
+        setLoadedSalesCache((prev) => ({
+          ...prev,
+          [fulfillmentModal.sale.id]: {
+            ...(prev[fulfillmentModal.sale.id] || {}),
+            ...fulfillmentModal.sale,
+            ...updatedFields,
+          },
+        }))
+
+        handleCloseFulfillmentModal()
+        fetchServerSales()
+        onRefreshSales?.()
+      } else {
+        toast({
+          title: "Error",
+          description: res.message || "Failed to update fulfillment details",
+          variant: "destructive",
+        })
+      }
+    } catch (err) {
+      console.error("Error moving order to Shipped:", err)
+      toast({
+        title: "Error",
+        description: "An unexpected error occurred while moving order to Shipped",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSavingFulfillment(false)
+    }
+  }
 
   const handleDeliveryStatusChange = useCallback(
     (saleId: number, newStatus: string) => {
@@ -607,31 +723,106 @@ export default function SalesExcelTable({
     }
   }
 
+  const [markingReadySaleId, setMarkingReadySaleId] = useState<number | null>(null)
+
+  const handleMarkReadyToShip = async (sale: any) => {
+    if (!sale?.id) return
+    try {
+      setMarkingReadySaleId(sale.id)
+      const res = await markSaleReadyToShip(sale.id, deviceId)
+      if (res.success) {
+        notifySuccess(toast, `Order #${sale.id} marked ready to ship for logistics`)
+        setServerSales((prev) => prev.filter((s) => s.id !== sale.id))
+        fetchServerSales()
+        if (onRefreshSales) {
+          onRefreshSales()
+        }
+      } else {
+        notifyError(toast, res.message || "Failed to mark order ready to ship")
+      }
+    } catch (err: any) {
+      console.error("handleMarkReadyToShip error:", err)
+      notifyError(toast, err?.message || "Failed to mark order ready to ship")
+    } finally {
+      setMarkingReadySaleId(null)
+    }
+  }
+
   // The list is always server-paginated/filtered; rows are already the current page.
   const displaySales = useMemo(() => {
     if (isPurchaseManager && purchaseManagerCardMode === "orders_to_check") {
-      return serverSales.filter((s: any) => {
+      const filtered = serverSales.filter((s: any) => {
         const dStatus = (s.delivery_status || "pending").trim().toLowerCase()
-        return dStatus === "pending" || dStatus === "paid"
+        const isDirect = dStatus === "direct"
+        if (isDirect) {
+          const courierFilled = Boolean(s.courier_service_name && s.courier_service_name.trim())
+          const supplierFilled = Boolean(s.dropship_supplier && s.dropship_supplier.trim())
+          return !(courierFilled && supplierFilled)
+        }
+        const isAutoReadyStatus = ["packed", "sent", "shipped", "shipping", "delivered"].includes(dStatus)
+        const isReady = Boolean(s.is_ready_to_ship) || isAutoReadyStatus
+        return (dStatus === "pending" || dStatus === "paid") && !isReady
+      })
+
+      // Incomplete Direct orders sink to the bottom of the list in Purchase Manager Orders to Check
+      return [...filtered].sort((a: any, b: any) => {
+        const aIsDirect = (a.delivery_status || "").trim().toLowerCase() === "direct"
+        const bIsDirect = (b.delivery_status || "").trim().toLowerCase() === "direct"
+        if (aIsDirect && !bIsDirect) return 1
+        if (!aIsDirect && bIsDirect) return -1
+        return 0
       })
     }
-    if (isLogistics) {
-      const excluded = new Set(["delivered", "returned", "failed", "pickup", "cancelled"])
-      return serverSales.filter((s: any) => {
+    if (isLogistics && logisticsCardMode === "ready_to_ship") {
+      const excluded = new Set(["delivered", "returned", "failed", "cancelled"])
+      const filtered = serverSales.filter((s: any) => {
         const dStatus = (s.delivery_status || "pending").trim().toLowerCase()
         const fType = (s.fulfillment_type || "").trim().toLowerCase()
         const status = (s.status || "").trim().toLowerCase()
         const pStatus = (s.payment_status || "").trim().toLowerCase()
-        return (
-          !excluded.has(dStatus) &&
-          !excluded.has(status) &&
-          !excluded.has(pStatus) &&
-          fType !== "pickup"
-        )
+        const isDirect = dStatus === "direct" && fType !== "pickup" && dStatus !== "pickup"
+        const isAutoReadyStatus = ["packed", "sent", "direct", "shipped", "shipping", "delivered"].includes(dStatus)
+        const isReady = Boolean(s.is_ready_to_ship) || isAutoReadyStatus
+
+        const isJobCard = isJobCardSale(s)
+        const isCourier =
+          (s.type_of_sale || "").trim().toLowerCase() === "courier" ||
+          fType === "ship" ||
+          Number(s.courier_paid_extra) > 0
+        const isJobCardCourier = isJobCard && isCourier
+
+        if (excluded.has(dStatus) || excluded.has(status) || excluded.has(pStatus)) {
+          return false
+        }
+
+        // 1. Direct orders (excluding store pickup)
+        if (isDirect) {
+          return true
+        }
+
+        // 2. Only Job Card Courier sales marked ready to ship
+        if (isJobCardCourier && isReady) {
+          return true
+        }
+
+        return false
       })
+
+      if (cardFilter === "all") {
+        return [...filtered].sort((a: any, b: any) => {
+          const tierA = getLogisticsDeliveryTier(a)
+          const tierB = getLogisticsDeliveryTier(b)
+          if (tierA !== tierB) return tierA - tierB
+          const timeA = new Date(a.sale_date || a.created_at || 0).getTime()
+          const timeB = new Date(b.sale_date || b.created_at || 0).getTime()
+          return timeB - timeA
+        })
+      }
+
+      return filtered
     }
     return serverSales
-  }, [serverSales, isLogistics, isPurchaseManager, purchaseManagerCardMode])
+  }, [serverSales, isLogistics, isPurchaseManager, purchaseManagerCardMode, logisticsCardMode, cardFilter])
 
   const selectedSalesList = useMemo(() => {
     return displaySales.filter((s) => selectedSales.includes(s.id))
@@ -653,6 +844,7 @@ export default function SalesExcelTable({
   }, [])
 
   const totalOrderCount = serverCardCounts ? serverCardCounts.total : totalServerCount
+  const readyToShipCount = (serverCardCounts as any)?.ready_to_ship ?? (isLogistics ? totalServerCount : 0)
   const totalCount = onlyPosUpdated ? totalServerCount : totalOrderCount
   const todayCount = serverCardCounts?.today ?? displaySales.filter(isTodaySale).length
   const pendingCount = serverCardCounts ? serverCardCounts.pending : 0
@@ -884,6 +1076,31 @@ export default function SalesExcelTable({
     }
   }
 
+  const handleDownloadJSON = async () => {
+    if (isGeneratingReport) return
+    const isSelected = selectedSales.length > 0
+    if (!isSelected && (!displaySales || displaySales.length === 0)) {
+      notifyWarning(toast, "No sales found for the selected filters.")
+      return
+    }
+
+    setIsGeneratingReport(true)
+    try {
+      const targetSales = isSelected ? await resolveSelectedSalesList() : displaySales
+      if (!targetSales || targetSales.length === 0) {
+        notifyWarning(toast, isSelected ? "No sales found for the selected orders." : "No sales found for the selected filters.")
+        return
+      }
+      const label = getEffectivePeriodLabel(targetSales.length)
+      downloadSalesSummaryJSON(targetSales, label, globalDateRange)
+      notifySuccess(toast, `Sales summary JSON report downloaded (${targetSales.length} orders).`)
+    } catch (err: any) {
+      notifyError(toast, err?.message || "Failed to download JSON report.")
+    } finally {
+      setIsGeneratingReport(false)
+    }
+  }
+
   const handleBulkPrintInvoices = async () => {
     if (selectedSales.length === 0) return
     setIsGeneratingReport(true)
@@ -944,7 +1161,7 @@ export default function SalesExcelTable({
   }
 
   const stickyActionHeaderClass =
-    "min-w-[5.5rem] whitespace-nowrap border-l border-slate-200 bg-[#F1F4F9] px-3 py-1.5 text-right"
+    "min-w-[5.5rem] whitespace-nowrap border-l border-slate-200 bg-[#F1F4F9] px-3 py-1.5 text-left"
   const stickyActionCellClass = (rowBg: string) =>
     `min-w-[5.5rem] whitespace-nowrap border-l border-slate-200 px-3 py-1.5 text-right ${rowBg}`
 
@@ -1037,17 +1254,51 @@ export default function SalesExcelTable({
           }}
         />
       ) : isLogistics ? (
-        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
-          {/* LOGISTICS CARD 1 — TOTAL ORDERS */}
+        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+          {/* LOGISTICS CARD 1 — ORDERS TO DELIVER (DEFAULT ACTIVE) */}
           <button
             type="button"
             onClick={() => {
+              setLogisticsCardMode("ready_to_ship")
+              setCardFilter("all")
+              setPage(1)
+            }}
+            className={cn(
+              "flex flex-col justify-between rounded-xl border p-3.5 text-left transition-all cursor-pointer shadow-xs hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-400 min-w-0",
+              logisticsCardMode === "ready_to_ship" && cardFilter === "all"
+                ? "border-emerald-500 bg-emerald-50/90 ring-2 ring-emerald-400/30"
+                : "border-slate-200 bg-white hover:border-emerald-300 hover:bg-slate-50/50",
+            )}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">Orders to Deliver</span>
+              <PackageCheck className="h-4 w-4 text-emerald-600 shrink-0" />
+            </div>
+            <div className="mt-2 flex items-baseline justify-between gap-2 min-w-0">
+              <div className="min-w-0">
+                <div className="text-xl font-extrabold text-slate-900 leading-tight">
+                  {readyToShipCount} <span className="text-xs font-normal text-slate-500">{readyToShipCount === 1 ? "Order" : "Orders"}</span>
+                </div>
+              </div>
+              {logisticsCardMode === "ready_to_ship" && cardFilter === "all" && (
+                <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-200 shrink-0">
+                  Orders to Deliver
+                </span>
+              )}
+            </div>
+          </button>
+
+          {/* LOGISTICS CARD 2 — TOTAL ORDERS (CLICK SHOWS ALL ORDERS) */}
+          <button
+            type="button"
+            onClick={() => {
+              setLogisticsCardMode("all_orders")
               setCardFilter("all")
               setPage(1)
             }}
             className={cn(
               "flex flex-col justify-between rounded-xl border p-3.5 text-left transition-all cursor-pointer shadow-xs hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-400 min-w-0",
-              cardFilter === "all"
+              logisticsCardMode === "all_orders" && cardFilter === "all"
                 ? "border-violet-500 bg-violet-50/90 ring-2 ring-violet-400/30"
                 : "border-slate-200 bg-white hover:border-violet-300 hover:bg-slate-50/50",
             )}
@@ -1075,7 +1326,7 @@ export default function SalesExcelTable({
                   {totalOrderCount} <span className="text-xs font-normal text-slate-500">{totalOrderCount === 1 ? "Order" : "Orders"}</span>
                 </div>
               </div>
-              {cardFilter === "all" && (
+              {logisticsCardMode === "all_orders" && cardFilter === "all" && (
                 <span className="text-[10px] font-bold text-violet-700 bg-violet-100 px-2 py-0.5 rounded-full border border-violet-200 shrink-0">
                   All Orders
                 </span>
@@ -1083,10 +1334,11 @@ export default function SalesExcelTable({
             </div>
           </button>
 
-          {/* LOGISTICS CARD 2 — PENDING ORDERS */}
+          {/* LOGISTICS CARD 3 — PENDING ORDERS */}
           <button
             type="button"
             onClick={() => {
+              setLogisticsCardMode("ready_to_ship")
               setCardFilter("pending")
               setPage(1)
             }}
@@ -1115,10 +1367,11 @@ export default function SalesExcelTable({
             </div>
           </button>
 
-          {/* LOGISTICS CARD 3 — DIRECT ORDERS */}
+          {/* LOGISTICS CARD 4 — DIRECT ORDERS */}
           <button
             type="button"
             onClick={() => {
+              setLogisticsCardMode("ready_to_ship")
               setCardFilter("direct")
               setPage(1)
             }}
@@ -1141,6 +1394,39 @@ export default function SalesExcelTable({
               </div>
               {cardFilter === "direct" && (
                 <span className="text-[10px] font-bold text-blue-800 bg-blue-100 px-2 py-0.5 rounded-full border border-blue-200 shrink-0">
+                  Active Filter
+                </span>
+              )}
+            </div>
+          </button>
+
+          {/* LOGISTICS CARD 5 — CRITICAL ORDERS */}
+          <button
+            type="button"
+            onClick={() => {
+              setLogisticsCardMode("ready_to_ship")
+              setCardFilter("critical")
+              setPage(1)
+            }}
+            className={cn(
+              "flex flex-col justify-between rounded-xl border p-3.5 text-left transition-all cursor-pointer shadow-xs hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-rose-400 min-w-0",
+              cardFilter === "critical"
+                ? "border-rose-500 bg-rose-50/90 ring-2 ring-rose-400/30"
+                : "border-slate-200 bg-white hover:border-rose-300 hover:bg-slate-50/50",
+            )}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-rose-700">Critical Orders</span>
+              <AlertTriangle className="h-4 w-4 text-rose-600 shrink-0" />
+            </div>
+            <div className="mt-2 flex items-baseline justify-between gap-2 min-w-0">
+              <div className="min-w-0">
+                <div className="text-xl font-extrabold text-slate-900 leading-tight">
+                  {criticalCount} <span className="text-xs font-normal text-slate-500">{criticalCount === 1 ? "Order" : "Orders"}</span>
+                </div>
+              </div>
+              {cardFilter === "critical" && (
+                <span className="text-[10px] font-bold text-rose-800 bg-rose-100 px-2 py-0.5 rounded-full border border-rose-200 shrink-0">
                   Active Filter
                 </span>
               )}
@@ -1567,6 +1853,28 @@ export default function SalesExcelTable({
                 <span>Excel{selectedSales.length > 0 ? ` (${selectedSales.length})` : ""}</span>
               </Button>
 
+              {isAdmin && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 gap-1.5 px-2.5 text-xs font-medium bg-white hover:bg-slate-50 border-slate-200 text-slate-700 shadow-2xs"
+                  onClick={handleDownloadJSON}
+                  disabled={isFetchingServer || isGeneratingReport}
+                  title={
+                    selectedSales.length > 0
+                      ? `Download Sales Summary JSON Report for ${selectedSales.length} selected orders`
+                      : "Download Sales Summary JSON Report"
+                  }
+                >
+                  {isGeneratingReport ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-500" />
+                  ) : (
+                    <Download className="h-3.5 w-3.5 text-blue-600" />
+                  )}
+                  <span>JSON{selectedSales.length > 0 ? ` (${selectedSales.length})` : ""}</span>
+                </Button>
+              )}
+
               <Button
                 size="sm"
                 className="h-7 gap-1.5 px-3 text-xs font-semibold bg-violet-600 hover:bg-violet-700 text-white shadow-2xs"
@@ -1643,7 +1951,7 @@ export default function SalesExcelTable({
                   {!isPurchaseManager && !isLogistics && headerCell("total", "Total", "right")}
                   {!isPurchaseManager && !isLogistics && headerCell("received", "Received", "right")}
                   {!isPurchaseManager && !isLogistics && headerCell("balance", "Balance", "right")}
-                  {(showActions || isLogistics) && <th className={stickyActionHeaderClass}>Action</th>}
+                  {canShowActions && <th className={stickyActionHeaderClass}>Action</th>}
                 </tr>
               </thead>
               <tbody className={isFetchingServer && hasFetchedServer ? "opacity-60 transition-opacity" : "transition-opacity"}>
@@ -1721,27 +2029,127 @@ export default function SalesExcelTable({
                       statusClass = "default"
                     }
 
+                    const isDirect = (sale.delivery_status || "").trim().toLowerCase() === "direct"
+                    const hasCourierService = Boolean(sale.courier_service_name && sale.courier_service_name.trim())
+                    const hasSupplier = Boolean(sale.dropship_supplier && sale.dropship_supplier.trim())
+                    const isDirectIncomplete = isDirect && (!hasCourierService || !hasSupplier)
+                    const isDirectOrder = isDirect
+                    const isJobCard = isJobCardSale(sale)
+                    const isCourier =
+                      (sale.type_of_sale || "").trim().toLowerCase() === "courier" ||
+                      (sale.fulfillment_type || "").trim().toLowerCase() === "ship" ||
+                      Number(sale.courier_paid_extra) > 0
+                    const isJobCardCourier = isJobCard && isCourier
+                    const canMoveToDirect = (!isDirectOrder && isJobCardCourier) || (isDirectOrder && (!hasCourierService || !hasSupplier))
+
                     let baseBgClass =
                       index % 2 === 0
                         ? "bg-white hover:bg-slate-100 text-slate-800"
                         : "bg-slate-50 hover:bg-slate-100 text-slate-800"
                     let borderLeftClass = ""
 
-                    if (statusClass === "red") {
-                      baseBgClass = "bg-rose-100 text-rose-950 hover:bg-rose-200 font-medium"
-                      borderLeftClass = "border-l-4 border-l-rose-500"
-                    } else if (statusClass === "blue") {
-                      baseBgClass = "bg-blue-100 text-blue-950 hover:bg-blue-200 font-medium"
-                      borderLeftClass = "border-l-4 border-l-blue-500"
-                    } else if (statusClass === "green") {
-                      baseBgClass = "bg-emerald-100 text-emerald-950 hover:bg-emerald-200 font-medium"
-                      borderLeftClass = "border-l-4 border-l-emerald-500"
+                    if (isPurchaseManager) {
+                      if (purchaseManagerCardMode === "all_orders") {
+                        const dStatusLower = (sale.delivery_status || "").trim().toLowerCase()
+                        const isReturned =
+                          dStatusLower === "returned" ||
+                          saleStatusLower === "returned" ||
+                          sale.status === "Returned" ||
+                          isCancelledOrReturned
+                        const isDelivered =
+                          dStatusLower === "delivered" ||
+                          dStatusLower === "completed" ||
+                          dStatusLower === "complete"
+                        const isOrangeStatus =
+                          dStatusLower === "direct" ||
+                          dStatusLower === "shipped" ||
+                          dStatusLower === "shipping"
+
+                        if (isReturned) {
+                          baseBgClass = "bg-rose-100 text-rose-950 hover:bg-rose-200 font-medium"
+                          borderLeftClass = "border-l-4 border-l-rose-500"
+                        } else if (isDelivered) {
+                          baseBgClass = "bg-emerald-100 text-emerald-950 hover:bg-emerald-200 font-medium"
+                          borderLeftClass = "border-l-4 border-l-emerald-500"
+                        } else if (isOrangeStatus) {
+                          baseBgClass = "bg-amber-100 text-amber-950 hover:bg-amber-200 font-medium"
+                          borderLeftClass = "border-l-4 border-l-amber-500"
+                        } else {
+                          baseBgClass =
+                            index % 2 === 0
+                              ? "bg-white hover:bg-slate-100 text-slate-800"
+                              : "bg-slate-50 hover:bg-slate-100 text-slate-800"
+                          borderLeftClass = ""
+                        }
+                      } else {
+                        // purchaseManagerCardMode === "orders_to_check"
+                        if (isDirectIncomplete) {
+                          baseBgClass = "bg-amber-100 text-amber-950 hover:bg-amber-200 font-medium"
+                          borderLeftClass = "border-l-4 border-l-amber-500"
+                        } else {
+                          // In Purchase Manager, normal rows have no special color (clean alternating white/slate)
+                          baseBgClass =
+                            index % 2 === 0
+                              ? "bg-white hover:bg-slate-100 text-slate-800"
+                              : "bg-slate-50 hover:bg-slate-100 text-slate-800"
+                          borderLeftClass = ""
+                        }
+                      }
+                    } else if (isLogistics) {
+                      const deliveryStatusLower = (sale.delivery_status || "").trim().toLowerCase()
+                      const isReturned =
+                        deliveryStatusLower === "returned" ||
+                        saleStatusLower === "returned" ||
+                        sale.status === "Returned" ||
+                        isCancelledOrReturned
+                      const isDelivered =
+                        deliveryStatusLower === "delivered" ||
+                        deliveryStatusLower === "completed" ||
+                        deliveryStatusLower === "complete"
+
+                      if (isReturned) {
+                        // Returned orders in logistics: Red
+                        baseBgClass = "bg-rose-100 text-rose-950 hover:bg-rose-200 font-medium"
+                        borderLeftClass = "border-l-4 border-l-rose-500"
+                      } else if (isDelivered) {
+                        // Delivered orders in logistics: Green
+                        baseBgClass = "bg-emerald-100 text-emerald-950 hover:bg-emerald-200 font-medium"
+                        borderLeftClass = "border-l-4 border-l-emerald-500"
+                      } else {
+                        const tier = getLogisticsDeliveryTier(sale)
+                        if (tier === 1) {
+                          // In-progress / new orders: NO color (neutral)
+                          baseBgClass =
+                            index % 2 === 0
+                              ? "bg-white hover:bg-slate-100 text-slate-800"
+                              : "bg-slate-50 hover:bg-slate-100 text-slate-800"
+                          borderLeftClass = ""
+                        } else if (tier === 2) {
+                          // Shipped but missing courier service or genuine tracking ID: Saffron / Amber / Orange
+                          baseBgClass = "bg-amber-100 text-amber-950 hover:bg-amber-200 font-medium"
+                          borderLeftClass = "border-l-4 border-l-amber-500"
+                        } else if (tier === 3) {
+                          // Shipped and completely updated with courier and tracking ID: Green
+                          baseBgClass = "bg-emerald-100 text-emerald-950 hover:bg-emerald-200 font-medium"
+                          borderLeftClass = "border-l-4 border-l-emerald-500"
+                        }
+                      }
+                    } else {
+                      if (statusClass === "red") {
+                        baseBgClass = "bg-rose-100 text-rose-950 hover:bg-rose-200 font-medium"
+                        borderLeftClass = "border-l-4 border-l-rose-500"
+                      } else if (statusClass === "blue") {
+                        baseBgClass = "bg-blue-100 text-blue-950 hover:bg-blue-200 font-medium"
+                        borderLeftClass = "border-l-4 border-l-blue-500"
+                      } else if (statusClass === "green") {
+                        baseBgClass = "bg-emerald-100 text-emerald-950 hover:bg-emerald-200 font-medium"
+                        borderLeftClass = "border-l-4 border-l-emerald-500"
+                      }
                     }
 
                     const isSelected = selectedSales.includes(sale.id)
                     const isExpanded = expandedSaleId === sale.id
                     const rowClass = `${baseBgClass} ${borderLeftClass} ${isSelected ? "bg-violet-100" : ""}`
-                    const isJobCard = isJobCardSale(sale)
                     const profitAmount = getSaleProfit(sale)
 
                     const mainRow = (
@@ -1879,6 +2287,9 @@ export default function SalesExcelTable({
                             isJobCard={isJobCard}
                             userRole="admin"
                             onStatusChange={(newStatus) => handleDeliveryStatusChange(sale.id, newStatus)}
+                            onOpenFulfillment={() => openFulfillmentModal(sale, "Shipped")}
+                            onOpenMoveToDirect={() => setMoveToDirectSale(sale)}
+                            sale={sale}
                           />
                         </td>
                         <td className="whitespace-nowrap px-3 py-1.5 text-slate-700">
@@ -1936,22 +2347,74 @@ export default function SalesExcelTable({
                             {remaining > 0 ? formatCurrency(remaining) : "—"}
                           </td>
                         )}
-                        {(showActions || isLogistics) && (
+                        {canShowActions && (
                           <td className={stickyActionCellClass(baseBgClass)}>
-                            {isLogistics ? (
-                              <div className="flex items-center justify-center">
+                            {isPurchaseManager ? (
+                              <div className="flex items-center justify-center gap-1">
                                 <Button
                                   type="button"
                                   size="sm"
+                                  disabled={markingReadySaleId === sale.id}
                                   onClick={(event) => {
                                     event.stopPropagation()
-                                    openFulfillmentModal(sale)
+                                    handleMarkReadyToShip(sale)
                                   }}
-                                  className="h-7 w-7 p-0 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white shadow-2xs hover:shadow-xs transition-transform hover:scale-105 active:scale-95 flex items-center justify-center cursor-pointer"
-                                  title="Fulfillment Details"
+                                  className="h-7 w-7 p-0 rounded-md bg-blue-600 hover:bg-blue-700 text-white shadow-2xs hover:shadow-xs transition-transform hover:scale-105 active:scale-95 flex items-center justify-center cursor-pointer"
+                                  title="Mark order Ready to Ship for Logistics"
+                                  aria-label="Mark Ready to Ship"
                                 >
-                                  <ArrowRight className="h-3.5 w-3.5" />
+                                  {markingReadySaleId === sale.id ? (
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  ) : (
+                                    <SendHorizontal className="h-3.5 w-3.5" />
+                                  )}
                                 </Button>
+                                {canMoveToDirect && (
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    onClick={(event) => {
+                                      event.stopPropagation()
+                                      setMoveToDirectSale(sale)
+                                    }}
+                                    className="h-7 w-7 p-0 rounded-full bg-purple-600 hover:bg-purple-700 text-white shadow-2xs hover:shadow-xs transition-transform hover:scale-105 active:scale-95 flex items-center justify-center cursor-pointer"
+                                    title="Move to Direct (Dropship)"
+                                    aria-label="Move to Direct"
+                                  >
+                                    <Forward className="h-3.5 w-3.5" />
+                                  </Button>
+                                )}
+                              </div>
+                            ) : isLogistics ? (
+                              <div className="flex items-center justify-center">
+                                {!isDirectOrder ? (
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    onClick={(event) => {
+                                      event.stopPropagation()
+                                      openFulfillmentModal(sale)
+                                    }}
+                                    className="h-7 w-7 p-0 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white shadow-2xs hover:shadow-xs transition-transform hover:scale-105 active:scale-95 flex items-center justify-center cursor-pointer"
+                                    title="Fulfillment Details"
+                                  >
+                                    <FilePenLine className="h-3.5 w-3.5" />
+                                  </Button>
+                                ) : (
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    onClick={(event) => {
+                                      event.stopPropagation()
+                                      setDirectFulfillmentSale(sale)
+                                    }}
+                                    className="h-7 w-7 p-0 rounded-full bg-purple-600 hover:bg-purple-700 text-white shadow-2xs hover:shadow-xs transition-transform hover:scale-105 active:scale-95 flex items-center justify-center cursor-pointer"
+                                    title="Direct Order Details"
+                                    aria-label="Direct Order Details"
+                                  >
+                                    <Forward className="h-3.5 w-3.5" />
+                                  </Button>
+                                )}
                               </div>
                             ) : (
                               <div className="flex items-center justify-end gap-1.5">
@@ -2080,6 +2543,46 @@ export default function SalesExcelTable({
                                 />
 
                                 <div className="pt-2 flex flex-wrap gap-1.5">
+                                  {isPurchaseManager && purchaseManagerCardMode === "orders_to_check" && (
+                                    <>
+                                      <Button
+                                        size="sm"
+                                        disabled={markingReadySaleId === sale.id}
+                                        onClick={() => handleMarkReadyToShip(sale)}
+                                        className="h-7 text-xs px-2.5 font-semibold bg-blue-600 hover:bg-blue-700 text-white gap-1.5 cursor-pointer"
+                                        title="Mark order Ready to Ship for Logistics"
+                                      >
+                                        {markingReadySaleId === sale.id ? (
+                                          <Loader2 className="h-3 w-3 animate-spin" />
+                                        ) : (
+                                          <PackageCheck className="h-3 w-3" />
+                                        )}
+                                        Ready to Ship
+                                      </Button>
+                                      {canMoveToDirect && (
+                                        <Button
+                                          size="sm"
+                                          onClick={() => setMoveToDirectSale(sale)}
+                                          className="h-7 text-xs px-2.5 font-semibold bg-purple-600 hover:bg-purple-700 text-white gap-1.5 cursor-pointer"
+                                          title="Move to Direct (Dropship)"
+                                        >
+                                          <Forward className="h-3 w-3" />
+                                          Move to Direct
+                                        </Button>
+                                      )}
+                                    </>
+                                  )}
+                                  {isLogistics && isDirectOrder && (
+                                    <Button
+                                      size="sm"
+                                      onClick={() => setDirectFulfillmentSale(sale)}
+                                      className="h-7 text-xs px-2.5 font-semibold bg-purple-600 hover:bg-purple-700 text-white gap-1.5 cursor-pointer"
+                                      title="Direct Order Details"
+                                    >
+                                      <Forward className="h-3 w-3" />
+                                      Direct Details
+                                    </Button>
+                                  )}
                                   {showActions && (
                                     <Button
                                       size="sm"
@@ -2202,13 +2705,83 @@ export default function SalesExcelTable({
                 const isSelected = selectedSales.includes(sale.id)
                 const isExpanded = expandedSaleId === sale.id
                 const profitAmount = getSaleProfit(sale)
+                const isDirectOrder = (sale.delivery_status || "").trim().toLowerCase() === "direct"
+                const isCourier =
+                  (sale.type_of_sale || "").trim().toLowerCase() === "courier" ||
+                  (sale.fulfillment_type || "").trim().toLowerCase() === "ship" ||
+                  Number(sale.courier_paid_extra) > 0
+                const isJobCardCourier = isJobCard && isCourier
+                const hasCourierService = Boolean(sale.courier_service_name && sale.courier_service_name.trim())
+                const hasSupplier = Boolean(sale.dropship_supplier && sale.dropship_supplier.trim())
+                const canMoveToDirect = (!isDirectOrder && isJobCardCourier) || (isDirectOrder && (!hasCourierService || !hasSupplier))
+
+                let mobileTierClass = ""
+                if (isPurchaseManager) {
+                  if (purchaseManagerCardMode === "all_orders") {
+                    const dStatusLower = (sale.delivery_status || "").trim().toLowerCase()
+                    const isReturned =
+                      dStatusLower === "returned" ||
+                      (sale.status || "").trim().toLowerCase() === "returned" ||
+                      isCancelledOrReturned
+                    const isDelivered =
+                      dStatusLower === "delivered" ||
+                      dStatusLower === "completed" ||
+                      dStatusLower === "complete"
+                    const isOrangeStatus =
+                      dStatusLower === "direct" ||
+                      dStatusLower === "shipped" ||
+                      dStatusLower === "shipping"
+
+                    if (isReturned) {
+                      mobileTierClass = "bg-rose-50/90 border-l-4 border-l-rose-500"
+                    } else if (isDelivered) {
+                      mobileTierClass = "bg-emerald-50/90 border-l-4 border-l-emerald-500"
+                    } else if (isOrangeStatus) {
+                      mobileTierClass = "bg-amber-50/90 border-l-4 border-l-amber-500"
+                    } else {
+                      mobileTierClass = "" // Neutral row in Purchase Manager
+                    }
+                  } else {
+                    const isDirectIncomplete = isDirectOrder && (!hasCourierService || !hasSupplier)
+                    if (isDirectIncomplete) {
+                      mobileTierClass = "bg-amber-50/90 border-l-4 border-l-amber-500"
+                    } else {
+                      mobileTierClass = "" // Neutral row in Purchase Manager
+                    }
+                  }
+                } else if (isLogistics) {
+                  const deliveryStatusLower = (sale.delivery_status || "").trim().toLowerCase()
+                  const isReturned =
+                    deliveryStatusLower === "returned" ||
+                    (sale.status || "").trim().toLowerCase() === "returned" ||
+                    isCancelledOrReturned
+                  const isDelivered =
+                    deliveryStatusLower === "delivered" ||
+                    deliveryStatusLower === "completed" ||
+                    deliveryStatusLower === "complete"
+
+                  if (isReturned) {
+                    mobileTierClass = "bg-rose-50/90 border-l-4 border-l-rose-500"
+                  } else if (isDelivered) {
+                    mobileTierClass = "bg-emerald-50/90 border-l-4 border-l-emerald-500"
+                  } else {
+                    const tier = getLogisticsDeliveryTier(sale)
+                    if (tier === 2) {
+                      mobileTierClass = "bg-amber-50/90 border-l-4 border-l-amber-500"
+                    } else if (tier === 3) {
+                      mobileTierClass = "bg-emerald-50/90 border-l-4 border-l-emerald-500"
+                    }
+                  }
+                } else if (isPending) {
+                  mobileTierClass = "bg-amber-50/40"
+                }
 
                 return (
                   <div
                     key={sale.id}
                     className={cn(
                       "p-3.5 bg-white transition-colors space-y-2.5",
-                      isPending ? "bg-amber-50/40" : "",
+                      mobileTierClass,
                       isSelected ? "bg-violet-50/70 border-l-4 border-l-violet-600" : "",
                     )}
                   >
@@ -2347,6 +2920,9 @@ export default function SalesExcelTable({
                           isJobCard={isJobCard}
                           userRole="admin"
                           onStatusChange={(newStatus) => handleDeliveryStatusChange(sale.id, newStatus)}
+                          onOpenFulfillment={() => openFulfillmentModal(sale, "Shipped")}
+                          onOpenMoveToDirect={() => setMoveToDirectSale(sale)}
+                          sale={sale}
                         />
                       </div>
 
@@ -2370,16 +2946,57 @@ export default function SalesExcelTable({
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <SaleDocumentActions sale={sale} size="card" />
 
-                        {isLogistics && (
+                        {isPurchaseManager && purchaseManagerCardMode === "orders_to_check" && (
                           <Button
                             size="sm"
-                            onClick={() => openFulfillmentModal(sale)}
-                            className="h-8 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white gap-1.5 rounded-lg px-2.5 shadow-2xs cursor-pointer"
-                            title="Open Fulfillment Details"
+                            disabled={markingReadySaleId === sale.id}
+                            onClick={() => handleMarkReadyToShip(sale)}
+                            className="h-8 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white gap-1.5 rounded-lg px-2.5 shadow-2xs cursor-pointer"
+                            title="Mark order Ready to Ship for Logistics"
                           >
-                            <span>Fulfillment</span>
-                            <ArrowRight className="h-3.5 w-3.5" />
+                            {markingReadySaleId === sale.id ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <PackageCheck className="h-3.5 w-3.5" />
+                            )}
+                            <span>Ready to Ship</span>
                           </Button>
+                        )}
+
+                        {isPurchaseManager && purchaseManagerCardMode === "orders_to_check" && canMoveToDirect && (
+                          <Button
+                            size="sm"
+                            onClick={() => setMoveToDirectSale(sale)}
+                            className="h-8 text-xs font-semibold bg-purple-600 hover:bg-purple-700 text-white gap-1.5 rounded-lg px-2.5 shadow-2xs cursor-pointer"
+                            title="Move to Direct (Dropship)"
+                          >
+                            <Forward className="h-3.5 w-3.5" />
+                            <span>Move to Direct</span>
+                          </Button>
+                        )}
+
+                        {isLogistics && logisticsCardMode !== "all_orders" && (
+                          !isDirectOrder ? (
+                            <Button
+                              size="sm"
+                              onClick={() => openFulfillmentModal(sale)}
+                              className="h-8 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white gap-1.5 rounded-lg px-2.5 shadow-2xs cursor-pointer"
+                              title="Open Fulfillment Details"
+                            >
+                              <FilePenLine className="h-3.5 w-3.5" />
+                              <span>Fulfillment</span>
+                            </Button>
+                          ) : (
+                            <Button
+                              size="sm"
+                              onClick={() => setDirectFulfillmentSale(sale)}
+                              className="h-8 text-xs font-semibold bg-purple-600 hover:bg-purple-700 text-white gap-1.5 rounded-lg px-2.5 shadow-2xs cursor-pointer"
+                              title="Direct Order Details"
+                            >
+                              <Forward className="h-3.5 w-3.5" />
+                              <span>Direct Details</span>
+                            </Button>
+                          )
                         )}
 
                         <Button
@@ -2413,9 +3030,20 @@ export default function SalesExcelTable({
                               <Eye className="h-4 w-4 mr-2 text-slate-500" /> View Modal
                             </DropdownMenuItem>
                           )}
-                          {isLogistics && (
-                            <DropdownMenuItem onClick={() => openFulfillmentModal(sale)}>
-                              <Package className="h-4 w-4 mr-2 text-indigo-600" /> Fulfillment Details
+                          {isLogistics && logisticsCardMode !== "all_orders" && (
+                            !isDirectOrder ? (
+                              <DropdownMenuItem onClick={() => openFulfillmentModal(sale)}>
+                                <FilePenLine className="h-4 w-4 mr-2 text-indigo-600" /> Fulfillment Details
+                              </DropdownMenuItem>
+                            ) : (
+                              <DropdownMenuItem onClick={() => setDirectFulfillmentSale(sale)}>
+                                <Forward className="h-4 w-4 mr-2 text-purple-600" /> Direct Details
+                              </DropdownMenuItem>
+                            )
+                          )}
+                          {isPurchaseManager && purchaseManagerCardMode === "orders_to_check" && canMoveToDirect && (
+                            <DropdownMenuItem onClick={() => setMoveToDirectSale(sale)}>
+                              <Forward className="h-4 w-4 mr-2 text-purple-600" /> Move to Direct
                             </DropdownMenuItem>
                           )}
                           {showActions && (
@@ -2634,37 +3262,78 @@ export default function SalesExcelTable({
           <div className="p-6 max-h-[70vh] overflow-y-auto">
             {fulfillmentModal && (
               <SaleShippingSection
-                deviceId={deviceId || fulfillmentModal.sale?.device_id || 0}
+                key={fulfillmentModal.sale?.id}
+                deviceId={deviceId || fulfillmentModal.sale?.device_id || activeStaff?.device_id || 0}
                 value={fulfillmentModal.shippingData}
-                onChange={(val) => setFulfillmentModal((prev) => (prev ? { ...prev, shippingData: val } : null))}
+                onChange={(val) => {
+                  setFulfillmentErrors({})
+                  setFulfillmentModal((prev) => (prev ? { ...prev, shippingData: val } : null))
+                }}
                 customerAddress={fulfillmentModal.sale?.shipping_address || fulfillmentModal.sale?.customer_address}
                 customerName={fulfillmentModal.sale?.customer_name || fulfillmentModal.sale?.customer_name_override}
                 customerPhone={fulfillmentModal.sale?.customer_phone || fulfillmentModal.sale?.customer_phone_override}
                 isJobCard={isJobCardSale(fulfillmentModal.sale)}
                 forceFullForm={true}
                 hidePickupToggle={true}
+                isLogisticsFulfillment={true}
+                formatCurrency={formatCurrency}
+                currency="INR"
+                errors={fulfillmentErrors}
               />
             )}
           </div>
-          <DialogFooter className="bg-white border-t border-slate-200 px-6 py-4 flex flex-row justify-end gap-2 sticky bottom-0 z-10">
+          <DialogFooter className="bg-white border-t border-slate-200 px-6 py-4 flex flex-row items-center justify-between sticky bottom-0 z-10">
             <Button 
               variant="outline" 
               onClick={handleCloseFulfillmentModal}
               disabled={isSavingFulfillment}
             >
-              Back
+              Cancel
             </Button>
             <Button 
-              onClick={handleSaveFulfillment}
+              onClick={handleMoveToShipped}
               disabled={isSavingFulfillment}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white gap-2"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2 font-semibold shadow-xs"
             >
-              {isSavingFulfillment ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              Save Details
+              {isSavingFulfillment ? <Loader2 className="h-4 w-4 animate-spin" /> : <Truck className="h-4 w-4" />}
+              Move to Shipped
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {moveToDirectSale && (
+        <MoveToDirectModal
+          isOpen={Boolean(moveToDirectSale)}
+          onClose={() => setMoveToDirectSale(null)}
+          sale={moveToDirectSale}
+          deviceId={deviceId || moveToDirectSale.device_id || activeStaff?.device_id || 0}
+          userId={deviceId || moveToDirectSale.device_id || activeStaff?.device_id || activeStaff?.id || 0}
+          onSuccess={() => {
+            setMoveToDirectSale(null)
+            fetchServerSales()
+            if (onRefreshSales) {
+              onRefreshSales()
+            }
+          }}
+        />
+      )}
+
+      {directFulfillmentSale && (
+        <DirectFulfillmentModal
+          isOpen={Boolean(directFulfillmentSale)}
+          onClose={() => setDirectFulfillmentSale(null)}
+          sale={directFulfillmentSale}
+          deviceId={deviceId || directFulfillmentSale.device_id || activeStaff?.device_id || 0}
+          onSuccess={() => {
+            setDirectFulfillmentSale(null)
+            fetchServerSales()
+            if (onRefreshSales) {
+              onRefreshSales()
+            }
+          }}
+        />
+      )}
     </div>
   )
 }

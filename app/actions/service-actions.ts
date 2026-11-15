@@ -120,3 +120,18 @@ export async function deleteService(serviceId: number, deviceId: number) {
     return { success: false, message: "Failed to delete service" }
   }
 }
+
+// Get all active services across all devices
+export async function getAllActiveServices() {
+  try {
+    const services = await sql`
+      SELECT * FROM services 
+      WHERE is_active = true
+      ORDER BY name ASC
+    `
+    return { success: true, data: services }
+  } catch (error) {
+    console.error("Error fetching all active services:", error)
+    return { success: false, message: "Failed to fetch services", data: [] }
+  }
+}

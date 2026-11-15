@@ -21,6 +21,7 @@ import { useDispatch } from "react-redux"
 import { addProduct } from "@/store/slices/productSlice"
 import { allocatePurchaseCosts, calculatePurchaseCourierCharge } from "@/lib/purchase-courier"
 import { markInventoryStale } from "@/lib/inventory-sync"
+import { cn } from "@/lib/utils"
 
 interface EditPurchaseModalProps {
   isOpen: boolean
@@ -76,6 +77,7 @@ export default function EditPurchaseModal({
   const [supplier, setSupplier] = useState("")
   const [status, setStatus] = useState<string>("Credit")
   const [purchaseStatus, setPurchaseStatus] = useState<string>("Delivered")
+  const [purchaseType, setPurchaseType] = useState<string>("Stock")
   const [paymentMethod, setPaymentMethod] = useState<string>("Cash")
   const [receivedAmount, setReceivedAmount] = useState<number>(0)
   const [products, setProducts] = useState<ProductRow[]>([])
@@ -96,7 +98,10 @@ export default function EditPurchaseModal({
     [subtotal, courierChargePercentage]
   )
   const courierCharge = customCourierCharge !== null ? customCourierCharge : autoCourierCharge
-  const totalAmount = useMemo(() => Number(subtotal) + Number(taxAmount) - Number(discountAmount) + Number(courierCharge), [subtotal, taxAmount, discountAmount, courierCharge])
+  // Purchase bill from supplier (without courier charge)
+  const purchaseTotal = useMemo(() => Math.max(0, Math.round((Number(subtotal) + Number(taxAmount) - Number(discountAmount)) * 100) / 100), [subtotal, taxAmount, discountAmount])
+  // Total cost including courier charge (paid after delivery)
+  const totalAmount = useMemo(() => Math.max(0, Math.round((purchaseTotal + Number(courierCharge)) * 100) / 100), [purchaseTotal, courierCharge])
 
   const purchaseItemsWithAllocations = useMemo(() => {
     const costAllocations = allocatePurchaseCosts(products, courierCharge, discountAmount)
@@ -135,6 +140,7 @@ export default function EditPurchaseModal({
     setSupplier("")
     setStatus("Credit")
     setPurchaseStatus("Delivered")
+    setPurchaseType("Stock")
     setPaymentMethod("Cash")
     setReceivedAmount(0)
     setProducts([])
@@ -203,6 +209,7 @@ export default function EditPurchaseModal({
       setStatus(statusMap[purchase.status] || purchase.status || "Credit")
       
       setPurchaseStatus(purchase.purchase_status || "Delivered")
+      setPurchaseType(purchase.purchase_type || "Stock")
       setPaymentMethod(purchase.payment_method || "Cash")
       setReceivedAmount(Number(purchase.received_amount) || 0)
 
@@ -259,12 +266,12 @@ export default function EditPurchaseModal({
       return "Please select a payment method"
     }
 
-    if (receivedAmount > totalAmount) {
-      return "Paid amount cannot be greater than total amount"
+    if (receivedAmount > purchaseTotal) {
+      return "Paid amount cannot be greater than purchase bill total"
     }
 
     return null
-  }, [supplier, products, status, paymentMethod, receivedAmount, totalAmount])
+  }, [supplier, products, status, paymentMethod, receivedAmount, purchaseTotal])
 
   // Form submission
   const handleSubmit = useCallback(async () => {
@@ -285,7 +292,7 @@ export default function EditPurchaseModal({
     try {
       let finalReceivedAmount = receivedAmount
       if (status === "Paid") {
-        finalReceivedAmount = totalAmount
+        finalReceivedAmount = purchaseTotal
       } else if (status === "Cancelled") {
         finalReceivedAmount = 0
       }
@@ -294,9 +301,10 @@ export default function EditPurchaseModal({
       formData.append("id", purchaseId.toString())
       formData.append("supplier", supplier)
       formData.append("purchase_date", date.toISOString())
-      formData.append("total_amount", totalAmount.toString())
+      formData.append("total_amount", purchaseTotal.toString())
       formData.append("status", status)
       formData.append("purchase_status", purchaseStatus)
+      formData.append("purchase_type", purchaseType || "Stock")
       formData.append("payment_method", paymentMethod)
       formData.append("user_id", userId.toString())
       formData.append("device_id", deviceId.toString())
@@ -577,22 +585,62 @@ export default function EditPurchaseModal({
                       </div>
                     )}
 
-                    {/* Paid Amount - only show for Credit */}
-                    {status === "Credit" && (
+                    {/* Purchase Type and Paid Amount in same row */}
+                    <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <Label className="text-sm font-medium text-gray-700">Paid Amount</Label>
-                        <Input
-                          type="number"
-                          min="0"
-                          max={totalAmount}
-                          step="0.01"
-                          value={receivedAmount}
-                          onChange={(e) => setReceivedAmount(Number.parseFloat(e.target.value) || 0)}
-                          className="h-9 mt-1 bg-white border-gray-300 text-gray-900"
-                          placeholder="0.00"
-                        />
+                        <Label className="text-sm font-medium text-gray-700">Purchase Type</Label>
+                        <div className="h-9 mt-1 flex items-center">
+                          <span
+                            className={cn(
+                              "inline-flex items-center rounded-md px-2.5 py-1 text-xs font-semibold border",
+                              (purchaseType || "").toLowerCase() === "dropship"
+                                ? "bg-purple-50 text-purple-700 border-purple-200"
+                                : "bg-blue-50 text-blue-700 border-blue-200"
+                            )}
+                          >
+                            {purchaseType || "Stock"}
+                          </span>
+                        </div>
                       </div>
-                    )}
+                      <div>
+                        <div className="flex items-center justify-between">
+                          <Label className="text-sm font-medium text-gray-700">Paid Amount</Label>
+                          {status === "Credit" && (
+                            <button
+                              type="button"
+                              onClick={() => setReceivedAmount(purchaseTotal)}
+                              className="text-[11px] text-blue-600 hover:text-blue-800 font-medium cursor-pointer"
+                            >
+                              Pay Full ({localCurrency} {purchaseTotal.toFixed(2)})
+                            </button>
+                          )}
+                        </div>
+                        {status === "Credit" ? (
+                          <>
+                            <Input
+                              type="number"
+                              min="0"
+                              max={purchaseTotal}
+                              step="0.01"
+                              value={receivedAmount}
+                              onChange={(e) => setReceivedAmount(Number.parseFloat(e.target.value) || 0)}
+                              className="h-9 mt-1 bg-white border-gray-300 text-gray-900"
+                              placeholder="0.00"
+                            />
+                            <p className="text-[11px] text-gray-500 mt-1">
+                              Remaining to Pay: {localCurrency} {(Math.max(0, purchaseTotal - receivedAmount)).toFixed(2)}
+                            </p>
+                          </>
+                        ) : (
+                          <Input
+                            type="number"
+                            value={purchaseTotal > 0 ? purchaseTotal.toFixed(2) : "0.00"}
+                            disabled
+                            className="h-9 mt-1 bg-gray-100 border-gray-200 text-gray-500 cursor-not-allowed"
+                          />
+                        )}
+                      </div>
+                    </div>
 
                     {/* Calculation Summary */}
                     <div className="border-t border-gray-200 pt-3 mt-4">
@@ -678,8 +726,14 @@ export default function EditPurchaseModal({
                             className="w-16 h-7 text-xs text-center bg-white border-gray-300 text-gray-900"
                           />
                         </div>
+                        <div className="flex justify-between items-center text-gray-800 font-semibold border-t border-gray-100 pt-2">
+                          <span>Purchase Bill (Supplier):</span>
+                          <span>
+                            {localCurrency} {purchaseTotal.toFixed(2)}
+                          </span>
+                        </div>
                         <div className="flex justify-between font-bold text-blue-600 border-t border-gray-200 pt-2">
-                          <span>Grand Total:</span>
+                          <span>Grand Total (with Courier):</span>
                           <span>
                             {localCurrency} {totalAmount.toFixed(2)}
                           </span>

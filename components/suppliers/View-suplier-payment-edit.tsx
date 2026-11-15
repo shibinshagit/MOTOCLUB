@@ -267,6 +267,7 @@ export default function EditSupplierPaymentModal({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="Cash">Cash</SelectItem>
+                  <SelectItem value="UPI">UPI</SelectItem>
                   <SelectItem value="Card">Card</SelectItem>
                   <SelectItem value="Bank Transfer">Bank Transfer</SelectItem>
                   <SelectItem value="Check">Check</SelectItem>

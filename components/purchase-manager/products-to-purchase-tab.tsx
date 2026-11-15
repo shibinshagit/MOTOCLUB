@@ -366,13 +366,6 @@ export default function ProductsToPurchaseTab({
     } catch (_) {}
   }, [deviceId, itemActions, postponedOrder, orderedOrder, rejectedOrder, redeemedOrder, itemNotes])
 
-  // Internal note modal state for currently ordered product
-  const [orderModalProduct, setOrderModalProduct] = useState<{
-    product: any
-    rowKey: string
-  } | null>(null)
-  const [internalNote, setInternalNote] = useState<string>("")
-
   // Reject modal state for currently rejected product
   const [rejectModalProduct, setRejectModalProduct] = useState<{
     product: any
@@ -395,10 +388,6 @@ export default function ProductsToPurchaseTab({
     rowKey: string
     note: string
   } | null>(null)
-
-  // Bulk Proceed to Purchase modal state
-  const [bulkOrderModalOpen, setBulkOrderModalOpen] = useState<boolean>(false)
-  const [bulkInternalNote, setBulkInternalNote] = useState<string>("")
 
   const { toast } = useToast()
 
@@ -797,10 +786,6 @@ export default function ProductsToPurchaseTab({
           delete updated[rowKey]
           return updated
         })
-        if (orderModalProduct?.rowKey === rowKey) {
-          setOrderModalProduct(null)
-          setInternalNote("")
-        }
         if (deviceId) {
           saveProductPurchaseAction(deviceId, rowKey, null).catch(console.error)
         }
@@ -811,24 +796,9 @@ export default function ProductsToPurchaseTab({
         return
       }
 
-      // Mark as ordered, move down before redeemed products, and open internal note modal
-      setItemActions((prev) => ({
-        ...prev,
-        [rowKey]: "order",
-      }))
-      setOrderedOrder((prev) => [...prev.filter((k) => k !== rowKey), rowKey])
-      setPostponedOrder((prev) => prev.filter((k) => k !== rowKey))
-      setRejectedOrder((prev) => prev.filter((k) => k !== rowKey))
-      setRedeemedOrder((prev) => prev.filter((k) => k !== rowKey))
-
-      if (deviceId) {
-        saveProductPurchaseAction(deviceId, rowKey, "order", orderedOrder.length + 1, itemNotes[rowKey] || null).catch(console.error)
-      }
-
       const prod = products.find((p) => getRowKey(p) === rowKey)
       if (prod) {
-        setOrderModalProduct({ product: prod, rowKey })
-        setInternalNote(itemNotes[rowKey] || "")
+        handleProceedToPurchaseSingle(prod, rowKey)
       }
       return
     }
@@ -923,10 +893,6 @@ export default function ProductsToPurchaseTab({
 
     // If changing away from order, clean up order state
     setOrderedOrder((prev) => prev.filter((k) => k !== rowKey))
-    if (orderModalProduct?.rowKey === rowKey) {
-      setOrderModalProduct(null)
-      setInternalNote("")
-    }
 
     // Clean up reject state
     setRejectedOrder((prev) => prev.filter((k) => k !== rowKey))
@@ -1147,37 +1113,6 @@ export default function ProductsToPurchaseTab({
     setPostponeNote("")
   }
 
-  // Revert order action when clicking Back in internal note modal
-  const handleOrderModalBack = () => {
-    if (!orderModalProduct) return
-    const { rowKey, product } = orderModalProduct
-
-    // Revert the action so the product returns to its original unhandled place and color
-    setItemActions((prev) => {
-      const updated = { ...prev }
-      delete updated[rowKey]
-      return updated
-    })
-    setOrderedOrder((prev) => prev.filter((k) => k !== rowKey))
-    setItemNotes((prev) => {
-      const updated = { ...prev }
-      delete updated[rowKey]
-      return updated
-    })
-
-    setOrderModalProduct(null)
-    setInternalNote("")
-
-    if (deviceId) {
-      saveProductPurchaseAction(deviceId, rowKey, null).catch(console.error)
-    }
-
-    toast({
-      title: "Action Reverted",
-      description: `${product.product_name || "Product"}: Returned to original list`,
-    })
-  }
-
   // Open the view/edit note modal when clicking the note icon
   const handleOpenViewNoteModal = (rowKey: string, product: any) => {
     setViewNoteModal({
@@ -1218,21 +1153,19 @@ export default function ProductsToPurchaseTab({
     setViewNoteModal(null)
   }
 
-  // Handle Skip or Save button in internal note modal:
-  // Directly moves to the new purchase page with the product details and internal notes.
-  const handleOrderModalSkipOrSave = async () => {
-    if (!orderModalProduct) return
-    const { rowKey, product } = orderModalProduct
-    const noteText = internalNote.trim()
+  // Directly moves to the new purchase page with the product details prefilled
+  const handleProceedToPurchaseSingle = async (product: any, rowKey: string) => {
+    // Mark as ordered, move down before redeemed products
+    setItemActions((prev) => ({
+      ...prev,
+      [rowKey]: "order",
+    }))
+    setOrderedOrder((prev) => [...prev.filter((k) => k !== rowKey), rowKey])
+    setPostponedOrder((prev) => prev.filter((k) => k !== rowKey))
+    setRejectedOrder((prev) => prev.filter((k) => k !== rowKey))
+    setRedeemedOrder((prev) => prev.filter((k) => k !== rowKey))
 
-    // Persist internal note if entered
-    if (noteText) {
-      setItemNotes((prev) => ({
-        ...prev,
-        [rowKey]: noteText,
-      }))
-    }
-
+    const existingNote = itemNotes[rowKey] || ""
     const requiredQty = Math.max(1, Number(product.required_quantity) || 1)
     const resolvedPrice = Number(
       (Number(product.unit_price) > 0 ? product.unit_price : null) ??
@@ -1241,7 +1174,7 @@ export default function ProductsToPurchaseTab({
       (Number(product.product_wholesale_price) > 0 ? product.product_wholesale_price : null) ??
       (Number(product.variant_price) > 0 ? product.variant_price : null) ??
       (Number(product.product_price) > 0 ? product.product_price : null) ??
-      0
+      0,
     )
     const taxPercentage = Math.max(0, Math.min(100, Number(product.tax_percentage) || 0))
     const baseTotal = requiredQty * resolvedPrice
@@ -1344,7 +1277,7 @@ export default function ProductsToPurchaseTab({
       products: [draftItem],
       isEditMode: false,
       editingPurchaseId: null,
-      notes: noteText || undefined,
+      notes: existingNote || undefined,
     }
 
     // Persist draft in localStorage
@@ -1372,7 +1305,7 @@ export default function ProductsToPurchaseTab({
     if (deviceId) {
       try {
         await Promise.all([
-          saveProductPurchaseAction(deviceId, rowKey, "order", orderedOrder.indexOf(rowKey) + 1, noteText || null),
+          saveProductPurchaseAction(deviceId, rowKey, "order", orderedOrder.length + 1, existingNote || null),
           createPurchaseActionNotification({
             deviceId,
             actionType: "order",
@@ -1387,7 +1320,7 @@ export default function ProductsToPurchaseTab({
                 price: resolvedPrice,
               },
             ],
-            internalNote: noteText || null,
+            internalNote: existingNote || null,
             staffId: activeStaff?.id,
             staffName: activeStaff?.name,
           }),
@@ -1397,20 +1330,15 @@ export default function ProductsToPurchaseTab({
       }
     }
 
-    setOrderModalProduct(null)
-    setInternalNote("")
-
     // Directly move to the new purchase page
     const targetUrl = `${pathname}?tab=purchase&purchaseView=entry`
     router.push(targetUrl)
   }
 
-  // Handle bulk Proceed to Purchase (Skip or Save)
-  // Directs to the new purchase page with all selected products and their notes
-  const handleBulkOrderSkipOrSave = async () => {
+  // Directly proceeds to the new purchase page with all selected products
+  const handleBulkOrderProceed = async () => {
     if (selectedProducts.length === 0) return
 
-    const noteText = bulkInternalNote.trim()
     const newlyOrderedKeys = selectedProducts.map(getRowKey)
 
     // Build draft item objects with full pricing, quantity, and variant details
@@ -1542,7 +1470,7 @@ export default function ProductsToPurchaseTab({
       products: draftItems,
       isEditMode: false,
       editingPurchaseId: null,
-      notes: noteText || undefined,
+      notes: undefined,
     }
 
     // Persist draft in localStorage
@@ -1582,16 +1510,6 @@ export default function ProductsToPurchaseTab({
     })
     setRedeemedOrder((prev) => prev.filter((k) => !newlyOrderedKeys.includes(k)))
 
-    if (noteText) {
-      setItemNotes((prev) => {
-        const updated = { ...prev }
-        newlyOrderedKeys.forEach((k) => {
-          updated[k] = noteText
-        })
-        return updated
-      })
-    }
-
     // Save to database
     if (deviceId) {
       try {
@@ -1625,14 +1543,14 @@ export default function ProductsToPurchaseTab({
               rowKey: key,
               action: "order",
               actionOrder: idx + 1,
-              note: noteText || null,
+              note: itemNotes[key] || null,
             })),
           ),
           createPurchaseActionNotification({
             deviceId,
             actionType: "bulk_order",
             products: bulkProductsPayload,
-            internalNote: noteText || null,
+            internalNote: null,
             staffId: activeStaff?.id,
             staffName: activeStaff?.name,
           }),
@@ -1642,8 +1560,6 @@ export default function ProductsToPurchaseTab({
       }
     }
 
-    setBulkOrderModalOpen(false)
-    setBulkInternalNote("")
     setSelectedRowKeys([])
 
     toast({
@@ -2240,10 +2156,7 @@ export default function ProductsToPurchaseTab({
             <Button
               size="sm"
               className="h-8 px-4 text-xs font-bold gap-2 bg-blue-600 hover:bg-blue-700 text-white shadow-sm cursor-pointer transition-all"
-              onClick={() => {
-                setBulkInternalNote("")
-                setBulkOrderModalOpen(true)
-              }}
+              onClick={handleBulkOrderProceed}
             >
               <ShoppingCart className="h-3.5 w-3.5" />
               <span>Proceed to Purchase</span>
@@ -2862,136 +2775,6 @@ export default function ProductsToPurchaseTab({
         </div>
       </div>
 
-      {/* Internal Note Modal */}
-      <Dialog
-        open={Boolean(orderModalProduct)}
-        onOpenChange={(open) => {
-          if (!open) handleOrderModalBack()
-        }}
-      >
-        <DialogContent className="sm:max-w-md bg-white border border-slate-200 shadow-xl p-5">
-          <DialogHeader>
-            <div className="flex items-center gap-2.5">
-              <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 shrink-0">
-                <FileText className="h-4 w-4" />
-              </div>
-              <div className="text-left">
-                <DialogTitle className="text-base font-bold text-slate-900">
-                  Internal Note
-                </DialogTitle>
-                <DialogDescription className="text-xs text-slate-500">
-                  Add internal notes or instructions for ordering this product
-                </DialogDescription>
-              </div>
-            </div>
-          </DialogHeader>
-
-          {orderModalProduct && (
-            <div className="space-y-3.5 py-1">
-              {/* Product summary */}
-              <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-3 space-y-1.5">
-                <div className="font-semibold text-xs text-slate-900">
-                  {orderModalProduct.product.product_name}
-                </div>
-                <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-600">
-                  {orderModalProduct.product.variant_name &&
-                    orderModalProduct.product.variant_name.toLowerCase() !== "default" && (
-                      <span className="rounded bg-white px-1.5 py-0.5 border border-slate-200 font-medium">
-                        Variant: {orderModalProduct.product.variant_name}
-                      </span>
-                    )}
-                  {orderModalProduct.product.variant_sku && (
-                    <span className="font-mono text-slate-500">
-                      SKU: {orderModalProduct.product.variant_sku}
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center justify-between pt-1 border-t border-slate-200 text-xs">
-                  <span className="text-slate-500">
-                    Required:{" "}
-                    <strong className="text-rose-600">
-                      {Number(orderModalProduct.product.required_quantity) || 0}
-                    </strong>
-                  </span>
-                  {Number(orderModalProduct.product.unit_price) > 0 && (
-                    <span className="text-slate-500">
-                      Unit Price:{" "}
-                      <strong className="text-slate-800">
-                        {currency} {Number(orderModalProduct.product.unit_price).toFixed(2)}
-                      </strong>
-                    </span>
-                  )}
-                  <span className="text-slate-500">
-                    Current Stock:{" "}
-                    <strong className="text-slate-700">
-                      {Number(orderModalProduct.product.current_stock) || 0}
-                    </strong>
-                  </span>
-                </div>
-              </div>
-
-              {/* Internal Note field */}
-              <div className="space-y-1.5">
-                <Label
-                  htmlFor="internal-note-input"
-                  className="text-xs font-semibold text-slate-700"
-                >
-                  Internal Note
-                </Label>
-                <Textarea
-                  id="internal-note-input"
-                  placeholder="Add internal note or order instructions..."
-                  value={internalNote}
-                  onChange={(e) => setInternalNote(e.target.value)}
-                  className="min-h-[90px] text-xs resize-none bg-white border-slate-300 focus:border-blue-500 focus:ring-blue-500"
-                  autoFocus
-                />
-                <p className="text-[11px] text-slate-400">
-                  {internalNote.trim().length > 0
-                    ? "Click Save to proceed to the new purchase page with this note."
-                    : "Click Skip to proceed to the new purchase page without a note."}
-                </p>
-              </div>
-            </div>
-          )}
-
-          <DialogFooter className="flex items-center justify-between sm:justify-between gap-2 pt-2 border-t border-slate-100">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={handleOrderModalBack}
-              className="h-8 px-3 text-xs gap-1.5 border-slate-300 text-slate-700 hover:bg-slate-100 cursor-pointer"
-            >
-              <ArrowLeft className="h-3.5 w-3.5" />
-              <span>Back</span>
-            </Button>
-
-            <Button
-              type="button"
-              onClick={handleOrderModalSkipOrSave}
-              className={cn(
-                "h-8 px-4 text-xs font-semibold gap-1.5 cursor-pointer transition-colors shadow-2xs",
-                internalNote.trim().length > 0
-                  ? "bg-blue-600 hover:bg-blue-700 text-white"
-                  : "bg-slate-800 hover:bg-slate-900 text-white",
-              )}
-            >
-              {internalNote.trim().length > 0 ? (
-                <>
-                  <Save className="h-3.5 w-3.5" />
-                  <span>Save</span>
-                </>
-              ) : (
-                <>
-                  <span>Skip</span>
-                  <ArrowRight className="h-3.5 w-3.5" />
-                </>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       {/* Reject Product Modal */}
       <Dialog
         open={Boolean(rejectModalProduct)}
@@ -3371,153 +3154,6 @@ export default function ProductsToPurchaseTab({
         </DialogContent>
       </Dialog>
 
-      {/* BULK ORDER / PROCEED TO PURCHASE MODAL */}
-      <Dialog
-        open={bulkOrderModalOpen}
-        onOpenChange={(open) => {
-          if (!open) setBulkOrderModalOpen(false)
-        }}
-      >
-        <DialogContent
-          className="sm:max-w-lg bg-white border border-slate-200 shadow-xl p-5"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <DialogHeader>
-            <div className="flex items-center gap-2.5">
-              <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 shrink-0">
-                <ShoppingCart className="h-4 w-4" />
-              </div>
-              <div className="text-left">
-                <DialogTitle className="text-base font-bold text-slate-900">
-                  Proceed to Purchase
-                </DialogTitle>
-                <DialogDescription className="text-xs text-slate-500">
-                  Review selected products and add internal order note before proceeding to purchase entry
-                </DialogDescription>
-              </div>
-            </div>
-          </DialogHeader>
-
-          <div className="space-y-3.5 py-1">
-            {/* Products summary card */}
-            <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-3 space-y-2">
-              <div className="flex items-center justify-between text-xs font-semibold text-slate-900">
-                <span className="flex items-center gap-1.5">
-                  <span className="inline-flex items-center justify-center h-5 px-2 rounded-full bg-blue-100 text-blue-800 text-[11px] font-bold">
-                    {selectedProducts.length}
-                  </span>
-                  <span>Products Selected</span>
-                </span>
-                <span className="text-slate-600">
-                  Total Units: <strong className="text-slate-900">{bulkTotalQty}</strong>
-                </span>
-              </div>
-
-              {/* Scrollable list preview of selected products */}
-              <div className="max-h-36 overflow-y-auto space-y-1 pr-1 divide-y divide-slate-100">
-                {selectedProducts.map((p) => {
-                  const rKey = getRowKey(p)
-                  const req = Math.max(1, Number(p.required_quantity) || 1)
-                  const unitP = Number(
-                    (Number(p.unit_price) > 0 ? p.unit_price : null) ??
-                    (Number(p.variant_cost_price) > 0 ? p.variant_cost_price : null) ??
-                    (Number(p.variant_wholesale_price) > 0 ? p.variant_wholesale_price : null) ??
-                    (Number(p.product_wholesale_price) > 0 ? p.product_wholesale_price : null) ??
-                    (Number(p.variant_price) > 0 ? p.variant_price : null) ??
-                    (Number(p.product_price) > 0 ? p.product_price : null) ??
-                    0,
-                  )
-                  return (
-                    <div key={rKey} className="flex items-center justify-between text-[11px] py-1 text-slate-700">
-                      <div className="truncate pr-2">
-                        <span className="font-medium text-slate-900">{p.product_name}</span>
-                        {p.variant_name && p.variant_name.toLowerCase() !== "default" && (
-                          <span className="text-slate-500 ml-1">({p.variant_name})</span>
-                        )}
-                      </div>
-                      <div className="shrink-0 flex items-center gap-2 text-slate-600 font-mono">
-                        <span className="text-rose-600 font-semibold">{req} qty</span>
-                        {unitP > 0 && (
-                          <span className="text-slate-500">
-                            @{currency} {unitP.toFixed(2)}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-
-              {bulkTotalEstCost > 0 && (
-                <div className="flex items-center justify-between pt-2 border-t border-slate-200 text-xs">
-                  <span className="text-slate-500 font-medium">Estimated Purchase Total:</span>
-                  <strong className="text-blue-700 font-bold">
-                    {currency} {bulkTotalEstCost.toFixed(2)}
-                  </strong>
-                </div>
-              )}
-            </div>
-
-            {/* Internal Note input */}
-            <div className="space-y-1.5">
-              <Label
-                htmlFor="bulk-internal-note-input"
-                className="text-xs font-semibold text-slate-700"
-              >
-                Internal Note (Optional)
-              </Label>
-              <Textarea
-                id="bulk-internal-note-input"
-                placeholder="Add internal note or order instructions for these products..."
-                value={bulkInternalNote}
-                onChange={(e) => setBulkInternalNote(e.target.value)}
-                className="min-h-[90px] text-xs resize-none bg-white border-slate-300 focus:border-blue-500 focus:ring-blue-500"
-                autoFocus
-              />
-              <p className="text-[11px] text-slate-400">
-                {bulkInternalNote.trim().length > 0
-                  ? "Click Save to proceed to the new purchase page with this note."
-                  : "Click Skip to proceed to the new purchase page without a note."}
-              </p>
-            </div>
-          </div>
-
-          <DialogFooter className="flex items-center justify-between sm:justify-between gap-2 pt-2 border-t border-slate-100">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setBulkOrderModalOpen(false)}
-              className="h-8 px-3 text-xs gap-1.5 border-slate-300 text-slate-700 hover:bg-slate-100 cursor-pointer"
-            >
-              <ArrowLeft className="h-3.5 w-3.5" />
-              <span>Back</span>
-            </Button>
-
-            <Button
-              type="button"
-              onClick={handleBulkOrderSkipOrSave}
-              className={cn(
-                "h-8 px-4 text-xs font-semibold gap-1.5 cursor-pointer transition-colors shadow-2xs",
-                bulkInternalNote.trim().length > 0
-                  ? "bg-blue-600 hover:bg-blue-700 text-white"
-                  : "bg-slate-800 hover:bg-slate-900 text-white",
-              )}
-            >
-              {bulkInternalNote.trim().length > 0 ? (
-                <>
-                  <Save className="h-3.5 w-3.5" />
-                  <span>Save</span>
-                </>
-              ) : (
-                <>
-                  <span>Skip</span>
-                  <ArrowRight className="h-3.5 w-3.5" />
-                </>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   )
 }

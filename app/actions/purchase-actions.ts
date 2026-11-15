@@ -94,6 +94,7 @@ async function queryDevicePurchases(deviceId: number, options: GetUserPurchasesO
         OR p.supplier_invoice_number ILIKE ${searchPattern}
         OR p.status ILIKE ${searchPattern}
         OR p.purchase_status ILIKE ${searchPattern}
+        OR p.purchase_type ILIKE ${searchPattern}
         OR p.notes ILIKE ${searchPattern}
         OR CAST(p.id AS TEXT) ILIKE ${purchaseNumberPattern}
       )
@@ -118,6 +119,7 @@ export type PurchaseColumnKey =
   | "paid"
   | "balance"
   | "delivery"
+  | "type"
 
 export type PurchaseColumnFilters = Partial<Record<PurchaseColumnKey, { contains?: string; selected?: string[] }>>
 
@@ -132,6 +134,7 @@ const PURCHASE_COLUMN_KEYS: PurchaseColumnKey[] = [
   "paid",
   "balance",
   "delivery",
+  "type",
 ]
 
 function purchaseItemsSummarySql(alias: string) {
@@ -176,6 +179,7 @@ const PURCHASE_COLUMN_EXPR: Record<PurchaseColumnKey, string> = {
   paid: numText(P_PAID),
   balance: numText(P_REMAINING),
   delivery: `COALESCE(NULLIF(p.purchase_status, ''), 'Delivered')`,
+  type: `COALESCE(NULLIF(p.purchase_type, ''), 'Stock')`,
 }
 
 // Newest-first ordering for dropdown options of high-cardinality columns (others sort by value).
@@ -218,14 +222,15 @@ const PURCHASE_BASE_WHERE = `
     OR p.supplier_invoice_number ILIKE $4
     OR p.status ILIKE $4
     OR p.purchase_status ILIKE $4
+    OR p.purchase_type ILIKE $4
     OR p.notes ILIKE $4
     OR CAST(p.id AS TEXT) ILIKE $5
   )`
 
-// $6..$15 contains (one per column), $16..$25 selected values as a JSON array (NULL = no filter)
+// $6..$(5+N) contains (one per column), $(6+N)..$(5+2N) selected values as a JSON array (NULL = no filter)
 const PURCHASE_COLUMN_WHERE = PURCHASE_COLUMN_KEYS.map((key, i) => {
   const c = 6 + i
-  const sel = 16 + i
+  const sel = 6 + PURCHASE_COLUMN_KEYS.length + i
   const expr = PURCHASE_COLUMN_EXPR[key]
   // The selected-values parameter is cast through text so the driver binds a plain string, then parsed as JSON.
   return `($${c}::text IS NULL OR POSITION(LOWER($${c}) IN LOWER(${expr})) > 0)
@@ -540,6 +545,7 @@ export async function createPurchase(formData: FormData) {
   const totalAmount = Number.parseFloat(formData.get("total_amount") as string)
   const status = (formData.get("status") as string) || "Credit"
   const purchaseStatus = (formData.get("purchase_status") as string) || "Delivered"
+  const purchaseType = (formData.get("purchase_type") as string)?.trim() || "Stock"
   const paymentMethod = (formData.get("payment_method") as string) || null
   const userId = Number.parseInt(formData.get("user_id") as string)
   const deviceId = Number.parseInt(formData.get("device_id") as string)
@@ -650,12 +656,12 @@ export async function createPurchase(formData: FormData) {
       // Create the purchase
       const purchaseResult = await tx`
         INSERT INTO purchases (
-          supplier, total_amount, status, payment_method, purchase_status, 
+          supplier, total_amount, status, payment_method, purchase_status, purchase_type,
           created_by, device_id, purchase_date, received_amount,
           courier_charge, courier_charge_percentage, discount, notes
         )
         VALUES (
-          ${supplier}, ${totalAmount}, ${status}, ${primaryPaymentMethod}, ${purchaseStatus}, 
+          ${supplier}, ${totalAmount}, ${status}, ${primaryPaymentMethod}, ${purchaseStatus}, ${purchaseType},
           ${userId}, ${deviceId}, ${purchaseDate}, ${finalReceivedAmount},
           ${courierCharge}, ${courierChargePercentage}, ${discount}, ${notes}
         )
@@ -722,25 +728,29 @@ export async function createPurchase(formData: FormData) {
           }
         }
 
-        if (variantId) {
+        const isDropship = (purchaseType || "").toLowerCase() === "dropship"
+
+        if (!isDropship) {
+          if (variantId) {
+            await tx`
+              UPDATE product_variants
+              SET cost_price = ${unitAcquisitionCost},
+                  wholesale_price = ${unitAcquisitionCost}
+              WHERE id = ${variantId}
+            `
+          }
+
           await tx`
-            UPDATE product_variants
-            SET cost_price = ${unitAcquisitionCost},
-                wholesale_price = ${unitAcquisitionCost}
-            WHERE id = ${variantId}
+            UPDATE products
+            SET wholesale_price = ${unitAcquisitionCost},
+                updated_at = NOW()
+            WHERE id = ${item.product_id}
           `
         }
 
-        await tx`
-          UPDATE products
-          SET wholesale_price = ${unitAcquisitionCost},
-              updated_at = NOW()
-          WHERE id = ${item.product_id}
-        `
-
-        // Every purchase MUST create a NEW BATCH — never reuse or merge.
+        // Every purchase MUST create a NEW BATCH — never reuse or merge (Stock purchases only).
         let batchId: number | null = null;
-        if (isDelivered && !isCancelled) {
+        if (!isDropship && isDelivered && !isCancelled) {
           const batchNo = `BATCH-PUR-${purchaseId}-${itemIndex}-${Date.now()}`;
           const newBatch = await tx`
             INSERT INTO product_batches (
@@ -768,8 +778,8 @@ export async function createPurchase(formData: FormData) {
           )
         `
 
-        // Only update stock when purchase status is Delivered AND not Cancelled
-        if (isDelivered && !isCancelled) {
+        // Only update stock when purchase status is Delivered AND not Cancelled AND NOT Dropship
+        if (!isDropship && isDelivered && !isCancelled) {
           await adjustDeviceProductStock(item.product_id, (item as any).variant_id || null, (item as any).batch_id || null, deviceId, Number(item.quantity), tx)
 
           // Add stock history entry for purchase
@@ -898,7 +908,7 @@ export async function markPurchaseDelivered(purchaseId: number, deviceId: number
       await tx`SET LOCAL statement_timeout = '15s'`
       await tx`SET LOCAL lock_timeout = '15s'`
       const purchases = await tx`
-        SELECT id, supplier, status, purchase_status, created_by, courier_charge, discount, total_amount
+        SELECT id, supplier, status, purchase_status, purchase_type, created_by, courier_charge, discount, total_amount
         FROM purchases WHERE id = ${purchaseId} AND device_id = ${deviceId}
         FOR UPDATE
       `
@@ -912,6 +922,17 @@ export async function markPurchaseDelivered(purchaseId: number, deviceId: number
       }
       if (String(purchase.purchase_status).toLowerCase() !== "ordered" || String(purchase.status).toLowerCase() === "cancelled") {
         return { success: false, message: "Only active ordered purchases can be delivered" }
+      }
+
+      // Dropship purchases do not hold warehouse inventory or alter master product costs
+      const isDropship = String(purchase.purchase_type || "").toLowerCase() === "dropship"
+      if (isDropship) {
+        const result = await tx`
+          UPDATE purchases SET purchase_status = 'Delivered', updated_at = NOW()
+          WHERE id = ${purchaseId} AND device_id = ${deviceId} AND purchase_status = 'Ordered' RETURNING *
+        `
+        if (!result.length) throw new Error("Purchase status changed while receiving")
+        return { success: true, data: result[0], message: "Purchase marked as delivered" }
       }
 
       console.log("[receive purchase] loading items")
@@ -1032,6 +1053,7 @@ export async function updatePurchase(formData: FormData) {
   const totalAmount = Number.parseFloat(formData.get("total_amount") as string)
   const status = (formData.get("status") as string) || "Credit"
   const purchaseStatus = (formData.get("purchase_status") as string) || "Delivered"
+  const purchaseType = (formData.get("purchase_type") as string)?.trim() || null
   const paymentMethod = (formData.get("payment_method") as string) || null
   const userId = Number.parseInt(formData.get("user_id") as string)
   const deviceId = Number.parseInt(formData.get("device_id") as string)
@@ -1110,12 +1132,14 @@ export async function updatePurchase(formData: FormData) {
     const result = await sql.begin(async (tx: any) => {
       // Get current purchase details to check status change
       const currentPurchase = await tx`
-        SELECT status, purchase_status, received_amount, total_amount FROM purchases WHERE id = ${purchaseId} AND device_id = ${deviceId}
+        SELECT status, purchase_status, purchase_type, received_amount, total_amount FROM purchases WHERE id = ${purchaseId} AND device_id = ${deviceId}
       `
 
       if (currentPurchase.length === 0) {
         throw new Error("Purchase not found")
       }
+
+      const isDropship = (purchaseType || currentPurchase[0]?.purchase_type || "").toLowerCase() === "dropship"
 
       // Get current items to handle stock changes properly
       const currentItems = await tx`
@@ -1138,6 +1162,7 @@ export async function updatePurchase(formData: FormData) {
         SET supplier = ${supplier}, total_amount = ${totalAmount}, 
             status = ${status}, purchase_date = ${purchaseDate},
             purchase_status = ${purchaseStatus}, payment_method = ${paymentMethod},
+            purchase_type = COALESCE(${purchaseType}, purchase_type),
             received_amount = ${finalReceivedAmount},
             courier_charge = ${courierCharge},
             courier_charge_percentage = ${courierChargePercentage},
@@ -1201,67 +1226,70 @@ export async function updatePurchase(formData: FormData) {
           }
         }
 
-        if (variantId) {
-          await tx`
-            UPDATE product_variants
-            SET cost_price = ${unitAcquisitionCost}, wholesale_price = ${unitAcquisitionCost}
-            WHERE id = ${variantId}
-          `
-        }
-
-        await tx`
-          UPDATE products
-          SET wholesale_price = ${unitAcquisitionCost},
-              updated_at = NOW()
-          WHERE id = ${item.product_id}
-        `
-
-        // Resolve Batch: reuse existing batch for this purchase item/product to avoid duplicate batches
         let batchId: number | null = item.batch_id ? Number(item.batch_id) : null;
-        if (batchId) {
-          const existingBatch = await tx`
-            SELECT id FROM product_batches WHERE id = ${batchId} AND purchase_id = ${purchaseId}
-          `;
-          if (existingBatch.length === 0) batchId = null;
-        }
 
-        if (!batchId) {
-          const matchingBatch = await tx`
-            SELECT id FROM product_batches 
-            WHERE purchase_id = ${purchaseId} 
-              AND product_id = ${item.product_id} 
-              AND product_variant_id = ${variantId}
-            ORDER BY id ASC LIMIT 1
-          `;
-          if (matchingBatch.length > 0) {
-            batchId = Number(matchingBatch[0].id);
+        if (!isDropship) {
+          if (variantId) {
+            await tx`
+              UPDATE product_variants
+              SET cost_price = ${unitAcquisitionCost}, wholesale_price = ${unitAcquisitionCost}
+              WHERE id = ${variantId}
+            `
           }
-        }
 
-        if (batchId) {
-          // Update existing batch details and quantity
           await tx`
-            UPDATE product_batches
-            SET cost_price = ${unitAcquisitionCost},
-                selling_price = ${item.price},
-                quantity_purchased = ${item.quantity},
-                status = ${shouldAddStock ? 'active' : 'inactive'},
+            UPDATE products
+            SET wholesale_price = ${unitAcquisitionCost},
                 updated_at = NOW()
-            WHERE id = ${batchId}
-          `;
-        } else if (shouldAddStock) {
-          // Create a new batch only if none existed
-          const batchNo = `BATCH-PUR-${purchaseId}-${itemIndex}-${Date.now()}`;
-          const newBatch = await tx`
-            INSERT INTO product_batches (
-              product_id, product_variant_id, batch_no, cost_price, selling_price,
-              quantity_purchased, remaining_quantity, status, purchase_id
-            ) VALUES (
-              ${item.product_id}, ${variantId}, ${batchNo}, ${unitAcquisitionCost}, ${item.price},
-              ${item.quantity}, ${item.quantity}, 'active', ${purchaseId}
-            ) RETURNING id
-          `;
-          batchId = Number(newBatch[0].id);
+            WHERE id = ${item.product_id}
+          `
+
+          // Resolve Batch: reuse existing batch for this purchase item/product to avoid duplicate batches
+          if (batchId) {
+            const existingBatch = await tx`
+              SELECT id FROM product_batches WHERE id = ${batchId} AND purchase_id = ${purchaseId}
+            `;
+            if (existingBatch.length === 0) batchId = null;
+          }
+
+          if (!batchId) {
+            const matchingBatch = await tx`
+              SELECT id FROM product_batches 
+              WHERE purchase_id = ${purchaseId} 
+                AND product_id = ${item.product_id} 
+                AND product_variant_id = ${variantId}
+              ORDER BY id ASC LIMIT 1
+            `;
+            if (matchingBatch.length > 0) {
+              batchId = Number(matchingBatch[0].id);
+            }
+          }
+
+          if (batchId) {
+            // Update existing batch details and quantity
+            await tx`
+              UPDATE product_batches
+              SET cost_price = ${unitAcquisitionCost},
+                  selling_price = ${item.price},
+                  quantity_purchased = ${item.quantity},
+                  status = ${shouldAddStock ? 'active' : 'inactive'},
+                  updated_at = NOW()
+              WHERE id = ${batchId}
+            `;
+          } else if (shouldAddStock) {
+            // Create a new batch only if none existed
+            const batchNo = `BATCH-PUR-${purchaseId}-${itemIndex}-${Date.now()}`;
+            const newBatch = await tx`
+              INSERT INTO product_batches (
+                product_id, product_variant_id, batch_no, cost_price, selling_price,
+                quantity_purchased, remaining_quantity, status, purchase_id
+              ) VALUES (
+                ${item.product_id}, ${variantId}, ${batchNo}, ${unitAcquisitionCost}, ${item.price},
+                ${item.quantity}, ${item.quantity}, 'active', ${purchaseId}
+              ) RETURNING id
+            `;
+            batchId = Number(newBatch[0].id);
+          }
         }
 
         item.variant_id = variantId;
@@ -1271,8 +1299,8 @@ export async function updatePurchase(formData: FormData) {
         item.item_discount_amount = itemDiscountAmount;
       }
 
-      // Handle stock movement cleanly without duplicate additions
-      if (wasStockAdded && shouldAddStock) {
+      // Handle stock movement cleanly without duplicate additions (Stock purchases only)
+      if (!isDropship && wasStockAdded && shouldAddStock) {
         // Case 1: Was delivered and stays delivered -> apply net quantity change per product/batch
         for (let item of items) {
           const oldItem = currentItems.find((ci: any) => 
@@ -1329,7 +1357,7 @@ export async function updatePurchase(formData: FormData) {
             }
           }
         }
-      } else if (!wasStockAdded && shouldAddStock) {
+      } else if (!isDropship && !wasStockAdded && shouldAddStock) {
         // Case 2: Status changed from Ordered -> Delivered -> add full stock
         for (let item of items) {
           const qty = Number(item.quantity) || 0;
@@ -1349,7 +1377,7 @@ export async function updatePurchase(formData: FormData) {
             }
           }
         }
-      } else if (wasStockAdded && !shouldAddStock) {
+      } else if (!isDropship && wasStockAdded && !shouldAddStock) {
         // Case 3: Status changed from Delivered -> Cancelled/Ordered -> reverse full stock
         for (let oldItem of currentItems) {
           const qty = Number(oldItem.quantity) || 0;

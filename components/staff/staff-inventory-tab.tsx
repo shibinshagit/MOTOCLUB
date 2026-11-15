@@ -496,7 +496,7 @@ export default function StaffInventoryTab({ isMediaManager: isMediaManagerProp }
               </div>
             ) : (
               products.map((product) => {
-                const sellingPrice = Number(product.msp ?? product.price ?? 0)
+                const mrpPrice = Number(product.mrp || product.price || 0)
                 const msp = Number(product.msp || product.variants?.[0]?.msp || 0)
                 return (
                   <div
@@ -538,23 +538,11 @@ export default function StaffInventoryTab({ isMediaManager: isMediaManagerProp }
 
                     {/* Pricing & Stock Row */}
                     {isMediaManager ? (
-                      <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                      <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100 grid grid-cols-3 gap-2 text-xs">
                         <div>
                           <p className="text-[10px] text-slate-400 font-semibold uppercase">MRP</p>
                           <span className="font-bold text-slate-800">
                             {currency} {Number(product.mrp || product.price || 0).toFixed(2)}
-                          </span>
-                        </div>
-                        <div>
-                          <p className="text-[10px] text-slate-400 font-semibold uppercase">Cost</p>
-                          <span className="font-bold text-slate-800">
-                            {currency} {Number(product.cost_price ?? product.wholesale_price ?? 0).toFixed(2)}
-                          </span>
-                        </div>
-                        <div>
-                          <p className="text-[10px] text-slate-400 font-semibold uppercase">Stock</p>
-                          <span className="font-bold text-slate-800">
-                            {product.stock === null ? "—" : product.stock}
                           </span>
                         </div>
                         <div>
@@ -563,18 +551,24 @@ export default function StaffInventoryTab({ isMediaManager: isMediaManagerProp }
                             {Number(product.msp || 0) > 0 ? `${currency} ${Number(product.msp).toFixed(2)}` : "—"}
                           </span>
                         </div>
+                        <div>
+                          <p className="text-[10px] text-slate-400 font-semibold uppercase">Stock</p>
+                          <span className="font-bold text-slate-800">
+                            {product.stock === null ? "—" : product.stock}
+                          </span>
+                        </div>
                       </div>
                     ) : (
                       <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100 flex items-center justify-between">
                         <div>
-                          <p className="text-[10px] text-slate-400 font-semibold uppercase">Price</p>
+                          <p className="text-[10px] text-slate-400 font-semibold uppercase">MRP</p>
                           <div className="flex items-baseline gap-1.5">
                             <span className="text-sm font-bold text-slate-900">
-                              {currency} {sellingPrice.toFixed(2)}
+                              {currency} {mrpPrice.toFixed(2)}
                             </span>
-                            {msp > 0 && msp !== sellingPrice && (
-                              <span className="text-[11px] text-slate-400 line-through">
-                                {currency} {msp.toFixed(2)}
+                            {msp > 0 && (
+                              <span className="text-[11px] text-indigo-600 font-medium">
+                                · MSP: {currency} {msp.toFixed(2)}
                               </span>
                             )}
                           </div>
@@ -646,13 +640,12 @@ export default function StaffInventoryTab({ isMediaManager: isMediaManagerProp }
                   {isMediaManager ? (
                     <>
                       <th className="px-4 py-4 font-semibold text-right">MRP</th>
-                      <th className="px-4 py-4 font-semibold text-right">Cost</th>
-                      <th className="px-4 py-4 font-semibold text-right">Stock</th>
                       <th className="px-4 py-4 font-semibold text-right">MSP</th>
+                      <th className="px-4 py-4 font-semibold text-right">Stock</th>
                     </>
                   ) : (
                     <>
-                      <th className="px-6 py-4 font-semibold text-right">Price</th>
+                      <th className="px-6 py-4 font-semibold text-right">MRP</th>
                       <th className="px-6 py-4 font-semibold text-right">MSP</th>
                       <th className="px-6 py-4 font-semibold text-right">Available Stock</th>
                     </>
@@ -681,7 +674,6 @@ export default function StaffInventoryTab({ isMediaManager: isMediaManagerProp }
                           <td className="px-4 py-4 text-right"><div className="h-4 bg-slate-200 rounded w-16 ml-auto" /></td>
                           <td className="px-4 py-4 text-right"><div className="h-4 bg-slate-200 rounded w-16 ml-auto" /></td>
                           <td className="px-4 py-4 text-right"><div className="h-4 bg-slate-200 rounded w-12 ml-auto" /></td>
-                          <td className="px-4 py-4 text-right"><div className="h-4 bg-slate-200 rounded w-16 ml-auto" /></td>
                         </>
                       ) : (
                         <>
@@ -696,7 +688,7 @@ export default function StaffInventoryTab({ isMediaManager: isMediaManagerProp }
                   ))
                 ) : hasError ? (
                   <tr>
-                    <td colSpan={isMediaManager ? 9 : 8} className="px-6 py-12 text-center text-slate-500">
+                    <td colSpan={8} className="px-6 py-12 text-center text-slate-500">
                       <AlertTriangle className="h-8 w-8 mx-auto mb-2 text-amber-500" />
                       <p className="font-semibold text-slate-700">{errorMessage || "Unable to load products."}</p>
                       <Button variant="outline" size="sm" onClick={() => loadInventory()} className="mt-3 text-xs">
@@ -706,7 +698,7 @@ export default function StaffInventoryTab({ isMediaManager: isMediaManagerProp }
                   </tr>
                 ) : products.length === 0 ? (
                   <tr>
-                    <td colSpan={isMediaManager ? 9 : 8} className="px-6 py-12 text-center text-slate-500">
+                    <td colSpan={8} className="px-6 py-12 text-center text-slate-500">
                       <Package className="h-8 w-8 mx-auto mb-2 text-slate-300" />
                       <p className="font-medium">No products found{debouncedSearch ? ` for "${debouncedSearch}"` : ""}</p>
                       {debouncedSearch && (
@@ -759,25 +751,22 @@ export default function StaffInventoryTab({ isMediaManager: isMediaManagerProp }
                           <td className="px-4 py-3 text-right font-medium text-slate-800">
                             {currency} {Number(product.mrp || product.price || 0).toFixed(2)}
                           </td>
-                          <td className="px-4 py-3 text-right font-medium text-slate-800">
-                            {currency} {Number(product.cost_price ?? product.wholesale_price ?? 0).toFixed(2)}
+                          <td className="px-4 py-3 text-right font-medium text-indigo-600">
+                            {Number(product.msp || 0) > 0 ? `${currency} ${Number(product.msp).toFixed(2)}` : "—"}
                           </td>
                           <td className="px-4 py-3 text-right font-bold text-slate-700">
                             {product.stock === null ? "—" : product.stock}
-                          </td>
-                          <td className="px-4 py-3 text-right font-medium text-indigo-600">
-                            {Number(product.msp || 0) > 0 ? `${currency} ${Number(product.msp).toFixed(2)}` : "—"}
                           </td>
                         </>
                       ) : (
                         <>
                           <td className="px-6 py-3 text-right font-medium text-slate-800">
                             {(() => {
-                              const sellingPrice = Number(product.msp ?? product.price ?? 0)
-                              return `${currency} ${sellingPrice.toFixed(2)}`
+                              const mrpPrice = Number(product.mrp || product.price || 0)
+                              return `${currency} ${mrpPrice.toFixed(2)}`
                             })()}
                           </td>
-                          <td className="px-6 py-3 text-right font-medium text-slate-600">
+                          <td className="px-6 py-3 text-right font-medium text-indigo-600">
                             {(() => {
                               const msp = Number(product.msp || product.variants?.[0]?.msp || 0)
                               return msp > 0 ? `${currency} ${msp.toFixed(2)}` : "—"

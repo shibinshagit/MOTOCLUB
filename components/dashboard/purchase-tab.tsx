@@ -50,7 +50,7 @@ import { markInventoryStale } from "@/lib/inventory-sync"
 import { getSuppliers as getRegisteredSuppliers } from "@/app/actions/supplier-actions"
 import { useConfirm } from "@/hooks/use-confirm"
 import { getCurrencySymbol } from "@/lib/currency-utils"
-import { formatCurrency as formatMoney } from "@/lib/utils"
+import { formatCurrency as formatMoney, cn } from "@/lib/utils"
 
 interface PurchaseTabProps {
   userId: number
@@ -133,6 +133,7 @@ interface PurchaseDraftSnapshot {
   supplier: string
   status: string
   purchaseStatus: string
+  purchaseType?: string
   paymentMethod: string
   receivedAmount: number
   discountAmount: number
@@ -174,6 +175,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
   const [supplier, setSupplier] = useState("")
   const [status, setStatus] = useState<string>("Credit")
   const [purchaseStatus, setPurchaseStatus] = useState<string>("Delivered")
+  const [purchaseType, setPurchaseType] = useState<string>("Stock")
   const [paymentMethod, setPaymentMethod] = useState<string>("Cash")
   const [receivedAmount, setReceivedAmount] = useState<number>(0)
   const [discountAmount, setDiscountAmount] = useState<number>(0)
@@ -274,6 +276,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
       supplier: "",
       status: "Credit",
       purchaseStatus: "Delivered",
+      purchaseType: "Stock",
       paymentMethod: "Cash",
       receivedAmount: 0,
       discountAmount: 0,
@@ -355,6 +358,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
     setSupplier(activeDraft.supplier || "")
     setStatus(activeDraft.status || "Credit")
     setPurchaseStatus(activeDraft.purchaseStatus || "Delivered")
+    setPurchaseType(activeDraft.purchaseType || "Stock")
     setPaymentMethod(activeDraft.paymentMethod || "Cash")
     setReceivedAmount(Number(activeDraft.receivedAmount) || 0)
     setDiscountAmount(Number(activeDraft.discountAmount) || 0)
@@ -414,6 +418,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
               supplier,
               status,
               purchaseStatus,
+              purchaseType,
               paymentMethod,
               receivedAmount,
               discountAmount,
@@ -433,6 +438,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
     supplier,
     status,
     purchaseStatus,
+    purchaseType,
     paymentMethod,
     receivedAmount,
     discountAmount,
@@ -777,6 +783,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
     setSupplier("")
     setStatus("Credit")
     setPurchaseStatus("Delivered")
+    setPurchaseType("Stock")
     setPaymentMethod("Cash")
     setProducts(resetProducts)
     setDiscountAmount(0)
@@ -808,6 +815,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
         const normalizedStatus = purchase.status === "Partial" ? "Cancelled" : purchase.status || "Credit"
         setStatus(normalizedStatus)
         setPurchaseStatus(purchase.purchase_status || "Delivered")
+        setPurchaseType(purchase.purchase_type || "Stock")
         setPaymentMethod(purchase.payment_method || "Cash")
         setReceivedAmount(Number(purchase.received_amount) || 0)
         setNotes(purchase.notes || "")
@@ -965,6 +973,7 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
         formData.append("total_amount", totalAmount.toString())
         formData.append("status", status)
         formData.append("purchase_status", purchaseStatus)
+        formData.append("purchase_type", purchaseType || "Stock")
         formData.append("payment_method", paymentMethod)
         formData.append("user_id", userId.toString())
         formData.append("device_id", deviceId.toString())
@@ -1753,27 +1762,55 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
         </div>
       )}
 
-                      {status === "Credit" && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="space-y-1">
+                          <Label className="text-xs font-medium text-gray-900">Purchase Type</Label>
+                          <div className="h-8 flex items-center">
+                            <span
+                              className={cn(
+                                "inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold border",
+                                (purchaseType || "").toLowerCase() === "dropship"
+                                  ? "bg-purple-50 text-purple-700 border-purple-200"
+                                  : "bg-blue-50 text-blue-700 border-blue-200"
+                              )}
+                            >
+                              {purchaseType || "Stock"}
+                            </span>
+                          </div>
+                        </div>
+
                         <div className="space-y-1">
                           <Label htmlFor="received_amount" className="text-xs font-medium text-gray-900">
                             Paid Amount
                           </Label>
-                          <Input
-                            id="received_amount"
-                            type="number"
-                            min="0"
-                            max={totalAmount}
-                            step="0.01"
-                            value={receivedAmount}
-                            onChange={(e) => setReceivedAmount(Number.parseFloat(e.target.value) || 0)}
-                            className="h-8 text-xs bg-white border-gray-300 text-gray-900"
-                            placeholder="0.00"
-                          />
-                          <p className="text-xs text-gray-500">
-                            Remaining: {currency} {(totalAmount - receivedAmount).toFixed(2)}
-                          </p>
+                          {status === "Credit" ? (
+                            <>
+                              <Input
+                                id="received_amount"
+                                type="number"
+                                min="0"
+                                max={totalAmount}
+                                step="0.01"
+                                value={receivedAmount}
+                                onChange={(e) => setReceivedAmount(Number.parseFloat(e.target.value) || 0)}
+                                className="h-8 text-xs bg-white border-gray-300 text-gray-900"
+                                placeholder="0.00"
+                              />
+                              <p className="text-xs text-gray-500">
+                                Remaining: {currency} {(totalAmount - receivedAmount).toFixed(2)}
+                              </p>
+                            </>
+                          ) : (
+                            <Input
+                              id="received_amount"
+                              type="number"
+                              value={totalAmount > 0 ? totalAmount.toFixed(2) : "0.00"}
+                              disabled
+                              className="h-8 text-xs bg-gray-100 border-gray-200 text-gray-500 cursor-not-allowed"
+                            />
+                          )}
                         </div>
-                      )}
+                      </div>
 
                       <div className="space-y-1">
                         <Label htmlFor="purchase-notes" className="text-xs font-medium text-gray-900">

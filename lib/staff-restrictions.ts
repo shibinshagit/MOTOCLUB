@@ -83,7 +83,8 @@ export function canStaffAccessPage(
 ): boolean {
   if (!staff) return true
   if (staff.role === "media_manager") return true
-  if (staff.role === "purchase_manager" && page === "attendance") return false
+  if (staff.role === "purchase_manager" && (page === "attendance" || page === "transfer" || page === "customer")) return false
+  if (staff.role === "logistics" && (page === "transfer" || page === "supplier" || page === "attendance")) return false
   return !getRestrictedPages(staff).includes(page)
 }
 
@@ -92,7 +93,30 @@ export function isStaffValueHidden(
   value: StaffValueRestriction,
 ): boolean {
   if (!staff) return false
+  const role = staff.role?.trim().toLowerCase()
+  if ((role === "media_manager" || role === "staff") && value === "cogs") return true
   return getRestrictedValues(staff).includes(value)
+}
+
+/**
+ * Roles allowed to toggle product Trending status and E-Commerce store listings.
+ * Edit this list to restrict or grant access in the future.
+ */
+export const ECOM_TRENDING_ALLOWED_ROLES = [
+  "admin",
+  "purchase_manager",
+  "logistics",
+  "media_manager",
+] as const
+
+export type EcomTrendingAllowedRole = (typeof ECOM_TRENDING_ALLOWED_ROLES)[number]
+
+export function canManageEcomAndTrending(
+  staff: StaffRestrictionSource | null | undefined,
+): boolean {
+  if (!staff || !staff.role) return true
+  const role = staff.role.trim().toLowerCase()
+  return (ECOM_TRENDING_ALLOWED_ROLES as readonly string[]).includes(role)
 }
 
 export const ADMIN_DIALOG_CONTENT_CLASS =

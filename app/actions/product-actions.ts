@@ -14,6 +14,7 @@ import { getDeviceProductStock, getDeviceVariantStock, adjustDeviceProductStock 
 import { compareProductsByStockPriority } from "@/lib/product-search"
 import { revalidatePath } from "next/cache"
 import { getServerActor, resolveAuthorizedDeviceId } from "@/lib/device-access"
+import { ECOM_TRENDING_ALLOWED_ROLES } from "@/lib/staff-restrictions"
 
 // Generate a unique barcode for a product
 async function generateProductBarcode(productId: number): Promise<string> {
@@ -963,12 +964,12 @@ export async function getProducts(
       const variants = variantsByProductId.get(Number(product.id)) || []
       const defaultVariant = variants[0] || null
       const costPriceVal = defaultVariant ? (Number(defaultVariant.cost_price ?? defaultVariant.wholesale_price) || 0) : (Number(product.wholesale_price) || 0)
-      const mspPriceVal = defaultVariant ? (Number(defaultVariant.msp ?? defaultVariant.price) || 0) : (Number(product.msp ?? product.price) || 0)
-      const mrpPriceVal = defaultVariant ? (Number(defaultVariant.mrp) || 0) : (Number(product.mrp) || 0)
-
-      const finalMrp = mrpPriceVal > 0 ? mrpPriceVal : (Number(product.mrp) || 0)
-      const finalMsp = mspPriceVal > 0 ? mspPriceVal : (Number(product.msp ?? product.price) || 0)
-      const finalPrice = finalMrp > 0 ? finalMrp : finalMsp
+      const explicitMrp = Number(defaultVariant?.mrp || product.mrp || 0)
+      const fallbackPrice = Number(product.price || defaultVariant?.price || 0)
+      const finalMrp = explicitMrp > 0 ? explicitMrp : fallbackPrice
+      const explicitMsp = Number(defaultVariant?.msp || product.msp || 0)
+      const finalMsp = explicitMsp
+      const finalPrice = finalMrp > 0 ? finalMrp : (finalMsp > 0 ? finalMsp : 0)
 
       return {
         ...product,
@@ -1757,12 +1758,12 @@ export async function getPaginatedProducts({
       const variants = variantsByProductId.get(Number(product.id)) || []
       const defaultVariant = variants[0] || null
       const costPriceVal = defaultVariant ? (Number(defaultVariant.cost_price ?? defaultVariant.wholesale_price) || 0) : (Number(product.wholesale_price) || 0)
-      const mspPriceVal = defaultVariant ? (Number(defaultVariant.msp ?? defaultVariant.price) || 0) : (Number(product.msp ?? product.price) || 0)
-      const mrpPriceVal = defaultVariant ? (Number(defaultVariant.mrp) || 0) : (Number(product.mrp) || 0)
-
-      const finalMrp = mrpPriceVal > 0 ? mrpPriceVal : (Number(product.mrp) || 0)
-      const finalMsp = mspPriceVal > 0 ? mspPriceVal : (Number(product.msp ?? product.price) || 0)
-      const finalPrice = finalMrp > 0 ? finalMrp : finalMsp
+      const explicitMrp = Number(defaultVariant?.mrp || product.mrp || 0)
+      const fallbackPrice = Number(product.price || defaultVariant?.price || 0)
+      const finalMrp = explicitMrp > 0 ? explicitMrp : fallbackPrice
+      const explicitMsp = Number(defaultVariant?.msp || product.msp || 0)
+      const finalMsp = explicitMsp
+      const finalPrice = finalMrp > 0 ? finalMrp : (finalMsp > 0 ? finalMsp : 0)
 
       return {
         ...product,
@@ -2048,14 +2049,58 @@ export async function getProductSearchSuggestions(
 }
 
 export async function getTrendingProducts(userId?: number) {
-  const result = await getProducts(userId)
-  if (!result.success) {
-    return result
-  }
+  resetConnectionState()
+  try {
+    const companyDeviceIds: number[] = userId ? await getCachedCompanyDeviceIds(userId) : []
 
-  return {
-    ...result,
-    data: (result.data || []).filter((product: { trending?: boolean }) => Boolean(product.trending)),
+    const products = userId
+      ? await sql`
+          SELECT 
+            p.*,
+            c.name as category_name,
+            COALESCE(pb_stock.total_stock, pd_stock.total_stock, 0) AS stock
+          FROM products p
+          LEFT JOIN product_categories c ON p.category_id = c.id
+          LEFT JOIN (
+            SELECT pv.product_id, SUM(pbds.stock) as total_stock
+            FROM product_batch_device_stock pbds
+            JOIN product_batches pb ON pb.id = pbds.batch_id
+            JOIN product_variants pv ON pv.id = pb.product_variant_id
+            WHERE pbds.device_id = ${userId}
+            GROUP BY pv.product_id
+          ) pb_stock ON pb_stock.product_id = p.id
+          LEFT JOIN (
+            SELECT pds.product_id, SUM(pds.stock) as total_stock
+            FROM product_device_stock pds
+            WHERE pds.device_id = ${userId}
+            GROUP BY pds.product_id
+          ) pd_stock ON pd_stock.product_id = p.id
+          WHERE p.trending = true
+          AND (
+            p.created_by = ANY(${companyDeviceIds})
+            OR p.created_by = ${userId}
+            OR p.created_by IS NULL
+          )
+          ORDER BY p.updated_at DESC, p.created_at DESC
+        `
+      : await sql`
+          SELECT 
+            p.*,
+            c.name as category_name
+          FROM products p
+          LEFT JOIN product_categories c ON p.category_id = c.id
+          WHERE p.trending = true
+          ORDER BY p.updated_at DESC, p.created_at DESC
+        `
+
+    return {
+      success: true,
+      data: products,
+      totalCount: products.length,
+    }
+  } catch (error) {
+    console.error("getTrendingProducts error:", error)
+    return { success: false, message: "Failed to load trending products", data: [] }
   }
 }
 
@@ -2082,6 +2127,19 @@ export async function getProductById(id: number, userId?: number) {
       return { success: false, message: "Product not found", data: null }
     }
 
+    const variantsResult = await sql`
+      SELECT * FROM product_variants 
+      WHERE product_id = ${result[0].id} 
+      ORDER BY id ASC
+    `
+    const defaultVariant = variantsResult[0] || null
+    const costPriceVal = defaultVariant ? (Number(defaultVariant.cost_price ?? defaultVariant.wholesale_price) || 0) : (Number(result[0].wholesale_price) || 0)
+    const explicitMrp = Number(defaultVariant?.mrp || result[0].mrp || 0)
+    const fallbackPrice = Number(result[0].price || defaultVariant?.price || 0)
+    const finalMrp = explicitMrp > 0 ? explicitMrp : fallbackPrice
+    const explicitMsp = Number(defaultVariant?.msp || result[0].msp || 0)
+    const finalMsp = explicitMsp
+
     let resolvedStock = 0
     if (userId) {
       resolvedStock = await getDeviceProductStock(result[0].id, userId)
@@ -2090,7 +2148,12 @@ export async function getProductById(id: number, userId?: number) {
     // Include category from either category_id or legacy category field
     const product = {
       ...result[0],
-      price: Number(result[0].mrp || result[0].price || result[0].msp || 0),
+      variants: variantsResult,
+      cost_price: costPriceVal,
+      wholesale_price: costPriceVal,
+      msp: finalMsp,
+      mrp: finalMrp,
+      price: finalMrp > 0 ? finalMrp : (finalMsp > 0 ? finalMsp : 0),
       stock: resolvedStock,
       category: result[0].category_name || result[0].category || "",
     }
@@ -2237,14 +2300,35 @@ interface CreateProductParams {
 // Update the createProduct function to check for duplicates within user's products
 export async function createProduct(formData: FormData) {
   // Staff (non-admin) sessions may only use existing products, except purchase_manager and logistics
-  const actor = await getServerActor()
+  let actor = await getServerActor()
+
+  // Resilient fallback: If cookie is missing but staff_id and user_id are supplied, verify via database
+  if (!actor) {
+    const rawUserId = formData.get("user_id") ? Number.parseInt(formData.get("user_id") as string) : undefined
+    const rawStaffId = formData.get("staff_id") ? Number.parseInt(formData.get("staff_id") as string) : undefined
+    if (rawStaffId && rawUserId) {
+      const staffRows = await sql`
+        SELECT id, role, is_active FROM staff WHERE id = ${rawStaffId} AND device_id = ${rawUserId} AND is_active = true LIMIT 1
+      `
+      if (staffRows.length > 0) {
+        const sRole = (staffRows[0].role || "staff").trim().toLowerCase()
+        actor = sRole === "admin"
+          ? { kind: "staff_admin", deviceId: rawUserId, role: sRole }
+          : { kind: "staff", deviceId: rawUserId, role: sRole }
+      }
+    }
+  }
+
   if (!actor) {
     const message = "You do not have permission to create products"
     return { success: false, error: message, message }
   }
-  if (actor.kind === "staff" && actor.role !== "purchase_manager" && actor.role !== "logistics") {
-    const message = "You do not have permission to create products"
-    return { success: false, error: message, message }
+  if (actor.kind === "staff") {
+    const role = (actor.role || "").trim().toLowerCase()
+    if (role !== "purchase_manager" && role !== "logistics") {
+      const message = "You do not have permission to create products"
+      return { success: false, error: message, message }
+    }
   }
   const name = formData.get("name") as string
   const companyName = formData.get("company_name") as string
@@ -2407,6 +2491,7 @@ export async function createProduct(formData: FormData) {
             price,
             wholesale_price,
             msp,
+            mrp,
             barcode,
             color,
             size,
@@ -2434,6 +2519,7 @@ export async function createProduct(formData: FormData) {
             ${Number.isNaN(price) ? (productVariants[0]?.mspPrice || 0) : price},
             ${wholesalePrice || productVariants[0]?.costPrice || 0},
             ${msp || productVariants[0]?.mspPrice || 0},
+            ${mrp || productVariants[0]?.mrp || 0},
             ${barcode || productVariants[0]?.barcode || null},
             ${color},
             ${size},
@@ -2768,6 +2854,12 @@ export async function updateProduct(formData: FormData) {
 
     const stockDeviceId = userId || currentProduct[0].created_by
 
+    const defaultVar = productVariants[0]
+    const resolvedCost = defaultVar ? (Number(defaultVar.wholesale_price ?? defaultVar.cost_price ?? defaultVar.costPrice) || 0) : wholesalePrice
+    const resolvedMsp = defaultVar ? (Number(defaultVar.msp ?? defaultVar.price ?? defaultVar.mspPrice) || 0) : msp
+    const resolvedMrp = defaultVar ? (Number(defaultVar.mrp) || 0) : mrp
+    const resolvedPrice = !Number.isNaN(price) && price > 0 ? price : (resolvedMsp > 0 ? resolvedMsp : resolvedMrp)
+
     // Update the product with all new fields
     let result
 
@@ -2780,6 +2872,10 @@ export async function updateProduct(formData: FormData) {
           category = ${category || ""},
           category_id = ${categoryId},
           description = ${description}, 
+          price = ${resolvedPrice},
+          wholesale_price = ${resolvedCost},
+          msp = ${resolvedMsp},
+          mrp = ${resolvedMrp},
           image_url = ${imageUrl},
           image_urls = ${JSON.stringify(finalImageUrls)}::text::jsonb,
           video_url = ${videoUrl},
@@ -2809,6 +2905,10 @@ export async function updateProduct(formData: FormData) {
           category = ${category || ""},
           category_id = ${categoryId},
           description = ${description}, 
+          price = ${resolvedPrice},
+          wholesale_price = ${resolvedCost},
+          msp = ${resolvedMsp},
+          mrp = ${resolvedMrp},
           image_url = ${imageUrl},
           image_urls = ${JSON.stringify(finalImageUrls)}::text::jsonb,
           video_url = ${videoUrl},
@@ -2873,7 +2973,7 @@ export async function updateProduct(formData: FormData) {
                 cost_price = ${variant.wholesale_price ?? variant.cost_price ?? variant.costPrice ?? 0},
                 wholesale_price = ${variant.wholesale_price ?? variant.cost_price ?? variant.costPrice ?? 0},
                 price = ${variant.price ?? variant.mspPrice ?? variant.msp ?? 0},
-                msp = ${variant.price ?? variant.mspPrice ?? variant.msp ?? 0},
+                msp = ${variant.msp ?? variant.mspPrice ?? variant.price ?? 0},
                 mrp = ${variant.mrp ?? 0},
                 minimum_stock = ${variant.minimum_stock ?? variant.minimumStock ?? 0},
                 shelf = ${variant.shelf || ""}
@@ -2932,7 +3032,7 @@ export async function updateProduct(formData: FormData) {
               ) VALUES (
                 ${id}, ${variant.variant_name || variant.name || ""}, ${variant.sku || ""}, ${variant.barcode || ""},
                 ${variant.wholesale_price ?? variant.cost_price ?? variant.costPrice ?? 0}, ${variant.wholesale_price ?? variant.cost_price ?? variant.costPrice ?? 0}, ${variant.price ?? variant.mspPrice ?? variant.msp ?? 0},
-                ${variant.price ?? variant.mspPrice ?? variant.msp ?? 0}, ${variant.mrp ?? 0}, ${variant.minimum_stock ?? variant.minimumStock ?? 0},
+                ${variant.msp ?? variant.mspPrice ?? variant.price ?? 0}, ${variant.mrp ?? 0}, ${variant.minimum_stock ?? variant.minimumStock ?? 0},
                 ${variant.shelf || ""}, 'active'
               ) RETURNING *
             `
@@ -3159,8 +3259,11 @@ export async function deleteProduct(id: number) {
   try {
     const actor = await getServerActor()
     if (!actor) return { success: false, message: "Not authorized to delete products" }
-    if (actor.kind === "staff" && actor.role !== "purchase_manager" && actor.role !== "logistics") {
-      return { success: false, message: "Only administrators can delete products" }
+    if (actor.kind === "staff") {
+      const role = (actor.role || "").trim().toLowerCase()
+      if (role !== "purchase_manager" && role !== "logistics") {
+        return { success: false, message: "Only administrators can delete products" }
+      }
     }
 
     await sql.begin("isolation level serializable", async (tx: any) => {
@@ -3288,17 +3391,29 @@ export async function updateProductPlatformStatus(
             : "own_ecom_status"
 
     let result
+    const actor = await getServerActor()
+    if (actor && actor.kind === "staff") {
+      const role = actor.role?.trim().toLowerCase()
+      if (role && !ECOM_TRENDING_ALLOWED_ROLES.includes(role as any)) {
+        return {
+          success: false,
+          message: "Unauthorized: Your role does not have permission to manage e-commerce platform status.",
+        }
+      }
+    }
+
+    const companyDeviceIds: number[] = userId ? await getCachedCompanyDeviceIds(userId) : []
+
     if (userId) {
       result =
         await sql`
           SELECT *
           FROM products
           WHERE id = ${productId}
-          AND created_by IN (
-            SELECT d2.id
-            FROM devices d1
-            JOIN devices d2 ON d2.company_id = d1.company_id
-            WHERE d1.id = ${userId}
+          AND (
+            created_by = ANY(${companyDeviceIds})
+            OR created_by = ${userId}
+            OR created_by IS NULL
           )
         `
     } else {
@@ -3333,7 +3448,7 @@ export async function updateProductPlatformStatus(
   }
 }
 
-export async function updateProductTrendingStatus(
+  export async function updateProductTrendingStatus(
   productId: number,
   trending: boolean,
   userId?: number,
@@ -3346,17 +3461,29 @@ export async function updateProductTrendingStatus(
 
   try {
     let result
+    const actor = await getServerActor()
+    if (actor && actor.kind === "staff") {
+      const role = actor.role?.trim().toLowerCase()
+      if (role && !ECOM_TRENDING_ALLOWED_ROLES.includes(role as any)) {
+        return {
+          success: false,
+          message: "Unauthorized: Your role does not have permission to manage trending products.",
+        }
+      }
+    }
+
+    const companyDeviceIds: number[] = userId ? await getCachedCompanyDeviceIds(userId) : []
+
     if (userId) {
       result =
         await sql`
           SELECT *
           FROM products
           WHERE id = ${productId}
-          AND created_by IN (
-            SELECT d2.id
-            FROM devices d1
-            JOIN devices d2 ON d2.company_id = d1.company_id
-            WHERE d1.id = ${userId}
+          AND (
+            created_by = ANY(${companyDeviceIds})
+            OR created_by = ${userId}
+            OR created_by IS NULL
           )
         `
     } else {
@@ -3730,6 +3857,19 @@ export async function getProductByBarcode(barcode: string, userId?: number) {
       return { success: false, message: "Product not found", data: null }
     }
 
+    const variantsResult = await sql`
+      SELECT * FROM product_variants 
+      WHERE product_id = ${result[0].id} 
+      ORDER BY id ASC
+    `
+    const defaultVariant = variantsResult[0] || null
+    const costPriceVal = defaultVariant ? (Number(defaultVariant.cost_price ?? defaultVariant.wholesale_price) || 0) : (Number(result[0].wholesale_price) || 0)
+    const explicitMrp = Number(defaultVariant?.mrp || result[0].mrp || 0)
+    const fallbackPrice = Number(result[0].price || defaultVariant?.price || 0)
+    const finalMrp = explicitMrp > 0 ? explicitMrp : fallbackPrice
+    const explicitMsp = Number(defaultVariant?.msp || result[0].msp || 0)
+    const finalMsp = explicitMsp
+
     let resolvedStock = 0
     if (userId) {
       resolvedStock = await getDeviceProductStock(result[0].id, userId)
@@ -3738,7 +3878,12 @@ export async function getProductByBarcode(barcode: string, userId?: number) {
     // Include category from either category_id or legacy category field
     const product = {
       ...result[0],
-      price: Number(result[0].mrp || result[0].price || result[0].msp || 0),
+      variants: variantsResult,
+      cost_price: costPriceVal,
+      wholesale_price: costPriceVal,
+      msp: finalMsp,
+      mrp: finalMrp,
+      price: finalMrp > 0 ? finalMrp : (finalMsp > 0 ? finalMsp : 0),
       stock: resolvedStock,
       category: result[0].category_name || result[0].category || "",
     }
@@ -3833,15 +3978,27 @@ export async function hideTrendingProducts(productIds: number[], userId: number)
 
   resetConnectionState()
   try {
+    const actor = await getServerActor()
+    if (actor && actor.kind === "staff") {
+      const role = actor.role?.trim().toLowerCase()
+      if (role && !ECOM_TRENDING_ALLOWED_ROLES.includes(role as any)) {
+        return {
+          success: false,
+          message: "Unauthorized: Your role does not have permission to manage trending products.",
+        }
+      }
+    }
+
+    const companyDeviceIds: number[] = userId ? await getCachedCompanyDeviceIds(userId) : []
+
     const result = await sql`
       UPDATE products 
       SET trending = false 
       WHERE id = ANY(${productIds as any})
-      AND created_by IN (
-        SELECT d2.id
-        FROM devices d1
-        JOIN devices d2 ON d2.company_id = d1.company_id
-        WHERE d1.id = ${userId}
+      AND (
+        created_by = ANY(${companyDeviceIds})
+        OR created_by = ${userId}
+        OR created_by IS NULL
       )
       RETURNING id
     `

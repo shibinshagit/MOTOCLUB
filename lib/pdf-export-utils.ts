@@ -461,8 +461,8 @@ export async function exportProductsToPDF(products: any[], filename = "products_
               <th>Name</th>
               <th>Category</th>
               <th>Barcode</th>
-              <th>Price</th>
-              <th>Wholesale</th>
+              <th>MRP</th>
+              <th>Cost</th>
               <th>Stock</th>
               <th>Status</th>
             </tr>
@@ -481,8 +481,8 @@ export async function exportProductsToPDF(products: any[], filename = "products_
           <td>${product.name || ""}</td>
           <td>${product.category || ""}</td>
           <td>${product.barcode || ""}</td>
-          <td>${formatCurrency(Number(product.price) || 0, currency)}</td>
-          <td>${formatCurrency(Number(product.wholesale_price) || 0, currency)}</td>
+          <td>${formatCurrency(Number(product.mrp || product.price) || 0, currency)}</td>
+          <td>${formatCurrency(Number(product.cost_price ?? product.wholesale_price) || 0, currency)}</td>
           <td>${stock}</td>
           <td>${status}</td>
         </tr>

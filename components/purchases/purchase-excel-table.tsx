@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { TableRowsInput } from "@/components/ui/table-rows-input"
 import { useToast } from "@/components/ui/use-toast"
 import { notifyError, notifySuccess, notifyWarning } from "@/lib/notifications"
-import { downloadPurchasesPDF } from "@/lib/purchases-pdf-utils"
+import { downloadPurchasesPDF, downloadPurchasesJSON } from "@/lib/purchases-pdf-utils"
 import {
   ExcelColumnFilterHeader,
   createEmptyColumnFilter,
@@ -24,7 +24,9 @@ import {
 } from "@/app/actions/purchase-actions"
 import { useAppSelector } from "@/store/hooks"
 import { selectActiveStaff } from "@/store/slices/staffSlice"
+import { selectUser } from "@/store/slices/deviceSlice"
 import PurchaseManagerKpiCards from "@/components/purchase-manager/purchase-manager-kpi-cards"
+import { cn } from "@/lib/utils"
 
 function PaymentStatusBadge({ status }: { status: string }) {
   const normalized = status === "Partial" ? "Cancelled" : status
@@ -63,6 +65,22 @@ function DeliveryStatusBadge({ status }: { status: string }) {
   )
 }
 
+function PurchaseTypeBadge({ type }: { type?: string }) {
+  const isDropship = (type || "").toLowerCase() === "dropship"
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-semibold border",
+        isDropship
+          ? "bg-purple-50 text-purple-700 border-purple-200"
+          : "bg-blue-50 text-blue-700 border-blue-200"
+      )}
+    >
+      {isDropship ? "Dropship" : "Stock"}
+    </span>
+  )
+}
+
 type ColumnKey =
   | "purchaseId"
   | "status"
@@ -74,6 +92,7 @@ type ColumnKey =
   | "paid"
   | "balance"
   | "delivery"
+  | "type"
 
 type ColumnFilters = Record<ColumnKey, ExcelColumnFilterValue>
 
@@ -89,6 +108,7 @@ const COLUMN_KEYS: ColumnKey[] = [
   "paid",
   "balance",
   "delivery",
+  "type",
 ]
 const MONEY_COLUMNS: ColumnKey[] = ["total", "paid", "balance"]
 
@@ -180,11 +200,21 @@ export default function PurchaseExcelTable({
   onEditPurchase,
 }: PurchaseExcelTableProps) {
   const pathname = usePathname()
+  const user = useAppSelector(selectUser)
   const activeStaff = useAppSelector(selectActiveStaff)
   const isPurchaseManager =
     propIsPurchaseManager !== undefined
       ? propIsPurchaseManager
       : activeStaff?.role === "purchase_manager" || Boolean(pathname?.startsWith("/purchase-manager"))
+
+  const isAdmin = Boolean(
+    (activeStaff?.role === "admin" || (!activeStaff && user?.role?.toUpperCase() === "ADMIN")) &&
+    activeStaff?.role !== "staff" &&
+    activeStaff?.role !== "media_manager" &&
+    activeStaff?.role !== "purchase_manager" &&
+    activeStaff?.role !== "logistics" &&
+    activeStaff?.role !== "partner"
+  )
 
   // Plain value of a row for a column; matches the SQL expressions used by the server-side filters.
   const rawValue = useCallback(
@@ -212,6 +242,8 @@ export default function PurchaseExcelTable({
           return getRemainingAmount(purchase).toFixed(2)
         case "delivery":
           return purchase.purchase_status || "Delivered"
+        case "type":
+          return purchase.purchase_type || "Stock"
       }
     },
     [getPaymentMethodDisplay, getPaidAmount, getRemainingAmount],
@@ -242,6 +274,7 @@ export default function PurchaseExcelTable({
   const [hasFetched, setHasFetched] = useState(false)
   const [fetchError, setFetchError] = useState<string | null>(null)
   const [isDownloadingPDF, setIsDownloadingPDF] = useState(false)
+  const [isDownloadingJSON, setIsDownloadingJSON] = useState(false)
   const { toast } = useToast()
 
   const handleDownloadPDF = async () => {
@@ -287,6 +320,51 @@ export default function PurchaseExcelTable({
       notifyError(toast, err?.message || "Failed to download purchases PDF")
     } finally {
       setIsDownloadingPDF(false)
+    }
+  }
+
+  const handleDownloadJSON = async () => {
+    if (isDownloadingJSON) return
+    if (!displayPurchases || displayPurchases.length === 0) {
+      notifyWarning(toast, "No purchases to download")
+      return
+    }
+
+    setIsDownloadingJSON(true)
+    try {
+      let exportData = displayPurchases
+      if (totalCount > displayPurchases.length && totalCount <= 1000 && deviceId) {
+        try {
+          const fullRes = await getPaginatedUserPurchases(deviceId, {
+            page: 1,
+            pageSize: totalCount,
+            dateFrom,
+            dateTo,
+            searchTerm: debouncedSearchTerm,
+            columnFilters: appliedFilters,
+          })
+          if (fullRes?.success && fullRes.data && fullRes.data.length > 0) {
+            exportData = fullRes.data.map(serializePurchaseRecord)
+          }
+        } catch (fetchErr) {
+          console.warn("Could not fetch full purchase list for JSON, using current page:", fetchErr)
+        }
+      }
+
+      downloadPurchasesJSON(
+        exportData,
+        periodLabel,
+        getPaidAmount,
+        getRemainingAmount,
+        getPaymentMethodDisplay,
+        { from: dateFrom, to: dateTo },
+      )
+      notifySuccess(toast, "Purchases JSON report downloaded successfully")
+    } catch (err: any) {
+      console.error("Error downloading purchases JSON:", err)
+      notifyError(toast, err?.message || "Failed to download purchases JSON")
+    } finally {
+      setIsDownloadingJSON(false)
     }
   }
   const [refreshTick, setRefreshTick] = useState(0)
@@ -592,6 +670,23 @@ export default function PurchaseExcelTable({
                 <Download className="ml-1.5 h-3.5 w-3.5 text-slate-500" />
               )}
             </Button>
+            {isAdmin && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2.5 text-xs font-semibold text-slate-700 bg-white border-slate-200 hover:bg-slate-50 shrink-0 shadow-none mr-1"
+                onClick={handleDownloadJSON}
+                disabled={isDownloadingJSON || displayPurchases.length === 0}
+                title="Download purchases as JSON"
+              >
+                JSON
+                {isDownloadingJSON ? (
+                  <Loader2 className="ml-1.5 h-3.5 w-3.5 animate-spin text-slate-500" />
+                ) : (
+                  <Download className="ml-1.5 h-3.5 w-3.5 text-blue-600" />
+                )}
+              </Button>
+            )}
             <div className="relative w-full sm:w-72">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
               <input
@@ -653,19 +748,20 @@ export default function PurchaseExcelTable({
                 {headerCell("paid", "Paid", "right")}
                 {headerCell("balance", "Balance", "right")}
                 {headerCell("delivery", "Delivery")}
+                {headerCell("type", "Type")}
                 <th className={stickyActionHeaderClass}>Action</th>
               </tr>
             </thead>
             <tbody className={isFetching && hasFetched ? "opacity-60 transition-opacity" : "transition-opacity"}>
               {showInitialSkeleton ? (
                 <tr>
-                  <td colSpan={12}>
+                  <td colSpan={13}>
                     <TableSkeleton />
                   </td>
                 </tr>
               ) : fetchError && displayPurchases.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="px-4 py-8 text-center text-sm text-rose-600">
+                  <td colSpan={13} className="px-4 py-8 text-center text-sm text-rose-600">
                     {fetchError}
                     <Button variant="outline" size="sm" className="ml-3 h-7 text-xs" onClick={retry}>
                       Retry
@@ -674,7 +770,7 @@ export default function PurchaseExcelTable({
                 </tr>
               ) : displayPurchases.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="px-4 py-12 text-center text-sm text-muted-foreground">
+                  <td colSpan={13} className="px-4 py-12 text-center text-sm text-muted-foreground">
                     {hasActiveQuery
                       ? "No purchases match the current search or column filters"
                       : `No purchases found for ${periodLabel}`}
@@ -722,6 +818,9 @@ export default function PurchaseExcelTable({
                       </td>
                       <td className="whitespace-nowrap px-3 py-1.5">
                         <DeliveryStatusBadge status={purchase.purchase_status || "Delivered"} />
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-1.5">
+                        <PurchaseTypeBadge type={purchase.purchase_type} />
                       </td>
                       <td className={stickyActionCellClass(index % 2 === 0 ? "bg-white" : "bg-slate-50/60")}>
                         <button
@@ -789,6 +888,7 @@ export default function PurchaseExcelTable({
                     <div className="flex flex-col gap-1 min-w-0">
                       <div className="flex items-center gap-1.5">
                         <span className="font-extrabold text-blue-700 text-sm">#{purchase.id}</span>
+                        <PurchaseTypeBadge type={purchase.purchase_type} />
                       </div>
                       <PaymentStatusBadge status={paymentStatus} />
                     </div>

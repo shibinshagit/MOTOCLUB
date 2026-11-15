@@ -63,10 +63,10 @@ export function InventorySummaryCards({ userId, refreshKey = 0, currency = "INR"
         (noRecord > 0 ? ` ${count(noRecord)} unit(s) have no purchase record and are valued at cost.` : ""),
     },
     {
-      label: "Current Retail Value",
+      label: "Total MRP Value",
       value: money(summary?.currentRetailValue),
-      sub: "Current selling value",
-      tip: "Current selling-price value of available stock.",
+      sub: "Total MRP value",
+      tip: "Total MRP value of available stock.",
     },
   ]
 

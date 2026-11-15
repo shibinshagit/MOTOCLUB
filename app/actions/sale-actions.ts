@@ -3,7 +3,7 @@
 import { addDays, parseISO, format } from "date-fns"
 import { sql, getLastError, resetConnectionState, executeWithRetry } from "@/lib/db"
 import { revalidatePath, unstable_noStore as noStore } from "next/cache"
-import { recordSaleTransaction, recordSaleAdjustment, deleteSaleTransaction, syncSaleShippingTransactions } from "./simplified-accounting"
+import { recordSaleTransaction, recordSaleAdjustment, deleteSaleTransaction, syncSaleShippingTransactions, recordPurchaseTransaction } from "./simplified-accounting"
 import { filterSalesForStaff } from "@/lib/staff-restrictions-server"
 import { normalizeSaleShippingInput } from "@/lib/sale-shipping"
 import { getStaffSession } from "@/lib/staff-session"
@@ -707,6 +707,7 @@ export interface GetPaginatedSalesOptions {
   isPurchaseManager?: boolean
   purchaseManagerShowAllOrders?: boolean
   isLogistics?: boolean
+  logisticsShowAllOrders?: boolean
 }
 
 export async function getPaginatedUserSales(deviceId: number, options: GetPaginatedSalesOptions = {}) {
@@ -733,6 +734,7 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
   const isPurchaseManager = options.isPurchaseManager || false
   const purchaseManagerShowAllOrders = options.purchaseManagerShowAllOrders || false
   const isLogistics = options.isLogistics ?? options.excludePendingAndPickup ?? false
+  const logisticsShowAllOrders = options.logisticsShowAllOrders || false
 
   try {
     const result = await executeWithRetry(async () => {
@@ -740,6 +742,7 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
         SELECT 
           s.id,
           s.is_pos_updated,
+          s.is_ready_to_ship,
           COALESCE(s.sale_date, s.created_at) as sale_date,
           s.created_at,
           s.status,
@@ -749,6 +752,7 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
           s.delivery_status,
           s.tracking_id,
           s.courier_service_name,
+          COALESCE(s.courier_partner_name, cp.name, md.name, '') as courier_partner_name,
           md.tracking_url_template as tracking_url_template,
           s.total_amount,
           s.received_amount,
@@ -794,6 +798,14 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
           COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name,
           COALESCE(NULLIF(s.customer_phone_override, ''), c.phone, '') as customer_phone,
           st.name as staff_name,
+          (
+            SELECT p.supplier
+            FROM purchases p
+            WHERE p.purchase_type = 'Dropship'
+              AND p.notes LIKE '%Job Card #' || s.id || '%'
+            ORDER BY p.id DESC
+            LIMIT 1
+          ) as dropship_supplier,
           COALESCE(
             (SELECT STRING_AGG(
                CONCAT(
@@ -847,6 +859,7 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
         FROM sales s
         LEFT JOIN customers c ON s.customer_id = c.id
         LEFT JOIN staff st ON s.staff_id = st.id
+        LEFT JOIN staff cp ON cp.id = s.courier_partner_id
         LEFT JOIN master_data md ON s.courier_partner_id = md.id
         WHERE (s.device_id = ${deviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
           AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
@@ -889,13 +902,16 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
             OR (
               ${cardFilter} = 'critical'
               AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
-              AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned', 'pending')
+              AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
               AND (
                 LOWER(COALESCE(s.payment_status, '')) IN ('paid', 'completed', 'partial', 'credit', 'cod')
                 OR LOWER(COALESCE(s.status, '')) IN ('credit', 'partial')
                 OR (s.total_amount > 0 AND s.received_amount >= s.total_amount)
               )
-              AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) IN ('pending', 'paid', 'packed', 'sent')
+              AND (
+                LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) IN ('pending', 'paid', 'packed', 'sent')
+                OR LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+              )
             )
             OR (
               ${cardFilter} = 'direct'
@@ -904,20 +920,60 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
               AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
             )
           )
-          AND (${onlyPosUpdated} = false OR ${purchaseManagerShowAllOrders} = true OR s.is_pos_updated = true)
+          AND (${onlyPosUpdated} = false OR ${purchaseManagerShowAllOrders} = true OR ${logisticsShowAllOrders} = true OR s.is_pos_updated = true)
           AND (
             ${isLogistics} = false
+            OR ${logisticsShowAllOrders} = true
             OR (
               COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
               AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
-              AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed', 'pickup')
-              AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+              AND (
+                -- 1. Direct Order
+                (
+                  LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                  AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+                  AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) != 'pickup'
+                )
+                -- 2. Only Job Card Courier Order
+                OR (
+                  (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%' OR s.tracking_id LIKE 'DOD%')
+                  AND (
+                    LOWER(COALESCE(s.type_of_sale, '')) = 'courier'
+                    OR LOWER(COALESCE(s.fulfillment_type, '')) = 'ship'
+                    OR COALESCE(s.courier_paid_extra, 0) > 0
+                  )
+                  AND (
+                    s.is_ready_to_ship = true
+                    OR LOWER(TRIM(COALESCE(s.delivery_status, ''))) IN ('packed', 'sent', 'direct', 'shipped', 'shipping', 'delivered')
+                  )
+                  AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed')
+                )
+              )
             )
           )
           AND (
             ${isPurchaseManager} = false
             OR ${purchaseManagerShowAllOrders} = true
-            OR LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+            OR (
+              (
+                LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+                AND s.is_ready_to_ship IS NOT TRUE
+                AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) != 'direct'
+              )
+              OR (
+                LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                AND (
+                  COALESCE(NULLIF(TRIM(s.courier_service_name), ''), '') = ''
+                  OR NOT EXISTS (
+                    SELECT 1 FROM purchases p
+                    WHERE p.purchase_type = 'Dropship'
+                      AND p.notes LIKE '%Job Card #' || s.id || '%'
+                      AND p.supplier IS NOT NULL
+                      AND TRIM(p.supplier) != ''
+                  )
+                )
+              )
+            )
           )
           AND (
             ${searchPattern}::text IS NULL
@@ -947,7 +1003,42 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
                 )
             )
           )
-        ORDER BY COALESCE(s.sale_date, s.created_at) DESC, s.id DESC
+        ORDER BY 
+          CASE 
+            WHEN ${isPurchaseManager} = true AND ${purchaseManagerShowAllOrders} = false THEN
+              CASE 
+                WHEN LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct' THEN 2
+                ELSE 1
+              END
+            WHEN ${isLogistics} = true AND ${cardFilter} = 'all' AND ${logisticsShowAllOrders} = false THEN
+              CASE 
+                -- Direct orders: Tier 2 if missing courier or tracking (or starts with DOD/JC), else Tier 3
+                WHEN LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) = 'direct' THEN
+                  CASE
+                    WHEN (
+                      s.tracking_id IS NULL OR TRIM(s.tracking_id) = ''
+                      OR UPPER(TRIM(s.tracking_id)) LIKE 'DOD%'
+                      OR UPPER(TRIM(s.tracking_id)) LIKE 'JC-%'
+                      OR (s.courier_service_name IS NULL AND s.courier_service_id IS NULL AND s.courier_partner_id IS NULL)
+                    ) THEN 2
+                    ELSE 3
+                  END
+                -- Tier 1: In-progress / new orders to deliver (Pending, Paid, Packed, Sent)
+                WHEN LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('shipped', 'shipping', 'delivered') THEN 1
+                -- Tier 2: Shipped but missing courier service or genuine tracking ID
+                WHEN LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) IN ('shipped', 'shipping', 'delivered')
+                  AND (
+                    s.tracking_id IS NULL OR TRIM(s.tracking_id) = ''
+                    OR UPPER(TRIM(s.tracking_id)) LIKE 'DOD%'
+                    OR UPPER(TRIM(s.tracking_id)) LIKE 'JC-%'
+                    OR (s.courier_service_name IS NULL AND s.courier_service_id IS NULL AND s.courier_partner_id IS NULL)
+                  ) THEN 2
+                -- Tier 3: Shipped and completely updated with courier and tracking
+                ELSE 3
+              END
+            ELSE 1
+          END ASC,
+          COALESCE(s.sale_date, s.created_at) DESC, s.id DESC
         LIMIT ${pageSize} OFFSET ${offset}
       `
 
@@ -957,7 +1048,42 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
           COALESCE(
             JSON_AGG(
               JSON_BUILD_OBJECT('id', s.id, 'isJobCard', (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%'))
-              ORDER BY COALESCE(s.sale_date, s.created_at) DESC, s.id DESC
+              ORDER BY 
+          CASE 
+            WHEN ${isPurchaseManager} = true AND ${purchaseManagerShowAllOrders} = false THEN
+              CASE 
+                WHEN LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct' THEN 2
+                ELSE 1
+              END
+            WHEN ${isLogistics} = true AND ${cardFilter} = 'all' AND ${logisticsShowAllOrders} = false THEN
+              CASE 
+                -- Direct orders: Tier 2 if missing courier or tracking (or starts with DOD/JC), else Tier 3
+                WHEN LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) = 'direct' THEN
+                  CASE
+                    WHEN (
+                      s.tracking_id IS NULL OR TRIM(s.tracking_id) = ''
+                      OR UPPER(TRIM(s.tracking_id)) LIKE 'DOD%'
+                      OR UPPER(TRIM(s.tracking_id)) LIKE 'JC-%'
+                      OR (s.courier_service_name IS NULL AND s.courier_service_id IS NULL AND s.courier_partner_id IS NULL)
+                    ) THEN 2
+                    ELSE 3
+                  END
+                -- Tier 1: In-progress / new orders to deliver (Pending, Paid, Packed, Sent)
+                WHEN LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('shipped', 'shipping', 'delivered') THEN 1
+                -- Tier 2: Shipped but missing courier service or genuine tracking ID
+                WHEN LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) IN ('shipped', 'shipping', 'delivered')
+                  AND (
+                    s.tracking_id IS NULL OR TRIM(s.tracking_id) = ''
+                    OR UPPER(TRIM(s.tracking_id)) LIKE 'DOD%'
+                    OR UPPER(TRIM(s.tracking_id)) LIKE 'JC-%'
+                    OR (s.courier_service_name IS NULL AND s.courier_service_id IS NULL AND s.courier_partner_id IS NULL)
+                  ) THEN 2
+                -- Tier 3: Shipped and completely updated with courier and tracking
+                ELSE 3
+              END
+            ELSE 1
+          END ASC,
+          COALESCE(s.sale_date, s.created_at) DESC, s.id DESC
             ) FILTER (WHERE s.id IS NOT NULL),
             '[]'::json
           ) as all_matching
@@ -1005,13 +1131,16 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
             OR (
               ${cardFilter} = 'critical'
               AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
-              AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned', 'pending')
+              AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
               AND (
                 LOWER(COALESCE(s.payment_status, '')) IN ('paid', 'completed', 'partial', 'credit', 'cod')
                 OR LOWER(COALESCE(s.status, '')) IN ('credit', 'partial')
                 OR (s.total_amount > 0 AND s.received_amount >= s.total_amount)
               )
-              AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) IN ('pending', 'paid', 'packed', 'sent')
+              AND (
+                LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) IN ('pending', 'paid', 'packed', 'sent')
+                OR LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+              )
             )
             OR (
               ${cardFilter} = 'direct'
@@ -1020,20 +1149,60 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
               AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
             )
           )
-          AND (${onlyPosUpdated} = false OR ${purchaseManagerShowAllOrders} = true OR s.is_pos_updated = true)
+          AND (${onlyPosUpdated} = false OR ${purchaseManagerShowAllOrders} = true OR ${logisticsShowAllOrders} = true OR s.is_pos_updated = true)
           AND (
             ${isLogistics} = false
+            OR ${logisticsShowAllOrders} = true
             OR (
               COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
               AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
-              AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed', 'pickup')
-              AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+              AND (
+                -- 1. Direct Order
+                (
+                  LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                  AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+                  AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) != 'pickup'
+                )
+                -- 2. Only Job Card Courier Order
+                OR (
+                  (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%' OR s.tracking_id LIKE 'DOD%')
+                  AND (
+                    LOWER(COALESCE(s.type_of_sale, '')) = 'courier'
+                    OR LOWER(COALESCE(s.fulfillment_type, '')) = 'ship'
+                    OR COALESCE(s.courier_paid_extra, 0) > 0
+                  )
+                  AND (
+                    s.is_ready_to_ship = true
+                    OR LOWER(TRIM(COALESCE(s.delivery_status, ''))) IN ('packed', 'sent', 'direct', 'shipped', 'shipping', 'delivered')
+                  )
+                  AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed')
+                )
+              )
             )
           )
           AND (
             ${isPurchaseManager} = false
             OR ${purchaseManagerShowAllOrders} = true
-            OR LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+            OR (
+              (
+                LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+                AND s.is_ready_to_ship IS NOT TRUE
+                AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) != 'direct'
+              )
+              OR (
+                LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                AND (
+                  COALESCE(NULLIF(TRIM(s.courier_service_name), ''), '') = ''
+                  OR NOT EXISTS (
+                    SELECT 1 FROM purchases p
+                    WHERE p.purchase_type = 'Dropship'
+                      AND p.notes LIKE '%Job Card #' || s.id || '%'
+                      AND p.supplier IS NOT NULL
+                      AND TRIM(p.supplier) != ''
+                  )
+                )
+              )
+            )
           )
           AND (
             ${searchPattern}::text IS NULL
@@ -1147,6 +1316,7 @@ export async function getSalesByIds(deviceId: number, saleIds: number[]) {
         SELECT 
           s.id,
           s.is_pos_updated,
+          s.is_ready_to_ship,
           COALESCE(s.sale_date, s.created_at) as sale_date,
           s.created_at,
           s.status,
@@ -1156,6 +1326,7 @@ export async function getSalesByIds(deviceId: number, saleIds: number[]) {
           s.delivery_status,
           s.tracking_id,
           s.courier_service_name,
+          COALESCE(s.courier_partner_name, cp.name, md.name, '') as courier_partner_name,
           md.tracking_url_template as tracking_url_template,
           s.total_amount,
           s.received_amount,
@@ -1201,6 +1372,14 @@ export async function getSalesByIds(deviceId: number, saleIds: number[]) {
           COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name,
           COALESCE(NULLIF(s.customer_phone_override, ''), c.phone, '') as customer_phone,
           st.name as staff_name,
+          (
+            SELECT p.supplier
+            FROM purchases p
+            WHERE p.purchase_type = 'Dropship'
+              AND p.notes LIKE '%Job Card #' || s.id || '%'
+            ORDER BY p.id DESC
+            LIMIT 1
+          ) as dropship_supplier,
           COALESCE(
             (SELECT STRING_AGG(
                CONCAT(
@@ -1264,6 +1443,7 @@ export async function getSalesByIds(deviceId: number, saleIds: number[]) {
         FROM sales s
         LEFT JOIN customers c ON s.customer_id = c.id
         LEFT JOIN staff st ON s.staff_id = st.id
+        LEFT JOIN staff cp ON cp.id = s.courier_partner_id
         LEFT JOIN master_data md ON s.courier_partner_id = md.id
         WHERE s.id = ANY(${uniqueIds})
           AND (s.device_id = ${deviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
@@ -1328,7 +1508,26 @@ export async function getSalesSummaryCards(
             WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
               AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled'
               AND s.is_pos_updated = true
-              AND LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+              AND (
+                (
+                  LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+                  AND s.is_ready_to_ship IS NOT TRUE
+                  AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) != 'direct'
+                )
+                OR (
+                  LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                  AND (
+                    COALESCE(NULLIF(TRIM(s.courier_service_name), ''), '') = ''
+                    OR NOT EXISTS (
+                      SELECT 1 FROM purchases p
+                      WHERE p.purchase_type = 'Dropship'
+                        AND p.notes LIKE '%Job Card #' || s.id || '%'
+                        AND p.supplier IS NOT NULL
+                        AND TRIM(p.supplier) != ''
+                    )
+                  )
+                )
+              )
               AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
               AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
           )::int as orders_to_check_count,
@@ -1336,10 +1535,72 @@ export async function getSalesSummaryCards(
             WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
               AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled'
               AND s.is_pos_updated = true
-              AND LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+              AND (
+                (
+                  LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+                  AND s.is_ready_to_ship IS NOT TRUE
+                  AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) != 'direct'
+                )
+                OR (
+                  LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                  AND (
+                    COALESCE(NULLIF(TRIM(s.courier_service_name), ''), '') = ''
+                    OR NOT EXISTS (
+                      SELECT 1 FROM purchases p
+                      WHERE p.purchase_type = 'Dropship'
+                        AND p.notes LIKE '%Job Card #' || s.id || '%'
+                        AND p.supplier IS NOT NULL
+                        AND TRIM(p.supplier) != ''
+                    )
+                  )
+                )
+              )
               AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
               AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
           ), 0)::numeric as orders_to_check_amount,
+          COUNT(*) FILTER (
+            WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
+              AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
+              AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed')
+              AND (${onlyPosUpdated} = false OR s.is_pos_updated = true)
+              AND (
+                ${isLogistics} = false
+                OR (
+                  -- 1. Direct Order
+                  (
+                    LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                    AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+                    AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) != 'pickup'
+                  )
+                  -- 2. Only Job Card Courier Order
+                  OR (
+                    (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%' OR s.tracking_id LIKE 'DOD%')
+                    AND (
+                      LOWER(COALESCE(s.type_of_sale, '')) = 'courier'
+                      OR LOWER(COALESCE(s.fulfillment_type, '')) = 'ship'
+                      OR COALESCE(s.courier_paid_extra, 0) > 0
+                    )
+                    AND (
+                      s.is_ready_to_ship = true
+                      OR LOWER(TRIM(COALESCE(s.delivery_status, ''))) IN ('packed', 'sent', 'direct', 'shipped', 'shipping', 'delivered')
+                    )
+                  )
+                )
+              )
+              AND (
+                ${isLogistics} = true
+                OR (
+                  s.is_ready_to_ship = true
+                  OR (
+                    LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                    AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+                    AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) != 'pickup'
+                  )
+                )
+              )
+              AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
+              AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
+          )::int as ready_to_ship_count,
           COUNT(*) FILTER (
             WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
               AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled'
@@ -1351,13 +1612,24 @@ export async function getSalesSummaryCards(
                 OR (
                   COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
                   AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
-                  AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed', 'pickup')
-                  AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+                  AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed')
+                  AND (
+                    s.is_ready_to_ship = true
+                    OR (
+                      LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                      AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+                      AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) != 'pickup'
+                    )
+                  )
                 )
               )
               AND (
                 ${isPurchaseManager} = false
-                OR LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+                OR (
+                  s.is_ready_to_ship IS NOT TRUE
+                  AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) != 'direct'
+                  AND LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+                )
               )
           )::int as today_count,
           COUNT(*) FILTER (
@@ -1365,36 +1637,91 @@ export async function getSalesSummaryCards(
               AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
               AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed', 'pickup')
               AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+              AND (
+                ${isLogistics} = false
+                OR (
+                  -- 1. Direct Order
+                  (
+                    LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                    AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+                    AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) != 'pickup'
+                  )
+                  -- 2. Only Job Card Courier Order
+                  OR (
+                    (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%' OR s.tracking_id LIKE 'DOD%')
+                    AND (
+                      LOWER(COALESCE(s.type_of_sale, '')) = 'courier'
+                      OR LOWER(COALESCE(s.fulfillment_type, '')) = 'ship'
+                      OR COALESCE(s.courier_paid_extra, 0) > 0
+                    )
+                    AND (
+                      s.is_ready_to_ship = true
+                      OR LOWER(TRIM(COALESCE(s.delivery_status, ''))) IN ('packed', 'sent', 'direct', 'shipped', 'shipping', 'delivered')
+                    )
+                  )
+                )
+              )
               AND (${onlyPosUpdated} = false OR s.is_pos_updated = true)
               AND (
                 ${isPurchaseManager} = false
-                OR LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+                OR (
+                  s.is_ready_to_ship IS NOT TRUE
+                  AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) != 'direct'
+                  AND LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+                )
               )
               AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
               AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
           )::int as pending_count,
           COUNT(*) FILTER (
             WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
-              AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned', 'pending')
+              AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
               AND (
                 LOWER(COALESCE(s.payment_status, '')) IN ('paid', 'completed', 'partial', 'credit', 'cod')
                 OR LOWER(COALESCE(s.status, '')) IN ('credit', 'partial')
                 OR (s.total_amount > 0 AND s.received_amount >= s.total_amount)
               )
-              AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) IN ('pending', 'paid', 'packed', 'sent')
+              AND (
+                LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) IN ('pending', 'paid', 'packed', 'sent')
+                OR LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+              )
               AND (${onlyPosUpdated} = false OR s.is_pos_updated = true)
               AND (
                 ${isLogistics} = false
                 OR (
                   COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
                   AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
-                  AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed', 'pickup')
-                  AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+                  AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed')
+                  AND (
+                    -- 1. Direct Order
+                    (
+                      LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                      AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+                      AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) != 'pickup'
+                    )
+                    -- 2. Only Job Card Courier Order
+                    OR (
+                      (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%' OR s.tracking_id LIKE 'DOD%')
+                      AND (
+                        LOWER(COALESCE(s.type_of_sale, '')) = 'courier'
+                        OR LOWER(COALESCE(s.fulfillment_type, '')) = 'ship'
+                        OR COALESCE(s.courier_paid_extra, 0) > 0
+                      )
+                      AND (
+                        s.is_ready_to_ship = true
+                        OR LOWER(TRIM(COALESCE(s.delivery_status, ''))) IN ('packed', 'sent', 'direct', 'shipped', 'shipping', 'delivered')
+                      )
+                    )
+                  )
                 )
               )
               AND (
                 ${isPurchaseManager} = false
-                OR LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+                OR (
+                  s.is_ready_to_ship IS NOT TRUE
+                  AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) != 'direct'
+                  AND LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+                )
               )
               AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
               AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
@@ -1409,13 +1736,24 @@ export async function getSalesSummaryCards(
                 OR (
                   COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
                   AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
-                  AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed', 'pickup')
-                  AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+                  AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed')
+                  AND (
+                    s.is_ready_to_ship = true
+                    OR (
+                      LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                      AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+                      AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) != 'pickup'
+                    )
+                  )
                 )
               )
               AND (
                 ${isPurchaseManager} = false
-                OR LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+                OR (
+                  s.is_ready_to_ship IS NOT TRUE
+                  AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) != 'direct'
+                  AND LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+                )
               )
               AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
               AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
@@ -1430,13 +1768,24 @@ export async function getSalesSummaryCards(
                 OR (
                   COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
                   AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
-                  AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed', 'pickup')
-                  AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+                  AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed')
+                  AND (
+                    s.is_ready_to_ship = true
+                    OR (
+                      LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                      AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+                      AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) != 'pickup'
+                    )
+                  )
                 )
               )
               AND (
                 ${isPurchaseManager} = false
-                OR LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+                OR (
+                  s.is_ready_to_ship IS NOT TRUE
+                  AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) != 'direct'
+                  AND LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+                )
               )
               AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
               AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
@@ -1486,7 +1835,7 @@ export async function getSalesSummaryCards(
             OR CAST(s.total_amount AS TEXT) LIKE ${searchPattern}
           )
       `
-      return rows[0] || { total_count: 0, total_amount: 0, orders_to_check_count: 0, orders_to_check_amount: 0, today_count: 0, pending_count: 0, critical_count: 0, direct_count: 0, direct_amount: 0 }
+      return rows[0] || { total_count: 0, total_amount: 0, orders_to_check_count: 0, orders_to_check_amount: 0, ready_to_ship_count: 0, today_count: 0, pending_count: 0, critical_count: 0, direct_count: 0, direct_amount: 0 }
     })
 
     return {
@@ -1496,6 +1845,7 @@ export async function getSalesSummaryCards(
         total_amount: Number(cardCounts.total_amount || 0),
         orders_to_check: Number(cardCounts.orders_to_check_count || 0),
         orders_to_check_amount: Number(cardCounts.orders_to_check_amount || 0),
+        ready_to_ship: Number(cardCounts.ready_to_ship_count || 0),
         today: Number(cardCounts.today_count || 0),
         pending: Number(cardCounts.pending_count || 0),
         critical: Number(cardCounts.critical_count || 0),
@@ -1507,7 +1857,7 @@ export async function getSalesSummaryCards(
     console.error("Get sales summary cards error:", error)
     return {
       success: false,
-      counts: { total: 0, total_amount: 0, orders_to_check: 0, orders_to_check_amount: 0, today: 0, pending: 0, critical: 0, direct: 0, direct_amount: 0 },
+      counts: { total: 0, total_amount: 0, orders_to_check: 0, orders_to_check_amount: 0, ready_to_ship: 0, today: 0, pending: 0, critical: 0, direct: 0, direct_amount: 0 },
     }
   }
 }
@@ -1774,6 +2124,14 @@ export async function getSaleDetails(saleId: number) {
           c.pincode as customer_pincode,
           c.landmark as customer_landmark,
           st.name as staff_name,
+          (
+            SELECT p.supplier
+            FROM purchases p
+            WHERE p.purchase_type = 'Dropship'
+              AND p.notes LIKE '%Job Card #' || s.id || '%'
+            ORDER BY p.id DESC
+            LIMIT 1
+          ) as dropship_supplier,
           COALESCE(cp.name, md.name, '') as courier_partner_name,
           md.tracking_url_template as tracking_url_template
         FROM sales s
@@ -2164,7 +2522,7 @@ export async function addSale(saleData: any) {
         packaging_type_id, packaging_type_name,
         tracking_id, shipping_address, shipping_city, shipping_district, shipping_state, shipping_street, shipping_landmark, shipping_address_type, shipping_pincode, weight_kg, length_cm, width_cm, height_cm,
         courier_paid_extra, expense_courier, expense_packing, shipped_at, delivered_at, shipping_notes,
-        advance_amount, balance_amount, is_pos_updated, type_of_sale
+        advance_amount, balance_amount, is_pos_updated, type_of_sale, is_ready_to_ship, ready_to_ship_at
       )
       VALUES (
         ${saleData.customerId || null},
@@ -2210,7 +2568,9 @@ export async function addSale(saleData: any) {
         ${advanceAmount},
         ${balanceAmount},
         false,
-        ${saleData.typeOfSale || 'walk in'}
+        ${saleData.typeOfSale || 'walk in'},
+        ${["packed", "sent", "direct", "shipped", "shipping", "delivered"].includes((shipping.delivery_status || "").trim().toLowerCase())},
+        ${["packed", "sent", "direct", "shipped", "shipping", "delivered"].includes((shipping.delivery_status || "").trim().toLowerCase()) ? new Date() : null}
       )
       RETURNING id
     `
@@ -2965,6 +3325,7 @@ export async function updateSale(saleData: any) {
     const origDelivery = (original.delivery_status || "").trim().toLowerCase()
     const newDelivery = (shipping.delivery_status || "").trim().toLowerCase()
     const isNewShip = newDelivery === "shipping" || newDelivery === "shipped"
+    const isAutoReadyToShip = ["packed", "sent", "direct", "shipped", "shipping", "delivered"].includes(newDelivery)
     const wasShip = origDelivery === "shipping" || origDelivery === "shipped"
     let targetShippingDate = original.shipping_date || null
     if (!wasShip && isNewShip) {
@@ -2990,6 +3351,8 @@ export async function updateSale(saleData: any) {
                 staff_id = ${saleData.staffId || null},
                 fulfillment_type = ${shipping.fulfillment_type},
                 delivery_status = ${shipping.delivery_status},
+                is_ready_to_ship = CASE WHEN ${isAutoReadyToShip} THEN true ELSE is_ready_to_ship END,
+                ready_to_ship_at = CASE WHEN ${isAutoReadyToShip} THEN COALESCE(ready_to_ship_at, NOW()) ELSE ready_to_ship_at END,
                 shipping_date = CASE WHEN ${isNewShip} THEN COALESCE(shipping_date, NOW()) ELSE shipping_date END,
                 courier_partner_id = ${shipping.courier_partner_id},
                 courier_service_id = ${shipping.courier_service_id},
@@ -3038,6 +3401,8 @@ export async function updateSale(saleData: any) {
                 staff_id = ${saleData.staffId || null},
                 fulfillment_type = ${shipping.fulfillment_type},
                 delivery_status = ${shipping.delivery_status},
+                is_ready_to_ship = CASE WHEN ${isAutoReadyToShip} THEN true ELSE is_ready_to_ship END,
+                ready_to_ship_at = CASE WHEN ${isAutoReadyToShip} THEN COALESCE(ready_to_ship_at, NOW()) ELSE ready_to_ship_at END,
                 shipping_date = CASE WHEN ${isNewShip} THEN COALESCE(shipping_date, NOW()) ELSE shipping_date END,
                 courier_partner_id = ${shipping.courier_partner_id},
                 courier_service_id = ${shipping.courier_service_id},
@@ -3570,9 +3935,25 @@ export async function updateSaleDeliveryStatus(
     const isJobCard = rows[0].sale_type === 'job_card'
     const isEcommerce = rows[0].source === 'ECOMMERCE' || rows[0].external_order_id != null
 
-    const allowedStatuses = ["Pending", "Paid", "Packed", "Sent", "Direct", "Courier", "Shipped", "Shipping", "Delivered", "Returned", "Failed"]
+    const statusMap: Record<string, string> = {
+      pending: "Pending",
+      paid: "Paid",
+      packed: "Packed",
+      sent: "Sent",
+      direct: "Direct",
+      courier: "Courier",
+      shipped: "Shipped",
+      shipping: "Shipping",
+      delivered: "Delivered",
+      returned: "Returned",
+      failed: "Failed",
+      pickup: "Pickup",
+    }
+    const cleanDeliveryStatus = statusMap[(deliveryStatus || "").trim().toLowerCase()] || (deliveryStatus || "").trim()
 
-    if (!allowedStatuses.includes(deliveryStatus)) {
+    const allowedStatuses = ["Pending", "Paid", "Packed", "Sent", "Direct", "Courier", "Shipped", "Shipping", "Delivered", "Returned", "Failed", "Pickup"]
+
+    if (!allowedStatuses.includes(cleanDeliveryStatus)) {
       return { success: false as const, message: `Invalid delivery status: ${deliveryStatus}` }
     }
 
@@ -3720,14 +4101,17 @@ export async function updateSaleDeliveryStatus(
 
     const newDeliveryStatus = (deliveryStatus || "").trim().toLowerCase()
     const isNewShipping = newDeliveryStatus === "shipping" || newDeliveryStatus === "shipped"
+    const isAutoReadyToShip = ["packed", "sent", "direct", "shipped", "shipping", "delivered"].includes(newDeliveryStatus)
 
     const updated = await sql`
       UPDATE sales
-      SET delivery_status = ${deliveryStatus},
+      SET delivery_status = ${cleanDeliveryStatus},
           shipped_at = ${shippedAt},
           delivered_at = ${deliveredAt},
           tracking_id = ${targetTrackingId},
           shipping_date = CASE WHEN ${isNewShipping} THEN COALESCE(shipping_date, NOW()) ELSE shipping_date END,
+          is_ready_to_ship = CASE WHEN ${isAutoReadyToShip} THEN true ELSE is_ready_to_ship END,
+          ready_to_ship_at = CASE WHEN ${isAutoReadyToShip} THEN COALESCE(ready_to_ship_at, NOW()) ELSE ready_to_ship_at END,
           updated_at = NOW()
       WHERE id = ${saleId}
       RETURNING shipping_date
@@ -3738,7 +4122,7 @@ export async function updateSaleDeliveryStatus(
     try {
       await sql`
         UPDATE orders
-        SET status = ${deliveryStatus.toLowerCase()},
+        SET status = ${cleanDeliveryStatus.toLowerCase()},
             updated_at = NOW()
         WHERE synced_sale_id = ${saleId}
       `
@@ -3758,6 +4142,44 @@ export async function updateSaleDeliveryStatus(
     }
   } catch (error) {
     console.error("updateSaleDeliveryStatus error:", error)
+    return {
+      success: false as const,
+      message: `Database error: ${error instanceof Error ? error.message : "Unknown error"}`,
+    }
+  }
+}
+
+export async function markSaleReadyToShip(saleId: number, deviceId?: number) {
+  if (!saleId) {
+    return { success: false as const, message: "Sale ID is required" }
+  }
+
+  try {
+    const updated = await sql`
+      UPDATE sales
+      SET is_ready_to_ship = true,
+          ready_to_ship_at = NOW(),
+          updated_at = NOW()
+      WHERE id = ${saleId}
+      RETURNING id, delivery_status, is_ready_to_ship
+    `
+
+    if (updated.length === 0) {
+      return { success: false as const, message: "Sale not found" }
+    }
+
+    revalidatePath("/dashboard")
+    revalidatePath("/staff/dashboard")
+    revalidatePath("/logistics/dashboard")
+    revalidatePath("/purchase-manager/dashboard")
+
+    return {
+      success: true as const,
+      message: "Order marked ready to ship",
+      sale: updated[0],
+    }
+  } catch (error) {
+    console.error("markSaleReadyToShip error:", error)
     return {
       success: false as const,
       message: `Database error: ${error instanceof Error ? error.message : "Unknown error"}`,
@@ -3866,11 +4288,14 @@ export async function updateSaleFulfillmentDetails(saleId: number, shippingData:
 
     const shippedAt = (["Shipped", "Shipping", "Courier", "In transit", "Delivered"].includes(String(shippingData.deliveryStatus)) ? new Date() : null)
     const deliveredAt = (shippingData.deliveryStatus === "Delivered" ? new Date() : null)
+    const targetDeliveryStatus = (shippingData.deliveryStatus || "").trim().toLowerCase()
+    const isAutoReadyToShip = ["packed", "sent", "direct", "shipped", "shipping", "delivered"].includes(targetDeliveryStatus)
 
     await sql`
       UPDATE sales
       SET 
         courier_partner_id = ${shippingData.courierPartnerId || null},
+        courier_partner_name = COALESCE(${shippingData.courierPartnerName || null}, (SELECT name FROM staff WHERE id = ${shippingData.courierPartnerId || null} LIMIT 1), (SELECT name FROM master_data WHERE id = ${shippingData.courierPartnerId || null} LIMIT 1), courier_partner_name),
         courier_service_id = ${shippingData.courierServiceId || null},
         courier_service_name = ${shippingData.courierServiceName || null},
         tracking_id = ${shippingData.trackingId || null},
@@ -3894,6 +4319,8 @@ export async function updateSaleFulfillmentDetails(saleId: number, shippingData:
         shipping_pincode = ${shippingData.shippingPincode || null},
         fulfillment_type = ${shippingData.fulfillmentType || 'ship'},
         delivery_status = COALESCE(${shippingData.deliveryStatus}, delivery_status),
+        is_ready_to_ship = CASE WHEN ${isAutoReadyToShip} THEN true ELSE is_ready_to_ship END,
+        ready_to_ship_at = CASE WHEN ${isAutoReadyToShip} THEN COALESCE(ready_to_ship_at, NOW()) ELSE ready_to_ship_at END,
         shipped_at = COALESCE(shipped_at, ${shippedAt}),
         delivered_at = COALESCE(delivered_at, ${deliveredAt}),
         shipping_date = COALESCE(shipping_date, ${shippingData.shippingDate ? new Date(shippingData.shippingDate) : null}),
@@ -4291,5 +4718,246 @@ export async function saveProductPurchaseActionsBulk(
   } catch (error: any) {
     console.error("Failed to save bulk product purchase actions:", error)
     return { success: false, message: error.message }
+  }
+}
+
+export interface MoveSaleToDirectPurchaseInput {
+  saleId: number
+  deviceId: number
+  userId: number
+  supplier: string
+  courierServiceName?: string | null
+  courierServiceId?: number | null
+  trackingId?: string | null
+  courierCharge?: number
+  courierChargePercentage?: number
+  discount?: number
+  paymentStatus?: string
+  purchaseStatus?: string
+  paidAmount?: number
+  notes?: string | null
+  items: Array<{
+    product_id: number
+    variant_id?: number | null
+    quantity: number
+    unit_cost: number
+    tax_percentage?: number
+    tax_amount?: number
+    line_total?: number
+  }>
+}
+
+export async function moveSaleToDirectPurchase(input: MoveSaleToDirectPurchaseInput) {
+  if (!input.saleId || !input.deviceId || !input.userId) {
+    return { success: false, message: "Sale ID, Device ID, and User ID are required" }
+  }
+
+  const supplier = input.supplier?.trim()
+  if (!supplier) {
+    return { success: false, message: "Supplier is required to move order to Direct" }
+  }
+
+  if (!input.items || !input.items.length) {
+    return { success: false, message: "Order must contain at least one product" }
+  }
+
+  resetConnectionState()
+
+  try {
+    const outcome = await sql.begin(async (tx: any) => {
+      // 1. Fetch and lock the sale
+      const sales = await tx`
+        SELECT id, device_id, customer_id, total_amount, received_amount, delivery_status,
+               tracking_id, sale_date, payment_method, payment_status, fulfillment_type,
+               courier_paid_extra, expense_packing
+        FROM sales
+        WHERE id = ${input.saleId}
+        FOR UPDATE
+      `
+      if (!sales.length) {
+        throw new Error("Sale order not found")
+      }
+      const sale = sales[0]
+
+      // 2. Calculate purchase subtotal, tax, discount, and purchase total (payable to supplier for products)
+      let subtotal = 0
+      let totalTax = 0
+      for (const it of input.items) {
+        const qty = Number(it.quantity) || 0
+        const cost = Number(it.unit_cost) || 0
+        const taxPct = Number(it.tax_percentage) || 0
+        const taxAmt = it.tax_amount != null ? Number(it.tax_amount) : Math.round(qty * cost * (taxPct / 100) * 100) / 100
+        subtotal += qty * cost
+        totalTax += taxAmt
+      }
+      const discount = Math.max(0, Number(input.discount) || 0)
+      const purchaseTotal = Math.max(0, Math.round((subtotal + totalTax - discount) * 100) / 100)
+      const courierCharge = Math.max(0, Number(input.courierCharge) || 0)
+
+      let status = (input.paymentStatus || "").toLowerCase() === "paid" ? "Paid" : "Credit"
+      const purchaseStatus = (input.purchaseStatus || "").toLowerCase() === "delivered" ? "Delivered" : "Ordered"
+      const finalPaidAmount = status === "Paid" ? purchaseTotal : Math.min(purchaseTotal, Math.max(0, Number(input.paidAmount) || 0))
+      if (finalPaidAmount >= purchaseTotal && purchaseTotal > 0) {
+        status = "Paid"
+      }
+      const internalNotes = input.notes?.trim() || `Direct dropship fulfillment for Job Card #${input.saleId}`
+
+      // 3. Create or update the Dropship Purchase (courier charge is paid after delivery and recorded as sales order expense)
+      const existingPurchases = await tx`
+        SELECT id FROM purchases
+        WHERE purchase_type = 'Dropship'
+          AND notes LIKE ${`%Job Card #${input.saleId}%`}
+        ORDER BY id DESC LIMIT 1
+      `
+
+      let purchaseId: number
+      if (existingPurchases.length > 0) {
+        purchaseId = existingPurchases[0].id
+        await tx`
+          UPDATE purchases
+          SET supplier = ${supplier},
+              total_amount = ${purchaseTotal},
+              status = ${status},
+              purchase_status = ${purchaseStatus},
+              received_amount = ${finalPaidAmount},
+              discount = ${discount},
+              notes = ${internalNotes}
+          WHERE id = ${purchaseId}
+        `
+        await tx`DELETE FROM purchase_items WHERE purchase_id = ${purchaseId}`
+      } else {
+        const purchaseRows = await tx`
+          INSERT INTO purchases (
+            supplier, total_amount, status, payment_method, purchase_status, purchase_type,
+            created_by, device_id, purchase_date, received_amount,
+            courier_charge, courier_charge_percentage, discount, notes
+          )
+          VALUES (
+            ${supplier}, ${purchaseTotal}, ${status}, 'Cash', ${purchaseStatus}, 'Dropship',
+            ${input.userId}, ${input.deviceId}, NOW(), ${finalPaidAmount},
+            0, 0, ${discount}, ${internalNotes}
+          )
+          RETURNING id
+        `
+        purchaseId = purchaseRows[0].id
+      }
+
+      // 4. Insert items into purchase_items (NO product cost update, NO inventory addition)
+      for (const it of input.items) {
+        const qty = Number(it.quantity) || 0
+        const price = Number(it.unit_cost) || 0
+        const taxPct = Number(it.tax_percentage) || 0
+        const taxAmt = it.tax_amount != null ? Number(it.tax_amount) : Math.round(qty * price * (taxPct / 100) * 100) / 100
+        const lineTotal = it.line_total != null ? Number(it.line_total) : Math.round((qty * price + taxAmt) * 100) / 100
+
+        const itemProportion = subtotal > 0 ? (qty * price) / subtotal : (1 / input.items.length)
+        const itemDiscountAmount = Number((discount * itemProportion).toFixed(2))
+        const itemNetCost = lineTotal - itemDiscountAmount
+        const unitAcquisitionCost = qty > 0 ? Number((itemNetCost / qty).toFixed(2)) : price
+
+        await tx`
+          INSERT INTO purchase_items (
+            purchase_id, product_id, product_variant_id, batch_id, quantity, price,
+            tax_percentage, tax_amount, line_total, courier_charge, discount, unit_cost
+          )
+          VALUES (
+            ${purchaseId}, ${it.product_id}, ${it.variant_id || null}, null,
+            ${qty}, ${price}, ${taxPct}, ${taxAmt},
+            ${lineTotal}, 0, ${itemDiscountAmount}, ${unitAcquisitionCost}
+          )
+        `
+      }
+
+      // Record purchase in simplified accounting system
+      try {
+        await recordPurchaseTransaction({
+          purchaseId,
+          totalAmount: purchaseTotal,
+          receivedAmount: finalPaidAmount,
+          outstandingAmount: Math.max(0, purchaseTotal - finalPaidAmount),
+          status,
+          paymentMethod: "Cash",
+          supplierName: supplier,
+          deviceId: input.deviceId,
+          userId: input.userId,
+          purchaseDate: new Date(),
+        }, tx)
+      } catch (recErr) {
+        console.warn("recordPurchaseTransaction error in moveSaleToDirectPurchase:", recErr)
+      }
+
+      // 5. Restore stock on warehouse inventory since supplier ships directly (only on initial creation)
+      if (existingPurchases.length === 0) {
+        try {
+          await applyStockTransition(
+            input.saleId,
+            input.deviceId,
+            false,
+            "direct_transfer",
+            `Restored stock - Job Card #${input.saleId} moved to Direct Dropship (Purchase #${purchaseId})`,
+            tx
+          )
+        } catch (stockErr) {
+          console.warn("Stock transition warning in moveSaleToDirectPurchase:", stockErr)
+        }
+      }
+
+      // 6. Update sales order: delivery_status = 'Direct', courier details, and expense_courier
+      const resolvedCourierName = input.courierServiceName?.trim() || null
+      const trackingId = input.trackingId?.trim() || null
+
+      await tx`
+        UPDATE sales
+        SET delivery_status = 'Direct',
+            courier_service_name = COALESCE(${resolvedCourierName}, courier_service_name),
+            courier_service_id = COALESCE(${input.courierServiceId || null}, courier_service_id),
+            tracking_id = COALESCE(${trackingId}, tracking_id),
+            expense_courier = ${courierCharge},
+            is_ready_to_ship = true,
+            ready_to_ship_at = COALESCE(ready_to_ship_at, NOW()),
+            updated_at = NOW()
+        WHERE id = ${input.saleId}
+      `
+
+      // 7. Sync sale shipping transactions
+      try {
+        await syncSaleShippingTransactions({
+          saleId: input.saleId,
+          deviceId: sale.device_id || input.deviceId,
+          userId: input.userId,
+          saleDate: new Date(sale.sale_date || new Date()),
+          paymentMethod: sale.payment_method || "Cash",
+          status: sale.payment_status || "Pending",
+          fulfillmentType: sale.fulfillment_type || "ship",
+          courierPaidExtra: Number(sale.courier_paid_extra) || 0,
+          expenseCourier: courierCharge,
+          expensePacking: Number(sale.expense_packing) || 0,
+          receivedAmount: Number(sale.received_amount) || 0,
+          totalAmount: Number(sale.total_amount) || 0,
+        })
+      } catch (syncErr) {
+        console.warn("Sync shipping transaction warning:", syncErr)
+      }
+
+      return {
+        success: true,
+        purchaseId,
+        message: `Order #${input.saleId} moved to Direct. Dropship Purchase #${purchaseId} created.`,
+      }
+    })
+
+    try {
+      revalidatePath("/dashboard")
+    } catch (e) {
+      // safe ignore in non-browser context
+    }
+
+    return outcome
+  } catch (err: any) {
+    console.error("moveSaleToDirectPurchase error:", err)
+    return {
+      success: false,
+      message: err instanceof Error ? err.message : "Failed to move order to Direct",
+    }
   }
 }

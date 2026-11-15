@@ -107,10 +107,10 @@ export default function TrendingDrawer({ open, onOpenChange, userId }: TrendingD
   }, [userId, toast])
 
   useEffect(() => {
-    if (open && !hasLoaded) {
+    if (open) {
       fetchTrendingProducts()
     }
-  }, [open, hasLoaded, fetchTrendingProducts])
+  }, [open, fetchTrendingProducts])
 
   const handleRefresh = () => {
     setHasLoaded(false)
@@ -379,6 +379,7 @@ export default function TrendingDrawer({ open, onOpenChange, userId }: TrendingD
                 currency={currency}
                 privacyMode={false}
                 userId={userId}
+                onProductUpdated={handleProductUpdated}
               />
             ) : null}
           </div>

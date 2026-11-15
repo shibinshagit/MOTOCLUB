@@ -88,6 +88,8 @@ interface DashboardProps {
   onlyPosUpdatedSales?: boolean
   hideProductsToPurchaseTab?: boolean
   hideAttendanceTab?: boolean
+  hideTransferTab?: boolean
+  hideCustomerTab?: boolean
   showSalesActions?: boolean
   showSalesViewModal?: boolean
   isLogistics?: boolean
@@ -120,6 +122,8 @@ export function Dashboard({
   onlyPosUpdatedSales,
   hideProductsToPurchaseTab,
   hideAttendanceTab,
+  hideTransferTab,
+  hideCustomerTab,
   showSalesActions = true,
   showSalesViewModal,
   isLogistics: isLogisticsProp,
@@ -207,8 +211,23 @@ export function Dashboard({
         return Boolean(onlyPosUpdatedSales && !hideProductsToPurchaseTab)
       }
 
-      // Disallow attendance if hideAttendanceTab is true or if user is purchase manager
-      if (tabId === "attendance" && (hideAttendanceTab || activeStaff?.role === "purchase_manager")) {
+      // Disallow attendance if hideAttendanceTab is true, user is logistics, or user is purchase manager
+      if (tabId === "attendance" && (hideAttendanceTab || isLogistics || activeStaff?.role === "logistics" || isPurchaseManager || activeStaff?.role === "purchase_manager")) {
+        return false
+      }
+
+      // Disallow supplier if user is logistics
+      if (tabId === "supplier" && (isLogistics || activeStaff?.role === "logistics")) {
+        return false
+      }
+
+      // Disallow transfer if hideTransferTab is true, user is logistics, or user is purchase manager
+      if (tabId === "transfer" && (hideTransferTab || isLogistics || activeStaff?.role === "logistics" || isPurchaseManager || activeStaff?.role === "purchase_manager")) {
+        return false
+      }
+
+      // Disallow customer if hideCustomerTab is true or user is purchase manager
+      if (tabId === "customer" && (hideCustomerTab || isPurchaseManager || activeStaff?.role === "purchase_manager")) {
         return false
       }
 
@@ -230,7 +249,7 @@ export function Dashboard({
       // 2. Staff level check (Device Admin restrictions)
       return canAccessPage(mappedTabId as StaffPageId)
     },
-    [device, activeStaff, canAccessPage],
+    [device, activeStaff, canAccessPage, isLogistics, isPurchaseManager, hideAttendanceTab, hideTransferTab, hideCustomerTab],
   )
 
   // Navigation items configuration
@@ -382,6 +401,12 @@ export function Dashboard({
             allStaff: staffList,
           }),
         )
+        try {
+          const { restoreStaffSession: restoreServerStaffSession } = await import("@/app/actions/staff-actions")
+          await restoreServerStaffSession(storedStaffId, device.id)
+        } catch (e) {
+          console.warn("Failed to sync server staff session cookie", e)
+        }
         setStaffAuthOpen(false)
       } catch {
         setStaffAuthOpen(true)
@@ -701,15 +726,21 @@ export function Dashboard({
             />
           )
         case "customer":
+          if (hideCustomerTab || isPurchaseManager || activeStaff?.role === "purchase_manager") {
+            return null
+          }
           return (
             <CustomerTab userId={device?.id ?? 0} companyId={companyId} />
           )
         case "attendance":
-          if (hideAttendanceTab || isPurchaseManager) {
+          if (hideAttendanceTab || isLogistics || activeStaff?.role === "logistics" || isPurchaseManager || activeStaff?.role === "purchase_manager") {
             return null
           }
           return <AttendanceTab />
         case "supplier":
+          if (isLogistics || activeStaff?.role === "logistics") {
+            return null
+          }
           return (
             <SupplierTab
               userId={device?.id ?? 0}
@@ -718,6 +749,9 @@ export function Dashboard({
             />
           )
         case "transfer":
+          if (hideTransferTab || isLogistics || activeStaff?.role === "logistics" || isPurchaseManager || activeStaff?.role === "purchase_manager") {
+            return null
+          }
           return <TransferTab userId={device?.id ?? 0} />
         case "accounting":
           return <AccountingTab userId={device?.id ?? 0} companyId={companyId} deviceId={deviceId || 0} />

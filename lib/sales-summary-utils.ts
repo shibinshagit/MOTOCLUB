@@ -745,3 +745,162 @@ export function downloadSalesSummaryExcel(
   link.click()
   document.body.removeChild(link)
 }
+
+export function downloadSalesSummaryJSON(
+  sales: any[],
+  periodLabel?: string,
+  dateRange?: { from?: string; to?: string },
+) {
+  const summaryRows = sales.map(extractSaleSummaryRow)
+  const totals = computeSalesSummaryTotals(summaryRows)
+
+  let totalTaxAmount = 0
+  let totalDiscountAmount = 0
+  let totalReceivedAmount = 0
+  let totalItemsCount = 0
+
+  const detailedOrders = sales.map((sale: any, idx: number) => {
+    const summaryRow = summaryRows[idx]
+
+    const taxAmount = Number(sale.tax || sale.tax_amount || 0)
+    const taxRate = Number(sale.tax_rate || 0)
+    const discountAmount = Number(sale.discount || 0)
+    const receivedAmount = Number(sale.received_amount || sale.total_amount || 0)
+    const balanceAmount = Number(sale.balance_amount || 0)
+
+    totalTaxAmount += taxAmount
+    totalDiscountAmount += discountAmount
+    totalReceivedAmount += receivedAmount
+
+    let rawItems = sale.items
+    if (typeof rawItems === "string") {
+      try {
+        rawItems = JSON.parse(rawItems)
+      } catch {
+        rawItems = []
+      }
+    }
+
+    const orderItems =
+      Array.isArray(rawItems) && rawItems.length > 0
+        ? rawItems.map((item: any) => {
+            const qty = Number(item.quantity || 1)
+            totalItemsCount += qty
+            const unitCost = Number(item.cost ?? item.cost_price ?? item.actual_cost ?? 0)
+            const unitPrice = Number(item.price ?? 0)
+            const itemTotalCost = Number((qty * unitCost).toFixed(2))
+            const itemTotalPrice = Number((qty * unitPrice).toFixed(2))
+            const itemProfit = Number((itemTotalPrice - itemTotalCost).toFixed(2))
+
+            return {
+              itemId: item.id || null,
+              productId: item.product_id || null,
+              productName: item.product_name || item.name || item.title || item.notes || "Item",
+              variantId: item.product_variant_id || item.variant_id || null,
+              variantName: item.variant_name || item.variant || "Default",
+              sku: item.sku || null,
+              barcode: item.barcode || null,
+              quantity: qty,
+              unitCost,
+              unitPrice,
+              totalCost: itemTotalCost,
+              totalPrice: itemTotalPrice,
+              profit: itemProfit,
+            }
+          })
+        : summaryRow.items.map((it) => {
+            totalItemsCount += it.quantity
+            return {
+              productName: it.name,
+              quantity: it.quantity,
+              totalCost: it.cost,
+              totalPrice: it.sellingPrice,
+              profit: Number((it.sellingPrice - it.cost).toFixed(2)),
+            }
+          })
+
+    return {
+      orderId: sale.id,
+      orderNumber: summaryRow.saleId,
+      invoiceNumber: sale.bill_number || sale.job_card_number || null,
+      jobCardNumber: sale.job_card_number || null,
+      saleDate: sale.sale_date || sale.created_at || null,
+      saleDateFormatted: summaryRow.saleDate,
+      status: sale.status || "Completed",
+      deliveryStatus: sale.delivery_status || "Pending",
+      paymentStatus: sale.payment_status || "Pending",
+      paymentMethod: sale.payment_method || "N/A",
+      typeOfSale: sale.type_of_sale || sale.sale_type || "N/A",
+      customer: {
+        id: sale.customer_id || null,
+        name: summaryRow.customerName,
+        phone: summaryRow.customerPhone,
+        address: sale.shipping_address || sale.customer_address || null,
+        street: sale.shipping_street || null,
+        city: sale.shipping_city || null,
+        state: sale.shipping_state || null,
+        pincode: sale.shipping_pincode || null,
+      },
+      shipping: {
+        courierPartnerId: sale.courier_partner_id || null,
+        courierPartnerName: sale.courier_partner_name || null,
+        courierServiceId: sale.courier_service_id || null,
+        courierServiceName: sale.courier_service_name || null,
+        trackingId: sale.tracking_id || null,
+        customerShippingCollected: summaryRow.courierCharge,
+        actualCourierExpense: summaryRow.partnerCourier,
+        packingExpense: Number(sale.expense_packing || 0),
+        shippedAt: sale.shipped_at || null,
+        deliveredAt: sale.delivered_at || null,
+      },
+      financials: {
+        itemsSellingPrice: summaryRow.sellingPrice,
+        itemsCost: summaryRow.cost,
+        courierChargeCollected: summaryRow.courierCharge,
+        actualCourierExpense: summaryRow.partnerCourier,
+        discount: Number(discountAmount.toFixed(2)),
+        taxRate: Number(taxRate.toFixed(2)),
+        taxAmount: Number(taxAmount.toFixed(2)),
+        totalAmount: summaryRow.totalPrice,
+        receivedAmount: Number(receivedAmount.toFixed(2)),
+        balanceAmount: Number(balanceAmount.toFixed(2)),
+        profit: summaryRow.profit,
+      },
+      items: orderItems,
+      rawSaleData: sale,
+    }
+  })
+
+  const exportPayload = {
+    reportTitle: "Sales Summary Report",
+    period: periodLabel || "All Time",
+    dateRange: dateRange || null,
+    generatedAt: new Date().toISOString(),
+    summaryTotals: {
+      totalOrders: totals.totalOrders,
+      totalQuantity: totalItemsCount,
+      totalSelling: totals.totalSelling,
+      totalCost: totals.totalCost,
+      totalCourierChargeCollected: totals.totalCourierCharge,
+      totalActualCourierExpense: totals.totalPartnerCourier,
+      totalDiscount: Number(totalDiscountAmount.toFixed(2)),
+      totalTax: Number(totalTaxAmount.toFixed(2)),
+      totalAmount: totals.totalPrice,
+      totalReceived: Number(totalReceivedAmount.toFixed(2)),
+      totalProfit: totals.totalProfit,
+    },
+    orders: detailedOrders,
+  }
+
+  const jsonContent = JSON.stringify(exportPayload, null, 2)
+  const blob = new Blob([jsonContent], { type: "application/json;charset=utf-8;" })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement("a")
+  const baseFilename = getSalesSummaryFilename(dateRange?.from, dateRange?.to, periodLabel)
+  link.setAttribute("href", url)
+  link.setAttribute("download", `${baseFilename}.json`)
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+}

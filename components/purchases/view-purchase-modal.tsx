@@ -23,6 +23,7 @@ import { getProductById } from "@/app/actions/product-actions"
 import { ProductDetailSlider } from "@/components/products/product-detail-slider"
 import ReturnPurchaseModal from "@/components/purchases/return-purchase-modal"
 import { getCurrencySymbol } from "@/lib/currency-utils"
+import { cn } from "@/lib/utils"
 
 interface ViewPurchaseModalProps {
   isOpen: boolean
@@ -68,6 +69,22 @@ function DeliveryStatusBadge({ status }: { status: string }) {
       }`}
     >
       {status || "Delivered"}
+    </span>
+  )
+}
+
+function PurchaseTypeBadge({ type }: { type?: string }) {
+  const isDropship = (type || "").toLowerCase() === "dropship"
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold",
+        isDropship
+          ? "bg-purple-50 text-purple-700 border-purple-200"
+          : "bg-blue-50 text-blue-700 border-blue-200"
+      )}
+    >
+      {isDropship ? "Dropship" : "Stock"}
     </span>
   )
 }
@@ -198,7 +215,7 @@ export default function ViewPurchaseModal({
   }, [isOpen, purchaseId])
 
   const calculateTotals = () => {
-    if (!purchaseData) return { subtotal: 0, taxTotal: 0, total: 0, paid: 0, remaining: 0, courierCharge: 0, discount: 0 }
+    if (!purchaseData) return { subtotal: 0, taxTotal: 0, total: 0, grandTotal: 0, paid: 0, remaining: 0, courierCharge: 0, discount: 0 }
 
     let subtotal = 0
     let taxTotal = 0
@@ -221,7 +238,8 @@ export default function ViewPurchaseModal({
 
     let courierCharge = Number(purchaseData.courier_charge) || 0
     let discount = Number(purchaseData.discount) || 0
-    const total = Number.parseFloat(purchaseData.total_amount) || (subtotal + taxTotal + courierCharge - discount)
+    const total = Number.parseFloat(purchaseData.total_amount) || (subtotal + taxTotal - discount)
+    const grandTotal = total + courierCharge
 
     const status = purchaseData.status === "Partial" ? "Cancelled" : purchaseData.status
     let paid = 0
@@ -232,10 +250,10 @@ export default function ViewPurchaseModal({
     }
     const remaining = Math.max(0, total - paid)
 
-    return { subtotal, taxTotal, total, paid, remaining, courierCharge, discount }
+    return { subtotal, taxTotal, total, grandTotal, paid, remaining, courierCharge, discount }
   }
 
-  const { subtotal, taxTotal, total, paid, remaining, courierCharge, discount } = calculateTotals()
+  const { subtotal, taxTotal, total, grandTotal, paid, remaining, courierCharge, discount } = calculateTotals()
 
   const getDisplayValue = (value: any, fallback = "—") => {
     if (value === null || value === undefined || value === "") return fallback
@@ -482,6 +500,7 @@ export default function ViewPurchaseModal({
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
                   <InfoCell label="Purchase #" value={`#${purchaseData.id}`} />
+                  <InfoCell label="Purchase Type" value={<PurchaseTypeBadge type={purchaseData.purchase_type} />} />
                   <InfoCell label="Date" value={formatPurchaseDate(purchaseData.purchase_date)} />
                   <InfoCell label="Payment" value={<PaymentStatusBadge status={paymentStatus} />} />
                   <InfoCell
@@ -667,15 +686,28 @@ export default function ViewPurchaseModal({
                             </td>
                           </tr>
                         )}
+                        {courierCharge > 0 && (
+                          <tr className="border-t border-slate-100 bg-[#F1F4F9]">
+                            <td
+                              colSpan={5}
+                              className="px-4 py-2 text-right text-xs font-semibold uppercase text-slate-700"
+                            >
+                              Purchase Bill (Supplier)
+                            </td>
+                            <td className="whitespace-nowrap px-4 py-2 text-right text-sm font-semibold text-slate-900">
+                              {formatCurrency(total)}
+                            </td>
+                          </tr>
+                        )}
                         <tr className="border-t border-slate-200 bg-[#F1F4F9]">
                           <td
                             colSpan={5}
                             className="px-4 py-2.5 text-right text-xs font-bold uppercase text-slate-700"
                           >
-                            Grand Total
+                            Grand Total (with Courier)
                           </td>
                           <td className="whitespace-nowrap px-4 py-2.5 text-right text-sm font-bold text-slate-900">
-                            {formatCurrency(total)}
+                            {formatCurrency(grandTotal)}
                           </td>
                         </tr>
                       </tfoot>

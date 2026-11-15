@@ -299,6 +299,7 @@ export function TodaySalesList({
                       paymentStatus={sale.payment_status}
                       isJobCard={true}
                       userRole="staff"
+                      sale={sale}
                       onStatusChange={(newStatus) => {
                         setSales((prev) => prev.map((s) => (s.id === sale.id ? { ...s, delivery_status: newStatus } : s)))
                         fetchSales()
@@ -561,6 +562,7 @@ export function TodaySalesList({
                           paymentStatus={sale.payment_status}
                           isJobCard={true}
                           userRole="staff"
+                          sale={sale}
                           onStatusChange={(newStatus) => {
                             setSales((prev) => prev.map((s) => (s.id === sale.id ? { ...s, delivery_status: newStatus } : s)))
                             fetchSales()
