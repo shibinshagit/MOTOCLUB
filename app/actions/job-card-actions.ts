@@ -489,10 +489,19 @@ export async function updateJobCard(id: number, input: any) {
     let staffId: number | null = null
 
     const session = await getStaffSession()
+    const isAdmin = !session || (session.role || "").toLowerCase() === "admin"
+
     if (session) {
       deviceId = session.deviceId
       staffId = session.staffId
-      if (existingSale[0].staff_id && existingSale[0].staff_id !== staffId) {
+
+      // Device check: ensure the job card belongs to the same device
+      if (existingSale[0].device_id && Number(existingSale[0].device_id) !== Number(deviceId)) {
+        return { success: false, message: "Unauthorized. Job Card belongs to a different device." }
+      }
+
+      // Staff check: non-admin staff can only update their own job cards
+      if (!isAdmin && existingSale[0].staff_id && existingSale[0].staff_id !== staffId) {
         return { success: false, message: "Unauthorized. You can only update your own job cards." }
       }
     } else {
@@ -602,7 +611,7 @@ export async function updateJobCard(id: number, input: any) {
 
     // 4. Update the sales record
     let updatedSaleRows
-    if (staffId) {
+    if (staffId && !isAdmin) {
       updatedSaleRows = await sql`
         UPDATE sales SET
           customer_id = ${resolvedCustomerId || null},
@@ -640,7 +649,7 @@ export async function updateJobCard(id: number, input: any) {
           END,
           payment_method = COALESCE(${primaryPaymentMethod}, payment_method, 'UPI'),
           type_of_sale = COALESCE(${input.typeOfSale || null}, type_of_sale)
-        WHERE id = ${id} AND staff_id = ${staffId}
+        WHERE id = ${id} AND staff_id = ${staffId} AND device_id = ${deviceId}
         RETURNING tracking_id
       `
     } else {
@@ -681,7 +690,7 @@ export async function updateJobCard(id: number, input: any) {
           END,
           payment_method = COALESCE(${primaryPaymentMethod}, payment_method, 'UPI'),
           type_of_sale = COALESCE(${input.typeOfSale || null}, type_of_sale)
-        WHERE id = ${id}
+        WHERE id = ${id} AND device_id = ${deviceId}
         RETURNING tracking_id
       `
     }
@@ -788,15 +797,18 @@ export async function updateJobCard(id: number, input: any) {
 export async function updateSaleCustomerPhone(saleId: number, phone: string, deviceId?: number) {
   try {
     const session = await getStaffSession()
+    const isAdmin = !session || (session.role || "").toLowerCase() === "admin"
     let staffId: number | null = null
+    let currentDeviceId: number | null = deviceId || null
     if (session) {
       staffId = session.staffId
+      currentDeviceId = session.deviceId
     }
 
     const cleanPhone = phone?.trim() || null
 
     let saleRows
-    if (staffId) {
+    if (staffId && !isAdmin) {
       saleRows = await sql`
         UPDATE sales 
         SET customer_phone_override = ${cleanPhone}
@@ -807,7 +819,7 @@ export async function updateSaleCustomerPhone(saleId: number, phone: string, dev
       saleRows = await sql`
         UPDATE sales 
         SET customer_phone_override = ${cleanPhone}
-        WHERE id = ${saleId}
+        WHERE id = ${saleId} AND (${currentDeviceId} IS NULL OR device_id = ${currentDeviceId})
         RETURNING id, customer_id
       `
     }
@@ -1144,17 +1156,19 @@ export async function getStaffSalesAnalytics(deviceId: number, targetMonthStr?: 
 export async function markJobCardPaid(saleId: number, deviceId: number) {
   try {
     const session = await getStaffSession()
+    const isAdmin = !session || (session.role || "").toLowerCase() === "admin"
+    const currentDeviceId = session?.deviceId || deviceId || 0
 
     await sql.begin(async (tx: any) => {
       // Lock the sale so a double click cannot move the stock twice
-      const rows = session
+      const rows = (session && !isAdmin)
         ? await tx`
             SELECT status, delivery_status, fulfillment_type, device_id FROM sales
             WHERE id = ${saleId} AND staff_id = ${session.staffId} FOR UPDATE
           `
         : await tx`
             SELECT status, delivery_status, fulfillment_type, device_id FROM sales
-            WHERE id = ${saleId} FOR UPDATE
+            WHERE id = ${saleId} AND (${currentDeviceId} = 0 OR device_id = ${currentDeviceId}) FOR UPDATE
           `
       if (rows.length === 0) throw new Error("Job Card not found or unauthorized")
       const cur = rows[0]
