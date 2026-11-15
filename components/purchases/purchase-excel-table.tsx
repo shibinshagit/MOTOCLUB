@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { TableRowsInput } from "@/components/ui/table-rows-input"
 import { useToast } from "@/components/ui/use-toast"
 import { notifyError, notifySuccess, notifyWarning } from "@/lib/notifications"
-import { downloadPurchasesPDF } from "@/lib/purchases-pdf-utils"
+import { downloadPurchasesPDF, downloadPurchasesJSON } from "@/lib/purchases-pdf-utils"
 import {
   ExcelColumnFilterHeader,
   createEmptyColumnFilter,
@@ -24,6 +24,7 @@ import {
 } from "@/app/actions/purchase-actions"
 import { useAppSelector } from "@/store/hooks"
 import { selectActiveStaff } from "@/store/slices/staffSlice"
+import { selectUser } from "@/store/slices/deviceSlice"
 import PurchaseManagerKpiCards from "@/components/purchase-manager/purchase-manager-kpi-cards"
 import { cn } from "@/lib/utils"
 
@@ -199,11 +200,21 @@ export default function PurchaseExcelTable({
   onEditPurchase,
 }: PurchaseExcelTableProps) {
   const pathname = usePathname()
+  const user = useAppSelector(selectUser)
   const activeStaff = useAppSelector(selectActiveStaff)
   const isPurchaseManager =
     propIsPurchaseManager !== undefined
       ? propIsPurchaseManager
       : activeStaff?.role === "purchase_manager" || Boolean(pathname?.startsWith("/purchase-manager"))
+
+  const isAdmin = Boolean(
+    (activeStaff?.role === "admin" || (!activeStaff && user?.role?.toUpperCase() === "ADMIN")) &&
+    activeStaff?.role !== "staff" &&
+    activeStaff?.role !== "media_manager" &&
+    activeStaff?.role !== "purchase_manager" &&
+    activeStaff?.role !== "logistics" &&
+    activeStaff?.role !== "partner"
+  )
 
   // Plain value of a row for a column; matches the SQL expressions used by the server-side filters.
   const rawValue = useCallback(
@@ -263,6 +274,7 @@ export default function PurchaseExcelTable({
   const [hasFetched, setHasFetched] = useState(false)
   const [fetchError, setFetchError] = useState<string | null>(null)
   const [isDownloadingPDF, setIsDownloadingPDF] = useState(false)
+  const [isDownloadingJSON, setIsDownloadingJSON] = useState(false)
   const { toast } = useToast()
 
   const handleDownloadPDF = async () => {
@@ -308,6 +320,51 @@ export default function PurchaseExcelTable({
       notifyError(toast, err?.message || "Failed to download purchases PDF")
     } finally {
       setIsDownloadingPDF(false)
+    }
+  }
+
+  const handleDownloadJSON = async () => {
+    if (isDownloadingJSON) return
+    if (!displayPurchases || displayPurchases.length === 0) {
+      notifyWarning(toast, "No purchases to download")
+      return
+    }
+
+    setIsDownloadingJSON(true)
+    try {
+      let exportData = displayPurchases
+      if (totalCount > displayPurchases.length && totalCount <= 1000 && deviceId) {
+        try {
+          const fullRes = await getPaginatedUserPurchases(deviceId, {
+            page: 1,
+            pageSize: totalCount,
+            dateFrom,
+            dateTo,
+            searchTerm: debouncedSearchTerm,
+            columnFilters: appliedFilters,
+          })
+          if (fullRes?.success && fullRes.data && fullRes.data.length > 0) {
+            exportData = fullRes.data.map(serializePurchaseRecord)
+          }
+        } catch (fetchErr) {
+          console.warn("Could not fetch full purchase list for JSON, using current page:", fetchErr)
+        }
+      }
+
+      downloadPurchasesJSON(
+        exportData,
+        periodLabel,
+        getPaidAmount,
+        getRemainingAmount,
+        getPaymentMethodDisplay,
+        { from: dateFrom, to: dateTo },
+      )
+      notifySuccess(toast, "Purchases JSON report downloaded successfully")
+    } catch (err: any) {
+      console.error("Error downloading purchases JSON:", err)
+      notifyError(toast, err?.message || "Failed to download purchases JSON")
+    } finally {
+      setIsDownloadingJSON(false)
     }
   }
   const [refreshTick, setRefreshTick] = useState(0)
@@ -613,6 +670,23 @@ export default function PurchaseExcelTable({
                 <Download className="ml-1.5 h-3.5 w-3.5 text-slate-500" />
               )}
             </Button>
+            {isAdmin && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2.5 text-xs font-semibold text-slate-700 bg-white border-slate-200 hover:bg-slate-50 shrink-0 shadow-none mr-1"
+                onClick={handleDownloadJSON}
+                disabled={isDownloadingJSON || displayPurchases.length === 0}
+                title="Download purchases as JSON"
+              >
+                JSON
+                {isDownloadingJSON ? (
+                  <Loader2 className="ml-1.5 h-3.5 w-3.5 animate-spin text-slate-500" />
+                ) : (
+                  <Download className="ml-1.5 h-3.5 w-3.5 text-blue-600" />
+                )}
+              </Button>
+            )}
             <div className="relative w-full sm:w-72">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
               <input

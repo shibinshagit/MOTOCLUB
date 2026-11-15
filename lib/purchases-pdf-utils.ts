@@ -180,3 +180,91 @@ export async function downloadPurchasesPDF(
   const filename = `purchases-report-${cleanNamePart}.pdf`
   doc.save(filename)
 }
+
+export function downloadPurchasesJSON(
+  purchases: PurchasePdfRowInput[],
+  periodLabel: string,
+  getPaidAmount: (purchase: any) => number,
+  getRemainingAmount: (purchase: any) => number,
+  getPaymentMethodDisplay: (purchase: any) => string,
+  dateRange?: { from?: string; to?: string },
+) {
+  let totalAmountSum = 0
+  let totalPaidSum = 0
+  let totalBalanceSum = 0
+
+  const detailedPurchases = purchases.map((purchase, index) => {
+    const total = Number(purchase.total_amount) || 0
+    const paid = getPaidAmount(purchase)
+    const remaining = getRemainingAmount(purchase)
+    const paymentStatus = purchase.status === "Partial" ? "Cancelled" : (purchase.status || "—")
+    const dateFormatted = purchase.purchase_date
+      ? format(new Date(purchase.purchase_date), "dd-MM-yyyy")
+      : "—"
+    const methodStr = getPaymentMethodDisplay(purchase) || "—"
+    const deliveryStr = purchase.purchase_status || "Delivered"
+    const typeStr = purchase.purchase_type || "Stock"
+
+    totalAmountSum += total
+    totalPaidSum += paid
+    totalBalanceSum += remaining
+
+    return {
+      index: index + 1,
+      purchaseId: purchase.id,
+      purchaseNumber: `#${purchase.id}`,
+      purchaseType: typeStr,
+      purchaseDate: purchase.purchase_date || null,
+      purchaseDateFormatted: dateFormatted,
+      supplier: purchase.supplier || "—",
+      supplierInvoiceNumber: purchase.supplier_invoice_number || purchase.invoice_number || null,
+      itemsSummary: purchase.items_summary || "—",
+      paymentStatus,
+      paymentMethod: methodStr,
+      deliveryStatus: deliveryStr,
+      financials: {
+        totalAmount: Number(total.toFixed(2)),
+        paidAmount: Number(paid.toFixed(2)),
+        remainingBalance: Number(remaining.toFixed(2)),
+        discount: Number((Number(purchase.discount) || 0).toFixed(2)),
+        courierCharge: Number((Number(purchase.courier_charge) || 0).toFixed(2)),
+      },
+      notes: purchase.notes || null,
+      rawPurchaseData: purchase,
+    }
+  })
+
+  const cleanPeriod = (periodLabel || "")
+    .replace(/→/g, "-")
+    .replace(/!/g, "-")
+    .replace(/\s+/g, " ")
+    .trim()
+
+  const exportPayload = {
+    reportTitle: "Purchases Report",
+    period: cleanPeriod || "All Time",
+    dateRange: dateRange || null,
+    generatedAt: new Date().toISOString(),
+    summaryTotals: {
+      totalPurchases: purchases.length,
+      totalAmount: Number(totalAmountSum.toFixed(2)),
+      totalPaid: Number(totalPaidSum.toFixed(2)),
+      totalBalanceRemaining: Number(totalBalanceSum.toFixed(2)),
+    },
+    purchases: detailedPurchases,
+  }
+
+  const jsonContent = JSON.stringify(exportPayload, null, 2)
+  const blob = new Blob([jsonContent], { type: "application/json;charset=utf-8;" })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement("a")
+  const cleanNamePart = cleanPeriod
+    ? cleanPeriod.toLowerCase().replace(/[^a-z0-9]+/g, "-")
+    : format(new Date(), "yyyy-MM-dd")
+  link.setAttribute("href", url)
+  link.setAttribute("download", `purchases-report-${cleanNamePart}.json`)
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+}
