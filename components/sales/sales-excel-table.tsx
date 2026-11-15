@@ -8,6 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { TableRowsInput } from "@/components/ui/table-rows-input"
 import { useAppSelector } from "@/store/hooks"
 import { selectActiveStaff } from "@/store/slices/staffSlice"
+import { selectUser } from "@/store/slices/deviceSlice"
 import PurchaseManagerKpiCards from "@/components/purchase-manager/purchase-manager-kpi-cards"
 import {
   ExcelColumnFilterHeader,
@@ -91,7 +92,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { useToast } from "@/components/ui/use-toast"
 import { notifyWarning, notifySuccess, notifyError } from "@/lib/notifications"
-import { downloadSalesSummaryPDF, printSalesSummaryReport, downloadSalesSummaryExcel } from "@/lib/sales-summary-utils"
+import { downloadSalesSummaryPDF, printSalesSummaryReport, downloadSalesSummaryExcel, downloadSalesSummaryJSON } from "@/lib/sales-summary-utils"
 import { JobCardModal } from "@/components/shared/job-card/job-card-modal"
 import SaleDocumentActions from "@/components/sales/sale-document-actions"
 import { MoveToDirectModal } from "@/components/sales/move-to-direct-modal"
@@ -315,6 +316,7 @@ export default function SalesExcelTable({
   showViewModal = true,
 }: SalesExcelTableProps) {
   const pathname = usePathname()
+  const user = useAppSelector(selectUser)
   const activeStaff = useAppSelector(selectActiveStaff)
   const isPurchaseManager =
     propIsPurchaseManager !== undefined
@@ -324,6 +326,15 @@ export default function SalesExcelTable({
     propIsLogistics !== undefined
       ? propIsLogistics
       : activeStaff?.role === "logistics" || Boolean(pathname?.startsWith("/logistics"))
+
+  const isAdmin = Boolean(
+    (activeStaff?.role === "admin" || (!activeStaff && user?.role?.toUpperCase() === "ADMIN")) &&
+    activeStaff?.role !== "staff" &&
+    activeStaff?.role !== "media_manager" &&
+    activeStaff?.role !== "purchase_manager" &&
+    activeStaff?.role !== "logistics" &&
+    activeStaff?.role !== "partner"
+  )
 
   const isFinancialHidden = isPurchaseManager || isLogistics
 
@@ -1060,6 +1071,31 @@ export default function SalesExcelTable({
       notifySuccess(toast, `Sales summary Excel report downloaded (${targetSales.length} orders).`)
     } catch (err: any) {
       notifyError(toast, err?.message || "Failed to download Excel report.")
+    } finally {
+      setIsGeneratingReport(false)
+    }
+  }
+
+  const handleDownloadJSON = async () => {
+    if (isGeneratingReport) return
+    const isSelected = selectedSales.length > 0
+    if (!isSelected && (!displaySales || displaySales.length === 0)) {
+      notifyWarning(toast, "No sales found for the selected filters.")
+      return
+    }
+
+    setIsGeneratingReport(true)
+    try {
+      const targetSales = isSelected ? await resolveSelectedSalesList() : displaySales
+      if (!targetSales || targetSales.length === 0) {
+        notifyWarning(toast, isSelected ? "No sales found for the selected orders." : "No sales found for the selected filters.")
+        return
+      }
+      const label = getEffectivePeriodLabel(targetSales.length)
+      downloadSalesSummaryJSON(targetSales, label, globalDateRange)
+      notifySuccess(toast, `Sales summary JSON report downloaded (${targetSales.length} orders).`)
+    } catch (err: any) {
+      notifyError(toast, err?.message || "Failed to download JSON report.")
     } finally {
       setIsGeneratingReport(false)
     }
@@ -1816,6 +1852,28 @@ export default function SalesExcelTable({
                 )}
                 <span>Excel{selectedSales.length > 0 ? ` (${selectedSales.length})` : ""}</span>
               </Button>
+
+              {isAdmin && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 gap-1.5 px-2.5 text-xs font-medium bg-white hover:bg-slate-50 border-slate-200 text-slate-700 shadow-2xs"
+                  onClick={handleDownloadJSON}
+                  disabled={isFetchingServer || isGeneratingReport}
+                  title={
+                    selectedSales.length > 0
+                      ? `Download Sales Summary JSON Report for ${selectedSales.length} selected orders`
+                      : "Download Sales Summary JSON Report"
+                  }
+                >
+                  {isGeneratingReport ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-500" />
+                  ) : (
+                    <Download className="h-3.5 w-3.5 text-blue-600" />
+                  )}
+                  <span>JSON{selectedSales.length > 0 ? ` (${selectedSales.length})` : ""}</span>
+                </Button>
+              )}
 
               <Button
                 size="sm"
