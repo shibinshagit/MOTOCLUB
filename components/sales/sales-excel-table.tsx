@@ -3263,7 +3263,7 @@ export default function SalesExcelTable({
             {fulfillmentModal && (
               <SaleShippingSection
                 key={fulfillmentModal.sale?.id}
-                deviceId={deviceId || fulfillmentModal.sale?.device_id || 0}
+                deviceId={deviceId || fulfillmentModal.sale?.device_id || activeStaff?.device_id || 0}
                 value={fulfillmentModal.shippingData}
                 onChange={(val) => {
                   setFulfillmentErrors({})

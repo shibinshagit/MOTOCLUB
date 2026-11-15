@@ -752,6 +752,7 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
           s.delivery_status,
           s.tracking_id,
           s.courier_service_name,
+          COALESCE(s.courier_partner_name, cp.name, md.name, '') as courier_partner_name,
           md.tracking_url_template as tracking_url_template,
           s.total_amount,
           s.received_amount,
@@ -858,6 +859,7 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
         FROM sales s
         LEFT JOIN customers c ON s.customer_id = c.id
         LEFT JOIN staff st ON s.staff_id = st.id
+        LEFT JOIN staff cp ON cp.id = s.courier_partner_id
         LEFT JOIN master_data md ON s.courier_partner_id = md.id
         WHERE (s.device_id = ${deviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
           AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
@@ -1324,6 +1326,7 @@ export async function getSalesByIds(deviceId: number, saleIds: number[]) {
           s.delivery_status,
           s.tracking_id,
           s.courier_service_name,
+          COALESCE(s.courier_partner_name, cp.name, md.name, '') as courier_partner_name,
           md.tracking_url_template as tracking_url_template,
           s.total_amount,
           s.received_amount,
@@ -1440,6 +1443,7 @@ export async function getSalesByIds(deviceId: number, saleIds: number[]) {
         FROM sales s
         LEFT JOIN customers c ON s.customer_id = c.id
         LEFT JOIN staff st ON s.staff_id = st.id
+        LEFT JOIN staff cp ON cp.id = s.courier_partner_id
         LEFT JOIN master_data md ON s.courier_partner_id = md.id
         WHERE s.id = ANY(${uniqueIds})
           AND (s.device_id = ${deviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
@@ -4291,6 +4295,7 @@ export async function updateSaleFulfillmentDetails(saleId: number, shippingData:
       UPDATE sales
       SET 
         courier_partner_id = ${shippingData.courierPartnerId || null},
+        courier_partner_name = COALESCE(${shippingData.courierPartnerName || null}, (SELECT name FROM staff WHERE id = ${shippingData.courierPartnerId || null} LIMIT 1), (SELECT name FROM master_data WHERE id = ${shippingData.courierPartnerId || null} LIMIT 1), courier_partner_name),
         courier_service_id = ${shippingData.courierServiceId || null},
         courier_service_name = ${shippingData.courierServiceName || null},
         tracking_id = ${shippingData.trackingId || null},

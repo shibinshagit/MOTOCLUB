@@ -24,6 +24,7 @@ import { useToast } from "@/components/ui/use-toast"
 import { notifyError, notifySuccess } from "@/lib/notifications"
 import { updateSaleTracking } from "@/app/actions/sale-actions"
 import { getMasterDataItems } from "@/app/actions/master-data-actions"
+import { getDeviceServices } from "@/app/actions/service-actions"
 
 interface DirectFulfillmentModalProps {
   isOpen: boolean
@@ -54,16 +55,36 @@ export function DirectFulfillmentModal({
     setSelectedCourierName(sale.courier_service_name || "")
     setTrackingId(sale.tracking_id || "")
 
-    if (deviceId) {
+    const effectiveDeviceId = Number(deviceId) || Number(sale?.device_id) || 0
+    if (effectiveDeviceId > 0) {
       setIsLoadingServices(true)
-      getMasterDataItems(deviceId, "courier")
-        .then((res) => {
-          if (res.success && Array.isArray(res.data)) {
-            const list = res.data
-              .filter((it: any) => it.is_active !== false && it.name)
-              .map((it: any) => ({ id: it.id, name: it.name }))
-            setCourierServices(list)
+      Promise.all([
+        getMasterDataItems(effectiveDeviceId, "courier"),
+        getDeviceServices(effectiveDeviceId),
+      ])
+        .then(([masterRes, servicesRes]) => {
+          const servicesMap = new Map<number, { id: number; name: string }>()
+          if (masterRes.success && Array.isArray(masterRes.data)) {
+            masterRes.data.forEach((it: any) => {
+              if (it.device_id === effectiveDeviceId && it.is_active !== false && it.name?.trim()) {
+                servicesMap.set(it.id, { id: it.id, name: it.name.trim() })
+              }
+            })
           }
+          if (servicesRes.success && Array.isArray(servicesRes.data)) {
+            const existingNames = new Set(Array.from(servicesMap.values()).map((s) => s.name.toLowerCase().trim()))
+            servicesRes.data.forEach((it: any) => {
+              if (it.device_id === effectiveDeviceId && it.is_active !== false && it.name?.trim()) {
+                const norm = it.name.toLowerCase().trim()
+                if (!servicesMap.has(it.id) && !existingNames.has(norm)) {
+                  servicesMap.set(it.id, { id: it.id, name: it.name.trim() })
+                  existingNames.add(norm)
+                }
+              }
+            })
+          }
+          const list = Array.from(servicesMap.values()).sort((a, b) => a.name.localeCompare(b.name))
+          setCourierServices(list)
         })
         .catch((err) => {
           console.error("Failed to load courier services:", err)

@@ -26,66 +26,90 @@ export interface ShippingMetaCacheItem {
 export const shippingMetaCacheByDevice = new Map<number, ShippingMetaCacheItem>()
 const inFlightRequests = new Map<number, Promise<ShippingMetaCacheItem>>()
 
-export async function fetchShippingMeta(deviceId: number): Promise<ShippingMetaCacheItem> {
-  if (!deviceId || deviceId <= 0) {
+export async function fetchShippingMeta(deviceId?: number | null): Promise<ShippingMetaCacheItem> {
+  const effectiveDeviceId = Number(deviceId) || 0
+  if (effectiveDeviceId <= 0) {
     return { partners: [], services: [], packaging: [], timestamp: Date.now() }
   }
 
-  const cached = shippingMetaCacheByDevice.get(deviceId)
+  const cached = shippingMetaCacheByDevice.get(effectiveDeviceId)
   if (cached && Date.now() - cached.timestamp < 5 * 60 * 1000) {
     return cached
   }
 
-  if (inFlightRequests.has(deviceId)) {
-    return inFlightRequests.get(deviceId)!
+  if (inFlightRequests.has(effectiveDeviceId)) {
+    return inFlightRequests.get(effectiveDeviceId)!
   }
 
   const promise = (async () => {
     try {
       const { getDeviceStaff } = await import("@/app/actions/staff-actions")
-      const { getMasterDataItems } = await import("@/app/actions/master-data-actions")
+      const { getMasterDataItems, getAllGlobalPackaging } = await import("@/app/actions/master-data-actions")
       const { getDeviceServices } = await import("@/app/actions/service-actions")
 
-      const [staffResult, courierMasterResult, packagingResult, servicesResult] = await Promise.all([
-        getDeviceStaff(deviceId),
-        getMasterDataItems(deviceId, "courier"),
-        getMasterDataItems(deviceId, "packaging"),
-        getDeviceServices(deviceId),
+      const [
+        deviceStaffResult,
+        deviceCouriersResult,
+        packagingResult,
+        deviceServicesResult,
+      ] = await Promise.all([
+        getDeviceStaff(effectiveDeviceId),
+        getMasterDataItems(effectiveDeviceId, "courier"),
+        getMasterDataItems(effectiveDeviceId, "packaging"),
+        getDeviceServices(effectiveDeviceId),
       ])
 
-      let partners: { id: number; name: string; linked_partner_id?: number | null; tracking_url_template?: string | null }[] = []
-      if (staffResult.success && Array.isArray(staffResult.data)) {
-        partners = staffResult.data
-          .filter((s: any) => s.role === "partner" && s.is_active !== false)
-          .map((s: any) => ({
-            id: s.id,
-            name: s.name,
-            linked_partner_id: s.linked_partner_id,
-          }))
+      // 1. Partners: Strictly active partners on THIS device
+      const partners: { id: number; name: string; linked_partner_id?: number | null; tracking_url_template?: string | null }[] = []
+      if (deviceStaffResult.success && Array.isArray(deviceStaffResult.data)) {
+        deviceStaffResult.data.forEach((s: any) => {
+          if (s.device_id === effectiveDeviceId && s.role === "partner" && s.is_active !== false && s.name?.trim()) {
+            partners.push({
+              id: s.id,
+              name: s.name.trim(),
+              linked_partner_id: s.linked_partner_id,
+            })
+          }
+        })
       }
+      partners.sort((a, b) => a.name.localeCompare(b.name))
 
-      const staffNames = new Set(partners.map((p) => p.name.toLowerCase().trim()))
-      const servicesList: { id: number; name: string }[] = []
+      // 2. Services: Strictly couriers & services on THIS device (master_data + services table)
+      const servicesMap = new Map<number, { id: number; name: string }>()
 
-      if (courierMasterResult.success && Array.isArray(courierMasterResult.data)) {
-        courierMasterResult.data.forEach((item: any) => {
-          if (item.is_active !== false && item.name && !staffNames.has(String(item.name).toLowerCase().trim())) {
-            servicesList.push({ id: item.id, name: item.name })
+      if (deviceCouriersResult.success && Array.isArray(deviceCouriersResult.data)) {
+        deviceCouriersResult.data.forEach((item: any) => {
+          if (item.device_id === effectiveDeviceId && item.is_active !== false && item.name?.trim()) {
+            servicesMap.set(item.id, { id: item.id, name: item.name.trim() })
           }
         })
       }
 
-      if (servicesResult.success && Array.isArray(servicesResult.data)) {
-        servicesResult.data.forEach((s: any) => {
-          if (s.name && !servicesList.some((existing) => existing.name.toLowerCase() === s.name.toLowerCase())) {
-            servicesList.push({ id: s.id, name: s.name })
+      const existingNames = new Set(Array.from(servicesMap.values()).map((s) => s.name.toLowerCase().trim()))
+
+      if (deviceServicesResult.success && Array.isArray(deviceServicesResult.data)) {
+        deviceServicesResult.data.forEach((s: any) => {
+          if (s.device_id === effectiveDeviceId && s.is_active !== false && s.name?.trim()) {
+            const norm = s.name.toLowerCase().trim()
+            if (!servicesMap.has(s.id) && !existingNames.has(norm)) {
+              servicesMap.set(s.id, { id: s.id, name: s.name.trim() })
+              existingNames.add(norm)
+            }
           }
         })
       }
 
+      const servicesList = Array.from(servicesMap.values()).sort((a, b) => a.name.localeCompare(b.name))
+
+      // 3. Packaging: Device packaging or global packaging fallback
       let packagingList: MasterDataItem[] = []
-      if (packagingResult.success && Array.isArray(packagingResult.data)) {
+      if (packagingResult.success && Array.isArray(packagingResult.data) && packagingResult.data.length > 0) {
         packagingList = packagingResult.data.filter((item: any) => item.is_active !== false)
+      } else {
+        const globalPkg = await getAllGlobalPackaging()
+        if (globalPkg.success && Array.isArray(globalPkg.data)) {
+          packagingList = globalPkg.data.filter((item: any) => item.is_active !== false)
+        }
       }
 
       const data: ShippingMetaCacheItem = {
@@ -94,14 +118,14 @@ export async function fetchShippingMeta(deviceId: number): Promise<ShippingMetaC
         packaging: packagingList,
         timestamp: Date.now(),
       }
-      shippingMetaCacheByDevice.set(deviceId, data)
+      shippingMetaCacheByDevice.set(effectiveDeviceId, data)
       return data
     } finally {
-      inFlightRequests.delete(deviceId)
+      inFlightRequests.delete(effectiveDeviceId)
     }
   })()
 
-  inFlightRequests.set(deviceId, promise)
+  inFlightRequests.set(effectiveDeviceId, promise)
   return promise
 }
 
@@ -207,17 +231,16 @@ export default function SaleShippingSection({
   }, [weightMode, shipping.weightKg, actualScaleWeight, volumetricWeight])
 
   useEffect(() => {
-    if (!deviceId) return
-
     let isMounted = true
-    const cached = shippingMetaCacheByDevice.get(deviceId)
+    const effectiveDeviceId = Number(deviceId) || 0
+    const cached = shippingMetaCacheByDevice.get(effectiveDeviceId)
     const isFresh = cached && Date.now() - cached.timestamp < 5 * 60 * 1000
 
     if (isFresh && courierPartners.length > 0) {
       return
     }
 
-    fetchShippingMeta(deviceId)
+    fetchShippingMeta(effectiveDeviceId)
       .then((data) => {
         if (!isMounted) return
         setCourierPartners(data.partners)
@@ -264,7 +287,7 @@ export default function SaleShippingSection({
 
   const handleCourierPartnerChange = (partnerIdStr: string) => {
     if (!partnerIdStr) {
-      patch({ courierPartnerId: null, courierServiceId: null, courierServiceName: "" })
+      patch({ courierPartnerId: null, courierPartnerName: "", courierServiceId: null, courierServiceName: "" })
       return
     }
     const partnerId = Number(partnerIdStr)
@@ -283,6 +306,7 @@ export default function SaleShippingSection({
 
     patch({
       courierPartnerId: partner?.id || null,
+      courierPartnerName: partner?.name || "",
       courierServiceId: autoServiceId,
       courierServiceName: autoServiceName,
       fulfillmentType: "ship",
@@ -429,7 +453,7 @@ export default function SaleShippingSection({
                     ))}
                     {shipping.courierPartnerId && !courierPartners.some((c) => c.id === shipping.courierPartnerId) && (
                       <option value={shipping.courierPartnerId}>
-                        {selectedCourierPartner?.name || `Partner #${shipping.courierPartnerId}`}
+                        {selectedCourierPartner?.name || shipping.courierPartnerName || `Partner #${shipping.courierPartnerId}`}
                       </option>
                     )}
                   </select>
@@ -602,7 +626,7 @@ export default function SaleShippingSection({
                 ))}
                 {shipping.courierPartnerId && !courierPartners.some((c) => c.id === shipping.courierPartnerId) && (
                   <option value={shipping.courierPartnerId}>
-                    {selectedCourierPartner?.name || `Partner #${shipping.courierPartnerId}`}
+                    {selectedCourierPartner?.name || shipping.courierPartnerName || `Partner #${shipping.courierPartnerId}`}
                   </option>
                 )}
               </select>

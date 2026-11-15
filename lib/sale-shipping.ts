@@ -19,6 +19,7 @@ export type SaleShippingInput = {
   deliveryStatus?: DeliveryStatus | string | null
   shippingDate?: string | null
   courierPartnerId?: number | null
+  courierPartnerName?: string | null
   courierServiceId?: number | null
   courierServiceName?: string | null
   packagingTypeId?: number | null
@@ -177,6 +178,7 @@ export function normalizeSaleShippingInput(input?: SaleShippingInput | null) {
     fulfillment_type: "ship" as const,
     delivery_status: deliveryStatus,
     courier_partner_id: input?.courierPartnerId || null,
+    courier_partner_name: input?.courierPartnerName?.trim() || null,
     courier_service_id: input?.courierServiceId || null,
     courier_service_name: input?.courierServiceName?.trim() || null,
     packaging_type_id: input?.packagingTypeId || null,
@@ -224,6 +226,7 @@ export function mapSaleShippingFromRecord(record: Record<string, unknown>): Sale
     fulfillmentType,
     deliveryStatus: (record.delivery_status as string) || "Pending",
     courierPartnerId: (record.courier_partner_id as number) || null,
+    courierPartnerName: (record.courier_partner_name as string) || "",
     courierServiceId: (record.courier_service_id as number) || null,
     courierServiceName: (record.courier_service_name as string) || "",
     packagingTypeId: (record.packaging_type_id as number) || null,
