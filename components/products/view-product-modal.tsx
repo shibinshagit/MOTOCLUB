@@ -35,6 +35,7 @@ interface ProductDetailBaseProps {
   hidePrintTags?: boolean
   hideStockHistory?: boolean
   hideManageMedia?: boolean
+  onProductUpdated?: (product: any) => void
 }
 
 export type ProductDetailPanelProps = ProductDetailBaseProps
@@ -131,8 +132,9 @@ export function ProductDetailPanel({
   hidePrintTags = false,
   hideStockHistory = false,
   hideManageMedia = false,
+  onProductUpdated,
 }: ProductDetailPanelProps) {
-  const { isValueHidden } = useStaffRestrictions()
+  const { isValueHidden, canManageEcomAndTrending } = useStaffRestrictions()
   const hideCogs = isValueHidden("cogs")
   const hideStockCount = isValueHidden("stock_count")
   const [stockHistory, setStockHistory] = useState<any[]>([])
@@ -162,13 +164,14 @@ export function ProductDetailPanel({
 
   const handleTogglePlatformStatus = async (platformKey: PlatformKey, currentStatus: string) => {
     if (!currentProduct?.id) return
-    const nextStatus: PlatformStatus = currentStatus === "active" ? "not_listed" : "active"
+    const nextStatus: PlatformStatus = currentStatus === "not_listed" ? "active" : "not_listed"
     setUpdatingPlatform(platformKey)
     try {
       const res = await updateProductPlatformStatus(currentProduct.id, platformKey, nextStatus, userId)
       if (res.success && res.data) {
         setCurrentProduct(res.data)
         dispatch(updateProduct(res.data))
+        if (onProductUpdated) onProductUpdated(res.data)
         notifySuccess(
           toast,
           `Updated ${platformKey === "own_ecom" ? "E-Commerce" : platformKey.toUpperCase()} status to ${nextStatus === "active" ? "Listed" : "Not Listed"}`,
@@ -194,6 +197,7 @@ export function ProductDetailPanel({
       if (res.success && res.data) {
         setCurrentProduct(res.data)
         dispatch(updateProduct(res.data))
+        if (onProductUpdated) onProductUpdated(res.data)
         notifySuccess(toast, res.message || (nextStatus ? "Product marked as trending" : "Product removed from trending"))
       } else {
         notifyError(toast, res.message || "Failed to update trending status")
@@ -567,11 +571,14 @@ export function ProductDetailPanel({
                     </p>
                   </div>
                   <div className="flex items-center gap-3">
-                    <Switch
-                      checked={Boolean(currentProduct.trending)}
-                      disabled={isUpdatingTrending}
-                      onCheckedChange={handleToggleTrending}
-                    />
+                    {canManageEcomAndTrending && (
+                      <Switch
+                        checked={Boolean(currentProduct.trending)}
+                        disabled={isUpdatingTrending}
+                        onCheckedChange={handleToggleTrending}
+                        aria-label="Mark product as trending"
+                      />
+                    )}
                     <span
                       className={cn(
                         "inline-flex w-[70px] justify-center items-center rounded-full border px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider",
@@ -601,11 +608,14 @@ export function ProductDetailPanel({
                 <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">E-Commerce Store Listing</p>
                 <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-3">
-                    <Switch
-                      checked={(currentProduct.own_ecom_status || "active") === "not_listed"}
-                      disabled={updatingPlatform === "own_ecom"}
-                      onCheckedChange={() => handleTogglePlatformStatus("own_ecom", currentProduct.own_ecom_status || "active")}
-                    />
+                    {canManageEcomAndTrending && (
+                      <Switch
+                        checked={(currentProduct.own_ecom_status || "active") !== "not_listed"}
+                        disabled={updatingPlatform === "own_ecom"}
+                        onCheckedChange={() => handleTogglePlatformStatus("own_ecom", currentProduct.own_ecom_status || "active")}
+                        aria-label="Toggle e-commerce store listing"
+                      />
+                    )}
                     <span
                       className={cn(
                         "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium",

@@ -96,6 +96,27 @@ export function isStaffValueHidden(
   return getRestrictedValues(staff).includes(value)
 }
 
+/**
+ * Roles allowed to toggle product Trending status and E-Commerce store listings.
+ * Edit this list to restrict or grant access in the future.
+ */
+export const ECOM_TRENDING_ALLOWED_ROLES = [
+  "admin",
+  "purchase_manager",
+  "logistics",
+  "media_manager",
+] as const
+
+export type EcomTrendingAllowedRole = (typeof ECOM_TRENDING_ALLOWED_ROLES)[number]
+
+export function canManageEcomAndTrending(
+  staff: StaffRestrictionSource | null | undefined,
+): boolean {
+  if (!staff || !staff.role) return true
+  const role = staff.role.trim().toLowerCase()
+  return (ECOM_TRENDING_ALLOWED_ROLES as readonly string[]).includes(role)
+}
+
 export const ADMIN_DIALOG_CONTENT_CLASS =
   "border-gray-200 bg-white text-gray-900 shadow-lg max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] overflow-y-auto sm:w-full"
 export const ADMIN_DIALOG_SCROLL_CLASS =

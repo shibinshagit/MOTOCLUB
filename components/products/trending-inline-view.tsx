@@ -205,6 +205,19 @@ export default function TrendingInlineView({ userId, isMediaManager: isMediaMana
           hidePrintTags={isMediaManager}
           hideStockHistory={isMediaManager}
           hideManageMedia={isMediaManager}
+          onProductUpdated={(updated) => {
+            if (!updated.trending) {
+              setProducts((prev) => prev.filter((p) => p.id !== updated.id))
+              if (detailProduct?.id === updated.id) {
+                setDetailProduct(null)
+              }
+            } else {
+              setProducts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)))
+              if (detailProduct?.id === updated.id) {
+                setDetailProduct(updated)
+              }
+            }
+          }}
         />
       )}
 

@@ -14,6 +14,7 @@ import { getDeviceProductStock, getDeviceVariantStock, adjustDeviceProductStock 
 import { compareProductsByStockPriority } from "@/lib/product-search"
 import { revalidatePath } from "next/cache"
 import { getServerActor, resolveAuthorizedDeviceId } from "@/lib/device-access"
+import { ECOM_TRENDING_ALLOWED_ROLES } from "@/lib/staff-restrictions"
 
 // Generate a unique barcode for a product
 async function generateProductBarcode(productId: number): Promise<string> {
@@ -2048,14 +2049,58 @@ export async function getProductSearchSuggestions(
 }
 
 export async function getTrendingProducts(userId?: number) {
-  const result = await getProducts(userId)
-  if (!result.success) {
-    return result
-  }
+  resetConnectionState()
+  try {
+    const companyDeviceIds: number[] = userId ? await getCachedCompanyDeviceIds(userId) : []
 
-  return {
-    ...result,
-    data: (result.data || []).filter((product: { trending?: boolean }) => Boolean(product.trending)),
+    const products = userId
+      ? await sql`
+          SELECT 
+            p.*,
+            c.name as category_name,
+            COALESCE(pb_stock.total_stock, pd_stock.total_stock, 0) AS stock
+          FROM products p
+          LEFT JOIN product_categories c ON p.category_id = c.id
+          LEFT JOIN (
+            SELECT pv.product_id, SUM(pbds.stock) as total_stock
+            FROM product_batch_device_stock pbds
+            JOIN product_batches pb ON pb.id = pbds.batch_id
+            JOIN product_variants pv ON pv.id = pb.product_variant_id
+            WHERE pbds.device_id = ${userId}
+            GROUP BY pv.product_id
+          ) pb_stock ON pb_stock.product_id = p.id
+          LEFT JOIN (
+            SELECT pds.product_id, SUM(pds.stock) as total_stock
+            FROM product_device_stock pds
+            WHERE pds.device_id = ${userId}
+            GROUP BY pds.product_id
+          ) pd_stock ON pd_stock.product_id = p.id
+          WHERE p.trending = true
+          AND (
+            p.created_by = ANY(${companyDeviceIds})
+            OR p.created_by = ${userId}
+            OR p.created_by IS NULL
+          )
+          ORDER BY p.updated_at DESC, p.created_at DESC
+        `
+      : await sql`
+          SELECT 
+            p.*,
+            c.name as category_name
+          FROM products p
+          LEFT JOIN product_categories c ON p.category_id = c.id
+          WHERE p.trending = true
+          ORDER BY p.updated_at DESC, p.created_at DESC
+        `
+
+    return {
+      success: true,
+      data: products,
+      totalCount: products.length,
+    }
+  } catch (error) {
+    console.error("getTrendingProducts error:", error)
+    return { success: false, message: "Failed to load trending products", data: [] }
   }
 }
 
@@ -3346,17 +3391,29 @@ export async function updateProductPlatformStatus(
             : "own_ecom_status"
 
     let result
+    const actor = await getServerActor()
+    if (actor && actor.kind === "staff") {
+      const role = actor.role?.trim().toLowerCase()
+      if (role && !ECOM_TRENDING_ALLOWED_ROLES.includes(role as any)) {
+        return {
+          success: false,
+          message: "Unauthorized: Your role does not have permission to manage e-commerce platform status.",
+        }
+      }
+    }
+
+    const companyDeviceIds: number[] = userId ? await getCachedCompanyDeviceIds(userId) : []
+
     if (userId) {
       result =
         await sql`
           SELECT *
           FROM products
           WHERE id = ${productId}
-          AND created_by IN (
-            SELECT d2.id
-            FROM devices d1
-            JOIN devices d2 ON d2.company_id = d1.company_id
-            WHERE d1.id = ${userId}
+          AND (
+            created_by = ANY(${companyDeviceIds})
+            OR created_by = ${userId}
+            OR created_by IS NULL
           )
         `
     } else {
@@ -3391,7 +3448,7 @@ export async function updateProductPlatformStatus(
   }
 }
 
-export async function updateProductTrendingStatus(
+  export async function updateProductTrendingStatus(
   productId: number,
   trending: boolean,
   userId?: number,
@@ -3404,17 +3461,29 @@ export async function updateProductTrendingStatus(
 
   try {
     let result
+    const actor = await getServerActor()
+    if (actor && actor.kind === "staff") {
+      const role = actor.role?.trim().toLowerCase()
+      if (role && !ECOM_TRENDING_ALLOWED_ROLES.includes(role as any)) {
+        return {
+          success: false,
+          message: "Unauthorized: Your role does not have permission to manage trending products.",
+        }
+      }
+    }
+
+    const companyDeviceIds: number[] = userId ? await getCachedCompanyDeviceIds(userId) : []
+
     if (userId) {
       result =
         await sql`
           SELECT *
           FROM products
           WHERE id = ${productId}
-          AND created_by IN (
-            SELECT d2.id
-            FROM devices d1
-            JOIN devices d2 ON d2.company_id = d1.company_id
-            WHERE d1.id = ${userId}
+          AND (
+            created_by = ANY(${companyDeviceIds})
+            OR created_by = ${userId}
+            OR created_by IS NULL
           )
         `
     } else {
@@ -3909,15 +3978,27 @@ export async function hideTrendingProducts(productIds: number[], userId: number)
 
   resetConnectionState()
   try {
+    const actor = await getServerActor()
+    if (actor && actor.kind === "staff") {
+      const role = actor.role?.trim().toLowerCase()
+      if (role && !ECOM_TRENDING_ALLOWED_ROLES.includes(role as any)) {
+        return {
+          success: false,
+          message: "Unauthorized: Your role does not have permission to manage trending products.",
+        }
+      }
+    }
+
+    const companyDeviceIds: number[] = userId ? await getCachedCompanyDeviceIds(userId) : []
+
     const result = await sql`
       UPDATE products 
       SET trending = false 
       WHERE id = ANY(${productIds as any})
-      AND created_by IN (
-        SELECT d2.id
-        FROM devices d1
-        JOIN devices d2 ON d2.company_id = d1.company_id
-        WHERE d1.id = ${userId}
+      AND (
+        created_by = ANY(${companyDeviceIds})
+        OR created_by = ${userId}
+        OR created_by IS NULL
       )
       RETURNING id
     `

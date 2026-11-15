@@ -36,6 +36,7 @@ import {
   type PlatformStatus 
 } from "@/app/actions/product-actions"
 import { notifyError, notifySuccess } from "@/lib/notifications"
+import { canManageEcomAndTrending } from "@/lib/staff-restrictions"
 import StaffMediaEditModal from "./staff-media-edit-modal"
 import { ProductMediaViewerModal } from "@/components/products/product-media-viewer-modal"
 
@@ -109,6 +110,7 @@ export default function StaffViewProductModal({
   const deviceCurrency = useAppSelector(selectDeviceCurrency)
   const activeStaff = useAppSelector(selectActiveStaff)
   const isMediaManager = isMediaManagerProp ?? Boolean(activeStaff?.role === "media_manager")
+  const canManageEcom = isMediaManagerProp ?? canManageEcomAndTrending(activeStaff)
 
   const currency = currencyProp || deviceCurrency || "INR"
   const currentDeviceId = device?.id || undefined
@@ -498,8 +500,8 @@ export default function StaffViewProductModal({
                   </div>
                 )}
 
-                {/* Trending Enabling Option (Media Manager) */}
-                {isMediaManager && (
+                {/* Trending Enabling Option */}
+                {canManageEcom && (
                   <div className="rounded-xl border border-slate-200 bg-white p-3.5 flex items-center justify-between shadow-xs">
                     <div>
                       <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Trending</p>
@@ -550,8 +552,8 @@ export default function StaffViewProductModal({
                   )}
                 </div>
 
-                {/* E-Commerce Direct Link Box (Staff) or Full E-Commerce / Marketplace Section (Media Manager) */}
-                {isMediaManager ? (
+                {/* E-Commerce Direct Link Box (Staff) or Full E-Commerce / Marketplace Section */}
+                {canManageEcom ? (
                   <div className="rounded-xl border border-slate-200 bg-white p-3.5 sm:p-4 space-y-3.5 shadow-xs">
                     <div>
                       <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 mb-2">E-Commerce Store Listing</p>

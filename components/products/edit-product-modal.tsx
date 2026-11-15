@@ -248,7 +248,7 @@ interface EditProductModalProps {
 }
 
 export default function EditProductModal({ isOpen, onClose, onSuccess, product, userId }: EditProductModalProps) {
-  const { isValueHidden } = useStaffRestrictions()
+  const { isValueHidden, canManageEcomAndTrending } = useStaffRestrictions()
   const hideCogs = isValueHidden("cogs")
   const hideStockCount = isValueHidden("stock_count")
   const { toast } = useToast()
@@ -1300,17 +1300,19 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
                   </Button>
                 </div>
 
-                <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2.5 sm:col-span-2">
-                  <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Trending</p>
-                    <p className="text-[11px] text-slate-500">Mark this product as trending</p>
+                {canManageEcomAndTrending && (
+                  <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2.5 sm:col-span-2">
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Trending</p>
+                      <p className="text-[11px] text-slate-500">Mark this product as trending</p>
+                    </div>
+                    <Switch
+                      checked={trending}
+                      onCheckedChange={setTrending}
+                      aria-label="Mark product as trending"
+                    />
                   </div>
-                  <Switch
-                    checked={trending}
-                    onCheckedChange={setTrending}
-                    aria-label="Mark product as trending"
-                  />
-                </div>
+                )}
               </div>
             </PanelSection>
 
@@ -1622,51 +1624,53 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
               </div>
             </PanelSection>
 
-            <PanelSection
-              title="Marketplace availability"
-              subtitle="Use Archived when a listing was live before but is currently stopped."
-            >
-              <div className="grid gap-2 sm:grid-cols-2">
-                {PLATFORM_OPTIONS.map((platform) => (
-                  <div key={platform.key} className="rounded-lg border border-slate-200 bg-slate-50/50 p-3">
-                    <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
-                      {platform.label}
+            {canManageEcomAndTrending && (
+              <PanelSection
+                title="Marketplace availability"
+                subtitle="Use Archived when a listing was live before but is currently stopped."
+              >
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {PLATFORM_OPTIONS.map((platform) => (
+                    <div key={platform.key} className="rounded-lg border border-slate-200 bg-slate-50/50 p-3">
+                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                        {platform.label}
+                      </div>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {(
+                          [
+                            { value: "not_listed" as PlatformStatus, label: "Not listed" },
+                            { value: "active" as PlatformStatus, label: "Active" },
+                            { value: "archived" as PlatformStatus, label: "Archived" },
+                          ] as const
+                        ).map((option) => {
+                          const isActive = platformStatus[platform.key] === option.value
+                          return (
+                            <button
+                              key={option.value}
+                              type="button"
+                              onClick={() =>
+                                setPlatformStatus((prev) => ({
+                                  ...prev,
+                                  [platform.key]: option.value,
+                                }))
+                              }
+                              className={cn(
+                                "rounded-md border px-2 py-1.5 text-[11px] font-medium transition-colors",
+                                isActive
+                                  ? "border-violet-300 bg-white text-violet-700 shadow-sm"
+                                  : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50",
+                              )}
+                            >
+                              {option.label}
+                            </button>
+                          )
+                        })}
+                      </div>
                     </div>
-                    <div className="grid grid-cols-3 gap-1.5">
-                      {(
-                        [
-                          { value: "not_listed" as PlatformStatus, label: "Not listed" },
-                          { value: "active" as PlatformStatus, label: "Active" },
-                          { value: "archived" as PlatformStatus, label: "Archived" },
-                        ] as const
-                      ).map((option) => {
-                        const isActive = platformStatus[platform.key] === option.value
-                        return (
-                          <button
-                            key={option.value}
-                            type="button"
-                            onClick={() =>
-                              setPlatformStatus((prev) => ({
-                                ...prev,
-                                [platform.key]: option.value,
-                              }))
-                            }
-                            className={cn(
-                              "rounded-md border px-2 py-1.5 text-[11px] font-medium transition-colors",
-                              isActive
-                                ? "border-violet-300 bg-white text-violet-700 shadow-sm"
-                                : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50",
-                            )}
-                          >
-                            {option.label}
-                          </button>
-                        )
-                      })}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </PanelSection>
+                  ))}
+                </div>
+              </PanelSection>
+            )}
 
             <PanelSection title="Attributes & details">
               <div className="space-y-4">

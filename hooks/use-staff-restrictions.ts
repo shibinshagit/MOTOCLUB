@@ -7,6 +7,7 @@ import {
   canStaffAccessPage,
   isStaffAdmin,
   isStaffValueHidden,
+  canManageEcomAndTrending,
   type StaffPageId,
   type StaffValueRestriction,
 } from "@/lib/staff-restrictions"
@@ -23,6 +24,7 @@ export function useStaffRestrictions() {
       hideStockCount: isStaffValueHidden(activeStaff, "stock_count"),
       canAccessPage: (page: StaffPageId) => canStaffAccessPage(activeStaff, page),
       isValueHidden: (value: StaffValueRestriction) => isStaffValueHidden(activeStaff, value),
+      canManageEcomAndTrending: canManageEcomAndTrending(activeStaff),
     }),
     [activeStaff],
   )

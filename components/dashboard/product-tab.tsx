@@ -392,6 +392,12 @@ export default function ProductTab({
           currency={currency}
           privacyMode={false}
           userId={userId}
+          onProductUpdated={(updated) => {
+            setProducts((prev) => prev.map((p) => (p.id === updated.id ? { ...p, ...updated } : p)))
+            if (detailProduct?.id === updated.id) {
+              setDetailProduct((prev: any) => ({ ...prev, ...updated }))
+            }
+          }}
         />
       ) : null}
 
