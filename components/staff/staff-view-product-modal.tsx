@@ -439,7 +439,7 @@ export default function StaffViewProductModal({
                 
                 {/* Price & Primary Metrics Cards */}
                 {isMediaManager ? (
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                     {/* MRP Card */}
                     <div className="rounded-2xl border border-violet-100 bg-violet-50/70 p-3 sm:p-4 shadow-xs flex flex-col justify-between min-h-[85px]">
                       <span className="text-[11px] font-semibold uppercase tracking-wider text-violet-700">MRP</span>
@@ -448,11 +448,11 @@ export default function StaffViewProductModal({
                       </p>
                     </div>
 
-                    {/* Cost Card */}
-                    <div className="rounded-2xl border border-slate-200 bg-slate-100/70 p-3 sm:p-4 shadow-xs flex flex-col justify-between min-h-[85px]">
-                      <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-600">Cost</span>
-                      <p className="text-lg sm:text-xl font-bold text-slate-900 mt-1">
-                        {formatMoney(activeProduct.cost_price ?? activeProduct.wholesale_price ?? 0)}
+                    {/* MSP Card */}
+                    <div className="rounded-2xl border border-blue-100 bg-blue-50/70 p-3 sm:p-4 shadow-xs flex flex-col justify-between min-h-[85px]">
+                      <span className="text-[11px] font-semibold uppercase tracking-wider text-blue-700">MSP</span>
+                      <p className="text-lg sm:text-xl font-bold text-blue-900 mt-1">
+                        {formatMoney(activeProduct.msp || msp || 0)}
                       </p>
                     </div>
 
@@ -461,14 +461,6 @@ export default function StaffViewProductModal({
                       <span className="text-[11px] font-semibold uppercase tracking-wider text-emerald-700">Stock</span>
                       <p className="text-lg sm:text-xl font-bold text-emerald-900 mt-1">
                         {activeProduct.stock === null ? "—" : Math.max(0, Number(activeProduct.stock) || 0)}
-                      </p>
-                    </div>
-
-                    {/* MSP Card */}
-                    <div className="rounded-2xl border border-blue-100 bg-blue-50/70 p-3 sm:p-4 shadow-xs flex flex-col justify-between min-h-[85px]">
-                      <span className="text-[11px] font-semibold uppercase tracking-wider text-blue-700">MSP</span>
-                      <p className="text-lg sm:text-xl font-bold text-blue-900 mt-1">
-                        {formatMoney(activeProduct.msp || msp || 0)}
                       </p>
                     </div>
                   </div>

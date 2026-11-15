@@ -22,6 +22,7 @@ import { notifyError } from "@/lib/notifications"
 import { useSelector } from "react-redux"
 import { selectDeviceCurrency } from "@/store/slices/deviceSlice"
 import { selectActiveStaff } from "@/store/slices/staffSlice"
+import { useStaffRestrictions } from "@/hooks/use-staff-restrictions"
 
 interface TrendingInlineViewProps {
   userId: number
@@ -31,7 +32,11 @@ interface TrendingInlineViewProps {
 export default function TrendingInlineView({ userId, isMediaManager: isMediaManagerProp }: TrendingInlineViewProps) {
   const currency = useSelector(selectDeviceCurrency)
   const activeStaff = useSelector(selectActiveStaff)
+  const { isValueHidden } = useStaffRestrictions()
   const isMediaManager = isMediaManagerProp ?? (activeStaff?.role === "media_manager")
+  const isNormalStaff = activeStaff?.role === "staff"
+  const hideCogs = isMediaManager || isNormalStaff || isValueHidden("cogs")
+  const hideStockCount = isValueHidden("stock_count")
   const { toast } = useToast()
 
   const [products, setProducts] = useState<any[]>([])
@@ -161,8 +166,8 @@ export default function TrendingInlineView({ userId, isMediaManager: isMediaMana
             searchTerm={searchTerm}
             isLoading={loading}
             hasLoaded={true}
-            hideCogs={false}
-            hideStockCount={false}
+            hideCogs={hideCogs}
+            hideStockCount={hideStockCount}
             currency={currency || "INR"}
             enableMultiSelect={true}
             selectedIds={selectedIds}

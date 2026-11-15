@@ -93,6 +93,8 @@ export function isStaffValueHidden(
   value: StaffValueRestriction,
 ): boolean {
   if (!staff) return false
+  const role = staff.role?.trim().toLowerCase()
+  if ((role === "media_manager" || role === "staff") && value === "cogs") return true
   return getRestrictedValues(staff).includes(value)
 }
 

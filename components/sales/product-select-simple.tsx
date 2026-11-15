@@ -15,6 +15,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { useSelector } from "react-redux"
 import { selectDeviceId } from "@/store/slices/deviceSlice"
 import { matchProductSemantic } from "@/lib/product-search"
+import { useStaffRestrictions } from "@/hooks/use-staff-restrictions"
 
 interface ProductSelectSimpleProps {
   id?: string
@@ -78,6 +79,8 @@ function ProductSelectSimple({
   autoOpen = false,
 }: ProductSelectSimpleProps) {
   const deviceId = useSelector(selectDeviceId)
+  const { isValueHidden } = useStaffRestrictions()
+  const hideCogs = isValueHidden("cogs")
   const [open, setOpen] = useState(autoOpen)
   const [services, setServices] = useState<any[]>([])
   const [products, setProducts] = useState<any[]>([])
@@ -587,7 +590,7 @@ function ProductSelectSimple({
                           <span className="text-xs text-gray-500 truncate">
                             {!isServiceMode && item.company_name && `Company: ${item.company_name} • `}
                             Price: {item.mrp || item.price || item.msp || 0}
-                            {!isServiceMode && (item.wholesale_price || item.cost_price) && ` • Wholesale/Cost: ${item.wholesale_price ?? item.cost_price ?? 0}`}
+                            {!hideCogs && !isServiceMode && (item.wholesale_price || item.cost_price) && ` • Wholesale/Cost: ${item.wholesale_price ?? item.cost_price ?? 0}`}
                             {!isServiceMode && item.barcode && ` • Barcode: ${item.barcode}`}
                             {!isServiceMode && ` • Stock: ${item.stock ?? 0}`}
                             {isServiceMode && item.category && ` • Category: ${item.category}`}

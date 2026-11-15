@@ -57,9 +57,31 @@ export async function getStaffInventory(
     })
 
     if (res.success && res.data) {
+      const isCostHidden = session.role === "media_manager" || session.role === "staff"
       res.data = res.data.map((p: any) => ({
         ...p,
         branch_name: branchName,
+        ...(isCostHidden
+          ? {
+              cost_price: null,
+              wholesale_price: null,
+              cost: null,
+              variants: Array.isArray(p.variants)
+                ? p.variants.map((v: any) => ({
+                    ...v,
+                    cost_price: null,
+                    wholesale_price: null,
+                    batches: Array.isArray(v.batches)
+                      ? v.batches.map((b: any) => ({
+                          ...b,
+                          cost_price: null,
+                          purchase_price: null,
+                        }))
+                      : v.batches,
+                  }))
+                : p.variants,
+            }
+          : {}),
       }))
     }
 
