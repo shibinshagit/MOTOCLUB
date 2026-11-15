@@ -690,7 +690,6 @@ export default function PayCreditModal({
                                 }
                               }}
                               disabled={(d) => d > new Date()}
-                              initialFocus
                             />
                           </PopoverContent>
                         </Popover>
