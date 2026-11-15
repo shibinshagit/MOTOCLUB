@@ -46,10 +46,7 @@ export async function getSuppliers(userId: number, limit?: number, searchTerm?: 
           AND (created_by = ${effectiveUserId} OR device_id = ${effectiveUserId})
           AND (status IS NULL OR status != 'Cancelled')
       ) ft ON true
-      WHERE (
-        s.created_by = ${effectiveUserId}
-        OR s.created_by IN (SELECT device_id FROM staff WHERE id = ${effectiveUserId})
-      )
+      WHERE s.created_by = ${effectiveUserId}
       AND (
         ${searchPattern}::text IS NULL
         OR LOWER(s.name) LIKE ${searchPattern}
@@ -67,7 +64,7 @@ export async function getSuppliers(userId: number, limit?: number, searchTerm?: 
           FROM financial_transactions
           WHERE reference_id = ANY(${supplierIds})
             AND reference_type = 'supplier'
-            AND (created_by = ${effectiveUserId} OR device_id = ${effectiveUserId} OR created_by IN (SELECT device_id FROM staff WHERE id = ${effectiveUserId}))
+            AND (created_by = ${effectiveUserId} OR device_id = ${effectiveUserId})
             AND (status IS NULL OR status != 'Cancelled')
         `
       : []
@@ -461,10 +458,7 @@ export async function getSupplierNames(userId: number) {
   try {
     const suppliers = await sql`
       SELECT name FROM suppliers
-      WHERE (
-        created_by = ${effectiveUserId}
-        OR created_by IN (SELECT device_id FROM staff WHERE id = ${effectiveUserId})
-      )
+      WHERE created_by = ${effectiveUserId}
       ORDER BY name ASC
     `
 
