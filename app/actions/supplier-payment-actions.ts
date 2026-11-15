@@ -4,6 +4,7 @@ import { sql, getLastError, resetConnectionState } from "@/lib/db"
 import { revalidatePath } from "next/cache"
 import { recordSupplierPayment } from "./simplified-accounting"
 import { getDeviceCompanyId } from "@/lib/device-company"
+import { getStaffSession } from "@/lib/staff-session"
 
 interface PaymentAllocation {
   purchaseId: number
@@ -34,6 +35,11 @@ export async function paySupplierCredit(
 
   if (!supplierId || !userId || !deviceId) {
     return { success: false, message: "Missing required parameters" }
+  }
+
+  const staff = await getStaffSession()
+  if (staff?.role === "purchase_manager") {
+    return { success: false, message: "Unauthorized: Purchase managers cannot process supplier credit payments." }
   }
 
   const safeCashAmount = Math.max(Number(paymentAmount) || 0, 0)

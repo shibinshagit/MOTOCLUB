@@ -24,6 +24,9 @@ import {
   FileText,
   CalendarIcon,
 } from "lucide-react"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Calendar } from "@/components/ui/calendar"
+import { format } from "date-fns"
 import { paySupplierCredit, applySupplierCredit, getSupplierCreditSummary } from "@/app/actions/supplier-payment-actions"
 import { useSelector } from "react-redux"
 import type { RootState } from "@/store/store"
@@ -72,7 +75,8 @@ export default function PayCreditModal({
   const [paymentAmount, setPaymentAmount] = useState("")
   const [paymentMethod, setPaymentMethod] = useState("Cash")
   const [notes, setNotes] = useState("")
-  const [paymentDate, setPaymentDate] = useState<string>("")
+  const [paymentDate, setPaymentDate] = useState<Date>(() => new Date())
+  const [isDatePickerOpen, setIsDatePickerOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [paymentResult, setPaymentResult] = useState<PaymentResultData | null>(null)
@@ -103,7 +107,8 @@ export default function PayCreditModal({
       setError(null)
       setPaymentResult(null)
       setNotes("")
-      setPaymentDate("")
+      setPaymentDate(new Date())
+      setIsDatePickerOpen(false)
       setPaymentMethod("Cash")
       setUseSupplierCredit(false)
       setCreditToApplyInput("0")
@@ -176,15 +181,12 @@ export default function PayCreditModal({
       return
     }
 
-    let finalPaymentDate: Date | undefined
-    if (paymentDate) {
-      const selectedDate = new Date(paymentDate)
-      if (isNaN(selectedDate.getTime())) {
-        setError("Please enter a valid payment date")
-        return
-      }
-      finalPaymentDate = selectedDate
+    if (!paymentDate || isNaN(paymentDate.getTime())) {
+      setError("Please select a valid payment date")
+      return
     }
+
+    const finalPaymentDate = paymentDate
 
     setIsLoading(true)
 
@@ -227,7 +229,14 @@ export default function PayCreditModal({
   const today = new Date().toISOString().split('T')[0]
 
   return (
-    <Dialog open={isOpen} onOpenChange={() => {}}>
+    <Dialog
+      open={isOpen}
+      onOpenChange={(open) => {
+        if (!open && !isLoading) {
+          handleClose()
+        }
+      }}
+    >
       <DialogContent className="max-w-3xl max-h-[95vh] overflow-hidden p-0 bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col [&>button]:hidden">
         {paymentResult ? (
           // Success View
@@ -286,7 +295,7 @@ export default function PayCreditModal({
                     </div>
                     <div className="text-right">
                       <div className="text-sm text-gray-500">Transaction Date</div>
-                      <div className="font-medium">{new Date().toLocaleDateString()}</div>
+                      <div className="font-medium">{format(paymentDate || new Date(), "dd/MM/yyyy")}</div>
                     </div>
                   </div>
 
@@ -581,6 +590,7 @@ export default function PayCreditModal({
                           <SelectContent>
                             <SelectItem value="Cash">💵 Cash</SelectItem>
                             <SelectItem value="Bank Transfer">🏦 Bank Transfer</SelectItem>
+                            <SelectItem value="UPI">📱 UPI</SelectItem>
                             <SelectItem value="Check">📝 Check</SelectItem>
                             <SelectItem value="Card">💳 Card</SelectItem>
                             <SelectItem value="Other">🔄 Other</SelectItem>
@@ -650,18 +660,42 @@ export default function PayCreditModal({
                           className="text-sm font-medium text-gray-700 flex items-center space-x-1"
                         >
                           <CalendarIcon className="h-3 w-3" />
-                          <span>Payment Date (Optional)</span>
+                          <span>Payment Date *</span>
                         </Label>
-                        <Input
-                          id="paymentDate"
-                          type="date"
-                          value={paymentDate}
-                          onChange={(e) => setPaymentDate(e.target.value)}
-                          max={today}
-                          className="h-10 border-2 focus:border-blue-500 rounded-lg"
-                        />
+                        <Popover open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen}>
+                          <PopoverTrigger asChild>
+                            <Button
+                              id="paymentDate"
+                              type="button"
+                              variant="outline"
+                              className="h-10 w-full justify-between border-2 border-slate-200 bg-white px-3 text-sm font-medium hover:border-blue-500 focus:border-blue-500 rounded-lg text-left"
+                            >
+                              <span className="flex items-center gap-2 text-gray-900">
+                                <CalendarIcon className="h-4 w-4 text-blue-600 shrink-0" />
+                                {paymentDate ? format(paymentDate, "dd/MM/yyyy") : "Select date"}
+                              </span>
+                              <span className="text-[10px] font-semibold tracking-wider text-slate-400 uppercase">
+                                DD/MM/YYYY
+                              </span>
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-auto p-0 z-[60] bg-white border border-slate-200 shadow-xl rounded-xl" align="start">
+                            <Calendar
+                              mode="single"
+                              selected={paymentDate}
+                              onSelect={(newDate) => {
+                                if (newDate) {
+                                  setPaymentDate(newDate)
+                                  setIsDatePickerOpen(false)
+                                }
+                              }}
+                              disabled={(d) => d > new Date()}
+                              initialFocus
+                            />
+                          </PopoverContent>
+                        </Popover>
                         <div className="text-xs text-gray-500">
-                          {paymentDate ? `Selected: ${new Date(paymentDate).toLocaleDateString()}` : 'Leave empty to use current date'}
+                          {paymentDate ? `Selected: ${format(paymentDate, "dd/MM/yyyy")}` : "Please select a payment date"}
                         </div>
                       </div>
                     </div>
