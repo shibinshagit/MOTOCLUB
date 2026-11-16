@@ -112,7 +112,11 @@ export function printSalesReceipt(sale: any, items: any[], currency = "AED", bus
   })
 
   // Calculate totals
-  const subtotal = items.reduce((sum, item) => sum + Number(item.quantity) * Number(item.price), 0)
+  const subtotal = items.reduce((sum, item) => {
+    const p = Number(item.price ?? item.unit_price ?? item.unit_cost ?? 0)
+    const q = Number(item.quantity) || 0
+    return sum + q * p
+  }, 0)
 
   // Get discount from sale object or calculate it
   let discount = 0
@@ -136,14 +140,15 @@ export function printSalesReceipt(sale: any, items: any[], currency = "AED", bus
     sale.courier_charge ??
     sale.shipping_charge ??
     sale.delivery_fee ??
+    sale.expense_courier ??
     0
   )
 
   // Calculate final total
   const finalTotal =
-    sale.total_amount !== undefined && sale.total_amount !== null
+    sale.total_amount !== undefined && sale.total_amount !== null && !isNaN(Number(sale.total_amount))
       ? Number(sale.total_amount)
-      : subtotal - discount + courierCharge
+      : Math.max(0, subtotal - discount + courierCharge)
 
 
   // Get received amount from sale object
@@ -654,22 +659,28 @@ export function printSalesReceipt(sale: any, items: any[], currency = "AED", bus
               <tbody>
                 ${items
                   .map(
-                    (item, index) => `
+                    (item, index) => {
+                      const qty = Number(item.quantity) || 0
+                      const itemPrice = Number(item.price ?? item.unit_price ?? item.unit_cost ?? 0)
+                      const lineTotal = qty * itemPrice
+                      return `
                   <tr>
                     <td class="text-center">${index + 1}</td>
                     <td>
-                      <div class="item-description">${item.product_name || item.service_name}</div>
+                      <div class="item-description">${item.product_name || item.service_name || "Item"}</div>
+                      ${item.variant_name ? `<div class="item-meta">Variant: ${item.variant_name}</div>` : ""}
                       ${item.barcode ? `<div class="item-meta">SKU: ${item.barcode}</div>` : ""}
                       ${item.notes ? `<div class="item-meta">${item.notes}</div>` : ""}
                       <span class="item-type ${item.service_name ? "service-type" : "product-type"}">
                         ${item.service_name ? "SVC" : "PRD"}
                       </span>
                     </td>
-                    <td class="text-center">${Number(item.quantity).toFixed(item.quantity % 1 === 0 ? 0 : 1)}</td>
-                    <td class="text-right">${formatCurrency(Number(item.price))}</td>
-                    <td class="text-right"><strong>${formatCurrency(Number(item.quantity) * Number(item.price))}</strong></td>
+                    <td class="text-center">${qty.toFixed(qty % 1 === 0 ? 0 : 1)}</td>
+                    <td class="text-right">${formatCurrency(itemPrice)}</td>
+                    <td class="text-right"><strong>${formatCurrency(lineTotal)}</strong></td>
                   </tr>
-                `,
+                `
+                    }
                   )
                   .join("")}
               </tbody>

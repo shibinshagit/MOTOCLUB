@@ -29,6 +29,7 @@ interface SupplierAutocompleteProps {
   userId?: number
   placeholder?: string
   className?: string
+  onSelectSupplier?: (supplier: SupplierRecord | null) => void
 }
 
 export default function SupplierAutocomplete({
@@ -37,6 +38,7 @@ export default function SupplierAutocomplete({
   userId,
   placeholder = "Select supplier",
   className,
+  onSelectSupplier,
 }: SupplierAutocompleteProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
@@ -56,6 +58,12 @@ export default function SupplierAutocomplete({
     () => suppliers.find((supplier) => supplier.name === value) ?? null,
     [suppliers, value],
   )
+
+  useEffect(() => {
+    if (onSelectSupplier) {
+      onSelectSupplier(selectedSupplier)
+    }
+  }, [selectedSupplier, onSelectSupplier])
 
   const isLegacyValue = Boolean(value.trim()) && !selectedSupplier
 
