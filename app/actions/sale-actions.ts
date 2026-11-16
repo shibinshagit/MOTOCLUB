@@ -338,19 +338,6 @@ export async function updateProductStock(
       }
     }
 
-    // Log stock history
-    try {
-      await query`
-        INSERT INTO product_stock_history (
-          product_id, product_variant_id, batch_id, quantity, type, reference_type, notes, created_by, device_id
-        ) VALUES (
-          ${productId}, ${resolvedVariantId}, ${batchId || null}, ${quantityChange}, ${operation === "subtract" ? "adjustment" : "adjustment"}, 'sale', 'POS Checkout', ${deviceId}, ${deviceId}
-        )
-      `
-    } catch (historyErr) {
-      console.error("Failed to write sale stock history:", historyErr)
-    }
-
     return { success: true, message: "Stock updated successfully" }
   } catch (error) {
     console.error(`Error updating stock for product ${productId}:`, error)
