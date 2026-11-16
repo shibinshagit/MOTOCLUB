@@ -53,9 +53,6 @@ export default function SaleInvoicePage() {
           if (result.data.sale.staff_name) {
             setStaffName(result.data.sale.staff_name)
           }
-
-          printSalesReceipt(result.data.sale, result.data.items, currency, companyInfo, false)
-          setTimeout(() => router.push("/dashboard"), 1000)
         } else {
           setError(result.message || "Failed to load sale details")
         }
@@ -114,7 +111,7 @@ export default function SaleInvoicePage() {
   }
 
   // Calculate totals
-  const subtotal = items.reduce((sum, item) => sum + Number(item.quantity) * Number(item.price), 0)
+  const subtotal = items.reduce((sum, item) => sum + Number(item.quantity) * Number(item.price ?? item.unit_price ?? 0), 0)
   const discount = Number(sale.discount) || 0
   const courierCharge = Number(
     sale.courier_paid_extra ??
@@ -122,12 +119,13 @@ export default function SaleInvoicePage() {
     sale.courier_charge ??
     sale.shipping_charge ??
     sale.delivery_fee ??
+    sale.expense_courier ??
     0
   )
   const finalTotal =
-    sale.total_amount !== undefined && sale.total_amount !== null
+    sale.total_amount !== undefined && sale.total_amount !== null && !isNaN(Number(sale.total_amount))
       ? Number(sale.total_amount)
-      : subtotal - discount + courierCharge
+      : Math.max(0, subtotal - discount + courierCharge)
 
 
   // Format date and time
@@ -258,31 +256,37 @@ export default function SaleInvoicePage() {
               <thead>
                 <tr className="bg-gray-100">
                   <th className="border border-gray-800 p-2 text-left w-[5%]">#</th>
-                  <th className="border border-gray-800 p-2 text-left w-[45%]">Description</th>
-                  <th className="border border-gray-800 p-2 text-left w-[15%]">Unit Price</th>
-                  <th className="border border-gray-800 p-2 text-left w-[15%]">Quantity</th>
-                  <th className="border border-gray-800 p-2 text-right w-[20%]">Amount</th>
+                  <th className="border border-gray-800 p-2 text-left w-[50%]">Item Description</th>
+                  <th className="border border-gray-800 p-2 text-center w-[12%]">Qty</th>
+                  <th className="border border-gray-800 p-2 text-right w-[16%]">Price</th>
+                  <th className="border border-gray-800 p-2 text-right w-[17%]">Total</th>
                 </tr>
               </thead>
               <tbody>
-                {items.map((item, index) => (
-                  <tr key={index}>
-                    <td className="border border-gray-800 p-2">{index + 1}</td>
-                    <td className="border border-gray-800 p-2">
-                      <div className="font-medium">{item.product_name || item.service_name}</div>
-                      {item.barcode && <div className="text-xs text-gray-500">SKU: {item.barcode}</div>}
-                      {item.notes && <div className="text-xs text-gray-500 italic">Notes: {item.notes}</div>}
-                      <div className="text-xs text-blue-600 font-medium">
-                        {item.service_name ? "Service" : "Product"}
-                      </div>
-                    </td>
-                    <td className="border border-gray-800 p-2">{formatCurrency(Number(item.price))}</td>
-                    <td className="border border-gray-800 p-2">{Number(item.quantity).toFixed(2)}</td>
-                    <td className="border border-gray-800 p-2 text-right">
-                      {formatCurrency(Number(item.quantity) * Number(item.price))}
-                    </td>
-                  </tr>
-                ))}
+                {items.map((item, index) => {
+                  const qty = Number(item.quantity) || 0
+                  const price = Number(item.price ?? item.unit_price ?? item.unit_cost ?? 0)
+                  const lineTotal = qty * price
+                  return (
+                    <tr key={index}>
+                      <td className="border border-gray-800 p-2 text-center">{index + 1}</td>
+                      <td className="border border-gray-800 p-2">
+                        <div className="font-medium">{item.product_name || item.service_name || "Item"}</div>
+                        {item.variant_name && <div className="text-xs text-gray-600 font-normal">Variant: {item.variant_name}</div>}
+                        {item.barcode && <div className="text-xs text-gray-500">SKU: {item.barcode}</div>}
+                        {item.notes && <div className="text-xs text-gray-500 italic">Notes: {item.notes}</div>}
+                        <div className="text-xs text-blue-600 font-medium">
+                          {item.service_name ? "Service" : "Product"}
+                        </div>
+                      </td>
+                      <td className="border border-gray-800 p-2 text-center font-mono">{qty.toFixed(qty % 1 === 0 ? 0 : 1)}</td>
+                      <td className="border border-gray-800 p-2 text-right font-mono">{formatCurrency(price)}</td>
+                      <td className="border border-gray-800 p-2 text-right font-mono font-semibold">
+                        {formatCurrency(lineTotal)}
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>

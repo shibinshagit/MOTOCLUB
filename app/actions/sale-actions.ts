@@ -2169,6 +2169,7 @@ export async function getSaleDetails(saleId: number) {
           pv.barcode,
           p.description as product_description,
           pv.wholesale_price as product_wholesale_price,
+          COALESCE(NULLIF(pv.mrp, 0), NULLIF(p.mrp, 0), NULLIF(pv.price, 0), NULLIF(p.price, 0), si.price, 0) as mrp,
           COALESCE(si.cost, pv.wholesale_price, 0) as actual_cost,
           pv.name as variant_name,
           pb.batch_no as batch_number,
