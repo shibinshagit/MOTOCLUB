@@ -107,22 +107,18 @@ async function uploadProductImage(file: File, productName: string): Promise<stri
 }
 
 async function uploadProductVideo(file: File, productName: string): Promise<string | null> {
+  const token = process.env.BLOB_READ_WRITE_TOKEN
+
+  if (!token) {
+    throw new Error("BLOB_READ_WRITE_TOKEN is not configured on the server.")
+  }
+
+  const timestamp = Date.now()
+  const safeName = productName.replace(/[^a-zA-Z0-9]/g, "_").substring(0, 50)
+  const extension = file.name.split(".").pop()?.toLowerCase() || "mp4"
+  const filename = `products/videos/${timestamp}-${safeName}.${extension}`
+
   try {
-    const token = process.env.BLOB_READ_WRITE_TOKEN
-
-    if (!token) {
-      console.warn("BLOB_READ_WRITE_TOKEN environment variable is not set. Using Data URL fallback.")
-      const buffer = await file.arrayBuffer()
-      const base64 = Buffer.from(buffer).toString("base64")
-      const mime = file.type || "video/mp4"
-      return `data:${mime};base64,${base64}`
-    }
-
-    const timestamp = Date.now()
-    const safeName = productName.replace(/[^a-zA-Z0-9]/g, "_").substring(0, 50)
-    const extension = file.name.split(".").pop()?.toLowerCase() || "mp4"
-    const filename = `products/videos/${timestamp}-${safeName}.${extension}`
-
     const blob = await put(filename, file, {
       access: "public",
       token: token,
@@ -130,14 +126,8 @@ async function uploadProductVideo(file: File, productName: string): Promise<stri
 
     return blob.url
   } catch (error) {
-    console.error("Error uploading video:", error)
-    if (error instanceof Error) {
-      const buffer = await file.arrayBuffer()
-      const base64 = Buffer.from(buffer).toString("base64")
-      const mime = file.type || "video/mp4"
-      return `data:${mime};base64,${base64}`
-    }
-    return null
+    console.error("Error uploading video to Vercel Blob:", error)
+    throw new Error(error instanceof Error ? error.message : "Failed to upload product video to Blob storage.")
   }
 }
 

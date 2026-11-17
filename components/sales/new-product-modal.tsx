@@ -489,15 +489,17 @@ export default function NewProductModal({
   const handleVideoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-    if (!file.type.startsWith("video/")) {
-      const message = "Please select a valid video file"
+    const isVideo = file.type.startsWith("video/") || /\.(mp4|mov|webm|m4v|mkv|avi)$/i.test(file.name)
+    if (!isVideo) {
+      const message = "Please select a valid video file (MP4, MOV, WebM)"
       setError(message)
       notifyError(toast, message)
       if (videoInputRef.current) videoInputRef.current.value = ""
       return
     }
     if (file.size > MAX_VIDEO_SIZE_BYTES) {
-      const message = "Video size must be less than 50MB"
+      const sizeMB = (file.size / (1024 * 1024)).toFixed(1)
+      const message = `Video size (${sizeMB}MB) exceeds the 50MB limit. Please select a video under 50MB.`
       setError(message)
       notifyError(toast, message)
       if (videoInputRef.current) videoInputRef.current.value = ""
