@@ -4230,6 +4230,111 @@ export async function updateSaleTracking(
   }
 }
 
+/**
+ * High-performance, lightweight query specifically for shipping fulfillment metadata.
+ * Strictly fetches active partners, couriers, and packaging for the specified device.
+ * Strips out heavy staff sales/performance subqueries for maximum speed.
+ */
+export async function getShippingFulfillmentMeta(deviceId: number) {
+  if (!deviceId) {
+    return { success: false, data: { partners: [], services: [], packaging: [] } }
+  }
+
+  const effectiveDeviceId = Number(deviceId) || 0
+
+  try {
+    const [partnersRes, couriersRes, servicesRes, packagingRes] = await Promise.all([
+      // 1. Partners: strictly active partners on this device only
+      sql`
+        SELECT id, name, linked_partner_id
+        FROM staff
+        WHERE device_id = ${effectiveDeviceId}
+          AND role = 'partner'
+          AND is_active = true
+        ORDER BY name ASC
+      `,
+      // 2. Couriers from master_data on this device only
+      sql`
+        SELECT id, name
+        FROM master_data
+        WHERE device_id = ${effectiveDeviceId}
+          AND category = 'courier'
+          AND is_active = true
+        ORDER BY sort_order ASC, name ASC
+      `,
+      // 3. Services on this device only
+      sql`
+        SELECT id, name
+        FROM services
+        WHERE device_id = ${effectiveDeviceId}
+          AND is_active = true
+        ORDER BY name ASC
+      `,
+      // 4. Packaging types (device packaging with global fallback)
+      sql`
+        SELECT id, name, metadata, device_id
+        FROM master_data
+        WHERE category = 'packaging'
+          AND is_active = true
+          AND (device_id = ${effectiveDeviceId} OR device_id IS NULL OR device_id = 0)
+        ORDER BY sort_order ASC, name ASC
+      `,
+    ])
+
+    // Map partners for this device
+    const partners = partnersRes
+      .filter((p: any) => p.name?.trim())
+      .map((p: any) => ({
+        id: Number(p.id),
+        name: p.name.trim() as string,
+        linked_partner_id: p.linked_partner_id ? Number(p.linked_partner_id) : null,
+      }))
+      .sort((a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name))
+
+    // Map courier services for this device
+    const servicesMap = new Map<number, { id: number; name: string }>()
+    couriersRes.forEach((c: any) => {
+      if (c.name?.trim()) {
+        servicesMap.set(Number(c.id), { id: Number(c.id), name: c.name.trim() })
+      }
+    })
+    const existingNames = new Set(Array.from(servicesMap.values()).map((s) => s.name.toLowerCase().trim()))
+    servicesRes.forEach((s: any) => {
+      if (s.name?.trim()) {
+        const norm = s.name.toLowerCase().trim()
+        if (!servicesMap.has(Number(s.id)) && !existingNames.has(norm)) {
+          servicesMap.set(Number(s.id), { id: Number(s.id), name: s.name.trim() })
+          existingNames.add(norm)
+        }
+      }
+    })
+    const services = Array.from(servicesMap.values()).sort((a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name))
+
+    // Packaging: use device-specific packaging if available, else global
+    const devicePackaging = packagingRes.filter((p: any) => p.device_id === effectiveDeviceId)
+    const packagingSource = devicePackaging.length > 0 ? devicePackaging : packagingRes
+    const packaging = packagingSource.map((p: any) => ({
+      id: Number(p.id),
+      name: p.name,
+      metadata: p.metadata,
+      category: "packaging",
+      is_active: true,
+    }))
+
+    return {
+      success: true,
+      data: {
+        partners,
+        services,
+        packaging,
+      },
+    }
+  } catch (error) {
+    console.error("Error in getShippingFulfillmentMeta:", error)
+    return { success: false, data: { partners: [], services: [], packaging: [] } }
+  }
+}
+
 export async function updateSaleFulfillmentDetails(saleId: number, shippingData: any) {
   if (!saleId) {
     return { success: false, message: "Sale ID is required" }
