@@ -32,6 +32,7 @@ import {
   RotateCcw
 } from "lucide-react"
 import { format, isPast, isToday } from "date-fns"
+import { formatIST, isTodayIST, isPastIST } from "@/lib/ist-date"
 
 interface LeadFollowUpsSectionProps {
   leadId: number
@@ -95,7 +96,7 @@ export function LeadFollowUpsSection({ leadId, onFollowUpChanged }: LeadFollowUp
     })
 
     if (res.success) {
-      toast({ title: "Follow-up scheduled", description: `Set for ${format(new Date(newDateTime), "dd MMM yyyy, p")}` })
+      toast({ title: "Follow-up scheduled", description: `Set for ${formatIST(newDateTime, "short")}` })
       setNewDateTime("")
       setNewNote("")
       setShowNewForm(false)
@@ -186,7 +187,7 @@ export function LeadFollowUpsSection({ leadId, onFollowUpChanged }: LeadFollowUp
     })
 
     if (res.success) {
-      toast({ title: "Follow-up rescheduled", description: `Updated to ${format(new Date(rescheduleDateTime), "dd MMM yyyy, p")}` })
+      toast({ title: "Follow-up rescheduled", description: `Updated to ${formatIST(rescheduleDateTime, "short")}` })
       setRescheduleDateTime("")
       setRescheduleNote("")
       setShowRescheduleForm(false)
@@ -237,13 +238,13 @@ export function LeadFollowUpsSection({ leadId, onFollowUpChanged }: LeadFollowUp
               <div className="flex items-center gap-2">
                 <Clock className="h-4 w-4 text-blue-600" />
                 <span className="font-semibold text-sm text-slate-900">
-                  {format(new Date(activeFollowUp.scheduled_at), "EEEE, dd MMM yyyy • p")}
+                  {formatIST(activeFollowUp.scheduled_at, "full")}
                 </span>
               </div>
               <div>
-                {isPast(new Date(activeFollowUp.scheduled_at)) && !isToday(new Date(activeFollowUp.scheduled_at)) ? (
+                {isPastIST(activeFollowUp.scheduled_at) && !isTodayIST(activeFollowUp.scheduled_at) ? (
                   <Badge variant="destructive" className="text-[11px] font-medium">Overdue</Badge>
-                ) : isToday(new Date(activeFollowUp.scheduled_at)) ? (
+                ) : isTodayIST(activeFollowUp.scheduled_at) ? (
                   <Badge className="bg-amber-500 hover:bg-amber-600 text-white text-[11px] font-medium">Due Today</Badge>
                 ) : (
                   <Badge className="bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-medium">Upcoming</Badge>
@@ -284,7 +285,7 @@ export function LeadFollowUpsSection({ leadId, onFollowUpChanged }: LeadFollowUp
                   size="sm"
                   onClick={() => {
                     setShowRescheduleForm(true)
-                    setRescheduleDateTime(activeFollowUp.scheduled_at ? new Date(activeFollowUp.scheduled_at).toISOString().slice(0, 16) : "")
+                    setRescheduleDateTime(activeFollowUp.scheduled_at || "")
                   }}
                   className="text-xs h-8 border-slate-300"
                 >
@@ -569,7 +570,7 @@ export function LeadFollowUpsSection({ leadId, onFollowUpChanged }: LeadFollowUp
                     </div>
 
                     <div className="text-[11px] text-muted-foreground">
-                      Scheduled: {format(new Date(item.scheduled_at), "dd MMM yyyy, p")}
+                      Scheduled: {formatIST(item.scheduled_at, "short")}
                     </div>
                   </div>
 
@@ -596,7 +597,7 @@ export function LeadFollowUpsSection({ leadId, onFollowUpChanged }: LeadFollowUp
                       {item.completed_by_name ? `Recorded by ${item.completed_by_name}` : "Recorded"}
                     </span>
                     {item.completed_at && (
-                      <span>{format(new Date(item.completed_at), "dd MMM yyyy 'at' p")}</span>
+                      <span>{formatIST(item.completed_at, "short")}</span>
                     )}
                   </div>
                 </div>

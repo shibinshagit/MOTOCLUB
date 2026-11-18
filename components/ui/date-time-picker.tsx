@@ -1,12 +1,18 @@
 "use client"
 
 import * as React from "react"
-import { format, addDays, addHours, setHours, setMinutes, isToday, isTomorrow, isPast } from "date-fns"
+import { addDays, isTomorrow } from "date-fns"
 import { Calendar as CalendarIcon, Clock, X, Check, ChevronDown } from "lucide-react"
 import { Calendar } from "@/components/ui/calendar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { 
+  getISTComponents, 
+  buildISTISOString, 
+  formatIST, 
+  isTodayIST 
+} from "@/lib/ist-date"
 
 export interface DateTimePickerProps {
   value?: string | null
@@ -35,61 +41,46 @@ export function DateTimePicker({
 }: DateTimePickerProps) {
   const [open, setOpen] = React.useState(false)
 
-  // Parse current value
-  const parsed = React.useMemo(() => {
+  // Parse current value in Indian Standard Time
+  const initialIST = React.useMemo(() => {
     if (!value) return null
-    const d = new Date(value)
-    return isNaN(d.getTime()) ? null : d
+    return getISTComponents(value)
   }, [value])
 
-  const [selectedDate, setSelectedDate] = React.useState<Date | undefined>(parsed || undefined)
-  const [hours12, setHours12] = React.useState<number>(() => {
-    if (!parsed) return 11
-    const h = parsed.getHours()
-    return h === 0 ? 12 : h > 12 ? h - 12 : h
-  })
-  const [minutes, setMinutesVal] = React.useState<number>(() => {
-    if (!parsed) return 0
-    return parsed.getMinutes()
-  })
-  const [period, setPeriod] = React.useState<"AM" | "PM">(() => {
-    if (!parsed) return "AM"
-    return parsed.getHours() >= 12 ? "PM" : "AM"
-  })
+  const [selectedDate, setSelectedDate] = React.useState<Date | undefined>(initialIST?.date)
+  const [hours12, setHours12] = React.useState<number>(initialIST?.hours12 ?? 11)
+  const [minutes, setMinutesVal] = React.useState<number>(initialIST?.minutes ?? 0)
+  const [period, setPeriod] = React.useState<"AM" | "PM">(initialIST?.period ?? "AM")
+
+  const minuteOptions = React.useMemo(() => {
+    const base = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55]
+    if (!base.includes(minutes)) {
+      return [...base, minutes].sort((a, b) => a - b)
+    }
+    return base
+  }, [minutes])
 
   // Synchronize internal state when prop changes
   React.useEffect(() => {
-    if (parsed) {
-      setSelectedDate(parsed)
-      const h = parsed.getHours()
-      setHours12(h === 0 ? 12 : h > 12 ? h - 12 : h)
-      setMinutesVal(parsed.getMinutes())
-      setPeriod(h >= 12 ? "PM" : "AM")
+    if (value) {
+      const comp = getISTComponents(value)
+      setSelectedDate(comp.date)
+      setHours12(comp.hours12)
+      setMinutesVal(comp.minutes)
+      setPeriod(comp.period)
     } else {
       setSelectedDate(undefined)
     }
-  }, [parsed])
+  }, [value])
 
-  // Helper to commit date + time to parent
+  // Helper to commit date + time to parent in IST
   const commit = (date: Date | undefined, h12: number, m: number, p: "AM" | "PM") => {
     if (!date) {
       onChange("")
       return
     }
-
-    let h24 = h12 % 12
-    if (p === "PM") h24 += 12
-
-    const finalDate = new Date(date)
-    finalDate.setHours(h24, m, 0, 0)
-
-    const y = finalDate.getFullYear()
-    const mon = String(finalDate.getMonth() + 1).padStart(2, "0")
-    const d = String(finalDate.getDate()).padStart(2, "0")
-    const hrs = String(finalDate.getHours()).padStart(2, "0")
-    const mins = String(finalDate.getMinutes()).padStart(2, "0")
-
-    onChange(`${y}-${mon}-${d}T${hrs}:${mins}`)
+    const isoIST = buildISTISOString(date, h12, m, p)
+    onChange(isoIST)
   }
 
   // Handle Day Selection from Calendar
@@ -107,37 +98,37 @@ export function DateTimePicker({
     setHours12(h12)
     setMinutesVal(m)
     setPeriod(p)
-    const baseDate = selectedDate || new Date()
+    const baseDate = selectedDate || getISTComponents(new Date()).date
     setSelectedDate(baseDate)
     commit(baseDate, h12, m, p)
   }
 
   // Preset Handlers
   const handlePreset = (type: "today_afternoon" | "tomorrow_morning" | "tomorrow_evening" | "in_2_days" | "next_week") => {
-    const now = new Date()
-    let targetDate = now
+    const nowIST = getISTComponents(new Date()).date
+    let targetDate = nowIST
     let h12 = 11
     let m = 0
     let p: "AM" | "PM" = "AM"
 
     if (type === "today_afternoon") {
-      targetDate = now
+      targetDate = nowIST
       h12 = 4
       p = "PM"
     } else if (type === "tomorrow_morning") {
-      targetDate = addDays(now, 1)
+      targetDate = addDays(nowIST, 1)
       h12 = 10
       p = "AM"
     } else if (type === "tomorrow_evening") {
-      targetDate = addDays(now, 1)
+      targetDate = addDays(nowIST, 1)
       h12 = 4
       p = "PM"
     } else if (type === "in_2_days") {
-      targetDate = addDays(now, 2)
+      targetDate = addDays(nowIST, 2)
       h12 = 11
       p = "AM"
     } else if (type === "next_week") {
-      targetDate = addDays(now, 7)
+      targetDate = addDays(nowIST, 7)
       h12 = 11
       p = "AM"
     }
@@ -151,12 +142,11 @@ export function DateTimePicker({
 
   // Format label for button
   const formattedDisplay = React.useMemo(() => {
-    if (!parsed) return null
+    if (!value) return null
     let prefix = ""
-    if (isToday(parsed)) prefix = "Today, "
-    else if (isTomorrow(parsed)) prefix = "Tomorrow, "
-    return `${prefix}${format(parsed, "dd MMM yyyy, p")}`
-  }, [parsed])
+    if (isTodayIST(value)) prefix = "Today, "
+    return `${prefix}${formatIST(value, "picker")}`
+  }, [value])
 
   return (
     <div className={cn("relative flex items-center w-full", className)}>
@@ -169,7 +159,7 @@ export function DateTimePicker({
             disabled={disabled}
             className={cn(
               "w-full justify-between text-left font-normal h-9 px-3 bg-white border-input hover:bg-slate-50 text-xs",
-              !parsed && "text-muted-foreground",
+              !value && "text-muted-foreground",
               className
             )}
           >
@@ -314,7 +304,7 @@ export function DateTimePicker({
                   onChange={(e) => handleTimeChange(hours12, Number(e.target.value), period)}
                   className="h-8 text-xs border border-slate-200 rounded-md px-2 bg-white text-slate-800 font-medium cursor-pointer focus:outline-none focus:ring-1 focus:ring-blue-500 touch-manipulation"
                 >
-                  {[0, 10, 15, 20, 30, 40, 45, 50].map((m) => (
+                  {minuteOptions.map((m) => (
                     <option key={m} value={m}>
                       {String(m).padStart(2, "0")} min
                     </option>
@@ -377,7 +367,7 @@ export function DateTimePicker({
       </Popover>
 
       {/* Quick Clear Icon if value exists */}
-      {parsed && !disabled && (
+      {value && !disabled && (
         <button
           type="button"
           onClick={(e) => {

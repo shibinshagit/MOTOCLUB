@@ -1083,6 +1083,10 @@ async function createTables() {
     await sql`CREATE INDEX IF NOT EXISTS idx_crm_lead_follow_ups_lead ON crm_lead_follow_ups(lead_id, scheduled_at)`
     await sql`CREATE INDEX IF NOT EXISTS idx_crm_lead_follow_ups_company_status ON crm_lead_follow_ups(company_id, status)`
 
+    await sql`ALTER TABLE crm_lead_follow_ups ADD COLUMN IF NOT EXISTS reminder_sent BOOLEAN DEFAULT false`
+    await sql`ALTER TABLE crm_lead_follow_ups ADD COLUMN IF NOT EXISTS reminder_sent_at TIMESTAMP`
+    await sql`CREATE INDEX IF NOT EXISTS idx_crm_lead_follow_ups_due ON crm_lead_follow_ups(status, reminder_sent, scheduled_at)`
+
     // Backfill from existing leads with next_follow_up_at
     await sql`
       INSERT INTO crm_lead_follow_ups (lead_id, company_id, device_id, scheduled_at, status, note, created_by, created_at)

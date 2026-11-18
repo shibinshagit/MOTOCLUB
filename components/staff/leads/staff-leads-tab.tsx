@@ -23,6 +23,7 @@ import { TableRowsInput } from "@/components/ui/table-rows-input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Loader2, Search, Phone, Calendar, Briefcase, Clock, Activity as ActivityIcon, UserCheck, Car, Plus, Wrench } from "lucide-react"
 import { format, isPast, isToday } from "date-fns"
+import { formatIST, isTodayIST, isPastIST } from "@/lib/ist-date"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
 import { useToast } from "@/components/ui/use-toast"
@@ -127,16 +128,7 @@ export default function StaffLeadsTab() {
     fetchLeads()
   }, [fetchLeads])
 
-  useEffect(() => {
-    const handleNewLead = () => {
-      fetchLeads()
-      fetchSummary()
-    }
-    window.addEventListener("crm:new-lead", handleNewLead)
-    return () => window.removeEventListener("crm:new-lead", handleNewLead)
-  }, [fetchLeads, fetchSummary])
-
-  const loadLeadData = async (id: number) => {
+  const loadLeadData = useCallback(async (id: number) => {
     const [leadRes, actRes, prodRes] = await Promise.all([
       getLeadDetails(id),
       getLeadActivities(id),
@@ -152,9 +144,7 @@ export default function StaffLeadsTab() {
       setEditYear(leadRes.data.year || "")
       
       if (leadRes.data.next_follow_up_at) {
-        // Convert UTC to local datetime string for input
-        const d = new Date(leadRes.data.next_follow_up_at)
-        setEditFollowUp(new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16))
+        setEditFollowUp(leadRes.data.next_follow_up_at)
       } else {
         setEditFollowUp("")
       }
@@ -162,15 +152,41 @@ export default function StaffLeadsTab() {
     if (actRes.success) {
       setActivities(actRes.data)
     }
-  }
+  }, [])
 
-  const handleOpenLead = async (id: number) => {
+  const handleOpenLead = useCallback(async (id: number) => {
     setSelectedLeadId(id)
     setIsModalOpen(true)
     setModalLoading(true)
     await loadLeadData(id)
     setModalLoading(false)
-  }
+  }, [loadLeadData])
+
+  useEffect(() => {
+    const handleNewLead = () => {
+      fetchLeads()
+      fetchSummary()
+    }
+    const handleOpenLeadEvent = (e: any) => {
+      const leadId = e?.detail?.leadId
+      if (leadId) {
+        handleOpenLead(Number(leadId))
+      }
+    }
+    const handleFollowUpReminder = () => {
+      fetchLeads()
+      fetchSummary()
+    }
+
+    window.addEventListener("crm:new-lead", handleNewLead)
+    window.addEventListener("crm:open-lead", handleOpenLeadEvent)
+    window.addEventListener("crm:follow-up-reminder", handleFollowUpReminder)
+    return () => {
+      window.removeEventListener("crm:new-lead", handleNewLead)
+      window.removeEventListener("crm:open-lead", handleOpenLeadEvent)
+      window.removeEventListener("crm:follow-up-reminder", handleFollowUpReminder)
+    }
+  }, [fetchLeads, fetchSummary, handleOpenLead])
 
   const handleSaveNotes = async () => {
     if (!selectedLead) return
@@ -203,7 +219,7 @@ export default function StaffLeadsTab() {
   const handleSaveFollowUpAndVehicle = async () => {
     if (!selectedLead) return
     setSaving(true)
-    const dt = editFollowUp ? new Date(editFollowUp).toISOString() : null
+    const dt = editFollowUp || null
     const res = await saveLeadFollowUpAndVehicle(selectedLead.id, {
       date: dt,
       vehicle: editVehicle,
@@ -286,9 +302,8 @@ export default function StaffLeadsTab() {
   }
 
   const formatFollowUp = (dateStr: string) => {
-    const d = new Date(dateStr)
-    const overdue = isPast(d) && !isToday(d)
-    return <span className={overdue ? "text-red-600 font-medium" : "text-emerald-600"}>{format(d, 'dd MMM, p')}</span>
+    const overdue = isPastIST(dateStr) && !isTodayIST(dateStr)
+    return <span className={overdue ? "text-red-600 font-medium" : "text-emerald-600"}>{formatIST(dateStr, 'short')}</span>
   }
 
   return (
@@ -408,12 +423,15 @@ export default function StaffLeadsTab() {
                   <th className="px-4 py-3 font-medium">Assigned To</th>
                   <th className="px-4 py-3 font-medium">Status</th>
                   <th className="px-4 py-3 font-medium">Follow Up</th>
-                  <th className="px-4 py-3 font-medium text-right">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
                 {leads.map((lead) => (
-                  <tr key={lead.id} className="hover:bg-muted/30">
+                  <tr 
+                    key={lead.id} 
+                    onClick={() => handleOpenLead(lead.id)} 
+                    className="hover:bg-muted/50 cursor-pointer transition-colors"
+                  >
                     <td className="px-4 py-3 font-medium">{lead.lead_number}</td>
                     <td className="px-4 py-3">
                       <div className="font-medium">{lead.name}</div>
@@ -440,9 +458,6 @@ export default function StaffLeadsTab() {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-xs">{lead.next_follow_up_at ? formatFollowUp(lead.next_follow_up_at) : '-'}</td>
-                    <td className="px-4 py-3 text-right">
-                      <Button variant="outline" size="sm" onClick={() => handleOpenLead(lead.id)}>View</Button>
-                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -451,7 +466,11 @@ export default function StaffLeadsTab() {
 
           <div className="grid grid-cols-1 gap-3 md:hidden">
             {leads.map((lead) => (
-              <Card key={lead.id} className="overflow-hidden" onClick={() => handleOpenLead(lead.id)}>
+              <Card 
+                key={lead.id} 
+                className="overflow-hidden cursor-pointer hover:shadow-md transition-all active:scale-[0.99]" 
+                onClick={() => handleOpenLead(lead.id)}
+              >
                 <CardContent className="p-4">
                   <div className="flex justify-between items-start mb-2">
                     <span className="text-xs font-medium text-muted-foreground">{lead.lead_number}</span>
@@ -755,7 +774,7 @@ export default function StaffLeadsTab() {
                                   {act.activity_type === 'FOLLOW_UP_UPDATED' && `updated follow up`}
                                 </span>
                               </p>
-                              <span className="text-xs text-muted-foreground">{format(new Date(act.created_at), 'dd MMM, p')}</span>
+                              <span className="text-xs text-muted-foreground">{formatIST(act.created_at, 'short')}</span>
                             </div>
                             {act.note && act.activity_type !== 'SALE_CREATED' && (
                               <p className="mt-1 text-xs text-muted-foreground bg-white p-2 rounded border">{act.note}</p>

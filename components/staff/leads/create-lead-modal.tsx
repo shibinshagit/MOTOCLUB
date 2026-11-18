@@ -196,7 +196,7 @@ export function CreateLeadModal({
         notes: notes.trim() || null,
         status,
         assigned_to: finalAssignedTo,
-        next_follow_up_at: followUpDate ? new Date(followUpDate).toISOString() : null,
+        next_follow_up_at: followUpDate || null,
         products: selectedProducts.map((p) => ({
           product_id: p.productId,
           product_variant_id: p.variantId

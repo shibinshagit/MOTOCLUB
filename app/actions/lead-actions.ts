@@ -5,6 +5,7 @@ import { getStaffSession } from "@/lib/staff-session"
 import { revalidatePath } from "next/cache"
 import { getDeviceProductStock, getDeviceVariantStock } from "@/lib/inventory-service"
 import { getEcommerceProductUrl } from "@/lib/product-links"
+import { parseToISTDbString, formatIST } from "@/lib/ist-date"
 
 export async function logLeadActivity(tx: any, params: {
   lead_id: number;
@@ -68,16 +69,17 @@ export async function getLeads(params: {
       AND (${params.status && params.status !== "All" ? params.status : null}::text IS NULL OR l.status = ${params.status})
       AND (${params.assigned_filter === 'mine' ? session.staffId : null}::int IS NULL OR l.assigned_to = ${session.staffId})
       AND (${params.assigned_filter === 'unassigned' ? 1 : null}::int IS NULL OR l.assigned_to IS NULL)
-      AND (${params.follow_up_filter === 'today' ? 1 : null}::int IS NULL OR DATE(l.next_follow_up_at AT TIME ZONE 'UTC') = CURRENT_DATE)
-      AND (${params.follow_up_filter === 'upcoming' ? 1 : null}::int IS NULL OR l.next_follow_up_at > NOW())
-      AND (${params.follow_up_filter === 'overdue' ? 1 : null}::int IS NULL OR (l.next_follow_up_at < NOW() AND l.status NOT IN ('Converted', 'Lost', 'Invalid')))
+      AND (${params.follow_up_filter === 'today' ? 1 : null}::int IS NULL OR l.next_follow_up_at::date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date)
+      AND (${params.follow_up_filter === 'upcoming' ? 1 : null}::int IS NULL OR l.next_follow_up_at > (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata'))
+      AND (${params.follow_up_filter === 'overdue' ? 1 : null}::int IS NULL OR (l.next_follow_up_at < (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata') AND l.status NOT IN ('Converted', 'Lost', 'Invalid')))
   `
   const total = Number(countResult[0].count)
 
   const records = await sql`
     SELECT 
       l.id, l.lead_number, l.name, l.phone, l.email, 
-      l.source, l.campaign, l.status, l.created_at, l.next_follow_up_at,
+      l.source, l.campaign, l.status, l.created_at,
+      to_char(l.next_follow_up_at, 'YYYY-MM-DD"T"HH24:MI:SS"+05:30"') as next_follow_up_at,
       l.assigned_to, s.name as assigned_staff_name,
       l.vehicle, l.year
     FROM crm_leads l
@@ -98,9 +100,9 @@ export async function getLeads(params: {
       AND (${params.status && params.status !== "All" ? params.status : null}::text IS NULL OR l.status = ${params.status})
       AND (${params.assigned_filter === 'mine' ? session.staffId : null}::int IS NULL OR l.assigned_to = ${session.staffId})
       AND (${params.assigned_filter === 'unassigned' ? 1 : null}::int IS NULL OR l.assigned_to IS NULL)
-      AND (${params.follow_up_filter === 'today' ? 1 : null}::int IS NULL OR DATE(l.next_follow_up_at AT TIME ZONE 'UTC') = CURRENT_DATE)
-      AND (${params.follow_up_filter === 'upcoming' ? 1 : null}::int IS NULL OR l.next_follow_up_at > NOW())
-      AND (${params.follow_up_filter === 'overdue' ? 1 : null}::int IS NULL OR (l.next_follow_up_at < NOW() AND l.status NOT IN ('Converted', 'Lost', 'Invalid')))
+      AND (${params.follow_up_filter === 'today' ? 1 : null}::int IS NULL OR l.next_follow_up_at::date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date)
+      AND (${params.follow_up_filter === 'upcoming' ? 1 : null}::int IS NULL OR l.next_follow_up_at > (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata'))
+      AND (${params.follow_up_filter === 'overdue' ? 1 : null}::int IS NULL OR (l.next_follow_up_at < (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata') AND l.status NOT IN ('Converted', 'Lost', 'Invalid')))
     ORDER BY COALESCE(l.next_follow_up_at, l.created_at) DESC
     LIMIT ${pageSize} OFFSET ${offset}
   `
@@ -122,6 +124,7 @@ export async function getLeadDetails(leadId: number) {
   const lead = await sql`
     SELECT 
       l.*,
+      to_char(l.next_follow_up_at, 'YYYY-MM-DD"T"HH24:MI:SS"+05:30"') as next_follow_up_at,
       s.name as assigned_staff_name
     FROM crm_leads l
     LEFT JOIN staff s ON l.assigned_to = s.id
@@ -225,7 +228,7 @@ export async function getLeadSummary() {
       SUM(CASE WHEN assigned_to = ${session.staffId} THEN 1 ELSE 0 END) as my_leads,
       SUM(CASE WHEN status = 'Follow Up' THEN 1 ELSE 0 END) as follow_up,
       SUM(CASE WHEN status = 'Interested' THEN 1 ELSE 0 END) as interested,
-      SUM(CASE WHEN next_follow_up_at < NOW() AND status NOT IN ('Converted', 'Lost', 'Invalid') THEN 1 ELSE 0 END) as overdue
+      SUM(CASE WHEN next_follow_up_at < (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata') AND status NOT IN ('Converted', 'Lost', 'Invalid') THEN 1 ELSE 0 END) as overdue
     FROM crm_leads
     WHERE company_id = ${session.companyId}
       AND (device_id IS NULL OR device_id = ${session.deviceId})
@@ -296,6 +299,7 @@ export async function saveLeadFollowUpAndVehicle(leadId: number, params: {
 
   const cleanVehicle = params.vehicle !== undefined ? (params.vehicle?.trim() || null) : null
   const cleanYear = params.year !== undefined ? (params.year?.trim() || null) : null
+  const cleanDate = parseToISTDbString(params.date)
 
   try {
     await sql.begin(async (tx: any) => {
@@ -311,7 +315,7 @@ export async function saveLeadFollowUpAndVehicle(leadId: number, params: {
       await tx`
         UPDATE crm_leads 
         SET 
-          next_follow_up_at = ${params.date}, 
+          next_follow_up_at = CASE WHEN ${cleanDate}::text IS NULL THEN NULL ELSE to_timestamp(${cleanDate}, 'YYYY-MM-DD HH24:MI:SS') END, 
           vehicle = ${cleanVehicle}, 
           year = ${cleanYear}, 
           updated_at = NOW() 
@@ -319,9 +323,9 @@ export async function saveLeadFollowUpAndVehicle(leadId: number, params: {
       `
 
       const changes: string[] = []
-      const oldDateStr = old[0].next_follow_up_at ? new Date(old[0].next_follow_up_at).toISOString() : null
-      if (params.date !== oldDateStr) {
-        changes.push(params.date ? `Follow-up set for ${new Date(params.date).toLocaleString()}` : "Follow-up removed")
+      const oldDateStr = old[0].next_follow_up_at ? parseToISTDbString(old[0].next_follow_up_at) : null
+      if (cleanDate !== oldDateStr) {
+        changes.push(params.date ? `Follow-up set for ${formatIST(params.date, "short")}` : "Follow-up removed")
       }
       if (cleanVehicle !== (old[0].vehicle || null) || cleanYear !== (old[0].year || null)) {
         changes.push(`Vehicle: ${cleanVehicle || "None"}${cleanYear ? ` (${cleanYear})` : ""}`)
@@ -371,7 +375,19 @@ export async function getLeadFollowUps(leadId: number): Promise<{ success: boole
   try {
     const records = await sql`
       SELECT 
-        fu.*,
+        fu.id,
+        fu.lead_id,
+        fu.company_id,
+        fu.device_id,
+        to_char(fu.scheduled_at, 'YYYY-MM-DD"T"HH24:MI:SS"+05:30"') as scheduled_at,
+        fu.status,
+        fu.note,
+        fu.outcome_note,
+        fu.created_by,
+        fu.completed_by,
+        to_char(fu.completed_at, 'YYYY-MM-DD"T"HH24:MI:SS"+05:30"') as completed_at,
+        to_char(fu.created_at, 'YYYY-MM-DD"T"HH24:MI:SS"+05:30"') as created_at,
+        to_char(fu.updated_at, 'YYYY-MM-DD"T"HH24:MI:SS"+05:30"') as updated_at,
         s1.name as created_by_name,
         s2.name as completed_by_name
       FROM crm_lead_follow_ups fu
@@ -400,7 +416,7 @@ export async function createLeadFollowUp(params: {
   if (!session) return { success: false, message: "Unauthorized" }
 
   const cleanNote = params.note?.trim() || null
-  const scheduledIso = new Date(params.scheduledAt).toISOString()
+  const scheduledDb = parseToISTDbString(params.scheduledAt)
 
   try {
     await sql.begin(async (tx: any) => {
@@ -420,7 +436,7 @@ export async function createLeadFollowUp(params: {
           lead_id, company_id, device_id, scheduled_at, status, note, created_by
         ) VALUES (
           ${params.leadId}, ${session.companyId}, ${session.deviceId},
-          ${scheduledIso}, 'scheduled', ${cleanNote}, ${session.staffId}
+          to_timestamp(${scheduledDb}, 'YYYY-MM-DD HH24:MI:SS'), 'scheduled', ${cleanNote}, ${session.staffId}
         )
       `
 
@@ -443,8 +459,8 @@ export async function createLeadFollowUp(params: {
         staff_id: session.staffId,
         activity_type: 'FOLLOW_UP_SET',
         note: cleanNote 
-          ? `Follow-up scheduled for ${new Date(params.scheduledAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}: "${cleanNote}"`
-          : `Follow-up scheduled for ${new Date(params.scheduledAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}`
+          ? `Follow-up scheduled for ${formatIST(params.scheduledAt, 'short')}: "${cleanNote}"`
+          : `Follow-up scheduled for ${formatIST(params.scheduledAt, 'short')}`
       })
     })
 
@@ -495,14 +511,14 @@ export async function completeLeadFollowUp(params: {
 
       // 3. If staff also provided next follow-up date, insert it directly
       if (params.nextScheduledAt) {
-        const nextIso = new Date(params.nextScheduledAt).toISOString()
+        const nextDb = parseToISTDbString(params.nextScheduledAt)
         const nextCleanNote = params.nextNote?.trim() || null
         await tx`
           INSERT INTO crm_lead_follow_ups (
             lead_id, company_id, device_id, scheduled_at, status, note, created_by
           ) VALUES (
             ${leadId}, ${session.companyId}, ${session.deviceId},
-            ${nextIso}, 'scheduled', ${nextCleanNote}, ${session.staffId}
+            to_timestamp(${nextDb}, 'YYYY-MM-DD HH24:MI:SS'), 'scheduled', ${nextCleanNote}, ${session.staffId}
           )
         `
       }
@@ -549,7 +565,7 @@ export async function rescheduleLeadFollowUp(params: {
   const session = await getStaffSession()
   if (!session) return { success: false, message: "Unauthorized" }
 
-  const newIso = new Date(params.newScheduledAt).toISOString()
+  const newDb = parseToISTDbString(params.newScheduledAt)
   const cleanNote = params.note?.trim() || null
 
   try {
@@ -566,8 +582,10 @@ export async function rescheduleLeadFollowUp(params: {
 
       await tx`
         UPDATE crm_lead_follow_ups
-        SET scheduled_at = ${newIso},
+        SET scheduled_at = to_timestamp(${newDb}, 'YYYY-MM-DD HH24:MI:SS'),
             note = COALESCE(${cleanNote}, note),
+            reminder_sent = false,
+            reminder_sent_at = NULL,
             updated_at = NOW()
         WHERE id = ${params.followUpId}
       `
@@ -588,7 +606,7 @@ export async function rescheduleLeadFollowUp(params: {
         company_id: session.companyId,
         staff_id: session.staffId,
         activity_type: 'FOLLOW_UP_UPDATED',
-        note: `Rescheduled to ${new Date(params.newScheduledAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}`
+        note: `Rescheduled to ${formatIST(params.newScheduledAt, 'short')}`
       })
     })
 
@@ -855,7 +873,7 @@ export async function createManualLead(input: CreateManualLeadInput) {
   const cleanNotes = input.notes?.trim() || null
   const cleanStatus = input.status?.trim() || "New"
   const assignedTo = input.assigned_to ? Number(input.assigned_to) : (session.staffId || null)
-  const nextFollowUpAt = input.next_follow_up_at ? new Date(input.next_follow_up_at).toISOString() : null
+  const nextFollowUpAt = parseToISTDbString(input.next_follow_up_at)
   const products = Array.isArray(input.products) ? input.products : []
 
   const leadNumber = `LD-${Date.now().toString().slice(-6)}${Math.floor(Math.random() * 1000)}`
@@ -909,7 +927,8 @@ export async function createManualLead(input: CreateManualLeadInput) {
           ${leadNumber}, ${agencyId}, ${companyId}, ${deviceId}, ${externalLeadId},
           ${cleanName}, ${cleanPhone}, ${cleanEmail}, ${cleanSource}, ${cleanCampaign},
           'Direct / Manual Entry', ${cleanMessage}, ${cleanNotes},
-          ${cleanVehicle}, ${cleanYear}, ${cleanStatus}, ${assignedTo}, ${nextFollowUpAt},
+          ${cleanVehicle}, ${cleanYear}, ${cleanStatus}, ${assignedTo},
+          CASE WHEN ${nextFollowUpAt}::text IS NULL THEN NULL ELSE to_timestamp(${nextFollowUpAt}, 'YYYY-MM-DD HH24:MI:SS') END,
           NOW(), NOW()
         )
         RETURNING id, lead_number
@@ -932,7 +951,7 @@ export async function createManualLead(input: CreateManualLeadInput) {
             lead_id, company_id, device_id, scheduled_at, status, note, created_by
           ) VALUES (
             ${insertedLead.id}, ${companyId}, ${deviceId},
-            ${nextFollowUpAt}, 'scheduled',
+            to_timestamp(${nextFollowUpAt}, 'YYYY-MM-DD HH24:MI:SS'), 'scheduled',
             ${cleanNotes || 'Initial Follow-up'}, ${session.staffId}
           )
         `

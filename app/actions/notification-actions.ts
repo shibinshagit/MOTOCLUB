@@ -2,6 +2,7 @@
 
 import { sql } from "@/lib/db"
 import { emitNotificationToDevice } from "@/lib/socket-server"
+import { formatIST } from "@/lib/ist-date"
 
 export interface NotificationItem {
   id: number
@@ -40,6 +41,13 @@ export async function getNotifications(
     const isStaffRole = role === "staff" || role === "media_manager"
     const isAdminRole = role === "admin"
 
+    // If staff role, check for any due follow-up reminders in the 30-min window
+    if (isStaffRole) {
+      try {
+        await checkAndSendFollowUpReminders(undefined, deviceId)
+      } catch (_) {}
+    }
+
     let rows: any[] = []
     if (filter === "unchecked") {
       rows = await sql`
@@ -48,7 +56,7 @@ export async function getNotifications(
         WHERE device_id = ${deviceId} 
           AND status = 'unchecked'
           AND (
-            ${isStaffRole}::boolean IS FALSE OR (type = 'new_lead' OR (data->>'targetRole') = 'staff')
+            ${isStaffRole}::boolean IS FALSE OR (type IN ('new_lead', 'follow_up_reminder') OR (data->>'targetRole') = 'staff')
           )
           AND (
             ${isAdminRole}::boolean IS FALSE OR (type IN ('order', 'postponed', 'reject', 'bulk_order') OR (data->>'targetRole') = 'admin')
@@ -63,7 +71,7 @@ export async function getNotifications(
         WHERE device_id = ${deviceId} 
           AND status = 'checked'
           AND (
-            ${isStaffRole}::boolean IS FALSE OR (type = 'new_lead' OR (data->>'targetRole') = 'staff')
+            ${isStaffRole}::boolean IS FALSE OR (type IN ('new_lead', 'follow_up_reminder') OR (data->>'targetRole') = 'staff')
           )
           AND (
             ${isAdminRole}::boolean IS FALSE OR (type IN ('order', 'postponed', 'reject', 'bulk_order') OR (data->>'targetRole') = 'admin')
@@ -77,7 +85,7 @@ export async function getNotifications(
         FROM notifications
         WHERE device_id = ${deviceId}
           AND (
-            ${isStaffRole}::boolean IS FALSE OR (type = 'new_lead' OR (data->>'targetRole') = 'staff')
+            ${isStaffRole}::boolean IS FALSE OR (type IN ('new_lead', 'follow_up_reminder') OR (data->>'targetRole') = 'staff')
           )
           AND (
             ${isAdminRole}::boolean IS FALSE OR (type IN ('order', 'postponed', 'reject', 'bulk_order') OR (data->>'targetRole') = 'admin')
@@ -93,7 +101,7 @@ export async function getNotifications(
       WHERE device_id = ${deviceId} 
         AND status = 'unchecked'
         AND (
-          ${isStaffRole}::boolean IS FALSE OR (type = 'new_lead' OR (data->>'targetRole') = 'staff')
+          ${isStaffRole}::boolean IS FALSE OR (type IN ('new_lead', 'follow_up_reminder') OR (data->>'targetRole') = 'staff')
         )
         AND (
           ${isAdminRole}::boolean IS FALSE OR (type IN ('order', 'postponed', 'reject', 'bulk_order') OR (data->>'targetRole') = 'admin')
@@ -143,13 +151,20 @@ export async function getUnreadNotificationCount(
     const isStaffRole = role === "staff" || role === "media_manager"
     const isAdminRole = role === "admin"
 
+    // If staff role, run a quick check for due follow-up reminders
+    if (isStaffRole) {
+      try {
+        await checkAndSendFollowUpReminders(undefined, deviceId)
+      } catch (_) {}
+    }
+
     const result = await sql`
       SELECT COUNT(*)::int as count
       FROM notifications
       WHERE device_id = ${deviceId} 
         AND status = 'unchecked'
         AND (
-          ${isStaffRole}::boolean IS FALSE OR (type = 'new_lead' OR (data->>'targetRole') = 'staff')
+          ${isStaffRole}::boolean IS FALSE OR (type IN ('new_lead', 'follow_up_reminder') OR (data->>'targetRole') = 'staff')
         )
         AND (
           ${isAdminRole}::boolean IS FALSE OR (type IN ('order', 'postponed', 'reject', 'bulk_order') OR (data->>'targetRole') = 'admin')
@@ -223,7 +238,7 @@ export async function markAllNotificationsAsChecked(
       WHERE device_id = ${deviceId} 
         AND status = 'unchecked'
         AND (
-          ${isStaffRole}::boolean IS FALSE OR (type = 'new_lead' OR (data->>'targetRole') = 'staff')
+          ${isStaffRole}::boolean IS FALSE OR (type IN ('new_lead', 'follow_up_reminder') OR (data->>'targetRole') = 'staff')
         )
         AND (
           ${isAdminRole}::boolean IS FALSE OR (type IN ('order', 'postponed', 'reject', 'bulk_order') OR (data->>'targetRole') = 'admin')
@@ -504,4 +519,153 @@ export async function createNewLeadNotification(
     return { success: false, count: 0, message: error?.message || "Failed to create lead notification" }
   }
 }
+
+/**
+ * Check for scheduled follow-ups that are due in the next 30 minutes,
+ * create a notification for the assigned staff's device, and emit it in real time.
+ * Prevents duplicates via atomic UPDATE on crm_lead_follow_ups.reminder_sent.
+ */
+export async function checkAndSendFollowUpReminders(
+  companyId?: number,
+  fallbackDeviceId?: number,
+): Promise<{ success: boolean; count: number; message?: string }> {
+  try {
+    // Look for follow-ups due in the next 30 minutes:
+    // status = 'scheduled'
+    // reminder_sent = false
+    // scheduled_at <= NOW() + 30 minutes
+    // scheduled_at >= NOW() - 2 hours (avoids triggering ancient backlogs)
+    // lead is active (NOT IN Converted, Lost, Invalid)
+    // lead has assigned_to IS NOT NULL
+    const dueFollowUps = await sql`
+      SELECT 
+        fu.id as follow_up_id,
+        to_char(fu.scheduled_at, 'YYYY-MM-DD"T"HH24:MI:SS"+05:30"') as scheduled_at,
+        fu.note as follow_up_note,
+        fu.company_id,
+        l.id as lead_id,
+        l.lead_number,
+        l.name as customer_name,
+        l.phone,
+        l.vehicle,
+        l.year,
+        l.assigned_to,
+        l.device_id as lead_device_id,
+        s.name as staff_name,
+        s.device_id as staff_device_id
+      FROM crm_lead_follow_ups fu
+      JOIN crm_leads l ON fu.lead_id = l.id
+      JOIN staff s ON l.assigned_to = s.id
+      WHERE fu.status = 'scheduled'
+        AND COALESCE(fu.reminder_sent, false) = false
+        AND l.status NOT IN ('Converted', 'Lost', 'Invalid')
+        AND l.assigned_to IS NOT NULL
+        AND fu.scheduled_at <= (NOW() AT TIME ZONE 'Asia/Kolkata' + INTERVAL '30 minutes')
+        AND fu.scheduled_at >= (NOW() AT TIME ZONE 'Asia/Kolkata' - INTERVAL '2 hours')
+        AND (${companyId ?? null}::int IS NULL OR fu.company_id = ${companyId ?? null})
+      ORDER BY fu.scheduled_at ASC
+      LIMIT 25
+    `
+
+    if (!dueFollowUps || dueFollowUps.length === 0) {
+      return { success: true, count: 0 }
+    }
+
+    let sentCount = 0
+
+    for (const row of dueFollowUps) {
+      // Preferred device: staff's assigned device. Fallbacks: lead's device, or current deviceId.
+      const targetDeviceId = Number(row.staff_device_id || row.lead_device_id || fallbackDeviceId)
+      if (!targetDeviceId || isNaN(targetDeviceId)) continue
+
+      // Atomically mark reminder_sent = true to prevent duplicate triggers under concurrent calls
+      const updated = await sql`
+        UPDATE crm_lead_follow_ups
+        SET reminder_sent = true, reminder_sent_at = NOW(), updated_at = NOW()
+        WHERE id = ${row.follow_up_id} AND COALESCE(reminder_sent, false) = false
+        RETURNING id
+      `
+
+      // If already processed by another concurrent check, skip
+      if (!updated || updated.length === 0) {
+        continue
+      }
+
+      // Format scheduled time for display in Indian Standard Time (e.g. "10:00 AM")
+      const timeStr = formatIST(row.scheduled_at, "time")
+
+      const title = `Follow-Up in 30 Mins: Lead #${row.lead_number}`
+      const message = `Follow-up scheduled at ${timeStr} with ${row.customer_name}. Lead #${row.lead_number}.`
+
+      const dataPayload = {
+        targetRole: "staff",
+        targetStaffId: row.assigned_to,
+        leadId: row.lead_id,
+        leadNumber: row.lead_number,
+        followUpId: row.follow_up_id,
+        scheduledAt: row.scheduled_at,
+        customerName: row.customer_name,
+        name: row.customer_name,
+        phone: row.phone || null,
+        vehicle: row.vehicle || null,
+        year: row.year || null,
+        note: row.follow_up_note || null,
+      }
+
+      const inserted = await sql`
+        INSERT INTO notifications (
+          device_id,
+          company_id,
+          type,
+          title,
+          message,
+          internal_note,
+          data,
+          status,
+          created_at
+        ) VALUES (
+          ${targetDeviceId},
+          ${row.company_id},
+          'follow_up_reminder',
+          ${title},
+          ${message},
+          NULL,
+          ${JSON.stringify(dataPayload)}::jsonb,
+          'unchecked',
+          NOW()
+        )
+        RETURNING *
+      `
+
+      if (inserted && inserted.length > 0) {
+        const notifRow = inserted[0]
+        const notifItem: NotificationItem = {
+          id: notifRow.id,
+          device_id: notifRow.device_id,
+          company_id: notifRow.company_id,
+          type: notifRow.type,
+          title: notifRow.title,
+          message: notifRow.message,
+          internal_note: notifRow.internal_note,
+          data: dataPayload,
+          status: notifRow.status,
+          created_at: new Date(notifRow.created_at).toISOString(),
+          read_at: null,
+          created_by_staff_id: null,
+          created_by_staff_name: null,
+        }
+
+        // Emit real-time notification to socket room and SSE clients
+        emitNotificationToDevice(targetDeviceId, notifItem)
+        sentCount++
+      }
+    }
+
+    return { success: true, count: sentCount }
+  } catch (error: any) {
+    console.error("Error checking and sending follow-up reminders:", error)
+    return { success: false, count: 0, message: error?.message || "Failed to check reminders" }
+  }
+}
+
 
