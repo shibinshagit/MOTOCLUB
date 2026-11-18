@@ -53,3 +53,51 @@ export async function uploadProductFileFromClient(
 
   return result.url
 }
+
+export async function uploadReviewFileFromClient(
+  file: File,
+  saleId: number | string,
+  type: "image" | "video"
+): Promise<string> {
+  const timestamp = Date.now()
+  const safeFileName = sanitizeName(file.name)
+  const basePath =
+    type === "video"
+      ? `reviews/videos/${saleId}-${timestamp}-${safeFileName}`
+      : `reviews/${saleId}-${timestamp}-${safeFileName}`
+
+  const response = await fetch("/api/blob/client-token", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      pathname: basePath,
+      contentType: file.type,
+      type,
+    }),
+  })
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}))
+    const errorMessage = payload?.error || `Upload authorization failed (${response.status})`
+    throw new Error(errorMessage)
+  }
+
+  const { clientToken } = (await response.json()) as { clientToken?: string }
+  if (!clientToken) {
+    throw new Error("Blob client token was not returned by server")
+  }
+
+  const result = await put(basePath, file, {
+    access: "public",
+    token: clientToken,
+    contentType: file.type || undefined,
+    multipart: file.size > 20 * 1024 * 1024,
+  })
+
+  if (!result || !result.url) {
+    throw new Error("File upload succeeded but no URL was returned")
+  }
+
+  return result.url
+}
+

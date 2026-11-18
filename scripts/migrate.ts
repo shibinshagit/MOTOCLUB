@@ -1145,6 +1145,25 @@ async function createTables() {
     await sql`CREATE INDEX IF NOT EXISTS idx_notifications_device_status ON notifications(device_id, status)`
     await sql`CREATE INDEX IF NOT EXISTS idx_notifications_device_created ON notifications(device_id, created_at DESC)`
   })
+
+  await run("sale_reviews", async () => {
+    await sql`
+      CREATE TABLE IF NOT EXISTS sale_reviews (
+        id SERIAL PRIMARY KEY,
+        sale_id INTEGER NOT NULL UNIQUE REFERENCES sales(id) ON DELETE CASCADE,
+        company_id INTEGER,
+        device_id INTEGER,
+        staff_id INTEGER REFERENCES staff(id) ON DELETE SET NULL,
+        customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL,
+        review_text TEXT,
+        media_urls JSONB DEFAULT '[]'::jsonb,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `
+    await sql`CREATE INDEX IF NOT EXISTS idx_sale_reviews_sale_id ON sale_reviews(sale_id)`
+    await sql`CREATE INDEX IF NOT EXISTS idx_sale_reviews_company_id ON sale_reviews(company_id)`
+  })
 }
 
 async function upgradeLegacyColumns() {
