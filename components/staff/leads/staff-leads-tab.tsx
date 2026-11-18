@@ -29,6 +29,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { JobCardModal } from "@/components/shared/job-card/job-card-modal"
 import { useAppSelector } from "@/store/hooks"
 import { selectActiveStaff } from "@/store/slices/staffSlice"
+import { selectDeviceId } from "@/store/slices/deviceSlice"
 import { CreateLeadModal } from "./create-lead-modal"
 
 const STATUSES = ['All', 'New', 'Assigned', 'Contacted', 'Follow Up', 'Interested', 'Converted', 'Lost', 'Invalid']
@@ -36,6 +37,7 @@ const MUTABLE_STATUSES = ['New', 'Assigned', 'Contacted', 'Follow Up', 'Interest
 
 export default function StaffLeadsTab() {
   const activeStaff = useAppSelector(selectActiveStaff)
+  const deviceId = useAppSelector(selectDeviceId)
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const [leads, setLeads] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -802,6 +804,7 @@ export default function StaffLeadsTab() {
         }}
         staffList={staffList}
         currentStaffId={activeStaff?.id}
+        deviceId={activeStaff?.device_id || deviceId || undefined}
       />
     </div>
   )

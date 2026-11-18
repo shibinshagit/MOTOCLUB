@@ -354,7 +354,7 @@ export async function getCompanyStaff() {
     SELECT id, name, role
     FROM staff
     WHERE company_id = ${session.companyId}
-      AND device_id = ${session.deviceId}
+      AND (device_id = ${session.deviceId} OR device_id IS NULL OR id = ${session.staffId})
       AND is_active = true
     ORDER BY name ASC
   `
@@ -370,7 +370,7 @@ export async function assignLead(leadId: number, staffId: number | null) {
       SELECT id FROM staff 
       WHERE id = ${staffId} 
         AND company_id = ${session.companyId} 
-        AND device_id = ${session.deviceId}
+        AND (device_id = ${session.deviceId} OR device_id IS NULL OR id = ${session.staffId})
     `
     if (checkStaff.length === 0) return { success: false, message: "Invalid staff assignment" }
   }
@@ -555,7 +555,7 @@ export async function createManualLead(input: CreateManualLeadInput) {
   const cleanMessage = input.message?.trim() || null
   const cleanNotes = input.notes?.trim() || null
   const cleanStatus = input.status?.trim() || "New"
-  const assignedTo = input.assigned_to ? Number(input.assigned_to) : null
+  const assignedTo = input.assigned_to ? Number(input.assigned_to) : (session.staffId || null)
   const nextFollowUpAt = input.next_follow_up_at ? new Date(input.next_follow_up_at).toISOString() : null
   const products = Array.isArray(input.products) ? input.products : []
 
