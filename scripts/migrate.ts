@@ -1062,6 +1062,47 @@ async function createTables() {
     await sql`CREATE INDEX IF NOT EXISTS idx_crm_lead_products_product ON crm_lead_products(product_id)`
   })
 
+  await run("crm_lead_follow_ups", async () => {
+    await sql`
+      CREATE TABLE IF NOT EXISTS crm_lead_follow_ups (
+        id SERIAL PRIMARY KEY,
+        lead_id INTEGER NOT NULL REFERENCES crm_leads(id) ON DELETE CASCADE,
+        company_id INTEGER NOT NULL REFERENCES companies(id),
+        device_id INTEGER REFERENCES devices(id),
+        scheduled_at TIMESTAMP NOT NULL,
+        status VARCHAR(30) NOT NULL DEFAULT 'scheduled',
+        note TEXT,
+        outcome_note TEXT,
+        created_by INTEGER REFERENCES staff(id),
+        completed_by INTEGER REFERENCES staff(id),
+        completed_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `
+    await sql`CREATE INDEX IF NOT EXISTS idx_crm_lead_follow_ups_lead ON crm_lead_follow_ups(lead_id, scheduled_at)`
+    await sql`CREATE INDEX IF NOT EXISTS idx_crm_lead_follow_ups_company_status ON crm_lead_follow_ups(company_id, status)`
+
+    // Backfill from existing leads with next_follow_up_at
+    await sql`
+      INSERT INTO crm_lead_follow_ups (lead_id, company_id, device_id, scheduled_at, status, note, created_by, created_at)
+      SELECT 
+        l.id, 
+        l.company_id, 
+        l.device_id, 
+        l.next_follow_up_at, 
+        'scheduled', 
+        COALESCE(l.notes, 'Initial Follow-up'), 
+        l.assigned_to, 
+        COALESCE(l.updated_at, l.created_at, NOW())
+      FROM crm_leads l
+      WHERE l.next_follow_up_at IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM crm_lead_follow_ups fu WHERE fu.lead_id = l.id
+        )
+    `
+  })
+
   await run("product_purchase_actions", async () => {
     await sql`
       CREATE TABLE IF NOT EXISTS product_purchase_actions (

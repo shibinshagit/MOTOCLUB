@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/components/ui/use-toast"
 import { createManualLead } from "@/app/actions/lead-actions"
 import ProductSelectSimple from "@/components/sales/product-select-simple"
+import { DateTimePicker } from "@/components/ui/date-time-picker"
 import { useAppSelector } from "@/store/hooks"
 import { selectDeviceId } from "@/store/slices/deviceSlice"
 import { selectActiveStaff } from "@/store/slices/staffSlice"
@@ -428,11 +429,11 @@ export function CreateLeadModal({
                 <Label htmlFor="lead-followup" className="text-xs font-medium">
                   Next Follow-Up
                 </Label>
-                <Input
+                <DateTimePicker
                   id="lead-followup"
-                  type="datetime-local"
                   value={followUpDate}
-                  onChange={(e) => setFollowUpDate(e.target.value)}
+                  onChange={setFollowUpDate}
+                  placeholder="Select date & time (Optional)"
                 />
               </div>
             </div>
