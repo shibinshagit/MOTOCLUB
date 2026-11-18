@@ -21,7 +21,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { TableRowsInput } from "@/components/ui/table-rows-input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Loader2, Search, Phone, Calendar, Briefcase, Clock, Activity as ActivityIcon, UserCheck, Car, Plus } from "lucide-react"
+import { Loader2, Search, Phone, Calendar, Briefcase, Clock, Activity as ActivityIcon, UserCheck, Car, Plus, Wrench } from "lucide-react"
 import { format, isPast, isToday } from "date-fns"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
@@ -526,9 +526,24 @@ export default function StaffLeadsTab() {
                     </Button>
                   </>
                 ) : (
-                  <Button size="sm" onClick={() => setIsConvertModalOpen(true)} className="bg-emerald-600 hover:bg-emerald-700">
-                    Convert to Customer
-                  </Button>
+                  <>
+                    <Button 
+                      size="sm" 
+                      onClick={() => setIsJobCardModalOpen(true)} 
+                      className="bg-blue-600 hover:bg-blue-700 text-white gap-1.5"
+                    >
+                      <Wrench className="w-3.5 h-3.5" />
+                      Convert to Job Card
+                    </Button>
+                    <Button 
+                      size="sm" 
+                      onClick={() => setIsConvertModalOpen(true)} 
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5"
+                    >
+                      <UserCheck className="w-3.5 h-3.5" />
+                      Convert to Customer
+                    </Button>
+                  </>
                 )}
               </div>
             )}
@@ -815,13 +830,19 @@ export default function StaffLeadsTab() {
               fetchSummary()
             }
           }}
-          initialCustomer={selectedLead?.converted_customer_id ? {
-            id: selectedLead.converted_customer_id,
-            name: selectedLead.name,
-            phone: selectedLead.phone
-          } : null}
+          initialCustomer={{
+            id: selectedLead?.converted_customer_id || null,
+            name: selectedLead?.name || "",
+            phone: selectedLead?.phone || ""
+          }}
           crmLeadId={selectedLead?.id}
           initialProducts={leadProducts}
+          initialNotes={
+            [
+              selectedLead?.vehicle ? `Vehicle: ${selectedLead.vehicle}${selectedLead.year ? ` (${selectedLead.year})` : ''}` : null,
+              selectedLead?.notes ? `Lead Notes: ${selectedLead.notes}` : null
+            ].filter(Boolean).join('\n')
+          }
           canCreateProducts={false}
         />
       )}

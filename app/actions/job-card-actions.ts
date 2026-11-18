@@ -256,7 +256,7 @@ export async function createJobCard(input: JobCardInput) {
         if (lead.converted_sale_id) {
           return { alreadyConverted: true, saleId: lead.converted_sale_id }
         }
-        if (lead.converted_customer_id !== resolvedCustomerId) {
+        if (lead.converted_customer_id && lead.converted_customer_id !== resolvedCustomerId) {
           throw new Error("Customer mismatch for this CRM lead.")
         }
       }
@@ -439,7 +439,9 @@ export async function createJobCard(input: JobCardInput) {
           UPDATE crm_leads
           SET
             converted_sale_id = ${saleId},
+            converted_customer_id = COALESCE(converted_customer_id, ${resolvedCustomerId}),
             status = 'Converted',
+            converted_at = COALESCE(converted_at, NOW()),
             updated_at = NOW()
           WHERE id = ${input.crmLeadId}
             AND company_id = ${session.companyId}

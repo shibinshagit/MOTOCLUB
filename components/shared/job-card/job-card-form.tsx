@@ -53,6 +53,7 @@ export function JobCardForm({
   initialCustomer,
   crmLeadId,
   initialProducts,
+  initialNotes,
   canCreateProducts = true,
   onSuccess,
 }: {
@@ -61,6 +62,7 @@ export function JobCardForm({
   initialCustomer?: any
   crmLeadId?: number
   initialProducts?: any[]
+  initialNotes?: string
   /** Staff can only pick existing products; admins keep "Add New Product". */
   canCreateProducts?: boolean
   onSuccess?: (data?: any) => void
@@ -351,11 +353,14 @@ export function JobCardForm({
           }
         })
       }
+      if (initialNotes) {
+        setShippingNotes(initialNotes)
+      }
       markHydrated()
     } else {
       markHydrated()
     }
-  }, [editSaleId, initialCustomer, getDraft, hasMeaningfulJobCardData, markHydrated])
+  }, [editSaleId, initialCustomer, initialNotes, getDraft, hasMeaningfulJobCardData, markHydrated])
 
   const loadExistingData = async (id: number) => {
     setIsLoading(true)
