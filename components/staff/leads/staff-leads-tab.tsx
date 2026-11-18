@@ -12,6 +12,7 @@ import {
   assignLead,
   saveLeadFollowUpAndVehicle,
   setLeadFollowUp,
+  saveLeadVehicleDetails,
   getLeadActivities,
   convertLeadToCustomer
 } from "@/app/actions/lead-actions"
@@ -20,8 +21,9 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { TableRowsInput } from "@/components/ui/table-rows-input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Loader2, Search, Phone, Calendar, Briefcase, Clock, Activity as ActivityIcon, UserCheck, Car, Plus } from "lucide-react"
+import { Loader2, Search, Phone, Calendar, Briefcase, Clock, Activity as ActivityIcon, UserCheck, Car, Plus, Wrench } from "lucide-react"
 import { format, isPast, isToday } from "date-fns"
+import { formatIST, isTodayIST, isPastIST } from "@/lib/ist-date"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
 import { useToast } from "@/components/ui/use-toast"
@@ -29,13 +31,16 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { JobCardModal } from "@/components/shared/job-card/job-card-modal"
 import { useAppSelector } from "@/store/hooks"
 import { selectActiveStaff } from "@/store/slices/staffSlice"
+import { selectDeviceId } from "@/store/slices/deviceSlice"
 import { CreateLeadModal } from "./create-lead-modal"
+import { LeadFollowUpsSection } from "./lead-follow-ups-section"
 
 const STATUSES = ['All', 'New', 'Assigned', 'Contacted', 'Follow Up', 'Interested', 'Converted', 'Lost', 'Invalid']
 const MUTABLE_STATUSES = ['New', 'Assigned', 'Contacted', 'Follow Up', 'Interested', 'Converted', 'Lost', 'Invalid']
 
 export default function StaffLeadsTab() {
   const activeStaff = useAppSelector(selectActiveStaff)
+  const deviceId = useAppSelector(selectDeviceId)
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const [leads, setLeads] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -123,16 +128,7 @@ export default function StaffLeadsTab() {
     fetchLeads()
   }, [fetchLeads])
 
-  useEffect(() => {
-    const handleNewLead = () => {
-      fetchLeads()
-      fetchSummary()
-    }
-    window.addEventListener("crm:new-lead", handleNewLead)
-    return () => window.removeEventListener("crm:new-lead", handleNewLead)
-  }, [fetchLeads, fetchSummary])
-
-  const loadLeadData = async (id: number) => {
+  const loadLeadData = useCallback(async (id: number) => {
     const [leadRes, actRes, prodRes] = await Promise.all([
       getLeadDetails(id),
       getLeadActivities(id),
@@ -148,9 +144,7 @@ export default function StaffLeadsTab() {
       setEditYear(leadRes.data.year || "")
       
       if (leadRes.data.next_follow_up_at) {
-        // Convert UTC to local datetime string for input
-        const d = new Date(leadRes.data.next_follow_up_at)
-        setEditFollowUp(new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16))
+        setEditFollowUp(leadRes.data.next_follow_up_at)
       } else {
         setEditFollowUp("")
       }
@@ -158,15 +152,41 @@ export default function StaffLeadsTab() {
     if (actRes.success) {
       setActivities(actRes.data)
     }
-  }
+  }, [])
 
-  const handleOpenLead = async (id: number) => {
+  const handleOpenLead = useCallback(async (id: number) => {
     setSelectedLeadId(id)
     setIsModalOpen(true)
     setModalLoading(true)
     await loadLeadData(id)
     setModalLoading(false)
-  }
+  }, [loadLeadData])
+
+  useEffect(() => {
+    const handleNewLead = () => {
+      fetchLeads()
+      fetchSummary()
+    }
+    const handleOpenLeadEvent = (e: any) => {
+      const leadId = e?.detail?.leadId
+      if (leadId) {
+        handleOpenLead(Number(leadId))
+      }
+    }
+    const handleFollowUpReminder = () => {
+      fetchLeads()
+      fetchSummary()
+    }
+
+    window.addEventListener("crm:new-lead", handleNewLead)
+    window.addEventListener("crm:open-lead", handleOpenLeadEvent)
+    window.addEventListener("crm:follow-up-reminder", handleFollowUpReminder)
+    return () => {
+      window.removeEventListener("crm:new-lead", handleNewLead)
+      window.removeEventListener("crm:open-lead", handleOpenLeadEvent)
+      window.removeEventListener("crm:follow-up-reminder", handleFollowUpReminder)
+    }
+  }, [fetchLeads, fetchSummary, handleOpenLead])
 
   const handleSaveNotes = async () => {
     if (!selectedLead) return
@@ -199,7 +219,7 @@ export default function StaffLeadsTab() {
   const handleSaveFollowUpAndVehicle = async () => {
     if (!selectedLead) return
     setSaving(true)
-    const dt = editFollowUp ? new Date(editFollowUp).toISOString() : null
+    const dt = editFollowUp || null
     const res = await saveLeadFollowUpAndVehicle(selectedLead.id, {
       date: dt,
       vehicle: editVehicle,
@@ -212,6 +232,23 @@ export default function StaffLeadsTab() {
       await loadLeadData(selectedLead.id)
     } else {
       toast({ title: "Failed to save details", variant: "destructive" })
+    }
+    setSaving(false)
+  }
+
+  const handleSaveVehicle = async () => {
+    if (!selectedLead) return
+    setSaving(true)
+    const res = await saveLeadVehicleDetails(selectedLead.id, {
+      vehicle: editVehicle,
+      year: editYear
+    })
+    if (res.success) {
+      toast({ title: "Vehicle details saved" })
+      fetchLeads()
+      await loadLeadData(selectedLead.id)
+    } else {
+      toast({ title: "Failed to save vehicle details", variant: "destructive" })
     }
     setSaving(false)
   }
@@ -265,9 +302,8 @@ export default function StaffLeadsTab() {
   }
 
   const formatFollowUp = (dateStr: string) => {
-    const d = new Date(dateStr)
-    const overdue = isPast(d) && !isToday(d)
-    return <span className={overdue ? "text-red-600 font-medium" : "text-emerald-600"}>{format(d, 'dd MMM, p')}</span>
+    const overdue = isPastIST(dateStr) && !isTodayIST(dateStr)
+    return <span className={overdue ? "text-red-600 font-medium" : "text-emerald-600"}>{formatIST(dateStr, 'short')}</span>
   }
 
   return (
@@ -387,12 +423,15 @@ export default function StaffLeadsTab() {
                   <th className="px-4 py-3 font-medium">Assigned To</th>
                   <th className="px-4 py-3 font-medium">Status</th>
                   <th className="px-4 py-3 font-medium">Follow Up</th>
-                  <th className="px-4 py-3 font-medium text-right">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
                 {leads.map((lead) => (
-                  <tr key={lead.id} className="hover:bg-muted/30">
+                  <tr 
+                    key={lead.id} 
+                    onClick={() => handleOpenLead(lead.id)} 
+                    className="hover:bg-muted/50 cursor-pointer transition-colors"
+                  >
                     <td className="px-4 py-3 font-medium">{lead.lead_number}</td>
                     <td className="px-4 py-3">
                       <div className="font-medium">{lead.name}</div>
@@ -419,9 +458,6 @@ export default function StaffLeadsTab() {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-xs">{lead.next_follow_up_at ? formatFollowUp(lead.next_follow_up_at) : '-'}</td>
-                    <td className="px-4 py-3 text-right">
-                      <Button variant="outline" size="sm" onClick={() => handleOpenLead(lead.id)}>View</Button>
-                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -430,7 +466,11 @@ export default function StaffLeadsTab() {
 
           <div className="grid grid-cols-1 gap-3 md:hidden">
             {leads.map((lead) => (
-              <Card key={lead.id} className="overflow-hidden" onClick={() => handleOpenLead(lead.id)}>
+              <Card 
+                key={lead.id} 
+                className="overflow-hidden cursor-pointer hover:shadow-md transition-all active:scale-[0.99]" 
+                onClick={() => handleOpenLead(lead.id)}
+              >
                 <CardContent className="p-4">
                   <div className="flex justify-between items-start mb-2">
                     <span className="text-xs font-medium text-muted-foreground">{lead.lead_number}</span>
@@ -505,9 +545,24 @@ export default function StaffLeadsTab() {
                     </Button>
                   </>
                 ) : (
-                  <Button size="sm" onClick={() => setIsConvertModalOpen(true)} className="bg-emerald-600 hover:bg-emerald-700">
-                    Convert to Customer
-                  </Button>
+                  <>
+                    <Button 
+                      size="sm" 
+                      onClick={() => setIsJobCardModalOpen(true)} 
+                      className="bg-blue-600 hover:bg-blue-700 text-white gap-1.5"
+                    >
+                      <Wrench className="w-3.5 h-3.5" />
+                      Convert to Job Card
+                    </Button>
+                    <Button 
+                      size="sm" 
+                      onClick={() => setIsConvertModalOpen(true)} 
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5"
+                    >
+                      <UserCheck className="w-3.5 h-3.5" />
+                      Convert to Customer
+                    </Button>
+                  </>
                 )}
               </div>
             )}
@@ -621,66 +676,78 @@ export default function StaffLeadsTab() {
                       </div>
                     </div>
 
-                    {/* Common Section for Follow Up, Vehicle and Year with single "Set" button */}
-                    <div className="p-4 rounded-lg border bg-muted/30 space-y-3">
+                    {/* Vehicle Details */}
+                    <div className="p-3.5 rounded-lg border bg-muted/20 space-y-3">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          <Calendar className="h-4 w-4 text-blue-600" />
-                          <h5 className="text-sm font-semibold">Follow Up, Vehicle & Year</h5>
+                          <Car className="h-4 w-4 text-blue-600" />
+                          <h5 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Vehicle Details</h5>
                         </div>
                         <Button 
                           size="sm" 
-                          onClick={handleSaveFollowUpAndVehicle} 
-                          disabled={saving}
-                          className="bg-blue-600 hover:bg-blue-700 min-w-[70px]"
+                          onClick={handleSaveVehicle} 
+                          disabled={saving || (editVehicle === (selectedLead.vehicle || "") && editYear === (selectedLead.year || ""))}
+                          className="bg-slate-800 hover:bg-slate-900 text-white text-xs h-7 min-w-[65px]"
                         >
-                          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Set"}
+                          {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : "Save"}
                         </Button>
                       </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        <div className="space-y-1.5">
-                          <label className="text-xs font-medium text-muted-foreground">Vehicle</label>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <label className="text-xs font-medium text-slate-700">Vehicle Model</label>
                           <Input 
-                            placeholder="e.g. BMW S1000RR / R15" 
+                            placeholder="e.g. BMW S1000RR / Yamaha R15" 
                             value={editVehicle} 
                             onChange={(e) => setEditVehicle(e.target.value)} 
+                            className="h-8 text-xs bg-white"
                           />
                         </div>
 
-                        <div className="space-y-1.5">
-                          <label className="text-xs font-medium text-muted-foreground">Year</label>
+                        <div className="space-y-1">
+                          <label className="text-xs font-medium text-slate-700">Model Year</label>
                           <Input 
                             placeholder="e.g. 2024" 
                             value={editYear} 
                             onChange={(e) => setEditYear(e.target.value)} 
-                          />
-                        </div>
-
-                        <div className="space-y-1.5">
-                          <label className="text-xs font-medium text-muted-foreground">Next Follow Up</label>
-                          <Input 
-                            type="datetime-local" 
-                            value={editFollowUp} 
-                            onChange={(e) => setEditFollowUp(e.target.value)} 
+                            className="h-8 text-xs bg-white"
                           />
                         </div>
                       </div>
                     </div>
 
-                    <div className="space-y-2 mt-4">
-                      <label className="text-sm font-medium">Internal Notes</label>
-                      <Textarea 
-                        placeholder="Add follow-up notes here..." 
-                        className="min-h-[100px]"
-                        value={editNotes}
-                        onChange={(e) => setEditNotes(e.target.value)}
+                    {/* Dedicated Multi-Follow-Up System */}
+                    <div className="p-4 rounded-xl border bg-white space-y-4 shadow-2xs">
+                      <LeadFollowUpsSection 
+                        leadId={selectedLead.id} 
+                        onFollowUpChanged={() => {
+                          loadLeadData(selectedLead.id)
+                          fetchLeads()
+                          fetchSummary()
+                        }}
                       />
-                      <div className="flex justify-end">
-                        <Button size="sm" onClick={handleSaveNotes} disabled={saving || editNotes === (selectedLead.notes || "")}>
+                    </div>
+
+                    {/* General Lead Notes */}
+                    <div className="space-y-2 mt-4">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">General Lead Notes</label>
+                        <Button 
+                          size="sm" 
+                          variant="outline"
+                          onClick={handleSaveNotes} 
+                          disabled={saving || editNotes === (selectedLead.notes || "")}
+                          className="h-7 text-xs"
+                        >
                           Save Notes
                         </Button>
                       </div>
+                      <Textarea 
+                        placeholder="General background notes, customer profile, or special instructions..." 
+                        className="min-h-[80px] text-xs"
+                        value={editNotes}
+                        onChange={(e) => setEditNotes(e.target.value)}
+                      />
                     </div>
                   </div>
                 </TabsContent>
@@ -707,7 +774,7 @@ export default function StaffLeadsTab() {
                                   {act.activity_type === 'FOLLOW_UP_UPDATED' && `updated follow up`}
                                 </span>
                               </p>
-                              <span className="text-xs text-muted-foreground">{format(new Date(act.created_at), 'dd MMM, p')}</span>
+                              <span className="text-xs text-muted-foreground">{formatIST(act.created_at, 'short')}</span>
                             </div>
                             {act.note && act.activity_type !== 'SALE_CREATED' && (
                               <p className="mt-1 text-xs text-muted-foreground bg-white p-2 rounded border">{act.note}</p>
@@ -782,13 +849,19 @@ export default function StaffLeadsTab() {
               fetchSummary()
             }
           }}
-          initialCustomer={selectedLead?.converted_customer_id ? {
-            id: selectedLead.converted_customer_id,
-            name: selectedLead.name,
-            phone: selectedLead.phone
-          } : null}
+          initialCustomer={{
+            id: selectedLead?.converted_customer_id || null,
+            name: selectedLead?.name || "",
+            phone: selectedLead?.phone || ""
+          }}
           crmLeadId={selectedLead?.id}
           initialProducts={leadProducts}
+          initialNotes={
+            [
+              selectedLead?.vehicle ? `Vehicle: ${selectedLead.vehicle}${selectedLead.year ? ` (${selectedLead.year})` : ''}` : null,
+              selectedLead?.notes ? `Lead Notes: ${selectedLead.notes}` : null
+            ].filter(Boolean).join('\n')
+          }
           canCreateProducts={false}
         />
       )}
@@ -802,6 +875,7 @@ export default function StaffLeadsTab() {
         }}
         staffList={staffList}
         currentStaffId={activeStaff?.id}
+        deviceId={activeStaff?.device_id || deviceId || undefined}
       />
     </div>
   )

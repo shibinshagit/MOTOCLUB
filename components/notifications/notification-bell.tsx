@@ -28,6 +28,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/components/ui/use-toast"
 import { cn } from "@/lib/utils"
+import { formatIST } from "@/lib/ist-date"
 import {
   getNotifications,
   getUnreadNotificationCount,
@@ -171,12 +172,20 @@ export function NotificationBell({
 
     const handleIncomingNotification = (newNotif: NotificationItem) => {
       // Role filtering:
-      // Admin should never see or hear new_lead notifications
-      if (role === "admin" && (newNotif.type === "new_lead" || newNotif.data?.targetRole === "staff")) {
+      // Admin should never see or hear new_lead or follow_up_reminder notifications
+      if (
+        role === "admin" &&
+        (newNotif.type === "new_lead" || newNotif.type === "follow_up_reminder" || newNotif.data?.targetRole === "staff")
+      ) {
         return
       }
       // Staff should never see purchase manager action notifications
-      if (role === "staff" && (newNotif.type !== "new_lead" && newNotif.data?.targetRole !== "staff")) {
+      if (
+        role === "staff" &&
+        newNotif.type !== "new_lead" &&
+        newNotif.type !== "follow_up_reminder" &&
+        newNotif.data?.targetRole !== "staff"
+      ) {
         return
       }
 
@@ -209,12 +218,54 @@ export function NotificationBell({
             <Button
               size="sm"
               variant="outline"
-              className="h-7 text-xs bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
-              onClick={() => onNotificationClick(newNotif)}
+              className="h-7 text-xs bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 font-semibold"
+              onClick={() => {
+                onNotificationClick(newNotif)
+                if (newNotif.data?.leadId) {
+                  try {
+                    window.dispatchEvent(new CustomEvent("crm:open-lead", { detail: { leadId: newNotif.data.leadId } }))
+                  } catch (_) {}
+                }
+              }}
             >
               View Lead
             </Button>
           ) : undefined,
+        })
+      }
+
+      // Audio & toast alert for normal staff on follow-up reminder
+      if (role === "staff" && newNotif.type === "follow_up_reminder") {
+        playNotificationSound()
+        try {
+          window.dispatchEvent(new CustomEvent("crm:follow-up-reminder", { detail: newNotif }))
+        } catch (_) {}
+
+        const custName = newNotif.data?.customerName || newNotif.data?.name || "Customer"
+        const leadNo = newNotif.data?.leadNumber ? ` (${newNotif.data.leadNumber})` : ""
+        const scheduledTime = newNotif.data?.scheduledAt ? formatIST(newNotif.data.scheduledAt, "time") : ""
+        const timeStr = scheduledTime ? ` scheduled at ${scheduledTime}` : ""
+
+        toast({
+          title: "⏰ Follow-Up in 30 Mins!",
+          description: `${custName}${leadNo}${timeStr}`,
+          action: (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100 font-bold"
+              onClick={() => {
+                onNotificationClick?.(newNotif)
+                if (newNotif.data?.leadId) {
+                  try {
+                    window.dispatchEvent(new CustomEvent("crm:open-lead", { detail: { leadId: newNotif.data.leadId } }))
+                  } catch (_) {}
+                }
+              }}
+            >
+              View Lead
+            </Button>
+          ),
         })
       }
     }
@@ -355,6 +406,13 @@ export function NotificationBell({
           <Badge className="bg-emerald-100 hover:bg-emerald-100 text-emerald-800 border-0 flex items-center gap-1 font-semibold text-[11px] px-2 py-0.5">
             <Sparkles className="h-3 w-3 text-emerald-600" />
             New Lead
+          </Badge>
+        )
+      case "follow_up_reminder":
+        return (
+          <Badge className="bg-amber-100 hover:bg-amber-100 text-amber-800 border-0 flex items-center gap-1 font-semibold text-[11px] px-2 py-0.5">
+            <Clock className="h-3 w-3 text-amber-600" />
+            Follow-Up (30m)
           </Badge>
         )
       case "order":
@@ -537,9 +595,14 @@ export function NotificationBell({
                         }
                       })
                     }
-                    if (notif.type === "new_lead" && onNotificationClick) {
+                    if ((notif.type === "new_lead" || notif.type === "follow_up_reminder") && onNotificationClick) {
                       setIsOpen(false)
                       onNotificationClick(notif)
+                    }
+                    if (data?.leadId) {
+                      try {
+                        window.dispatchEvent(new CustomEvent("crm:open-lead", { detail: { leadId: data.leadId } }))
+                      } catch (_) {}
                     }
                   }}
                   className={cn(
@@ -664,8 +727,86 @@ export function NotificationBell({
                     </div>
                   )}
 
+                  {/* CRM Follow-Up Reminder Details Section */}
+                  {notif.type === "follow_up_reminder" && (
+                    <div className="mt-2 rounded-lg bg-amber-50/70 border border-amber-200/80 p-2.5 text-xs space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-slate-800 text-sm">
+                          {data.customerName || data.name || notif.title}
+                        </span>
+                        {data.leadNumber && (
+                          <span className="text-[10px] font-mono bg-white px-1.5 py-0.5 rounded border border-amber-300 text-amber-800 font-bold">
+                            {data.leadNumber}
+                          </span>
+                        )}
+                      </div>
+
+                      {data.scheduledAt && (
+                        <div className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-900 bg-amber-100/70 px-2 py-1 rounded">
+                          <Clock className="h-3.5 w-3.5 text-amber-700 flex-shrink-0" />
+                          <span>
+                            Scheduled at: {formatIST(data.scheduledAt, "time")} • Today
+                          </span>
+                        </div>
+                      )}
+
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-600">
+                        {data.phone && (
+                          <a
+                            href={`tel:${data.phone}`}
+                            onClick={(e) => e.stopPropagation()}
+                            className="flex items-center gap-1 font-medium text-slate-800 hover:text-amber-800 hover:underline"
+                          >
+                            <Phone className="h-3 w-3 text-amber-600" />
+                            {data.phone}
+                          </a>
+                        )}
+                        {(data.vehicle || data.year) && (
+                          <div className="flex items-center gap-1 text-[11px] text-slate-700 font-medium">
+                            <Car className="h-3 w-3 text-amber-600 flex-shrink-0" />
+                            <span>
+                              {data.vehicle} {data.year ? `(${data.year})` : ""}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {data.note && (
+                        <p className="text-[11px] text-slate-700 italic bg-white/80 p-1.5 rounded border border-amber-200/60">
+                          &ldquo;{data.note}&rdquo;
+                        </p>
+                      )}
+
+                      {onNotificationClick && (
+                        <div className="pt-1 flex justify-end">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-6 text-[11px] px-2 text-amber-800 border-amber-300 hover:bg-amber-100 bg-white flex items-center gap-1 font-semibold"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              if (isUnchecked && deviceId) {
+                                markNotificationAsChecked(notif.id, deviceId, role)
+                              }
+                              setIsOpen(false)
+                              onNotificationClick(notif)
+                              if (data.leadId) {
+                                try {
+                                  window.dispatchEvent(new CustomEvent("crm:open-lead", { detail: { leadId: data.leadId } }))
+                                } catch (_) {}
+                              }
+                            }}
+                          >
+                            <span>Open Lead Details</span>
+                            <ExternalLink className="h-3 w-3 text-amber-700" />
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {/* Product Details Section */}
-                  {notif.type !== "new_lead" && !isBulk && productsList.length > 0 && (
+                  {notif.type !== "new_lead" && notif.type !== "follow_up_reminder" && !isBulk && productsList.length > 0 && (
                     <div className="mt-2 rounded-lg bg-slate-50/80 border border-slate-100 p-2.5 text-xs space-y-1">
                       {productsList.map((prod, idx) => (
                         <div key={idx} className="space-y-0.5">
@@ -761,7 +902,7 @@ export function NotificationBell({
                   )}
 
                   {/* Internal Notes Callout Box (Only if note exists) */}
-                  {notif.internal_note && (
+                  {notif.internal_note && notif.type !== "follow_up_reminder" && (
                     <div className="mt-2 rounded-lg bg-amber-50/90 border border-amber-200/70 p-2.5 text-xs text-amber-900">
                       <div className="flex items-center gap-1.5 font-bold text-amber-800 mb-0.5">
                         <FileText className="h-3.5 w-3.5 text-amber-700 flex-shrink-0" />

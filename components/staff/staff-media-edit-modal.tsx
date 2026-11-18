@@ -43,7 +43,11 @@ export default function StaffMediaEditModal({
   const [imageUrls, setImageUrls] = useState<string[]>([])
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [isUploadingImage, setIsUploadingImage] = useState(false)
+  const [imageUploadProgress, setImageUploadProgress] = useState(0)
+  const [imageUploadStatus, setImageUploadStatus] = useState("")
   const [isUploadingVideo, setIsUploadingVideo] = useState(false)
+  const [videoUploadProgress, setVideoUploadProgress] = useState(0)
+  const [videoUploadStatus, setVideoUploadStatus] = useState("")
   const [isPending, startTransition] = useTransition()
 
   useEffect(() => {
@@ -98,30 +102,82 @@ export default function StaffMediaEditModal({
 
     const filesToUpload = files.slice(0, maxCanAdd)
     setIsUploadingImage(true)
+    setImageUploadProgress(0)
+    setImageUploadStatus("Optimizing images...")
 
     try {
-      const newUrls: string[] = []
+      const validFiles: File[] = []
       for (const file of filesToUpload) {
-        if (!file.type.startsWith("image/")) {
+        if (!file.type.startsWith("image/") && !/\.(jpe?g|png|webp|avif)$/i.test(file.name)) {
           notifyError(toast, `${file.name} is not a valid image file.`, "Invalid file")
           continue
         }
-
-        const compressed = await compressImageForUpload(file)
-        if (compressed.size > MAX_IMAGE_SIZE_BYTES) {
-          notifyError(toast, `${file.name} exceeds 10MB limit after compression.`, "File too large")
-          continue
-        }
-
-        const uploadedUrl = await uploadProductFileFromClient(compressed, product.name || "product", "image")
-        if (uploadedUrl) {
-          newUrls.push(uploadedUrl)
-        }
+        validFiles.push(file)
       }
 
-      if (newUrls.length > 0) {
-        setImageUrls((prev) => [...prev, ...newUrls].slice(0, 4))
-        notifySuccess(toast, `Uploaded ${newUrls.length} image${newUrls.length > 1 ? "s" : ""}.`)
+      if (validFiles.length === 0) {
+        setIsUploadingImage(false)
+        return
+      }
+
+      // 1. Optimize images in parallel
+      const compressedFiles = await Promise.all(
+        validFiles.map((file) => compressImageForUpload(file))
+      )
+
+      const filesUnderLimit: File[] = []
+      for (const comp of compressedFiles) {
+        if (comp.size > MAX_IMAGE_SIZE_BYTES) {
+          notifyError(toast, `${comp.name} exceeds 10MB limit after compression.`, "File too large")
+          continue
+        }
+        filesUnderLimit.push(comp)
+      }
+
+      if (filesUnderLimit.length === 0) {
+        setIsUploadingImage(false)
+        return
+      }
+
+      // 2. Upload in parallel with aggregated progress
+      const totalCount = filesUnderLimit.length
+      let completedCount = 0
+      const progressMap = new Map<number, number>()
+
+      const updateOverallProgress = () => {
+        let totalPercent = 0
+        progressMap.forEach((val) => { totalPercent += val })
+        const overall = Math.round(totalPercent / totalCount)
+        setImageUploadProgress(overall)
+        setImageUploadStatus(`Uploading ${completedCount} of ${totalCount} photos (${overall}%)...`)
+      }
+
+      setImageUploadStatus(`Uploading ${totalCount} photo${totalCount > 1 ? "s" : ""} in parallel...`)
+
+      const uploadPromises = filesUnderLimit.map((file, idx) => {
+        progressMap.set(idx, 0)
+        return uploadProductFileFromClient(
+          file,
+          product.name || "product",
+          "image",
+          (p) => {
+            progressMap.set(idx, p.percentage)
+            updateOverallProgress()
+          }
+        ).then((url) => {
+          completedCount++
+          progressMap.set(idx, 100)
+          updateOverallProgress()
+          return url
+        })
+      })
+
+      const newUrls = await Promise.all(uploadPromises)
+      const validUrls = newUrls.filter((u): u is string => typeof u === "string" && !!u)
+
+      if (validUrls.length > 0) {
+        setImageUrls((prev) => [...prev, ...validUrls].slice(0, 4))
+        notifySuccess(toast, `Uploaded ${validUrls.length} image${validUrls.length > 1 ? "s" : ""}.`)
       }
     } catch (error) {
       console.error("Staff image upload error:", error)
@@ -132,6 +188,8 @@ export default function StaffMediaEditModal({
       )
     } finally {
       setIsUploadingImage(false)
+      setImageUploadProgress(0)
+      setImageUploadStatus("")
       if (imageInputRef.current) imageInputRef.current.value = ""
     }
   }
@@ -155,8 +213,20 @@ export default function StaffMediaEditModal({
     }
 
     setIsUploadingVideo(true)
+    setVideoUploadProgress(0)
+    setVideoUploadStatus("Uploading video: 0%...")
     try {
-      const uploadedUrl = await uploadProductFileFromClient(file, product.name || "product", "video")
+      const uploadedUrl = await uploadProductFileFromClient(
+        file,
+        product.name || "product",
+        "video",
+        (p) => {
+          setVideoUploadProgress(p.percentage)
+          const loadedMB = (p.loaded / (1024 * 1024)).toFixed(1)
+          const totalMB = (p.total / (1024 * 1024)).toFixed(1)
+          setVideoUploadStatus(`Uploading video: ${p.percentage}% (${loadedMB}MB / ${totalMB}MB)...`)
+        }
+      )
       if (uploadedUrl) {
         setVideoUrl(uploadedUrl)
         notifySuccess(toast, "Product video uploaded successfully.")
@@ -170,6 +240,8 @@ export default function StaffMediaEditModal({
       )
     } finally {
       setIsUploadingVideo(false)
+      setVideoUploadProgress(0)
+      setVideoUploadStatus("")
       if (videoInputRef.current) videoInputRef.current.value = ""
     }
   }
@@ -203,7 +275,10 @@ export default function StaffMediaEditModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && !isUploadingImage && !isUploadingVideo && !isPending && onClose()}>
-      <DialogContent className="flex w-[95vw] max-h-[90dvh] flex-col gap-0 p-0 overflow-hidden bg-slate-50 sm:max-w-2xl">
+      <DialogContent
+        overlayClassName="z-[300] bg-black/60"
+        className="z-[300] flex w-[95vw] max-h-[90dvh] flex-col gap-0 p-0 overflow-hidden bg-slate-50 sm:max-w-2xl"
+      >
         {/* Header */}
         <DialogHeader className="shrink-0 px-4 sm:px-6 py-4 border-b bg-white">
           <DialogTitle className="text-base font-bold text-slate-800 flex items-center gap-2">
@@ -255,6 +330,24 @@ export default function StaffMediaEditModal({
                 onChange={handleImageSelect}
               />
             </div>
+
+            {isUploadingImage && (
+              <div className="rounded-lg border border-violet-200 bg-violet-50/60 p-3 space-y-1.5">
+                <div className="flex items-center justify-between text-xs text-violet-800">
+                  <span className="flex items-center gap-1.5 font-medium">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-violet-600" />
+                    {imageUploadStatus || "Uploading photos..."}
+                  </span>
+                  <span className="font-semibold">{imageUploadProgress}%</span>
+                </div>
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-violet-200">
+                  <div
+                    className="h-full bg-violet-600 transition-all duration-300 ease-out"
+                    style={{ width: `${imageUploadProgress}%` }}
+                  />
+                </div>
+              </div>
+            )}
 
             {/* Photo Grid */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
@@ -347,6 +440,24 @@ export default function StaffMediaEditModal({
                 onChange={handleVideoSelect}
               />
             </div>
+
+            {isUploadingVideo && (
+              <div className="rounded-lg border border-indigo-200 bg-indigo-50/60 p-3 space-y-1.5">
+                <div className="flex items-center justify-between text-xs text-indigo-800">
+                  <span className="flex items-center gap-1.5 font-medium">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-indigo-600" />
+                    {videoUploadStatus || "Uploading video..."}
+                  </span>
+                  <span className="font-semibold">{videoUploadProgress}%</span>
+                </div>
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-indigo-200">
+                  <div
+                    className="h-full bg-indigo-600 transition-all duration-300 ease-out"
+                    style={{ width: `${videoUploadProgress}%` }}
+                  />
+                </div>
+              </div>
+            )}
 
             {videoUrl ? (
               <div className="relative rounded-lg border border-slate-200 overflow-hidden bg-slate-900 pt-2">

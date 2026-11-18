@@ -79,6 +79,7 @@ function ProductSelectSimple({
   autoOpen = false,
 }: ProductSelectSimpleProps) {
   const deviceId = useSelector(selectDeviceId)
+  const effectiveUserId = (userId && userId !== 1) ? userId : (deviceId || userId || 1)
   const { isValueHidden } = useStaffRestrictions()
   const hideCogs = isValueHidden("cogs")
   const [open, setOpen] = useState(autoOpen)
@@ -129,7 +130,7 @@ function ProductSelectSimple({
       setProducts([])
       setHasSearched(false)
     }
-  }, [debouncedSearchTerm, isServiceMode, open, userId])
+  }, [debouncedSearchTerm, isServiceMode, open, effectiveUserId])
 
   // Reload products when category changes
   useEffect(() => {
@@ -187,11 +188,11 @@ function ProductSelectSimple({
       const searchNorm = normalize(searchTerm)
 
       // Try backend API with category filter
-      let result = await getProducts(userId, searchBufferSize, searchTerm, selectedCategoryId)
+      let result = await getProducts(effectiveUserId, searchBufferSize, searchTerm, selectedCategoryId)
 
       // If no backend result → client-side filtering
       if (!result.success || result.data.length === 0) {
-        const broadResult = await getProducts(userId, searchBufferSize * 2, "", selectedCategoryId)
+        const broadResult = await getProducts(effectiveUserId, searchBufferSize * 2, "", selectedCategoryId)
 
         if (broadResult.success && broadResult.data.length > 0) {
           const filteredProducts = broadResult.data.filter((product: any) => {
@@ -221,7 +222,7 @@ function ProductSelectSimple({
 
   const fetchSelectedProduct = async (productId: number) => {
     try {
-      const result = await getProducts(userId, 1, productId.toString())
+      const result = await getProducts(effectiveUserId, 1, productId.toString())
       if (result.success && result.data.length > 0) {
         const product = result.data[0]
         setSelectedProduct(product)
@@ -252,7 +253,7 @@ function ProductSelectSimple({
   const fetchCategories = async () => {
     setLoadingCategories(true)
     try {
-      const result = await getCategories(userId)
+      const result = await getCategories(effectiveUserId)
       if (result.success && result.data) {
         setCategories(result.data)
       } else {

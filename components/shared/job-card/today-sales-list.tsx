@@ -9,11 +9,13 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { ChevronDown, ChevronUp, MapPin, Phone, User, Calendar, Layers, MessageCircle, Printer, Edit, Trash2, Search, X } from "lucide-react"
+import { ChevronDown, ChevronUp, MapPin, Phone, User, Calendar, Layers, MessageCircle, Printer, Edit, Trash2, Search, X, Star } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 import { useConfirm } from "@/hooks/use-confirm"
 import { printJobCard, printBatchJobCards } from "@/lib/receipt-utils"
 import { JobCardModal } from "./job-card-modal"
+import { SaleReviewModal } from "./sale-review-modal"
+import { getSalesWithReviews } from "@/app/actions/review-actions"
 import { DeliveryStatusSelect } from "@/components/sales/delivery-status-select"
 import { TrackingCell } from "@/components/sales/tracking-cell"
 import { format } from "date-fns"
@@ -72,6 +74,10 @@ export function TodaySalesList({
   // Edit Modal State
   const [editingSaleId, setEditingSaleId] = useState<number | null>(null)
 
+  // Review Modal State
+  const [reviewingSale, setReviewingSale] = useState<any>(null)
+  const [reviewedSaleIds, setReviewedSaleIds] = useState<Record<number, boolean>>({})
+
   useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedSearch(searchTerm)
@@ -95,12 +101,26 @@ export function TodaySalesList({
           return parseSaleDateTime(b).getTime() - parseSaleDateTime(a).getTime()
         })
         setSales(sorted)
+
+        // Check which delivered sales already have reviews
+        const deliveredIds = sorted
+          .filter((s: any) => (s.delivery_status || "").trim().toLowerCase() === "delivered")
+          .map((s: any) => Number(s.id))
+        if (deliveredIds.length > 0) {
+          getSalesWithReviews(deliveredIds)
+            .then((map) => setReviewedSaleIds(map))
+            .catch(() => {})
+        } else {
+          setReviewedSaleIds({})
+        }
       } else {
         setSales([])
+        setReviewedSaleIds({})
       }
     } catch (err) {
       console.error("fetchSales error:", err)
       setSales([])
+      setReviewedSaleIds({})
     } finally {
       setLoading(false)
     }
@@ -180,6 +200,18 @@ export function TodaySalesList({
           }}
           editSaleId={editingSaleId}
           canCreateProducts={canCreateProducts}
+        />
+      )}
+
+      {reviewingSale && (
+        <SaleReviewModal
+          isOpen={true}
+          onClose={() => setReviewingSale(null)}
+          sale={reviewingSale}
+          onSaved={() => {
+            fetchSales()
+            onSaleChanged?.()
+          }}
         />
       )}
 
@@ -382,6 +414,26 @@ export function TodaySalesList({
                     >
                       <Edit className="h-4 w-4" />
                     </Button>
+
+                    {(sale.delivery_status || "").trim().toLowerCase() === "delivered" && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className={`h-9 w-9 rounded-full shadow-sm shrink-0 ${
+                          reviewedSaleIds[sale.id]
+                            ? "bg-amber-500 text-white hover:bg-amber-600 ring-2 ring-amber-300 ring-offset-1"
+                            : "bg-amber-100 text-amber-800 hover:bg-amber-200 border border-amber-300"
+                        }`}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setReviewingSale(sale)
+                        }}
+                        title={reviewedSaleIds[sale.id] ? "View / Edit Review" : "Add Review"}
+                      >
+                        <Star className="h-4 w-4 fill-amber-500 text-amber-700" />
+                      </Button>
+                    )}
                   </div>
                 </div>
 
@@ -434,7 +486,7 @@ export function TodaySalesList({
                 <th className="whitespace-nowrap px-4 py-4 text-center">Products</th>
                 <th className="whitespace-nowrap px-4 py-4 text-right">Total Paid</th>
                 <th className="whitespace-nowrap px-4 py-4 text-center">Status</th>
-                <th className="sticky right-0 z-20 min-w-[5.5rem] whitespace-nowrap border-l border-slate-200 bg-white px-4 py-4 text-center shadow-[-8px_0_12px_-8px_rgba(15,23,42,0.05)]">WA</th>
+                <th className="sticky right-0 z-20 min-w-[9.5rem] whitespace-nowrap border-l border-slate-200 bg-white px-3 py-4 text-center shadow-[-8px_0_12px_-8px_rgba(15,23,42,0.05)]">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -571,7 +623,7 @@ export function TodaySalesList({
                         />
                       </td>
                       <td 
-                        className={`sticky right-0 z-10 min-w-[8rem] whitespace-nowrap border-l border-slate-100 bg-white px-4 py-4 text-center shadow-[-8px_0_12px_-8px_rgba(15,23,42,0.05)]`} 
+                        className={`sticky right-0 z-10 min-w-[9.5rem] whitespace-nowrap border-l border-slate-100 bg-white px-3 py-4 text-center shadow-[-8px_0_12px_-8px_rgba(15,23,42,0.05)]`} 
                         onClick={(e) => e.stopPropagation()}
                       >
                         <div className="flex items-center justify-center gap-2">
@@ -584,6 +636,21 @@ export function TodaySalesList({
                           <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full bg-blue-500 text-white hover:bg-blue-600 hover:text-white shadow-sm" onClick={() => handleEdit(sale)} title="Edit">
                             <Edit className="h-4 w-4" />
                           </Button>
+                          {(sale.delivery_status || "").trim().toLowerCase() === "delivered" && (
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              className={`h-8 w-8 rounded-full shadow-sm ${
+                                reviewedSaleIds[sale.id]
+                                  ? "bg-amber-500 text-white hover:bg-amber-600 ring-2 ring-amber-300 ring-offset-1"
+                                  : "bg-amber-100 text-amber-800 hover:bg-amber-200 border border-amber-300"
+                              }`} 
+                              onClick={() => setReviewingSale(sale)} 
+                              title={reviewedSaleIds[sale.id] ? "View / Edit Review" : "Add Review"}
+                            >
+                              <Star className="h-4 w-4 fill-amber-500 text-amber-700" />
+                            </Button>
+                          )}
                         </div>
                       </td>
                     </tr>

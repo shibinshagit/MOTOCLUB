@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -10,6 +10,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/components/ui/use-toast"
 import { createManualLead } from "@/app/actions/lead-actions"
 import ProductSelectSimple from "@/components/sales/product-select-simple"
+import { DateTimePicker } from "@/components/ui/date-time-picker"
+import { useAppSelector } from "@/store/hooks"
+import { selectDeviceId } from "@/store/slices/deviceSlice"
+import { selectActiveStaff } from "@/store/slices/staffSlice"
 import { 
   UserPlus, 
   Phone, 
@@ -56,6 +60,7 @@ interface CreateLeadModalProps {
   onSuccess: () => void
   staffList: { id: number; name: string; role?: string }[]
   currentStaffId?: number
+  deviceId?: number
 }
 
 export function CreateLeadModal({
@@ -63,10 +68,16 @@ export function CreateLeadModal({
   onClose,
   onSuccess,
   staffList,
-  currentStaffId
+  currentStaffId,
+  deviceId
 }: CreateLeadModalProps) {
   const { toast } = useToast()
   const [loading, setLoading] = useState(false)
+
+  const activeStaff = useAppSelector(selectActiveStaff)
+  const reduxDeviceId = useAppSelector(selectDeviceId)
+  const effectiveStaffId = currentStaffId || activeStaff?.id
+  const effectiveDeviceId = deviceId || activeStaff?.device_id || reduxDeviceId || undefined
 
   // Form Fields
   const [name, setName] = useState("")
@@ -79,7 +90,7 @@ export function CreateLeadModal({
   const [year, setYear] = useState("")
   const [status, setStatus] = useState("New")
   const [assignedTo, setAssignedTo] = useState<string>(
-    currentStaffId ? String(currentStaffId) : "unassigned"
+    effectiveStaffId ? String(effectiveStaffId) : "unassigned"
   )
   const [followUpDate, setFollowUpDate] = useState("")
   const [notes, setNotes] = useState("")
@@ -87,6 +98,13 @@ export function CreateLeadModal({
   // Products
   const [selectedProducts, setSelectedProducts] = useState<SelectedProductItem[]>([])
   const [showProductPicker, setShowProductPicker] = useState(false)
+
+  // Keep assignedTo synchronized with current logged-in staff when modal opens
+  useEffect(() => {
+    if (isOpen && effectiveStaffId) {
+      setAssignedTo(String(effectiveStaffId))
+    }
+  }, [isOpen, effectiveStaffId])
 
   const resetForm = () => {
     setName("")
@@ -98,7 +116,7 @@ export function CreateLeadModal({
     setVehicle("")
     setYear("")
     setStatus("New")
-    setAssignedTo(currentStaffId ? String(currentStaffId) : "unassigned")
+    setAssignedTo(effectiveStaffId ? String(effectiveStaffId) : "unassigned")
     setFollowUpDate("")
     setNotes("")
     setSelectedProducts([])
@@ -164,7 +182,7 @@ export function CreateLeadModal({
 
     try {
       const finalSource = source === "Other" && customSource.trim() ? customSource.trim() : source
-      const finalAssignedTo = assignedTo && assignedTo !== "unassigned" ? Number(assignedTo) : null
+      const finalAssignedTo = assignedTo && assignedTo !== "unassigned" ? Number(assignedTo) : (effectiveStaffId || null)
 
       const res = await createManualLead({
         name: name.trim(),
@@ -178,7 +196,7 @@ export function CreateLeadModal({
         notes: notes.trim() || null,
         status,
         assigned_to: finalAssignedTo,
-        next_follow_up_at: followUpDate ? new Date(followUpDate).toISOString() : null,
+        next_follow_up_at: followUpDate || null,
         products: selectedProducts.map((p) => ({
           product_id: p.productId,
           product_variant_id: p.variantId
@@ -393,6 +411,11 @@ export function CreateLeadModal({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="unassigned">Unassigned</SelectItem>
+                    {effectiveStaffId && !staffList.some((s) => s.id === effectiveStaffId) && (
+                      <SelectItem value={String(effectiveStaffId)}>
+                        {activeStaff?.name ? `${activeStaff.name} (You)` : `Staff #${effectiveStaffId} (You)`}
+                      </SelectItem>
+                    )}
                     {staffList.map((s) => (
                       <SelectItem key={s.id} value={String(s.id)}>
                         {s.name} {s.role ? `(${s.role})` : ""}
@@ -406,11 +429,11 @@ export function CreateLeadModal({
                 <Label htmlFor="lead-followup" className="text-xs font-medium">
                   Next Follow-Up
                 </Label>
-                <Input
+                <DateTimePicker
                   id="lead-followup"
-                  type="datetime-local"
                   value={followUpDate}
-                  onChange={(e) => setFollowUpDate(e.target.value)}
+                  onChange={setFollowUpDate}
+                  placeholder="Select date & time (Optional)"
                 />
               </div>
             </div>
@@ -446,6 +469,7 @@ export function CreateLeadModal({
                   allowAddNew={false}
                   allowServices={false}
                   autoOpen={true}
+                  userId={effectiveDeviceId}
                 />
               </div>
             )}

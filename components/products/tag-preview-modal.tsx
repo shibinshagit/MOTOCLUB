@@ -400,7 +400,11 @@ export function TagPreviewModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent onClick={(e) => e.stopPropagation()} className="sm:max-w-[480px] p-6 bg-white border border-slate-200 rounded-xl shadow-xl">
+      <DialogContent
+        overlayClassName="z-[300] bg-black/60"
+        onClick={(e) => e.stopPropagation()}
+        className="z-[300] sm:max-w-[480px] p-6 bg-white border border-slate-200 rounded-xl shadow-xl"
+      >
         <DialogHeader className="space-y-1 text-left">
           <DialogTitle className="text-lg font-bold text-slate-900 flex items-center gap-2">
             <span className="text-emerald-600 font-mono font-black text-lg tracking-tighter flex items-center leading-none">

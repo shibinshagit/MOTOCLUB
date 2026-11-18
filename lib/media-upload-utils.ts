@@ -27,19 +27,23 @@ export function formatBytes(bytes: number) {
 
 export async function compressImageForUpload(file: File, options?: CompressImageOptions): Promise<File> {
   if (typeof window === "undefined") return file
-  if (!file.type.startsWith("image/") || file.type === "image/svg+xml") return file
+  const isImage = file.type.startsWith("image/") || /\.(jpe?g|png|webp|avif)$/i.test(file.name)
+  if (!isImage || file.type === "image/svg+xml") return file
 
-  const maxDimension = options?.maxDimension ?? 2200
-  const skipIfUnderBytes = options?.skipIfUnderBytes ?? 2 * 1024 * 1024
+  const maxDimension = options?.maxDimension ?? 1800
+  const skipIfUnderBytes = options?.skipIfUnderBytes ?? 1.5 * 1024 * 1024
   const preferredMime = options?.preferredMime
 
-  // Keep small files unchanged unless caller opts into a lower threshold.
-  if (file.size <= skipIfUnderBytes) return file
+  // Keep already lightweight JPEGs/WebPs unchanged to avoid unnecessary canvas work
+  if (file.size <= skipIfUnderBytes && (file.type === "image/jpeg" || file.type === "image/webp")) {
+    return file
+  }
 
   let bitmap: ImageBitmap | null = null
   try {
     bitmap = await createImageBitmap(file)
-    const scale = Math.min(1, maxDimension / Math.max(bitmap.width, bitmap.height))
+    const maxOriginal = Math.max(bitmap.width, bitmap.height)
+    const scale = maxOriginal > maxDimension ? maxDimension / maxOriginal : 1
     const width = Math.max(1, Math.round(bitmap.width * scale))
     const height = Math.max(1, Math.round(bitmap.height * scale))
 
@@ -55,23 +59,29 @@ export async function compressImageForUpload(file: File, options?: CompressImage
       file.type === "image/jpeg" || file.type === "image/webp"
         ? file.type
         : preferredMime || "image/jpeg"
-    const qualitySteps = [0.88, 0.8, 0.72, 0.64, 0.56]
 
-    let bestBlob: Blob | null = null
-    for (const quality of qualitySteps) {
-      const blob = await canvasToBlob(canvas, targetMime, quality)
-      if (!blob) continue
-      if (!bestBlob || blob.size < bestBlob.size) bestBlob = blob
-      if (blob.size <= MAX_IMAGE_SIZE_BYTES) {
-        return new File([blob], toFileName(file.name, targetMime), {
+    // Fast pass at 0.82 quality - produces crystal-clear output with minimal bytes
+    const fastBlob = await canvasToBlob(canvas, targetMime, 0.82)
+    if (fastBlob && fastBlob.size <= MAX_IMAGE_SIZE_BYTES) {
+      return new File([fastBlob], toFileName(file.name, targetMime), {
+        type: targetMime,
+        lastModified: Date.now(),
+      })
+    }
+
+    // Secondary fallback pass if still over limit
+    if (fastBlob && fastBlob.size > MAX_IMAGE_SIZE_BYTES) {
+      const fallbackBlob = await canvasToBlob(canvas, targetMime, 0.65)
+      if (fallbackBlob && fallbackBlob.size <= MAX_IMAGE_SIZE_BYTES) {
+        return new File([fallbackBlob], toFileName(file.name, targetMime), {
           type: targetMime,
           lastModified: Date.now(),
         })
       }
     }
 
-    if (bestBlob && bestBlob.size < file.size) {
-      return new File([bestBlob], toFileName(file.name, targetMime), {
+    if (fastBlob && fastBlob.size < file.size) {
+      return new File([fastBlob], toFileName(file.name, targetMime), {
         type: targetMime,
         lastModified: Date.now(),
       })
