@@ -1,13 +1,14 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Package, Truck } from "lucide-react"
+import { Package, Truck, Loader2 } from "lucide-react"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
 import { getMasterDataItems, getAllGlobalCouriers } from "@/app/actions/master-data-actions"
 import { getDeviceServices, addService } from "@/app/actions/service-actions"
+import { getShippingFulfillmentMeta } from "@/app/actions/sale-actions"
 import { getPackagingDefaultCost } from "@/lib/master-data"
 import {
   DEFAULT_SALE_SHIPPING,
@@ -33,7 +34,7 @@ export async function fetchShippingMeta(deviceId?: number | null): Promise<Shipp
   }
 
   const cached = shippingMetaCacheByDevice.get(effectiveDeviceId)
-  if (cached && Date.now() - cached.timestamp < 5 * 60 * 1000) {
+  if (cached && Date.now() - cached.timestamp < 5 * 60 * 1000 && (cached.partners.length > 0 || cached.services.length > 0)) {
     return cached
   }
 
@@ -43,83 +44,22 @@ export async function fetchShippingMeta(deviceId?: number | null): Promise<Shipp
 
   const promise = (async () => {
     try {
-      const { getDeviceStaff } = await import("@/app/actions/staff-actions")
-      const { getMasterDataItems, getAllGlobalPackaging } = await import("@/app/actions/master-data-actions")
-      const { getDeviceServices } = await import("@/app/actions/service-actions")
-
-      const [
-        deviceStaffResult,
-        deviceCouriersResult,
-        packagingResult,
-        deviceServicesResult,
-      ] = await Promise.all([
-        getDeviceStaff(effectiveDeviceId),
-        getMasterDataItems(effectiveDeviceId, "courier"),
-        getMasterDataItems(effectiveDeviceId, "packaging"),
-        getDeviceServices(effectiveDeviceId),
-      ])
-
-      // 1. Partners: Strictly active partners on THIS device
-      const partners: { id: number; name: string; linked_partner_id?: number | null; tracking_url_template?: string | null }[] = []
-      if (deviceStaffResult.success && Array.isArray(deviceStaffResult.data)) {
-        deviceStaffResult.data.forEach((s: any) => {
-          if (s.device_id === effectiveDeviceId && s.role === "partner" && s.is_active !== false && s.name?.trim()) {
-            partners.push({
-              id: s.id,
-              name: s.name.trim(),
-              linked_partner_id: s.linked_partner_id,
-            })
-          }
-        })
-      }
-      partners.sort((a, b) => a.name.localeCompare(b.name))
-
-      // 2. Services: Strictly couriers & services on THIS device (master_data + services table)
-      const servicesMap = new Map<number, { id: number; name: string }>()
-
-      if (deviceCouriersResult.success && Array.isArray(deviceCouriersResult.data)) {
-        deviceCouriersResult.data.forEach((item: any) => {
-          if (item.device_id === effectiveDeviceId && item.is_active !== false && item.name?.trim()) {
-            servicesMap.set(item.id, { id: item.id, name: item.name.trim() })
-          }
-        })
-      }
-
-      const existingNames = new Set(Array.from(servicesMap.values()).map((s) => s.name.toLowerCase().trim()))
-
-      if (deviceServicesResult.success && Array.isArray(deviceServicesResult.data)) {
-        deviceServicesResult.data.forEach((s: any) => {
-          if (s.device_id === effectiveDeviceId && s.is_active !== false && s.name?.trim()) {
-            const norm = s.name.toLowerCase().trim()
-            if (!servicesMap.has(s.id) && !existingNames.has(norm)) {
-              servicesMap.set(s.id, { id: s.id, name: s.name.trim() })
-              existingNames.add(norm)
-            }
-          }
-        })
-      }
-
-      const servicesList = Array.from(servicesMap.values()).sort((a, b) => a.name.localeCompare(b.name))
-
-      // 3. Packaging: Device packaging or global packaging fallback
-      let packagingList: MasterDataItem[] = []
-      if (packagingResult.success && Array.isArray(packagingResult.data) && packagingResult.data.length > 0) {
-        packagingList = packagingResult.data.filter((item: any) => item.is_active !== false)
-      } else {
-        const globalPkg = await getAllGlobalPackaging()
-        if (globalPkg.success && Array.isArray(globalPkg.data)) {
-          packagingList = globalPkg.data.filter((item: any) => item.is_active !== false)
-        }
-      }
-
+      // Single fast server action fetching partners, couriers, and packaging in one call (~150-250ms)
+      const res = await getShippingFulfillmentMeta(effectiveDeviceId)
       const data: ShippingMetaCacheItem = {
-        partners,
-        services: servicesList,
-        packaging: packagingList,
+        partners: res.data?.partners || [],
+        services: res.data?.services || [],
+        packaging: res.data?.packaging || [],
         timestamp: Date.now(),
       }
-      shippingMetaCacheByDevice.set(effectiveDeviceId, data)
+
+      if (data.partners.length > 0 || data.services.length > 0) {
+        shippingMetaCacheByDevice.set(effectiveDeviceId, data)
+      }
       return data
+    } catch (err) {
+      console.error("[fetchShippingMeta] Error loading shipping meta:", err)
+      return { partners: [], services: [], packaging: [], timestamp: Date.now() }
     } finally {
       inFlightRequests.delete(effectiveDeviceId)
     }
@@ -163,7 +103,15 @@ export default function SaleShippingSection({
   errors,
 }: SaleShippingSectionProps) {
   const shipping = { ...DEFAULT_SALE_SHIPPING, ...value }
-  const cachedMeta = deviceId ? shippingMetaCacheByDevice.get(deviceId) : null
+  const effectiveDeviceId = Number(deviceId) || 0
+  const cachedMeta = effectiveDeviceId > 0 ? shippingMetaCacheByDevice.get(effectiveDeviceId) : null
+  const isCacheFresh = Boolean(
+    cachedMeta &&
+    Date.now() - cachedMeta.timestamp < 5 * 60 * 1000 &&
+    (cachedMeta.partners.length > 0 || cachedMeta.services.length > 0)
+  )
+
+  const [isLoadingMeta, setIsLoadingMeta] = useState<boolean>(!isCacheFresh && effectiveDeviceId > 0)
 
   const [courierPartners, setCourierPartners] = useState<{ id: number; name: string; linked_partner_id?: number | null; tracking_url_template?: string | null }[]>(
     () => cachedMeta?.partners || []
@@ -232,15 +180,29 @@ export default function SaleShippingSection({
 
   useEffect(() => {
     let isMounted = true
-    const effectiveDeviceId = Number(deviceId) || 0
-    const cached = shippingMetaCacheByDevice.get(effectiveDeviceId)
-    const isFresh = cached && Date.now() - cached.timestamp < 5 * 60 * 1000
-
-    if (isFresh && courierPartners.length > 0) {
+    const currentDeviceId = Number(deviceId) || 0
+    if (currentDeviceId <= 0) {
+      setIsLoadingMeta(false)
       return
     }
 
-    fetchShippingMeta(effectiveDeviceId)
+    const cached = shippingMetaCacheByDevice.get(currentDeviceId)
+    const isFresh = Boolean(
+      cached &&
+      Date.now() - cached.timestamp < 5 * 60 * 1000 &&
+      (cached.partners.length > 0 || cached.services.length > 0)
+    )
+
+    if (isFresh && cached) {
+      setCourierPartners(cached.partners)
+      setCourierServices(cached.services)
+      setPackagingTypes(cached.packaging)
+      setIsLoadingMeta(false)
+      return
+    }
+
+    setIsLoadingMeta(true)
+    fetchShippingMeta(currentDeviceId)
       .then((data) => {
         if (!isMounted) return
         setCourierPartners(data.partners)
@@ -250,11 +212,14 @@ export default function SaleShippingSection({
       .catch((error) => {
         console.error("[SaleShippingSection] Error fetching shipping data:", error)
       })
+      .finally(() => {
+        if (isMounted) setIsLoadingMeta(false)
+      })
 
     return () => {
       isMounted = false
     }
-  }, [deviceId, courierPartners.length])
+  }, [deviceId])
 
   const selectedCourierPartner = useMemo(
     () => courierPartners.find((courier) => courier.id === shipping.courierPartnerId) || null,
@@ -440,23 +405,33 @@ export default function SaleShippingSection({
                   <Label className="text-sm font-extrabold uppercase tracking-wide text-slate-900">
                     Courier Partner <span className="text-red-500">*</span>
                   </Label>
-                  <select
-                    value={shipping.courierPartnerId ? String(shipping.courierPartnerId) : ""}
-                    onChange={(e) => handleCourierPartnerChange(e.target.value)}
-                    className="flex h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm font-bold text-slate-900"
-                  >
-                    <option value="" className="font-normal">Select partner</option>
-                    {courierPartners.map((courier) => (
-                      <option key={courier.id} value={courier.id}>
-                        {courier.name}
+                  <div className="relative">
+                    <select
+                      disabled={isLoadingMeta}
+                      value={shipping.courierPartnerId ? String(shipping.courierPartnerId) : ""}
+                      onChange={(e) => handleCourierPartnerChange(e.target.value)}
+                      className="flex h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm font-bold text-slate-900 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
+                    >
+                      <option value="" className="font-normal">
+                        {isLoadingMeta ? "Loading partners..." : "Select partner"}
                       </option>
-                    ))}
-                    {shipping.courierPartnerId && !courierPartners.some((c) => c.id === shipping.courierPartnerId) && (
-                      <option value={shipping.courierPartnerId}>
-                        {selectedCourierPartner?.name || shipping.courierPartnerName || `Partner #${shipping.courierPartnerId}`}
-                      </option>
+                      {courierPartners.map((courier) => (
+                        <option key={courier.id} value={courier.id}>
+                          {courier.name}
+                        </option>
+                      ))}
+                      {shipping.courierPartnerId && !courierPartners.some((c) => c.id === shipping.courierPartnerId) && (
+                        <option value={shipping.courierPartnerId}>
+                          {selectedCourierPartner?.name || shipping.courierPartnerName || `Partner #${shipping.courierPartnerId}`}
+                        </option>
+                      )}
+                    </select>
+                    {isLoadingMeta && (
+                      <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                        <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
+                      </div>
                     )}
-                  </select>
+                  </div>
                 </div>
                 
                 <div>
@@ -477,19 +452,34 @@ export default function SaleShippingSection({
                       </div>
                     </div>
                   ) : (
-                    <select
-                      value={shipping.courierServiceId ? String(shipping.courierServiceId) : ""}
-                      onChange={(e) => handleCourierServiceChange(e.target.value)}
-                      className="flex h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm font-bold text-slate-900"
-                    >
-                      <option value="" className="font-normal">Select service</option>
-                      {courierServices.map((service) => (
-                        <option key={service.id} value={service.id}>
-                          {service.name}
+                    <div className="relative">
+                      <select
+                        disabled={isLoadingMeta}
+                        value={shipping.courierServiceId ? String(shipping.courierServiceId) : ""}
+                        onChange={(e) => handleCourierServiceChange(e.target.value)}
+                        className="flex h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm font-bold text-slate-900 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
+                      >
+                        <option value="" className="font-normal">
+                          {isLoadingMeta ? "Loading services..." : "Select service"}
                         </option>
-                      ))}
-                      <option value="create_new">+ Create New Courier Service</option>
-                    </select>
+                        {courierServices.map((service) => (
+                          <option key={service.id} value={service.id}>
+                            {service.name}
+                          </option>
+                        ))}
+                        {shipping.courierServiceId && !courierServices.some((s) => s.id === shipping.courierServiceId) && (
+                          <option value={shipping.courierServiceId}>
+                            {shipping.courierServiceName || `Service #${shipping.courierServiceId}`}
+                          </option>
+                        )}
+                        {!isLoadingMeta && <option value="create_new">+ Create New Courier Service</option>}
+                      </select>
+                      {isLoadingMeta && (
+                        <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                          <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
               </div>
@@ -610,26 +600,36 @@ export default function SaleShippingSection({
               <Label className="text-[11px] font-extrabold uppercase tracking-wider text-slate-800">
                 COURIER PARTNER <span className="text-red-500">*</span>
               </Label>
-              <select
-                value={shipping.courierPartnerId ? String(shipping.courierPartnerId) : ""}
-                onChange={(e) => handleCourierPartnerChange(e.target.value)}
-                className={cn(
-                  "flex h-10 w-full rounded-xl border bg-white px-3 text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900/10 cursor-pointer",
-                  errors?.courierPartner ? "border-red-500 ring-1 ring-red-500 bg-red-50/20" : "border-slate-200"
-                )}
-              >
-                <option value="" className="font-normal">Select partner</option>
-                {courierPartners.map((courier) => (
-                  <option key={courier.id} value={courier.id}>
-                    {courier.name}
+              <div className="relative">
+                <select
+                  disabled={isLoadingMeta}
+                  value={shipping.courierPartnerId ? String(shipping.courierPartnerId) : ""}
+                  onChange={(e) => handleCourierPartnerChange(e.target.value)}
+                  className={cn(
+                    "flex h-10 w-full rounded-xl border bg-white px-3 text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900/10 cursor-pointer disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed",
+                    errors?.courierPartner ? "border-red-500 ring-1 ring-red-500 bg-red-50/20" : "border-slate-200"
+                  )}
+                >
+                  <option value="" className="font-normal">
+                    {isLoadingMeta ? "Loading partners..." : "Select partner"}
                   </option>
-                ))}
-                {shipping.courierPartnerId && !courierPartners.some((c) => c.id === shipping.courierPartnerId) && (
-                  <option value={shipping.courierPartnerId}>
-                    {selectedCourierPartner?.name || shipping.courierPartnerName || `Partner #${shipping.courierPartnerId}`}
-                  </option>
+                  {courierPartners.map((courier) => (
+                    <option key={courier.id} value={courier.id}>
+                      {courier.name}
+                    </option>
+                  ))}
+                  {shipping.courierPartnerId && !courierPartners.some((c) => c.id === shipping.courierPartnerId) && (
+                    <option value={shipping.courierPartnerId}>
+                      {selectedCourierPartner?.name || shipping.courierPartnerName || `Partner #${shipping.courierPartnerId}`}
+                    </option>
+                  )}
+                </select>
+                {isLoadingMeta && (
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-400" />
+                  </div>
                 )}
-              </select>
+              </div>
               {errors?.courierPartner && (
                 <p className="text-[11px] font-medium text-red-500">{errors.courierPartner}</p>
               )}
@@ -653,24 +653,34 @@ export default function SaleShippingSection({
                   </div>
                 </div>
               ) : (
-                <select
-                  value={shipping.courierServiceId ? String(shipping.courierServiceId) : ""}
-                  onChange={(e) => handleCourierServiceChange(e.target.value)}
-                  className="flex h-10 w-full rounded-xl border-2 border-slate-900 bg-white px-3 text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900/10 cursor-pointer"
-                >
-                  <option value="">Select service</option>
-                  {courierServices.map((service) => (
-                    <option key={service.id} value={service.id}>
-                      {service.name}
+                <div className="relative">
+                  <select
+                    disabled={isLoadingMeta}
+                    value={shipping.courierServiceId ? String(shipping.courierServiceId) : ""}
+                    onChange={(e) => handleCourierServiceChange(e.target.value)}
+                    className="flex h-10 w-full rounded-xl border-2 border-slate-900 bg-white px-3 text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900/10 cursor-pointer disabled:border-slate-300 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
+                  >
+                    <option value="">
+                      {isLoadingMeta ? "Loading services..." : "Select service"}
                     </option>
-                  ))}
-                  {shipping.courierServiceId && !courierServices.some((s) => s.id === shipping.courierServiceId) && (
-                    <option value={shipping.courierServiceId}>
-                      {shipping.courierServiceName || `Service #${shipping.courierServiceId}`}
-                    </option>
+                    {courierServices.map((service) => (
+                      <option key={service.id} value={service.id}>
+                        {service.name}
+                      </option>
+                    ))}
+                    {shipping.courierServiceId && !courierServices.some((s) => s.id === shipping.courierServiceId) && (
+                      <option value={shipping.courierServiceId}>
+                        {shipping.courierServiceName || `Service #${shipping.courierServiceId}`}
+                      </option>
+                    )}
+                    {!isLoadingMeta && <option value="create_new">+ Create New Courier Service</option>}
+                  </select>
+                  {isLoadingMeta && (
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-400" />
+                    </div>
                   )}
-                  <option value="create_new">+ Create New Courier Service</option>
-                </select>
+                </div>
               )}
             </div>
 

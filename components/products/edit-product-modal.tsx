@@ -727,15 +727,17 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
   const handleVideoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-    if (!file.type.startsWith("video/")) {
-      const message = "Please select a video file."
+    const isVideo = file.type.startsWith("video/") || /\.(mp4|mov|webm|m4v|mkv|avi)$/i.test(file.name)
+    if (!isVideo) {
+      const message = "Please select a valid video file (MP4, MOV, WebM)."
       setError(message)
       notifyError(toast, message, "Invalid file")
       if (videoInputRef.current) videoInputRef.current.value = ""
       return
     }
     if (file.size > MAX_VIDEO_SIZE_BYTES) {
-      const message = "Video must be under 50MB."
+      const sizeMB = (file.size / (1024 * 1024)).toFixed(1)
+      const message = `Video size (${sizeMB}MB) exceeds the 50MB limit. Please select a video under 50MB.`
       setError(message)
       notifyError(toast, message, "Too large")
       if (videoInputRef.current) videoInputRef.current.value = ""
@@ -1563,7 +1565,13 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
                   <FieldLabel>Video (optional)</FieldLabel>
                   {activeVideoSrc ? (
                     <div className="relative overflow-hidden rounded-lg border border-slate-200">
-                      <video controls className="h-32 w-full">
+                      <video 
+                        controls 
+                        className="h-32 w-full"
+                        onError={() => {
+                          console.warn("Product video failed to decode or load.")
+                        }}
+                      >
                         <source src={activeVideoSrc} />
                       </video>
                       <Button
@@ -1588,6 +1596,10 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
                       ) : uploadedVideoUrl ? (
                         <span className="absolute bottom-2 left-2 rounded bg-emerald-600 px-2 py-1 text-xs text-white">
                           Uploaded
+                        </span>
+                      ) : currentVideoUrl ? (
+                        <span className="absolute bottom-2 left-2 rounded bg-slate-700 px-2 py-1 text-xs text-white">
+                          Current Video
                         </span>
                       ) : null}
                     </div>

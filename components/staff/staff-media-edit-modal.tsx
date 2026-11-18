@@ -140,14 +140,16 @@ export default function StaffMediaEditModal({
     const file = e.target.files?.[0]
     if (!file || !product) return
 
-    if (!file.type.startsWith("video/")) {
+    const isVideo = file.type.startsWith("video/") || /\.(mp4|mov|webm|m4v|mkv|avi)$/i.test(file.name)
+    if (!isVideo) {
       notifyError(toast, "Please select a valid video file (MP4, WebM, MOV).", "Invalid file")
       if (videoInputRef.current) videoInputRef.current.value = ""
       return
     }
 
     if (file.size > MAX_VIDEO_SIZE_BYTES) {
-      notifyError(toast, "Video file exceeds 50MB limit.", "File too large")
+      const sizeMB = (file.size / (1024 * 1024)).toFixed(1)
+      notifyError(toast, `Video file exceeds 50MB limit (selected: ${sizeMB}MB).`, "File too large")
       if (videoInputRef.current) videoInputRef.current.value = ""
       return
     }
