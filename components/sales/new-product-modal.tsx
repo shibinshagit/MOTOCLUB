@@ -238,6 +238,8 @@ export default function NewProductModal({
   const [videoPreview, setVideoPreview] = useState<string | null>(null)
   const [uploadedVideoUrl, setUploadedVideoUrl] = useState<string | null>(null)
   const [isUploadingMedia, setIsUploadingMedia] = useState(false)
+  const [mediaUploadProgress, setMediaUploadProgress] = useState(0)
+  const [mediaUploadStatus, setMediaUploadStatus] = useState("")
   const imageInputRef = useRef<HTMLInputElement>(null)
   const videoInputRef = useRef<HTMLInputElement>(null)
   const [formData, setFormData] = useState({
@@ -444,22 +446,31 @@ export default function NewProductModal({
       notifyError(toast, `Only ${maxSelectable} image${maxSelectable === 1 ? "" : "s"} can be selected.`, "Image limit reached")
     }
 
-    for (const file of files.slice(0, maxSelectable)) {
-      if (!file.type.startsWith("image/")) {
-        const message = `${file.name} is not an image file`
-        setError(message)
-        notifyError(toast, message)
-        continue
+    const filesToProcess = files.slice(0, maxSelectable)
+    const processedImages = await Promise.all(
+      filesToProcess.map(async (file) => {
+        if (!file.type.startsWith("image/") && !/\.(jpe?g|png|webp|avif)$/i.test(file.name)) {
+          const message = `${file.name} is not an image file`
+          setError(message)
+          notifyError(toast, message)
+          return null
+        }
+        const processedImage = await compressImageForUpload(file)
+        if (processedImage.size > MAX_IMAGE_SIZE_BYTES) {
+          const message = `${file.name} exceeds 10MB even after compression`
+          setError(message)
+          notifyError(toast, message)
+          return null
+        }
+        return processedImage
+      })
+    )
+
+    for (const img of processedImages) {
+      if (img) {
+        validImageFiles.push(img)
+        validImagePreviews.push(URL.createObjectURL(img))
       }
-      const processedImage = await compressImageForUpload(file)
-      if (processedImage.size > MAX_IMAGE_SIZE_BYTES) {
-        const message = `${file.name} exceeds 10MB even after compression`
-        setError(message)
-        notifyError(toast, message)
-        continue
-      }
-      validImageFiles.push(processedImage)
-      validImagePreviews.push(URL.createObjectURL(processedImage))
     }
 
     if (validImageFiles.length > 0) {
@@ -530,20 +541,75 @@ export default function NewProductModal({
     }
 
     setIsUploadingMedia(true)
+    setMediaUploadProgress(0)
+    setMediaUploadStatus("Preparing upload...")
+
     try {
-      const newlyUploadedImageUrls: string[] = []
-      for (const image of selectedImages) {
-        const uploadedUrl = await uploadProductFileFromClient(image, formData.name || "product", "image")
-        newlyUploadedImageUrls.push(uploadedUrl)
+      const totalItems = selectedImages.length + (selectedVideo ? 1 : 0)
+      let completedItems = 0
+      const progressMap = new Map<string, number>()
+
+      const updateOverallProgress = () => {
+        let totalPercent = 0
+        progressMap.forEach((p) => {
+          totalPercent += p
+        })
+        const overall = Math.round(totalPercent / totalItems)
+        setMediaUploadProgress(overall)
+        setMediaUploadStatus(`Uploading media: ${overall}% (${completedItems} of ${totalItems} finished)`)
       }
 
-      let newlyUploadedVideoUrl: string | null = null
-      if (selectedVideo) {
-        newlyUploadedVideoUrl = await uploadProductFileFromClient(selectedVideo, formData.name || "product", "video")
-      }
+      setMediaUploadStatus(`Uploading ${totalItems} item${totalItems > 1 ? "s" : ""} in parallel...`)
 
-      if (newlyUploadedImageUrls.length > 0) {
-        setUploadedImageUrls((prev) => [...prev, ...newlyUploadedImageUrls].slice(0, 4))
+      const imagePromises = selectedImages.map((image, idx) => {
+        const key = `img-${idx}`
+        progressMap.set(key, 0)
+        return uploadProductFileFromClient(
+          image,
+          formData.name || "product",
+          "image",
+          (p) => {
+            progressMap.set(key, p.percentage)
+            updateOverallProgress()
+          }
+        ).then((url) => {
+          completedItems++
+          progressMap.set(key, 100)
+          updateOverallProgress()
+          return url
+        })
+      })
+
+      const videoPromise = selectedVideo
+        ? (() => {
+            const key = "video"
+            progressMap.set(key, 0)
+            return uploadProductFileFromClient(
+              selectedVideo,
+              formData.name || "product",
+              "video",
+              (p) => {
+                progressMap.set(key, p.percentage)
+                updateOverallProgress()
+              }
+            ).then((url) => {
+              completedItems++
+              progressMap.set(key, 100)
+              updateOverallProgress()
+              return url
+            })
+          })()
+        : Promise.resolve(null)
+
+      const [newlyUploadedImageUrls, newlyUploadedVideoUrl] = await Promise.all([
+        Promise.all(imagePromises),
+        videoPromise,
+      ])
+
+      const validNewUrls = newlyUploadedImageUrls.filter((u): u is string => typeof u === "string" && !!u)
+
+      if (validNewUrls.length > 0) {
+        setUploadedImageUrls((prev) => [...prev, ...validNewUrls].slice(0, 4))
       }
       if (newlyUploadedVideoUrl) {
         if (uploadedVideoUrl) {
@@ -553,13 +619,15 @@ export default function NewProductModal({
       }
 
       clearSelectedMedia()
-      notifySuccess(toast, "Selected media uploaded successfully." , "Uploaded")
+      notifySuccess(toast, "Selected media uploaded successfully.", "Uploaded")
     } catch (error) {
       console.error("Media upload failed:", error)
       const message = error instanceof Error ? error.message : "Failed to upload selected media. Please try again."
       notifyError(toast, message, "Upload failed")
     } finally {
       setIsUploadingMedia(false)
+      setMediaUploadProgress(0)
+      setMediaUploadStatus("")
     }
   }
 
@@ -1675,6 +1743,24 @@ export default function NewProductModal({
                   <input ref={videoInputRef} type="file" accept="video/*" onChange={handleVideoSelect} className="hidden" />
                 </div>
 
+                {isUploadingMedia && (
+                  <div className="w-full space-y-1.5 rounded-lg border border-emerald-200 bg-emerald-50/60 p-3">
+                    <div className="flex items-center justify-between text-xs text-emerald-800">
+                      <span className="flex items-center gap-1.5 font-medium">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-600" />
+                        {mediaUploadStatus || "Uploading media..."}
+                      </span>
+                      <span className="font-semibold">{mediaUploadProgress}%</span>
+                    </div>
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-emerald-200">
+                      <div
+                        className="h-full bg-emerald-600 transition-all duration-300 ease-out"
+                        style={{ width: `${mediaUploadProgress}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+
                 {(selectedImages.length > 0 || selectedVideo) && (
                   <Button
                     type="button"
@@ -1685,7 +1771,7 @@ export default function NewProductModal({
                     {isUploadingMedia ? (
                       <>
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Uploading media...
+                        Uploading media ({mediaUploadProgress}%)...
                       </>
                     ) : (
                       "Upload selected media"

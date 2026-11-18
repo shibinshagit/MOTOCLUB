@@ -265,6 +265,8 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
   const [uploadedVideoUrl, setUploadedVideoUrl] = useState<string | null>(null)
   const [currentVideoUrl, setCurrentVideoUrl] = useState<string | null>(null)
   const [isUploadingMedia, setIsUploadingMedia] = useState(false)
+  const [mediaUploadProgress, setMediaUploadProgress] = useState(0)
+  const [mediaUploadStatus, setMediaUploadStatus] = useState("")
   const imageInputRef = useRef<HTMLInputElement>(null)
   const videoInputRef = useRef<HTMLInputElement>(null)
   const [formData, setFormData] = useState({
@@ -676,24 +678,33 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
       notifyError(toast, `Only ${maxCanAdd} more image${maxCanAdd === 1 ? "" : "s"} can be selected.`, "Image limit reached")
     }
 
+    const filesToProcess = files.slice(0, maxCanAdd)
+    const processedImages = await Promise.all(
+      filesToProcess.map(async (file) => {
+        if (!file.type.startsWith("image/") && !/\.(jpe?g|png|webp|avif)$/i.test(file.name)) {
+          const message = `${file.name} is not an image.`
+          setError(message)
+          notifyError(toast, message, "Invalid file")
+          return null
+        }
+        const processedImage = await compressImageForUpload(file)
+        if (processedImage.size > MAX_IMAGE_SIZE_BYTES) {
+          const message = `${file.name} exceeds 10MB even after compression.`
+          setError(message)
+          notifyError(toast, message, "Too large")
+          return null
+        }
+        return processedImage
+      })
+    )
+
     const accepted: File[] = []
     const previews: string[] = []
-    for (const file of files.slice(0, maxCanAdd)) {
-      if (!file.type.startsWith("image/")) {
-        const message = `${file.name} is not an image.`
-        setError(message)
-        notifyError(toast, message, "Invalid file")
-        continue
+    for (const img of processedImages) {
+      if (img) {
+        accepted.push(img)
+        previews.push(URL.createObjectURL(img))
       }
-      const processedImage = await compressImageForUpload(file)
-      if (processedImage.size > MAX_IMAGE_SIZE_BYTES) {
-        const message = `${file.name} exceeds 10MB even after compression.`
-        setError(message)
-        notifyError(toast, message, "Too large")
-        continue
-      }
-      accepted.push(processedImage)
-      previews.push(URL.createObjectURL(processedImage))
     }
 
     if (accepted.length > 0) {
@@ -768,20 +779,75 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
     if (selectedImages.length === 0 && !selectedVideo) return
 
     setIsUploadingMedia(true)
+    setMediaUploadProgress(0)
+    setMediaUploadStatus("Preparing upload...")
+
     try {
-      const newlyUploadedImageUrls: string[] = []
-      for (const image of selectedImages) {
-        const uploadedUrl = await uploadProductFileFromClient(image, formData.name || product.name, "image")
-        newlyUploadedImageUrls.push(uploadedUrl)
+      const totalItems = selectedImages.length + (selectedVideo ? 1 : 0)
+      let completedItems = 0
+      const progressMap = new Map<string, number>()
+
+      const updateOverallProgress = () => {
+        let totalPercent = 0
+        progressMap.forEach((p) => {
+          totalPercent += p
+        })
+        const overall = Math.round(totalPercent / totalItems)
+        setMediaUploadProgress(overall)
+        setMediaUploadStatus(`Uploading media: ${overall}% (${completedItems} of ${totalItems} finished)`)
       }
 
-      let newlyUploadedVideoUrl: string | null = null
-      if (selectedVideo) {
-        newlyUploadedVideoUrl = await uploadProductFileFromClient(selectedVideo, formData.name || product.name, "video")
-      }
+      setMediaUploadStatus(`Uploading ${totalItems} item${totalItems > 1 ? "s" : ""} in parallel...`)
 
-      if (newlyUploadedImageUrls.length > 0) {
-        setUploadedImageUrls((prev) => [...prev, ...newlyUploadedImageUrls].slice(0, 4))
+      const imagePromises = selectedImages.map((image, idx) => {
+        const key = `img-${idx}`
+        progressMap.set(key, 0)
+        return uploadProductFileFromClient(
+          image,
+          formData.name || product.name,
+          "image",
+          (p) => {
+            progressMap.set(key, p.percentage)
+            updateOverallProgress()
+          }
+        ).then((url) => {
+          completedItems++
+          progressMap.set(key, 100)
+          updateOverallProgress()
+          return url
+        })
+      })
+
+      const videoPromise = selectedVideo
+        ? (() => {
+            const key = "video"
+            progressMap.set(key, 0)
+            return uploadProductFileFromClient(
+              selectedVideo,
+              formData.name || product.name,
+              "video",
+              (p) => {
+                progressMap.set(key, p.percentage)
+                updateOverallProgress()
+              }
+            ).then((url) => {
+              completedItems++
+              progressMap.set(key, 100)
+              updateOverallProgress()
+              return url
+            })
+          })()
+        : Promise.resolve(null)
+
+      const [newlyUploadedImageUrls, newlyUploadedVideoUrl] = await Promise.all([
+        Promise.all(imagePromises),
+        videoPromise,
+      ])
+
+      const validNewUrls = newlyUploadedImageUrls.filter((u): u is string => typeof u === "string" && !!u)
+
+      if (validNewUrls.length > 0) {
+        setUploadedImageUrls((prev) => [...prev, ...validNewUrls].slice(0, 4))
       }
       if (newlyUploadedVideoUrl) {
         if (uploadedVideoUrl) {
@@ -791,13 +857,15 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
       }
 
       clearSelectedDraftMedia()
-      notifySuccess(toast, "Selected media uploaded successfully." , "Uploaded")
+      notifySuccess(toast, "Selected media uploaded successfully.", "Uploaded")
     } catch (error) {
       console.error("Media upload failed:", error)
       const message = error instanceof Error ? error.message : "Failed to upload selected media. Please try again."
       notifyError(toast, message, "Upload failed")
     } finally {
       setIsUploadingMedia(false)
+      setMediaUploadProgress(0)
+      setMediaUploadStatus("")
     }
   }
 
@@ -1616,6 +1684,24 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
                   <input ref={videoInputRef} type="file" accept="video/*" onChange={handleVideoSelect} className="hidden" />
                 </div>
 
+                {isUploadingMedia && (
+                  <div className="w-full space-y-1.5 rounded-lg border border-emerald-200 bg-emerald-50/60 p-3">
+                    <div className="flex items-center justify-between text-xs text-emerald-800">
+                      <span className="flex items-center gap-1.5 font-medium">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-600" />
+                        {mediaUploadStatus || "Uploading media..."}
+                      </span>
+                      <span className="font-semibold">{mediaUploadProgress}%</span>
+                    </div>
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-emerald-200">
+                      <div
+                        className="h-full bg-emerald-600 transition-all duration-300 ease-out"
+                        style={{ width: `${mediaUploadProgress}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+
                 {(selectedImages.length > 0 || selectedVideo) && (
                   <Button
                     type="button"
@@ -1626,7 +1712,7 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
                     {isUploadingMedia ? (
                       <>
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Uploading media...
+                        Uploading media ({mediaUploadProgress}%)...
                       </>
                     ) : (
                       "Upload selected media"

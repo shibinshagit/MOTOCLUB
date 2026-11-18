@@ -376,10 +376,10 @@ export function ProductMediaViewerModal({
   return (
     <DialogPrimitive.Root open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-[200] bg-black/60 backdrop-blur-sm select-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 duration-150" />
+        <DialogPrimitive.Overlay className="fixed inset-0 z-[300] bg-black/60 backdrop-blur-sm select-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 duration-150" />
         <DialogPrimitive.Content
           ref={containerRef}
-          className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[200] flex flex-col w-[calc(100%-1.5rem)] sm:w-[calc(100%-3rem)] max-w-3xl max-h-[90vh] bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 duration-150 select-none"
+          className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[300] flex flex-col w-[calc(100%-1.5rem)] sm:w-[calc(100%-3rem)] max-w-3xl max-h-[90vh] bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 duration-150 select-none"
         >
           <DialogPrimitive.Title className="sr-only">
             {productName}

@@ -31,7 +31,6 @@ export async function POST(request: Request): Promise<Response> {
       addRandomSuffix: true,
       validUntil: Date.now() + 15 * 60 * 1000, // 15 minutes to allow slow connections to complete without 30s timeout
       maximumSizeInBytes: type === "video" ? MAX_VIDEO_SIZE_BYTES : MAX_IMAGE_SIZE_BYTES,
-      allowedContentTypes: type === "video" ? ["video/*"] : ["image/*"],
     })
 
     return Response.json({ clientToken })

@@ -146,7 +146,9 @@ export function SaleReviewModal({ isOpen, onClose, sale, onSaved }: SaleReviewMo
         setUploadProgressText(`Uploading ${completed + 1} of ${total}: ${file.name}...`)
 
         const type: "image" | "video" = isVideo ? "video" : "image"
-        const uploadedUrl = await uploadReviewFileFromClient(file, sale.id, type)
+        const uploadedUrl = await uploadReviewFileFromClient(file, sale.id, type, (p) => {
+          setUploadProgressText(`Uploading ${completed + 1} of ${total}: ${file.name} (${p.percentage}%)...`)
+        })
 
         newMediaItems.push({
           url: uploadedUrl,
