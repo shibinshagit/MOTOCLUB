@@ -244,7 +244,6 @@ export function DateTimePicker({
                 mode="single"
                 selected={selectedDate}
                 onSelect={handleDaySelect}
-                initialFocus
                 className="p-1 scale-95"
               />
             </div>
