@@ -3320,9 +3320,9 @@ export async function updateSale(saleData: any) {
       targetShippingDate = targetShippingDate || new Date()
     }
 
-    const updateSaleRecord = async (whereDeviceScoped: boolean) => {
+    const updateSaleRecord = async (tx: any, whereDeviceScoped: boolean) => {
         if (whereDeviceScoped) {
-          await sql`
+          await tx`
             UPDATE sales 
             SET customer_id = ${saleData.customerId || null},
                 customer_name_override = ${saleData.customerName || saleData.customerNameOverride || original.customer_name_override || null},
@@ -3372,7 +3372,7 @@ export async function updateSale(saleData: any) {
             WHERE id = ${saleData.id} AND device_id = ${saleData.deviceId}
           `
         } else {
-          await sql`
+          await tx`
             UPDATE sales 
             SET customer_id = ${saleData.customerId || null},
                 customer_name_override = ${saleData.customerName || saleData.customerNameOverride || original.customer_name_override || null},
@@ -3424,11 +3424,12 @@ export async function updateSale(saleData: any) {
         }
       }
 
-      await updateSaleRecord(Boolean(saleData.deviceId))
+    await sql.begin(async (tx: any) => {
+      await updateSaleRecord(tx, Boolean(saleData.deviceId))
 
       if (origDelivery !== newDelivery && shipping.delivery_status) {
         try {
-          await sql`
+          await tx`
             INSERT INTO tracking_events (
               sale_id, tracking_id, status, location, description, event_at, created_at
             ) VALUES (
@@ -3440,23 +3441,15 @@ export async function updateSale(saleData: any) {
         }
       }
 
-      if (saleData.customerId && shipping) {
-        try {
-          await syncCustomerShippingAddress(saleData.customerId, shipping)
-        } catch (addrSyncErr) {
-          console.warn("Could not sync customer shipping address on updateSale:", addrSyncErr)
-        }
-      }
-
       // Sync transaction_payments if payments provided
       try {
-        await sql`DELETE FROM transaction_payments WHERE sale_id = ${saleData.id}`
+        await tx`DELETE FROM transaction_payments WHERE sale_id = ${saleData.id}`
         if (changes.newPaymentStatus !== "Pending" && changes.newPaymentStatus !== "Credit") {
           if (Array.isArray(saleData.payments) && saleData.payments.length > 0) {
             for (const p of saleData.payments) {
               const pAmt = Number(p.amount) || 0
               if (pAmt > 0) {
-                await sql`
+                await tx`
                   INSERT INTO transaction_payments (
                     sale_id, payment_method, amount, reference_number, notes, payment_date
                   ) VALUES (
@@ -3471,7 +3464,7 @@ export async function updateSale(saleData: any) {
             const isCod = pm === "COD" || pm === "CASH ON DELIVERY"
             const tpAmount = isCod ? changes.newTotal : (changes.newReceived > 0 ? changes.newReceived : changes.newTotal)
             if (tpAmount > 0) {
-              await sql`
+              await tx`
                 INSERT INTO transaction_payments (
                   sale_id, payment_method, amount, payment_date
                 ) VALUES (
@@ -3485,8 +3478,8 @@ export async function updateSale(saleData: any) {
         console.warn("Could not sync transaction_payments on updateSale:", tpUpdateErr)
       }
 
-    // 7. Handle sale items updates with MULTI-BATCH logic
-    console.log("Updating sale items with multi-batch stock tracking...")
+      // 7. Handle sale items updates with MULTI-BATCH logic
+      console.log("Updating sale items with multi-batch stock tracking...")
 
       const wasCancelled = changes.originalStatus.toLowerCase() === "cancelled"
       const isNowCancelled = changes.newStatus.toLowerCase() === "cancelled"
@@ -3502,11 +3495,11 @@ export async function updateSale(saleData: any) {
       })
 
       // Fetch all existing sale items and their allocations
-      const existingItems = await sql`
+      const existingItems = await tx`
         SELECT id, product_id, product_variant_id FROM sale_items WHERE sale_id = ${saleData.id}
       `
       
-      const existingAllocations = await sql`
+      const existingAllocations = await tx`
         SELECT sba.*, si.product_id, si.product_variant_id 
         FROM sale_batch_allocations sba 
         JOIN sale_items si ON sba.sale_item_id = si.id 
@@ -3516,7 +3509,7 @@ export async function updateSale(saleData: any) {
       // Lines with no allocation rows (job cards, non-batch lines) are not covered by the allocation logic
       // below. Snapshot them now so the stock difference can be applied after the lines are rewritten.
       const unallocatedBefore = wasDeducted && !wasCancelled
-        ? await getSaleStockLines(saleData.id, sql, true)
+        ? await getSaleStockLines(saleData.id, tx, true)
         : new Map()
 
       const stockDeviceId = Number(original.device_id || saleData.deviceId || 0)
@@ -3531,7 +3524,8 @@ export async function updateSale(saleData: any) {
             alloc.batch_id, 
             alloc.quantity, 
             "add", 
-            stockDeviceId
+            stockDeviceId,
+            tx
           )
           if (stockResult.success) {
             await createStockHistoryEntry(
@@ -3543,7 +3537,8 @@ export async function updateSale(saleData: any) {
               saleData.id,
               "sale",
               stockDeviceId,
-              `Sale #${saleData.id} edited - stock temporarily restored`
+              `Sale #${saleData.id} edited - stock temporarily restored`,
+              tx
             )
           }
         }
@@ -3551,7 +3546,7 @@ export async function updateSale(saleData: any) {
 
       // DELETE old allocations (we will recreate them)
       if (existingItems.length > 0) {
-        await sql`DELETE FROM sale_batch_allocations WHERE sale_item_id IN (SELECT id FROM sale_items WHERE sale_id = ${saleData.id})`
+        await tx`DELETE FROM sale_batch_allocations WHERE sale_item_id IN (SELECT id FROM sale_items WHERE sale_id = ${saleData.id})`
       }
 
       const processedItemIds = new Set()
@@ -3562,7 +3557,7 @@ export async function updateSale(saleData: any) {
         let resolvedVariantId = variantId
         
         if (!resolvedVariantId) {
-          const defaultVariant = await sql`
+          const defaultVariant = await tx`
             SELECT id FROM product_variants WHERE product_id = ${item.productId} ORDER BY id ASC LIMIT 1
           `
           if (defaultVariant.length > 0) {
@@ -3574,7 +3569,7 @@ export async function updateSale(saleData: any) {
         
         if (item.id) {
           // Update existing item
-          await sql`
+          await tx`
             UPDATE sale_items SET
               product_id = ${item.productId},
               product_variant_id = ${resolvedVariantId || null},
@@ -3588,7 +3583,7 @@ export async function updateSale(saleData: any) {
           processedItemIds.add(item.id)
         } else {
           // Insert new item
-          const itemResult = await sql`
+          const itemResult = await tx`
             INSERT INTO sale_items (
               sale_id, product_id, product_variant_id, batch_id, quantity, price, cost, notes
             ) VALUES (
@@ -3596,6 +3591,15 @@ export async function updateSale(saleData: any) {
             ) RETURNING id
           `
           insertedItemId = itemResult[0].id;
+        }
+
+        // Check if item is batch-managed
+        let isBatchManaged = false
+        if (item.productId) {
+          const prodData = await tx`SELECT is_batch_managed FROM products WHERE id = ${item.productId}`
+          if (prodData.length > 0) {
+            isBatchManaged = prodData[0].is_batch_managed
+          }
         }
 
         // RE-ALLOCATE: Always create new allocations. Deduct stock if it is currently DEDUCTED (Shipped/Delivered).
@@ -3631,16 +3635,40 @@ export async function updateSale(saleData: any) {
                   costPrice: prevAlloc?.cost_price || item.cost || 0,
                   sellingPrice: prevAlloc?.selling_price || item.price || 0,
                 }];
+              } else if (isBatchManaged) {
+                // Auto-allocate from available batches FIFO (same as addSale)
+                const availableBatches = await tx`
+                  SELECT pb.id, pbds.stock, pb.cost_price, pb.selling_price
+                  FROM product_batch_device_stock pbds
+                  JOIN product_batches pb ON pb.id = pbds.batch_id
+                  WHERE pb.product_variant_id = ${resolvedVariantId} 
+                    AND pbds.device_id = ${stockDeviceId}
+                    AND pbds.stock > 0
+                  ORDER BY pb.manufacture_date ASC NULLS LAST, pb.created_at ASC
+                `
+                let remainingQty = targetQty
+                for (const batch of availableBatches) {
+                  if (remainingQty <= 0) break
+                  const stockAvailable = Number(batch.stock)
+                  const qtyFromBatch = Math.min(remainingQty, stockAvailable)
+                  allocations.push({
+                    batchId: batch.id,
+                    quantity: qtyFromBatch,
+                    costPrice: Number(batch.cost_price) || 0,
+                    sellingPrice: Number(batch.selling_price) || 0,
+                  })
+                  remainingQty -= qtyFromBatch
+                }
+                if (remainingQty > 0) {
+                  allocations.push({ batchId: null, quantity: remainingQty })
+                }
               }
             }
           }
           
           for (const alloc of allocations) {
-            if (alloc.quantity <= 0) continue;
-            if (!alloc.batchId) {
-              throw new Error("A batch-managed sale allocation requires a batch")
-            }
-            const batch = await sql`
+            if (alloc.quantity <= 0 || !alloc.batchId) continue;
+            const batch = await tx`
               SELECT pb.id FROM product_batches pb
               JOIN product_variants pv ON pv.id = pb.product_variant_id
               WHERE pb.id = ${alloc.batchId}
@@ -3648,11 +3676,12 @@ export async function updateSale(saleData: any) {
                 AND pb.product_variant_id = ${resolvedVariantId}
             `
             if (batch.length === 0) {
-              throw new Error("Selected batch does not belong to the selected product variant")
+              console.warn(`Batch ${alloc.batchId} does not belong to variant ${resolvedVariantId}, skipping allocation row`)
+              continue;
             }
             
             // Insert allocation
-            await sql`
+            await tx`
               INSERT INTO sale_batch_allocations (sale_item_id, batch_id, quantity, cost_price, selling_price)
               VALUES (${insertedItemId}, ${alloc.batchId}, ${alloc.quantity}, ${alloc.costPrice || item.cost || 0}, ${alloc.sellingPrice || item.price})
             `
@@ -3665,7 +3694,8 @@ export async function updateSale(saleData: any) {
                 alloc.batchId, 
                 alloc.quantity, 
                 "subtract", 
-                stockDeviceId
+                stockDeviceId,
+                tx
               )
               
               if (stockResult.success) {
@@ -3678,7 +3708,8 @@ export async function updateSale(saleData: any) {
                   saleData.id,
                   "sale",
                   stockDeviceId,
-                  `Sale #${saleData.id} edited - stock deducted for allocation`
+                  `Sale #${saleData.id} edited - stock deducted for allocation`,
+                  tx
                 )
               }
             }
@@ -3689,7 +3720,7 @@ export async function updateSale(saleData: any) {
       // Handle deleted items
       for (const item of existingItems) {
         if (!processedItemIds.has(item.id)) {
-          await sql`DELETE FROM sale_items WHERE id = ${item.id}`
+          await tx`DELETE FROM sale_items WHERE id = ${item.id}`
         }
       }
 
@@ -3697,19 +3728,16 @@ export async function updateSale(saleData: any) {
       // difference, pending -> deducted deducts the lines once, deducted -> pending/cancelled restores them.
       {
         const unallocatedAfter = isNowDeducted && !isNowCancelled
-          ? await getSaleStockLines(saleData.id, sql, true)
+          ? await getSaleStockLines(saleData.id, tx, true)
           : new Map()
-        const stockDeviceId = Number(original.device_id) || saleData.deviceId
-        await sql.begin(async (tx: any) => {
-          await applyStockDelta(
-            saleData.id,
-            stockDeviceId,
-            unallocatedBefore,
-            unallocatedAfter,
-            `Sale #${saleData.id} updated`,
-            tx,
-          )
-        })
+        await applyStockDelta(
+          saleData.id,
+          stockDeviceId,
+          unallocatedBefore,
+          unallocatedAfter,
+          `Sale #${saleData.id} updated`,
+          tx,
+        )
       }
 
       console.log("Sale items and batch allocations updated successfully")
@@ -3717,7 +3745,7 @@ export async function updateSale(saleData: any) {
       // 7.5. Update sale type based on current items
       try {
         if (original.sale_type !== 'job_card') {
-          const serviceCheck = await sql`
+          const serviceCheck = await tx`
             SELECT COUNT(*) as service_count
             FROM sale_items si
             WHERE si.sale_id = ${saleData.id}
@@ -3726,7 +3754,7 @@ export async function updateSale(saleData: any) {
 
           const newSaleType = serviceCheck[0]?.service_count > 0 ? "service" : "product"
 
-          await sql`
+          await tx`
             UPDATE sales 
             SET sale_type = ${newSaleType}
             WHERE id = ${saleData.id}
@@ -3739,6 +3767,15 @@ export async function updateSale(saleData: any) {
       } catch (err) {
         console.log("Error updating sale type:", err)
       }
+    })
+
+    if (saleData.customerId && shipping) {
+      try {
+        await syncCustomerShippingAddress(saleData.customerId, shipping)
+      } catch (addrSyncErr) {
+        console.warn("Could not sync customer shipping address on updateSale:", addrSyncErr)
+      }
+    }
 
       // 8. FIXED: Create accounting entry only if there are actual financial changes
       try {
