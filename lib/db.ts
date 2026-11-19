@@ -70,9 +70,9 @@ const createSqlClient = () => {
   const postgres = require("postgres") as (url: string, options?: Record<string, unknown>) => any
   
   const sqlFn = postgres(dbUrl, {
-    max: 10,
-    idle_timeout: 20,
-    connect_timeout: 15,
+    max: useLocalDriver ? 10 : 2, // Serverless best practice: max 2 conns per instance to prevent pool saturation
+    idle_timeout: 5,              // Release idle connections in 5 seconds (down from 20s)
+    connect_timeout: 10,
     ssl: useLocalDriver ? false : "require",
     onnotice: () => {},
   })
@@ -115,16 +115,6 @@ const createSqlClient = () => {
   wrappedSql.begin = sqlFn.begin ? sqlFn.begin.bind(sqlFn) : undefined;
   wrappedSql.json = sqlFn.json ? sqlFn.json.bind(sqlFn) : undefined;
   wrappedSql.array = sqlFn.array ? sqlFn.array.bind(sqlFn) : undefined;
-  
-  ;(async () => {
-    try {
-      await wrappedSql`SELECT 1`
-      logDbInit("Database connection successful")
-      logDbInitOnce()
-    } catch (error) {
-      console.error("Initial database connection test failed:", error)
-    }
-  })()
 
   return { sql: wrappedSql as any }
 }

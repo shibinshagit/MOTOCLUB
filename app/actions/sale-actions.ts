@@ -853,8 +853,8 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
           AND (
             ${cardFilter} = 'today'
             OR (
-              (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
-              AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
+              (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) >= ${dateFrom}::timestamp)
+              AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) < ${endExclusive}::timestamp)
             )
           )
           AND (
@@ -878,7 +878,7 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
           )
           AND (
             ${cardFilter} = 'all'
-            OR (${cardFilter} = 'today' AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned') AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled' AND LOWER(COALESCE(s.delivery_status, '')) NOT IN ('returned', 'failed') AND COALESCE(s.sale_date, s.created_at)::date = CURRENT_DATE)
+            OR (${cardFilter} = 'today' AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned') AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled' AND LOWER(COALESCE(s.delivery_status, '')) NOT IN ('returned', 'failed') AND COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC'))::date = CURRENT_DATE)
             OR (
               ${cardFilter} = 'pending'
               AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
@@ -1025,7 +1025,7 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
               END
             ELSE 1
           END ASC,
-          COALESCE(s.sale_date, s.created_at) DESC, s.id DESC
+          COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) DESC, s.id DESC
         LIMIT ${pageSize} OFFSET ${offset}
       `
 
@@ -1035,42 +1035,6 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
           COALESCE(
             JSON_AGG(
               JSON_BUILD_OBJECT('id', s.id, 'isJobCard', (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%'))
-              ORDER BY 
-          CASE 
-            WHEN ${isPurchaseManager} = true AND ${purchaseManagerShowAllOrders} = false THEN
-              CASE 
-                WHEN LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct' THEN 2
-                ELSE 1
-              END
-            WHEN ${isLogistics} = true AND ${cardFilter} = 'all' AND ${logisticsShowAllOrders} = false THEN
-              CASE 
-                -- Direct orders: Tier 2 if missing courier or tracking (or starts with DOD/JC), else Tier 3
-                WHEN LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) = 'direct' THEN
-                  CASE
-                    WHEN (
-                      s.tracking_id IS NULL OR TRIM(s.tracking_id) = ''
-                      OR UPPER(TRIM(s.tracking_id)) LIKE 'DOD%'
-                      OR UPPER(TRIM(s.tracking_id)) LIKE 'JC-%'
-                      OR (s.courier_service_name IS NULL AND s.courier_service_id IS NULL AND s.courier_partner_id IS NULL)
-                    ) THEN 2
-                    ELSE 3
-                  END
-                -- Tier 1: In-progress / new orders to deliver (Pending, Paid, Packed, Sent)
-                WHEN LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('shipped', 'shipping', 'delivered') THEN 1
-                -- Tier 2: Shipped but missing courier service or genuine tracking ID
-                WHEN LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) IN ('shipped', 'shipping', 'delivered')
-                  AND (
-                    s.tracking_id IS NULL OR TRIM(s.tracking_id) = ''
-                    OR UPPER(TRIM(s.tracking_id)) LIKE 'DOD%'
-                    OR UPPER(TRIM(s.tracking_id)) LIKE 'JC-%'
-                    OR (s.courier_service_name IS NULL AND s.courier_service_id IS NULL AND s.courier_partner_id IS NULL)
-                  ) THEN 2
-                -- Tier 3: Shipped and completely updated with courier and tracking
-                ELSE 3
-              END
-            ELSE 1
-          END ASC,
-          COALESCE(s.sale_date, s.created_at) DESC, s.id DESC
             ) FILTER (WHERE s.id IS NOT NULL),
             '[]'::json
           ) as all_matching
@@ -1082,8 +1046,8 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
           AND (
             ${cardFilter} = 'today'
             OR (
-              (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
-              AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
+              (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) >= ${dateFrom}::timestamp)
+              AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) < ${endExclusive}::timestamp)
             )
           )
           AND (
@@ -1107,7 +1071,7 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
           )
           AND (
             ${cardFilter} = 'all'
-            OR (${cardFilter} = 'today' AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned') AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled' AND LOWER(COALESCE(s.delivery_status, '')) NOT IN ('returned', 'failed') AND COALESCE(s.sale_date, s.created_at)::date = CURRENT_DATE)
+            OR (${cardFilter} = 'today' AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned') AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled' AND LOWER(COALESCE(s.delivery_status, '')) NOT IN ('returned', 'failed') AND COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC'))::date = CURRENT_DATE)
             OR (
               ${cardFilter} = 'pending'
               AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
@@ -1484,12 +1448,12 @@ export async function getSalesSummaryCards(
       const rows = await sql`
         SELECT
           COUNT(*) FILTER (
-            WHERE (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
-              AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
+            WHERE (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) >= ${dateFrom}::timestamp)
+              AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) < ${endExclusive}::timestamp)
           )::int as total_count,
           COALESCE(SUM(s.total_amount) FILTER (
-            WHERE (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
-              AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
+            WHERE (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) >= ${dateFrom}::timestamp)
+              AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) < ${endExclusive}::timestamp)
           ), 0)::numeric as total_amount,
           COUNT(*) FILTER (
             WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
@@ -1515,8 +1479,8 @@ export async function getSalesSummaryCards(
                   )
                 )
               )
-              AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
-              AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
+              AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) >= ${dateFrom}::timestamp)
+              AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) < ${endExclusive}::timestamp)
           )::int as orders_to_check_count,
           COALESCE(SUM(s.total_amount) FILTER (
             WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
@@ -1542,8 +1506,8 @@ export async function getSalesSummaryCards(
                   )
                 )
               )
-              AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
-              AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
+              AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) >= ${dateFrom}::timestamp)
+              AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) < ${endExclusive}::timestamp)
           ), 0)::numeric as orders_to_check_amount,
           COUNT(*) FILTER (
             WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
@@ -1585,8 +1549,8 @@ export async function getSalesSummaryCards(
                   )
                 )
               )
-              AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
-              AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
+              AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) >= ${dateFrom}::timestamp)
+              AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) < ${endExclusive}::timestamp)
           )::int as ready_to_ship_count,
           COUNT(*) FILTER (
             WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
@@ -1657,8 +1621,8 @@ export async function getSalesSummaryCards(
                   AND LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
                 )
               )
-              AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
-              AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
+              AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) >= ${dateFrom}::timestamp)
+              AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) < ${endExclusive}::timestamp)
           )::int as pending_count,
           COUNT(*) FILTER (
             WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
@@ -1710,8 +1674,8 @@ export async function getSalesSummaryCards(
                   AND LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
                 )
               )
-              AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
-              AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
+              AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) >= ${dateFrom}::timestamp)
+              AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) < ${endExclusive}::timestamp)
           )::int as critical_count,
           COUNT(*) FILTER (
             WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
@@ -1742,8 +1706,8 @@ export async function getSalesSummaryCards(
                   AND LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
                 )
               )
-              AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
-              AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
+              AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) >= ${dateFrom}::timestamp)
+              AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) < ${endExclusive}::timestamp)
           )::int as direct_count,
           COALESCE(SUM(s.total_amount) FILTER (
             WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
@@ -1774,8 +1738,8 @@ export async function getSalesSummaryCards(
                   AND LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
                 )
               )
-              AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
-              AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
+              AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) >= ${dateFrom}::timestamp)
+              AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) < ${endExclusive}::timestamp)
           ), 0)::numeric as direct_amount
         FROM sales s
         LEFT JOIN customers c ON s.customer_id = c.id
@@ -1783,9 +1747,9 @@ export async function getSalesSummaryCards(
         WHERE (s.device_id = ${deviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
           AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
           AND (
-            (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) >= ${dateFrom}::timestamp)
-            AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, s.created_at) < ${endExclusive}::timestamp)
-            OR COALESCE(s.sale_date, s.created_at)::date = CURRENT_DATE
+            (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) >= ${dateFrom}::timestamp)
+            AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) < ${endExclusive}::timestamp)
+            OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC'))::date = CURRENT_DATE
           )
           AND (
             ${typeFilter} = 'all'
@@ -3888,7 +3852,8 @@ export async function updateSale(saleData: any) {
     }
 
     // 9. Revalidate the dashboard page to show the updated sale
-    revalidatePath("/", "layout")
+    revalidatePath("/dashboard")
+    revalidatePath("/staff/dashboard")
 
     console.log(`Sale ${saleData.id} updated successfully:`, {
       status: changes.newStatus,
@@ -4253,7 +4218,6 @@ export async function updateSaleTracking(
       `
     }
 
-    revalidatePath("/", "layout")
     revalidatePath("/dashboard")
     revalidatePath("/staff/dashboard")
 
