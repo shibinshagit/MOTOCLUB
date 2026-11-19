@@ -25,6 +25,7 @@ import type { CustomerPaymentAllocation } from "@/app/actions/customer-payment-a
 import { useSelector } from "react-redux"
 import type { RootState } from "@/store/store"
 import { formatCurrency as formatMoney } from "@/lib/utils"
+import { format } from "date-fns"
 
 interface PayCustomerCreditModalProps {
   isOpen: boolean
@@ -47,10 +48,11 @@ export default function PayCustomerCreditModal({
   userId,
   deviceId,
 }: PayCustomerCreditModalProps) {
+  const today = format(new Date(), "yyyy-MM-dd")
   const [paymentAmount, setPaymentAmount] = useState("")
   const [paymentMethod, setPaymentMethod] = useState("Cash")
   const [notes, setNotes] = useState("")
-  const [paymentDate, setPaymentDate] = useState("")
+  const [paymentDate, setPaymentDate] = useState(today)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [paymentResult, setPaymentResult] = useState<{
@@ -63,14 +65,13 @@ export default function PayCustomerCreditModal({
   const currency = useSelector((state: RootState) => state.device.currency) || "AED"
   const formatCurrency = (amount: number) => formatMoney(amount, currency)
   const maxAmount = customer.still_to_collect
-  const today = new Date().toISOString().split("T")[0]
 
   useEffect(() => {
     if (isOpen) {
       setPaymentAmount("")
       setPaymentMethod("Cash")
       setNotes("")
-      setPaymentDate("")
+      setPaymentDate(format(new Date(), "yyyy-MM-dd"))
       setError(null)
       setPaymentResult(null)
     }
@@ -260,9 +261,10 @@ export default function PayCustomerCreditModal({
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="Cash">Cash</SelectItem>
+                        <SelectItem value="UPI">UPI</SelectItem>
+                        <SelectItem value="Card">Card</SelectItem>
                         <SelectItem value="Bank Transfer">Bank Transfer</SelectItem>
                         <SelectItem value="Check">Check</SelectItem>
-                        <SelectItem value="Card">Card</SelectItem>
                         <SelectItem value="Other">Other</SelectItem>
                       </SelectContent>
                     </Select>
@@ -270,7 +272,7 @@ export default function PayCustomerCreditModal({
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="customer-pay-date">Payment Date (optional)</Label>
+                  <Label htmlFor="customer-pay-date">Payment Date</Label>
                   <Input
                     id="customer-pay-date"
                     type="date"
