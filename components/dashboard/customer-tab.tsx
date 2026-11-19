@@ -92,6 +92,7 @@ export function CustomerTab({ userId, companyId }: { userId: number; companyId?:
   const [isSearching, setIsSearching] = useState(false)
   const [isBackgroundRefreshing, setIsBackgroundRefreshing] = useState(false)
   const [settlements, setSettlements] = useState<CustomerSettlementSummary[]>([])
+  const [paymentSearchTerm, setPaymentSearchTerm] = useState("")
   const [isLoadingSettlements, setIsLoadingSettlements] = useState(false)
   const [showCollectModal, setShowCollectModal] = useState(false)
   const [selectedCustomerForPayment, setSelectedCustomerForPayment] = useState<{
@@ -168,6 +169,21 @@ export function CustomerTab({ userId, companyId }: { userId: number; companyId?:
       { totalBilled: 0, alreadyReceived: 0, stillToCollect: 0 },
     )
   }, [settlements])
+
+  const filteredSettlements = useMemo(() => {
+    const term = paymentSearchTerm.trim().toLowerCase()
+    if (!term) return settlements
+    const cleanDigitTerm = term.replace(/\D/g, "")
+
+    return settlements.filter((customer) => {
+      const nameMatch = customer.customer_name?.toLowerCase().includes(term)
+      const phoneMatch = cleanDigitTerm
+        ? customer.customer_phone?.replace(/\D/g, "").includes(cleanDigitTerm)
+        : customer.customer_phone?.toLowerCase().includes(term)
+      const idMatch = String(customer.customer_id).includes(term)
+      return nameMatch || phoneMatch || idMatch
+    })
+  }, [settlements, paymentSearchTerm])
 
   const loadCustomerPayments = useCallback(
     async (customerId: number) => {
@@ -726,6 +742,32 @@ return (
         </div>
       </div>
 
+      {/* Customer Payments Search Bar */}
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4 flex-shrink-0" />
+        <Input
+          placeholder="Search customer payments by name or phone..."
+          value={paymentSearchTerm}
+          onChange={(e) => setPaymentSearchTerm(e.target.value)}
+          className="pl-10 pr-10 text-sm"
+        />
+        {paymentSearchTerm && (
+          <button
+            onClick={() => setPaymentSearchTerm("")}
+            className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+            title="Clear search"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        )}
+      </div>
+
+      {paymentSearchTerm && (
+        <div className="text-xs text-gray-500">
+          Found {filteredSettlements.length} matching {filteredSettlements.length === 1 ? "customer" : "customers"}
+        </div>
+      )}
+
       {isLoadingSettlements ? (
         <div className="py-8 text-center text-gray-500">
           <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2" />
@@ -733,15 +775,32 @@ return (
         </div>
       ) : settlements.length === 0 ? (
         <div className="py-6 text-center text-sm text-gray-500">No outstanding customer balances yet</div>
+      ) : filteredSettlements.length === 0 ? (
+        <div className="text-center py-10 bg-gray-50 rounded-xl border border-dashed border-gray-200 p-6">
+          <Search className="h-8 w-8 text-gray-400 mx-auto mb-2" />
+          <h3 className="text-sm font-medium text-gray-900 mb-1">No matching payments found</h3>
+          <p className="text-xs text-gray-500 mb-3">
+            No pending customer balance matches &ldquo;{paymentSearchTerm}&rdquo;.
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setPaymentSearchTerm("")}
+            className="text-xs"
+          >
+            Clear search
+          </Button>
+        </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3">
-          {settlements.map((customer) => (
+          {filteredSettlements.map((customer) => (
             <Card key={customer.customer_id} className="border border-gray-200 shadow-sm">
               <CardContent className="p-4 space-y-3">
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <div className="font-semibold text-gray-900">{customer.customer_name}</div>
                     <div className="text-xs text-gray-500">
+                      {customer.customer_phone ? `${customer.customer_phone} · ` : ""}
                       {customer.open_sale_count} open sale{customer.open_sale_count === 1 ? "" : "s"}
                     </div>
                   </div>

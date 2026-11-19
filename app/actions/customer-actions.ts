@@ -402,6 +402,7 @@ export async function getCustomerSales(customerId: number, companyId?: number) {
 export type CustomerSettlementSummary = {
   customer_id: number
   customer_name: string
+  customer_phone?: string
   total_billed: number
   already_received: number
   still_to_collect: number
@@ -420,6 +421,7 @@ export async function getCustomerSettlementSummaries(deviceId: number, companyId
       SELECT
         c.id AS customer_id,
         c.name AS customer_name,
+        c.phone AS customer_phone,
         SUM(COALESCE(s.total_amount, 0))::numeric AS total_billed,
         SUM(COALESCE(s.received_amount, 0))::numeric AS already_received,
         SUM(GREATEST(COALESCE(s.total_amount, 0) - COALESCE(s.received_amount, 0), 0))::numeric AS still_to_collect,
@@ -431,7 +433,7 @@ export async function getCustomerSettlementSummaries(deviceId: number, companyId
       WHERE (c.created_by = ${companyId} OR c.created_by IN (SELECT id FROM devices WHERE company_id = ${companyId}))
         AND s.device_id IN (SELECT id FROM devices WHERE company_id = ${companyId})
         AND LOWER(COALESCE(s.status, '')) != 'cancelled'
-      GROUP BY c.id, c.name
+      GROUP BY c.id, c.name, c.phone
       HAVING SUM(GREATEST(COALESCE(s.total_amount, 0) - COALESCE(s.received_amount, 0), 0)) > 0.01
       ORDER BY still_to_collect DESC, c.name ASC
     `) as any[]
@@ -439,6 +441,7 @@ export async function getCustomerSettlementSummaries(deviceId: number, companyId
     const data: CustomerSettlementSummary[] = rows.map((row) => ({
       customer_id: Number(row.customer_id),
       customer_name: String(row.customer_name || `Customer #${row.customer_id}`),
+      customer_phone: row.customer_phone ? String(row.customer_phone) : undefined,
       total_billed: Number(row.total_billed || 0),
       already_received: Number(row.already_received || 0),
       still_to_collect: Number(row.still_to_collect || 0),
