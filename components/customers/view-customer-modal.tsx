@@ -66,6 +66,21 @@ export default function ViewCustomerModal({ isOpen, onClose, customer, companyId
     }
   }
 
+  const isCancelledOrReturned = (sale: any) => {
+    const status = String(sale?.status || "").toLowerCase().trim()
+    const paymentStatus = String(sale?.payment_status || "").toLowerCase().trim()
+    const deliveryStatus = String(sale?.delivery_status || "").toLowerCase().trim()
+    return (
+      status === "cancelled" ||
+      status === "returned" ||
+      paymentStatus === "cancelled" ||
+      paymentStatus === "returned" ||
+      deliveryStatus === "returned" ||
+      deliveryStatus === "cancelled" ||
+      deliveryStatus === "failed"
+    )
+  }
+
   const fetchCustomerSales = async () => {
     setLoading(true)
     try {
@@ -73,15 +88,16 @@ export default function ViewCustomerModal({ isOpen, onClose, customer, companyId
       if (result.success) {
         setSales(result.data)
 
-        // Calculate totals
-        const totalSpentAmount = result.data.reduce((sum: number, sale: any) => sum + Number(sale.received_amount || 0), 0)
-        const totalAmountCalculated = result.data.reduce((sum: number, sale: any) => sum + Number(sale.total_amount || 0), 0)
-        const totalCreditAmount = result.data.reduce((sum: number, sale: any) => {
+        // Calculate totals (excluding cancelled and returned sales)
+        const validSales = result.data.filter((sale: any) => !isCancelledOrReturned(sale))
+        const totalSpentAmount = validSales.reduce((sum: number, sale: any) => sum + Number(sale.received_amount || 0), 0)
+        const totalAmountCalculated = validSales.reduce((sum: number, sale: any) => sum + Number(sale.total_amount || 0), 0)
+        const totalCreditAmount = validSales.reduce((sum: number, sale: any) => {
           const total = Number(sale.total_amount || 0)
           const received = Number(sale.received_amount || 0)
           return sum + Math.max(0, total - received)
         }, 0)
-        const totalBalanceAmount = result.data.reduce((sum: number, sale: any) => {
+        const totalBalanceAmount = validSales.reduce((sum: number, sale: any) => {
           const total = Number(sale.total_amount || 0)
           const received = Number(sale.received_amount || 0)
           return sum + (total - received)
@@ -383,7 +399,7 @@ export default function ViewCustomerModal({ isOpen, onClose, customer, companyId
                     const totalAmount = Number(sale.total_amount || 0)
                     const receivedAmount = Number(sale.received_amount || 0)
                     const balance = totalAmount - receivedAmount
-                    const isCredit = balance > 0
+                    const isCredit = balance > 0 && !isCancelledOrReturned(sale)
 
                     return (
                       <div

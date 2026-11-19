@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useEffect, useState } from "react"
+import { useEffect, useState, useMemo } from "react"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -19,9 +19,12 @@ import {
   Banknote,
   ArrowRight,
   X,
+  Receipt,
+  Calendar,
 } from "lucide-react"
 import { collectCustomerCredit } from "@/app/actions/customer-payment-actions"
 import type { CustomerPaymentAllocation } from "@/app/actions/customer-payment-actions"
+import { getCustomerSales } from "@/app/actions/customer-actions"
 import { useSelector } from "react-redux"
 import type { RootState } from "@/store/store"
 import { formatCurrency as formatMoney } from "@/lib/utils"
@@ -38,6 +41,9 @@ interface PayCustomerCreditModalProps {
   }
   userId: number
   deviceId: number
+  companyId?: number
+  initialSaleId?: number
+  initialAmount?: number
 }
 
 export default function PayCustomerCreditModal({
@@ -47,12 +53,18 @@ export default function PayCustomerCreditModal({
   customer,
   userId,
   deviceId,
+  companyId,
+  initialSaleId,
+  initialAmount,
 }: PayCustomerCreditModalProps) {
   const today = format(new Date(), "yyyy-MM-dd")
   const [paymentAmount, setPaymentAmount] = useState("")
   const [paymentMethod, setPaymentMethod] = useState("Cash")
   const [notes, setNotes] = useState("")
   const [paymentDate, setPaymentDate] = useState(today)
+  const [selectedSaleIds, setSelectedSaleIds] = useState<number[]>([])
+  const [pendingSales, setPendingSales] = useState<any[]>([])
+  const [loadingSales, setLoadingSales] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [paymentResult, setPaymentResult] = useState<{
@@ -64,18 +76,109 @@ export default function PayCustomerCreditModal({
 
   const currency = useSelector((state: RootState) => state.device.currency) || "AED"
   const formatCurrency = (amount: number) => formatMoney(amount, currency)
-  const maxAmount = customer.still_to_collect
 
+  const isCancelledOrReturned = (sale: any) => {
+    const status = String(sale?.status || "").toLowerCase().trim()
+    const paymentStatus = String(sale?.payment_status || "").toLowerCase().trim()
+    const deliveryStatus = String(sale?.delivery_status || "").toLowerCase().trim()
+    return (
+      status === "cancelled" ||
+      status === "returned" ||
+      paymentStatus === "cancelled" ||
+      paymentStatus === "returned" ||
+      deliveryStatus === "returned" ||
+      deliveryStatus === "cancelled" ||
+      deliveryStatus === "failed"
+    )
+  }
+
+  // Fetch pending sales when modal opens
+  useEffect(() => {
+    if (isOpen && customer?.customer_id) {
+      setLoadingSales(true)
+      getCustomerSales(customer.customer_id, companyId, deviceId, { pendingOnly: true })
+        .then((res) => {
+          if (res.success && Array.isArray(res.data)) {
+            const openOrders = res.data.filter((s: any) => {
+              const total = Number(s.total_amount || 0)
+              const rec = Number(s.received_amount || 0)
+              return total - rec > 0.01 && !isCancelledOrReturned(s)
+            })
+            setPendingSales(openOrders)
+          }
+        })
+        .catch((err) => console.error("Error fetching open orders:", err))
+        .finally(() => setLoadingSales(false))
+    } else {
+      setPendingSales([])
+      setSelectedSaleIds([])
+    }
+  }, [isOpen, customer?.customer_id, companyId, deviceId])
+
+  // Reset form when modal opens
   useEffect(() => {
     if (isOpen) {
-      setPaymentAmount("")
       setPaymentMethod("Cash")
       setNotes("")
       setPaymentDate(format(new Date(), "yyyy-MM-dd"))
       setError(null)
       setPaymentResult(null)
+
+      if (initialSaleId) {
+        setSelectedSaleIds([initialSaleId])
+        if (initialAmount !== undefined && initialAmount > 0) {
+          setPaymentAmount(initialAmount.toFixed(2))
+        } else {
+          setPaymentAmount("")
+        }
+      } else {
+        setSelectedSaleIds([])
+        setPaymentAmount("")
+      }
     }
-  }, [isOpen])
+  }, [isOpen, initialSaleId, initialAmount])
+
+  // Calculate total balance of selected orders
+  const selectedBalance = useMemo(() => {
+    if (selectedSaleIds.length === 0) return 0
+    return pendingSales
+      .filter((s) => selectedSaleIds.includes(s.id))
+      .reduce((sum, s) => sum + Math.max(0, Number(s.total_amount || 0) - Number(s.received_amount || 0)), 0)
+  }, [selectedSaleIds, pendingSales])
+
+  // Max allowed amount: if specific orders are selected, capped at their total balance; otherwise customer's still_to_collect
+  const maxAmount = selectedSaleIds.length > 0 ? selectedBalance : customer.still_to_collect
+
+  const handleToggleSale = (saleId: number) => {
+    setSelectedSaleIds((prev) => {
+      const next = prev.includes(saleId) ? prev.filter((id) => id !== saleId) : [...prev, saleId]
+      const newTotal = pendingSales
+        .filter((s) => next.includes(s.id))
+        .reduce((sum, s) => sum + Math.max(0, Number(s.total_amount || 0) - Number(s.received_amount || 0)), 0)
+
+      if (next.length > 0) {
+        setPaymentAmount(newTotal.toFixed(2))
+      } else {
+        setPaymentAmount("")
+      }
+      return next
+    })
+  }
+
+  const handleSelectAll = () => {
+    if (selectedSaleIds.length === pendingSales.length && pendingSales.length > 0) {
+      setSelectedSaleIds([])
+      setPaymentAmount("")
+    } else {
+      const allIds = pendingSales.map((s) => s.id)
+      setSelectedSaleIds(allIds)
+      const allTotal = pendingSales.reduce(
+        (sum, s) => sum + Math.max(0, Number(s.total_amount || 0) - Number(s.received_amount || 0)),
+        0,
+      )
+      setPaymentAmount(allTotal.toFixed(2))
+    }
+  }
 
   const handleClose = () => {
     if (paymentResult) onSuccess()
@@ -106,6 +209,8 @@ export default function PayCustomerCreditModal({
       finalPaymentDate = selectedDate
     }
 
+    const targetIds = selectedSaleIds.length > 0 ? selectedSaleIds : undefined
+
     setIsLoading(true)
     try {
       const result = await collectCustomerCredit(
@@ -116,6 +221,7 @@ export default function PayCustomerCreditModal({
         paymentMethod,
         notes.trim() || undefined,
         finalPaymentDate,
+        targetIds,
       )
 
       if (result.success && result.data) {
@@ -201,7 +307,11 @@ export default function PayCustomerCreditModal({
                 <CreditCard className="h-5 w-5" />
                 <div>
                   <h2 className="text-lg font-bold">Collect payment</h2>
-                  <p className="text-blue-100 text-sm">Oldest unpaid sales are paid first</p>
+                  <p className="text-blue-100 text-sm">
+                    {selectedSaleIds.length > 0
+                      ? `Paying ${selectedSaleIds.length} selected order${selectedSaleIds.length > 1 ? "s" : ""}`
+                      : "Select orders below or pay across oldest orders first"}
+                  </p>
                 </div>
               </div>
               <Button variant="ghost" size="sm" onClick={handleClose} className="text-white hover:bg-white/20">
@@ -229,13 +339,113 @@ export default function PayCustomerCreditModal({
                     </div>
                   </div>
                   <div className="text-right">
-                    <div className="text-xs text-gray-500">Still to collect</div>
+                    <div className="text-xs text-gray-500">
+                      {selectedSaleIds.length > 0 ? "Selected orders balance" : "Still to collect"}
+                    </div>
                     <div className="text-xl font-bold text-emerald-600">{formatCurrency(maxAmount)}</div>
                   </div>
                 </CardContent>
               </Card>
 
               <form onSubmit={handleSubmit} className="space-y-4">
+                {/* Selectable Pending Orders List */}
+                <div className="space-y-2 p-3 bg-slate-50/90 border border-slate-200 rounded-lg">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-semibold text-slate-800 flex items-center gap-1.5">
+                      <Receipt className="h-3.5 w-3.5 text-blue-600" />
+                      <span>Select Orders to Pay ({pendingSales.length} open)</span>
+                    </Label>
+                    {pendingSales.length > 0 && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleSelectAll}
+                        className="h-6 text-[11px] font-medium text-blue-600 hover:text-blue-800 hover:bg-blue-100/60 px-2"
+                      >
+                        {selectedSaleIds.length === pendingSales.length ? "Deselect All" : "Select All"}
+                      </Button>
+                    )}
+                  </div>
+
+                  {loadingSales ? (
+                    <div className="flex items-center justify-center py-6 text-xs text-gray-500 gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
+                      <span>Loading pending orders...</span>
+                    </div>
+                  ) : pendingSales.length === 0 ? (
+                    <div className="text-xs text-gray-500 py-3 text-center bg-white rounded border border-dashed border-gray-200">
+                      No pending orders found.
+                    </div>
+                  ) : (
+                    <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
+                      {pendingSales.map((sale) => {
+                        const total = Number(sale.total_amount || 0)
+                        const rec = Number(sale.received_amount || 0)
+                        const due = Math.max(0, total - rec)
+                        const isSelected = selectedSaleIds.includes(sale.id)
+
+                        return (
+                          <div
+                            key={sale.id}
+                            onClick={() => handleToggleSale(sale.id)}
+                            className={`flex items-center justify-between p-2.5 rounded-lg border text-xs cursor-pointer select-none transition-all ${
+                              isSelected
+                                ? "border-blue-500 bg-blue-50/80 shadow-xs ring-1 ring-blue-400/40"
+                                : "border-gray-200 bg-white hover:border-gray-300"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2.5">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => {}} // Click handled by parent div
+                                className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer pointer-events-none"
+                              />
+                              <div>
+                                <div className="font-semibold text-gray-900 flex items-center gap-1.5">
+                                  <span>Sale #{sale.id}</span>
+                                  <Badge variant="outline" className="text-[10px] py-0 px-1 font-normal text-gray-600">
+                                    {sale.status || "Pending"}
+                                  </Badge>
+                                </div>
+                                <div className="text-[11px] text-gray-500 flex items-center gap-1 mt-0.5">
+                                  <Calendar className="h-3 w-3 text-gray-400" />
+                                  <span>{sale.sale_date ? format(new Date(sale.sale_date), "dd MMM yyyy") : "N/A"}</span>
+                                  <span>·</span>
+                                  <span>Total: {formatCurrency(total)}</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="text-right">
+                              <div className="text-[10px] text-gray-500">Balance Due</div>
+                              <div className="font-bold text-amber-700 text-xs sm:text-sm">
+                                {formatCurrency(due)}
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+
+                  {selectedSaleIds.length > 0 ? (
+                    <div className="flex items-center justify-between text-xs bg-emerald-50 text-emerald-800 px-2.5 py-1.5 rounded-md border border-emerald-200">
+                      <span className="font-medium">
+                        ✓ {selectedSaleIds.length} order{selectedSaleIds.length === 1 ? "" : "s"} selected
+                      </span>
+                      <span className="font-bold">
+                        Total Selected: {formatCurrency(selectedBalance)}
+                      </span>
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-gray-500 italic">
+                      Tap order(s) above to automatically fill the amount, or enter a custom amount to pay across oldest orders first.
+                    </p>
+                  )}
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="customer-pay-amount">Amount *</Label>

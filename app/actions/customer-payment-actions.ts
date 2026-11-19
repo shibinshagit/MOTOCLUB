@@ -97,31 +97,62 @@ async function applyPaymentToSales(params: {
   userId: number
   paymentAmount: number
   paymentMethod: string
+  targetSaleIds?: number[]
 }): Promise<{ allocations: CustomerPaymentAllocation[]; remainingCredit: number; totalCogs: number }> {
-  const creditSales = await sql`
-    SELECT
-      s.id,
-      COALESCE(s.total_amount, 0)::numeric AS total_amount,
-      COALESCE(s.received_amount, 0)::numeric AS received_amount,
-      s.sale_date
-    FROM sales s
-    JOIN customers c ON c.id = s.customer_id
-    WHERE s.customer_id = ${params.customerId}
-      AND s.device_id = ${params.deviceId}
-      AND LOWER(COALESCE(s.status, '')) != 'cancelled'
-      AND (COALESCE(s.total_amount, 0) - COALESCE(s.received_amount, 0)) > 0.01
-    ORDER BY s.sale_date ASC, s.id ASC
-  `
+  const saleIds = params.targetSaleIds && params.targetSaleIds.length > 0 ? params.targetSaleIds : undefined
+
+  const creditSales = saleIds
+    ? await sql`
+        SELECT
+          s.id,
+          COALESCE(s.total_amount, 0)::numeric AS total_amount,
+          COALESCE(s.received_amount, 0)::numeric AS received_amount,
+          s.sale_date
+        FROM sales s
+        JOIN customers c ON c.id = s.customer_id
+        WHERE s.id = ANY(${saleIds})
+          AND s.customer_id = ${params.customerId}
+          AND s.device_id = ${params.deviceId}
+          AND LOWER(COALESCE(s.status, '')) NOT IN ('cancelled', 'returned')
+          AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
+          AND LOWER(COALESCE(s.delivery_status, '')) NOT IN ('returned', 'cancelled', 'failed')
+          AND (COALESCE(s.total_amount, 0) - COALESCE(s.received_amount, 0)) > 0.01
+        ORDER BY s.sale_date ASC, s.id ASC
+      `
+    : await sql`
+        SELECT
+          s.id,
+          COALESCE(s.total_amount, 0)::numeric AS total_amount,
+          COALESCE(s.received_amount, 0)::numeric AS received_amount,
+          s.sale_date
+        FROM sales s
+        JOIN customers c ON c.id = s.customer_id
+        WHERE s.customer_id = ${params.customerId}
+          AND s.device_id = ${params.deviceId}
+          AND LOWER(COALESCE(s.status, '')) NOT IN ('cancelled', 'returned')
+          AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
+          AND LOWER(COALESCE(s.delivery_status, '')) NOT IN ('returned', 'cancelled', 'failed')
+          AND (COALESCE(s.total_amount, 0) - COALESCE(s.received_amount, 0)) > 0.01
+        ORDER BY s.sale_date ASC, s.id ASC
+      `
 
   const totalOutstanding = creditSales.reduce((sum: number, sale: any) => {
     return sum + (Number(sale.total_amount) - Number(sale.received_amount || 0))
   }, 0)
 
   if (creditSales.length === 0) {
+    if (saleIds && saleIds.length > 0) {
+      throw new Error(`Selected order(s) [${saleIds.join(", ")}] not found or already fully paid`)
+    }
     throw new Error("No outstanding sales found for this customer")
   }
 
   if (params.paymentAmount > totalOutstanding + 0.01) {
+    if (saleIds && saleIds.length > 0) {
+      throw new Error(
+        `Payment amount (${params.paymentAmount.toFixed(2)}) exceeds balance for selected order(s) (${totalOutstanding.toFixed(2)})`,
+      )
+    }
     throw new Error(
       `Payment amount (${params.paymentAmount.toFixed(2)}) exceeds outstanding balance (${totalOutstanding.toFixed(2)})`,
     )
@@ -186,6 +217,7 @@ export async function collectCustomerCredit(
   paymentMethod = "Cash",
   notes?: string,
   paymentDate?: Date,
+  targetSaleIds?: number[] | number,
 ) {
   if (!customerId || !paymentAmount || !userId || !deviceId) {
     return { success: false, message: "Missing required parameters" }
@@ -213,12 +245,19 @@ export async function collectCustomerCredit(
 
     const customerName = String(customerRows[0].name || `Customer #${customerId}`)
 
+    const saleIds = Array.isArray(targetSaleIds)
+      ? targetSaleIds
+      : targetSaleIds
+        ? [targetSaleIds]
+        : undefined
+
     const { allocations, remainingCredit, totalCogs } = await applyPaymentToSales({
       customerId,
       deviceId,
       userId,
       paymentAmount,
       paymentMethod,
+      targetSaleIds: saleIds,
     })
 
     let finalPaymentDate: Date
@@ -227,6 +266,12 @@ export async function collectCustomerCredit(
     } else {
       const now = new Date()
       finalPaymentDate = new Date(now.getTime() - now.getTimezoneOffset() * 60000)
+    }
+
+    let finalNotes = notes?.trim() || ""
+    if (saleIds && saleIds.length > 0) {
+      const tag = `[Order${saleIds.length > 1 ? "s" : ""} #${saleIds.join(", #")}]`
+      finalNotes = finalNotes ? `${tag} ${finalNotes}` : tag
     }
 
     const transactionResult = await recordCustomerPayment({
@@ -239,7 +284,7 @@ export async function collectCustomerCredit(
       deviceId,
       userId,
       paymentDate: finalPaymentDate,
-      notes,
+      notes: finalNotes || undefined,
     })
 
     if (!transactionResult.success) {

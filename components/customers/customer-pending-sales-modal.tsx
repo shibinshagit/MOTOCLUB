@@ -17,7 +17,7 @@ interface CustomerPendingSalesModalProps {
   customer: CustomerSettlementSummary | null
   companyId?: number
   deviceId?: number
-  onCollect?: (customer: CustomerSettlementSummary) => void
+  onCollect?: (customer: CustomerSettlementSummary, saleId?: number, saleAmount?: number) => void
 }
 
 interface PendingSale {
@@ -54,19 +54,35 @@ export default function CustomerPendingSalesModal({
     }
   }, [isOpen, customer?.customer_id])
 
+  const isCancelledOrReturned = (sale: any) => {
+    const status = String(sale?.status || "").toLowerCase().trim()
+    const paymentStatus = String(sale?.payment_status || "").toLowerCase().trim()
+    const deliveryStatus = String(sale?.delivery_status || "").toLowerCase().trim()
+    return (
+      status === "cancelled" ||
+      status === "returned" ||
+      paymentStatus === "cancelled" ||
+      paymentStatus === "returned" ||
+      deliveryStatus === "returned" ||
+      deliveryStatus === "cancelled" ||
+      deliveryStatus === "failed"
+    )
+  }
+
   const fetchPendingSales = async () => {
     if (!customer?.customer_id) return
     setLoading(true)
     setError(null)
 
     try {
-      const result = await getCustomerSales(customer.customer_id, companyId, deviceId)
+      const result = await getCustomerSales(customer.customer_id, companyId, deviceId, { pendingOnly: true })
       if (result.success && Array.isArray(result.data)) {
         // Strictly filter to ONLY orders where total_amount - received_amount > 0.01 (unsettled / pending credit orders)
+        // and exclude any cancelled or returned orders
         const pendingOnly = result.data.filter((sale: any) => {
           const total = Number(sale.total_amount || 0)
           const received = Number(sale.received_amount || 0)
-          return total - received > 0.01
+          return total - received > 0.01 && !isCancelledOrReturned(sale)
         })
         setSales(pendingOnly)
       } else {
@@ -81,10 +97,12 @@ export default function CustomerPendingSalesModal({
   }
 
   const getStatusBadge = (status: string) => {
-    const s = (status || "").toLowerCase()
+    const s = (status || "").toLowerCase().trim()
     if (s === "completed") return "bg-green-100 text-green-800 border-green-200"
     if (s === "pending") return "bg-amber-100 text-amber-800 border-amber-200"
     if (s === "delivered") return "bg-blue-100 text-blue-800 border-blue-200"
+    if (s === "cancelled") return "bg-red-100 text-red-800 border-red-200"
+    if (s === "returned") return "bg-purple-100 text-purple-800 border-purple-200"
     return "bg-gray-100 text-gray-800 border-gray-200"
   }
 
@@ -239,9 +257,21 @@ export default function CustomerPendingSalesModal({
                         ) : null}
                       </div>
 
-                      <span className="text-xs font-semibold text-amber-700">
-                        Pending: {formatCurrency(balanceLeft)}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-semibold text-amber-700">
+                          Pending: {formatCurrency(balanceLeft)}
+                        </span>
+                        {onCollect && customer && balanceLeft > 0.01 && (
+                          <Button
+                            size="sm"
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-7 px-2.5 font-medium shadow-xs"
+                            onClick={() => onCollect(customer, sale.id, balanceLeft)}
+                          >
+                            <CreditCard className="h-3 w-3 mr-1" />
+                            Pay This Order
+                          </Button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 )

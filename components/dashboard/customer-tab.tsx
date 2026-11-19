@@ -19,6 +19,7 @@ import {
   FilePenLine,
   Undo2,
   MessageCircle,
+  Calendar,
 } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import EditCustomerModal from "../customers/edit-customer-modal"
@@ -56,7 +57,7 @@ import {
   updateCustomer,
   deleteCustomer,
 } from "@/store/slices/customerSlice"
-import { formatDistanceToNow } from "date-fns"
+import { formatDistanceToNow, format } from "date-fns"
 import { Card, CardContent } from "@/components/ui/card"
 import { formatCurrency as formatMoney } from "@/lib/utils"
 import { smartCapUncontrolled } from "@/lib/text-format"
@@ -101,6 +102,8 @@ export function CustomerTab({ userId, companyId }: { userId: number; companyId?:
     customer_id: number
     customer_name: string
     still_to_collect: number
+    initialSaleId?: number
+    initialAmount?: number
   } | null>(null)
   const [paymentHistoryCustomer, setPaymentHistoryCustomer] = useState<{
     customer_id: number
@@ -208,11 +211,17 @@ export function CustomerTab({ userId, companyId }: { userId: number; companyId?:
     [userId, toast],
   )
 
-  const handleCollectCustomer = (customer: CustomerSettlementSummary) => {
+  const handleCollectCustomer = (
+    customer: CustomerSettlementSummary,
+    saleId?: number,
+    saleAmount?: number,
+  ) => {
     setSelectedCustomerForPayment({
       customer_id: customer.customer_id,
       customer_name: customer.customer_name,
       still_to_collect: customer.still_to_collect,
+      initialSaleId: saleId,
+      initialAmount: saleAmount,
     })
     setShowCollectModal(true)
   }
@@ -814,6 +823,12 @@ return (
                       {customer.customer_phone ? `${customer.customer_phone} · ` : ""}
                       {customer.open_sale_count} open sale{customer.open_sale_count === 1 ? "" : "s"}
                     </div>
+                    {customer.last_credit_sale_date && (
+                      <div className="flex items-center gap-1.5 text-xs font-semibold text-red-600 bg-red-50 border border-red-200/80 rounded-md px-2 py-0.5 w-fit mt-1.5">
+                        <Calendar className="h-3.5 w-3.5 text-red-500 flex-shrink-0" />
+                        <span>Last credit: {format(new Date(customer.last_credit_sale_date), "dd MMM yyyy")}</span>
+                      </div>
+                    )}
                   </div>
                   <div className="flex flex-wrap gap-1 justify-end">
                     <Button
@@ -988,6 +1003,9 @@ return (
         customer={selectedCustomerForPayment}
         userId={userId}
         deviceId={userId}
+        companyId={companyId || userId}
+        initialSaleId={selectedCustomerForPayment.initialSaleId}
+        initialAmount={selectedCustomerForPayment.initialAmount}
       />
     )}
 
@@ -997,9 +1015,9 @@ return (
       customer={pendingSalesCustomer}
       companyId={companyId || userId}
       deviceId={userId}
-      onCollect={(customer) => {
+      onCollect={(customer, saleId, saleAmount) => {
         setPendingSalesCustomer(null)
-        handleCollectCustomer(customer)
+        handleCollectCustomer(customer, saleId, saleAmount)
       }}
     />
 
