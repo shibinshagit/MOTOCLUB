@@ -138,7 +138,7 @@ export default function PayCustomerCreditModal({
   ].filter((amount, index, arr) => arr.indexOf(amount) === index && amount > 0)
 
   return (
-    <Dialog open={isOpen} onOpenChange={() => {}}>
+    <Dialog open={isOpen} onOpenChange={(open) => { if (!open && !isLoading) handleClose() }}>
       <DialogContent className="max-w-2xl max-h-[95vh] overflow-hidden p-0 [&>button]:hidden">
         {paymentResult ? (
           <div className="flex flex-col max-h-[90vh]">

@@ -25,6 +25,7 @@ import EditCustomerModal from "../customers/edit-customer-modal"
 import ViewCustomerModal from "../customers/view-customer-modal"
 import PayCustomerCreditModal from "../customers/pay-customer-credit-modal"
 import EditCustomerPaymentModal from "../customers/edit-customer-payment-modal"
+import CustomerPendingSalesModal from "../customers/customer-pending-sales-modal"
 import { useToast } from "@/components/ui/use-toast"
 import { notifyError, notifySuccess } from "@/lib/notifications"
 import { openCustomerWhatsApp } from "@/lib/whatsapp-utils"
@@ -93,6 +94,7 @@ export function CustomerTab({ userId, companyId }: { userId: number; companyId?:
   const [isBackgroundRefreshing, setIsBackgroundRefreshing] = useState(false)
   const [settlements, setSettlements] = useState<CustomerSettlementSummary[]>([])
   const [paymentSearchTerm, setPaymentSearchTerm] = useState("")
+  const [pendingSalesCustomer, setPendingSalesCustomer] = useState<CustomerSettlementSummary | null>(null)
   const [isLoadingSettlements, setIsLoadingSettlements] = useState(false)
   const [showCollectModal, setShowCollectModal] = useState(false)
   const [selectedCustomerForPayment, setSelectedCustomerForPayment] = useState<{
@@ -794,23 +796,42 @@ return (
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3">
           {filteredSettlements.map((customer) => (
-            <Card key={customer.customer_id} className="border border-gray-200 shadow-sm">
+            <Card
+              key={customer.customer_id}
+              className="border border-gray-200 shadow-sm cursor-pointer hover:border-blue-300 hover:shadow-md transition-all group"
+              onClick={() => setPendingSalesCustomer(customer)}
+            >
               <CardContent className="p-4 space-y-3">
                 <div className="flex items-start justify-between gap-2">
                   <div>
-                    <div className="font-semibold text-gray-900">{customer.customer_name}</div>
+                    <div className="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors">
+                      {customer.customer_name}
+                    </div>
                     <div className="text-xs text-gray-500">
                       {customer.customer_phone ? `${customer.customer_phone} · ` : ""}
                       {customer.open_sale_count} open sale{customer.open_sale_count === 1 ? "" : "s"}
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-1 justify-end">
-                    <Button size="sm" variant="outline" onClick={() => handleOpenPaymentHistory(customer)}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleOpenPaymentHistory(customer)
+                      }}
+                    >
                       <History className="h-3.5 w-3.5 mr-1" />
                       Payments
                     </Button>
                     {customer.still_to_collect > 0.01 && (
-                      <Button size="sm" onClick={() => handleCollectCustomer(customer)}>
+                      <Button
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleCollectCustomer(customer)
+                        }}
+                      >
                         <CreditCard className="h-3.5 w-3.5 mr-1" />
                         Collect now
                       </Button>
@@ -966,6 +987,17 @@ return (
         deviceId={userId}
       />
     )}
+
+    <CustomerPendingSalesModal
+      isOpen={!!pendingSalesCustomer}
+      onClose={() => setPendingSalesCustomer(null)}
+      customer={pendingSalesCustomer}
+      companyId={companyId || userId}
+      onCollect={(customer) => {
+        setPendingSalesCustomer(null)
+        handleCollectCustomer(customer)
+      }}
+    />
 
     <Dialog
       open={!!paymentHistoryCustomer}
