@@ -82,123 +82,281 @@ export async function getCustomerAddresses(customerId: number, companyId?: numbe
   }
 }
 
-export async function getCustomers(userId?: number, limit?: number, searchTerm?: string) {
+export interface GetCustomersOptions {
+  deviceId?: number
+  onlyDeviceActivity?: boolean
+}
+
+export async function getCustomers(
+  userId?: number,
+  limit?: number,
+  searchTerm?: string,
+  options?: GetCustomersOptions,
+) {
   // Reset connection state to allow a fresh attempt
   resetConnectionState()
 
   try {
     let customers
 
-    if (searchTerm && searchTerm.trim() !== "") {
-      // Search query - search across name, email, phone, and address
-      const searchPattern = `%${searchTerm.toLowerCase()}%`
+    const hasSearch = Boolean(searchTerm && searchTerm.trim() !== "")
+    const searchPattern = hasSearch ? `%${searchTerm!.toLowerCase()}%` : ""
+    const isDeviceScoped = Boolean(options?.onlyDeviceActivity && options?.deviceId)
+    const deviceId = options?.deviceId
 
-      if (userId) {
-        if (limit) {
-          customers = await sql`
-            SELECT c.*, COUNT(s.id) as order_count
-            FROM customers c
-            LEFT JOIN sales s ON c.id = s.customer_id
-            WHERE (c.created_by = ${userId} OR c.created_by IN (SELECT id FROM devices WHERE company_id = ${userId}))
-            AND (
-              LOWER(c.name) LIKE ${searchPattern}
-              OR LOWER(c.email) LIKE ${searchPattern}
-              OR c.phone LIKE ${searchPattern}
-              OR LOWER(c.address) LIKE ${searchPattern}
-            )
-            GROUP BY c.id
-            ORDER BY c.created_at DESC
-            LIMIT ${limit}
-          `
+    if (isDeviceScoped && deviceId) {
+      if (hasSearch) {
+        if (userId) {
+          if (limit) {
+            customers = await sql`
+              SELECT c.*, COUNT(s.id) as order_count
+              FROM customers c
+              LEFT JOIN sales s ON c.id = s.customer_id AND s.device_id = ${deviceId}
+              WHERE (c.created_by = ${userId} OR c.created_by IN (SELECT id FROM devices WHERE company_id = ${userId}))
+              AND (
+                c.created_by = ${deviceId}
+                OR EXISTS (SELECT 1 FROM sales s2 WHERE s2.customer_id = c.id AND s2.device_id = ${deviceId})
+              )
+              AND (
+                LOWER(c.name) LIKE ${searchPattern}
+                OR LOWER(c.email) LIKE ${searchPattern}
+                OR c.phone LIKE ${searchPattern}
+                OR LOWER(c.address) LIKE ${searchPattern}
+              )
+              GROUP BY c.id
+              ORDER BY c.created_at DESC
+              LIMIT ${limit}
+            `
+          } else {
+            customers = await sql`
+              SELECT c.*, COUNT(s.id) as order_count
+              FROM customers c
+              LEFT JOIN sales s ON c.id = s.customer_id AND s.device_id = ${deviceId}
+              WHERE (c.created_by = ${userId} OR c.created_by IN (SELECT id FROM devices WHERE company_id = ${userId}))
+              AND (
+                c.created_by = ${deviceId}
+                OR EXISTS (SELECT 1 FROM sales s2 WHERE s2.customer_id = c.id AND s2.device_id = ${deviceId})
+              )
+              AND (
+                LOWER(c.name) LIKE ${searchPattern}
+                OR LOWER(c.email) LIKE ${searchPattern}
+                OR c.phone LIKE ${searchPattern}
+                OR LOWER(c.address) LIKE ${searchPattern}
+              )
+              GROUP BY c.id
+              ORDER BY c.created_at DESC
+            `
+          }
         } else {
-          customers = await sql`
-            SELECT c.*, COUNT(s.id) as order_count
-            FROM customers c
-            LEFT JOIN sales s ON c.id = s.customer_id
-            WHERE (c.created_by = ${userId} OR c.created_by IN (SELECT id FROM devices WHERE company_id = ${userId}))
-            AND (
-              LOWER(c.name) LIKE ${searchPattern}
-              OR LOWER(c.email) LIKE ${searchPattern}
-              OR c.phone LIKE ${searchPattern}
-              OR LOWER(c.address) LIKE ${searchPattern}
-            )
-            GROUP BY c.id
-            ORDER BY c.created_at DESC
-          `
+          if (limit) {
+            customers = await sql`
+              SELECT c.*, COUNT(s.id) as order_count
+              FROM customers c
+              LEFT JOIN sales s ON c.id = s.customer_id AND s.device_id = ${deviceId}
+              WHERE (
+                c.created_by = ${deviceId}
+                OR EXISTS (SELECT 1 FROM sales s2 WHERE s2.customer_id = c.id AND s2.device_id = ${deviceId})
+              )
+              AND (
+                LOWER(c.name) LIKE ${searchPattern}
+                OR LOWER(c.email) LIKE ${searchPattern}
+                OR c.phone LIKE ${searchPattern}
+                OR LOWER(c.address) LIKE ${searchPattern}
+              )
+              GROUP BY c.id
+              ORDER BY c.created_at DESC
+              LIMIT ${limit}
+            `
+          } else {
+            customers = await sql`
+              SELECT c.*, COUNT(s.id) as order_count
+              FROM customers c
+              LEFT JOIN sales s ON c.id = s.customer_id AND s.device_id = ${deviceId}
+              WHERE (
+                c.created_by = ${deviceId}
+                OR EXISTS (SELECT 1 FROM sales s2 WHERE s2.customer_id = c.id AND s2.device_id = ${deviceId})
+              )
+              AND (
+                LOWER(c.name) LIKE ${searchPattern}
+                OR LOWER(c.email) LIKE ${searchPattern}
+                OR c.phone LIKE ${searchPattern}
+                OR LOWER(c.address) LIKE ${searchPattern}
+              )
+              GROUP BY c.id
+              ORDER BY c.created_at DESC
+            `
+          }
         }
       } else {
-        if (limit) {
-          customers = await sql`
-            SELECT c.*, COUNT(s.id) as order_count
-            FROM customers c
-            LEFT JOIN sales s ON c.id = s.customer_id
-            WHERE (
-              LOWER(c.name) LIKE ${searchPattern}
-              OR LOWER(c.email) LIKE ${searchPattern}
-              OR c.phone LIKE ${searchPattern}
-              OR LOWER(c.address) LIKE ${searchPattern}
-            )
-            GROUP BY c.id
-            ORDER BY c.created_at DESC
-            LIMIT ${limit}
-          `
+        // Device-scoped query without search
+        if (userId) {
+          if (limit) {
+            customers = await sql`
+              SELECT c.*, COUNT(s.id) as order_count
+              FROM customers c
+              LEFT JOIN sales s ON c.id = s.customer_id AND s.device_id = ${deviceId}
+              WHERE (c.created_by = ${userId} OR c.created_by IN (SELECT id FROM devices WHERE company_id = ${userId}))
+              AND (
+                c.created_by = ${deviceId}
+                OR EXISTS (SELECT 1 FROM sales s2 WHERE s2.customer_id = c.id AND s2.device_id = ${deviceId})
+              )
+              GROUP BY c.id
+              ORDER BY c.created_at DESC
+              LIMIT ${limit}
+            `
+          } else {
+            customers = await sql`
+              SELECT c.*, COUNT(s.id) as order_count
+              FROM customers c
+              LEFT JOIN sales s ON c.id = s.customer_id AND s.device_id = ${deviceId}
+              WHERE (c.created_by = ${userId} OR c.created_by IN (SELECT id FROM devices WHERE company_id = ${userId}))
+              AND (
+                c.created_by = ${deviceId}
+                OR EXISTS (SELECT 1 FROM sales s2 WHERE s2.customer_id = c.id AND s2.device_id = ${deviceId})
+              )
+              GROUP BY c.id
+              ORDER BY c.created_at DESC
+            `
+          }
         } else {
-          customers = await sql`
-            SELECT c.*, COUNT(s.id) as order_count
-            FROM customers c
-            LEFT JOIN sales s ON c.id = s.customer_id
-            WHERE (
-              LOWER(c.name) LIKE ${searchPattern}
-              OR LOWER(c.email) LIKE ${searchPattern}
-              OR c.phone LIKE ${searchPattern}
-              OR LOWER(c.address) LIKE ${searchPattern}
-            )
-            GROUP BY c.id
-            ORDER BY c.created_at DESC
-          `
+          if (limit) {
+            customers = await sql`
+              SELECT c.*, COUNT(s.id) as order_count
+              FROM customers c
+              LEFT JOIN sales s ON c.id = s.customer_id AND s.device_id = ${deviceId}
+              WHERE (
+                c.created_by = ${deviceId}
+                OR EXISTS (SELECT 1 FROM sales s2 WHERE s2.customer_id = c.id AND s2.device_id = ${deviceId})
+              )
+              GROUP BY c.id
+              ORDER BY c.created_at DESC
+              LIMIT ${limit}
+            `
+          } else {
+            customers = await sql`
+              SELECT c.*, COUNT(s.id) as order_count
+              FROM customers c
+              LEFT JOIN sales s ON c.id = s.customer_id AND s.device_id = ${deviceId}
+              WHERE (
+                c.created_by = ${deviceId}
+                OR EXISTS (SELECT 1 FROM sales s2 WHERE s2.customer_id = c.id AND s2.device_id = ${deviceId})
+              )
+              GROUP BY c.id
+              ORDER BY c.created_at DESC
+            `
+          }
         }
       }
     } else {
-      // Regular query without search
-      if (userId) {
-        if (limit) {
-          customers = await sql`
-            SELECT c.*, COUNT(s.id) as order_count
-            FROM customers c
-            LEFT JOIN sales s ON c.id = s.customer_id
-            WHERE (c.created_by = ${userId} OR c.created_by IN (SELECT id FROM devices WHERE company_id = ${userId}))
-            GROUP BY c.id
-            ORDER BY c.created_at DESC
-            LIMIT ${limit}
-          `
+      if (hasSearch) {
+        // Search query - search across name, email, phone, and address
+        if (userId) {
+          if (limit) {
+            customers = await sql`
+              SELECT c.*, COUNT(s.id) as order_count
+              FROM customers c
+              LEFT JOIN sales s ON c.id = s.customer_id
+              WHERE (c.created_by = ${userId} OR c.created_by IN (SELECT id FROM devices WHERE company_id = ${userId}))
+              AND (
+                LOWER(c.name) LIKE ${searchPattern}
+                OR LOWER(c.email) LIKE ${searchPattern}
+                OR c.phone LIKE ${searchPattern}
+                OR LOWER(c.address) LIKE ${searchPattern}
+              )
+              GROUP BY c.id
+              ORDER BY c.created_at DESC
+              LIMIT ${limit}
+            `
+          } else {
+            customers = await sql`
+              SELECT c.*, COUNT(s.id) as order_count
+              FROM customers c
+              LEFT JOIN sales s ON c.id = s.customer_id
+              WHERE (c.created_by = ${userId} OR c.created_by IN (SELECT id FROM devices WHERE company_id = ${userId}))
+              AND (
+                LOWER(c.name) LIKE ${searchPattern}
+                OR LOWER(c.email) LIKE ${searchPattern}
+                OR c.phone LIKE ${searchPattern}
+                OR LOWER(c.address) LIKE ${searchPattern}
+              )
+              GROUP BY c.id
+              ORDER BY c.created_at DESC
+            `
+          }
         } else {
-          customers = await sql`
-            SELECT c.*, COUNT(s.id) as order_count
-            FROM customers c
-            LEFT JOIN sales s ON c.id = s.customer_id
-            WHERE (c.created_by = ${userId} OR c.created_by IN (SELECT id FROM devices WHERE company_id = ${userId}))
-            GROUP BY c.id
-            ORDER BY c.created_at DESC
-          `
+          if (limit) {
+            customers = await sql`
+              SELECT c.*, COUNT(s.id) as order_count
+              FROM customers c
+              LEFT JOIN sales s ON c.id = s.customer_id
+              WHERE (
+                LOWER(c.name) LIKE ${searchPattern}
+                OR LOWER(c.email) LIKE ${searchPattern}
+                OR c.phone LIKE ${searchPattern}
+                OR LOWER(c.address) LIKE ${searchPattern}
+              )
+              GROUP BY c.id
+              ORDER BY c.created_at DESC
+              LIMIT ${limit}
+            `
+          } else {
+            customers = await sql`
+              SELECT c.*, COUNT(s.id) as order_count
+              FROM customers c
+              LEFT JOIN sales s ON c.id = s.customer_id
+              WHERE (
+                LOWER(c.name) LIKE ${searchPattern}
+                OR LOWER(c.email) LIKE ${searchPattern}
+                OR c.phone LIKE ${searchPattern}
+                OR LOWER(c.address) LIKE ${searchPattern}
+              )
+              GROUP BY c.id
+              ORDER BY c.created_at DESC
+            `
+          }
         }
       } else {
-        if (limit) {
-          customers = await sql`
-            SELECT c.*, COUNT(s.id) as order_count
-            FROM customers c
-            LEFT JOIN sales s ON c.id = s.customer_id
-            GROUP BY c.id
-            ORDER BY c.created_at DESC
-            LIMIT ${limit}
-          `
+        // Regular query without search
+        if (userId) {
+          if (limit) {
+            customers = await sql`
+              SELECT c.*, COUNT(s.id) as order_count
+              FROM customers c
+              LEFT JOIN sales s ON c.id = s.customer_id
+              WHERE (c.created_by = ${userId} OR c.created_by IN (SELECT id FROM devices WHERE company_id = ${userId}))
+              GROUP BY c.id
+              ORDER BY c.created_at DESC
+              LIMIT ${limit}
+            `
+          } else {
+            customers = await sql`
+              SELECT c.*, COUNT(s.id) as order_count
+              FROM customers c
+              LEFT JOIN sales s ON c.id = s.customer_id
+              WHERE (c.created_by = ${userId} OR c.created_by IN (SELECT id FROM devices WHERE company_id = ${userId}))
+              GROUP BY c.id
+              ORDER BY c.created_at DESC
+            `
+          }
         } else {
-          customers = await sql`
-            SELECT c.*, COUNT(s.id) as order_count
-            FROM customers c
-            LEFT JOIN sales s ON c.id = s.customer_id
-            GROUP BY c.id
-            ORDER BY c.created_at DESC
-          `
+          if (limit) {
+            customers = await sql`
+              SELECT c.*, COUNT(s.id) as order_count
+              FROM customers c
+              LEFT JOIN sales s ON c.id = s.customer_id
+              GROUP BY c.id
+              ORDER BY c.created_at DESC
+              LIMIT ${limit}
+            `
+          } else {
+            customers = await sql`
+              SELECT c.*, COUNT(s.id) as order_count
+              FROM customers c
+              LEFT JOIN sales s ON c.id = s.customer_id
+              GROUP BY c.id
+              ORDER BY c.created_at DESC
+            `
+          }
         }
       }
     }
@@ -356,7 +514,7 @@ export async function updateCustomer(formData: FormData) {
   }
 }
 
-export async function getCustomerSales(customerId: number, companyId?: number) {
+export async function getCustomerSales(customerId: number, companyId?: number, deviceId?: number) {
   if (!customerId) {
     return { success: false, message: "Customer ID is required", data: [] }
   }
@@ -371,22 +529,39 @@ export async function getCustomerSales(customerId: number, companyId?: number) {
       return { success: false, message: "Customer not found", data: [] }
     }
 
-    const sales = await sql`
-      SELECT s.id,
-             s.sale_date, 
-             s.total_amount,
-             s.received_amount, 
-             s.payment_method, 
-             s.status, 
-             s.customer_id,
-             COUNT(si.id) as item_count
-      FROM sales s
-      LEFT JOIN sale_items si ON s.id = si.sale_id
-      WHERE s.customer_id = ${customerId}
-        AND s.device_id IN (SELECT id FROM devices WHERE company_id = ${scopeCompanyId})
-      GROUP BY s.id, s.sale_date, s.total_amount, s.received_amount, s.payment_method, s.status, s.customer_id
-      ORDER BY s.sale_date DESC
-    `
+    const sales = deviceId
+      ? await sql`
+          SELECT s.id,
+                 s.sale_date, 
+                 s.total_amount,
+                 s.received_amount, 
+                 s.payment_method, 
+                 s.status, 
+                 s.customer_id,
+                 COUNT(si.id) as item_count
+          FROM sales s
+          LEFT JOIN sale_items si ON s.id = si.sale_id
+          WHERE s.customer_id = ${customerId}
+            AND s.device_id = ${deviceId}
+          GROUP BY s.id, s.sale_date, s.total_amount, s.received_amount, s.payment_method, s.status, s.customer_id
+          ORDER BY s.sale_date DESC
+        `
+      : await sql`
+          SELECT s.id,
+                 s.sale_date, 
+                 s.total_amount,
+                 s.received_amount, 
+                 s.payment_method, 
+                 s.status, 
+                 s.customer_id,
+                 COUNT(si.id) as item_count
+          FROM sales s
+          LEFT JOIN sale_items si ON s.id = si.sale_id
+          WHERE s.customer_id = ${customerId}
+            AND s.device_id IN (SELECT id FROM devices WHERE company_id = ${scopeCompanyId})
+          GROUP BY s.id, s.sale_date, s.total_amount, s.received_amount, s.payment_method, s.status, s.customer_id
+          ORDER BY s.sale_date DESC
+        `
 
     return { success: true, data: sales }
   } catch (error) {
@@ -409,7 +584,11 @@ export type CustomerSettlementSummary = {
   open_sale_count: number
 }
 
-export async function getCustomerSettlementSummaries(deviceId: number, companyId: number) {
+export async function getCustomerSettlementSummaries(
+  deviceId: number,
+  companyId: number,
+  options?: { allDevices?: boolean }
+) {
   if (!deviceId || !companyId) {
     return { success: false, message: "Device ID and company ID are required", data: [] as CustomerSettlementSummary[] }
   }
@@ -417,26 +596,46 @@ export async function getCustomerSettlementSummaries(deviceId: number, companyId
   resetConnectionState()
 
   try {
-    const rows = (await sql`
-      SELECT
-        c.id AS customer_id,
-        c.name AS customer_name,
-        c.phone AS customer_phone,
-        SUM(COALESCE(s.total_amount, 0))::numeric AS total_billed,
-        SUM(COALESCE(s.received_amount, 0))::numeric AS already_received,
-        SUM(GREATEST(COALESCE(s.total_amount, 0) - COALESCE(s.received_amount, 0), 0))::numeric AS still_to_collect,
-        COUNT(*) FILTER (
-          WHERE COALESCE(s.total_amount, 0) - COALESCE(s.received_amount, 0) > 0.01
-        )::int AS open_sale_count
-      FROM customers c
-      JOIN sales s ON s.customer_id = c.id
-      WHERE (c.created_by = ${companyId} OR c.created_by IN (SELECT id FROM devices WHERE company_id = ${companyId}))
-        AND s.device_id IN (SELECT id FROM devices WHERE company_id = ${companyId})
-        AND LOWER(COALESCE(s.status, '')) != 'cancelled'
-      GROUP BY c.id, c.name, c.phone
-      HAVING SUM(GREATEST(COALESCE(s.total_amount, 0) - COALESCE(s.received_amount, 0), 0)) > 0.01
-      ORDER BY still_to_collect DESC, c.name ASC
-    `) as any[]
+    const rows = options?.allDevices
+      ? ((await sql`
+          SELECT
+            c.id AS customer_id,
+            c.name AS customer_name,
+            c.phone AS customer_phone,
+            SUM(COALESCE(s.total_amount, 0))::numeric AS total_billed,
+            SUM(COALESCE(s.received_amount, 0))::numeric AS already_received,
+            SUM(GREATEST(COALESCE(s.total_amount, 0) - COALESCE(s.received_amount, 0), 0))::numeric AS still_to_collect,
+            COUNT(*) FILTER (
+              WHERE COALESCE(s.total_amount, 0) - COALESCE(s.received_amount, 0) > 0.01
+            )::int AS open_sale_count
+          FROM customers c
+          JOIN sales s ON s.customer_id = c.id
+          WHERE (c.created_by = ${companyId} OR c.created_by IN (SELECT id FROM devices WHERE company_id = ${companyId}))
+            AND s.device_id IN (SELECT id FROM devices WHERE company_id = ${companyId})
+            AND LOWER(COALESCE(s.status, '')) != 'cancelled'
+          GROUP BY c.id, c.name, c.phone
+          HAVING SUM(GREATEST(COALESCE(s.total_amount, 0) - COALESCE(s.received_amount, 0), 0)) > 0.01
+          ORDER BY still_to_collect DESC, c.name ASC
+        `) as any[])
+      : ((await sql`
+          SELECT
+            c.id AS customer_id,
+            c.name AS customer_name,
+            c.phone AS customer_phone,
+            SUM(COALESCE(s.total_amount, 0))::numeric AS total_billed,
+            SUM(COALESCE(s.received_amount, 0))::numeric AS already_received,
+            SUM(GREATEST(COALESCE(s.total_amount, 0) - COALESCE(s.received_amount, 0), 0))::numeric AS still_to_collect,
+            COUNT(*) FILTER (
+              WHERE COALESCE(s.total_amount, 0) - COALESCE(s.received_amount, 0) > 0.01
+            )::int AS open_sale_count
+          FROM customers c
+          JOIN sales s ON s.customer_id = c.id
+          WHERE s.device_id = ${deviceId}
+            AND LOWER(COALESCE(s.status, '')) != 'cancelled'
+          GROUP BY c.id, c.name, c.phone
+          HAVING SUM(GREATEST(COALESCE(s.total_amount, 0) - COALESCE(s.received_amount, 0), 0)) > 0.01
+          ORDER BY still_to_collect DESC, c.name ASC
+        `) as any[])
 
     const data: CustomerSettlementSummary[] = rows.map((row) => ({
       customer_id: Number(row.customer_id),

@@ -279,7 +279,10 @@ export function CustomerTab({ userId, companyId }: { userId: number; companyId?:
 
       // Get customers with limit if not showing all and not searching
       const limit = showAll || searchTerm ? undefined : 5
-      const response = await getCustomers(companyId || userId, limit, searchTerm)
+      const response = await getCustomers(companyId || userId, limit, searchTerm, {
+        deviceId: userId,
+        onlyDeviceActivity: true,
+      })
 
       if (response.success) {
         dispatch(setCustomers(response.data))
@@ -993,6 +996,7 @@ return (
       onClose={() => setPendingSalesCustomer(null)}
       customer={pendingSalesCustomer}
       companyId={companyId || userId}
+      deviceId={userId}
       onCollect={(customer) => {
         setPendingSalesCustomer(null)
         handleCollectCustomer(customer)

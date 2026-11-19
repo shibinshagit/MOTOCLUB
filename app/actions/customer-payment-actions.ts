@@ -108,7 +108,6 @@ async function applyPaymentToSales(params: {
     JOIN customers c ON c.id = s.customer_id
     WHERE s.customer_id = ${params.customerId}
       AND s.device_id = ${params.deviceId}
-      AND c.created_by = ${params.userId}
       AND LOWER(COALESCE(s.status, '')) != 'cancelled'
       AND (COALESCE(s.total_amount, 0) - COALESCE(s.received_amount, 0)) > 0.01
     ORDER BY s.sale_date ASC, s.id ASC
@@ -203,7 +202,7 @@ export async function collectCustomerCredit(
 
     const customerRows = await sql`
       SELECT id, name FROM customers
-      WHERE id = ${customerId} AND created_by = ${userId}
+      WHERE id = ${customerId}
       LIMIT 1
     `
 

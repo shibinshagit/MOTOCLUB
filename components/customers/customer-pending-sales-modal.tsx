@@ -16,6 +16,7 @@ interface CustomerPendingSalesModalProps {
   onClose: () => void
   customer: CustomerSettlementSummary | null
   companyId?: number
+  deviceId?: number
   onCollect?: (customer: CustomerSettlementSummary) => void
 }
 
@@ -34,6 +35,7 @@ export default function CustomerPendingSalesModal({
   onClose,
   customer,
   companyId,
+  deviceId,
   onCollect,
 }: CustomerPendingSalesModalProps) {
   const [sales, setSales] = useState<PendingSale[]>([])
@@ -58,7 +60,7 @@ export default function CustomerPendingSalesModal({
     setError(null)
 
     try {
-      const result = await getCustomerSales(customer.customer_id, companyId)
+      const result = await getCustomerSales(customer.customer_id, companyId, deviceId)
       if (result.success && Array.isArray(result.data)) {
         // Strictly filter to ONLY orders where total_amount - received_amount > 0.01 (unsettled / pending credit orders)
         const pendingOnly = result.data.filter((sale: any) => {
