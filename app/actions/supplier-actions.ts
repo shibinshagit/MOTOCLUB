@@ -26,14 +26,19 @@ export async function getSuppliers(userId: number, limit?: number, searchTerm?: 
         COALESCE(p.total_purchases, 0) as total_purchases,
         COALESCE(p.total_amount, 0) as total_amount,
         GREATEST(COALESCE(ft.total_paid, 0), COALESCE(p.paid_amount, 0)) as paid_amount,
-        COALESCE(p.balance_amount, 0) as balance_amount
+        COALESCE(p.balance_amount, 0) as balance_amount,
+        p.last_credit_purchase_date
       FROM suppliers s
       LEFT JOIN LATERAL (
         SELECT 
           COUNT(*) as total_purchases,
           SUM(total_amount) as total_amount,
           SUM(COALESCE(received_amount, 0)) as paid_amount,
-          SUM(CASE WHEN status != 'Cancelled' THEN (total_amount - COALESCE(received_amount, 0)) ELSE 0 END) as balance_amount
+          SUM(CASE WHEN LOWER(COALESCE(status, '')) NOT IN ('cancelled', 'returned') THEN (total_amount - COALESCE(received_amount, 0)) ELSE 0 END) as balance_amount,
+          MAX(purchase_date) FILTER (
+            WHERE LOWER(COALESCE(status, '')) NOT IN ('cancelled', 'returned')
+              AND (total_amount - COALESCE(received_amount, 0)) > 0.01
+          ) as last_credit_purchase_date
         FROM purchases
         WHERE (created_by = ${effectiveUserId} OR device_id = ${effectiveUserId}) AND TRIM(supplier) = TRIM(s.name)
       ) p ON true
@@ -139,6 +144,7 @@ export async function getSuppliers(userId: number, limit?: number, searchTerm?: 
         credit_used: creditUsed,
         available_credit: availableCredit,
         supplier_credit: availableCredit,
+        last_credit_purchase_date: s.last_credit_purchase_date ? String(s.last_credit_purchase_date) : null,
       }
     })
 

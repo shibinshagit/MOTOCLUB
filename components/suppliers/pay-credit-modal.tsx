@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -23,11 +23,12 @@ import {
   TrendingDown,
   FileText,
   CalendarIcon,
+  Calendar as CalendarLucide,
 } from "lucide-react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Calendar } from "@/components/ui/calendar"
 import { format } from "date-fns"
-import { paySupplierCredit, applySupplierCredit, getSupplierCreditSummary } from "@/app/actions/supplier-payment-actions"
+import { paySupplierCredit, applySupplierCredit, getSupplierCreditSummary, getSupplierOpenPurchases } from "@/app/actions/supplier-payment-actions"
 import { useSelector } from "react-redux"
 import type { RootState } from "@/store/store"
 
@@ -44,6 +45,8 @@ interface PayCreditModalProps {
   }
   userId: number
   deviceId: number
+  initialPurchaseId?: number
+  initialAmount?: number
 }
 
 interface PaymentAllocation {
@@ -69,6 +72,8 @@ export default function PayCreditModal({
   supplier,
   userId,
   deviceId,
+  initialPurchaseId,
+  initialAmount,
 }: PayCreditModalProps) {
   const [useSupplierCredit, setUseSupplierCredit] = useState(false)
   const [creditToApplyInput, setCreditToApplyInput] = useState("")
@@ -80,6 +85,10 @@ export default function PayCreditModal({
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [paymentResult, setPaymentResult] = useState<PaymentResultData | null>(null)
+
+  const [openPurchases, setOpenPurchases] = useState<any[]>([])
+  const [loadingPurchases, setLoadingPurchases] = useState(false)
+  const [selectedPurchaseIds, setSelectedPurchaseIds] = useState<number[]>([])
 
   const [liveCreditSummary, setLiveCreditSummary] = useState<{
     availableCredit: number
@@ -101,6 +110,35 @@ export default function PayCreditModal({
     return `${currency} ${amount.toFixed(2)}`
   }
 
+  // Helper to filter out cancelled/returned purchases
+  const isCancelledOrReturned = (p: any) => {
+    const status = String(p?.status || "").toLowerCase().trim()
+    return status === "cancelled" || status === "returned"
+  }
+
+  // Fetch open purchases when modal opens
+  useEffect(() => {
+    if (isOpen && supplier?.id && userId) {
+      setLoadingPurchases(true)
+      getSupplierOpenPurchases(supplier.id, userId, deviceId)
+        .then((res) => {
+          if (res.success && Array.isArray(res.data)) {
+            const validPurchases = res.data.filter((p: any) => {
+              const total = Number(p.total_amount || 0)
+              const rec = Number(p.received_amount || 0)
+              return total - rec > 0.01 && !isCancelledOrReturned(p)
+            })
+            setOpenPurchases(validPurchases)
+          }
+        })
+        .catch((err) => console.error("Error fetching supplier open purchases:", err))
+        .finally(() => setLoadingPurchases(false))
+    } else {
+      setOpenPurchases([])
+      setSelectedPurchaseIds([])
+    }
+  }, [isOpen, supplier?.id, userId, deviceId])
+
   // Fetch live credit summary and reset form when modal opens
   useEffect(() => {
     if (isOpen) {
@@ -112,7 +150,18 @@ export default function PayCreditModal({
       setPaymentMethod("Cash")
       setUseSupplierCredit(false)
       setCreditToApplyInput("0")
-      setPaymentAmount(outstandingBalance.toString())
+
+      if (initialPurchaseId) {
+        setSelectedPurchaseIds([initialPurchaseId])
+        if (initialAmount !== undefined && initialAmount > 0) {
+          setPaymentAmount(initialAmount.toFixed(2))
+        } else {
+          setPaymentAmount("")
+        }
+      } else {
+        setSelectedPurchaseIds([])
+        setPaymentAmount(outstandingBalance.toString())
+      }
 
       if (supplier?.id && userId) {
         getSupplierCreditSummary(supplier.id, userId)
@@ -122,7 +171,9 @@ export default function PayCreditModal({
                 availableCredit: res.data.availableCredit,
                 outstandingBalance: res.data.outstandingBalance,
               })
-              setPaymentAmount(res.data.outstandingBalance.toString())
+              if (!initialPurchaseId) {
+                setPaymentAmount(res.data.outstandingBalance.toString())
+              }
             }
           })
           .catch((err) => {
@@ -130,7 +181,53 @@ export default function PayCreditModal({
           })
       }
     }
-  }, [isOpen, supplier?.id, userId])
+  }, [isOpen, supplier?.id, userId, initialPurchaseId, initialAmount])
+
+  // Selected purchases balance calculation
+  const selectedBalance = useMemo(() => {
+    if (selectedPurchaseIds.length === 0) return 0
+    return openPurchases
+      .filter((p) => selectedPurchaseIds.includes(p.id))
+      .reduce((sum, p) => {
+        const total = Number(p.total_amount || 0)
+        const rec = Number(p.received_amount || 0)
+        return sum + Math.max(0, total - rec)
+      }, 0)
+  }, [openPurchases, selectedPurchaseIds])
+
+  const handleTogglePurchase = (purchaseId: number) => {
+    setSelectedPurchaseIds((prev) => {
+      const next = prev.includes(purchaseId)
+        ? prev.filter((id) => id !== purchaseId)
+        : [...prev, purchaseId]
+
+      if (next.length > 0) {
+        const totalDue = openPurchases
+          .filter((p) => next.includes(p.id))
+          .reduce((sum, p) => sum + Math.max(0, Number(p.total_amount || 0) - Number(p.received_amount || 0)), 0)
+        setPaymentAmount(totalDue.toFixed(2))
+      } else {
+        setPaymentAmount(outstandingBalance.toString())
+      }
+
+      return next
+    })
+  }
+
+  const handleSelectAll = () => {
+    if (selectedPurchaseIds.length === openPurchases.length) {
+      setSelectedPurchaseIds([])
+      setPaymentAmount(outstandingBalance.toString())
+    } else {
+      const allIds = openPurchases.map((p) => p.id)
+      setSelectedPurchaseIds(allIds)
+      const totalDue = openPurchases.reduce(
+        (sum, p) => sum + Math.max(0, Number(p.total_amount || 0) - Number(p.received_amount || 0)),
+        0
+      )
+      setPaymentAmount(totalDue.toFixed(2))
+    }
+  }
 
   const handleToggleSupplierCredit = (checked: boolean) => {
     setUseSupplierCredit(checked)
@@ -200,6 +297,7 @@ export default function PayCreditModal({
         notes.trim() || undefined,
         finalPaymentDate,
         creditToApplyNum,
+        selectedPurchaseIds.length > 0 ? selectedPurchaseIds : undefined,
       )
 
       if (result.success && result.data) {
@@ -222,7 +320,8 @@ export default function PayCreditModal({
     onClose()
   }
 
-  const quickAmounts = [100, 500, 1000, Math.max(outstandingBalance - creditToApplyNum, 0)].filter(
+  const baseRemaining = selectedPurchaseIds.length > 0 ? selectedBalance : outstandingBalance
+  const quickAmounts = [100, 500, 1000, Math.max(baseRemaining - creditToApplyNum, 0)].filter(
     (amount, index, arr) => arr.indexOf(amount) === index && amount > 0
   )
 
@@ -474,12 +573,123 @@ export default function PayCreditModal({
                         </div>
                       </div>
                       <div className="text-right">
-                        <div className="text-xs text-gray-500 mb-1">Outstanding Balance</div>
-                        <div className="text-2xl font-bold text-red-600">{formatCurrency(outstandingBalance)}</div>
+                        <div className="text-xs text-gray-500 mb-1">
+                          {selectedPurchaseIds.length > 0 ? "Selected Balance" : "Outstanding Balance"}
+                        </div>
+                        <div className={`text-2xl font-bold ${selectedPurchaseIds.length > 0 ? "text-blue-600" : "text-red-600"}`}>
+                          {formatCurrency(selectedPurchaseIds.length > 0 ? selectedBalance : outstandingBalance)}
+                        </div>
                       </div>
                     </div>
                   </CardContent>
                 </Card>
+
+                {/* Selectable Open Purchases Card */}
+                <div className="space-y-2 p-3.5 bg-slate-50/90 border border-slate-200 rounded-xl">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-semibold text-slate-800 flex items-center gap-1.5">
+                      <Receipt className="h-3.5 w-3.5 text-blue-600" />
+                      <span>Select Purchases to Pay ({openPurchases.length} open)</span>
+                    </Label>
+                    {openPurchases.length > 0 && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleSelectAll}
+                        className="h-6 text-[11px] font-medium text-blue-600 hover:text-blue-800 hover:bg-blue-100/60 px-2 cursor-pointer"
+                      >
+                        {selectedPurchaseIds.length === openPurchases.length ? "Deselect All" : "Select All"}
+                      </Button>
+                    )}
+                  </div>
+
+                  {loadingPurchases ? (
+                    <div className="flex items-center justify-center py-6 text-xs text-gray-500 gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
+                      <span>Loading open purchases...</span>
+                    </div>
+                  ) : openPurchases.length === 0 ? (
+                    <div className="text-xs text-gray-500 py-3 text-center bg-white rounded-lg border border-dashed border-gray-200">
+                      No unsettled credit purchases found for this supplier.
+                    </div>
+                  ) : (
+                    <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
+                      {openPurchases.map((purchase) => {
+                        const total = Number(purchase.total_amount || 0)
+                        const rec = Number(purchase.received_amount || 0)
+                        const due = Math.max(0, total - rec)
+                        const isSelected = selectedPurchaseIds.includes(purchase.id)
+                        const isPartiallyPaid = rec > 0
+
+                        return (
+                          <div
+                            key={purchase.id}
+                            onClick={() => handleTogglePurchase(purchase.id)}
+                            className={`flex items-center justify-between p-2.5 rounded-lg border text-xs cursor-pointer select-none transition-all ${
+                              isSelected
+                                ? "border-blue-500 bg-blue-50/80 shadow-xs ring-1 ring-blue-400/40"
+                                : "border-gray-200 bg-white hover:border-gray-300"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2.5">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => {}} // Click handled by parent div
+                                className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer pointer-events-none"
+                              />
+                              <div>
+                                <div className="font-semibold text-gray-900 flex items-center gap-1.5">
+                                  <span>Purchase #{purchase.id}</span>
+                                  <Badge variant="outline" className="text-[10px] py-0 px-1 font-normal text-gray-600">
+                                    {isPartiallyPaid ? "Partially Paid" : "Unpaid Credit"}
+                                  </Badge>
+                                </div>
+                                <div className="text-[11px] text-gray-500 flex items-center gap-1 mt-0.5">
+                                  <CalendarLucide className="h-3 w-3 text-gray-400" />
+                                  <span>
+                                    {purchase.purchase_date ? format(new Date(purchase.purchase_date), "dd MMM yyyy") : "N/A"}
+                                  </span>
+                                  <span>·</span>
+                                  <span>Total: {formatCurrency(total)}</span>
+                                  {purchase.payment_method && (
+                                    <>
+                                      <span>·</span>
+                                      <span>{purchase.payment_method}</span>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="text-right">
+                              <div className="text-[10px] text-gray-500">Balance Due</div>
+                              <div className="font-bold text-amber-700 text-xs sm:text-sm">
+                                {formatCurrency(due)}
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+
+                  {selectedPurchaseIds.length > 0 ? (
+                    <div className="flex items-center justify-between text-xs bg-emerald-50 text-emerald-800 px-2.5 py-1.5 rounded-md border border-emerald-200">
+                      <span className="font-medium">
+                        ✓ {selectedPurchaseIds.length} purchase{selectedPurchaseIds.length === 1 ? "" : "s"} selected
+                      </span>
+                      <span className="font-bold">
+                        Total Selected: {formatCurrency(selectedBalance)}
+                      </span>
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-gray-500 italic">
+                      Tap purchase(s) above to automatically fill the amount, or leave unselected to pay across oldest purchases first.
+                    </p>
+                  )}
+                </div>
 
                 {/* Available Credit Usage Card */}
                 <Card className="border-blue-200 bg-blue-50/50 shadow-md">
@@ -711,7 +921,11 @@ export default function PayCreditModal({
                             onClick={() => setPaymentAmount(amount.toString())}
                             className="h-9 text-xs rounded-lg border-2 hover:border-blue-500 hover:bg-blue-50 transition-all duration-200"
                           >
-                            {amount === Math.max(outstandingBalance - creditToApplyNum, 0) ? "Full Remaining" : formatCurrency(amount)}
+                            {amount === Math.max(baseRemaining - creditToApplyNum, 0)
+                              ? selectedPurchaseIds.length > 0
+                                ? "Selected Total"
+                                : "Full Remaining"
+                              : formatCurrency(amount)}
                           </Button>
                         ))}
                       </div>

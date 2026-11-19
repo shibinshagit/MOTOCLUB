@@ -4,7 +4,9 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { format } from "date-fns"
 import {
   Loader2,
   Search,
@@ -25,6 +27,7 @@ import {
   FilePenLine,
   RotateCcw,
   Wallet,
+  Calendar,
 } from "lucide-react"
 import { useAppDispatch, useAppSelector } from "@/store/hooks"
 import { usePathname } from "next/navigation"
@@ -162,6 +165,8 @@ export default function SupplierTab({
     balance_amount: number
     available_credit?: number
     supplier_credit?: number
+    initialPurchaseId?: number
+    initialAmount?: number
   } | null>(null)
   const [selectedSupplierForRefund, setSelectedSupplierForRefund] = useState<any>(null)
 
@@ -384,7 +389,15 @@ export default function SupplierTab({
 
   const handleAdd = useCallback(() => setShowAddModal(true), [])
 
-  const handlePayCredit = useCallback((supplier: { id: number; name: string; balance_amount: number; available_credit?: number; supplier_credit?: number }) => {
+  const handlePayCredit = useCallback((supplier: {
+    id: number
+    name: string
+    balance_amount: number
+    available_credit?: number
+    supplier_credit?: number
+    initialPurchaseId?: number
+    initialAmount?: number
+  }) => {
     if (isPurchaseManager) return
     setSelectedSupplierForPayment(supplier)
     setShowPayCreditModal(true)
@@ -492,9 +505,23 @@ export default function SupplierTab({
             {/* Header Section */}
             <div className="flex items-start justify-between">
               <div className="flex-1 min-w-0">
-                <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-2 truncate">
-                  {supplier.name}
-                </h3>
+                <div className="flex flex-wrap items-center gap-2 mb-2">
+                  <h3 className="text-base sm:text-lg font-semibold text-gray-900 truncate">
+                    {supplier.name}
+                  </h3>
+                  <Badge variant="outline" className="text-xs font-semibold bg-gray-50 text-gray-700 border-gray-200">
+                    #{supplier.id}
+                  </Badge>
+                  {(supplier.balance_amount || 0) > 0.01 && (supplier as any).last_credit_purchase_date && (
+                    <Badge
+                      variant="outline"
+                      className="bg-red-50 text-red-600 border-red-200 text-[11px] font-semibold px-2 py-0.5 flex items-center gap-1 shadow-2xs"
+                    >
+                      <Calendar className="h-3 w-3 text-red-500" />
+                      <span>Last Credit: {format(new Date((supplier as any).last_credit_purchase_date), "dd MMM yyyy")}</span>
+                    </Badge>
+                  )}
+                </div>
                 
                 {/* Contact Info */}
                 <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-4 space-y-1 sm:space-y-0 text-xs sm:text-sm text-gray-600">
@@ -786,6 +813,8 @@ export default function SupplierTab({
           supplier={selectedSupplierForPayment}
           userId={userId}
           deviceId={deviceId || 0}
+          initialPurchaseId={selectedSupplierForPayment.initialPurchaseId}
+          initialAmount={selectedSupplierForPayment.initialAmount}
         />
       )}
 
