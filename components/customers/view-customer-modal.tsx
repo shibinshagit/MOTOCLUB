@@ -8,7 +8,8 @@ import { Separator } from "@/components/ui/separator"
 import { format } from "date-fns"
 import { useEffect, useState } from "react"
 import { getCustomerSales, getCustomerAddresses, setDefaultCustomerAddress } from "@/app/actions/customer-actions"
-import { User, Mail, Phone, MapPin, Calendar, ShoppingBag, Wallet, Package, Clock, TrendingUp, CheckCircle2 } from "lucide-react"
+import { User, Mail, Phone, MapPin, Calendar, ShoppingBag, Wallet, Package, Clock, TrendingUp, CheckCircle2, MessageCircle } from "lucide-react"
+import { openCustomerWhatsApp } from "@/lib/whatsapp-utils"
 import { formatCurrency as formatMoney } from "@/lib/utils"
 import { useSelector } from "react-redux"
 import { selectDeviceCurrency } from "@/store/slices/deviceSlice"
@@ -161,12 +162,26 @@ export default function ViewCustomerModal({ isOpen, onClose, customer, companyId
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <Phone className="h-4 w-4 text-gray-400" />
-                  <div>
-                    <p className="text-sm font-medium text-gray-500">Phone</p>
-                    <p className="text-sm text-gray-700">{customer.phone || "Not provided"}</p>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Phone className="h-4 w-4 text-gray-400 flex-shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-gray-500">Phone</p>
+                      <p className="text-sm text-gray-700 truncate">{customer.phone || "Not provided"}</p>
+                    </div>
                   </div>
+                  {customer.phone && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => openCustomerWhatsApp(customer.phone, "Hi")}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white h-7 px-2.5 text-xs rounded-lg flex items-center gap-1.5 flex-shrink-0 shadow-xs"
+                      title="Send WhatsApp message"
+                    >
+                      <MessageCircle className="h-3.5 w-3.5" />
+                      <span>WhatsApp</span>
+                    </Button>
+                  )}
                 </div>
 
                 <div className="flex items-start gap-2">

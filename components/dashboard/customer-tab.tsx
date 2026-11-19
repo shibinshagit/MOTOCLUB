@@ -18,6 +18,7 @@ import {
   History,
   FilePenLine,
   Undo2,
+  MessageCircle,
 } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import EditCustomerModal from "../customers/edit-customer-modal"
@@ -26,6 +27,7 @@ import PayCustomerCreditModal from "../customers/pay-customer-credit-modal"
 import EditCustomerPaymentModal from "../customers/edit-customer-payment-modal"
 import { useToast } from "@/components/ui/use-toast"
 import { notifyError, notifySuccess } from "@/lib/notifications"
+import { openCustomerWhatsApp } from "@/lib/whatsapp-utils"
 import { exportCustomersToPDF } from "@/lib/pdf-export-utils"
 import {
   getCustomers,
@@ -644,6 +646,21 @@ return (
 
             {/* Action Buttons - Responsive Layout */}
             <div className="flex flex-col sm:flex-row items-end sm:items-center gap-1 sm:gap-2 ml-2 sm:ml-4 flex-shrink-0">
+              <Button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  const ok = openCustomerWhatsApp(customer.phone, "Hi")
+                  if (!ok) {
+                    notifyError(toast, "This customer does not have a phone number on file.", "No Phone Number")
+                  }
+                }}
+                size="sm"
+                className="bg-emerald-600 hover:bg-emerald-700 text-white px-2 sm:px-3 py-1 text-xs rounded-lg min-w-0 w-12 sm:w-auto flex items-center justify-center gap-1"
+                title="Send WhatsApp message"
+              >
+                <MessageCircle className="h-3.5 w-3.5 flex-shrink-0" />
+                <span className="hidden sm:inline">WhatsApp</span>
+              </Button>
               <Button
                 onClick={(e) => {
                   e.stopPropagation()
