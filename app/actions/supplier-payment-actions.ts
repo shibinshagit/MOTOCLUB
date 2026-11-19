@@ -22,6 +22,7 @@ export async function paySupplierCredit(
   notes?: string,
   paymentDate?: Date,
   creditToApply: number = 0,
+  targetPurchaseIds?: number[],
 ) {
   console.log("paySupplierCredit: Starting payment process", {
     supplierId,
@@ -31,6 +32,7 @@ export async function paySupplierCredit(
     deviceId,
     paymentMethod,
     paymentDate,
+    targetPurchaseIds,
   })
 
   if (!supplierId || !userId || !deviceId) {
@@ -76,21 +78,42 @@ export async function paySupplierCredit(
       }
 
       // 2. Fetch outstanding credit purchases
-      const creditPurchases = await tx`
-        SELECT 
-          id,
-          total_amount,
-          received_amount,
-          purchase_date,
-          status
-        FROM purchases
-        WHERE TRIM(supplier) = TRIM(${supplier.name})
-          AND created_by = ${userId}
-          AND device_id = ${deviceId}
-          AND status != 'Cancelled'
-          AND (total_amount - COALESCE(received_amount, 0)) > 0
-        ORDER BY purchase_date ASC, id ASC
-      `
+      const targetIds = targetPurchaseIds && targetPurchaseIds.length > 0 ? targetPurchaseIds : null
+
+      const creditPurchases = targetIds
+        ? await tx`
+            SELECT 
+              id,
+              total_amount,
+              received_amount,
+              purchase_date,
+              status
+            FROM purchases
+            WHERE id = ANY(${targetIds})
+              AND (TRIM(supplier) = TRIM(${supplier.name}) OR LOWER(TRIM(supplier)) = LOWER(TRIM(${supplier.name})))
+              AND (created_by = ${userId} OR device_id = ${deviceId})
+              AND LOWER(COALESCE(status, '')) NOT IN ('cancelled', 'returned')
+              AND (total_amount - COALESCE(received_amount, 0)) > 0.01
+            ORDER BY purchase_date ASC, id ASC
+          `
+        : await tx`
+            SELECT 
+              id,
+              total_amount,
+              received_amount,
+              purchase_date,
+              status
+            FROM purchases
+            WHERE (TRIM(supplier) = TRIM(${supplier.name}) OR LOWER(TRIM(supplier)) = LOWER(TRIM(${supplier.name})))
+              AND (created_by = ${userId} OR device_id = ${deviceId})
+              AND LOWER(COALESCE(status, '')) NOT IN ('cancelled', 'returned')
+              AND (total_amount - COALESCE(received_amount, 0)) > 0.01
+            ORDER BY purchase_date ASC, id ASC
+          `
+
+      if (targetIds && creditPurchases.length === 0) {
+        throw new Error("None of the selected purchases were found or all have already been settled.")
+      }
 
       const totalOutstanding = creditPurchases.reduce((sum: number, purchase: any) => {
         return sum + (Number(purchase.total_amount) - Number(purchase.received_amount || 0))
@@ -279,6 +302,58 @@ export async function paySupplierCredit(
     return {
       success: false,
       message: "Payment processing failed. Please try again.",
+    }
+  }
+}
+
+export async function getSupplierOpenPurchases(
+  supplierId: number,
+  userId: number,
+  deviceId?: number
+): Promise<{ success: boolean; data: any[]; message?: string }> {
+  if (!supplierId || !userId) {
+    return { success: false, message: "Supplier ID and User ID are required", data: [] }
+  }
+
+  resetConnectionState()
+
+  try {
+    const suppliers = await sql`
+      SELECT id, name FROM suppliers WHERE id = ${supplierId}
+    `
+    if (suppliers.length === 0) {
+      return { success: false, message: "Supplier not found", data: [] }
+    }
+    const supplierName = suppliers[0].name
+    const effectiveDeviceId = deviceId || userId
+
+    const purchases = await sql`
+      SELECT 
+        p.id,
+        p.purchase_date,
+        p.total_amount,
+        p.received_amount,
+        p.status,
+        p.payment_method,
+        (COALESCE(p.total_amount, 0) - COALESCE(p.received_amount, 0)) as balance_left,
+        COUNT(pi.id) as item_count
+      FROM purchases p
+      LEFT JOIN purchase_items pi ON pi.purchase_id = p.id
+      WHERE (TRIM(p.supplier) = TRIM(${supplierName}) OR LOWER(TRIM(p.supplier)) = LOWER(TRIM(${supplierName})))
+        AND (p.created_by = ${userId} OR p.device_id = ${effectiveDeviceId})
+        AND LOWER(COALESCE(p.status, '')) NOT IN ('cancelled', 'returned')
+        AND (COALESCE(p.total_amount, 0) - COALESCE(p.received_amount, 0)) > 0.01
+      GROUP BY p.id, p.purchase_date, p.total_amount, p.received_amount, p.status, p.payment_method
+      ORDER BY p.purchase_date ASC, p.id ASC
+    `
+
+    return { success: true, data: purchases }
+  } catch (error) {
+    console.error("getSupplierOpenPurchases error:", error)
+    return {
+      success: false,
+      message: getLastError()?.message || "Failed to load open purchases",
+      data: [],
     }
   }
 }

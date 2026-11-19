@@ -593,16 +593,38 @@ export default function SupplierDetailPage({
                             </td>
 
                             <td className="px-4 py-3 text-center whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleOpenPurchase(purchase.id)}
-                                className="h-7 px-2.5 text-xs gap-1 border-slate-200 text-slate-700 hover:text-blue-600 hover:bg-blue-50 shadow-2xs cursor-pointer"
-                                title="View Purchase Details"
-                              >
-                                <Eye className="h-3.5 w-3.5 text-slate-500" />
-                                <span>View</span>
-                              </Button>
+                              <div className="flex items-center justify-center gap-1.5">
+                                {onPayCredit && isCredit && balance > 0.01 && (
+                                  <Button
+                                    size="sm"
+                                    onClick={() =>
+                                      onPayCredit({
+                                        id: supplier.id,
+                                        name: supplier.name,
+                                        balance_amount: supplier.balance_amount || 0,
+                                        available_credit: supplier.available_credit || supplier.supplier_credit || 0,
+                                        initialPurchaseId: purchase.id,
+                                        initialAmount: balance,
+                                      })
+                                    }
+                                    className="h-7 px-2 text-[11px] bg-emerald-600 hover:bg-emerald-700 text-white gap-1 shadow-2xs cursor-pointer font-medium"
+                                    title="Pay This Purchase"
+                                  >
+                                    <CreditCard className="h-3 w-3" />
+                                    <span>Pay</span>
+                                  </Button>
+                                )}
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleOpenPurchase(purchase.id)}
+                                  className="h-7 px-2 text-xs gap-1 border-slate-200 text-slate-700 hover:text-blue-600 hover:bg-blue-50 shadow-2xs cursor-pointer"
+                                  title="View Purchase Details"
+                                >
+                                  <Eye className="h-3.5 w-3.5 text-slate-500" />
+                                  <span>View</span>
+                                </Button>
+                              </div>
                             </td>
                           </tr>
                         )

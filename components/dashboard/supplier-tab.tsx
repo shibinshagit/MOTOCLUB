@@ -4,7 +4,9 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { format } from "date-fns"
 import {
   Loader2,
   Search,
@@ -25,6 +27,9 @@ import {
   FilePenLine,
   RotateCcw,
   Wallet,
+  Calendar,
+  CheckCircle,
+  X,
 } from "lucide-react"
 import { useAppDispatch, useAppSelector } from "@/store/hooks"
 import { usePathname } from "next/navigation"
@@ -149,6 +154,8 @@ export default function SupplierTab({
   const isPurchaseManager = activeStaff?.role === "purchase_manager" || Boolean(pathname?.startsWith("/purchase-manager"))
 
   // Local state
+  const [activeView, setActiveView] = useState<"suppliers" | "payments">("suppliers")
+  const [paymentSearchTerm, setPaymentSearchTerm] = useState("")
   const [localSearchTerm, setLocalSearchTerm] = useState("")
   const [viewingSupplierId, setViewingSupplierId] = useState<number | null>(null)
   const [showAddModal, setShowAddModal] = useState(false)
@@ -162,8 +169,38 @@ export default function SupplierTab({
     balance_amount: number
     available_credit?: number
     supplier_credit?: number
+    initialPurchaseId?: number
+    initialAmount?: number
   } | null>(null)
   const [selectedSupplierForRefund, setSelectedSupplierForRefund] = useState<any>(null)
+
+  const dueSuppliers = useMemo(() => {
+    return allSuppliers.filter((s) => (s.balance_amount || 0) > 0.01)
+  }, [allSuppliers])
+
+  const filteredDueSuppliers = useMemo(() => {
+    if (!paymentSearchTerm.trim()) return dueSuppliers
+    const term = paymentSearchTerm.toLowerCase().trim()
+    return dueSuppliers.filter(
+      (s) =>
+        s.name?.toLowerCase().includes(term) ||
+        s.phone?.toLowerCase().includes(term) ||
+        s.email?.toLowerCase().includes(term) ||
+        String(s.id).includes(term)
+    )
+  }, [dueSuppliers, paymentSearchTerm])
+
+  const dueTotals = useMemo(() => {
+    return dueSuppliers.reduce(
+      (acc, s) => ({
+        totalPurchases: acc.totalPurchases + Number(s.total_amount || 0),
+        alreadyPaid: acc.alreadyPaid + Number(s.paid_amount || 0),
+        stillToPay: acc.stillToPay + Number(s.balance_amount || 0),
+        availableCredit: acc.availableCredit + Number(s.available_credit || s.supplier_credit || 0),
+      }),
+      { totalPurchases: 0, alreadyPaid: 0, stillToPay: 0, availableCredit: 0 }
+    )
+  }, [dueSuppliers])
 
   const [paymentHistorySupplier, setPaymentHistorySupplier] = useState<{ id: number; name: string } | null>(null)
   const [supplierPayments, setSupplierPayments] = useState<SupplierPaymentListRow[]>([])
@@ -384,7 +421,15 @@ export default function SupplierTab({
 
   const handleAdd = useCallback(() => setShowAddModal(true), [])
 
-  const handlePayCredit = useCallback((supplier: { id: number; name: string; balance_amount: number; available_credit?: number; supplier_credit?: number }) => {
+  const handlePayCredit = useCallback((supplier: {
+    id: number
+    name: string
+    balance_amount: number
+    available_credit?: number
+    supplier_credit?: number
+    initialPurchaseId?: number
+    initialAmount?: number
+  }) => {
     if (isPurchaseManager) return
     setSelectedSupplierForPayment(supplier)
     setShowPayCreditModal(true)
@@ -492,9 +537,23 @@ export default function SupplierTab({
             {/* Header Section */}
             <div className="flex items-start justify-between">
               <div className="flex-1 min-w-0">
-                <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-2 truncate">
-                  {supplier.name}
-                </h3>
+                <div className="flex flex-wrap items-center gap-2 mb-2">
+                  <h3 className="text-base sm:text-lg font-semibold text-gray-900 truncate">
+                    {supplier.name}
+                  </h3>
+                  <Badge variant="outline" className="text-xs font-semibold bg-gray-50 text-gray-700 border-gray-200">
+                    #{supplier.id}
+                  </Badge>
+                  {(supplier.balance_amount || 0) > 0.01 && (supplier as any).last_credit_purchase_date && (
+                    <Badge
+                      variant="outline"
+                      className="bg-red-50 text-red-600 border-red-200 text-[11px] font-semibold px-2 py-0.5 flex items-center gap-1 shadow-2xs"
+                    >
+                      <Calendar className="h-3 w-3 text-red-500" />
+                      <span>Last Credit: {format(new Date((supplier as any).last_credit_purchase_date), "dd MMM yyyy")}</span>
+                    </Badge>
+                  )}
+                </div>
                 
                 {/* Contact Info */}
                 <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-4 space-y-1 sm:space-y-0 text-xs sm:text-sm text-gray-600">
@@ -518,66 +577,34 @@ export default function SupplierTab({
               </div>
 
               {/* Action Buttons */}
-              <div className="flex flex-col sm:flex-row gap-1 ml-2 sm:ml-4 flex-shrink-0">
-                <div className="flex flex-wrap gap-1 justify-end sm:justify-start">
-                  {!isPurchaseManager && (
-                    <Button
-                      size="sm"
-                      className="h-7 px-2 bg-green-600 hover:bg-green-700 text-white text-xs whitespace-nowrap"
-                      onClick={() =>
-                        handlePayCredit({
-                          id: supplier.id,
-                          name: supplier.name,
-                          balance_amount: supplier.balance_amount || 0,
-                          available_credit: supplier.available_credit || supplier.supplier_credit || 0,
-                        })
-                      }
-                    >
-                      <CreditCard className="h-3 w-3 mr-1 flex-shrink-0" />
-                      <span className="hidden sm:inline">Pay Credit</span>
-                      <span className="sm:hidden">Pay</span>
-                    </Button>
-                  )}
-                  {(supplier.paid_amount || 0) > 0 && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-7 px-2 text-xs whitespace-nowrap border-amber-200 text-amber-800 hover:bg-amber-50"
-                      onClick={() => handleOpenPaymentHistory({ id: supplier.id, name: supplier.name })}
-                    >
-                      <History className="h-3 w-3 mr-1 flex-shrink-0" />
-                      <span className="hidden sm:inline">Payments</span>
-                      <span className="sm:hidden">Paymts</span>
-                    </Button>
-                  )}
-                </div>
-
-                <div className="flex space-x-1">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 w-7 p-0 text-blue-600 hover:bg-blue-50"
-                    onClick={() => handleView(supplier.id)}
-                  >
-                    <Eye className="h-3 w-3" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 w-7 p-0 text-amber-600 hover:bg-amber-50"
-                    onClick={() => handleEdit(supplier.id)}
-                  >
-                    <Edit className="h-3 w-3" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 w-7 p-0 text-red-600 hover:bg-red-50"
-                    onClick={() => handleDelete(supplier.id, supplier.name)}
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </Button>
-                </div>
+              <div className="flex items-center space-x-1 ml-2 sm:ml-4 flex-shrink-0">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0 text-blue-600 hover:bg-blue-50 cursor-pointer"
+                  onClick={() => handleView(supplier.id)}
+                  title="View Supplier"
+                >
+                  <Eye className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0 text-amber-600 hover:bg-amber-50 cursor-pointer"
+                  onClick={() => handleEdit(supplier.id)}
+                  title="Edit Supplier"
+                >
+                  <Edit className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0 text-red-600 hover:bg-red-50 cursor-pointer"
+                  onClick={() => handleDelete(supplier.id, supplier.name)}
+                  title="Delete Supplier"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
               </div>
             </div>
 
@@ -638,7 +665,7 @@ export default function SupplierTab({
         </CardContent>
       </Card>
     ))
-  }, [suppliers, formatCurrency, handleView, handleEdit, handleDelete, handlePayCredit, handleRefundCredit, handleOpenPaymentHistory, isPurchaseManager])
+  }, [suppliers, formatCurrency, handleView, handleEdit, handleDelete])
 
   return (
     <div className="h-full flex flex-col bg-gray-50">
@@ -659,93 +686,312 @@ export default function SupplierTab({
           {/* Header */}
           <div className="bg-white border-b border-gray-200 px-4 sm:px-6 py-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="flex items-center space-x-4">
-                <div>
-                  <div className="flex items-center space-x-2">
-                    <h1 className="text-lg sm:text-xl font-bold text-gray-900">Suppliers</h1>
-                    {(isRefreshing || isLoading) && <RefreshCw className="h-4 w-4 animate-spin text-blue-600 flex-shrink-0" />}
-                  </div>
-                  <p className="text-xs sm:text-sm text-gray-500">
-                    {stats.total > 0
-                      ? `${stats.total} suppliers • ${formatCurrency(stats.totalAmount)} total • ${formatCurrency(stats.totalBalance)} balance`
-                      : "No suppliers found"}
-                  </p>
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
+                <div className="flex items-center space-x-2">
+                  <h1 className="text-lg sm:text-xl font-bold text-gray-900">Suppliers</h1>
+                  {(isRefreshing || isLoading) && <RefreshCw className="h-4 w-4 animate-spin text-blue-600 flex-shrink-0" />}
+                </div>
+
+                {/* View Switcher: Suppliers vs Supplier Payments */}
+                <div role="tablist" aria-label="Suppliers view" className="inline-flex rounded-lg bg-gray-100 p-1">
+                  {([
+                    { id: "suppliers", label: "Suppliers" },
+                    { id: "payments", label: `Supplier Payments${dueSuppliers.length > 0 ? ` (${dueSuppliers.length})` : ""}` },
+                  ] as const).map((view) => (
+                    <button
+                      key={view.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={activeView === view.id}
+                      onClick={() => setActiveView(view.id)}
+                      className={`whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-semibold transition-colors sm:text-sm cursor-pointer ${
+                        activeView === view.id ? "bg-white text-gray-900 shadow-xs" : "text-gray-600 hover:text-gray-900"
+                      }`}
+                    >
+                      {view.label}
+                    </button>
+                  ))}
                 </div>
               </div>
 
-              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-                {/* Search */}
-                <div className="relative flex-1 sm:flex-initial">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400 flex-shrink-0" />
-                  <Input
-                    placeholder="Search suppliers..."
-                    value={localSearchTerm}
-                    onChange={(e) => handleSearchChange(e.target.value)}
-                    className="pl-10 w-full sm:w-64 h-9 text-sm"
-                  />
-                </div>
+              {activeView === "suppliers" ? (
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                  {/* Search */}
+                  <div className="relative flex-1 sm:flex-initial">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400 flex-shrink-0" />
+                    <Input
+                      placeholder="Search suppliers..."
+                      value={localSearchTerm}
+                      onChange={(e) => handleSearchChange(e.target.value)}
+                      className="pl-10 w-full sm:w-64 h-9 text-sm"
+                    />
+                  </div>
 
+                  <div className="flex items-center gap-2">
+                    {/* Refresh button */}
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      onClick={handleRefresh} 
+                      disabled={isLoading || isRefreshing} 
+                      className="h-9 flex-shrink-0 cursor-pointer"
+                    >
+                      <RefreshCw className={`h-4 w-4 ${(isLoading || isRefreshing) ? "animate-spin" : ""}`} />
+                      <span className="hidden sm:inline ml-2">Refresh</span>
+                    </Button>
+
+                    {/* Add button */}
+                    <Button onClick={handleAdd} size="sm" className="bg-blue-600 hover:bg-blue-700 text-white h-9 flex-shrink-0 cursor-pointer">
+                      <Plus className="h-4 w-4 mr-2 flex-shrink-0" />
+                      <span className="hidden sm:inline">Add Supplier</span>
+                      <span className="sm:hidden">Add</span>
+                    </Button>
+                  </div>
+                </div>
+              ) : (
                 <div className="flex items-center gap-2">
-                  {/* Refresh button */}
                   <Button 
                     variant="outline" 
                     size="sm" 
                     onClick={handleRefresh} 
                     disabled={isLoading || isRefreshing} 
-                    className="h-9 flex-shrink-0"
+                    className="h-9 flex-shrink-0 cursor-pointer"
                   >
                     <RefreshCw className={`h-4 w-4 ${(isLoading || isRefreshing) ? "animate-spin" : ""}`} />
                     <span className="hidden sm:inline ml-2">Refresh</span>
                   </Button>
-
-                  {/* Add button */}
-                  <Button onClick={handleAdd} size="sm" className="bg-blue-600 hover:bg-blue-700 text-white h-9 flex-shrink-0">
-                    <Plus className="h-4 w-4 mr-2 flex-shrink-0" />
-                    <span className="hidden sm:inline">Add Supplier</span>
-                    <span className="sm:hidden">Add</span>
-                  </Button>
                 </div>
-              </div>
+              )}
             </div>
           </div>
 
           {/* Content Area */}
           <div className="flex-1 overflow-auto p-4 sm:p-6">
-            {isLoading && allSuppliers.length === 0 ? (
-              <div className="flex items-center justify-center py-12">
-                <Loader2 className="h-6 w-6 animate-spin mr-2 text-blue-600" />
-                <span className="text-gray-600">Loading suppliers...</span>
-              </div>
-            ) : error && allSuppliers.length === 0 ? (
-              <Card className="bg-white">
-                <CardContent className="text-center py-12">
-                  <div className="text-red-600 mb-4">{error}</div>
-                  <Button onClick={handleRefresh} variant="outline">
-                    Try Again
-                  </Button>
-                </CardContent>
-              </Card>
-            ) : suppliers.length === 0 ? (
-              <Card className="bg-white">
-                <CardContent className="text-center py-12">
-                  <Users className="h-16 w-16 text-gray-300 mx-auto mb-4" />
-                  <h3 className="text-lg font-medium text-gray-900 mb-2">
-                    {localSearchTerm ? "No suppliers match your search" : "No suppliers found"}
-                  </h3>
-                  <p className="text-gray-500 mb-6">
-                    {localSearchTerm ? "Try adjusting your search terms" : "Get started by adding your first supplier"}
-                  </p>
-                  {!localSearchTerm && (
-                    <Button onClick={handleAdd} className="bg-blue-600 hover:bg-blue-700 text-white">
-                      <Plus className="h-4 w-4 mr-2" />
-                      Add Your First Supplier
+            {activeView === "suppliers" ? (
+              isLoading && allSuppliers.length === 0 ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-6 w-6 animate-spin mr-2 text-blue-600" />
+                  <span className="text-gray-600">Loading suppliers...</span>
+                </div>
+              ) : error && allSuppliers.length === 0 ? (
+                <Card className="bg-white">
+                  <CardContent className="text-center py-12">
+                    <div className="text-red-600 mb-4">{error}</div>
+                    <Button onClick={handleRefresh} variant="outline">
+                      Try Again
                     </Button>
-                  )}
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
+              ) : suppliers.length === 0 ? (
+                <Card className="bg-white">
+                  <CardContent className="text-center py-12">
+                    <Users className="h-16 w-16 text-gray-300 mx-auto mb-4" />
+                    <h3 className="text-lg font-medium text-gray-900 mb-2">
+                      {localSearchTerm ? "No suppliers match your search" : "No suppliers found"}
+                    </h3>
+                    <p className="text-gray-500 mb-6">
+                      {localSearchTerm ? "Try adjusting your search terms" : "Get started by adding your first supplier"}
+                    </p>
+                    {!localSearchTerm && (
+                      <Button onClick={handleAdd} className="bg-blue-600 hover:bg-blue-700 text-white">
+                        <Plus className="h-4 w-4 mr-2" />
+                        Add Your First Supplier
+                      </Button>
+                    )}
+                  </CardContent>
+                </Card>
+              ) : (
+                <div className="space-y-2">
+                  {supplierCards}
+                </div>
+              )
             ) : (
-              <div className="space-y-2">
-                {supplierCards}
+              /* Supplier Payments View */
+              <div className="space-y-4">
+                {/* Summary Stats KPI Banner */}
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white p-3.5 sm:p-4 rounded-xl border border-gray-200 shadow-2xs">
+                  <div>
+                    <h2 className="text-base sm:text-lg font-bold text-gray-900">Supplier Due Payments</h2>
+                    <p className="text-xs sm:text-sm text-gray-500">
+                      Showing suppliers with outstanding credit balances to settle
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <span className="rounded-full bg-gray-50 text-gray-700 px-3 py-1 border border-gray-200">
+                      Total purchases: {formatCurrency(dueTotals.totalPurchases)}
+                    </span>
+                    <span className="rounded-full bg-blue-50 text-blue-700 px-3 py-1 border border-blue-200">
+                      Already paid: {formatCurrency(dueTotals.alreadyPaid)}
+                    </span>
+                    <span className="rounded-full bg-emerald-50 text-emerald-800 px-3 py-1 font-semibold border border-emerald-200">
+                      Still to pay: {formatCurrency(dueTotals.stillToPay)}
+                    </span>
+                    {dueTotals.availableCredit > 0 && (
+                      <span className="rounded-full bg-indigo-50 text-indigo-700 px-3 py-1 border border-indigo-200">
+                        Available credit: {formatCurrency(dueTotals.availableCredit)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Search Bar */}
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4 flex-shrink-0" />
+                  <Input
+                    placeholder="Search supplier payments by name, phone, or email..."
+                    value={paymentSearchTerm}
+                    onChange={(e) => setPaymentSearchTerm(e.target.value)}
+                    className="pl-10 pr-10 text-sm bg-white"
+                  />
+                  {paymentSearchTerm && (
+                    <button
+                      onClick={() => setPaymentSearchTerm("")}
+                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer"
+                      title="Clear search"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+
+                {paymentSearchTerm && (
+                  <div className="text-xs text-gray-500">
+                    Found {filteredDueSuppliers.length} matching {filteredDueSuppliers.length === 1 ? "supplier" : "suppliers"}
+                  </div>
+                )}
+
+                {/* Cards Grid or Empty States */}
+                {isLoading && allSuppliers.length === 0 ? (
+                  <div className="py-12 text-center text-gray-500">
+                    <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2 text-blue-600" />
+                    <span>Loading supplier balances...</span>
+                  </div>
+                ) : dueSuppliers.length === 0 ? (
+                  <div className="py-12 text-center bg-white rounded-xl border border-dashed border-gray-200 p-6">
+                    <CheckCircle className="h-10 w-10 text-emerald-500 mx-auto mb-2" />
+                    <h3 className="text-sm font-semibold text-gray-900 mb-1">All Clear! No Due Payments</h3>
+                    <p className="text-xs text-gray-500">
+                      There are currently no outstanding supplier balances to pay.
+                    </p>
+                  </div>
+                ) : filteredDueSuppliers.length === 0 ? (
+                  <div className="text-center py-10 bg-white rounded-xl border border-dashed border-gray-200 p-6">
+                    <Search className="h-8 w-8 text-gray-400 mx-auto mb-2" />
+                    <h3 className="text-sm font-medium text-gray-900 mb-1">No matching payments found</h3>
+                    <p className="text-xs text-gray-500 mb-3">
+                      No pending supplier balance matches &ldquo;{paymentSearchTerm}&rdquo;.
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPaymentSearchTerm("")}
+                      className="text-xs cursor-pointer"
+                    >
+                      Clear search
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3.5">
+                    {filteredDueSuppliers.map((supplier) => (
+                      <Card
+                        key={supplier.id}
+                        className="border border-gray-200 shadow-2xs cursor-pointer hover:border-blue-400 hover:shadow-md transition-all group bg-white"
+                        onClick={() =>
+                          !isPurchaseManager &&
+                          handlePayCredit({
+                            id: supplier.id,
+                            name: supplier.name,
+                            balance_amount: supplier.balance_amount || 0,
+                            available_credit: supplier.available_credit || supplier.supplier_credit || 0,
+                          })
+                        }
+                      >
+                        <CardContent className="p-4 space-y-3">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="font-bold text-gray-900 text-sm sm:text-base group-hover:text-blue-600 transition-colors truncate">
+                                  {supplier.name}
+                                </span>
+                                <Badge variant="outline" className="text-[10px] font-semibold bg-gray-50 text-gray-600 border-gray-200">
+                                  #{supplier.id}
+                                </Badge>
+                              </div>
+                              <div className="text-xs text-gray-500 mt-0.5 truncate">
+                                {supplier.phone ? `${supplier.phone} · ` : ""}
+                                {supplier.open_purchase_count || 0} open purchase{supplier.open_purchase_count === 1 ? "" : "s"}
+                              </div>
+                              {supplier.last_credit_purchase_date && (
+                                <div className="flex items-center gap-1.5 text-xs font-semibold text-red-600 bg-red-50 border border-red-200/80 rounded-md px-2 py-0.5 w-fit mt-1.5 shadow-2xs">
+                                  <Calendar className="h-3 w-3 text-red-500 flex-shrink-0" />
+                                  <span>Last credit: {format(new Date(supplier.last_credit_purchase_date), "dd MMM yyyy")}</span>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Action Buttons */}
+                            <div className="flex flex-wrap gap-1 justify-end flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+                              {(supplier.paid_amount || 0) > 0 && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 px-2 text-xs border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer"
+                                  onClick={() => handleOpenPaymentHistory({ id: supplier.id, name: supplier.name })}
+                                >
+                                  <History className="h-3.5 w-3.5 mr-1 text-slate-500" />
+                                  Payments
+                                </Button>
+                              )}
+                              {!isPurchaseManager && (
+                                <Button
+                                  size="sm"
+                                  className="h-7 px-2.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs cursor-pointer font-medium"
+                                  onClick={() =>
+                                    handlePayCredit({
+                                      id: supplier.id,
+                                      name: supplier.name,
+                                      balance_amount: supplier.balance_amount || 0,
+                                      available_credit: supplier.available_credit || supplier.supplier_credit || 0,
+                                    })
+                                  }
+                                >
+                                  <CreditCard className="h-3.5 w-3.5 mr-1" />
+                                  Pay Credit
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Financial Breakdown Card */}
+                          <div className="rounded-lg border border-emerald-100 bg-emerald-50/50 p-3 space-y-1.5">
+                            <div className="text-xs font-semibold text-emerald-800">Credit Purchases</div>
+                            <div className="flex justify-between text-xs text-gray-600">
+                              <span>Total amount</span>
+                              <span className="font-medium text-gray-900">{formatCurrency(supplier.total_amount || 0)}</span>
+                            </div>
+                            <div className="flex justify-between text-xs text-gray-600">
+                              <span>Already paid</span>
+                              <span className="font-medium text-emerald-700">{formatCurrency(supplier.paid_amount || 0)}</span>
+                            </div>
+                            <div className="flex justify-between text-sm pt-1.5 border-t border-emerald-100">
+                              <span className="font-medium text-emerald-900">Still to pay</span>
+                              <span className="font-bold text-emerald-700">{formatCurrency(supplier.balance_amount || 0)}</span>
+                            </div>
+                            {((supplier.available_credit || supplier.supplier_credit || 0) > 0) && (
+                              <div className="flex justify-between text-xs pt-1 border-t border-emerald-100 text-blue-700 font-medium">
+                                <span className="flex items-center gap-1">
+                                  <Wallet className="h-3 w-3 text-blue-600" />
+                                  Available credit
+                                </span>
+                                <span>{formatCurrency(supplier.available_credit || supplier.supplier_credit || 0)}</span>
+                              </div>
+                            )}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -786,6 +1032,8 @@ export default function SupplierTab({
           supplier={selectedSupplierForPayment}
           userId={userId}
           deviceId={deviceId || 0}
+          initialPurchaseId={selectedSupplierForPayment.initialPurchaseId}
+          initialAmount={selectedSupplierForPayment.initialAmount}
         />
       )}
 

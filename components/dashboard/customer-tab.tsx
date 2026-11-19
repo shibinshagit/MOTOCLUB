@@ -18,14 +18,18 @@ import {
   History,
   FilePenLine,
   Undo2,
+  MessageCircle,
+  Calendar,
 } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import EditCustomerModal from "../customers/edit-customer-modal"
 import ViewCustomerModal from "../customers/view-customer-modal"
 import PayCustomerCreditModal from "../customers/pay-customer-credit-modal"
 import EditCustomerPaymentModal from "../customers/edit-customer-payment-modal"
+import CustomerPendingSalesModal from "../customers/customer-pending-sales-modal"
 import { useToast } from "@/components/ui/use-toast"
 import { notifyError, notifySuccess } from "@/lib/notifications"
+import { openCustomerWhatsApp } from "@/lib/whatsapp-utils"
 import { exportCustomersToPDF } from "@/lib/pdf-export-utils"
 import {
   getCustomers,
@@ -53,7 +57,7 @@ import {
   updateCustomer,
   deleteCustomer,
 } from "@/store/slices/customerSlice"
-import { formatDistanceToNow } from "date-fns"
+import { formatDistanceToNow, format } from "date-fns"
 import { Card, CardContent } from "@/components/ui/card"
 import { formatCurrency as formatMoney } from "@/lib/utils"
 import { smartCapUncontrolled } from "@/lib/text-format"
@@ -90,12 +94,16 @@ export function CustomerTab({ userId, companyId }: { userId: number; companyId?:
   const [isSearching, setIsSearching] = useState(false)
   const [isBackgroundRefreshing, setIsBackgroundRefreshing] = useState(false)
   const [settlements, setSettlements] = useState<CustomerSettlementSummary[]>([])
+  const [paymentSearchTerm, setPaymentSearchTerm] = useState("")
+  const [pendingSalesCustomer, setPendingSalesCustomer] = useState<CustomerSettlementSummary | null>(null)
   const [isLoadingSettlements, setIsLoadingSettlements] = useState(false)
   const [showCollectModal, setShowCollectModal] = useState(false)
   const [selectedCustomerForPayment, setSelectedCustomerForPayment] = useState<{
     customer_id: number
     customer_name: string
     still_to_collect: number
+    initialSaleId?: number
+    initialAmount?: number
   } | null>(null)
   const [paymentHistoryCustomer, setPaymentHistoryCustomer] = useState<{
     customer_id: number
@@ -167,6 +175,21 @@ export function CustomerTab({ userId, companyId }: { userId: number; companyId?:
     )
   }, [settlements])
 
+  const filteredSettlements = useMemo(() => {
+    const term = paymentSearchTerm.trim().toLowerCase()
+    if (!term) return settlements
+    const cleanDigitTerm = term.replace(/\D/g, "")
+
+    return settlements.filter((customer) => {
+      const nameMatch = customer.customer_name?.toLowerCase().includes(term)
+      const phoneMatch = cleanDigitTerm
+        ? customer.customer_phone?.replace(/\D/g, "").includes(cleanDigitTerm)
+        : customer.customer_phone?.toLowerCase().includes(term)
+      const idMatch = String(customer.customer_id).includes(term)
+      return nameMatch || phoneMatch || idMatch
+    })
+  }, [settlements, paymentSearchTerm])
+
   const loadCustomerPayments = useCallback(
     async (customerId: number) => {
       if (!userId || !customerId) return
@@ -188,11 +211,17 @@ export function CustomerTab({ userId, companyId }: { userId: number; companyId?:
     [userId, toast],
   )
 
-  const handleCollectCustomer = (customer: CustomerSettlementSummary) => {
+  const handleCollectCustomer = (
+    customer: CustomerSettlementSummary,
+    saleId?: number,
+    saleAmount?: number,
+  ) => {
     setSelectedCustomerForPayment({
       customer_id: customer.customer_id,
       customer_name: customer.customer_name,
       still_to_collect: customer.still_to_collect,
+      initialSaleId: saleId,
+      initialAmount: saleAmount,
     })
     setShowCollectModal(true)
   }
@@ -259,7 +288,10 @@ export function CustomerTab({ userId, companyId }: { userId: number; companyId?:
 
       // Get customers with limit if not showing all and not searching
       const limit = showAll || searchTerm ? undefined : 5
-      const response = await getCustomers(companyId || userId, limit, searchTerm)
+      const response = await getCustomers(companyId || userId, limit, searchTerm, {
+        deviceId: userId,
+        onlyDeviceActivity: true,
+      })
 
       if (response.success) {
         dispatch(setCustomers(response.data))
@@ -647,6 +679,21 @@ return (
               <Button
                 onClick={(e) => {
                   e.stopPropagation()
+                  const ok = openCustomerWhatsApp(customer.phone, "Hi")
+                  if (!ok) {
+                    notifyError(toast, "This customer does not have a phone number on file.", "No Phone Number")
+                  }
+                }}
+                size="sm"
+                className="bg-emerald-600 hover:bg-emerald-700 text-white px-2 sm:px-3 py-1 text-xs rounded-lg min-w-0 w-12 sm:w-auto flex items-center justify-center gap-1"
+                title="Send WhatsApp message"
+              >
+                <MessageCircle className="h-3.5 w-3.5 flex-shrink-0" />
+                <span className="hidden sm:inline">WhatsApp</span>
+              </Button>
+              <Button
+                onClick={(e) => {
+                  e.stopPropagation()
                   openEditModal(customer)
                 }}
                 size="sm"
@@ -709,6 +756,32 @@ return (
         </div>
       </div>
 
+      {/* Customer Payments Search Bar */}
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4 flex-shrink-0" />
+        <Input
+          placeholder="Search customer payments by name or phone..."
+          value={paymentSearchTerm}
+          onChange={(e) => setPaymentSearchTerm(e.target.value)}
+          className="pl-10 pr-10 text-sm"
+        />
+        {paymentSearchTerm && (
+          <button
+            onClick={() => setPaymentSearchTerm("")}
+            className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+            title="Clear search"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        )}
+      </div>
+
+      {paymentSearchTerm && (
+        <div className="text-xs text-gray-500">
+          Found {filteredSettlements.length} matching {filteredSettlements.length === 1 ? "customer" : "customers"}
+        </div>
+      )}
+
       {isLoadingSettlements ? (
         <div className="py-8 text-center text-gray-500">
           <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2" />
@@ -716,25 +789,67 @@ return (
         </div>
       ) : settlements.length === 0 ? (
         <div className="py-6 text-center text-sm text-gray-500">No outstanding customer balances yet</div>
+      ) : filteredSettlements.length === 0 ? (
+        <div className="text-center py-10 bg-gray-50 rounded-xl border border-dashed border-gray-200 p-6">
+          <Search className="h-8 w-8 text-gray-400 mx-auto mb-2" />
+          <h3 className="text-sm font-medium text-gray-900 mb-1">No matching payments found</h3>
+          <p className="text-xs text-gray-500 mb-3">
+            No pending customer balance matches &ldquo;{paymentSearchTerm}&rdquo;.
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setPaymentSearchTerm("")}
+            className="text-xs"
+          >
+            Clear search
+          </Button>
+        </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3">
-          {settlements.map((customer) => (
-            <Card key={customer.customer_id} className="border border-gray-200 shadow-sm">
+          {filteredSettlements.map((customer) => (
+            <Card
+              key={customer.customer_id}
+              className="border border-gray-200 shadow-sm cursor-pointer hover:border-blue-300 hover:shadow-md transition-all group"
+              onClick={() => setPendingSalesCustomer(customer)}
+            >
               <CardContent className="p-4 space-y-3">
                 <div className="flex items-start justify-between gap-2">
                   <div>
-                    <div className="font-semibold text-gray-900">{customer.customer_name}</div>
+                    <div className="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors">
+                      {customer.customer_name}
+                    </div>
                     <div className="text-xs text-gray-500">
+                      {customer.customer_phone ? `${customer.customer_phone} · ` : ""}
                       {customer.open_sale_count} open sale{customer.open_sale_count === 1 ? "" : "s"}
                     </div>
+                    {customer.last_credit_sale_date && (
+                      <div className="flex items-center gap-1.5 text-xs font-semibold text-red-600 bg-red-50 border border-red-200/80 rounded-md px-2 py-0.5 w-fit mt-1.5">
+                        <Calendar className="h-3.5 w-3.5 text-red-500 flex-shrink-0" />
+                        <span>Last credit: {format(new Date(customer.last_credit_sale_date), "dd MMM yyyy")}</span>
+                      </div>
+                    )}
                   </div>
                   <div className="flex flex-wrap gap-1 justify-end">
-                    <Button size="sm" variant="outline" onClick={() => handleOpenPaymentHistory(customer)}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleOpenPaymentHistory(customer)
+                      }}
+                    >
                       <History className="h-3.5 w-3.5 mr-1" />
                       Payments
                     </Button>
                     {customer.still_to_collect > 0.01 && (
-                      <Button size="sm" onClick={() => handleCollectCustomer(customer)}>
+                      <Button
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleCollectCustomer(customer)
+                        }}
+                      >
                         <CreditCard className="h-3.5 w-3.5 mr-1" />
                         Collect now
                       </Button>
@@ -888,8 +1003,23 @@ return (
         customer={selectedCustomerForPayment}
         userId={userId}
         deviceId={userId}
+        companyId={companyId || userId}
+        initialSaleId={selectedCustomerForPayment.initialSaleId}
+        initialAmount={selectedCustomerForPayment.initialAmount}
       />
     )}
+
+    <CustomerPendingSalesModal
+      isOpen={!!pendingSalesCustomer}
+      onClose={() => setPendingSalesCustomer(null)}
+      customer={pendingSalesCustomer}
+      companyId={companyId || userId}
+      deviceId={userId}
+      onCollect={(customer, saleId, saleAmount) => {
+        setPendingSalesCustomer(null)
+        handleCollectCustomer(customer, saleId, saleAmount)
+      }}
+    />
 
     <Dialog
       open={!!paymentHistoryCustomer}

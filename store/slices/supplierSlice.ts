@@ -9,6 +9,7 @@ export interface Supplier {
   email?: string
   address?: string
   total_purchases?: number
+  open_purchase_count?: number
   total_amount?: number
   paid_amount?: number
   balance_amount?: number
@@ -18,6 +19,7 @@ export interface Supplier {
   credit_used?: number
   available_credit?: number
   supplier_credit?: number
+  last_credit_purchase_date?: string
   created_at?: string
   updated_at?: string
 }
@@ -80,6 +82,7 @@ export const fetchSuppliers = createAsyncThunk(
         email: supplier.email || "",
         address: supplier.address || "",
         total_purchases: Number(supplier.total_purchases) || 0,
+        open_purchase_count: Number(supplier.open_purchase_count) || 0,
         total_amount: Number(supplier.total_amount) || 0,
         paid_amount: Number(supplier.paid_amount) || 0,
         balance_amount: Number(supplier.balance_amount) || 0,
@@ -89,6 +92,7 @@ export const fetchSuppliers = createAsyncThunk(
         credit_used: Number(supplier.credit_used) || 0,
         available_credit: Number(supplier.available_credit ?? supplier.supplier_credit) || 0,
         supplier_credit: Number(supplier.supplier_credit ?? supplier.available_credit) || 0,
+        last_credit_purchase_date: supplier.last_credit_purchase_date || null,
         created_at: supplier.created_at,
         updated_at: supplier.updated_at,
       }))
