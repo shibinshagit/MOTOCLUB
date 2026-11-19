@@ -1292,7 +1292,6 @@ export async function updateSupplierPayment(data: {
       // Revalidate paths to clear cache
       revalidatePath("/dashboard")
       revalidatePath("/dashboard?tab=accounting")
-      revalidatePath("/", "layout")
       
       return {
         success: true,

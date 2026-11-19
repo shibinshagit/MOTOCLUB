@@ -961,8 +961,17 @@ export async function getProducts(
       const finalMsp = explicitMsp
       const finalPrice = finalMrp > 0 ? finalMrp : (finalMsp > 0 ? finalMsp : 0)
 
+      const safeImageUrl = typeof product.image_url === "string" && (product.image_url.startsWith("data:") || product.image_url.length > 1000)
+        ? null
+        : product.image_url
+      const safeVideoUrl = typeof product.video_url === "string" && (product.video_url.startsWith("data:") || product.video_url.length > 1000)
+        ? null
+        : product.video_url
+
       return {
         ...product,
+        image_url: safeImageUrl,
+        video_url: safeVideoUrl,
         created_at: product.created_at ? (product.created_at instanceof Date ? product.created_at.toISOString() : String(product.created_at)) : null,
         updated_at: product.updated_at ? (product.updated_at instanceof Date ? product.updated_at.toISOString() : String(product.updated_at)) : null,
         stock: currentDeviceStock,

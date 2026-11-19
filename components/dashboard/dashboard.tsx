@@ -437,19 +437,23 @@ export function Dashboard({
     }
   }, [activeStaff, device?.id, getStaffSessionKey])
 
-  // Periodically verify active staff status in database (handles "before refreshing")
+  // Verify active staff status on focus or periodically (every 5 minutes, throttled to 30s)
   useEffect(() => {
     if (!device?.id || !activeStaff?.id) return
 
     let isChecking = false
+    let lastChecked = 0
 
     const checkActive = async () => {
       if (typeof document !== "undefined" && document.hidden) return
       if (isChecking) return
+      const now = Date.now()
+      if (now - lastChecked < 30000) return // Throttle: at most once every 30 seconds
       isChecking = true
       try {
         const { verifyStaffActiveStatus } = await import("@/app/actions/staff-actions")
         const res = await verifyStaffActiveStatus(activeStaff.id, device.id)
+        lastChecked = Date.now()
         if (!res.active || res.restricted) {
           if (typeof window !== "undefined") {
             localStorage.removeItem("deviceState")
@@ -470,7 +474,7 @@ export function Dashboard({
       }
     }
 
-    const interval = setInterval(checkActive, 8000)
+    const interval = setInterval(checkActive, 300000) // 5 minutes fallback check
     window.addEventListener("focus", checkActive)
 
     return () => {

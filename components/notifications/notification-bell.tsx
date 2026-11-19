@@ -270,62 +270,21 @@ export function NotificationBell({
       }
     }
 
-    // 2. Connect to Socket.io server
-    try {
-      const socketHost = typeof window !== "undefined" ? window.location.hostname : "localhost"
-      const socketPort = 3001
-      const socketUrl = `${window.location.protocol}//${socketHost}:${socketPort}`
-
-      const socket = socketIO(socketUrl, {
-        path: "/socket.io",
-        transports: ["websocket", "polling"],
-        reconnectionAttempts: 10,
-        reconnectionDelay: 2000,
-        timeout: 10000,
-      })
-
-      socketRef.current = socket
-
-      socket.on("connect", () => {
-        setIsSocketConnected(true)
-        socket.emit("join-device", deviceId)
-      })
-
-      socket.on("disconnect", () => {
-        setIsSocketConnected(false)
-      })
-
-      socket.on("notification:new", (newNotif: NotificationItem) => {
-        handleIncomingNotification(newNotif)
-      })
-    } catch (err) {
-      console.warn("Socket initialization failed, falling back to SSE/polling:", err)
-    }
-
-    // 3. Fallback: SSE stream on port 3000
-    try {
-      const sse = new EventSource(`/api/notifications/stream?deviceId=${deviceId}`)
-      eventSourceRef.current = sse
-
-      sse.onmessage = (event) => {
-        if (!event.data || event.data.startsWith(":")) return
-        try {
-          const newNotif = JSON.parse(event.data)
-          handleIncomingNotification(newNotif)
-        } catch (_) {}
-      }
-    } catch (_) {}
-
-    // 4. Polling fallback (every 25 seconds)
-    const pollInterval = setInterval(() => {
+    // 2. Active notification polling (every 45 seconds when window is active, plus on window focus)
+    const handlePoll = () => {
+      if (typeof document !== "undefined" && document.hidden) return
       fetchCount()
       if (isOpen) {
         fetchNotificationsList()
       }
-    }, 25000)
+    }
+
+    const pollInterval = setInterval(handlePoll, 45000)
+    window.addEventListener("focus", handlePoll)
 
     return () => {
       clearInterval(pollInterval)
+      window.removeEventListener("focus", handlePoll)
       if (socketRef.current) {
         socketRef.current.emit("leave-device", deviceId)
         socketRef.current.disconnect()
