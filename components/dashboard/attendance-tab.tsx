@@ -105,7 +105,8 @@ export default function AttendanceTab() {
     notCheckedIn: 0,
     absent: 0,
     late: 0,
-    leave: 0
+    leave: 0,
+    totalRecords: 0
   })
 
   // Edit Modal State
@@ -391,7 +392,17 @@ export default function AttendanceTab() {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 print:hidden">
-        <Card><CardHeader className="pb-2"><CardTitle className="text-xs font-medium text-gray-500">Total Staff</CardTitle></CardHeader><CardContent><div className="text-xl font-bold">{summary.total || 0}</div></CardContent></Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-medium text-gray-500">Total Staff</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-xl font-bold">{summary.total || 0}</div>
+            {dateRange !== "Today" && (summary.totalRecords || 0) > 0 && (
+              <div className="text-[11px] text-gray-400 font-normal">{(summary.totalRecords || 0)} logs in period</div>
+            )}
+          </CardContent>
+        </Card>
         <Card><CardHeader className="pb-2"><CardTitle className="text-xs font-medium text-emerald-600">Present</CardTitle></CardHeader><CardContent><div className="text-xl font-bold text-emerald-700">{summary.present || 0}</div></CardContent></Card>
         <Card><CardHeader className="pb-2"><CardTitle className="text-xs font-medium text-gray-600">Not Checked In</CardTitle></CardHeader><CardContent><div className="text-xl font-bold text-gray-700">{summary.notCheckedIn || 0}</div></CardContent></Card>
         <Card><CardHeader className="pb-2"><CardTitle className="text-xs font-medium text-rose-600">Absent</CardTitle></CardHeader><CardContent><div className="text-xl font-bold text-rose-700">{summary.absent || 0}</div></CardContent></Card>

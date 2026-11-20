@@ -135,7 +135,7 @@ export async function getFilteredAttendance(
       ORDER BY s.name ASC, a.date DESC
     `
 
-    // Apply filters in memory
+    // Apply staffId and role filters in memory
     if (filters.staffId && filters.staffId.toLowerCase() !== "all") {
       attendance = attendance.filter((a: any) => String(a.staff_id) === String(filters.staffId))
     }
@@ -144,30 +144,51 @@ export async function getFilteredAttendance(
       attendance = attendance.filter((a: any) => String(a.staff_role || "").toLowerCase() === filters.role!.toLowerCase())
     }
 
-    console.log(`[ATTENDANCE QUERY] DeviceID: ${deviceId}, Filters:`, filters);
-    console.log(`[ATTENDANCE QUERY] Fetched Staff Count = ${attendance.length}`);
-    if (attendance.length > 0) {
-      console.log(`[ATTENDANCE QUERY] First Staff:`, attendance[0].staff_name, attendance[0].staff_id);
+    // Calculate baseline summary statistics using distinct staff members before filtering by status
+    const distinctStaffIds = new Set(attendance.map((a: any) => a.staff_id))
+    const totalStaffCount = distinctStaffIds.size
+    const isSingleDay = filters.startDate === filters.endDate
+
+    const presentCount = isSingleDay
+      ? attendance.filter((a: any) => a.status === 'Present' || (a.check_in && !a.status)).length
+      : new Set(attendance.filter((a: any) => a.status === 'Present' || (a.check_in && !a.status)).map((a: any) => a.staff_id)).size
+
+    const notCheckedInCount = isSingleDay
+      ? attendance.filter((a: any) => !a.check_in && !a.status).length
+      : Math.max(0, totalStaffCount - presentCount)
+
+    const absentCount = isSingleDay
+      ? attendance.filter((a: any) => a.status === 'Absent').length
+      : new Set(attendance.filter((a: any) => a.status === 'Absent').map((a: any) => a.staff_id)).size
+
+    const leaveCount = isSingleDay
+      ? attendance.filter((a: any) => a.status === 'Leave').length
+      : new Set(attendance.filter((a: any) => a.status === 'Leave').map((a: any) => a.staff_id)).size
+
+    const lateCount = isSingleDay
+      ? attendance.filter((a: any) => a.late_minutes > 0 || a.status === 'Late').length
+      : new Set(attendance.filter((a: any) => a.late_minutes > 0 || a.status === 'Late').map((a: any) => a.staff_id)).size
+
+    const summary = {
+      total: totalStaffCount,
+      present: presentCount,
+      notCheckedIn: notCheckedInCount,
+      absent: absentCount,
+      leave: leaveCount,
+      late: lateCount,
+      totalRecords: attendance.length,
     }
 
-    // Apply status filter in memory since derived statuses (like "Absent" if check_in is null) are easier here
+    // Apply status filter to table records without mutating summary totals
+    let displayedRecords = attendance
     if (filters.status && filters.status !== "All") {
-      attendance = attendance.filter((a: any) => {
+      displayedRecords = attendance.filter((a: any) => {
         const currentStatus = a.status || (a.check_in ? 'Present' : 'Absent')
         return currentStatus === filters.status
       })
     }
 
-    const summary = {
-      total: attendance.length,
-      present: attendance.filter((a: any) => (a.status === 'Present' || (a.check_in && !a.status))).length,
-      notCheckedIn: attendance.filter((a: any) => (!a.check_in && !a.status)).length,
-      absent: attendance.filter((a: any) => a.status === 'Absent').length,
-      leave: attendance.filter((a: any) => a.status === 'Leave').length,
-      late: attendance.filter((a: any) => a.late_minutes > 0 || a.status === 'Late').length,
-    }
-
-    return { success: true, data: attendance as AttendanceRecord[], summary }
+    return { success: true, data: displayedRecords as AttendanceRecord[], summary }
   } catch (error) {
     console.error("Fetch attendance error:", error)
     return { success: false, message: "Failed to fetch attendance records" }
