@@ -52,18 +52,35 @@ interface PayrollRequestsTabProps {
   currency?: string
   initialSubTab?: "payroll" | "requests" | "history"
   globalMonth?: string
+  globalStartDate?: string
+  globalEndDate?: string
 }
 
-export default function PayrollRequestsTab({ deviceId, currency = "INR", initialSubTab = "payroll", globalMonth }: PayrollRequestsTabProps) {
+export default function PayrollRequestsTab({
+  deviceId,
+  currency = "INR",
+  initialSubTab = "payroll",
+  globalMonth,
+  globalStartDate,
+  globalEndDate,
+}: PayrollRequestsTabProps) {
   const [activeSubTab, setActiveSubTab] = useState<"payroll" | "requests" | "history">(initialSubTab)
+  const [filterMode, setFilterMode] = useState<"month" | "custom">(globalStartDate && globalEndDate ? "custom" : "month")
   const [selectedMonth, setSelectedMonth] = useState<string>(globalMonth || new Date().toISOString().slice(0, 7))
+  const [startDate, setStartDate] = useState<string>(globalStartDate || "")
+  const [endDate, setEndDate] = useState<string>(globalEndDate || "")
   
-  // Sync selectedMonth if globalMonth prop changes (e.g. from global date filter)
+  // Sync if global props change (e.g. from global date filter or accounting tab)
   useEffect(() => {
-    if (globalMonth) {
+    if (globalStartDate && globalEndDate) {
+      setFilterMode("custom")
+      setStartDate(globalStartDate)
+      setEndDate(globalEndDate)
+      if (globalMonth) setSelectedMonth(globalMonth)
+    } else if (globalMonth) {
       setSelectedMonth(globalMonth)
     }
-  }, [globalMonth])
+  }, [globalMonth, globalStartDate, globalEndDate])
 
   const [payrollSummary, setPayrollSummary] = useState<any>(null)
   const [isLoadingPayroll, setIsLoadingPayroll] = useState(true)
@@ -124,11 +141,21 @@ export default function PayrollRequestsTab({ deviceId, currency = "INR", initial
   const { confirm, ConfirmDialog } = useConfirm()
 
   // Load Payroll Summary
-  const fetchPayroll = async () => {
+  const fetchPayroll = async (overrideMonth?: string, overrideStart?: string, overrideEnd?: string) => {
     if (!deviceId) return
     setIsLoadingPayroll(true)
     try {
-      const res = await getStaffPayrollSummary(deviceId, selectedMonth)
+      const activeMode = (overrideStart && overrideEnd) ? "custom" : filterMode
+      const m = overrideMonth !== undefined ? overrideMonth : selectedMonth
+      const s = overrideStart !== undefined ? overrideStart : (activeMode === "custom" ? startDate : undefined)
+      const e = overrideEnd !== undefined ? overrideEnd : (activeMode === "custom" ? endDate : undefined)
+
+      if (activeMode === "custom" && (!s || !e)) {
+        setIsLoadingPayroll(false)
+        return
+      }
+
+      const res = await getStaffPayrollSummary(deviceId, m, s, e)
       if (res.success) {
         setPayrollSummary(res.data)
       } else {
@@ -179,7 +206,7 @@ export default function PayrollRequestsTab({ deviceId, currency = "INR", initial
     if (activeSubTab === "payroll") fetchPayroll()
     if (activeSubTab === "requests") fetchRequests()
     if (activeSubTab === "history") fetchHistory()
-  }, [deviceId, selectedMonth, activeSubTab, requestFilterType, requestFilterStatus])
+  }, [deviceId, selectedMonth, filterMode, startDate, endDate, activeSubTab, requestFilterType, requestFilterStatus])
 
   // Open Pay Modal for a staff member
   const handleOpenPayModal = (staff: any) => {
@@ -265,7 +292,7 @@ export default function PayrollRequestsTab({ deviceId, currency = "INR", initial
       const res = await createSalaryPayment({
         staffId: selectedStaffForPay.staffId,
         deviceId,
-        paymentMonth: selectedMonth,
+        paymentMonth: filterMode === "custom" && startDate ? startDate.slice(0, 7) : selectedMonth,
         paymentDate: payForm.paymentDate,
         baseSalary: Number(payForm.baseSalary),
         bonus: Number(payForm.bonus),
@@ -405,14 +432,65 @@ export default function PayrollRequestsTab({ deviceId, currency = "INR", initial
         <div className="space-y-6">
           {/* Controls & Summary Cards */}
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-            <div className="flex items-center gap-2">
-              <Label className="text-xs font-bold text-slate-700">Select Month:</Label>
-              <Input
-                type="month"
-                value={selectedMonth}
-                onChange={(e) => setSelectedMonth(e.target.value)}
-                className="w-44 text-xs font-medium"
-              />
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={filterMode === "month" ? "default" : "ghost"}
+                  onClick={() => setFilterMode("month")}
+                  className="h-7 text-xs font-semibold px-3"
+                >
+                  By Month
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={filterMode === "custom" ? "default" : "ghost"}
+                  onClick={() => {
+                    setFilterMode("custom")
+                    if (!startDate || !endDate) {
+                      const now = new Date()
+                      const y = now.getFullYear()
+                      const m = String(now.getMonth() + 1).padStart(2, "0")
+                      setStartDate(`${y}-${m}-01`)
+                      setEndDate(now.toISOString().split("T")[0])
+                    }
+                  }}
+                  className="h-7 text-xs font-semibold px-3"
+                >
+                  Custom Range
+                </Button>
+              </div>
+
+              {filterMode === "month" ? (
+                <div className="flex items-center gap-2">
+                  <Label className="text-xs font-bold text-slate-700">Select Month:</Label>
+                  <Input
+                    type="month"
+                    value={selectedMonth}
+                    onChange={(e) => setSelectedMonth(e.target.value)}
+                    className="w-44 text-xs font-medium h-8 bg-white"
+                  />
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <Label className="text-xs font-bold text-slate-700">Date Range:</Label>
+                  <Input
+                    type="date"
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    className="w-36 text-xs font-medium h-8 bg-white"
+                  />
+                  <span className="text-xs text-slate-500 font-medium">to</span>
+                  <Input
+                    type="date"
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    className="w-36 text-xs font-medium h-8 bg-white"
+                  />
+                </div>
+              )}
             </div>
           </div>
 
@@ -435,7 +513,9 @@ export default function PayrollRequestsTab({ deviceId, currency = "INR", initial
               <CardContent className="p-4">
                 <div className="flex justify-between items-center">
                   <div>
-                    <p className="text-xs text-emerald-100 uppercase tracking-wider font-semibold">Total Salary Paid This Month</p>
+                    <p className="text-xs text-emerald-100 uppercase tracking-wider font-semibold">
+                      Total Salary Paid ({filterMode === "custom" && startDate && endDate ? `${startDate} to ${endDate}` : selectedMonth})
+                    </p>
                     <h3 className="text-2xl font-extrabold mt-1">
                       {formatCurr(payrollSummary?.totalPaid || 0)}
                     </h3>
@@ -449,7 +529,9 @@ export default function PayrollRequestsTab({ deviceId, currency = "INR", initial
               <CardContent className="p-4">
                 <div className="flex justify-between items-center">
                   <div>
-                    <p className="text-xs text-amber-100 uppercase tracking-wider font-semibold">Active Advances Taken</p>
+                    <p className="text-xs text-amber-100 uppercase tracking-wider font-semibold">
+                      Advances Taken ({filterMode === "custom" && startDate && endDate ? `${startDate} to ${endDate}` : selectedMonth})
+                    </p>
                     <h3 className="text-2xl font-extrabold mt-1">
                       {formatCurr(payrollSummary?.totalAdvances || 0)}
                     </h3>
@@ -463,7 +545,9 @@ export default function PayrollRequestsTab({ deviceId, currency = "INR", initial
           {/* Payroll Table */}
           <Card>
             <CardHeader className="py-4 border-b">
-              <CardTitle className="text-base font-semibold">Staff Payroll for {selectedMonth}</CardTitle>
+              <CardTitle className="text-base font-semibold">
+                Staff Payroll for {filterMode === "custom" && startDate && endDate ? `${startDate} to ${endDate}` : selectedMonth}
+              </CardTitle>
             </CardHeader>
             <CardContent className="p-0 overflow-x-auto">
               {isLoadingPayroll ? (
