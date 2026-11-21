@@ -2509,11 +2509,25 @@ const renderTransactionList = (
           </div>
 
           <TabsContent value="requests" className="p-4">
-            <PayrollRequestsTab deviceId={deviceId} currency={currency} initialSubTab="requests" globalMonth={format(dateFrom, "yyyy-MM")} />
+            <PayrollRequestsTab
+              deviceId={deviceId}
+              currency={currency}
+              initialSubTab="requests"
+              globalMonth={format(dateFrom, "yyyy-MM")}
+              globalStartDate={format(dateFrom, "yyyy-MM-dd")}
+              globalEndDate={format(dateTo, "yyyy-MM-dd")}
+            />
           </TabsContent>
 
           <TabsContent value="payroll" className="p-4">
-            <PayrollRequestsTab deviceId={deviceId} currency={currency} initialSubTab="payroll" globalMonth={format(dateFrom, "yyyy-MM")} />
+            <PayrollRequestsTab
+              deviceId={deviceId}
+              currency={currency}
+              initialSubTab="payroll"
+              globalMonth={format(dateFrom, "yyyy-MM")}
+              globalStartDate={format(dateFrom, "yyyy-MM-dd")}
+              globalEndDate={format(dateTo, "yyyy-MM-dd")}
+            />
           </TabsContent>
 
           <TabsContent value="transactions" className="p-4">

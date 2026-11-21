@@ -95,12 +95,34 @@ export async function ensureSalaryTables() {
   }
 }
 
-// Get payroll summary for all staff members of a device for a given month
-export async function getStaffPayrollSummary(deviceId: number, month?: string) {
+// Get payroll summary for all staff members of a device for a given month or custom date range
+export async function getStaffPayrollSummary(
+  deviceId: number,
+  month?: string,
+  startDate?: string,
+  endDate?: string
+) {
   noStore()
   await ensureSalaryTables()
   try {
-    const targetMonth = month || new Date().toISOString().slice(0, 7) // 'YYYY-MM'
+    let effectiveStartDate: string
+    let effectiveEndDate: string
+    let targetMonth: string
+
+    if (startDate && endDate) {
+      effectiveStartDate = startDate
+      effectiveEndDate = endDate
+      targetMonth = month || startDate.slice(0, 7)
+    } else {
+      targetMonth = month || new Date().toISOString().slice(0, 7) // 'YYYY-MM'
+      const parts = targetMonth.split("-").map(Number)
+      const year = parts[0] || new Date().getFullYear()
+      const m = parts[1] || (new Date().getMonth() + 1)
+      const sDate = new Date(Date.UTC(year, m - 1, 1))
+      const eDate = new Date(Date.UTC(year, m, 0))
+      effectiveStartDate = sDate.toISOString().slice(0, 10)
+      effectiveEndDate = eDate.toISOString().slice(0, 10)
+    }
 
     // Fetch active staff for device
     const staffMembers = await sql`
@@ -110,19 +132,26 @@ export async function getStaffPayrollSummary(deviceId: number, month?: string) {
       ORDER BY name ASC
     `
 
-    // Fetch existing salary payments for this month
+    // Fetch existing salary payments for this period or month
     const existingPayments = await sql`
       SELECT sp.*, s.name as staff_name
       FROM salary_payments sp
       JOIN staff s ON sp.staff_id = s.id
-      WHERE sp.device_id = ${deviceId} AND sp.payment_month = ${targetMonth}
+      WHERE sp.device_id = ${deviceId} 
+        AND (
+          sp.payment_month = ${targetMonth}
+          OR (sp.payment_date IS NOT NULL AND sp.payment_date::date BETWEEN ${effectiveStartDate}::date AND ${effectiveEndDate}::date)
+        )
     `
 
-    // Fetch pending/approved advances for each staff member
+    // Fetch pending/approved advances for each staff member within date range
     const advances = await sql`
       SELECT staff_id, SUM(amount) as total_advance
       FROM staff_requests
-      WHERE device_id = ${deviceId} AND request_type = 'salary_advance' AND status IN ('Approved', 'Paid')
+      WHERE device_id = ${deviceId} 
+        AND request_type = 'salary_advance' 
+        AND status IN ('Approved', 'Paid')
+        AND COALESCE(start_date, approved_at::date, created_at::date) BETWEEN ${effectiveStartDate}::date AND ${effectiveEndDate}::date
       GROUP BY staff_id
     `
 
@@ -216,6 +245,8 @@ export async function getStaffPayrollSummary(deviceId: number, month?: string) {
       success: true,
       data: {
         month: targetMonth,
+        startDate: effectiveStartDate,
+        endDate: effectiveEndDate,
         summary,
         totalBaseSalary: summary.reduce((acc: number, item: any) => acc + item.baseSalary, 0),
         totalPaid: summary.reduce((acc: number, item: any) => acc + item.paidAmount, 0),
