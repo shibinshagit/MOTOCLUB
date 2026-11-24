@@ -8,6 +8,7 @@ import { addCustomer, syncCustomerShippingAddress } from "./customer-actions"
 import { isSaleStockDeducted } from "./sale-actions"
 import { applyStockTransition, getSaleStockLines, applyStockDelta } from "@/lib/sale-stock"
 import { PaymentRecordInput } from "@/types/payment"
+import { recordSaleTransaction, syncSaleShippingTransactions } from "./simplified-accounting"
 
 /**
  * Validates one job card line against the database and returns the identifiers that are stored on the
@@ -379,7 +380,7 @@ export async function createJobCard(input: JobCardInput) {
                   `
                 }
               }
-            } else if (resolvedPaymentStatus === "Paid" && receivedAmount > 0) {
+            } else if (receivedAmount > 0) {
               await sp`
                 INSERT INTO transaction_payments (
                   sale_id, payment_method, amount, payment_date
@@ -457,14 +458,87 @@ export async function createJobCard(input: JobCardInput) {
         })
       }
 
-      return { success: true, data: { saleId, trackingId } }
+      return {
+        success: true,
+        data: {
+          saleId,
+          trackingId,
+          receivedAmount,
+          totalAmount,
+          totalCost,
+          itemsSubtotal,
+          courierPaidExtra,
+          resolvedPaymentStatus,
+          orderStatus,
+          resolvedCustomerId,
+          primaryPaymentMethod,
+          advanceAmount,
+          balanceAmount,
+        },
+      }
     })
 
     if (txResult && txResult.alreadyConverted) {
       return { success: false, alreadyConverted: true, saleId: txResult.saleId, message: "A sale has already been created for this CRM lead." }
     }
 
-    const { saleId, trackingId } = txResult.data
+    const {
+      saleId,
+      trackingId,
+      receivedAmount: finalReceived,
+      totalAmount: finalTotal,
+      totalCost: finalCost,
+      itemsSubtotal: finalItemsSubtotal,
+      courierPaidExtra: finalCourierExtra,
+      resolvedPaymentStatus: finalPaymentStatus,
+      orderStatus: finalOrderStatus,
+      resolvedCustomerId: finalCustomerId,
+      primaryPaymentMethod: finalPaymentMethod,
+      balanceAmount: finalBalance,
+    } = txResult.data
+
+    // Sync accounting: only record transaction if money was actually received (> 0)
+    try {
+      const isCourier = (input.typeOfSale || "").toLowerCase().trim() === "courier" || finalCourierExtra > 0
+      const fulfillmentType = isCourier ? "ship" : "pickup"
+
+      if (finalReceived > 0) {
+        await recordSaleTransaction({
+          saleId,
+          totalAmount: finalTotal,
+          cogsAmount: finalCost,
+          receivedAmount: finalReceived,
+          outstandingAmount: finalBalance,
+          status: finalPaymentStatus,
+          paymentMethod: finalPaymentMethod || "UPI",
+          deviceId,
+          userId: session?.staffId || deviceId,
+          customerId: finalCustomerId,
+          saleDate: new Date(),
+          productCreditAmount: finalItemsSubtotal,
+          payments: Array.isArray(input.payments) && input.payments.length > 0 ? input.payments : undefined,
+        })
+      }
+
+      await syncSaleShippingTransactions({
+        saleId,
+        deviceId,
+        userId: session?.staffId || deviceId,
+        saleDate: new Date(),
+        paymentMethod: finalPaymentMethod || "UPI",
+        status: finalOrderStatus,
+        paymentStatus: finalPaymentStatus,
+        fulfillmentType,
+        courierPaidExtra: finalCourierExtra,
+        expenseCourier: 0,
+        expensePacking: 0,
+        receivedAmount: finalReceived,
+        totalAmount: finalTotal,
+        productCreditAmount: finalItemsSubtotal,
+      })
+    } catch (accErr) {
+      console.error("Non-fatal: Job Card accounting sync failed:", accErr)
+    }
 
     revalidatePath("/staff/dashboard")
     revalidatePath("/dashboard")
@@ -775,7 +849,7 @@ export async function updateJobCard(id: number, input: any) {
             `
           }
         }
-      } else if (rawInputStatus && nextPaymentStatus === "Paid" && updatedReceived > 0) {
+      } else if (updatedReceived > 0) {
         await tx`DELETE FROM transaction_payments WHERE sale_id = ${id}`
         await tx`
           INSERT INTO transaction_payments (
@@ -786,6 +860,55 @@ export async function updateJobCard(id: number, input: any) {
         `
       }
     })
+
+    // Directly re-sync transaction entries to reflect updated values without adding extra adjustment rows
+    try {
+      const isCourier =
+        ((input.typeOfSale || existingSale[0]?.type_of_sale || "").toLowerCase().trim() === "courier") ||
+        (Number(input.courierPaidExtra != null ? input.courierPaidExtra : (existingSale[0]?.courier_paid_extra || 0)) > 0)
+      const fulfillmentType = isCourier ? "ship" : "pickup"
+      const courierPaidExtra = Number(input.courierPaidExtra != null ? input.courierPaidExtra : (existingSale[0]?.courier_paid_extra || 0))
+
+      if (updatedReceived > 0) {
+        await recordSaleTransaction({
+          saleId: id,
+          totalAmount: Number(totalAmount),
+          cogsAmount: Number(totalCost),
+          receivedAmount: Number(updatedReceived),
+          outstandingAmount: Number(balanceAmount),
+          status: nextPaymentStatus,
+          paymentMethod: primaryPaymentMethod,
+          deviceId: deviceId,
+          userId: staffId || deviceId,
+          customerId: resolvedCustomerId,
+          saleDate: new Date(),
+          productCreditAmount: itemsSubtotal,
+          payments: Array.isArray(input.payments) && input.payments.length > 0 ? input.payments : undefined,
+        })
+      } else {
+        const { deleteSaleTransaction } = await import("./simplified-accounting")
+        await deleteSaleTransaction(id, deviceId)
+      }
+
+      await syncSaleShippingTransactions({
+        saleId: id,
+        deviceId: deviceId,
+        userId: staffId || deviceId,
+        saleDate: new Date(),
+        paymentMethod: primaryPaymentMethod,
+        status: nextOrderStatus,
+        paymentStatus: nextPaymentStatus,
+        fulfillmentType,
+        courierPaidExtra,
+        expenseCourier: 0,
+        expensePacking: 0,
+        receivedAmount: Number(updatedReceived),
+        totalAmount: Number(totalAmount),
+        productCreditAmount: itemsSubtotal,
+      })
+    } catch (accErr) {
+      console.error("Non-fatal: Job Card update accounting sync failed:", accErr)
+    }
 
     revalidatePath("/dashboard")
     revalidatePath("/staff/dashboard")
@@ -1161,29 +1284,37 @@ export async function markJobCardPaid(saleId: number, deviceId: number) {
     const isAdmin = !session || (session.role || "").toLowerCase() === "admin"
     const currentDeviceId = session?.deviceId || deviceId || 0
 
+    let saleDetails: any = null
+
     await sql.begin(async (tx: any) => {
       // Lock the sale so a double click cannot move the stock twice
       const rows = (session && !isAdmin)
         ? await tx`
-            SELECT status, delivery_status, fulfillment_type, device_id FROM sales
+            SELECT id, status, delivery_status, fulfillment_type, device_id, total_amount, total_cost, payment_method, customer_id, courier_paid_extra, received_amount, type_of_sale FROM sales
             WHERE id = ${saleId} AND staff_id = ${session.staffId} FOR UPDATE
           `
         : await tx`
-            SELECT status, delivery_status, fulfillment_type, device_id FROM sales
+            SELECT id, status, delivery_status, fulfillment_type, device_id, total_amount, total_cost, payment_method, customer_id, courier_paid_extra, received_amount, type_of_sale FROM sales
             WHERE id = ${saleId} AND (${currentDeviceId} = 0 OR device_id = ${currentDeviceId}) FOR UPDATE
           `
       if (rows.length === 0) throw new Error("Job Card not found or unauthorized")
       const cur = rows[0]
+      saleDetails = cur
       const newDelivery =
         !cur.delivery_status || cur.delivery_status === "Pending" ? "Paid" : cur.delivery_status
 
       const wasDeducted = await isSaleStockDeducted(cur.status, cur.delivery_status || "Pending", cur.fulfillment_type)
       const nowDeducted = await isSaleStockDeducted(cur.status, newDelivery, cur.fulfillment_type)
 
+      const prevReceived = Number(cur.received_amount || 0)
+      const totalAmount = Number(cur.total_amount || 0)
+      const remainingAmountToPay = Math.max(0, totalAmount - prevReceived)
+
       await tx`
         UPDATE sales
         SET
           payment_status = 'Paid',
+          status = 'Completed',
           delivery_status = ${newDelivery},
           received_amount = total_amount,
           balance_amount = 0,
@@ -1198,6 +1329,16 @@ export async function markJobCardPaid(saleId: number, deviceId: number) {
         WHERE id = ${saleId}
       `
 
+      if (remainingAmountToPay > 0) {
+        await tx`
+          INSERT INTO transaction_payments (
+            sale_id, payment_method, amount, notes, payment_date
+          ) VALUES (
+            ${saleId}, ${cur.payment_method || "UPI"}, ${remainingAmountToPay}, 'Marked Paid', NOW()
+          )
+        `
+      }
+
       if (wasDeducted !== nowDeducted) {
         await applyStockTransition(
           saleId,
@@ -1209,6 +1350,54 @@ export async function markJobCardPaid(saleId: number, deviceId: number) {
         )
       }
     })
+
+    if (saleDetails) {
+      try {
+        const totalAmount = Number(saleDetails.total_amount || 0)
+        const courierPaidExtra = Number(saleDetails.courier_paid_extra || 0)
+        const itemsSubtotal = Math.max(0, totalAmount - courierPaidExtra)
+        const isCourier =
+          ((saleDetails.type_of_sale || "").toLowerCase().trim() === "courier") ||
+          (saleDetails.fulfillment_type === "ship") ||
+          (courierPaidExtra > 0)
+        const fulfillmentType = isCourier ? "ship" : "pickup"
+        const saleDeviceId = Number(saleDetails.device_id) || currentDeviceId
+
+        await recordSaleTransaction({
+          saleId,
+          totalAmount,
+          cogsAmount: Number(saleDetails.total_cost || 0),
+          receivedAmount: totalAmount,
+          outstandingAmount: 0,
+          status: "Paid",
+          paymentMethod: saleDetails.payment_method || "UPI",
+          deviceId: saleDeviceId,
+          userId: session?.staffId || saleDeviceId,
+          customerId: saleDetails.customer_id,
+          saleDate: new Date(),
+          productCreditAmount: itemsSubtotal,
+        })
+
+        await syncSaleShippingTransactions({
+          saleId,
+          deviceId: saleDeviceId,
+          userId: session?.staffId || saleDeviceId,
+          saleDate: new Date(),
+          paymentMethod: saleDetails.payment_method || "UPI",
+          status: "Completed",
+          paymentStatus: "Paid",
+          fulfillmentType,
+          courierPaidExtra,
+          expenseCourier: 0,
+          expensePacking: 0,
+          receivedAmount: totalAmount,
+          totalAmount,
+          productCreditAmount: itemsSubtotal,
+        })
+      } catch (accErr) {
+        console.error("Non-fatal: markJobCardPaid accounting sync failed:", accErr)
+      }
+    }
 
     revalidatePath("/staff/dashboard")
     revalidatePath("/dashboard")

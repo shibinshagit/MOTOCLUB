@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache"
 import { recordSupplierPayment } from "./simplified-accounting"
 import { getDeviceCompanyId } from "@/lib/device-company"
 import { getStaffSession } from "@/lib/staff-session"
+import { ensureDateTime } from "@/lib/utils"
 
 interface PaymentAllocation {
   purchaseId: number
@@ -130,13 +131,7 @@ export async function paySupplierCredit(
 
       const allAllocations: PaymentAllocation[] = []
 
-      let finalPaymentDate: Date
-      if (paymentDate) {
-        finalPaymentDate = new Date(paymentDate.getTime() - paymentDate.getTimezoneOffset() * 60000)
-      } else {
-        const now = new Date()
-        finalPaymentDate = new Date(now.getTime() - now.getTimezoneOffset() * 60000)
-      }
+      const finalPaymentDate: Date = ensureDateTime(paymentDate)
 
       // 3. Process Credit Application (if any)
       if (actualCreditApplied > 0) {
@@ -1251,7 +1246,7 @@ export async function updateSupplierPayment(data: {
       }
 
       // Format the payment date (handle timezone)
-      const finalPaymentDate = new Date(data.paymentDate.getTime() - data.paymentDate.getTimezoneOffset() * 60000)
+      const finalPaymentDate = ensureDateTime(data.paymentDate)
 
       // Count affected purchases for description
       const affectedPurchases = await sql`

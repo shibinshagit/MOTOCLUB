@@ -206,4 +206,23 @@ export function formatOrderId(id: any): string {
   return `MC-${strId}`
 }
 
+export function ensureDateTime(dateInput?: Date | string | null): Date {
+  const now = new Date()
+  if (!dateInput) return now
+
+  const d = dateInput instanceof Date ? new Date(dateInput.getTime()) : new Date(dateInput)
+  if (isNaN(d.getTime())) return now
+
+  const isUtcMidnight = d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0
+  const isIstMidnight = d.getUTCHours() === 18 && d.getUTCMinutes() === 30 && d.getUTCSeconds() === 0
+  const isLocalMidnight = d.getHours() === 0 && d.getMinutes() === 0 && d.getSeconds() === 0
+
+  if (isUtcMidnight || isIstMidnight || isLocalMidnight) {
+    d.setUTCHours(now.getUTCHours(), now.getUTCMinutes(), now.getUTCSeconds(), now.getUTCMilliseconds())
+  }
+
+  return d
+}
+
+
 

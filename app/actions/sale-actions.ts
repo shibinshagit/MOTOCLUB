@@ -2191,6 +2191,30 @@ export async function getSaleDetails(saleId: number) {
       notes: p.notes || undefined,
     }))
 
+    // If transaction_payments was empty, fallback to check split rows in financial_transactions
+    if (paymentsList.length === 0) {
+      try {
+        const ftPayments = await sql`
+          SELECT id, payment_method, received_amount, amount, notes, transaction_date
+          FROM financial_transactions
+          WHERE reference_type = 'sale' AND reference_id = ${saleId} AND transaction_type = 'sale'
+          ORDER BY id ASC
+        `
+        if (ftPayments.length > 1) {
+          for (const ft of ftPayments) {
+            paymentsList.push({
+              id: ft.id,
+              paymentMethod: ft.payment_method || "UPI",
+              amount: Number(ft.received_amount || ft.amount) || 0,
+              notes: ft.notes || undefined,
+            })
+          }
+        }
+      } catch (ftErr) {
+        console.warn("Could not fallback to financial_transactions for payments:", ftErr)
+      }
+    }
+
     // Fetch Return History
     let returnsList: any[] = []
     try {
@@ -3756,49 +3780,42 @@ export async function updateSale(saleData: any) {
           adjustmentDescription = `Sale #${saleData.id} status changed from ${changes.originalStatus} to ${changes.newStatus}`
         }
 
-        // Record accounting when cash, bill, or cost changes
+        // When edited, directly re-sync the existing transaction entries without creating extra adjustment rows
         const hasAccountingChange =
           changes.receivedDiff !== 0 ||
           changes.discountChanged ||
           changes.totalChanged ||
           changes.itemsChanged ||
-          (changes.statusChanged &&
-            changes.originalStatus.toLowerCase() === "completed" &&
-            changes.newStatus.toLowerCase() === "cancelled")
+          changes.statusChanged
 
         if (hasAccountingChange) {
-          const accountingResult = await recordSaleAdjustment({
-            saleId: saleData.id,
-            changeType: "consolidated_edit",
-            previousValues: {
-              totalAmount: changes.originalTotal,
-              receivedAmount: changes.originalReceived,
-              status: changes.originalStatus,
-              cogsAmount: originalCogs,
-              discount: changes.originalDiscount,
-            },
-            newValues: {
+          if (changes.newReceived > 0 || changes.newStatus.toLowerCase() === "cancelled") {
+            const accountingResult = await recordSaleTransaction({
+              saleId: saleData.id,
               totalAmount: changes.newTotal,
               cogsAmount: newCogs,
               receivedAmount: changes.newReceived,
               outstandingAmount: changes.outstandingAmount,
               status: changes.newStatus,
+              paymentMethod: saleData.paymentMethod || "UPI",
+              deviceId: saleData.deviceId,
+              userId: saleData.userId,
               customerId: saleData.customerId,
-              discount: changes.newDiscount,
-            },
-            deviceId: saleData.deviceId,
-            userId: saleData.userId,
-            description: adjustmentDescription,
-            adjustmentDate: new Date(),
-          })
+              saleDate: changes.newDate,
+              productCreditAmount: changes.productTotal,
+              payments: saleData.payments,
+            })
 
-          if (accountingResult.success && accountingResult.transactionId) {
-            console.log("Accounting entry created for sale update:", accountingResult.transactionId)
-          } else if (accountingResult.message) {
-            console.log("Accounting:", accountingResult.message)
+            if (accountingResult.success && accountingResult.transactionId) {
+              console.log("Accounting entry updated for sale:", saleData.id)
+            }
+          } else {
+            // If received amount was updated to 0, clean any previous transaction entry
+            await deleteSaleTransaction(saleData.id, saleData.deviceId)
+            console.log("Cleared transactions for sale #", saleData.id, "as received amount is 0")
           }
         } else {
-          console.log("No accounting changes detected, skipping accounting entry")
+          console.log("No accounting changes detected, skipping accounting sync")
         }
 
         const { courierPaidExtra, expenseCourier, expensePacking } = getShippingAmounts(shipping)
@@ -3809,6 +3826,7 @@ export async function updateSale(saleData: any) {
           saleDate: changes.newDate,
           paymentMethod: saleData.paymentMethod || "UPI",
           status: changes.newStatus,
+          paymentStatus: changes.newStatus,
           fulfillmentType: shipping.fulfillment_type,
           courierPaidExtra,
           expenseCourier,
@@ -4505,6 +4523,19 @@ export async function deleteSale(saleId: number, deviceId?: number) {
         `
       } catch (accountingError) {
         console.error("Error deleting remaining accounting records:", accountingError)
+      }
+
+      try {
+        const { cleanupCustomerPaymentsForSale } = await import("./simplified-accounting")
+        await cleanupCustomerPaymentsForSale(saleId)
+      } catch (cpErr) {
+        console.error("Error cleaning up linked customer payments on deleteSale:", cpErr)
+      }
+
+      try {
+        await sql`DELETE FROM transaction_payments WHERE sale_id = ${saleId}`
+      } catch (tpErr) {
+        console.error("Error deleting transaction_payments on deleteSale:", tpErr)
       }
 
       // Delete batch allocations first to avoid foreign key constraint issues

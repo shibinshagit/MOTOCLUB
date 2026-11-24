@@ -138,8 +138,21 @@ export function SplitPaymentInput({
   }, [rows])
 
   const prevPaymentStatus = React.useRef(paymentStatus)
+  const isInitialMount = React.useRef(true)
 
   useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false
+      prevPaymentStatus.current = paymentStatus
+      return
+    }
+
+    // In edit mode, do not auto-wipe or auto-collapse existing split payments loaded from the order
+    if (isEditMode) {
+      prevPaymentStatus.current = paymentStatus
+      return
+    }
+
     const statusChangedToPaid = 
       (paymentStatus === "Paid" || paymentStatus === "Completed") && 
       (prevPaymentStatus.current !== "Paid" && prevPaymentStatus.current !== "Completed")

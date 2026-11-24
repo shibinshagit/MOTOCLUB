@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -35,6 +35,9 @@ import {
   ChevronLeft,
   ChevronRight,
   Info,
+  RotateCcw,
+  ArrowUp,
+  ArrowDown,
 } from "lucide-react"
 import { useAppSelector, useAppDispatch } from "@/store/hooks"
 import { useStaffRestrictions } from "@/hooks/use-staff-restrictions"
@@ -202,6 +205,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
   const [searchTerm, setSearchTerm] = useState("")
   const [filterType, setFilterType] = useState("all")
   const [activeTab, setActiveTab] = useState("transactions")
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc")
 
   // Date range modal state
   const [isDateModalOpen, setIsDateModalOpen] = useState(false)
@@ -462,45 +466,74 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
       .replace(/[A-Z]{3}\s?/, `${currency} `)
   }
 
-  // Updated formatDateTime function
-  const formatDateTime = (dateInput: string | Date) => {
-    let date: Date
+  // Updated formatDateTime function - displays Indian Standard Time (IST / Asia/Kolkata)
+  // Resolves actual time from created_at if dateInput was midnight/date-only
+  const formatDateTime = (dateInput?: string | Date, createdAtInput?: string | Date) => {
+    if (!dateInput && !createdAtInput) return { date: "Invalid Date", time: "00:00" }
 
-    if (dateInput instanceof Date) {
-      date = dateInput
-    } else if (typeof dateInput === "string") {
-      date = parseISO(dateInput)
+    const isMidnight = (d: Date | null, rawVal: any): boolean => {
+      if (!d || isNaN(d.getTime())) return true
+      if (typeof rawVal === "string") {
+        const trimmed = rawVal.trim()
+        if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return true
+        if (/(?:T|\s)00:00(?::00(?:\.000)?)?(?:Z|[+-]\d{2}:?\d{2})?$/i.test(trimmed)) return true
+      }
+      const isUtcMidnight = d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0
+      const isIstMidnight = d.getUTCHours() === 18 && d.getUTCMinutes() === 30 && d.getUTCSeconds() === 0
+      const isLocalMidnight = d.getHours() === 0 && d.getMinutes() === 0 && d.getSeconds() === 0
+      return isUtcMidnight || isIstMidnight || isLocalMidnight
+    }
+
+    const dDate = dateInput ? (typeof dateInput === "string" ? new Date(dateInput) : dateInput) : null
+    const cDate = createdAtInput ? (typeof createdAtInput === "string" ? new Date(createdAtInput) : createdAtInput) : null
+
+    let finalDate: Date
+    if (dDate && !isNaN(dDate.getTime()) && !isMidnight(dDate, dateInput)) {
+      finalDate = dDate
+    } else if (cDate && !isNaN(cDate.getTime()) && !isMidnight(cDate, createdAtInput)) {
+      if (dDate && !isNaN(dDate.getTime())) {
+        finalDate = new Date(dDate)
+        finalDate.setUTCHours(cDate.getUTCHours(), cDate.getUTCMinutes(), cDate.getUTCSeconds(), cDate.getUTCMilliseconds())
+      } else {
+        finalDate = cDate
+      }
     } else {
-      return { date: "Invalid Date", time: "00:00" }
+      finalDate = (dDate && !isNaN(dDate.getTime())) ? dDate : ((cDate && !isNaN(cDate.getTime())) ? cDate : new Date())
     }
 
-    if (!isValid(date)) {
-      return { date: "Invalid Date", time: "00:00" }
-    }
+    const dateFormatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Kolkata",
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    })
+
+    const timeFormatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Kolkata",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    })
 
     return {
-      date: format(date, "MMM d, yyyy"),
-      time: format(date, "HH:mm"),
+      date: dateFormatter.format(finalDate),
+      time: timeFormatter.format(finalDate),
     }
   }
 
-  // Updated formatDate function
+  // Updated formatDate function - displays Indian Standard Time (IST / Asia/Kolkata)
   const formatDateOnly = (dateInput: string | Date) => {
-    let date: Date
+    if (!dateInput) return "Invalid Date"
+    const d = typeof dateInput === "string" ? new Date(dateInput) : dateInput
+    if (isNaN(d.getTime())) return "Invalid Date"
 
-    if (dateInput instanceof Date) {
-      date = dateInput
-    } else if (typeof dateInput === "string") {
-      date = parseISO(dateInput)
-    } else {
-      return "Invalid Date"
-    }
-
-    if (!isValid(date)) {
-      return "Invalid Date"
-    }
-
-    return format(date, "MMM d, yyyy")
+    const dateFormatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Kolkata",
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    })
+    return dateFormatter.format(d)
   }
 
   const getStatusBadge = (status: string) => {
@@ -521,6 +554,12 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
       return (
         <Badge className="border-rose-200 bg-rose-100 text-xs text-rose-800">
           Cancelled
+        </Badge>
+      )
+    } else if (statusLower === "returned" || statusLower === "sale return") {
+      return (
+        <Badge className="border-purple-200 bg-purple-100 text-xs text-purple-800">
+          Returned
         </Badge>
       )
     } else if (statusLower === "adjustment") {
@@ -776,7 +815,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
               <tbody>
                 ${filteredTransactions
                   .map((t) => {
-                    const dateTime = formatDateTime(t.date)
+                    const dateTime = formatDateTime(t.date, t.created_at)
                     const netImpact = getCashImpact(t)
                     const cashImpact = getCashImpact(t)
                     const moneyFlow = getMoneyFlowDisplay(t)
@@ -901,6 +940,17 @@ const filteredTransactions =
     return matchesType
   }) || []
 
+  const sortedTransactions = useMemo(() => {
+    return [...filteredTransactions].sort((a, b) => {
+      const timeA = new Date(a.date).getTime() || a.id
+      const timeB = new Date(b.date).getTime() || b.id
+      if (timeA === timeB) {
+        return sortOrder === "asc" ? a.id - b.id : b.id - a.id
+      }
+      return sortOrder === "asc" ? timeA - timeB : timeB - timeA
+    })
+  }, [filteredTransactions, sortOrder])
+
 const getManualCategoryName = (t: any): string => {
   if (!t) return "General"
   const directCategory =
@@ -943,6 +993,17 @@ const pettyCashTransactions =
   selectedPettyCashCategory === "all"
     ? allPettyCashTransactions
     : allPettyCashTransactions.filter((t) => getManualCategoryName(t) === selectedPettyCashCategory)
+
+const sortedPettyCashTransactions = useMemo(() => {
+  return [...pettyCashTransactions].sort((a, b) => {
+    const timeA = new Date(a.date).getTime() || a.id
+    const timeB = new Date(b.date).getTime() || b.id
+    if (timeA === timeB) {
+      return sortOrder === "asc" ? a.id - b.id : b.id - a.id
+    }
+    return sortOrder === "asc" ? timeA - timeB : timeB - timeA
+  })
+}, [pettyCashTransactions, sortOrder])
 
 
 const isDataLoading = isLoading && !financialData
@@ -1295,6 +1356,27 @@ const getMoneyFlowInfo = (transaction: any) => {
       text: 'Full Payment',
       color: 'text-emerald-600',
       amount: amount
+    }
+  }
+
+  // Sale Returns - Money Out / Refund
+  if (type === 'sale_return' || type === 'sale_return_extra' || type === 'return') {
+    const refundAmt = Math.abs(amount) || n(transaction.debit) || n(transaction.amount)
+    return {
+      type: 'out',
+      text: 'Sale Return Refund',
+      color: 'text-purple-600',
+      amount: refundAmt
+    }
+  }
+
+  // Customer Payments - Money In
+  if (type === 'customer_payment') {
+    return {
+      type: 'in',
+      text: 'Customer Payment',
+      color: 'text-emerald-600',
+      amount: amount || n(transaction.received) || n(transaction.credit)
     }
   }
   
@@ -1779,6 +1861,11 @@ const getTransactionTypeIcon = (type: string) => {
       return <ShoppingCart className="h-4 w-4" />
     case "purchase":
       return <Package className="h-4 w-4" />
+    case "sale_return":
+    case "return":
+      return <RotateCcw className="h-4 w-4 text-purple-600" />
+    case "customer_payment":
+      return <Users className="h-4 w-4 text-emerald-600" />
     case "supplier_payment":
       return <CreditCard className="h-4 w-4" />
     case "manual":
@@ -1987,11 +2074,22 @@ const renderTransactionList = (
           <div className="col-span-1 text-right">Remaining</div>
           {!hideCogs && <div className="col-span-1 text-right">Product Cost</div>}
           <div className="col-span-1 text-right">Cash Impact</div>
-          <div className="col-span-2 text-right">Date & Time</div>
+          <div
+            className="col-span-2 text-right cursor-pointer select-none hover:text-foreground flex items-center justify-end gap-1 transition-colors"
+            onClick={() => setSortOrder(prev => prev === "asc" ? "desc" : "asc")}
+            title={sortOrder === "asc" ? "Chronological: Oldest first (Last history at bottom). Click to reverse." : "Reverse: Newest first. Click to reverse."}
+          >
+            <span>Date & Time</span>
+            {sortOrder === "asc" ? (
+              <ArrowUp className="h-3.5 w-3.5 text-primary" />
+            ) : (
+              <ArrowDown className="h-3.5 w-3.5 text-primary" />
+            )}
+          </div>
         </div>
 
         {transactions.map((transaction) => {
-          const dateTime = formatDateTime(transaction.date)
+          const dateTime = formatDateTime(transaction.date, transaction.created_at)
           const cashImpact = getCashImpact(transaction)
           const isPositive = cashImpact > 0
           const isNegative = cashImpact < 0
@@ -2000,13 +2098,14 @@ const renderTransactionList = (
           const enhancedDescription = getEnhancedDescription(transaction)
 
           const isSale = transaction.type === "sale" || transaction.description?.toLowerCase().startsWith("sale")
+          const isSaleReturn = transaction.type === "sale_return" || transaction.type === "sale_return_extra" || transaction.description?.toLowerCase().includes("sale return")
           const isPurchase = transaction.type === "purchase" || transaction.description?.toLowerCase().startsWith("purchase")
           const isManual = transaction.type === "manual" || transaction.reference_type === "manual" || transaction.description?.toLowerCase().includes("manual")
           const isSupplierPayment = transaction.type === 'supplier_payment' ||
                                    transaction.description?.toLowerCase().includes('supplier payment')
 
           const handleClick = () => {
-            if (isSale) {
+            if (isSale || isSaleReturn) {
               const saleId = transaction.sale_id ||
                             transaction.reference_id ||
                             extractIdFromDescription(transaction.description) ||
@@ -2056,7 +2155,10 @@ const renderTransactionList = (
 
               <div className="col-span-1 text-center">
                 <Badge variant="outline" className="text-xs capitalize">
-                  {transaction.type || "unknown"}
+                  {transaction.type === "sale_return" ? "Sale Return" :
+                   transaction.type === "customer_payment" ? "Customer Payment" :
+                   transaction.type === "sale_shipping" ? "Shipping" :
+                   (transaction.type || "unknown")}
                 </Badge>
               </div>
 
@@ -2532,7 +2634,7 @@ const renderTransactionList = (
 
           <TabsContent value="transactions" className="p-4">
             {renderTransactionList(
-              filteredTransactions,
+              sortedTransactions,
               "No transactions found for the selected period",
             )}
           </TabsContent>
@@ -2658,7 +2760,7 @@ const renderTransactionList = (
             </div>
 
             {renderTransactionList(
-              pettyCashTransactions,
+              sortedPettyCashTransactions,
               "No petty cash entries found for the selected period",
             )}
           </TabsContent>

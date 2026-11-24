@@ -4,6 +4,8 @@ import type { RootState } from "../store"
 interface Transaction {
   id: number
   date: string
+  created_at?: string
+  transaction_date?: string
   description: string
   type: string
   reference_type?: string
