@@ -9,6 +9,7 @@ import { getSupplierCreditSummary } from "./supplier-payment-actions"
 import { adjustDeviceProductStock } from "@/lib/inventory-service"
 import { allocatePurchaseCosts } from "@/lib/purchase-courier"
 import { getDeviceCompanyId } from "@/lib/device-company"
+import { ensureDateTime } from "@/lib/utils"
 
 export async function getPurchases() {
   try {
@@ -601,7 +602,8 @@ export async function createPurchase(formData: FormData) {
     return { success: false, message: "Supplier, total amount, at least one item, user ID, and device ID are required" }
   }
 
-  const costAllocations = allocatePurchaseCosts(items, courierCharge, discount)
+  const isDropship = (purchaseType || "").toLowerCase() === "dropship"
+  const costAllocations = allocatePurchaseCosts(items, isDropship ? 0 : courierCharge, discount)
 
   let finalReceivedAmount = receivedAmount
   if (paymentsList.length > 0) {
@@ -874,7 +876,9 @@ export async function createPurchase(formData: FormData) {
         supplierName: supplier,
         deviceId,
         userId,
-        purchaseDate: new Date(purchaseDate),
+        purchaseDate: ensureDateTime(purchaseDate),
+        courierCharge: courierCharge || 0,
+        purchaseType: purchaseType || "Stock",
         payments: paymentsList.length > 0 ? paymentsList : undefined,
       }, tx)
 
@@ -1118,7 +1122,8 @@ export async function updatePurchase(formData: FormData) {
     }
   }
 
-  const costAllocations = allocatePurchaseCosts(items, courierCharge, discount)
+  const isDropship = (purchaseType || "").toLowerCase() === "dropship"
+  const costAllocations = allocatePurchaseCosts(items, isDropship ? 0 : courierCharge, discount)
 
   // Validate paid amount
   if (receivedAmount > totalAmount) {
@@ -1435,7 +1440,9 @@ export async function updatePurchase(formData: FormData) {
         supplierName: supplier,
         deviceId,
         userId,
-        purchaseDate: new Date(purchaseDate),
+        purchaseDate: ensureDateTime(purchaseDate),
+        courierCharge: courierCharge || 0,
+        purchaseType: purchaseType || "Stock",
         payments: paymentsList.length > 0 ? paymentsList : undefined,
       }, tx)
 

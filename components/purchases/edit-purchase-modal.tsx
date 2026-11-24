@@ -103,8 +103,10 @@ export default function EditPurchaseModal({
   // Total cost including courier charge (paid after delivery)
   const totalAmount = useMemo(() => Math.max(0, Math.round((purchaseTotal + Number(courierCharge)) * 100) / 100), [purchaseTotal, courierCharge])
 
+  const isDropship = (purchaseType || "").toLowerCase() === "dropship"
+
   const purchaseItemsWithAllocations = useMemo(() => {
-    const costAllocations = allocatePurchaseCosts(products, courierCharge, discountAmount)
+    const costAllocations = allocatePurchaseCosts(products, isDropship ? 0 : courierCharge, discountAmount)
     return products.map((item, idx) => {
       const allocation = costAllocations[idx]
       return {
@@ -115,7 +117,7 @@ export default function EditPurchaseModal({
         finalCost: allocation ? allocation.lineTotalCost : item.lineTotal,
       }
     })
-  }, [products, courierCharge, discountAmount, subtotal, courierChargePercentage])
+  }, [products, courierCharge, discountAmount, subtotal, courierChargePercentage, isDropship])
 
   const allocationMap = useMemo(() => {
     const map = new Map<string, { allocationPercentage: number; allocatedCourier: number; allocatedDiscount: number; finalCost: number }>()

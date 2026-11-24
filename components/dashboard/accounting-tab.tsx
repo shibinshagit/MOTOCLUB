@@ -205,7 +205,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
   const [searchTerm, setSearchTerm] = useState("")
   const [filterType, setFilterType] = useState("all")
   const [activeTab, setActiveTab] = useState("transactions")
-  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc")
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc")
 
   // Date range modal state
   const [isDateModalOpen, setIsDateModalOpen] = useState(false)
@@ -813,7 +813,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                 </tr>
               </thead>
               <tbody>
-                ${filteredTransactions
+                ${sortedTransactions
                   .map((t) => {
                     const dateTime = formatDateTime(t.date, t.created_at)
                     const netImpact = getCashImpact(t)
@@ -942,12 +942,16 @@ const filteredTransactions =
 
   const sortedTransactions = useMemo(() => {
     return [...filteredTransactions].sort((a, b) => {
-      const timeA = new Date(a.date).getTime() || a.id
-      const timeB = new Date(b.date).getTime() || b.id
+      const tA = new Date(a.date).getTime()
+      const tB = new Date(b.date).getTime()
+      const timeA = !isNaN(tA) ? tA : 0
+      const timeB = !isNaN(tB) ? tB : 0
       if (timeA === timeB) {
-        return sortOrder === "asc" ? a.id - b.id : b.id - a.id
+        const idA = Number(a.id) || 0
+        const idB = Number(b.id) || 0
+        return sortOrder === "desc" ? idB - idA : idA - idB
       }
-      return sortOrder === "asc" ? timeA - timeB : timeB - timeA
+      return sortOrder === "desc" ? timeB - timeA : timeA - timeB
     })
   }, [filteredTransactions, sortOrder])
 
@@ -996,12 +1000,16 @@ const pettyCashTransactions =
 
 const sortedPettyCashTransactions = useMemo(() => {
   return [...pettyCashTransactions].sort((a, b) => {
-    const timeA = new Date(a.date).getTime() || a.id
-    const timeB = new Date(b.date).getTime() || b.id
+    const tA = new Date(a.date).getTime()
+    const tB = new Date(b.date).getTime()
+    const timeA = !isNaN(tA) ? tA : 0
+    const timeB = !isNaN(tB) ? tB : 0
     if (timeA === timeB) {
-      return sortOrder === "asc" ? a.id - b.id : b.id - a.id
+      const idA = Number(a.id) || 0
+      const idB = Number(b.id) || 0
+      return sortOrder === "desc" ? idB - idA : idA - idB
     }
-    return sortOrder === "asc" ? timeA - timeB : timeB - timeA
+    return sortOrder === "desc" ? timeB - timeA : timeA - timeB
   })
 }, [pettyCashTransactions, sortOrder])
 
@@ -1286,6 +1294,10 @@ const getMoneyFlowAmount = (transaction: any) => {
   if (type === 'sale_shipping') {
     return credit > 0 ? credit : -debit
   }
+
+  if (type === 'purchase_shipping') {
+    return credit > 0 ? credit : -debit
+  }
   
   // For sale adjustments - net money movement from ledger
   if (isSaleAdjustment(transaction)) {
@@ -1453,6 +1465,38 @@ const getMoneyFlowInfo = (transaction: any) => {
       text: 'Supplier Payment',
       color: 'text-rose-600',
       amount: amount
+    }
+  }
+
+  // Purchase shipping / Courier charge - Money Out
+  if (type === 'purchase_shipping' || (type === 'shipping' && description.toLowerCase().includes('purchase'))) {
+    return {
+      type: 'out',
+      text: 'Courier Charge',
+      color: 'text-rose-600',
+      amount: Math.abs(amount) || n(transaction.debit) || n(transaction.amount)
+    }
+  }
+
+  // Sale shipping / Courier charge
+  if (type === 'sale_shipping' || (type === 'shipping' && description.toLowerCase().includes('sale'))) {
+    const debit = n(transaction.debit)
+    const credit = n(transaction.credit)
+    if (debit > 0) {
+      return {
+        type: 'out',
+        text: 'Courier Expense',
+        color: 'text-rose-600',
+        amount: debit || Math.abs(amount) || n(transaction.amount)
+      }
+    }
+    if (credit > 0) {
+      return {
+        type: 'in',
+        text: 'Courier Collected',
+        color: 'text-emerald-600',
+        amount: credit || amount
+      }
     }
   }
   
@@ -1624,22 +1668,22 @@ const getRemainingAmount = (transaction: any) => {
   }
   
   // For regular credit sales, remaining = total amount - received amount
-  if (status === 'credit' && type === 'sale') {
+  if ((status === 'credit' || status === 'partial') && type === 'sale') {
     return Math.max(0, totalAmount - receivedAmount)
   }
   
   // For credit purchases, remaining = total amount - received amount
-  if (status === 'credit' && type === 'purchase') {
+  if ((status === 'credit' || status === 'partial') && type === 'purchase') {
     return Math.max(0, totalAmount - receivedAmount)
   }
   
   // For completed sales with partial payment
-  if (status === 'completed' && receivedAmount < totalAmount) {
+  if ((status === 'completed' || status === 'paid') && receivedAmount < totalAmount) {
     return Math.max(0, totalAmount - receivedAmount)
   }
   
   // For paid purchases with partial payment
-  if (status === 'paid' && receivedAmount < totalAmount) {
+  if ((status === 'paid' || status === 'completed') && receivedAmount < totalAmount) {
     return Math.max(0, totalAmount - receivedAmount)
   }
   
@@ -2003,9 +2047,9 @@ const getEnhancedDescription = (transaction: any) => {
   
   // Purchase transactions
   if (type === 'purchase') {
-    if (status === 'credit') {
+    if (status === 'credit' || status === 'partial') {
       return `Credit Purchase #${transaction.purchase_id || 'N/A'} - ${currency} ${amount.toFixed(2)} (Pending: ${currency} ${(amount - received).toFixed(2)})`
-    } else if (status === 'paid') {
+    } else if (status === 'paid' || status === 'completed') {
       if (received < amount) {
         return `Partial Payment Purchase #${transaction.purchase_id || 'N/A'} - ${currency} ${amount.toFixed(2)} (Paid: ${currency} ${received.toFixed(2)})`
       } else {
@@ -2013,6 +2057,16 @@ const getEnhancedDescription = (transaction: any) => {
       }
     }
     return `Purchase #${transaction.purchase_id || 'N/A'} - ${currency} ${amount.toFixed(2)}`
+  }
+
+  // Purchase shipping / Courier charge
+  if (type === 'purchase_shipping') {
+    return description || `Purchase #${transaction.purchase_id || transaction.reference_id || 'N/A'} - Courier charge`
+  }
+
+  // Sale shipping / Courier charge
+  if (type === 'sale_shipping') {
+    return description || `Sale #${transaction.sale_id || transaction.reference_id || 'N/A'} - Courier charge`
   }
   
   // Adjustment transactions
@@ -2028,7 +2082,7 @@ const getEnhancedDescription = (transaction: any) => {
   
   // Supplier payments
   if (type === 'supplier_payment' || description.toLowerCase().includes('supplier payment')) {
-    return `Supplier Payment - ${currency} ${Math.abs(n(transaction.debit)).toFixed(2)}`
+    return description || `Supplier Payment - ${currency} ${Math.abs(n(transaction.debit)).toFixed(2)}`
   }
   
   // Manual transactions
@@ -2076,14 +2130,14 @@ const renderTransactionList = (
           <div className="col-span-1 text-right">Cash Impact</div>
           <div
             className="col-span-2 text-right cursor-pointer select-none hover:text-foreground flex items-center justify-end gap-1 transition-colors"
-            onClick={() => setSortOrder(prev => prev === "asc" ? "desc" : "asc")}
-            title={sortOrder === "asc" ? "Chronological: Oldest first (Last history at bottom). Click to reverse." : "Reverse: Newest first. Click to reverse."}
+            onClick={() => setSortOrder(prev => prev === "desc" ? "asc" : "desc")}
+            title={sortOrder === "desc" ? "Showing latest first (Newest on top). Click to show oldest first." : "Showing oldest first. Click to show newest first."}
           >
             <span>Date & Time</span>
-            {sortOrder === "asc" ? (
-              <ArrowUp className="h-3.5 w-3.5 text-primary" />
-            ) : (
+            {sortOrder === "desc" ? (
               <ArrowDown className="h-3.5 w-3.5 text-primary" />
+            ) : (
+              <ArrowUp className="h-3.5 w-3.5 text-primary" />
             )}
           </div>
         </div>
@@ -2097,9 +2151,9 @@ const renderTransactionList = (
           const moneyFlowInfo = getMoneyFlowInfo(transaction)
           const enhancedDescription = getEnhancedDescription(transaction)
 
-          const isSale = transaction.type === "sale" || transaction.description?.toLowerCase().startsWith("sale")
+          const isSale = transaction.type === "sale" || transaction.type === "sale_shipping" || transaction.description?.toLowerCase().startsWith("sale")
           const isSaleReturn = transaction.type === "sale_return" || transaction.type === "sale_return_extra" || transaction.description?.toLowerCase().includes("sale return")
-          const isPurchase = transaction.type === "purchase" || transaction.description?.toLowerCase().startsWith("purchase")
+          const isPurchase = transaction.type === "purchase" || transaction.type === "purchase_shipping" || transaction.description?.toLowerCase().startsWith("purchase")
           const isManual = transaction.type === "manual" || transaction.reference_type === "manual" || transaction.description?.toLowerCase().includes("manual")
           const isSupplierPayment = transaction.type === 'supplier_payment' ||
                                    transaction.description?.toLowerCase().includes('supplier payment')
@@ -2157,7 +2211,7 @@ const renderTransactionList = (
                 <Badge variant="outline" className="text-xs capitalize">
                   {transaction.type === "sale_return" ? "Sale Return" :
                    transaction.type === "customer_payment" ? "Customer Payment" :
-                   transaction.type === "sale_shipping" ? "Shipping" :
+                   transaction.type === "sale_shipping" || transaction.type === "purchase_shipping" ? "Shipping" :
                    (transaction.type || "unknown")}
                 </Badge>
               </div>

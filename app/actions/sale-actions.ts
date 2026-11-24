@@ -12,6 +12,7 @@ import { getReplacementShipmentsForSale } from "./replacement-actions"
 import { syncCustomerShippingAddress } from "./customer-actions"
 import { getAuthoritativeProfitSummary, type AuthoritativeProfitSummary } from "@/lib/profit-calculation"
 import { applyStockTransition, getSaleStockLines, applyStockDelta } from "@/lib/sale-stock"
+import { allocatePurchaseCosts } from "@/lib/purchase-courier"
 
 function getShippingAmounts(shipping: ReturnType<typeof normalizeSaleShippingInput>) {
   if (shipping.fulfillment_type !== "ship") {
@@ -4558,6 +4559,29 @@ export async function deleteSale(saleId: number, deviceId?: number) {
         console.error("Error deleting job cards:", jobCardErr)
       }
 
+      // Delete any linked dropship purchase created for this sale/job card
+      try {
+        const linkedDropshipPurchases = await sql`
+          SELECT id, device_id 
+          FROM purchases 
+          WHERE LOWER(purchase_type) = 'dropship'
+            AND (
+              notes LIKE ${`%Job Card #${saleId}%`}
+              OR notes LIKE ${`%Order #${saleId}%`}
+              OR notes LIKE ${`%Sale #${saleId}%`}
+            )
+        `
+        if (linkedDropshipPurchases.length > 0) {
+          const { deletePurchase } = await import("./purchase-actions")
+          for (const dp of linkedDropshipPurchases) {
+            console.log(`Deleting linked dropship purchase #${dp.id} for sale #${saleId}`)
+            await deletePurchase(dp.id, dp.device_id || saleDeviceId)
+          }
+        }
+      } catch (dropshipErr) {
+        console.error("Error deleting linked dropship purchase on deleteSale:", dropshipErr)
+      }
+
       // Delete product stock history entries for this sale
       try {
         await sql`
@@ -4918,6 +4942,7 @@ export async function moveSaleToDirectPurchase(input: MoveSaleToDirectPurchaseIn
       const discount = Math.max(0, Number(input.discount) || 0)
       const purchaseTotal = Math.max(0, Math.round((subtotal + totalTax - discount) * 100) / 100)
       const courierCharge = Math.max(0, Number(input.courierCharge) || 0)
+      const courierPct = Math.max(0, Number(input.courierChargePercentage) || 0)
 
       let status = (input.paymentStatus || "").toLowerCase() === "paid" ? "Paid" : "Credit"
       const purchaseStatus = (input.purchaseStatus || "").toLowerCase() === "delivered" ? "Delivered" : "Ordered"
@@ -4927,7 +4952,14 @@ export async function moveSaleToDirectPurchase(input: MoveSaleToDirectPurchaseIn
       }
       const internalNotes = input.notes?.trim() || `Direct dropship fulfillment for Job Card #${input.saleId}`
 
-      // 3. Create or update the Dropship Purchase (courier charge is paid after delivery and recorded as sales order expense)
+      // Calculate cost allocations across items (in dropship, courier is NOT distributed to individual items)
+      const itemsForAlloc = input.items.map((it) => ({
+        price: Number(it.unit_cost) || 0,
+        quantity: Number(it.quantity) || 0,
+      }))
+      const costAllocations = allocatePurchaseCosts(itemsForAlloc, 0, discount)
+
+      // 3. Create or update the Dropship Purchase (store courier charge so view/edit displays it properly)
       const existingPurchases = await tx`
         SELECT id FROM purchases
         WHERE purchase_type = 'Dropship'
@@ -4945,6 +4977,8 @@ export async function moveSaleToDirectPurchase(input: MoveSaleToDirectPurchaseIn
               status = ${status},
               purchase_status = ${purchaseStatus},
               received_amount = ${finalPaidAmount},
+              courier_charge = ${courierCharge},
+              courier_charge_percentage = ${courierPct},
               discount = ${discount},
               notes = ${internalNotes}
           WHERE id = ${purchaseId}
@@ -4960,14 +4994,15 @@ export async function moveSaleToDirectPurchase(input: MoveSaleToDirectPurchaseIn
           VALUES (
             ${supplier}, ${purchaseTotal}, ${status}, 'Cash', ${purchaseStatus}, 'Dropship',
             ${input.userId}, ${input.deviceId}, NOW(), ${finalPaidAmount},
-            0, 0, ${discount}, ${internalNotes}
+            ${courierCharge}, ${courierPct}, ${discount}, ${internalNotes}
           )
           RETURNING id
         `
         purchaseId = purchaseRows[0].id
       }
 
-      // 4. Insert items into purchase_items (NO product cost update, NO inventory addition)
+      // 4. Insert items into purchase_items (with courier charge and unit cost allocated)
+      let itemIndex = 0
       for (const it of input.items) {
         const qty = Number(it.quantity) || 0
         const price = Number(it.unit_cost) || 0
@@ -4975,10 +5010,11 @@ export async function moveSaleToDirectPurchase(input: MoveSaleToDirectPurchaseIn
         const taxAmt = it.tax_amount != null ? Number(it.tax_amount) : Math.round(qty * price * (taxPct / 100) * 100) / 100
         const lineTotal = it.line_total != null ? Number(it.line_total) : Math.round((qty * price + taxAmt) * 100) / 100
 
-        const itemProportion = subtotal > 0 ? (qty * price) / subtotal : (1 / input.items.length)
-        const itemDiscountAmount = Number((discount * itemProportion).toFixed(2))
-        const itemNetCost = lineTotal - itemDiscountAmount
-        const unitAcquisitionCost = qty > 0 ? Number((itemNetCost / qty).toFixed(2)) : price
+        const alloc = costAllocations[itemIndex]
+        const unitAcquisitionCost = alloc ? alloc.unitAcquisitionCost : price
+        const itemCourierCharge = alloc ? alloc.courierCharge : 0
+        const itemDiscountAmount = alloc ? alloc.discountAmount : 0
+        itemIndex++
 
         await tx`
           INSERT INTO purchase_items (
@@ -4988,12 +5024,12 @@ export async function moveSaleToDirectPurchase(input: MoveSaleToDirectPurchaseIn
           VALUES (
             ${purchaseId}, ${it.product_id}, ${it.variant_id || null}, null,
             ${qty}, ${price}, ${taxPct}, ${taxAmt},
-            ${lineTotal}, 0, ${itemDiscountAmount}, ${unitAcquisitionCost}
+            ${lineTotal}, ${itemCourierCharge}, ${itemDiscountAmount}, ${unitAcquisitionCost}
           )
         `
       }
 
-      // Record purchase in simplified accounting system
+      // Record purchase in simplified accounting system (courier charge for dropship is recorded on the sales order, not purchase)
       try {
         await recordPurchaseTransaction({
           purchaseId,
@@ -5006,6 +5042,8 @@ export async function moveSaleToDirectPurchase(input: MoveSaleToDirectPurchaseIn
           deviceId: input.deviceId,
           userId: input.userId,
           purchaseDate: new Date(),
+          courierCharge: 0,
+          purchaseType: "Dropship",
         }, tx)
       } catch (recErr) {
         console.warn("recordPurchaseTransaction error in moveSaleToDirectPurchase:", recErr)
@@ -5051,9 +5089,10 @@ export async function moveSaleToDirectPurchase(input: MoveSaleToDirectPurchaseIn
           deviceId: sale.device_id || input.deviceId,
           userId: input.userId,
           saleDate: new Date(sale.sale_date || new Date()),
+          transactionDate: new Date(),
           paymentMethod: sale.payment_method || "Cash",
           status: sale.payment_status || "Pending",
-          fulfillmentType: sale.fulfillment_type || "ship",
+          fulfillmentType: "direct",
           courierPaidExtra: Number(sale.courier_paid_extra) || 0,
           expenseCourier: courierCharge,
           expensePacking: Number(sale.expense_packing) || 0,

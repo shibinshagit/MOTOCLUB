@@ -88,7 +88,9 @@ export async function paySupplierCredit(
               total_amount,
               received_amount,
               purchase_date,
-              status
+              status,
+              purchase_type,
+              COALESCE(courier_charge, 0) as courier_charge
             FROM purchases
             WHERE id = ANY(${targetIds})
               AND (TRIM(supplier) = TRIM(${supplier.name}) OR LOWER(TRIM(supplier)) = LOWER(TRIM(${supplier.name})))
@@ -103,7 +105,9 @@ export async function paySupplierCredit(
               total_amount,
               received_amount,
               purchase_date,
-              status
+              status,
+              purchase_type,
+              COALESCE(courier_charge, 0) as courier_charge
             FROM purchases
             WHERE (TRIM(supplier) = TRIM(${supplier.name}) OR LOWER(TRIM(supplier)) = LOWER(TRIM(${supplier.name})))
               AND (created_by = ${userId} OR device_id = ${deviceId})
@@ -195,6 +199,8 @@ export async function paySupplierCredit(
       let cashTransactionId: number | null = null
 
       if (safeCashAmount > 0) {
+        let separatedShippingAmount = 0
+
         for (const purchase of creditPurchases) {
           if (remainingToAllocateCash <= 0) break
 
@@ -205,52 +211,85 @@ export async function paySupplierCredit(
           const alloc = Math.min(remainingToAllocateCash, currentBal)
           const newRec = currentRec + alloc
           const newBal = Number(purchase.total_amount) - newRec
+          const isNowPaid = newBal <= 0.01
+          const courierCharge = Number(purchase.courier_charge) || 0
 
           purchase.received_amount = newRec
 
           await tx`
             UPDATE purchases 
             SET received_amount = ${newRec},
-                status = ${newBal <= 0.01 ? "Paid" : "Credit"}
+                status = ${isNowPaid ? "Paid" : "Credit"}
             WHERE id = ${purchase.id}
           `
+
+          // If purchase is now fully paid and has courier charge, separate courier charge into its own transaction row (Stock purchases only; Dropship courier is recorded under sales order)
+          const isDropship = (purchase.purchase_type || "").toLowerCase() === "dropship"
+          if (isNowPaid && courierCharge > 0 && !isDropship) {
+            const existingShip = await tx`
+              SELECT id FROM financial_transactions 
+              WHERE reference_type = 'purchase' 
+                AND reference_id = ${purchase.id} 
+                AND transaction_type = 'purchase_shipping'
+              LIMIT 1
+            `
+            if (existingShip.length === 0) {
+              await tx`
+                INSERT INTO financial_transactions (
+                  transaction_type, reference_type, reference_id,
+                  amount, received_amount, cost_amount, debit_amount, credit_amount,
+                  status, payment_method, description, device_id, company_id, created_by, transaction_date
+                ) VALUES (
+                  'purchase_shipping', 'purchase', ${purchase.id},
+                  ${courierCharge}, ${courierCharge}, 0, ${courierCharge}, 0,
+                  'Completed', ${paymentMethod},
+                  ${`Purchase #${purchase.id} - Courier charge`},
+                  ${deviceId}, ${await getDeviceCompanyId(deviceId)}, ${userId}, ${finalPaymentDate.toISOString()}
+                )
+              `
+              separatedShippingAmount += Math.min(alloc, courierCharge)
+            }
+          }
 
           allAllocations.push({
             purchaseId: purchase.id,
             allocatedAmount: alloc,
-            newStatus: newBal <= 0.01 ? "Paid" : "Credit",
+            newStatus: isNowPaid ? "Paid" : "Credit",
             remainingBalance: newBal,
           })
 
           remainingToAllocateCash -= alloc
         }
 
-        const debitAmount = safeCashAmount
-        const description = newExtraCreditCreated > 0
-          ? `Supplier Payment - ${supplier.name} - ${paymentMethod} - Applied: ${cashApplied.toFixed(2)}, Extra Credit: ${newExtraCreditCreated.toFixed(2)}`
-          : `Supplier Payment - ${supplier.name} - ${paymentMethod}`
+        const netCashForSupplierPayment = Math.max(0, safeCashAmount - separatedShippingAmount)
+        if (netCashForSupplierPayment > 0) {
+          const debitAmount = netCashForSupplierPayment
+          const description = newExtraCreditCreated > 0
+            ? `Supplier Payment - ${supplier.name} - ${paymentMethod} - Applied: ${cashApplied.toFixed(2)}, Extra Credit: ${newExtraCreditCreated.toFixed(2)}`
+            : `Supplier Payment - ${supplier.name} - ${paymentMethod}`
 
-        const storedNotes = JSON.stringify({
-          v: 1,
-          userNotes: notes?.trim() || "",
-          amountApplied: cashApplied,
-          extraCredit: newExtraCreditCreated,
-          allocations: allAllocations.map((a) => ({ purchaseId: a.purchaseId, allocatedAmount: a.allocatedAmount })),
-        })
+          const storedNotes = JSON.stringify({
+            v: 1,
+            userNotes: notes?.trim() || "",
+            amountApplied: cashApplied,
+            extraCredit: newExtraCreditCreated,
+            allocations: allAllocations.map((a) => ({ purchaseId: a.purchaseId, allocatedAmount: a.allocatedAmount })),
+          })
 
-        const insertResult = await tx`
-          INSERT INTO financial_transactions (
-            transaction_type, reference_type, reference_id,
-            amount, received_amount, cost_amount, debit_amount, credit_amount,
-            status, payment_method, description, notes, device_id, company_id, created_by, transaction_date
-          ) VALUES (
-            'supplier_payment', 'supplier', ${supplierId},
-            ${safeCashAmount}, ${safeCashAmount}, 0, ${debitAmount}, 0,
-            'Completed', ${paymentMethod}, ${description}, ${storedNotes}, 
-            ${deviceId}, ${await getDeviceCompanyId(deviceId)}, ${userId}, ${finalPaymentDate.toISOString()}
-          ) RETURNING id
-        `
-        cashTransactionId = insertResult[0]?.id
+          const insertResult = await tx`
+            INSERT INTO financial_transactions (
+              transaction_type, reference_type, reference_id,
+              amount, received_amount, cost_amount, debit_amount, credit_amount,
+              status, payment_method, description, notes, device_id, company_id, created_by, transaction_date
+            ) VALUES (
+              'supplier_payment', 'supplier', ${supplierId},
+              ${netCashForSupplierPayment}, ${netCashForSupplierPayment}, 0, ${debitAmount}, 0,
+              'Completed', ${paymentMethod}, ${description}, ${storedNotes}, 
+              ${deviceId}, ${await getDeviceCompanyId(deviceId)}, ${userId}, ${finalPaymentDate.toISOString()}
+            ) RETURNING id
+          `
+          cashTransactionId = insertResult[0]?.id
+        }
       }
 
       const totalSettled = actualCreditApplied + cashApplied

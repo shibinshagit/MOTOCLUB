@@ -596,44 +596,126 @@ export async function recordPurchaseTransaction(purchaseData: {
   deviceId: number
   userId: number
   purchaseDate: Date
+  courierCharge?: number
+  purchaseType?: string
   payments?: Array<{ paymentMethod: string; amount: number; referenceNumber?: string; notes?: string }>
 }, query: any = sql) {
   try {
-    // Clear existing financial_transactions for this purchase to avoid duplicate ledger entries
+    // Clear existing financial_transactions for this purchase (both product and shipping lines) to avoid duplicate ledger entries
     await query`
       DELETE FROM financial_transactions
-      WHERE transaction_type = 'purchase' AND reference_type = 'purchase' AND reference_id = ${purchaseData.purchaseId}
+      WHERE reference_type = 'purchase' 
+        AND reference_id = ${purchaseData.purchaseId}
+        AND transaction_type IN ('purchase', 'purchase_shipping')
     `
 
-    const totalAmount = Number(purchaseData.totalAmount) || 0
-    const receivedAmount = Number(purchaseData.receivedAmount) || 0
-    const status = purchaseData.status?.toLowerCase()
+    const isDropship = (purchaseData.purchaseType || "").toLowerCase() === "dropship"
+    const rawTotalAmount = Number(purchaseData.totalAmount) || 0
+    const rawReceivedAmount = Number(purchaseData.receivedAmount) || 0
+    const rawCourierCharge = Number(purchaseData.courierCharge) || 0
 
-    let debitAmount = 0
-    let creditAmount = 0
-    let description = ""
-
-    if (status === "credit") {
-      debitAmount = 0
-      creditAmount = 0
-      description = `Purchase #${purchaseData.purchaseId} - Credit - ${purchaseData.paymentMethod} - Supplier: ${purchaseData.supplierName} - Outstanding: ${purchaseData.outstandingAmount}`
-    } else {
-      debitAmount = receivedAmount
-      creditAmount = 0
-      description = `Purchase #${purchaseData.purchaseId} - ${purchaseData.status} - ${purchaseData.paymentMethod} - Supplier: ${purchaseData.supplierName}`
-    }
-
-    const costAmount = 0
+    // Courier charge is recorded separately (as sale_shipping for dropship, or purchase_shipping for stock).
+    // The purchase product bill amount must exclude courier charge so courier is never double-counted in total.
+    const courierCharge = isDropship ? 0 : rawCourierCharge
+    const totalAmount = rawCourierCharge > 0 ? Math.max(0, rawTotalAmount - rawCourierCharge) : rawTotalAmount
+    const receivedAmount = isDropship && rawCourierCharge > 0 ? Math.max(0, rawReceivedAmount - rawCourierCharge) : rawReceivedAmount
+    const statusLower = (purchaseData.status || "").toLowerCase()
+    const isPaid = statusLower === "paid" || statusLower === "completed" || (rawTotalAmount > 0 && rawReceivedAmount >= rawTotalAmount)
 
     const activePayments = Array.isArray(purchaseData.payments)
       ? purchaseData.payments.filter((p) => Number(p.amount) > 0)
       : []
 
+    // 1 & 2: If 0 paid amount (credit purchase, no money out), do NOT insert into financial_transactions
+    if (rawReceivedAmount <= 0 && activePayments.length === 0) {
+      console.log(`Purchase #${purchaseData.purchaseId} recorded with 0 paid amount: skipped financial_transactions entry (tracked under Payables)`)
+      return { success: true, transactionId: null, message: "No cash paid, skipped transaction entry" }
+    }
+
+    const companyId = await getDeviceCompanyId(purchaseData.deviceId)
+    const effectivePurchaseDate = ensureDateTime(purchaseData.purchaseDate)
+    const costAmount = 0
     let lastInsertedId: number | undefined
 
+    // Courier charge is recorded separately as shipping.
+    // The purchase product bill amount should exclude courier charge so courier is never double-counted in total.
+    const productBillAmount = totalAmount
+
+    // 4: If payment is fully completed and courier charge > 0, separate courier charge into its own row
+    if (isPaid && courierCharge > 0) {
+      const productPaid = Math.max(0, receivedAmount - courierCharge)
+      const pm = activePayments[0]?.paymentMethod || purchaseData.paymentMethod || "Cash"
+
+      // A. Product purchase row (without courier charge)
+      if (activePayments.length > 1) {
+        let remainingCourierToDeduct = courierCharge
+        for (const p of activePayments) {
+          const pAmt = Number(p.amount) || 0
+          if (pAmt <= 0) continue
+          const courierDeductedFromThis = Math.min(remainingCourierToDeduct, pAmt)
+          remainingCourierToDeduct -= courierDeductedFromThis
+          const netProductPaid = pAmt - courierDeductedFromThis
+          if (netProductPaid > 0) {
+            const refStr = p.referenceNumber ? ` (Ref: ${p.referenceNumber})` : ""
+            const pDesc = `Purchase #${purchaseData.purchaseId} - ${purchaseData.status} - ${p.paymentMethod}${refStr} - Supplier: ${purchaseData.supplierName}`
+            const res = await query`
+              INSERT INTO financial_transactions (
+                transaction_type, reference_type, reference_id,
+                amount, received_amount, cost_amount, debit_amount, credit_amount,
+                status, payment_method, description, device_id, company_id, created_by, transaction_date
+              ) VALUES (
+                'purchase', 'purchase', ${purchaseData.purchaseId},
+                ${productBillAmount}, ${netProductPaid}, ${costAmount}, ${netProductPaid}, 0,
+                ${purchaseData.status}, ${p.paymentMethod}, ${pDesc}, 
+                ${purchaseData.deviceId}, ${companyId}, ${purchaseData.userId}, ${effectivePurchaseDate.toISOString()}
+              ) RETURNING id
+            `
+            lastInsertedId = res[0]?.id
+          }
+        }
+      } else if (productPaid > 0) {
+        const pDesc = `Purchase #${purchaseData.purchaseId} - ${purchaseData.status} - ${pm} - Supplier: ${purchaseData.supplierName}`
+        const res = await query`
+          INSERT INTO financial_transactions (
+            transaction_type, reference_type, reference_id,
+            amount, received_amount, cost_amount, debit_amount, credit_amount,
+            status, payment_method, description, device_id, company_id, created_by, transaction_date
+          ) VALUES (
+            'purchase', 'purchase', ${purchaseData.purchaseId},
+            ${productBillAmount}, ${productPaid}, ${costAmount}, ${productPaid}, 0,
+            ${purchaseData.status}, ${pm}, ${pDesc}, 
+            ${purchaseData.deviceId}, ${companyId}, ${purchaseData.userId}, ${effectivePurchaseDate.toISOString()}
+          ) RETURNING id
+        `
+        lastInsertedId = res[0]?.id
+      }
+
+      // B. Courier charge separate row
+      const courierDesc = `Purchase #${purchaseData.purchaseId} - Courier charge`
+      const shipRes = await query`
+        INSERT INTO financial_transactions (
+          transaction_type, reference_type, reference_id,
+          amount, received_amount, cost_amount, debit_amount, credit_amount,
+          status, payment_method, description, device_id, company_id, created_by, transaction_date
+        ) VALUES (
+          'purchase_shipping', 'purchase', ${purchaseData.purchaseId},
+          ${courierCharge}, ${courierCharge}, 0, ${courierCharge}, 0,
+          'Completed', ${pm}, ${courierDesc}, 
+          ${purchaseData.deviceId}, ${companyId}, ${purchaseData.userId}, ${effectivePurchaseDate.toISOString()}
+        ) RETURNING id
+      `
+      if (!lastInsertedId) {
+        lastInsertedId = shipRes[0]?.id
+      }
+
+      return { success: true, transactionId: lastInsertedId }
+    }
+
+    // Otherwise: partial payment or no courier charge
     if (activePayments.length > 1) {
       for (const p of activePayments) {
         const pAmt = Number(p.amount) || 0
+        if (pAmt <= 0) continue
         const refStr = p.referenceNumber ? ` (Ref: ${p.referenceNumber})` : ""
         const pDesc = `Purchase #${purchaseData.purchaseId} - ${purchaseData.status} - ${p.paymentMethod}${refStr} - Supplier: ${purchaseData.supplierName}`
 
@@ -644,15 +726,18 @@ export async function recordPurchaseTransaction(purchaseData: {
             status, payment_method, description, device_id, company_id, created_by, transaction_date
           ) VALUES (
             'purchase', 'purchase', ${purchaseData.purchaseId},
-            ${totalAmount}, ${pAmt}, ${costAmount}, ${pAmt}, 0,
+            ${productBillAmount}, ${pAmt}, ${costAmount}, ${pAmt}, 0,
             ${purchaseData.status}, ${p.paymentMethod}, ${pDesc}, 
-            ${purchaseData.deviceId}, ${await getDeviceCompanyId(purchaseData.deviceId)}, ${purchaseData.userId}, ${purchaseData.purchaseDate}
+            ${purchaseData.deviceId}, ${companyId}, ${purchaseData.userId}, ${effectivePurchaseDate.toISOString()}
           ) RETURNING id
         `
         lastInsertedId = res[0]?.id
       }
     } else {
       const pm = activePayments[0]?.paymentMethod || purchaseData.paymentMethod || "Cash"
+      const debitAmount = receivedAmount
+      const description = `Purchase #${purchaseData.purchaseId} - ${purchaseData.status} - ${pm} - Supplier: ${purchaseData.supplierName}`
+
       const result = await query`
         INSERT INTO financial_transactions (
           transaction_type, reference_type, reference_id,
@@ -660,9 +745,9 @@ export async function recordPurchaseTransaction(purchaseData: {
           status, payment_method, description, device_id, company_id, created_by, transaction_date
         ) VALUES (
           'purchase', 'purchase', ${purchaseData.purchaseId},
-          ${totalAmount}, ${receivedAmount}, ${costAmount}, ${debitAmount}, ${creditAmount},
+          ${productBillAmount}, ${receivedAmount}, ${costAmount}, ${debitAmount}, 0,
           ${purchaseData.status}, ${pm}, ${description}, 
-          ${purchaseData.deviceId}, ${await getDeviceCompanyId(purchaseData.deviceId)}, ${purchaseData.userId}, ${purchaseData.purchaseDate}
+          ${purchaseData.deviceId}, ${companyId}, ${purchaseData.userId}, ${effectivePurchaseDate.toISOString()}
         ) RETURNING id
       `
       lastInsertedId = result[0]?.id
@@ -900,6 +985,7 @@ export async function syncSaleShippingTransactions(shippingData: {
   totalAmount?: number
   /** Product revenue only; when set, main sale row is aligned to exclude courier charge. */
   productCreditAmount?: number
+  transactionDate?: Date
 }) {
   try {
     // company_id comes from the device, never a fixed value
@@ -913,6 +999,10 @@ export async function syncSaleShippingTransactions(shippingData: {
         AND transaction_type = 'sale_shipping'
     `
 
+    if (shippingData.status === "Cancelled") {
+      return { success: true as const, transactionIds: [] as number[] }
+    }
+
     const statusStr = (shippingData.status || "").toLowerCase().trim()
     const paymentStatusStr = (shippingData.paymentStatus || "").toLowerCase().trim()
     const isPaidOrCompleted =
@@ -920,11 +1010,6 @@ export async function syncSaleShippingTransactions(shippingData: {
       statusStr === "paid" ||
       paymentStatusStr === "paid" ||
       paymentStatusStr === "completed"
-
-    // Only show shipping/courier charge as a separate entry in accounting when order payment status is Completed or Paid
-    if (shippingData.fulfillmentType !== "ship" || shippingData.status === "Cancelled" || !isPaidOrCompleted) {
-      return { success: true as const, transactionIds: [] as number[] }
-    }
 
     const courierPaidExtra = Number(shippingData.courierPaidExtra) || 0
     const expenseCourier = Number(shippingData.expenseCourier) || 0
@@ -970,8 +1055,9 @@ export async function syncSaleShippingTransactions(shippingData: {
     }
 
     const transactionIds: number[] = []
-    const baseDate = ensureDateTime(shippingData.saleDate)
+    const baseDate = ensureDateTime(shippingData.transactionDate || shippingData.saleDate)
 
+    // 1. Courier charge collected from customer (Money In)
     if (courierCredit > 0) {
       const result = await sql`
         INSERT INTO financial_transactions (
@@ -989,6 +1075,7 @@ export async function syncSaleShippingTransactions(shippingData: {
       transactionIds.push(Number(result[0]?.id))
     }
 
+    // 2. Courier charge paid by company (Money Out - company expense for shipping / direct dropship)
     if (expenseCourier > 0) {
       const result = await sql`
         INSERT INTO financial_transactions (
@@ -997,15 +1084,16 @@ export async function syncSaleShippingTransactions(shippingData: {
           status, payment_method, description, device_id, company_id, created_by, transaction_date
         ) VALUES (
           'sale_shipping', 'sale', ${shippingData.saleId},
-          ${expenseCourier}, 0, 0, ${expenseCourier}, 0,
-          ${shippingData.status}, ${shippingData.paymentMethod || "Cash"},
-          ${`Sale #${shippingData.saleId} - Courier expense`},
+          ${expenseCourier}, ${expenseCourier}, 0, ${expenseCourier}, 0,
+          'Completed', ${shippingData.paymentMethod || "Cash"},
+          ${`Sale #${shippingData.saleId} - Courier charge`},
           ${shippingData.deviceId}, ${companyId}, ${shippingData.userId}, ${baseDate.toISOString()}
         ) RETURNING id
       `
       transactionIds.push(Number(result[0]?.id))
     }
 
+    // 3. Packing expense paid by company (Money Out)
     if (expensePacking > 0) {
       const result = await sql`
         INSERT INTO financial_transactions (
@@ -1014,8 +1102,8 @@ export async function syncSaleShippingTransactions(shippingData: {
           status, payment_method, description, device_id, company_id, created_by, transaction_date
         ) VALUES (
           'sale_shipping', 'sale', ${shippingData.saleId},
-          ${expensePacking}, 0, 0, ${expensePacking}, 0,
-          ${shippingData.status}, ${shippingData.paymentMethod || "Cash"},
+          ${expensePacking}, ${expensePacking}, 0, ${expensePacking}, 0,
+          'Completed', ${shippingData.paymentMethod || "Cash"},
           ${`Sale #${shippingData.saleId} - Packing expense`},
           ${shippingData.deviceId}, ${companyId}, ${shippingData.userId}, ${baseDate.toISOString()}
         ) RETURNING id
@@ -1119,16 +1207,85 @@ export async function deleteSaleTransaction(saleId: number, deviceId: number) {
   }
 }
 
+// Clean up supplier payments when a purchase is deleted
+export async function cleanupSupplierPaymentsForPurchase(purchaseId: number) {
+  try {
+    const purchaseIdNum = Number(purchaseId)
+    if (!purchaseIdNum) return { success: true }
+
+    // Find any supplier_payment transactions that reference this purchase in their notes or description
+    const payments = await sql`
+      SELECT id, amount, debit_amount, notes, description
+      FROM financial_transactions
+      WHERE transaction_type = 'supplier_payment'
+        AND (
+          notes LIKE ${`%"purchaseId":${purchaseIdNum}%`}
+          OR notes LIKE ${`%"purchaseId": "${purchaseIdNum}"%`}
+          OR notes LIKE ${`%"purchaseId":${purchaseIdNum},%`}
+          OR notes LIKE ${`%Purchase #${purchaseIdNum}%`}
+          OR description LIKE ${`%Purchase #${purchaseIdNum}%`}
+        )
+    `
+
+    for (const p of payments) {
+      let stored: { v?: number; userNotes?: string; amountApplied?: number; extraCredit?: number; allocations?: Array<{ purchaseId: number; allocatedAmount?: number; amount?: number }> } | null = null
+      try {
+        stored = typeof p.notes === "string" ? JSON.parse(p.notes) : p.notes
+      } catch {
+        stored = null
+      }
+
+      const allocations = Array.isArray(stored?.allocations) ? stored.allocations : []
+      const targetAlloc = allocations.find((a: any) => Number(a.purchaseId) === purchaseIdNum)
+      const remainingAllocations = allocations.filter((a: any) => Number(a.purchaseId) !== purchaseIdNum)
+
+      if (remainingAllocations.length === 0) {
+        // If all allocations were for this purchase or no other allocations exist, delete the transaction
+        await sql`DELETE FROM financial_transactions WHERE id = ${p.id}`
+      } else {
+        // If other purchases were also settled in this payment, reduce the payment amount and update notes
+        const removedAmount = Number(targetAlloc?.allocatedAmount || targetAlloc?.amount) || 0
+        const newAmount = Math.max(0, Number(p.amount || 0) - removedAmount)
+        const updatedNotes = JSON.stringify({
+          ...stored,
+          amountApplied: Math.max(0, Number(stored?.amountApplied || p.amount || 0) - removedAmount),
+          allocations: remainingAllocations,
+        })
+        const newAllocCount = remainingAllocations.length
+        let cleanDesc = String(p.description || "").replace(/\d+\s+purchase\(s\)\s+affected/, `${newAllocCount} purchase(s) affected`)
+        cleanDesc = cleanDesc.replace(new RegExp(`\\[?Purchase#?\\s*${purchaseIdNum}\\]?`, "gi"), "").replace(/\s{2,}/g, " ").trim()
+
+        await sql`
+          UPDATE financial_transactions
+          SET amount = ${newAmount},
+              received_amount = ${newAmount},
+              debit_amount = ${newAmount},
+              notes = ${updatedNotes},
+              description = ${cleanDesc}
+          WHERE id = ${p.id}
+        `
+      }
+    }
+
+    return { success: true }
+  } catch (error) {
+    console.error(`Error cleaning up supplier payments for purchase ${purchaseId}:`, error)
+    return { success: false, error: error instanceof Error ? error.message : "Unknown error" }
+  }
+}
+
 // Delete transaction when purchase is deleted
 export async function deletePurchaseTransaction(purchaseId: number, deviceId: number) {
   try {
     const result = await sql`
       DELETE FROM financial_transactions 
-      WHERE reference_type = 'purchase' 
+      WHERE (reference_type = 'purchase' OR reference_type = 'purchase_shipping')
         AND reference_id = ${purchaseId} 
         AND device_id = ${deviceId}
       RETURNING id
     `
+
+    await cleanupSupplierPaymentsForPurchase(purchaseId)
 
     console.log(`Deleted ${result.length} financial transactions for purchase ${purchaseId}`)
     return { success: true, deletedCount: result.length }
@@ -1206,19 +1363,21 @@ export async function getFinancialSummary(
       transactions = await sql`
         SELECT * FROM financial_transactions 
         WHERE device_id = ${deviceId} 
+          AND NOT (transaction_type = 'purchase' AND debit_amount = 0 AND received_amount = 0)
           AND (
             (transaction_date AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${fromDateStr}::date AND ${toDateStr}::date
             OR (created_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${fromDateStr}::date AND ${toDateStr}::date
             OR transaction_date::date BETWEEN ${fromDateStr}::date AND ${toDateStr}::date
           )
-        ORDER BY transaction_date ASC, id ASC
+        ORDER BY transaction_date DESC, id DESC
       `
     } else {
       console.log("Querying all transactions for device:", deviceId)
       transactions = await sql`
         SELECT * FROM financial_transactions 
         WHERE device_id = ${deviceId}
-        ORDER BY transaction_date ASC, id ASC
+          AND NOT (transaction_type = 'purchase' AND debit_amount = 0 AND received_amount = 0)
+        ORDER BY transaction_date DESC, id DESC
       `
     }
 
@@ -1366,16 +1525,20 @@ export async function getFinancialSummary(
         const creditAmount = Number(tx.credit_amount) || 0
         const debitAmount = Number(tx.debit_amount) || 0
         
-        // FIXED: For credit purchases, calculate remaining amount properly
+        // FIXED: For credit/partial purchases and sales, calculate remaining amount properly
         let remaining = 0
-        if (status.toLowerCase() === 'credit' && type === 'purchase') {
+        const statusClean = status.toLowerCase()
+        if ((statusClean === 'credit' || statusClean === 'partial') && type === 'purchase') {
           remaining = amount - received
-        } else if (status.toLowerCase() === 'credit' && type === 'sale') {
+        } else if ((statusClean === 'credit' || statusClean === 'partial') && type === 'sale') {
           remaining = amount - received
-        } else if (status.toLowerCase() === 'completed' && received < amount) {
+        } else if ((statusClean === 'completed' || statusClean === 'paid') && received < amount) {
           remaining = amount - received
         } else if (type === 'transfer' && received < amount) {
           remaining = amount - received
+        }
+        if (type === 'purchase_shipping' || type === 'sale_shipping') {
+          remaining = 0
         }
 
         const effectiveDate = resolveTransactionDateTime(tx)
@@ -1400,7 +1563,7 @@ export async function getFinancialSummary(
           reference: `${tx.reference_type} #${tx.reference_id}`,
           remaining: Math.max(0, remaining),
           sale_id: tx.reference_type === 'sale' ? tx.reference_id : undefined,
-          purchase_id: tx.reference_type === 'purchase' ? tx.reference_id : undefined,
+          purchase_id: (tx.reference_type === 'purchase' || tx.transaction_type === 'purchase_shipping') ? tx.reference_id : undefined,
           supplier_payment_id: tx.transaction_type === 'supplier_payment' || tx.reference_type === 'supplier' ? tx.id : undefined,
           transfer_id: tx.reference_type === 'transfer' ? tx.reference_id : undefined,
           reference_id: tx.reference_id,
