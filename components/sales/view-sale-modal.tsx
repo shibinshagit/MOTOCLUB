@@ -50,7 +50,7 @@ function SaleStatusBadge({ status }: { status: string }) {
     Partial: "bg-blue-50 text-blue-700 border-blue-200",
     Credit: "bg-amber-50 text-amber-700 border-amber-200",
     Cancelled: "bg-rose-50 text-rose-700 border-rose-200",
-    Returned: "bg-purple-50 text-purple-700 border-purple-200",
+    Returned: "bg-red-100 text-red-800 border-red-300 font-bold",
     Pending: "bg-slate-50 text-slate-700 border-slate-200",
   }
 
@@ -265,7 +265,7 @@ export default function ViewSaleModal({
   const getStatusDisplay = (sale: any) => {
     if (!sale) return "Pending"
     if (sale.status === "Cancelled") return "Cancelled"
-    if (sale.status === "Returned") return "Returned"
+    if (sale.status === "Returned" || sale.payment_status?.toLowerCase() === "returned") return "Returned"
     const pStatus = sale.payment_status?.toLowerCase()
     if (pStatus === "paid" || pStatus === "completed") return "Paid"
     if (pStatus === "partial") return "Partial"

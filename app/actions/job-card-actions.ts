@@ -1186,6 +1186,16 @@ export async function getAllJobCards(
     sales = await sql`
       SELECT 
         s.*,
+        CASE 
+          WHEN s.payment_status = 'Returned' OR LOWER(COALESCE(s.payment_status, '')) = 'returned' THEN 'Returned'
+          WHEN (s.delivery_status = 'Returned' OR s.status = 'Returned') AND EXISTS (
+            SELECT 1 FROM financial_transactions ft 
+            WHERE ft.reference_type = 'sale' 
+              AND ft.reference_id = s.id 
+              AND ft.transaction_type = 'sale_return'
+          ) THEN 'Returned'
+          ELSE s.payment_status
+        END as payment_status,
         COALESCE(NULLIF(s.customer_name_override, ''), c.name) as customer_name,
         COALESCE(NULLIF(s.customer_phone_override, ''), c.phone) as customer_phone,
         c.street as customer_street,

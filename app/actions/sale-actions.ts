@@ -13,6 +13,7 @@ import { syncCustomerShippingAddress } from "./customer-actions"
 import { getAuthoritativeProfitSummary, type AuthoritativeProfitSummary } from "@/lib/profit-calculation"
 import { applyStockTransition, getSaleStockLines, applyStockDelta } from "@/lib/sale-stock"
 import { allocatePurchaseCosts } from "@/lib/purchase-courier"
+import { getDeviceCompanyId } from "@/lib/device-company"
 
 function getShippingAmounts(shipping: ReturnType<typeof normalizeSaleShippingInput>) {
   if (shipping.fulfillment_type !== "ship") {
@@ -726,15 +727,39 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
 
   try {
     const result = await executeWithRetry(async () => {
+      // Auto-heal any returned sales that already have refunds in financial_transactions
+      sql`
+        UPDATE sales s
+        SET payment_status = 'Returned', status = 'Returned'
+        WHERE (s.delivery_status = 'Returned' OR s.status = 'Returned')
+          AND (s.payment_status IS NULL OR s.payment_status != 'Returned')
+          AND EXISTS (
+            SELECT 1 FROM financial_transactions ft 
+            WHERE ft.reference_type = 'sale' 
+              AND ft.reference_id = s.id 
+              AND ft.transaction_type = 'sale_return'
+          )
+      `.catch(() => {})
+
       const sales = await sql`
         SELECT 
           s.id,
+          s.device_id,
           s.is_pos_updated,
           s.is_ready_to_ship,
           COALESCE(s.sale_date, s.created_at) as sale_date,
           s.created_at,
           s.status,
-          s.payment_status,
+          CASE 
+            WHEN s.payment_status = 'Returned' OR LOWER(COALESCE(s.payment_status, '')) = 'returned' THEN 'Returned'
+            WHEN (s.delivery_status = 'Returned' OR s.status = 'Returned') AND EXISTS (
+              SELECT 1 FROM financial_transactions ft 
+              WHERE ft.reference_type = 'sale' 
+                AND ft.reference_id = s.id 
+                AND ft.transaction_type = 'sale_return'
+            ) THEN 'Returned'
+            ELSE s.payment_status
+          END as payment_status,
           s.payment_method,
           s.fulfillment_type,
           s.delivery_status,
@@ -4065,19 +4090,19 @@ export async function updateSaleDeliveryStatus(
         }
       }
 
-      // Mark sale as Cancelled and update financial fields
+      // Mark sale as Returned and update payment_status to Pending (awaiting refund) without immediate cash flow
       await sql`
         UPDATE sales
         SET delivery_status = 'Returned',
-            status = 'Cancelled',
+            status = 'Returned',
+            payment_status = 'Pending',
             updated_at = NOW()
         WHERE id = ${saleId}
-          AND device_id = ${deviceId}
       `
 
       revalidatePath("/dashboard")
       revalidatePath("/staff/dashboard")
-      return { success: true as const, message: "Order marked as Returned. Stock has been fully restored.", trackingId: rows[0].tracking_id }
+      return { success: true as const, message: "Order marked as Returned. Stock has been fully restored and payment status set to Pending.", trackingId: rows[0].tracking_id }
     }
 
     // ===== NORMAL DELIVERY STATUS TRANSITIONS =====
@@ -5122,6 +5147,122 @@ export async function moveSaleToDirectPurchase(input: MoveSaleToDirectPurchaseIn
     return {
       success: false,
       message: err instanceof Error ? err.message : "Failed to move order to Direct",
+    }
+  }
+}
+
+export async function processSaleReturnRefund(input: {
+  saleId: number
+  refundAmount: number
+  paymentMethod: string
+  deviceId?: number
+  userId?: number
+  notes?: string
+}) {
+  try {
+    const saleId = Number(input.saleId)
+    const refundAmount = Math.max(0, Number(input.refundAmount) || 0)
+
+    if (!saleId) {
+      return { success: false, message: "Sale ID is required" }
+    }
+
+    const saleRows = await sql`
+      SELECT s.*, c.name as customer_name, c.phone as customer_phone
+      FROM sales s
+      LEFT JOIN customers c ON s.customer_id = c.id
+      WHERE s.id = ${saleId}
+      LIMIT 1
+    `
+
+    if (saleRows.length === 0) {
+      return { success: false, message: `Sale #${saleId} not found` }
+    }
+
+    const sale = saleRows[0]
+
+    // 1. Restriction: If sale is already marked as Returned, block further returns
+    if (sale.payment_status === "Returned" || sale.payment_status?.toLowerCase() === "returned") {
+      return {
+        success: false,
+        message: `Sale #${saleId} has already been returned. Multiple return refunds are not allowed.`,
+      }
+    }
+
+    // 2. Restriction: Check if a sale_return financial transaction already exists for this order
+    const existingRefund = await sql`
+      SELECT id, amount, transaction_date 
+      FROM financial_transactions 
+      WHERE reference_type = 'sale' 
+        AND reference_id = ${saleId} 
+        AND transaction_type = 'sale_return'
+      LIMIT 1
+    `
+
+    if (existingRefund.length > 0) {
+      // Ensure sales payment_status and status are updated to 'Returned'
+      await sql`
+        UPDATE sales
+        SET payment_status = 'Returned',
+            status = 'Returned',
+            updated_at = NOW()
+        WHERE id = ${saleId}
+      `
+      return {
+        success: false,
+        message: `A return refund has already been processed for Sale #${saleId}. Multiple returns are restricted.`,
+      }
+    }
+
+    const actualDeviceId = Number(sale.device_id || input.deviceId || 1)
+    const companyId = await getDeviceCompanyId(actualDeviceId)
+    const customerName = sale.customer_name || sale.customer_name_override || "Customer"
+    const paymentMethod = input.paymentMethod || sale.payment_method || "Cash"
+
+    // If refund amount > 0, record Money Out in financial_transactions
+    if (refundAmount > 0) {
+      const description = `Sale #${saleId} - Return Refund - ${customerName} - ${paymentMethod}`
+      await sql`
+        INSERT INTO financial_transactions (
+          transaction_name, transaction_type, reference_type, reference_id,
+          amount, received_amount, cost_amount, debit_amount, credit_amount,
+          status, payment_method, description, notes, device_id, company_id, created_by, transaction_date
+        ) VALUES (
+          'Sale Return Refund', 'sale_return', 'sale', ${saleId},
+          ${refundAmount}, ${refundAmount}, 0, ${refundAmount}, 0,
+          'Completed', ${paymentMethod}, ${description}, ${input.notes || null},
+          ${actualDeviceId}, ${companyId}, ${input.userId || sale.created_by || 1}, NOW()
+        )
+      `
+    }
+
+    // Update payment_status to 'Returned' and ensure status is 'Returned'
+    await sql`
+      UPDATE sales
+      SET payment_status = 'Returned',
+          status = 'Returned',
+          updated_at = NOW()
+      WHERE id = ${saleId}
+    `
+
+    try {
+      revalidatePath("/dashboard")
+      revalidatePath("/staff/dashboard")
+      revalidatePath("/sales")
+      revalidatePath("/sales/list")
+      revalidatePath("/accounts")
+      revalidatePath("/transactions")
+    } catch (_) {}
+
+    return {
+      success: true,
+      message: `Return refund of ${refundAmount.toFixed(2)} processed for Sale #${saleId}. Payment status updated to Returned.`,
+    }
+  } catch (err: any) {
+    console.error("processSaleReturnRefund error:", err)
+    return {
+      success: false,
+      message: err instanceof Error ? err.message : "Failed to process return refund",
     }
   }
 }
