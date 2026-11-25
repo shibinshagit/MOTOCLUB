@@ -28,7 +28,7 @@ interface Transaction {
 }
 
 interface Receivable {
-  id: number
+  id: number | string
   customer_name: string
   amount: number
   total_amount: number
@@ -36,10 +36,11 @@ interface Receivable {
   due_date: string
   days_overdue: number
   status: string
+  is_transfer?: boolean
 }
 
 interface Payable {
-  id: number
+  id: number | string
   supplier_name: string
   amount: number
   total_amount: number
@@ -47,6 +48,7 @@ interface Payable {
   due_date: string
   days_overdue: number
   status: string
+  is_transfer?: boolean
 }
 
 export interface FinancialData {

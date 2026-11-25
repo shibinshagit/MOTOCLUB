@@ -1737,13 +1737,22 @@ export async function getFinancialSummary(
         s.received_amount,
         s.sale_date,
         s.status,
-        c.name as customer_name,
-        (s.total_amount - COALESCE(s.received_amount, 0)) as outstanding_amount
+        s.payment_status,
+        COALESCE(NULLIF(s.customer_name_override, ''), c.name, 'Walk-in Customer') as customer_name,
+        COALESCE(
+          NULLIF(s.balance_amount, 0),
+          GREATEST(0, COALESCE(s.total_amount, 0) - COALESCE(s.discount, 0) - COALESCE(s.received_amount, 0))
+        ) as outstanding_amount
       FROM sales s
       LEFT JOIN customers c ON s.customer_id = c.id
       WHERE s.device_id = ${deviceId}
-        AND s.status != 'Cancelled'
-        AND (s.total_amount - COALESCE(s.received_amount, 0)) > 0
+        AND LOWER(COALESCE(s.status, '')) NOT IN ('cancelled', 'returned')
+        AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('paid', 'completed', 'cancelled', 'returned')
+        AND LOWER(COALESCE(s.delivery_status, '')) NOT IN ('returned', 'cancelled', 'failed')
+        AND COALESCE(
+          NULLIF(s.balance_amount, 0),
+          GREATEST(0, COALESCE(s.total_amount, 0) - COALESCE(s.discount, 0) - COALESCE(s.received_amount, 0))
+        ) > 0.01
       ORDER BY s.sale_date DESC
     `
 
@@ -1754,12 +1763,14 @@ export async function getFinancialSummary(
         p.received_amount,
         p.purchase_date,
         p.status,
-        p.supplier as supplier_name,
-        (p.total_amount - COALESCE(p.received_amount, 0)) as outstanding_amount
+        p.purchase_status,
+        COALESCE(NULLIF(TRIM(p.supplier), ''), 'Unknown Supplier') as supplier_name,
+        GREATEST(0, COALESCE(p.total_amount, 0) - COALESCE(p.received_amount, 0)) as outstanding_amount
       FROM purchases p
       WHERE p.device_id = ${deviceId}
-        AND p.status != 'Cancelled'
-        AND (p.total_amount - COALESCE(p.received_amount, 0)) > 0
+        AND LOWER(COALESCE(p.status, '')) NOT IN ('paid', 'completed', 'cancelled')
+        AND LOWER(COALESCE(p.purchase_status, '')) NOT IN ('cancelled', 'fully returned')
+        AND GREATEST(0, COALESCE(p.total_amount, 0) - COALESCE(p.received_amount, 0)) > 0.01
       ORDER BY p.purchase_date DESC
     `
 
@@ -1928,7 +1939,8 @@ export async function getFinancialSummary(
             0,
             Math.floor((new Date().getTime() - new Date(r.sale_date).getTime()) / (1000 * 60 * 60 * 24)),
           ),
-          status: r.status,
+          status: r.payment_status || r.status || "Credit",
+          is_transfer: false,
         })),
         ...transferReceivablesQuery.map((r: any) => ({
           id: `T-${r.id}`,
@@ -1941,7 +1953,8 @@ export async function getFinancialSummary(
             0,
             Math.floor((new Date().getTime() - new Date(r.due_date).getTime()) / (1000 * 60 * 60 * 24)),
           ),
-          status: r.status,
+          status: r.status || "Completed",
+          is_transfer: true,
         })),
       ],
       payables: [
@@ -1956,7 +1969,8 @@ export async function getFinancialSummary(
             0,
             Math.floor((new Date().getTime() - new Date(p.purchase_date).getTime()) / (1000 * 60 * 60 * 24)),
           ),
-          status: p.status,
+          status: p.status || "Credit",
+          is_transfer: false,
         })),
         ...transferPayablesQuery.map((p: any) => ({
           id: `T-${p.id}`,
@@ -1969,7 +1983,8 @@ export async function getFinancialSummary(
             0,
             Math.floor((new Date().getTime() - new Date(p.due_date).getTime()) / (1000 * 60 * 60 * 24)),
           ),
-          status: p.status,
+          status: p.status || "Completed",
+          is_transfer: true,
         })),
       ],
     }

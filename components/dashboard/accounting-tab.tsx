@@ -3122,10 +3122,17 @@ const renderTransactionList = (
                     {financialData?.receivables.map((receivable) => (
                       <tr key={receivable.id}>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-foreground">
-                          #{receivable.id}
+                          {receivable.is_transfer ? receivable.id : `#${receivable.id}`}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">
-                          {receivable.customer_name}
+                          <div className="flex items-center gap-2">
+                            <span>{receivable.customer_name}</span>
+                            {receivable.is_transfer && (
+                              <Badge variant="outline" className="border-purple-200 bg-purple-50 text-[10px] text-purple-700 font-medium">
+                                Branch Transfer
+                              </Badge>
+                            )}
+                          </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground text-right">
                           {currency} {receivable.total_amount.toFixed(2)}
@@ -3140,9 +3147,14 @@ const renderTransactionList = (
                           {formatDateOnly(receivable.due_date)}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <Badge variant={receivable.days_overdue > 30 ? "destructive" : "default"}>
-                            {receivable.days_overdue > 0 ? `${receivable.days_overdue} days old` : "Current"}
-                          </Badge>
+                          <div className="flex items-center gap-1.5">
+                            <Badge variant="outline" className="text-xs">
+                              {receivable.status || "Credit"}
+                            </Badge>
+                            <Badge variant={receivable.days_overdue > 30 ? "destructive" : "secondary"} className="text-xs">
+                              {receivable.days_overdue > 0 ? `${receivable.days_overdue}d old` : "Current"}
+                            </Badge>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -3189,10 +3201,17 @@ const renderTransactionList = (
                     {financialData?.payables.map((payable) => (
                       <tr key={payable.id}>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-foreground">
-                          #{payable.id}
+                          {payable.is_transfer ? payable.id : `#${payable.id}`}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">
-                          {payable.supplier_name}
+                          <div className="flex items-center gap-2">
+                            <span>{payable.supplier_name}</span>
+                            {payable.is_transfer && (
+                              <Badge variant="outline" className="border-purple-200 bg-purple-50 text-[10px] text-purple-700 font-medium">
+                                Branch Transfer
+                              </Badge>
+                            )}
+                          </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground text-right">
                           {currency} {payable.total_amount.toFixed(2)}
@@ -3207,9 +3226,14 @@ const renderTransactionList = (
                           {formatDateOnly(payable.due_date)}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <Badge variant={payable.days_overdue > 30 ? "destructive" : "default"}>
-                            {payable.days_overdue > 0 ? `${payable.days_overdue} days old` : "Current"}
-                          </Badge>
+                          <div className="flex items-center gap-1.5">
+                            <Badge variant="outline" className="text-xs">
+                              {payable.status || "Credit"}
+                            </Badge>
+                            <Badge variant={payable.days_overdue > 30 ? "destructive" : "secondary"} className="text-xs">
+                              {payable.days_overdue > 0 ? `${payable.days_overdue}d old` : "Current"}
+                            </Badge>
+                          </div>
                         </td>
                       </tr>
                     ))}
