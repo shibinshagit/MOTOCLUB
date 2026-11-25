@@ -1503,6 +1503,202 @@ export async function updatePurchase(formData: FormData) {
   }
 }
 
+export async function cancelPurchase(purchaseId: number, deviceId: number, userId?: number, reason?: string) {
+  if (!purchaseId || !deviceId) {
+    return { success: false, message: "Purchase ID and Device ID are required" }
+  }
+
+  resetConnectionState()
+
+  try {
+    const outcome = await sql.begin(async (tx: any) => {
+      // 1. Fetch current purchase
+      const purchaseRows = await tx`
+        SELECT * FROM purchases WHERE id = ${purchaseId} AND device_id = ${deviceId} FOR UPDATE
+      `
+      if (purchaseRows.length === 0) {
+        return { success: false, message: "Purchase not found" }
+      }
+      const purchase = purchaseRows[0]
+
+      if (String(purchase.status).toLowerCase() === "cancelled") {
+        return { success: false, message: "Purchase is already cancelled" }
+      }
+
+      // 2. Check if returns exist
+      const returnRows = await tx`
+        SELECT 1 FROM purchase_returns WHERE purchase_id = ${purchaseId} LIMIT 1
+      `
+      if (returnRows.length > 0) {
+        return {
+          success: false,
+          message: "Cannot cancel a purchase that has return records. Please handle returns instead."
+        }
+      }
+
+      // 3. Fetch purchase items
+      const items = await tx`
+        SELECT product_id, product_variant_id, batch_id, quantity
+        FROM purchase_items
+        WHERE purchase_id = ${purchaseId}
+      `
+
+      // 4. Reverse stock if stock was previously added
+      const isDropship = String(purchase.purchase_type || "").toLowerCase() === "dropship"
+      const wasStockAdded = String(purchase.purchase_status || "").toLowerCase() === "delivered" && String(purchase.status || "").toLowerCase() !== "cancelled"
+
+      if (!isDropship && wasStockAdded) {
+        for (const item of items) {
+          const qty = Number(item.quantity) || 0
+          if (qty > 0) {
+            await adjustDeviceProductStock(
+              item.product_id,
+              item.product_variant_id || null,
+              item.batch_id || null,
+              deviceId,
+              -qty,
+              tx
+            )
+
+            try {
+              await tx`
+                INSERT INTO product_stock_history (
+                  product_id, product_variant_id, batch_id, quantity, type, reference_id, reference_type, notes, created_by, device_id
+                ) VALUES (
+                  ${item.product_id}, ${item.product_variant_id || null}, ${item.batch_id || null}, ${-qty},
+                  'adjustment', ${purchaseId}, 'purchase',
+                  ${`Stock reversed: Purchase #${purchaseId} cancelled - ${purchase.supplier || ""}`},
+                  ${userId || purchase.created_by}, ${deviceId}
+                )
+              `
+            } catch (hErr) {
+              console.error("Failed to add stock history for cancelled purchase:", hErr)
+            }
+
+            if (item.batch_id) {
+              await tx`
+                UPDATE product_batches
+                SET status = 'cancelled', remaining_quantity = 0, updated_at = NOW()
+                WHERE id = ${item.batch_id}
+              `
+            }
+          }
+        }
+      }
+
+      // 5. Calculate total paid amount from financial_transactions or purchase.received_amount
+      const existingPayments = await tx`
+        SELECT id, amount, debit_amount, payment_method, transaction_date
+        FROM financial_transactions
+        WHERE reference_type = 'purchase'
+          AND reference_id = ${purchaseId}
+          AND device_id = ${deviceId}
+          AND debit_amount > 0
+      `
+
+      let totalPaidAmount = 0
+      for (const ep of existingPayments) {
+        totalPaidAmount += Number(ep.debit_amount) || 0
+      }
+
+      if (totalPaidAmount <= 0) {
+        const rawReceived = Number(purchase.received_amount) || 0
+        if (rawReceived > 0) {
+          totalPaidAmount = rawReceived
+        }
+      }
+
+      // Check if a refund has already been recorded for this cancellation
+      const existingRefundRows = await tx`
+        SELECT 1 FROM financial_transactions
+        WHERE reference_type = 'purchase'
+          AND reference_id = ${purchaseId}
+          AND transaction_type = 'purchase_cancel_refund'
+        LIMIT 1
+      `
+
+      // Option 2: Keep the original Money Out transaction row(s) and insert an offsetting Money In (refund) row
+      if (totalPaidAmount > 0 && existingRefundRows.length === 0) {
+        const paymentMethod = purchase.payment_method || existingPayments[0]?.payment_method || "Cash"
+        const refundDescription = `Purchase #${purchaseId} Cancelled - Refund from ${purchase.supplier || "Supplier"}`
+        const companyId = await getDeviceCompanyId(deviceId)
+
+        await tx`
+          INSERT INTO financial_transactions (
+            transaction_name,
+            transaction_type,
+            reference_type,
+            reference_id,
+            amount,
+            received_amount,
+            cost_amount,
+            debit_amount,
+            credit_amount,
+            status,
+            payment_method,
+            description,
+            notes,
+            device_id,
+            company_id,
+            created_by,
+            transaction_date
+          ) VALUES (
+            'Purchase Cancellation Refund',
+            'purchase_cancel_refund',
+            'purchase',
+            ${purchaseId},
+            ${totalPaidAmount},
+            ${totalPaidAmount},
+            0,
+            0,
+            ${totalPaidAmount},
+            'Completed',
+            ${paymentMethod},
+            ${refundDescription},
+            ${reason ? `Cancellation reason: ${reason.trim()}` : 'Purchase cancelled - payment refunded'},
+            ${deviceId},
+            ${companyId},
+            ${userId || purchase.created_by},
+            NOW()
+          )
+        `
+      }
+
+      // 6. Update purchase status to Cancelled
+      const cancelNotes = reason?.trim()
+        ? `${purchase.notes ? purchase.notes + " | " : ""}Cancelled: ${reason.trim()}`
+        : (purchase.notes ? `${purchase.notes} | Cancelled` : "Purchase cancelled")
+
+      await tx`
+        UPDATE purchases
+        SET
+          status = 'Cancelled',
+          purchase_status = 'Cancelled',
+          notes = ${cancelNotes},
+          updated_at = NOW()
+        WHERE id = ${purchaseId} AND device_id = ${deviceId}
+      `
+
+      return { success: true, message: `Purchase #${purchaseId} cancelled successfully` }
+    })
+
+    if (outcome.success) {
+      try {
+        revalidatePath("/dashboard", "layout")
+        revalidatePath("/purchases")
+      } catch (_) {}
+    }
+
+    return outcome
+  } catch (error) {
+    console.error("Cancel purchase error:", error)
+    return {
+      success: false,
+      message: `Database error: ${getLastError()?.message || "Unknown error"}. Please try again later.`,
+    }
+  }
+}
+
 export async function deletePurchase(purchaseId: number, deviceId: number) {
   if (!purchaseId || !deviceId) {
     return { success: false, message: "Purchase ID and Device ID are required" }

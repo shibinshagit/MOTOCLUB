@@ -1522,6 +1522,16 @@ const getMoneyFlowInfo = (transaction: any) => {
     }
   }
 
+  // Purchase Return & Purchase Cancel Refund - Money In
+  if (type === 'purchase_return' || type === 'purchase_cancel_refund') {
+    return {
+      type: 'in',
+      text: type === 'purchase_cancel_refund' ? 'Purchase Cancel Refund' : 'Purchase Return Refund',
+      color: 'text-emerald-600',
+      amount: n(transaction.credit) || n(transaction.received) || amount
+    }
+  }
+
   // Customer Payments - Money In
   if (type === 'customer_payment') {
     return {
@@ -2047,6 +2057,8 @@ const getTransactionTypeIcon = (type: string) => {
       return <Package className="h-4 w-4" />
     case "sale_return":
     case "return":
+    case "purchase_return":
+    case "purchase_cancel_refund":
       return <RotateCcw className="h-4 w-4 text-purple-600" />
     case "customer_payment":
       return <Users className="h-4 w-4 text-emerald-600" />
@@ -2462,6 +2474,8 @@ const renderTransactionList = (
               <div className="col-span-1 text-center">
                 <Badge variant="outline" className="text-xs capitalize">
                   {transaction.type === "sale_return" ? "Sale Return" :
+                   transaction.type === "purchase_return" ? "Purchase Return" :
+                   transaction.type === "purchase_cancel_refund" ? "Cancel Refund" :
                    transaction.type === "customer_payment" ? "Customer Payment" :
                    transaction.type === "sale_shipping" || transaction.type === "purchase_shipping" ? "Shipping" :
                    (transaction.type || "unknown")}

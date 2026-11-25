@@ -4,7 +4,7 @@ import React, { useState, useEffect, type ReactNode } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Edit, Loader2, Package, Printer, Trash2, RotateCcw } from "lucide-react"
+import { Edit, Loader2, Package, Printer, Trash2, RotateCcw, Ban } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 import { notifyError, notifySuccess } from "@/lib/notifications"
 import {
@@ -15,10 +15,11 @@ import {
 import { useConfirm } from "@/hooks/use-confirm"
 import { FormAlert } from "@/components/ui/form-alert"
 import { format } from "date-fns"
-import { useSelector } from "react-redux"
+import { useSelector, useDispatch } from "react-redux"
 import { selectDeviceCurrency, selectDeviceId } from "@/store/slices/deviceSlice"
+import { setNeedsRefresh } from "@/store/slices/productSlice"
 import { printPurchaseReceipt } from "@/lib/receipt-utils"
-import { getPurchaseDetails, markPurchaseDelivered } from "@/app/actions/purchase-actions"
+import { getPurchaseDetails, markPurchaseDelivered, cancelPurchase } from "@/app/actions/purchase-actions"
 import { getProductById } from "@/app/actions/product-actions"
 import { ProductDetailSlider } from "@/components/products/product-detail-slider"
 import ReturnPurchaseModal from "@/components/purchases/return-purchase-modal"
@@ -40,6 +41,7 @@ function PaymentStatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
     Paid: "bg-emerald-50 text-emerald-700 border-emerald-200",
     Credit: "bg-amber-50 text-amber-700 border-amber-200",
+    Cancelled: "bg-rose-50 text-rose-700 border-rose-200",
   }
 
   return (
@@ -58,6 +60,7 @@ function DeliveryStatusBadge({ status }: { status: string }) {
     Delivered: "bg-emerald-50 text-emerald-700 border-emerald-200",
     Pending: "bg-amber-50 text-amber-700 border-amber-200",
     Ordered: "bg-blue-50 text-blue-700 border-blue-200",
+    Cancelled: "bg-rose-50 text-rose-700 border-rose-200",
     "Fully Returned": "bg-rose-50 text-rose-700 border-rose-200",
     "Partially Returned": "bg-amber-50 text-amber-700 border-amber-200",
   }
@@ -140,6 +143,8 @@ export default function ViewPurchaseModal({
   const [isItemLoading, setIsItemLoading] = useState(false)
   const [isDelivering, setIsDelivering] = useState(false)
   const [isReturnModalOpen, setIsReturnModalOpen] = useState(false)
+  const [isCancelling, setIsCancelling] = useState(false)
+  const dispatch = useDispatch()
 
   const handleReturn = () => {
     if (!purchaseData || !purchaseId) return
@@ -241,14 +246,16 @@ export default function ViewPurchaseModal({
     const total = Number.parseFloat(purchaseData.total_amount) || (subtotal + taxTotal - discount)
     const grandTotal = total + courierCharge
 
-    const status = purchaseData.status === "Partial" ? "Cancelled" : purchaseData.status
+    const status = purchaseData.status === "Partial" ? "Credit" : purchaseData.status
     let paid = 0
     if (status === "Credit") {
       paid = Number.parseFloat(purchaseData.received_amount) || 0
     } else if (status === "Paid") {
       paid = total
+    } else if (status === "Cancelled") {
+      paid = 0
     }
-    const remaining = Math.max(0, total - paid)
+    const remaining = status === "Cancelled" ? 0 : Math.max(0, total - paid)
 
     return { subtotal, taxTotal, total, grandTotal, paid, remaining, courierCharge, discount }
   }
@@ -263,6 +270,31 @@ export default function ViewPurchaseModal({
   const handleEdit = () => {
     if (onEdit && purchaseData) {
       onEdit(purchaseData)
+    }
+  }
+
+  const handleCancel = async () => {
+    if (!purchaseId || !deviceId || isCancelling) return
+    const shouldCancel = await confirm(
+      "Are you sure you want to cancel this purchase? This will reverse any added stock and remove its payment from accounts."
+    )
+    if (!shouldCancel) return
+
+    try {
+      setIsCancelling(true)
+      const res = await cancelPurchase(purchaseId, deviceId, purchaseData?.created_by || deviceId)
+      if (res.success) {
+        notifySuccess(toast, res.message || "Purchase cancelled successfully")
+        dispatch(setNeedsRefresh(true))
+        if (onDelivered) onDelivered()
+        onClose()
+      } else {
+        notifyError(toast, res.message || "Failed to cancel purchase")
+      }
+    } catch (err: any) {
+      notifyError(toast, err.message || "An error occurred while cancelling the purchase")
+    } finally {
+      setIsCancelling(false)
     }
   }
 
@@ -406,7 +438,7 @@ export default function ViewPurchaseModal({
                 variant="outline"
                 size="sm"
                 onClick={handleEdit}
-                disabled={isLoading || !purchaseData}
+                disabled={isLoading || !purchaseData || purchaseData.status === "Cancelled" || purchaseData.purchase_status === "Cancelled"}
                 className="h-8 border-slate-200 bg-white px-3 text-xs"
               >
                 <Edit className="mr-1.5 h-3.5 w-3.5" />
@@ -426,12 +458,24 @@ export default function ViewPurchaseModal({
                 variant="outline"
                 size="sm"
                 onClick={handleReturn}
-                disabled={isLoading || !purchaseData || purchaseData.purchase_status === "Fully Returned"}
+                disabled={isLoading || !purchaseData || purchaseData.purchase_status === "Fully Returned" || purchaseData.status === "Cancelled" || purchaseData.purchase_status === "Cancelled"}
                 className="h-8 border-slate-200 bg-white px-3 text-xs"
               >
                 <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
                 Return
               </Button>
+              {purchaseData?.status !== "Cancelled" && purchaseData?.purchase_status !== "Cancelled" && purchaseData?.purchase_status !== "Fully Returned" && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleCancel}
+                  disabled={isLoading || isCancelling || !purchaseData}
+                  className="h-8 border-amber-200 bg-white px-3 text-xs text-amber-700 hover:bg-amber-50"
+                >
+                  {isCancelling ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Ban className="mr-1.5 h-3.5 w-3.5" />}
+                  Cancel
+                </Button>
+              )}
               <Button
                 variant="outline"
                 size="sm"
@@ -442,7 +486,7 @@ export default function ViewPurchaseModal({
                 <Trash2 className="mr-1.5 h-3.5 w-3.5" />
                 Delete
               </Button>
-              {purchaseData?.purchase_status === "Ordered" && (
+              {purchaseData?.purchase_status === "Ordered" && purchaseData?.status !== "Cancelled" && (
                 <Button
                   size="sm"
                   onClick={handleMarkDelivered}

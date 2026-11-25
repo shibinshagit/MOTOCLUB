@@ -539,6 +539,7 @@ export default function EditPurchaseModal({
                           <SelectContent className="bg-white border-gray-200">
                             <SelectItem value="Credit">Credit</SelectItem>
                             <SelectItem value="Paid">Paid</SelectItem>
+                            <SelectItem value="Cancelled">Cancelled</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -554,6 +555,7 @@ export default function EditPurchaseModal({
                         <SelectContent className="bg-white border-gray-200">
                           <SelectItem value="Delivered">Delivered</SelectItem>
                           <SelectItem value="Ordered">Ordered</SelectItem>
+                          <SelectItem value="Cancelled">Cancelled</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
