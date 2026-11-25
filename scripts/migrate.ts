@@ -1400,6 +1400,24 @@ async function upgradeLegacyColumns() {
     }
   })
 
+  await runSafe("financial_transactions.cleanup_duplicate_salary_advance", () => sql`
+    DELETE FROM financial_transactions ft1
+    USING financial_transactions ft2
+    WHERE ft1.reference_type = 'salary_advance'
+      AND ft2.reference_type = 'salary_advance'
+      AND ft1.reference_id = ft2.reference_id
+      AND ft1.id > ft2.id
+  `)
+
+  await runSafe("financial_transactions.remove_unpaid_salary_advance_transactions", () => sql`
+    DELETE FROM financial_transactions ft
+    USING staff_requests sr
+    WHERE ft.reference_type = 'salary_advance'
+      AND ft.reference_id = sr.id
+      AND sr.request_type = 'salary_advance'
+      AND sr.status <> 'Paid'
+  `)
+
   await runSafe("product_batches.adj_zero_cost_backfill", () => sql`
     UPDATE product_batches pb
     SET

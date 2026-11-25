@@ -1061,6 +1061,18 @@ return (
                     {payment.user_notes ? (
                       <div className="text-xs text-gray-500 mt-1">{payment.user_notes}</div>
                     ) : null}
+                    {payment.allocations && payment.allocations.length > 0 && (
+                      <div className="mt-1.5 flex flex-wrap gap-1">
+                        {payment.allocations.map((alloc, idx) => (
+                          <span
+                            key={idx}
+                            className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-semibold bg-blue-50 text-blue-700 border border-blue-200"
+                          >
+                            Sale #{alloc.saleId}: {formatCurrency(alloc.allocatedAmount)}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <div className="flex gap-1 flex-shrink-0">
                     <Button

@@ -8,7 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { TableRowsInput } from "@/components/ui/table-rows-input"
 import { useAppSelector } from "@/store/hooks"
 import { selectActiveStaff } from "@/store/slices/staffSlice"
-import { selectUser } from "@/store/slices/deviceSlice"
+import { selectUser, selectDeviceCurrency } from "@/store/slices/deviceSlice"
 import PurchaseManagerKpiCards from "@/components/purchase-manager/purchase-manager-kpi-cards"
 import {
   ExcelColumnFilterHeader,
@@ -97,17 +97,27 @@ import { JobCardModal } from "@/components/shared/job-card/job-card-modal"
 import SaleDocumentActions from "@/components/sales/sale-document-actions"
 import { MoveToDirectModal } from "@/components/sales/move-to-direct-modal"
 import { DirectFulfillmentModal } from "@/components/sales/direct-fulfillment-modal"
+import { ReturnPaymentModal } from "@/components/sales/return-payment-modal"
 
 function getSaleStatusLabel(sale: any): string {
-  if (sale.status === "Returned") {
+  const isReturned =
+    sale.status === "Returned" ||
+    sale.delivery_status === "Returned" ||
+    sale.delivery_status?.toLowerCase() === "returned"
+
+  if (isReturned) {
+    if (sale.payment_status?.toLowerCase() === "returned") {
+      return "Returned"
+    }
+    if (sale.payment_status?.toLowerCase() === "pending") {
+      return "Pending"
+    }
     return "Returned"
   }
 
   if (
     sale.status === "Cancelled" ||
-    sale.payment_status?.toLowerCase() === "cancelled" ||
-    sale.delivery_status === "Returned" ||
-    sale.delivery_status?.toLowerCase() === "returned"
+    sale.payment_status?.toLowerCase() === "cancelled"
   ) {
     return "Cancelled"
   }
@@ -146,7 +156,7 @@ function SaleStatusBadge({ status }: { status: string }) {
     Credit: "bg-amber-50 text-amber-700 border-amber-200",
     COD: "bg-purple-50 text-purple-700 border-purple-200",
     Cancelled: "bg-rose-50 text-rose-700 border-rose-200",
-    Returned: "bg-rose-50 text-rose-700 border-rose-200",
+    Returned: "bg-red-100 text-red-800 border-red-300 font-bold",
     Pending: "bg-slate-50 text-slate-700 border-slate-200",
   }
 
@@ -339,12 +349,14 @@ export default function SalesExcelTable({
   const isFinancialHidden = isPurchaseManager || isLogistics
 
   const { toast } = useToast()
+  const currency = useAppSelector(selectDeviceCurrency) || "INR"
   const [internalSearchTerm, setInternalSearchTerm] = useState("")
   const [isGeneratingReport, setIsGeneratingReport] = useState(false)
   const [isCreateJobCardOpen, setIsCreateJobCardOpen] = useState(false)
   const [editingJobCardId, setEditingJobCardId] = useState<number | null>(null)
   const [moveToDirectSale, setMoveToDirectSale] = useState<any | null>(null)
   const [directFulfillmentSale, setDirectFulfillmentSale] = useState<any | null>(null)
+  const [returnPaymentSale, setReturnPaymentSale] = useState<any | null>(null)
 
   const handleRowEdit = (sale: any) => {
     if (isJobCardSale(sale)) {
@@ -423,7 +435,9 @@ export default function SalesExcelTable({
     total: number
     today?: number
     pending: number
+    pending_amount?: number
     critical: number
+    critical_amount?: number
     total_amount?: number
     direct?: number
     direct_amount?: number
@@ -854,7 +868,23 @@ export default function SalesExcelTable({
   const pendingSalesCount = pendingCount
 
   const totalSalesAmount = useMemo(
-    () => serverCardCounts?.total_amount ?? displaySales.reduce((sum, sale) => sum + Number(sale.total_amount || 0), 0),
+    () =>
+      serverCardCounts?.total_amount ??
+      displaySales
+        .filter((sale) => {
+          const status = (sale.status || "").toLowerCase()
+          const paymentStatus = (sale.payment_status || "").toLowerCase()
+          const deliveryStatus = (sale.delivery_status || "").toLowerCase()
+          return (
+            status !== "cancelled" &&
+            status !== "returned" &&
+            paymentStatus !== "cancelled" &&
+            paymentStatus !== "returned" &&
+            deliveryStatus !== "returned" &&
+            deliveryStatus !== "failed"
+          )
+        })
+        .reduce((sum, sale) => sum + Number(sale.received_amount || 0), 0),
     [serverCardCounts?.total_amount, displaySales],
   )
   const todaySalesAmount = useMemo(
@@ -864,13 +894,15 @@ export default function SalesExcelTable({
   )
   const pendingSalesAmount = useMemo(
     () =>
-      displaySales.filter(isPendingSale).reduce((sum, sale) => sum + Number(sale.total_amount || 0), 0),
-    [displaySales],
+      serverCardCounts?.pending_amount ??
+      displaySales.filter(isPendingSale).reduce((sum, sale) => sum + Number(sale.received_amount || 0), 0),
+    [serverCardCounts?.pending_amount, displaySales],
   )
   const criticalSalesAmount = useMemo(
     () =>
-      displaySales.filter(isCriticalSale).reduce((sum, sale) => sum + Number(sale.total_amount || 0), 0),
-    [displaySales],
+      serverCardCounts?.critical_amount ??
+      displaySales.filter(isCriticalSale).reduce((sum, sale) => sum + Number(sale.received_amount || 0), 0),
+    [serverCardCounts?.critical_amount, displaySales],
   )
 
   const activeFilterCount = hasFetchedServer
@@ -2245,12 +2277,7 @@ export default function SalesExcelTable({
                                   ECOM
                                 </span>
                               )}
-                              {sale.status === "Returned" ? (
-                                <span className="inline-flex items-center gap-0.5 rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-bold text-rose-800 border border-rose-300">
-                                  <RotateCcw className="h-2.5 w-2.5" />
-                                  RETURNED
-                                </span>
-                              ) : Number(sale.total_returned_qty) > 0 || Number(sale.return_count) > 0 ? (
+                              {Number(sale.total_returned_qty) > 0 || Number(sale.return_count) > 0 ? (
                                 <span className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800 border border-amber-300">
                                   <RotateCcw className="h-2.5 w-2.5" />
                                   PARTIAL RETURN
@@ -2270,8 +2297,36 @@ export default function SalesExcelTable({
                           </div>
                         </td>
                         {!isPurchaseManager && !isLogistics && (
-                          <td className="whitespace-nowrap px-3 py-1.5">
-                            <SaleStatusBadge status={getSaleStatusLabel(sale)} />
+                          <td className="whitespace-nowrap px-3 py-1.5" onClick={(e) => {
+                            const isReturned = sale.status === "Returned" || sale.delivery_status?.toLowerCase() === "returned"
+                            if (isReturned && sale.payment_status?.toLowerCase() === "pending") {
+                              e.stopPropagation()
+                              setReturnPaymentSale(sale)
+                            }
+                          }}>
+                            {(() => {
+                              const isReturned = sale.status === "Returned" || sale.delivery_status?.toLowerCase() === "returned"
+                              if (isReturned && sale.payment_status?.toLowerCase() === "pending") {
+                                return (
+                                  <span
+                                    className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-100 hover:bg-amber-200 px-2 py-0.5 text-[11px] font-bold text-amber-900 cursor-pointer transition-all hover:scale-105 shadow-2xs select-none"
+                                    title="Click to process return refund"
+                                  >
+                                    <RotateCcw className="h-2.5 w-2.5 text-amber-700" />
+                                    Pending
+                                  </span>
+                                )
+                              }
+                              if (sale.payment_status?.toLowerCase() === "returned" || isReturned) {
+                                return (
+                                  <span className="inline-flex items-center gap-1 rounded-full border border-red-300 bg-red-100 px-2 py-0.5 text-[11px] font-bold text-red-800">
+                                    <RotateCcw className="h-2.5 w-2.5 text-red-600" />
+                                    Returned
+                                  </span>
+                                )
+                              }
+                              return <SaleStatusBadge status={getSaleStatusLabel(sale)} />
+                            })()}
                           </td>
                         )}
                         <td className="whitespace-nowrap px-3 py-1.5" onClick={(e) => e.stopPropagation()}>
@@ -2819,11 +2874,7 @@ export default function SalesExcelTable({
                               ECOM
                             </span>
                           )}
-                          {sale.status === "Returned" ? (
-                            <span className="rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-bold text-rose-800 border border-rose-300">
-                              RETURNED
-                            </span>
-                          ) : Number(sale.total_returned_qty) > 0 || Number(sale.return_count) > 0 ? (
+                          {Number(sale.total_returned_qty) > 0 || Number(sale.return_count) > 0 ? (
                             <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800 border border-amber-300">
                               PARTIAL RETURN
                             </span>
@@ -2843,8 +2894,36 @@ export default function SalesExcelTable({
                               </span>
                             )}
                           </div>
-                          <div className="mt-0.5">
-                            <SaleStatusBadge status={statusLabel} />
+                          <div className="mt-0.5" onClick={(e) => {
+                            const isReturned = sale.status === "Returned" || sale.delivery_status?.toLowerCase() === "returned"
+                            if (isReturned && sale.payment_status?.toLowerCase() === "pending") {
+                              e.stopPropagation()
+                              setReturnPaymentSale(sale)
+                            }
+                          }}>
+                            {(() => {
+                              const isReturned = sale.status === "Returned" || sale.delivery_status?.toLowerCase() === "returned"
+                              if (isReturned && sale.payment_status?.toLowerCase() === "pending") {
+                                return (
+                                  <span
+                                    className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-900 cursor-pointer shadow-2xs"
+                                    title="Click to process return refund"
+                                  >
+                                    <RotateCcw className="h-2.5 w-2.5 text-amber-700" />
+                                    Pending
+                                  </span>
+                                )
+                              }
+                              if (sale.payment_status?.toLowerCase() === "returned" || isReturned) {
+                                return (
+                                  <span className="inline-flex items-center gap-1 rounded-full border border-red-300 bg-red-100 px-2 py-0.5 text-[11px] font-bold text-red-800">
+                                    <RotateCcw className="h-2.5 w-2.5 text-red-600" />
+                                    Returned
+                                  </span>
+                                )
+                              }
+                              return <SaleStatusBadge status={statusLabel} />
+                            })()}
                           </div>
                         </div>
                       )}
@@ -3327,6 +3406,31 @@ export default function SalesExcelTable({
           deviceId={deviceId || directFulfillmentSale.device_id || activeStaff?.device_id || 0}
           onSuccess={() => {
             setDirectFulfillmentSale(null)
+            fetchServerSales()
+            if (onRefreshSales) {
+              onRefreshSales()
+            }
+          }}
+        />
+      )}
+
+      {returnPaymentSale && (
+        <ReturnPaymentModal
+          isOpen={Boolean(returnPaymentSale)}
+          onClose={() => setReturnPaymentSale(null)}
+          sale={returnPaymentSale}
+          deviceId={deviceId || returnPaymentSale.device_id || 0}
+          currency={currency}
+          onSuccess={() => {
+            const returnedId = returnPaymentSale.id
+            setReturnPaymentSale(null)
+            setServerSales((prev: any[]) =>
+              prev.map((s: any) =>
+                s.id === returnedId
+                  ? { ...s, payment_status: "Returned", status: "Returned" }
+                  : s
+              )
+            )
             fetchServerSales()
             if (onRefreshSales) {
               onRefreshSales()

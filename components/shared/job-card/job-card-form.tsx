@@ -386,8 +386,26 @@ export function JobCardForm({
       setOriginalDeliveryStatus(sale.delivery_status || "Pending")
       setPaymentStatus(sale.payment_status || "Pending")
       setPaymentMethod(sale.payment_method || "UPI")
-      if (Array.isArray(res.data.payments) && res.data.payments.length > 0) {
-        setPayments(res.data.payments)
+
+      const loadedPayments =
+        Array.isArray(sale.payments) && sale.payments.length > 0
+          ? sale.payments
+          : Array.isArray(res.data?.payments) && res.data.payments.length > 0
+            ? res.data.payments
+            : null
+
+      if (loadedPayments && loadedPayments.length > 0) {
+        const mapped = loadedPayments.map((p: any) => ({
+          id: p.id,
+          paymentMethod: p.paymentMethod || p.payment_method || "UPI",
+          amount: Number(p.amount) || 0,
+          referenceNumber: p.referenceNumber || p.reference_number || undefined,
+          notes: p.notes || undefined,
+        }))
+        setPayments(mapped)
+        const totalPaid = mapped.reduce((sum: number, p: any) => sum + (Number(p.amount) || 0), 0)
+        setReceivedAmount(totalPaid)
+        setBalanceAmount(Math.max(0, (Number(sale.total_amount) || 0) - totalPaid))
       } else {
         const amt =
           sale.payment_status === "Paid"
@@ -399,6 +417,8 @@ export function JobCardForm({
             amount: amt,
           },
         ])
+        setReceivedAmount(amt)
+        setBalanceAmount(Math.max(0, (Number(sale.total_amount) || 0) - amt))
       }
       if (sale.customer_id) {
         getCustomerAddresses(sale.customer_id).then((addrRes) => {

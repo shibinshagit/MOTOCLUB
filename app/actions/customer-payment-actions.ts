@@ -3,6 +3,7 @@
 import { sql, getLastError, resetConnectionState } from "@/lib/db"
 import { revalidatePath } from "next/cache"
 import { recordCustomerPayment } from "./simplified-accounting"
+import { ensureDateTime } from "@/lib/utils"
 
 export interface CustomerPaymentAllocation {
   saleId: number
@@ -11,15 +12,16 @@ export interface CustomerPaymentAllocation {
   remainingBalance: number
 }
 
+export type StoredAllocation = { saleId: number; allocatedAmount: number }
+
 export type CustomerPaymentListRow = {
   id: number
   amount: number
   payment_method: string
   transaction_date: string
   user_notes: string
+  allocations?: StoredAllocation[]
 }
-
-type StoredAllocation = { saleId: number; allocatedAmount: number }
 
 type StoredPaymentNotes = {
   v: 1
@@ -98,7 +100,8 @@ async function applyPaymentToSales(params: {
   paymentAmount: number
   paymentMethod: string
   targetSaleIds?: number[]
-}): Promise<{ allocations: CustomerPaymentAllocation[]; remainingCredit: number; totalCogs: number }> {
+  paymentDate?: Date
+}): Promise<{ allocations: CustomerPaymentAllocation[]; remainingCredit: number; totalCogs: number; separatedShippingAmount: number }> {
   const saleIds = params.targetSaleIds && params.targetSaleIds.length > 0 ? params.targetSaleIds : undefined
 
   const creditSales = saleIds
@@ -107,6 +110,9 @@ async function applyPaymentToSales(params: {
           s.id,
           COALESCE(s.total_amount, 0)::numeric AS total_amount,
           COALESCE(s.received_amount, 0)::numeric AS received_amount,
+          s.payment_method,
+          s.courier_paid_extra,
+          s.fulfillment_type,
           s.sale_date
         FROM sales s
         JOIN customers c ON c.id = s.customer_id
@@ -124,6 +130,9 @@ async function applyPaymentToSales(params: {
           s.id,
           COALESCE(s.total_amount, 0)::numeric AS total_amount,
           COALESCE(s.received_amount, 0)::numeric AS received_amount,
+          s.payment_method,
+          s.courier_paid_extra,
+          s.fulfillment_type,
           s.sale_date
         FROM sales s
         JOIN customers c ON c.id = s.customer_id
@@ -161,6 +170,7 @@ async function applyPaymentToSales(params: {
   let remainingPayment = params.paymentAmount
   const allocations: CustomerPaymentAllocation[] = []
   let totalCogs = 0
+  let separatedShippingAmount = 0
 
   for (const sale of creditSales) {
     if (remainingPayment <= 0) break
@@ -181,16 +191,66 @@ async function applyPaymentToSales(params: {
       totalCogs += saleCogs * (allocationAmount / totalAmount)
     }
 
+    // Combine payment methods so sale and job card display all methods used
+    const existingMethod = (sale.payment_method || "").trim()
+    const updatedPaymentMethod = existingMethod
+      ? (existingMethod.toLowerCase().includes(params.paymentMethod.toLowerCase())
+          ? existingMethod
+          : `${existingMethod} + ${params.paymentMethod}`)
+      : params.paymentMethod
+
+    // 1. Update sales record with new received, balance, status and payment method
     await sql`
       UPDATE sales
       SET received_amount = ${newReceivedAmount},
           balance_amount = ${newBalanceAmount},
           payment_status = ${newPaymentStatus},
           status = ${newStatus},
-          payment_method = ${params.paymentMethod},
+          payment_method = ${updatedPaymentMethod},
           updated_at = NOW()
       WHERE id = ${sale.id}
     `
+
+    // 2. Insert into transaction_payments so payment history on the order/job card reflects this payment
+    try {
+      await sql`
+        INSERT INTO transaction_payments (
+          sale_id, payment_method, amount, notes, payment_date
+        ) VALUES (
+          ${sale.id}, ${params.paymentMethod}, ${allocationAmount}, 
+          'Customer Payment Settlement', NOW()
+        )
+      `
+    } catch (tpErr) {
+      console.warn("Could not insert transaction_payments record:", tpErr)
+    }
+
+    // 3. If order is now Paid and has courier charge, sync shipping accounting entry
+    if (newPaymentStatus === "Paid" && sale.fulfillment_type === "ship" && Number(sale.courier_paid_extra) > 0) {
+      try {
+        const { syncSaleShippingTransactions } = await import("./simplified-accounting")
+        const courierPaidExtra = Number(sale.courier_paid_extra) || 0
+        await syncSaleShippingTransactions({
+          saleId: Number(sale.id),
+          deviceId: params.deviceId,
+          userId: params.userId,
+          saleDate: params.paymentDate || new Date(),
+          paymentMethod: updatedPaymentMethod,
+          status: newStatus,
+          paymentStatus: newPaymentStatus,
+          fulfillmentType: "ship",
+          courierPaidExtra,
+          expenseCourier: 0,
+          expensePacking: 0,
+          receivedAmount: newReceivedAmount,
+          totalAmount: totalAmount,
+          productCreditAmount: Math.max(0, totalAmount - courierPaidExtra),
+        })
+        separatedShippingAmount += Math.min(allocationAmount, courierPaidExtra)
+      } catch (shipErr) {
+        console.warn("Could not sync shipping entry on customer payment settlement:", shipErr)
+      }
+    }
 
     allocations.push({
       saleId: Number(sale.id),
@@ -206,6 +266,7 @@ async function applyPaymentToSales(params: {
     allocations,
     remainingCredit: Number((totalOutstanding - params.paymentAmount).toFixed(2)),
     totalCogs: Number(totalCogs.toFixed(2)),
+    separatedShippingAmount,
   }
 }
 
@@ -251,44 +312,43 @@ export async function collectCustomerCredit(
         ? [targetSaleIds]
         : undefined
 
-    const { allocations, remainingCredit, totalCogs } = await applyPaymentToSales({
+    const finalPaymentDate = ensureDateTime(paymentDate)
+
+    const { allocations, remainingCredit, totalCogs, separatedShippingAmount } = await applyPaymentToSales({
       customerId,
       deviceId,
       userId,
       paymentAmount,
       paymentMethod,
       targetSaleIds: saleIds,
-    })
-
-    let finalPaymentDate: Date
-    if (paymentDate) {
-      finalPaymentDate = new Date(paymentDate.getTime() - paymentDate.getTimezoneOffset() * 60000)
-    } else {
-      const now = new Date()
-      finalPaymentDate = new Date(now.getTime() - now.getTimezoneOffset() * 60000)
-    }
-
-    let finalNotes = notes?.trim() || ""
-    if (saleIds && saleIds.length > 0) {
-      const tag = `[Order${saleIds.length > 1 ? "s" : ""} #${saleIds.join(", #")}]`
-      finalNotes = finalNotes ? `${tag} ${finalNotes}` : tag
-    }
-
-    const transactionResult = await recordCustomerPayment({
-      customerId,
-      customerName,
-      paymentAmount,
-      costAmount: totalCogs,
-      paymentMethod,
-      allocations,
-      deviceId,
-      userId,
       paymentDate: finalPaymentDate,
-      notes: finalNotes || undefined,
     })
 
-    if (!transactionResult.success) {
-      console.error("Failed to record customer payment transaction:", transactionResult.error)
+    const userNotes = notes?.trim() || ""
+
+    // Deduct any courier/shipping amount that was separated into a dedicated shipping entry
+    const netPaymentForProducts = Math.max(0, paymentAmount - (separatedShippingAmount || 0))
+    let recordedTransactionId: number | undefined
+
+    if (netPaymentForProducts > 0) {
+      const transactionResult = await recordCustomerPayment({
+        customerId,
+        customerName,
+        paymentAmount: netPaymentForProducts,
+        costAmount: totalCogs,
+        paymentMethod,
+        allocations,
+        deviceId,
+        userId,
+        paymentDate: finalPaymentDate,
+        notes: userNotes || undefined,
+      })
+
+      if (!transactionResult.success) {
+        console.error("Failed to record customer payment transaction:", transactionResult.error)
+      } else {
+        recordedTransactionId = transactionResult.transactionId
+      }
     }
 
     // await sql`COMMIT`
@@ -301,7 +361,7 @@ export async function collectCustomerCredit(
         totalPaid: paymentAmount,
         allocations,
         remainingCredit,
-        transactionId: transactionResult.transactionId,
+        transactionId: recordedTransactionId,
         customerName,
       },
     }
@@ -339,12 +399,31 @@ export async function listCustomerPaymentsForCustomer(
 
     const data: CustomerPaymentListRow[] = rows.map((row: any) => {
       const stored = parseStoredPaymentNotes(row.notes)
+      let allocations: StoredAllocation[] = stored?.allocations || []
+
+      // Fallback: Parse allocations from description if notes JSON wasn't available
+      if (allocations.length === 0 && row.description) {
+        const match = row.description.match(/\[(.*?)\]/)
+        if (match && match[1]) {
+          for (const part of match[1].split(",")) {
+            const sMatch = part.match(/Sale\s*#(\d+)(?::\s*([0-9.]+))?/i)
+            if (sMatch) {
+              allocations.push({
+                saleId: parseInt(sMatch[1], 10),
+                allocatedAmount: sMatch[2] ? parseFloat(sMatch[2]) : 0,
+              })
+            }
+          }
+        }
+      }
+
       return {
         id: row.id,
         amount: Number(row.amount) || 0,
         payment_method: row.payment_method || "Cash",
         transaction_date: row.transaction_date,
         user_notes: stored?.userNotes || "",
+        allocations,
       }
     })
 

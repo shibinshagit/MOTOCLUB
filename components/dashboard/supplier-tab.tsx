@@ -1101,6 +1101,18 @@ export default function SupplierTab({
                     <div className="text-xs text-gray-500 mt-0.5">
                       {p.payment_method} · {new Date(p.transaction_date).toLocaleDateString()}
                     </div>
+                    {p.allocations && p.allocations.length > 0 && (
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {p.allocations.map((alloc, idx) => (
+                          <span
+                            key={idx}
+                            className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-semibold bg-amber-50 text-amber-800 border border-amber-200"
+                          >
+                            Purchase #{alloc.purchaseId}: {formatCurrency(alloc.allocatedAmount)}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   {p.transaction_type === "supplier_payment" && (
                     <div className="flex gap-1 flex-shrink-0">

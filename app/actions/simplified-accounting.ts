@@ -1,9 +1,11 @@
 "use server"
 
 import { format, addDays, parseISO } from "date-fns"
+import { revalidatePath } from "next/cache"
 import { getDeviceCompanyId } from "@/lib/device-company"
 import { sql } from "@/lib/db"
 import { getAuthoritativeProfitSummary } from "@/lib/profit-calculation"
+import { ensureDateTime } from "@/lib/utils"
 
 // Record supplier payment transaction
 export async function recordSupplierPayment(paymentData: {
@@ -33,11 +35,30 @@ export async function recordSupplierPayment(paymentData: {
     const debitAmount = paymentAmount // Cash going out to pay supplier
     const creditAmount = 0 // No income from this transaction
 
-    // Create detailed description including notes
-    let description = `Supplier Payment - ${paymentData.supplierName} - ${paymentData.paymentMethod} - ${paymentData.allocations.length} purchase(s) affected`
+    // Create detailed description including allocations and notes
+    const purchaseAllocations = (paymentData.allocations || []).filter((a: any) => Number(a.allocatedAmount || a.amount || 0) > 0)
+    const allocationSummary = purchaseAllocations.length > 0
+      ? purchaseAllocations.map((a: any) => `Purchase #${a.purchaseId || a.purchase_id}: ${Number(a.allocatedAmount || a.amount || 0).toFixed(2)}`).join(", ")
+      : ""
+
+    let description = `Supplier Payment - ${paymentData.supplierName} - ${paymentData.paymentMethod}`
+    if (allocationSummary) {
+      description += ` - [${allocationSummary}]`
+    }
     if (paymentData.notes && paymentData.notes.trim()) {
       description += ` - Notes: ${paymentData.notes.trim()}`
     }
+
+    const storedNotes = JSON.stringify({
+      v: 1,
+      userNotes: paymentData.notes?.trim() || "",
+      allocations: purchaseAllocations.map((a: any) => ({
+        purchaseId: a.purchaseId || a.purchase_id,
+        allocatedAmount: Number(a.allocatedAmount || a.amount || 0),
+      })),
+    })
+
+    const finalPaymentDate = ensureDateTime(paymentData.paymentDate)
 
     // Insert the supplier payment transaction
     const result = await sql`
@@ -48,8 +69,8 @@ export async function recordSupplierPayment(paymentData: {
       ) VALUES (
         'supplier_payment', 'supplier', ${paymentData.supplierId},
         ${paymentAmount}, ${paymentAmount}, 0, ${debitAmount}, ${creditAmount},
-        'Completed', ${paymentData.paymentMethod}, ${description}, ${paymentData.notes || null}, 
-        ${paymentData.deviceId}, ${await getDeviceCompanyId(paymentData.deviceId)}, ${paymentData.userId}, ${paymentData.paymentDate.toISOString()}
+        'Completed', ${paymentData.paymentMethod}, ${description}, ${storedNotes}, 
+        ${paymentData.deviceId}, ${await getDeviceCompanyId(paymentData.deviceId)}, ${paymentData.userId}, ${finalPaymentDate.toISOString()}
       ) RETURNING id
     `
 
@@ -79,7 +100,14 @@ export async function recordCustomerPayment(paymentData: {
     const debitAmount = 0
     const creditAmount = paymentAmount
 
-    let description = `Customer Payment - ${paymentData.customerName} - ${paymentData.paymentMethod} - ${paymentData.allocations.length} sale(s) affected`
+    const allocationSummary = paymentData.allocations && paymentData.allocations.length > 0
+      ? paymentData.allocations.map((a) => `Sale #${a.saleId}: ${Number(a.allocatedAmount).toFixed(2)}`).join(", ")
+      : ""
+
+    let description = `Customer Payment - ${paymentData.customerName} - ${paymentData.paymentMethod}`
+    if (allocationSummary) {
+      description += ` - [${allocationSummary}]`
+    }
     if (paymentData.notes?.trim()) {
       description += ` - Notes: ${paymentData.notes.trim()}`
     }
@@ -95,6 +123,8 @@ export async function recordCustomerPayment(paymentData: {
       })),
     })
 
+    const finalPaymentDate = ensureDateTime(paymentData.paymentDate)
+
     const result = await sql`
       INSERT INTO financial_transactions (
         transaction_type, reference_type, reference_id,
@@ -104,7 +134,7 @@ export async function recordCustomerPayment(paymentData: {
         'customer_payment', 'customer', ${paymentData.customerId},
         ${paymentAmount}, ${paymentAmount}, ${costAmount}, ${debitAmount}, ${creditAmount},
         'Completed', ${paymentData.paymentMethod}, ${description}, ${storedNotes},
-        ${paymentData.deviceId}, ${companyId}, ${paymentData.userId}, ${paymentData.paymentDate.toISOString()}
+        ${paymentData.deviceId}, ${companyId}, ${paymentData.userId}, ${finalPaymentDate.toISOString()}
       ) RETURNING id
     `
 
@@ -224,10 +254,17 @@ export async function recordSaleTransaction(saleData: {
     const hasShippingSplit =
       productCredit != null && totalAmount > 0 && productCredit < totalAmount
     const productBillAmount = hasShippingSplit ? productCredit : totalAmount
-    const productReceived =
-      hasShippingSplit && totalAmount > 0
-        ? (receivedAmount / totalAmount) * productCredit
-        : receivedAmount
+
+    const isPaidOrCompleted =
+      saleData.status === "Completed" ||
+      saleData.status === "Paid" ||
+      (totalAmount > 0 && receivedAmount >= totalAmount)
+
+    // For partial payments, record exactly the money received (never dilute with fractional courier ratios)
+    const productReceived = isPaidOrCompleted
+      ? (hasShippingSplit ? productCredit : receivedAmount)
+      : (hasShippingSplit ? Math.min(receivedAmount, productCredit) : receivedAmount)
+
     let receivedAmountForRecord = productReceived
 
     if (saleData.status === "Cancelled") {
@@ -264,43 +301,37 @@ export async function recordSaleTransaction(saleData: {
       ? saleData.payments.filter((p) => Number(p.amount) > 0)
       : []
 
+    // If no money entered or left the business (e.g. 100% credit or zero down), do NOT create dummy transactions
+    if (saleData.status !== "Cancelled" && receivedAmountForRecord <= 0 && activePayments.length === 0) {
+      console.log(`Sale #${saleData.saleId} recorded with 0 cash received: skipped financial_transactions entry (tracked under Receivables)`)
+      return { success: true, transactionId: null, message: "No cash received, skipped transaction entry" }
+    }
+
     let lastInsertedId: number | undefined
 
     if (activePayments.length > 1) {
       // Create separate ledger entry for each payment method in split payment
       const totalSplitPaid = activePayments.reduce((s, p) => s + (Number(p.amount) || 0), 0)
-      const nonCodPaidTotal = activePayments
-        .filter((p) => !isCod(p.paymentMethod))
-        .reduce((s, p) => s + (Number(p.amount) || 0), 0)
 
       for (const p of activePayments) {
         const pAmt = Number(p.amount) || 0
+        if (pAmt <= 0) continue
+
         const isThisCod = isCod(p.paymentMethod)
-
-        let pCreditAmount = 0
-        let pReceived = 0
-        let pCostAmount = 0
-        let pDebitAmount = 0
-
-        if (isThisCod && totalSplitPaid >= totalAmount && (saleData.status === "Partial" || saleData.status === "Credit" || saleData.status === "Pending")) {
-          // COD portion is uncollected during creation: 0 received money
-          pReceived = 0
-          pCreditAmount = 0
-          pCostAmount = 0
-          pDebitAmount = 0
-        } else {
-          const ratio = nonCodPaidTotal > 0 && totalSplitPaid >= totalAmount
-            ? pAmt / nonCodPaidTotal
-            : (totalSplitPaid > 0 ? pAmt / totalSplitPaid : 1 / activePayments.length)
-          pCreditAmount = creditAmount * ratio
-          pCostAmount = costAmount * ratio
-          pDebitAmount = debitAmount * ratio
-          pReceived = receivedAmountForRecord * ratio
+        if (isThisCod && (saleData.status === "Partial" || saleData.status === "Credit" || saleData.status === "Pending")) {
+          // COD uncollected portion does not enter transaction ledger yet
+          continue
         }
 
-        const ratio = totalSplitPaid > 0 ? pAmt / totalSplitPaid : 1 / activePayments.length
+        const pCreditAmount = pAmt
+        const pReceived = pAmt
+        const pDebitAmount = 0
+        const pCostAmount = productBillAmount > 0
+          ? (pAmt / productBillAmount) * (Number(saleData.cogsAmount) || 0)
+          : 0
+
         const refStr = p.referenceNumber ? ` (Ref: ${p.referenceNumber})` : ""
-        const pDesc = `Sale #${saleData.saleId} - ${saleData.status} - ${p.paymentMethod}${refStr} - Customer: ${saleData.customerId ? `ID ${saleData.customerId}` : "Walk-in"}`
+        const pDesc = `Sale #${saleData.saleId} - ${p.paymentMethod} Payment${refStr} - Customer: ${saleData.customerId ? `ID ${saleData.customerId}` : "Walk-in"}`
 
         const res = await sql`
           INSERT INTO financial_transactions (
@@ -309,7 +340,7 @@ export async function recordSaleTransaction(saleData: {
             status, payment_method, description, device_id, company_id, created_by, transaction_date
           ) VALUES (
             'sale', 'sale', ${saleData.saleId},
-            ${(productBillAmount * ratio).toFixed(2)}, ${pReceived.toFixed(2)}, ${pCostAmount.toFixed(2)}, ${pDebitAmount.toFixed(2)}, ${pCreditAmount.toFixed(2)},
+            ${pAmt.toFixed(2)}, ${pReceived.toFixed(2)}, ${pCostAmount.toFixed(2)}, ${pDebitAmount.toFixed(2)}, ${pCreditAmount.toFixed(2)},
             ${saleData.status}, ${p.paymentMethod || "Cash"}, ${pDesc}, 
             ${saleData.deviceId}, ${await getDeviceCompanyId(saleData.deviceId)}, ${saleData.userId}, ${saleData.saleDate}
           ) RETURNING id
@@ -317,20 +348,23 @@ export async function recordSaleTransaction(saleData: {
         lastInsertedId = res[0]?.id
       }
     } else {
-      const pm = activePayments[0]?.paymentMethod || saleData.paymentMethod || "Cash"
-      const res = await sql`
-        INSERT INTO financial_transactions (
-          transaction_type, reference_type, reference_id,
-          amount, received_amount, cost_amount, debit_amount, credit_amount,
-          status, payment_method, description, device_id, company_id, created_by, transaction_date
-        ) VALUES (
-          'sale', 'sale', ${saleData.saleId},
-          ${productBillAmount}, ${receivedAmountForRecord}, ${costAmount}, ${debitAmount}, ${creditAmount},
-          ${saleData.status}, ${pm}, ${description}, 
-          ${saleData.deviceId}, ${await getDeviceCompanyId(saleData.deviceId)}, ${saleData.userId}, ${saleData.saleDate}
-        ) RETURNING id
-      `
-      lastInsertedId = res[0]?.id
+      // Only insert if money actually came in or out (e.g. cancellation refund)
+      if (creditAmount > 0 || debitAmount > 0) {
+        const pm = activePayments[0]?.paymentMethod || saleData.paymentMethod || "Cash"
+        const res = await sql`
+          INSERT INTO financial_transactions (
+            transaction_type, reference_type, reference_id,
+            amount, received_amount, cost_amount, debit_amount, credit_amount,
+            status, payment_method, description, device_id, company_id, created_by, transaction_date
+          ) VALUES (
+            'sale', 'sale', ${saleData.saleId},
+            ${productBillAmount}, ${receivedAmountForRecord}, ${costAmount}, ${debitAmount}, ${creditAmount},
+            ${saleData.status}, ${pm}, ${description}, 
+            ${saleData.deviceId}, ${await getDeviceCompanyId(saleData.deviceId)}, ${saleData.userId}, ${saleData.saleDate}
+          ) RETURNING id
+        `
+        lastInsertedId = res[0]?.id
+      }
     }
 
     console.log(`Sale transaction recorded successfully: ID ${lastInsertedId}`, {
@@ -587,44 +621,199 @@ export async function recordPurchaseTransaction(purchaseData: {
   deviceId: number
   userId: number
   purchaseDate: Date
+  courierCharge?: number
+  courierDate?: Date
+  purchaseType?: string
   payments?: Array<{ paymentMethod: string; amount: number; referenceNumber?: string; notes?: string }>
 }, query: any = sql) {
   try {
-    // Clear existing financial_transactions for this purchase to avoid duplicate ledger entries
-    await query`
-      DELETE FROM financial_transactions
-      WHERE transaction_type = 'purchase' AND reference_type = 'purchase' AND reference_id = ${purchaseData.purchaseId}
-    `
+    const isDropship = (purchaseData.purchaseType || "").toLowerCase() === "dropship"
+    const rawTotalAmount = Number(purchaseData.totalAmount) || 0
+    const rawReceivedAmount = Number(purchaseData.receivedAmount) || 0
+    const courierCharge = Number(purchaseData.courierCharge) || 0
 
-    const totalAmount = Number(purchaseData.totalAmount) || 0
-    const receivedAmount = Number(purchaseData.receivedAmount) || 0
-    const status = purchaseData.status?.toLowerCase()
-
-    let debitAmount = 0
-    let creditAmount = 0
-    let description = ""
-
-    if (status === "credit") {
-      debitAmount = 0
-      creditAmount = 0
-      description = `Purchase #${purchaseData.purchaseId} - Credit - ${purchaseData.paymentMethod} - Supplier: ${purchaseData.supplierName} - Outstanding: ${purchaseData.outstandingAmount}`
-    } else {
-      debitAmount = receivedAmount
-      creditAmount = 0
-      description = `Purchase #${purchaseData.purchaseId} - ${purchaseData.status} - ${purchaseData.paymentMethod} - Supplier: ${purchaseData.supplierName}`
+    // Look for linked sale ID if dropship
+    let linkedSaleId: number | null = null
+    if (purchaseData.purchaseId) {
+      const pRows = await query`SELECT notes FROM purchases WHERE id = ${purchaseData.purchaseId} LIMIT 1`
+      if (pRows.length > 0) {
+        const match = (pRows[0].notes || "").match(/(?:Job Card|Order|Sale)\s*#(\d+)/i)
+        if (match) linkedSaleId = parseInt(match[1], 10)
+      }
     }
 
-    const costAmount = 0
+    // Inspect existing transactions to preserve timestamps on separate updates
+    const existingTx = await query`
+      SELECT id, transaction_type, reference_type, reference_id, transaction_date, amount
+      FROM financial_transactions
+      WHERE device_id = ${purchaseData.deviceId}
+        AND reference_type = 'purchase'
+        AND reference_id = ${purchaseData.purchaseId}
+    `
+    const existingProductRow = existingTx.find((t: any) => t.transaction_type === 'purchase')
+    const existingStockCourierRow = existingTx.find((t: any) => t.transaction_type === 'purchase_shipping')
+
+    let existingDropshipCourierRow: any = null
+    if (isDropship && linkedSaleId) {
+      const dropTx = await query`
+        SELECT id, transaction_type, reference_type, reference_id, transaction_date, amount
+        FROM financial_transactions
+        WHERE device_id = ${purchaseData.deviceId}
+          AND reference_type = 'sale'
+          AND reference_id = ${linkedSaleId}
+          AND transaction_type = 'sale_shipping'
+          AND debit_amount > 0
+          AND description ILIKE '%Courier charge%'
+        LIMIT 1
+      `
+      if (dropTx.length > 0) existingDropshipCourierRow = dropTx[0]
+    }
+
+    // Clear existing financial_transactions for this purchase
+    await query`
+      DELETE FROM financial_transactions
+      WHERE reference_type = 'purchase' 
+        AND reference_id = ${purchaseData.purchaseId}
+        AND transaction_type IN ('purchase', 'purchase_shipping')
+    `
+    if (isDropship && linkedSaleId && existingDropshipCourierRow) {
+      await query`
+        DELETE FROM financial_transactions
+        WHERE id = ${existingDropshipCourierRow.id}
+      `
+    }
+
+    const totalAmount = rawTotalAmount
+    const receivedAmount = rawReceivedAmount
+    const statusLower = (purchaseData.status || "").toLowerCase()
+    const isPaid = statusLower === "paid" || statusLower === "completed" || (rawTotalAmount > 0 && rawReceivedAmount >= rawTotalAmount)
 
     const activePayments = Array.isArray(purchaseData.payments)
       ? purchaseData.payments.filter((p) => Number(p.amount) > 0)
       : []
 
-    let lastInsertedId: number | undefined
+    // If 0 paid amount (credit purchase, no money out), do NOT insert into financial_transactions
+    if (rawReceivedAmount <= 0 && activePayments.length === 0) {
+      console.log(`Purchase #${purchaseData.purchaseId} recorded with 0 paid amount: skipped financial_transactions entry (tracked under Payables)`)
+      return { success: true, transactionId: null, message: "No cash paid, skipped transaction entry" }
+    }
 
+    const companyId = await getDeviceCompanyId(purchaseData.deviceId)
+    
+    // Preserve original product transaction date if it was already recorded and date hasn't changed
+    const effectivePurchaseDate = existingProductRow && existingProductRow.transaction_date
+      ? ensureDateTime(existingProductRow.transaction_date)
+      : ensureDateTime(purchaseData.purchaseDate)
+
+    // For courier: if already recorded earlier, preserve that date. If newly added on edit, use courierDate or NOW().
+    const existingCourierDate = isDropship
+      ? existingDropshipCourierRow?.transaction_date
+      : existingStockCourierRow?.transaction_date
+    const effectiveCourierDate = existingCourierDate
+      ? ensureDateTime(existingCourierDate)
+      : ensureDateTime(purchaseData.courierDate || new Date())
+
+    const costAmount = 0
+    let lastInsertedId: number | undefined
+    const productBillAmount = totalAmount
+
+    // If payment is fully completed and courier charge > 0, separate courier charge into its own row
+    if (isPaid && courierCharge > 0) {
+      const productPaid = productBillAmount
+      const pm = activePayments[0]?.paymentMethod || purchaseData.paymentMethod || "Cash"
+
+      // A. Product purchase row
+      if (activePayments.length > 1) {
+        for (const p of activePayments) {
+          const pAmt = Number(p.amount) || 0
+          if (pAmt <= 0) continue
+          const refStr = p.referenceNumber ? ` (Ref: ${p.referenceNumber})` : ""
+          const pDesc = `Purchase #${purchaseData.purchaseId} - ${purchaseData.status} - ${p.paymentMethod}${refStr} - Supplier: ${purchaseData.supplierName}`
+          const res = await query`
+            INSERT INTO financial_transactions (
+              transaction_type, reference_type, reference_id,
+              amount, received_amount, cost_amount, debit_amount, credit_amount,
+              status, payment_method, description, device_id, company_id, created_by, transaction_date
+            ) VALUES (
+              'purchase', 'purchase', ${purchaseData.purchaseId},
+              ${productBillAmount}, ${pAmt}, ${costAmount}, ${pAmt}, 0,
+              ${purchaseData.status}, ${p.paymentMethod}, ${pDesc}, 
+              ${purchaseData.deviceId}, ${companyId}, ${purchaseData.userId}, ${effectivePurchaseDate.toISOString()}
+            ) RETURNING id
+          `
+          lastInsertedId = res[0]?.id
+        }
+      } else if (productPaid > 0) {
+        const pDesc = `Purchase #${purchaseData.purchaseId} - ${purchaseData.status} - ${pm} - Supplier: ${purchaseData.supplierName}`
+        const res = await query`
+          INSERT INTO financial_transactions (
+            transaction_type, reference_type, reference_id,
+            amount, received_amount, cost_amount, debit_amount, credit_amount,
+            status, payment_method, description, device_id, company_id, created_by, transaction_date
+          ) VALUES (
+            'purchase', 'purchase', ${purchaseData.purchaseId},
+            ${productBillAmount}, ${productPaid}, ${costAmount}, ${productPaid}, 0,
+            ${purchaseData.status}, ${pm}, ${pDesc}, 
+            ${purchaseData.deviceId}, ${companyId}, ${purchaseData.userId}, ${effectivePurchaseDate.toISOString()}
+          ) RETURNING id
+        `
+        lastInsertedId = res[0]?.id
+      }
+
+      // B. Courier charge separate row
+      if (isDropship && linkedSaleId) {
+        // Dropship: Deduct as Sale Order courier charge and sync fulfillment
+        const courierDesc = `Sale #${linkedSaleId} - Courier charge`
+        const shipRes = await query`
+          INSERT INTO financial_transactions (
+            transaction_type, reference_type, reference_id,
+            amount, received_amount, cost_amount, debit_amount, credit_amount,
+            status, payment_method, description, device_id, company_id, created_by, transaction_date
+          ) VALUES (
+            'sale_shipping', 'sale', ${linkedSaleId},
+            ${courierCharge}, ${courierCharge}, 0, ${courierCharge}, 0,
+            'Completed', ${pm}, ${courierDesc}, 
+            ${purchaseData.deviceId}, ${companyId}, ${purchaseData.userId}, ${effectiveCourierDate.toISOString()}
+          ) RETURNING id
+        `
+        if (!lastInsertedId) {
+          lastInsertedId = shipRes[0]?.id
+        }
+
+        // Note in sales order fulfillment
+        await query`
+          UPDATE sales
+          SET expense_courier = ${courierCharge}, updated_at = NOW()
+          WHERE id = ${linkedSaleId}
+        `
+      } else {
+        // Stock purchase: Deduct as Purchase courier charge
+        const courierDesc = `Purchase #${purchaseData.purchaseId} - Courier charge`
+        const shipRes = await query`
+          INSERT INTO financial_transactions (
+            transaction_type, reference_type, reference_id,
+            amount, received_amount, cost_amount, debit_amount, credit_amount,
+            status, payment_method, description, device_id, company_id, created_by, transaction_date
+          ) VALUES (
+            'purchase_shipping', 'purchase', ${purchaseData.purchaseId},
+            ${courierCharge}, ${courierCharge}, 0, ${courierCharge}, 0,
+            'Completed', ${pm}, ${courierDesc}, 
+            ${purchaseData.deviceId}, ${companyId}, ${purchaseData.userId}, ${effectiveCourierDate.toISOString()}
+          ) RETURNING id
+        `
+        if (!lastInsertedId) {
+          lastInsertedId = shipRes[0]?.id
+        }
+      }
+
+      return { success: true, transactionId: lastInsertedId }
+    }
+
+    // Otherwise: product payment only (no courier charge or courier unpaid)
     if (activePayments.length > 1) {
       for (const p of activePayments) {
         const pAmt = Number(p.amount) || 0
+        if (pAmt <= 0) continue
         const refStr = p.referenceNumber ? ` (Ref: ${p.referenceNumber})` : ""
         const pDesc = `Purchase #${purchaseData.purchaseId} - ${purchaseData.status} - ${p.paymentMethod}${refStr} - Supplier: ${purchaseData.supplierName}`
 
@@ -635,15 +824,18 @@ export async function recordPurchaseTransaction(purchaseData: {
             status, payment_method, description, device_id, company_id, created_by, transaction_date
           ) VALUES (
             'purchase', 'purchase', ${purchaseData.purchaseId},
-            ${totalAmount}, ${pAmt}, ${costAmount}, ${pAmt}, 0,
+            ${productBillAmount}, ${pAmt}, ${costAmount}, ${pAmt}, 0,
             ${purchaseData.status}, ${p.paymentMethod}, ${pDesc}, 
-            ${purchaseData.deviceId}, ${await getDeviceCompanyId(purchaseData.deviceId)}, ${purchaseData.userId}, ${purchaseData.purchaseDate}
+            ${purchaseData.deviceId}, ${companyId}, ${purchaseData.userId}, ${effectivePurchaseDate.toISOString()}
           ) RETURNING id
         `
         lastInsertedId = res[0]?.id
       }
     } else {
       const pm = activePayments[0]?.paymentMethod || purchaseData.paymentMethod || "Cash"
+      const debitAmount = receivedAmount
+      const description = `Purchase #${purchaseData.purchaseId} - ${purchaseData.status} - ${pm} - Supplier: ${purchaseData.supplierName}`
+
       const result = await query`
         INSERT INTO financial_transactions (
           transaction_type, reference_type, reference_id,
@@ -651,9 +843,9 @@ export async function recordPurchaseTransaction(purchaseData: {
           status, payment_method, description, device_id, company_id, created_by, transaction_date
         ) VALUES (
           'purchase', 'purchase', ${purchaseData.purchaseId},
-          ${totalAmount}, ${receivedAmount}, ${costAmount}, ${debitAmount}, ${creditAmount},
+          ${productBillAmount}, ${receivedAmount}, ${costAmount}, ${debitAmount}, 0,
           ${purchaseData.status}, ${pm}, ${description}, 
-          ${purchaseData.deviceId}, ${await getDeviceCompanyId(purchaseData.deviceId)}, ${purchaseData.userId}, ${purchaseData.purchaseDate}
+          ${purchaseData.deviceId}, ${companyId}, ${purchaseData.userId}, ${effectivePurchaseDate.toISOString()}
         ) RETURNING id
       `
       lastInsertedId = result[0]?.id
@@ -875,6 +1067,273 @@ export async function recordManualTransaction(transactionData: {
   }
 }
 
+export async function getPendingCourierSales(deviceId: number) {
+  try {
+    const sales = await sql`
+      SELECT 
+        s.id,
+        COALESCE(s.tracking_id, s.job_card_number, s.id::text) as invoice_number,
+        s.total_amount,
+        COALESCE(s.expense_courier, 0) as expense_courier,
+        COALESCE(s.courier_paid_extra, 0) as courier_paid_extra,
+        s.delivery_status,
+        s.fulfillment_type,
+        s.type_of_sale,
+        s.created_at,
+        COALESCE(NULLIF(s.customer_name_override, ''), c.name, 'Customer') as customer_name,
+        COALESCE(NULLIF(s.customer_phone_override, ''), c.phone, '') as customer_phone
+      FROM sales s
+      LEFT JOIN customers c ON s.customer_id = c.id
+      WHERE s.device_id = ${deviceId}
+        AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
+        AND (
+          LOWER(COALESCE(s.type_of_sale, '')) = 'courier'
+          OR LOWER(COALESCE(s.fulfillment_type, '')) = 'ship'
+          OR LOWER(TRIM(COALESCE(s.delivery_status, ''))) IN ('direct', 'shipped', 'shipping', 'sent', 'packed', 'courier')
+          OR COALESCE(s.courier_paid_extra, 0) > 0
+          OR COALESCE(s.expense_courier, 0) > 0
+          OR s.tracking_id IS NOT NULL
+        )
+        AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+        AND NOT EXISTS (
+          SELECT 1 FROM financial_transactions ft
+          WHERE ft.device_id = s.device_id
+            AND ft.reference_type = 'sale'
+            AND ft.reference_id = s.id
+            AND ft.transaction_type = 'sale_shipping'
+            AND ft.debit_amount > 0
+            AND ft.description ILIKE '%Courier charge%'
+        )
+      ORDER BY s.id DESC
+      LIMIT 100
+    `
+    return { success: true, data: sales }
+  } catch (error) {
+    console.error("Error fetching pending courier sales:", error)
+    return { success: false, error: error instanceof Error ? error.message : "Unknown error", data: [] }
+  }
+}
+
+export async function getPendingCourierPurchases(deviceId: number) {
+  try {
+    const purchases = await sql`
+      SELECT 
+        p.id,
+        p.invoice_number,
+        COALESCE(p.supplier, 'Supplier') as supplier_name,
+        p.total_amount,
+        COALESCE(p.courier_charge, 0) as courier_charge,
+        p.purchase_type,
+        p.status,
+        p.purchase_date,
+        p.notes
+      FROM purchases p
+      WHERE p.device_id = ${deviceId}
+        AND COALESCE(p.status, '') != 'cancelled'
+        AND COALESCE(p.courier_charge, 0) > 0
+        AND NOT EXISTS (
+          SELECT 1 FROM financial_transactions ft
+          WHERE ft.device_id = p.device_id
+            AND ft.reference_type = 'purchase'
+            AND ft.reference_id = p.id
+            AND ft.transaction_type = 'purchase_shipping'
+            AND ft.debit_amount > 0
+            AND ft.description ILIKE '%Courier charge%'
+        )
+      ORDER BY p.id DESC
+      LIMIT 100
+    `
+
+    // Check for dropship purchases: if linked sale already has courier charge deducted in accounts, filter it out
+    const linkedSaleIds: number[] = []
+    const dropshipMap = new Map<number, number>()
+    for (const p of purchases) {
+      const isDropship = (p.purchase_type || "").toLowerCase() === "dropship"
+      if (isDropship && p.notes) {
+        const match = (p.notes || "").match(/(?:Job Card|Order|Sale)\s*#(\d+)/i)
+        if (match) {
+          const sId = parseInt(match[1], 10)
+          linkedSaleIds.push(sId)
+          dropshipMap.set(p.id, sId)
+        }
+      }
+    }
+
+    const deductedSaleIds = new Set<number>()
+    if (linkedSaleIds.length > 0) {
+      const existing = await sql`
+        SELECT reference_id FROM financial_transactions
+        WHERE device_id = ${deviceId}
+          AND reference_type = 'sale'
+          AND reference_id IN ${sql(linkedSaleIds)}
+          AND transaction_type = 'sale_shipping'
+          AND debit_amount > 0
+          AND description ILIKE '%Courier charge%'
+      `
+      for (const row of existing) {
+        deductedSaleIds.add(Number(row.reference_id))
+      }
+    }
+
+    const filteredPurchases = purchases.filter((p: any) => {
+      const linked = dropshipMap.get(p.id)
+      return !(linked && deductedSaleIds.has(linked))
+    })
+
+    return { success: true, data: filteredPurchases }
+  } catch (error) {
+    console.error("Error fetching pending courier purchases:", error)
+    return { success: false, error: error instanceof Error ? error.message : "Unknown error", data: [] }
+  }
+}
+
+export interface RecordCourierExpenseFromPettyCashInput {
+  sourceType: "sale" | "purchase"
+  targetId: number // saleId or purchaseId
+  amount: number
+  paymentMethod: string
+  category?: string
+  categoryId?: number
+  notes?: string
+  deviceId: number
+  userId: number
+  transactionDate?: Date | string
+  updateFulfillment?: boolean
+}
+
+export async function recordCourierExpenseFromPettyCash(input: RecordCourierExpenseFromPettyCashInput) {
+  try {
+    const amount = Number(input.amount) || 0
+    if (amount <= 0) {
+      return { success: false, message: "Invalid courier expense amount" }
+    }
+
+    const companyId = await getDeviceCompanyId(input.deviceId)
+    const categoryName = input.category?.trim() || "Courier & Delivery"
+    const txDate = input.transactionDate ? new Date(input.transactionDate) : new Date()
+    const formattedTxDate = format(txDate, "yyyy-MM-dd HH:mm:ss")
+    const pm = input.paymentMethod || "Cash"
+
+    let lastInsertedId: number | undefined
+
+    if (input.sourceType === "sale") {
+      const saleId = input.targetId
+      const userDesc = (input.notes || "").trim()
+      const desc = userDesc || `Sale #${saleId} - Courier charge`
+
+      const res = await sql`
+        INSERT INTO financial_transactions (
+          transaction_type, reference_type, reference_id,
+          amount, received_amount, cost_amount, debit_amount, credit_amount,
+          status, payment_method, description, category_name, device_id, company_id, created_by, transaction_date
+        ) VALUES (
+          'sale_shipping', 'sale', ${saleId},
+          ${amount}, ${amount}, 0, ${amount}, 0,
+          'Completed', ${pm}, ${desc}, ${categoryName},
+          ${input.deviceId}, ${companyId}, ${input.userId}, ${formattedTxDate}
+        ) RETURNING id
+      `
+      lastInsertedId = res[0]?.id
+
+      // Update sales fulfillment expense_courier
+      await sql`
+        UPDATE sales
+        SET expense_courier = ${amount}, updated_at = NOW()
+        WHERE id = ${saleId}
+      `
+    } else {
+      // purchase
+      const purchaseId = input.targetId
+      const pRows = await sql`
+        SELECT id, purchase_type, notes, COALESCE(supplier, 'Supplier') as supplier_name, courier_charge
+        FROM purchases
+        WHERE id = ${purchaseId}
+        LIMIT 1
+      `
+      if (pRows.length === 0) {
+        return { success: false, message: `Purchase #${purchaseId} not found` }
+      }
+
+      const p = pRows[0]
+      const isDropship = (p.purchase_type || "").toLowerCase() === "dropship"
+      let linkedSaleId: number | null = null
+      if (isDropship && p.notes) {
+        const match = (p.notes || "").match(/(?:Job Card|Order|Sale)\s*#(\d+)/i)
+        if (match) linkedSaleId = parseInt(match[1], 10)
+      }
+
+      if (isDropship && linkedSaleId) {
+        const userDesc = (input.notes || "").trim()
+        const desc = userDesc || `Sale #${linkedSaleId} - Courier charge`
+        const res = await sql`
+          INSERT INTO financial_transactions (
+            transaction_type, reference_type, reference_id,
+            amount, received_amount, cost_amount, debit_amount, credit_amount,
+            status, payment_method, description, category_name, device_id, company_id, created_by, transaction_date
+          ) VALUES (
+            'sale_shipping', 'sale', ${linkedSaleId},
+            ${amount}, ${amount}, 0, ${amount}, 0,
+            'Completed', ${pm}, ${desc}, ${categoryName},
+            ${input.deviceId}, ${companyId}, ${input.userId}, ${formattedTxDate}
+          ) RETURNING id
+        `
+        lastInsertedId = res[0]?.id
+
+        // Two-way sync: update sale fulfillment and purchase details
+        await sql`
+          UPDATE sales
+          SET expense_courier = ${amount}, updated_at = NOW()
+          WHERE id = ${linkedSaleId}
+        `
+        await sql`
+          UPDATE purchases
+          SET courier_charge = ${amount}, updated_at = NOW()
+          WHERE id = ${purchaseId}
+        `
+      } else {
+        // Stock purchase
+        const userDesc = (input.notes || "").trim()
+        const desc = userDesc || `Purchase #${purchaseId} - Courier charge`
+        const res = await sql`
+          INSERT INTO financial_transactions (
+            transaction_type, reference_type, reference_id,
+            amount, received_amount, cost_amount, debit_amount, credit_amount,
+            status, payment_method, description, category_name, device_id, company_id, created_by, transaction_date
+          ) VALUES (
+            'purchase_shipping', 'purchase', ${purchaseId},
+            ${amount}, ${amount}, 0, ${amount}, 0,
+            'Completed', ${pm}, ${desc}, ${categoryName},
+            ${input.deviceId}, ${companyId}, ${input.userId}, ${formattedTxDate}
+          ) RETURNING id
+        `
+        lastInsertedId = res[0]?.id
+
+        await sql`
+          UPDATE purchases
+          SET courier_charge = ${amount}, updated_at = NOW()
+          WHERE id = ${purchaseId}
+        `
+      }
+    }
+
+    try {
+      revalidatePath("/dashboard", "layout")
+    } catch (_) {}
+
+    return {
+      success: true,
+      transactionId: lastInsertedId,
+      message: "Courier expense recorded successfully",
+    }
+  } catch (error) {
+    console.error("Error recording courier expense from petty cash:", error)
+    return {
+      success: false,
+      message: error instanceof Error ? error.message : "Unknown error",
+    }
+  }
+}
+
 export async function syncSaleShippingTransactions(shippingData: {
   saleId: number
   deviceId: number
@@ -882,6 +1341,7 @@ export async function syncSaleShippingTransactions(shippingData: {
   saleDate: Date
   paymentMethod: string
   status: string
+  paymentStatus?: string
   fulfillmentType: string
   courierPaidExtra: number
   expenseCourier: number
@@ -890,6 +1350,7 @@ export async function syncSaleShippingTransactions(shippingData: {
   totalAmount?: number
   /** Product revenue only; when set, main sale row is aligned to exclude courier charge. */
   productCreditAmount?: number
+  transactionDate?: Date
 }) {
   try {
     // company_id comes from the device, never a fixed value
@@ -897,15 +1358,23 @@ export async function syncSaleShippingTransactions(shippingData: {
 
     await sql`
       DELETE FROM financial_transactions
-      WHERE reference_type = 'sale'
+      WHERE (reference_type = 'sale' OR reference_type = 'sale_shipping')
         AND reference_id = ${shippingData.saleId}
         AND device_id = ${shippingData.deviceId}
         AND transaction_type = 'sale_shipping'
     `
 
-    if (shippingData.fulfillmentType !== "ship" || shippingData.status === "Cancelled") {
+    if (shippingData.status === "Cancelled") {
       return { success: true as const, transactionIds: [] as number[] }
     }
+
+    const statusStr = (shippingData.status || "").toLowerCase().trim()
+    const paymentStatusStr = (shippingData.paymentStatus || "").toLowerCase().trim()
+    const isPaidOrCompleted =
+      statusStr === "completed" ||
+      statusStr === "paid" ||
+      paymentStatusStr === "paid" ||
+      paymentStatusStr === "completed"
 
     const courierPaidExtra = Number(shippingData.courierPaidExtra) || 0
     const expenseCourier = Number(shippingData.expenseCourier) || 0
@@ -920,34 +1389,41 @@ export async function syncSaleShippingTransactions(shippingData: {
       productCredit != null && totalAmount > 0 && productCredit < totalAmount
 
     if (hasShippingSplit) {
-      const productReceived =
-        totalAmount > 0 ? (receivedAmount / totalAmount) * productCredit : 0
-      const mainCredit =
-        shippingData.status === "Completed" ? productCredit : productReceived
-
-      await sql`
-        UPDATE financial_transactions
-        SET
-          amount = ${productCredit},
-          received_amount = ${productReceived},
-          credit_amount = ${mainCredit}
+      const existingRows = await sql`
+        SELECT id, amount FROM financial_transactions
         WHERE reference_type = 'sale'
           AND reference_id = ${shippingData.saleId}
           AND device_id = ${shippingData.deviceId}
           AND transaction_type = 'sale'
       `
+      // Only adjust single-payment row if it hasn't already been split by recordSaleTransaction
+      if (existingRows.length === 1 && Math.abs(Number(existingRows[0].amount) - productCredit) > 0.01) {
+        const productReceived = isPaidOrCompleted ? productCredit : Math.min(receivedAmount, productCredit)
+        const mainCredit = productReceived
+
+        await sql`
+          UPDATE financial_transactions
+          SET
+            amount = ${productCredit},
+            received_amount = ${productReceived},
+            credit_amount = ${mainCredit}
+          WHERE id = ${existingRows[0].id}
+        `
+      }
     }
 
     let courierCredit = 0
-    if (shippingData.status === "Completed") {
+    if (isPaidOrCompleted) {
       courierCredit = courierPaidExtra
     } else if (shippingData.status === "Credit" && courierPaidExtra > 0 && totalAmount > 0 && receivedAmount > 0) {
       courierCredit = (receivedAmount / totalAmount) * courierPaidExtra
     }
 
     const transactionIds: number[] = []
-    const baseDate = shippingData.saleDate
+    const collectionDate = ensureDateTime(shippingData.saleDate || shippingData.transactionDate)
+    const expenseDate = ensureDateTime(shippingData.transactionDate || shippingData.saleDate)
 
+    // 1. Courier charge collected from customer (Money In)
     if (courierCredit > 0) {
       const result = await sql`
         INSERT INTO financial_transactions (
@@ -956,15 +1432,16 @@ export async function syncSaleShippingTransactions(shippingData: {
           status, payment_method, description, device_id, company_id, created_by, transaction_date
         ) VALUES (
           'sale_shipping', 'sale', ${shippingData.saleId},
-          ${courierCredit}, 0, 0, 0, ${courierCredit},
-          ${shippingData.status}, ${shippingData.paymentMethod || "Cash"},
+          ${courierCredit}, ${isPaidOrCompleted ? courierCredit : 0}, 0, 0, ${courierCredit},
+          ${isPaidOrCompleted ? 'Completed' : shippingData.status}, ${shippingData.paymentMethod || "Cash"},
           ${`Sale #${shippingData.saleId} - Courier charge collected`},
-          ${shippingData.deviceId}, ${companyId}, ${shippingData.userId}, ${baseDate}
+          ${shippingData.deviceId}, ${companyId}, ${shippingData.userId}, ${collectionDate.toISOString()}
         ) RETURNING id
       `
       transactionIds.push(Number(result[0]?.id))
     }
 
+    // 2. Courier charge paid by company (Money Out - company expense for shipping / direct dropship)
     if (expenseCourier > 0) {
       const result = await sql`
         INSERT INTO financial_transactions (
@@ -973,15 +1450,16 @@ export async function syncSaleShippingTransactions(shippingData: {
           status, payment_method, description, device_id, company_id, created_by, transaction_date
         ) VALUES (
           'sale_shipping', 'sale', ${shippingData.saleId},
-          ${expenseCourier}, 0, 0, ${expenseCourier}, 0,
-          ${shippingData.status}, ${shippingData.paymentMethod || "Cash"},
-          ${`Sale #${shippingData.saleId} - Courier expense`},
-          ${shippingData.deviceId}, ${companyId}, ${shippingData.userId}, ${baseDate}
+          ${expenseCourier}, ${expenseCourier}, 0, ${expenseCourier}, 0,
+          'Completed', ${shippingData.paymentMethod || "Cash"},
+          ${`Sale #${shippingData.saleId} - Courier charge`},
+          ${shippingData.deviceId}, ${companyId}, ${shippingData.userId}, ${expenseDate.toISOString()}
         ) RETURNING id
       `
       transactionIds.push(Number(result[0]?.id))
     }
 
+    // 3. Packing expense paid by company (Money Out)
     if (expensePacking > 0) {
       const result = await sql`
         INSERT INTO financial_transactions (
@@ -990,10 +1468,10 @@ export async function syncSaleShippingTransactions(shippingData: {
           status, payment_method, description, device_id, company_id, created_by, transaction_date
         ) VALUES (
           'sale_shipping', 'sale', ${shippingData.saleId},
-          ${expensePacking}, 0, 0, ${expensePacking}, 0,
-          ${shippingData.status}, ${shippingData.paymentMethod || "Cash"},
+          ${expensePacking}, ${expensePacking}, 0, ${expensePacking}, 0,
+          'Completed', ${shippingData.paymentMethod || "Cash"},
           ${`Sale #${shippingData.saleId} - Packing expense`},
-          ${shippingData.deviceId}, ${companyId}, ${shippingData.userId}, ${baseDate}
+          ${shippingData.deviceId}, ${companyId}, ${shippingData.userId}, ${expenseDate.toISOString()}
         ) RETURNING id
       `
       transactionIds.push(Number(result[0]?.id))
@@ -1009,16 +1487,83 @@ export async function syncSaleShippingTransactions(shippingData: {
   }
 }
 
+export async function cleanupCustomerPaymentsForSale(saleId: number) {
+  try {
+    const saleIdNum = Number(saleId)
+    if (!saleIdNum) return { success: true }
+
+    // Find any customer payment transactions in financial_transactions referencing this saleId
+    const payments = await sql`
+      SELECT id, amount, cost_amount, notes, description, payment_method, reference_id, device_id
+      FROM financial_transactions
+      WHERE transaction_type = 'customer_payment'
+        AND (
+          notes LIKE ${'%"saleId":' + saleIdNum + ',%'}
+          OR notes LIKE ${'%"saleId":' + saleIdNum + '}%'}
+          OR notes LIKE ${'%"saleId": ' + saleIdNum + ',%'}
+          OR notes LIKE ${'%"saleId": ' + saleIdNum + '}%'}
+          OR description LIKE ${'%#' + saleIdNum + '%'}
+        )
+    `
+
+    for (const p of payments) {
+      let stored: { v?: number; userNotes?: string; allocations?: Array<{ saleId: number; allocatedAmount: number }> } | null = null
+      try {
+        stored = typeof p.notes === "string" ? JSON.parse(p.notes) : p.notes
+      } catch {
+        stored = null
+      }
+
+      const allocations = Array.isArray(stored?.allocations) ? stored.allocations : []
+      const targetAlloc = allocations.find((a: any) => Number(a.saleId) === saleIdNum)
+      const remainingAllocations = allocations.filter((a: any) => Number(a.saleId) !== saleIdNum)
+
+      if (remainingAllocations.length === 0) {
+        // If all allocations were for this sale or no other allocations exist, delete the transaction
+        await sql`DELETE FROM financial_transactions WHERE id = ${p.id}`
+      } else {
+        // If other sales were also settled in this payment, reduce the payment amount and update notes
+        const removedAmount = Number(targetAlloc?.allocatedAmount) || 0
+        const newAmount = Math.max(0, Number(p.amount || 0) - removedAmount)
+        const updatedNotes = JSON.stringify({
+          ...stored,
+          allocations: remainingAllocations,
+        })
+        const newAllocCount = remainingAllocations.length
+        let cleanDesc = String(p.description || "").replace(/\d+\s+sale\(s\)\s+affected/, `${newAllocCount} sale(s) affected`)
+        cleanDesc = cleanDesc.replace(new RegExp(`\\[?Order#?\\s*${saleIdNum}\\]?`, "gi"), "").replace(/\s{2,}/g, " ").trim()
+
+        await sql`
+          UPDATE financial_transactions
+          SET amount = ${newAmount},
+              received_amount = ${newAmount},
+              credit_amount = ${newAmount},
+              notes = ${updatedNotes},
+              description = ${cleanDesc}
+          WHERE id = ${p.id}
+        `
+      }
+    }
+
+    return { success: true }
+  } catch (error) {
+    console.error(`Error cleaning up customer payments for sale ${saleId}:`, error)
+    return { success: false, error: error instanceof Error ? error.message : "Unknown error" }
+  }
+}
+
 // Delete transaction when sale/purchase is deleted
 export async function deleteSaleTransaction(saleId: number, deviceId: number) {
   try {
     const result = await sql`
       DELETE FROM financial_transactions 
-      WHERE reference_type = 'sale' 
+      WHERE (reference_type = 'sale' OR reference_type = 'sale_shipping')
         AND reference_id = ${saleId} 
         AND device_id = ${deviceId}
       RETURNING id
     `
+
+    await cleanupCustomerPaymentsForSale(saleId)
 
     console.log(`Deleted ${result.length} financial transactions for sale ${saleId}`)
     return { success: true, deletedCount: result.length }
@@ -1028,16 +1573,85 @@ export async function deleteSaleTransaction(saleId: number, deviceId: number) {
   }
 }
 
+// Clean up supplier payments when a purchase is deleted
+export async function cleanupSupplierPaymentsForPurchase(purchaseId: number) {
+  try {
+    const purchaseIdNum = Number(purchaseId)
+    if (!purchaseIdNum) return { success: true }
+
+    // Find any supplier_payment transactions that reference this purchase in their notes or description
+    const payments = await sql`
+      SELECT id, amount, debit_amount, notes, description
+      FROM financial_transactions
+      WHERE transaction_type = 'supplier_payment'
+        AND (
+          notes LIKE ${`%"purchaseId":${purchaseIdNum}%`}
+          OR notes LIKE ${`%"purchaseId": "${purchaseIdNum}"%`}
+          OR notes LIKE ${`%"purchaseId":${purchaseIdNum},%`}
+          OR notes LIKE ${`%Purchase #${purchaseIdNum}%`}
+          OR description LIKE ${`%Purchase #${purchaseIdNum}%`}
+        )
+    `
+
+    for (const p of payments) {
+      let stored: { v?: number; userNotes?: string; amountApplied?: number; extraCredit?: number; allocations?: Array<{ purchaseId: number; allocatedAmount?: number; amount?: number }> } | null = null
+      try {
+        stored = typeof p.notes === "string" ? JSON.parse(p.notes) : p.notes
+      } catch {
+        stored = null
+      }
+
+      const allocations = Array.isArray(stored?.allocations) ? stored.allocations : []
+      const targetAlloc = allocations.find((a: any) => Number(a.purchaseId) === purchaseIdNum)
+      const remainingAllocations = allocations.filter((a: any) => Number(a.purchaseId) !== purchaseIdNum)
+
+      if (remainingAllocations.length === 0) {
+        // If all allocations were for this purchase or no other allocations exist, delete the transaction
+        await sql`DELETE FROM financial_transactions WHERE id = ${p.id}`
+      } else {
+        // If other purchases were also settled in this payment, reduce the payment amount and update notes
+        const removedAmount = Number(targetAlloc?.allocatedAmount || targetAlloc?.amount) || 0
+        const newAmount = Math.max(0, Number(p.amount || 0) - removedAmount)
+        const updatedNotes = JSON.stringify({
+          ...stored,
+          amountApplied: Math.max(0, Number(stored?.amountApplied || p.amount || 0) - removedAmount),
+          allocations: remainingAllocations,
+        })
+        const newAllocCount = remainingAllocations.length
+        let cleanDesc = String(p.description || "").replace(/\d+\s+purchase\(s\)\s+affected/, `${newAllocCount} purchase(s) affected`)
+        cleanDesc = cleanDesc.replace(new RegExp(`\\[?Purchase#?\\s*${purchaseIdNum}\\]?`, "gi"), "").replace(/\s{2,}/g, " ").trim()
+
+        await sql`
+          UPDATE financial_transactions
+          SET amount = ${newAmount},
+              received_amount = ${newAmount},
+              debit_amount = ${newAmount},
+              notes = ${updatedNotes},
+              description = ${cleanDesc}
+          WHERE id = ${p.id}
+        `
+      }
+    }
+
+    return { success: true }
+  } catch (error) {
+    console.error(`Error cleaning up supplier payments for purchase ${purchaseId}:`, error)
+    return { success: false, error: error instanceof Error ? error.message : "Unknown error" }
+  }
+}
+
 // Delete transaction when purchase is deleted
 export async function deletePurchaseTransaction(purchaseId: number, deviceId: number) {
   try {
     const result = await sql`
       DELETE FROM financial_transactions 
-      WHERE reference_type = 'purchase' 
+      WHERE (reference_type = 'purchase' OR reference_type = 'purchase_shipping')
         AND reference_id = ${purchaseId} 
         AND device_id = ${deviceId}
       RETURNING id
     `
+
+    await cleanupSupplierPaymentsForPurchase(purchaseId)
 
     console.log(`Deleted ${result.length} financial transactions for purchase ${purchaseId}`)
     return { success: true, deletedCount: result.length }
@@ -1045,6 +1659,40 @@ export async function deletePurchaseTransaction(purchaseId: number, deviceId: nu
     console.error("Error deleting purchase transaction:", error)
     return { success: false, error: error instanceof Error ? error.message : "Unknown error" }
   }
+}
+
+function isMidnightTime(d: Date | null): boolean {
+  if (!d) return true
+  const isUtcZero = d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0
+  const isIstZero = d.getUTCHours() === 18 && d.getUTCMinutes() === 30 && d.getUTCSeconds() === 0
+  return isUtcZero || isIstZero
+}
+
+function resolveTransactionDateTime(tx: { transaction_date?: any; created_at?: any }): Date {
+  const tVal = tx.transaction_date
+  const cVal = tx.created_at
+  const tDate = tVal instanceof Date ? tVal : (tVal ? new Date(tVal) : null)
+  const cDate = cVal instanceof Date ? cVal : (cVal ? new Date(cVal) : null)
+
+  const isTValid = tDate && !isNaN(tDate.getTime())
+  const isCValid = cDate && !isNaN(cDate.getTime())
+
+  // If tDate has a real non-midnight time, use it
+  if (isTValid && !isMidnightTime(tDate)) {
+    return tDate
+  }
+
+  // If tDate was midnight or date-only, but created_at has a real time, combine tDate's date with created_at's time
+  if (isCValid && !isMidnightTime(cDate)) {
+    if (isTValid) {
+      const res = new Date(tDate)
+      res.setUTCHours(cDate.getUTCHours(), cDate.getUTCMinutes(), cDate.getUTCSeconds(), cDate.getUTCMilliseconds())
+      return res
+    }
+    return cDate
+  }
+
+  return isTValid ? tDate : (isCValid ? cDate : new Date())
 }
 
 // FIXED: Get financial summary from the simplified structure - PROPER cash balance calculation
@@ -1057,53 +1705,124 @@ export async function getFinancialSummary(
   try {
     console.log("Getting financial summary for device:", deviceId, "date range:", fromDateStr, "to", toDateStr)
 
-    // Auto-repair any previous manual entries whose transaction_type, reference_type, or date was improperly overwritten
-    try {
-      await sql`
-        UPDATE financial_transactions 
-        SET 
-          transaction_type = 'manual', 
-          reference_type = 'manual',
-          received_amount = amount,
-          transaction_date = created_at
-        WHERE device_id = ${deviceId} 
-          AND (reference_type = 'manual' OR transaction_type = 'manual' OR description LIKE 'Manual Entry%')
-          AND (transaction_type != 'manual' OR reference_type != 'manual' OR received_amount = 0 OR transaction_date::date > created_at::date)
-      `
-    } catch (repairErr) {
-      console.log("Non-fatal: manual transaction auto-repair skipped", repairErr)
-    }
+    // Execute all independent read queries in parallel to minimize network latency
+    const transactionsPromise = (fromDateStr && toDateStr)
+      ? sql`
+          SELECT * FROM financial_transactions 
+          WHERE device_id = ${deviceId} 
+            AND NOT (transaction_type = 'purchase' AND debit_amount = 0 AND received_amount = 0)
+            AND (
+              (transaction_date AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${fromDateStr}::date AND ${toDateStr}::date
+              OR (created_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${fromDateStr}::date AND ${toDateStr}::date
+              OR transaction_date::date BETWEEN ${fromDateStr}::date AND ${toDateStr}::date
+            )
+          ORDER BY transaction_date DESC, id DESC
+        `
+      : sql`
+          SELECT * FROM financial_transactions 
+          WHERE device_id = ${deviceId}
+            AND NOT (transaction_type = 'purchase' AND debit_amount = 0 AND received_amount = 0)
+          ORDER BY transaction_date DESC, id DESC
+        `
 
-    // Query transactions (fromDateStr/toDateStr are YYYY-MM-DD from the client calendar)
-    let transactions
-    if (fromDateStr && toDateStr) {
-      console.log("Querying with date range:", fromDateStr, "to", toDateStr)
-      transactions = await sql`
-        SELECT * FROM financial_transactions 
-        WHERE device_id = ${deviceId} 
-          AND (
-            transaction_date::date BETWEEN ${fromDateStr}::date AND ${toDateStr}::date
-            OR created_at::date BETWEEN ${fromDateStr}::date AND ${toDateStr}::date
-            OR (transaction_date + interval '5 hours 30 minutes')::date BETWEEN ${fromDateStr}::date AND ${toDateStr}::date
-          )
-        ORDER BY transaction_date DESC, id DESC
-      `
-    } else {
-      console.log("Querying all transactions for device:", deviceId)
-      transactions = await sql`
-        SELECT * FROM financial_transactions 
-        WHERE device_id = ${deviceId}
-        ORDER BY transaction_date DESC, id DESC
-      `
-    }
-
-    console.log(`Found ${transactions.length} transactions for device ${deviceId}`)
-
-    // Fetch Authoritative Sales, COGS & Profit from single backend source of truth
-    const authoritativeProfit = await getAuthoritativeProfitSummary(deviceId, {
+    const authoritativeProfitPromise = getAuthoritativeProfitSummary(deviceId, {
       dateFrom: fromDateStr,
       dateTo: toDateStr,
     })
+
+    const receivablesPromise = sql`
+      SELECT 
+        s.id,
+        s.total_amount,
+        s.received_amount,
+        s.sale_date,
+        s.status,
+        s.payment_status,
+        COALESCE(NULLIF(s.customer_name_override, ''), c.name, 'Walk-in Customer') as customer_name,
+        COALESCE(
+          NULLIF(s.balance_amount, 0),
+          GREATEST(0, COALESCE(s.total_amount, 0) - COALESCE(s.discount, 0) - COALESCE(s.received_amount, 0))
+        ) as outstanding_amount
+      FROM sales s
+      LEFT JOIN customers c ON s.customer_id = c.id
+      WHERE s.device_id = ${deviceId}
+        AND LOWER(COALESCE(s.status, '')) NOT IN ('cancelled', 'returned')
+        AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('paid', 'completed', 'cancelled', 'returned')
+        AND LOWER(COALESCE(s.delivery_status, '')) NOT IN ('returned', 'cancelled', 'failed')
+        AND COALESCE(
+          NULLIF(s.balance_amount, 0),
+          GREATEST(0, COALESCE(s.total_amount, 0) - COALESCE(s.discount, 0) - COALESCE(s.received_amount, 0))
+        ) > 0.01
+      ORDER BY s.sale_date DESC
+    `
+
+    const payablesPromise = sql`
+      SELECT 
+        p.id,
+        p.total_amount,
+        p.received_amount,
+        p.purchase_date,
+        p.status,
+        p.purchase_status,
+        COALESCE(NULLIF(TRIM(p.supplier), ''), 'Unknown Supplier') as supplier_name,
+        GREATEST(0, COALESCE(p.total_amount, 0) - COALESCE(p.received_amount, 0)) as outstanding_amount
+      FROM purchases p
+      WHERE p.device_id = ${deviceId}
+        AND LOWER(COALESCE(p.status, '')) NOT IN ('paid', 'completed', 'cancelled')
+        AND LOWER(COALESCE(p.purchase_status, '')) NOT IN ('cancelled', 'fully returned')
+        AND GREATEST(0, COALESCE(p.total_amount, 0) - COALESCE(p.received_amount, 0)) > 0.01
+      ORDER BY p.purchase_date DESC
+    `
+
+    const transferReceivablesPromise = sql`
+      SELECT
+        t.id,
+        COALESCE(t.total_amount, 0) AS total_amount,
+        COALESCE(t.paid_amount, 0) AS received_amount,
+        COALESCE(t.transfer_date, t.created_at) AS due_date,
+        t.payment_status AS status,
+        dt.name AS counterpart_name,
+        (COALESCE(t.total_amount, 0) - COALESCE(t.paid_amount, 0)) AS outstanding_amount
+      FROM stock_transfers t
+      JOIN devices dt ON dt.id = t.to_device_id
+      WHERE t.from_device_id = ${deviceId}
+        AND LOWER(COALESCE(t.status, '')) = 'completed'
+        AND (COALESCE(t.total_amount, 0) - COALESCE(t.paid_amount, 0)) > 0
+      ORDER BY COALESCE(t.transfer_date, t.created_at) DESC
+    `.catch(() => [])
+
+    const transferPayablesPromise = sql`
+      SELECT
+        t.id,
+        COALESCE(t.total_amount, 0) AS total_amount,
+        COALESCE(t.paid_amount, 0) AS received_amount,
+        COALESCE(t.transfer_date, t.created_at) AS due_date,
+        t.payment_status AS status,
+        df.name AS counterpart_name,
+        (COALESCE(t.total_amount, 0) - COALESCE(t.paid_amount, 0)) AS outstanding_amount
+      FROM stock_transfers t
+      JOIN devices df ON df.id = t.from_device_id
+      WHERE t.to_device_id = ${deviceId}
+        AND LOWER(COALESCE(t.status, '')) = 'completed'
+        AND (COALESCE(t.total_amount, 0) - COALESCE(t.paid_amount, 0)) > 0
+      ORDER BY COALESCE(t.transfer_date, t.created_at) DESC
+    `.catch(() => [])
+
+    const [
+      transactions,
+      authoritativeProfit,
+      receivablesQuery,
+      payablesQuery,
+      transferReceivablesQuery,
+      transferPayablesQuery,
+    ] = await Promise.all([
+      transactionsPromise,
+      authoritativeProfitPromise,
+      receivablesPromise,
+      payablesPromise,
+      transferReceivablesPromise,
+      transferPayablesPromise,
+    ])
 
     let cashBalance = 0
     transactions.forEach((tx: any) => {
@@ -1118,83 +1837,6 @@ export async function getFinancialSummary(
     const grossProfit = authoritativeProfit.grossProfit
     const totalExpenses = authoritativeProfit.operatingExpenses
     const netProfit = authoritativeProfit.netProfit
-
-    // Get receivables (sales with outstanding amounts)
-    const receivablesQuery = await sql`
-      SELECT 
-        s.id,
-        s.total_amount,
-        s.received_amount,
-        s.sale_date,
-        s.status,
-        c.name as customer_name,
-        (s.total_amount - COALESCE(s.received_amount, 0)) as outstanding_amount
-      FROM sales s
-      LEFT JOIN customers c ON s.customer_id = c.id
-      WHERE s.device_id = ${deviceId}
-        AND s.status != 'Cancelled'
-        AND (s.total_amount - COALESCE(s.received_amount, 0)) > 0
-      ORDER BY s.sale_date DESC
-    `
-
-    // Get payables (purchases with outstanding amounts)
-    const payablesQuery = await sql`
-      SELECT 
-        p.id,
-        p.total_amount,
-        p.received_amount,
-        p.purchase_date,
-        p.status,
-        p.supplier as supplier_name,
-        (p.total_amount - COALESCE(p.received_amount, 0)) as outstanding_amount
-      FROM purchases p
-      WHERE p.device_id = ${deviceId}
-        AND p.status != 'Cancelled'
-        AND (p.total_amount - COALESCE(p.received_amount, 0)) > 0
-      ORDER BY p.purchase_date DESC
-    `
-
-    // Transfer receivables: this device SENT goods and is owed money by the receiving warehouse
-    let transferReceivablesQuery: any[] = []
-    let transferPayablesQuery: any[] = []
-    try {
-      transferReceivablesQuery = await sql`
-        SELECT
-          t.id,
-          COALESCE(t.total_amount, 0) AS total_amount,
-          COALESCE(t.paid_amount, 0) AS received_amount,
-          COALESCE(t.transfer_date, t.created_at) AS due_date,
-          t.payment_status AS status,
-          dt.name AS counterpart_name,
-          (COALESCE(t.total_amount, 0) - COALESCE(t.paid_amount, 0)) AS outstanding_amount
-        FROM stock_transfers t
-        JOIN devices dt ON dt.id = t.to_device_id
-        WHERE t.from_device_id = ${deviceId}
-          AND LOWER(COALESCE(t.status, '')) = 'completed'
-          AND (COALESCE(t.total_amount, 0) - COALESCE(t.paid_amount, 0)) > 0
-        ORDER BY COALESCE(t.transfer_date, t.created_at) DESC
-      `
-
-      // Transfer payables: this device RECEIVED goods and owes money to the sending warehouse
-      transferPayablesQuery = await sql`
-        SELECT
-          t.id,
-          COALESCE(t.total_amount, 0) AS total_amount,
-          COALESCE(t.paid_amount, 0) AS received_amount,
-          COALESCE(t.transfer_date, t.created_at) AS due_date,
-          t.payment_status AS status,
-          df.name AS counterpart_name,
-          (COALESCE(t.total_amount, 0) - COALESCE(t.paid_amount, 0)) AS outstanding_amount
-        FROM stock_transfers t
-        JOIN devices df ON df.id = t.from_device_id
-        WHERE t.to_device_id = ${deviceId}
-          AND LOWER(COALESCE(t.status, '')) = 'completed'
-          AND (COALESCE(t.total_amount, 0) - COALESCE(t.paid_amount, 0)) > 0
-        ORDER BY COALESCE(t.transfer_date, t.created_at) DESC
-      `
-    } catch (transferErr) {
-      console.error("Error loading transfer dues (non-fatal):", transferErr)
-    }
 
     const accountsReceivable =
       receivablesQuery.reduce((sum: number, r: any) => sum + Number(r.outstanding_amount), 0) +
@@ -1241,21 +1883,28 @@ export async function getFinancialSummary(
         const creditAmount = Number(tx.credit_amount) || 0
         const debitAmount = Number(tx.debit_amount) || 0
         
-        // FIXED: For credit purchases, calculate remaining amount properly
+        // FIXED: For credit/partial purchases and sales, calculate remaining amount properly
         let remaining = 0
-        if (status.toLowerCase() === 'credit' && type === 'purchase') {
+        const statusClean = status.toLowerCase()
+        if ((statusClean === 'credit' || statusClean === 'partial') && type === 'purchase') {
           remaining = amount - received
-        } else if (status.toLowerCase() === 'credit' && type === 'sale') {
+        } else if ((statusClean === 'credit' || statusClean === 'partial') && type === 'sale') {
           remaining = amount - received
-        } else if (status.toLowerCase() === 'completed' && received < amount) {
+        } else if ((statusClean === 'completed' || statusClean === 'paid') && received < amount) {
           remaining = amount - received
         } else if (type === 'transfer' && received < amount) {
           remaining = amount - received
         }
+        if (type === 'purchase_shipping' || type === 'sale_shipping') {
+          remaining = 0
+        }
 
+        const effectiveDate = resolveTransactionDateTime(tx)
         return {
           id: tx.id,
-          date: tx.transaction_date,
+          date: effectiveDate.toISOString(),
+          created_at: tx.created_at instanceof Date ? tx.created_at.toISOString() : (tx.created_at || ""),
+          transaction_date: tx.transaction_date instanceof Date ? tx.transaction_date.toISOString() : (tx.transaction_date || ""),
           description: tx.description || `${tx.transaction_type} #${tx.reference_id}`,
           type: tx.transaction_type,
           reference_type: tx.reference_type,
@@ -1272,7 +1921,7 @@ export async function getFinancialSummary(
           reference: `${tx.reference_type} #${tx.reference_id}`,
           remaining: Math.max(0, remaining),
           sale_id: tx.reference_type === 'sale' ? tx.reference_id : undefined,
-          purchase_id: tx.reference_type === 'purchase' ? tx.reference_id : undefined,
+          purchase_id: (tx.reference_type === 'purchase' || tx.transaction_type === 'purchase_shipping') ? tx.reference_id : undefined,
           supplier_payment_id: tx.transaction_type === 'supplier_payment' || tx.reference_type === 'supplier' ? tx.id : undefined,
           transfer_id: tx.reference_type === 'transfer' ? tx.reference_id : undefined,
           reference_id: tx.reference_id,
@@ -1290,7 +1939,8 @@ export async function getFinancialSummary(
             0,
             Math.floor((new Date().getTime() - new Date(r.sale_date).getTime()) / (1000 * 60 * 60 * 24)),
           ),
-          status: r.status,
+          status: r.payment_status || r.status || "Credit",
+          is_transfer: false,
         })),
         ...transferReceivablesQuery.map((r: any) => ({
           id: `T-${r.id}`,
@@ -1303,7 +1953,8 @@ export async function getFinancialSummary(
             0,
             Math.floor((new Date().getTime() - new Date(r.due_date).getTime()) / (1000 * 60 * 60 * 24)),
           ),
-          status: r.status,
+          status: r.status || "Completed",
+          is_transfer: true,
         })),
       ],
       payables: [
@@ -1318,7 +1969,8 @@ export async function getFinancialSummary(
             0,
             Math.floor((new Date().getTime() - new Date(p.purchase_date).getTime()) / (1000 * 60 * 60 * 24)),
           ),
-          status: p.status,
+          status: p.status || "Credit",
+          is_transfer: false,
         })),
         ...transferPayablesQuery.map((p: any) => ({
           id: `T-${p.id}`,
@@ -1331,7 +1983,8 @@ export async function getFinancialSummary(
             0,
             Math.floor((new Date().getTime() - new Date(p.due_date).getTime()) / (1000 * 60 * 60 * 24)),
           ),
-          status: p.status,
+          status: p.status || "Completed",
+          is_transfer: true,
         })),
       ],
     }
@@ -1416,73 +2069,151 @@ export async function getAccountingBalances(deviceId: number, fromDateStr: strin
     const balanceResult = await sql`
       SELECT 
         COALESCE(SUM(
-          CASE WHEN transaction_date < ${openingCutoff}::timestamp THEN 
+          CASE WHEN (COALESCE(transaction_date, created_at) AT TIME ZONE 'Asia/Kolkata')::date < ${cleanFromStr}::date THEN 
             CASE 
-              WHEN COALESCE(credit_amount, 0) > 0 THEN credit_amount 
-              WHEN transaction_type = 'sale' THEN COALESCE(received_amount, 0)
-              WHEN transaction_type = 'customer_payment' THEN COALESCE(received_amount, amount, 0)
-              ELSE COALESCE(credit_amount, 0)
+              WHEN transaction_type = 'sale' THEN 
+                CASE 
+                  WHEN LOWER(COALESCE(status, '')) = 'cancelled' THEN 0
+                  WHEN COALESCE(received_amount, 0) > 0 THEN received_amount
+                  WHEN LOWER(COALESCE(status, '')) IN ('completed', 'paid') THEN COALESCE(credit_amount, amount, 0)
+                  ELSE 0
+                END
+              WHEN transaction_type = 'customer_payment' THEN COALESCE(credit_amount, amount, received_amount, 0)
+              WHEN (transaction_type = 'sale_shipping' OR transaction_type = 'shipping') AND (description ILIKE '%collected%' OR (COALESCE(credit_amount, 0) > 0 AND COALESCE(debit_amount, 0) = 0)) THEN COALESCE(credit_amount, received_amount, amount, 0)
+              WHEN transaction_type IN ('purchase_cancel_refund', 'purchase_return') THEN COALESCE(credit_amount, received_amount, amount, 0)
+              WHEN transaction_type IN ('income', 'INCOME') THEN COALESCE(credit_amount, amount, received_amount, 0)
+              WHEN transaction_type = 'transfer' AND COALESCE(credit_amount, 0) > 0 THEN credit_amount
+              WHEN transaction_type = 'adjustment' AND COALESCE(credit_amount, 0) > COALESCE(debit_amount, 0) THEN (credit_amount - debit_amount)
+              WHEN transaction_type IN ('purchase', 'purchase_shipping', 'supplier_payment', 'warehouse_payment', 'sale_return', 'sale_return_extra', 'return', 'expense', 'EXPENSE', 'salary', 'staff_advance') THEN 0
+              WHEN COALESCE(credit_amount, 0) > 0 AND COALESCE(debit_amount, 0) = 0 THEN credit_amount
+              ELSE 0
             END 
           ELSE 0 END
         ), 0) as opening_credits,
 
         COALESCE(SUM(
-          CASE WHEN transaction_date < ${openingCutoff}::timestamp THEN 
+          CASE WHEN (COALESCE(transaction_date, created_at) AT TIME ZONE 'Asia/Kolkata')::date < ${cleanFromStr}::date THEN 
             CASE 
-              WHEN COALESCE(debit_amount, 0) > 0 THEN debit_amount 
-              WHEN transaction_type = 'purchase' THEN COALESCE(received_amount, 0)
-              WHEN transaction_type IN ('expense', 'supplier_payment', 'warehouse_payment') THEN COALESCE(amount, received_amount, 0)
-              ELSE COALESCE(debit_amount, 0)
+              WHEN (transaction_type = 'sale_shipping' OR transaction_type = 'shipping') AND description ILIKE '%collected%' THEN 0
+              WHEN transaction_type IN ('sale', 'customer_payment', 'purchase_cancel_refund', 'purchase_return') THEN 0
+              WHEN transaction_type = 'purchase' THEN 
+                CASE 
+                  WHEN LOWER(COALESCE(status, '')) = 'cancelled' THEN 0
+                  WHEN COALESCE(received_amount, 0) > 0 THEN received_amount
+                  WHEN LOWER(COALESCE(status, '')) IN ('completed', 'paid') THEN COALESCE(debit_amount, amount, 0)
+                  ELSE 0
+                END
+              WHEN transaction_type IN ('supplier_payment', 'warehouse_payment') THEN COALESCE(debit_amount, amount, received_amount, 0)
+              WHEN transaction_type IN ('sale_return', 'sale_return_extra', 'return') THEN COALESCE(debit_amount, received_amount, amount, 0)
+              WHEN transaction_type = 'purchase_shipping' THEN COALESCE(debit_amount, amount, received_amount, 0)
+              WHEN (transaction_type = 'sale_shipping' OR transaction_type = 'shipping') AND COALESCE(debit_amount, 0) > 0 THEN COALESCE(debit_amount, amount, 0)
+              WHEN transaction_type IN ('expense', 'EXPENSE', 'salary', 'staff_advance') THEN COALESCE(debit_amount, amount, received_amount, 0)
+              WHEN transaction_type = 'transfer' AND COALESCE(debit_amount, 0) > 0 THEN debit_amount
+              WHEN transaction_type = 'adjustment' AND COALESCE(debit_amount, 0) > COALESCE(credit_amount, 0) THEN (debit_amount - credit_amount)
+              WHEN COALESCE(debit_amount, 0) > 0 AND COALESCE(credit_amount, 0) = 0 THEN debit_amount
+              ELSE 0
             END 
           ELSE 0 END
         ), 0) as opening_debits,
 
         COALESCE(SUM(
-          CASE WHEN transaction_date >= ${openingCutoff}::timestamp AND transaction_date < ${closingExclusiveCutoff}::timestamp THEN 
+          CASE WHEN (COALESCE(transaction_date, created_at) AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${cleanFromStr}::date AND ${cleanToStr}::date THEN 
             CASE 
-              WHEN COALESCE(credit_amount, 0) > 0 THEN credit_amount 
-              WHEN transaction_type = 'sale' THEN COALESCE(received_amount, 0)
-              WHEN transaction_type = 'customer_payment' THEN COALESCE(received_amount, amount, 0)
-              ELSE COALESCE(credit_amount, 0)
+              WHEN transaction_type = 'sale' THEN 
+                CASE 
+                  WHEN LOWER(COALESCE(status, '')) = 'cancelled' THEN 0
+                  WHEN COALESCE(received_amount, 0) > 0 THEN received_amount
+                  WHEN LOWER(COALESCE(status, '')) IN ('completed', 'paid') THEN COALESCE(credit_amount, amount, 0)
+                  ELSE 0
+                END
+              WHEN transaction_type = 'customer_payment' THEN COALESCE(credit_amount, amount, received_amount, 0)
+              WHEN (transaction_type = 'sale_shipping' OR transaction_type = 'shipping') AND (description ILIKE '%collected%' OR (COALESCE(credit_amount, 0) > 0 AND COALESCE(debit_amount, 0) = 0)) THEN COALESCE(credit_amount, received_amount, amount, 0)
+              WHEN transaction_type IN ('purchase_cancel_refund', 'purchase_return') THEN COALESCE(credit_amount, received_amount, amount, 0)
+              WHEN transaction_type IN ('income', 'INCOME') THEN COALESCE(credit_amount, amount, received_amount, 0)
+              WHEN transaction_type = 'transfer' AND COALESCE(credit_amount, 0) > 0 THEN credit_amount
+              WHEN transaction_type = 'adjustment' AND COALESCE(credit_amount, 0) > COALESCE(debit_amount, 0) THEN (credit_amount - debit_amount)
+              WHEN transaction_type IN ('purchase', 'purchase_shipping', 'supplier_payment', 'warehouse_payment', 'sale_return', 'sale_return_extra', 'return', 'expense', 'EXPENSE', 'salary', 'staff_advance') THEN 0
+              WHEN COALESCE(credit_amount, 0) > 0 AND COALESCE(debit_amount, 0) = 0 THEN credit_amount
+              ELSE 0
             END 
           ELSE 0 END
         ), 0) as period_credits,
 
         COALESCE(SUM(
-          CASE WHEN transaction_date >= ${openingCutoff}::timestamp AND transaction_date < ${closingExclusiveCutoff}::timestamp THEN 
+          CASE WHEN (COALESCE(transaction_date, created_at) AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${cleanFromStr}::date AND ${cleanToStr}::date THEN 
             CASE 
-              WHEN COALESCE(debit_amount, 0) > 0 THEN debit_amount 
-              WHEN transaction_type = 'purchase' THEN COALESCE(received_amount, 0)
-              WHEN transaction_type IN ('expense', 'supplier_payment', 'warehouse_payment') THEN COALESCE(amount, received_amount, 0)
-              ELSE COALESCE(debit_amount, 0)
+              WHEN (transaction_type = 'sale_shipping' OR transaction_type = 'shipping') AND description ILIKE '%collected%' THEN 0
+              WHEN transaction_type IN ('sale', 'customer_payment', 'purchase_cancel_refund', 'purchase_return') THEN 0
+              WHEN transaction_type = 'purchase' THEN 
+                CASE 
+                  WHEN LOWER(COALESCE(status, '')) = 'cancelled' THEN 0
+                  WHEN COALESCE(received_amount, 0) > 0 THEN received_amount
+                  WHEN LOWER(COALESCE(status, '')) IN ('completed', 'paid') THEN COALESCE(debit_amount, amount, 0)
+                  ELSE 0
+                END
+              WHEN transaction_type IN ('supplier_payment', 'warehouse_payment') THEN COALESCE(debit_amount, amount, received_amount, 0)
+              WHEN transaction_type IN ('sale_return', 'sale_return_extra', 'return') THEN COALESCE(debit_amount, received_amount, amount, 0)
+              WHEN transaction_type = 'purchase_shipping' THEN COALESCE(debit_amount, amount, received_amount, 0)
+              WHEN (transaction_type = 'sale_shipping' OR transaction_type = 'shipping') AND COALESCE(debit_amount, 0) > 0 THEN COALESCE(debit_amount, amount, 0)
+              WHEN transaction_type IN ('expense', 'EXPENSE', 'salary', 'staff_advance') THEN COALESCE(debit_amount, amount, received_amount, 0)
+              WHEN transaction_type = 'transfer' AND COALESCE(debit_amount, 0) > 0 THEN debit_amount
+              WHEN transaction_type = 'adjustment' AND COALESCE(debit_amount, 0) > COALESCE(credit_amount, 0) THEN (debit_amount - credit_amount)
+              WHEN COALESCE(debit_amount, 0) > 0 AND COALESCE(credit_amount, 0) = 0 THEN debit_amount
+              ELSE 0
             END 
           ELSE 0 END
         ), 0) as period_debits,
 
         COALESCE(SUM(
-          CASE WHEN transaction_date < ${closingExclusiveCutoff}::timestamp THEN 
+          CASE WHEN (COALESCE(transaction_date, created_at) AT TIME ZONE 'Asia/Kolkata')::date <= ${cleanToStr}::date THEN 
             CASE 
-              WHEN COALESCE(credit_amount, 0) > 0 THEN credit_amount 
-              WHEN transaction_type = 'sale' THEN COALESCE(received_amount, 0)
-              WHEN transaction_type = 'customer_payment' THEN COALESCE(received_amount, amount, 0)
-              ELSE COALESCE(credit_amount, 0)
+              WHEN transaction_type = 'sale' THEN 
+                CASE 
+                  WHEN LOWER(COALESCE(status, '')) = 'cancelled' THEN 0
+                  WHEN COALESCE(received_amount, 0) > 0 THEN received_amount
+                  WHEN LOWER(COALESCE(status, '')) IN ('completed', 'paid') THEN COALESCE(credit_amount, amount, 0)
+                  ELSE 0
+                END
+              WHEN transaction_type = 'customer_payment' THEN COALESCE(credit_amount, amount, received_amount, 0)
+              WHEN (transaction_type = 'sale_shipping' OR transaction_type = 'shipping') AND (description ILIKE '%collected%' OR (COALESCE(credit_amount, 0) > 0 AND COALESCE(debit_amount, 0) = 0)) THEN COALESCE(credit_amount, received_amount, amount, 0)
+              WHEN transaction_type IN ('purchase_cancel_refund', 'purchase_return') THEN COALESCE(credit_amount, received_amount, amount, 0)
+              WHEN transaction_type IN ('income', 'INCOME') THEN COALESCE(credit_amount, amount, received_amount, 0)
+              WHEN transaction_type = 'transfer' AND COALESCE(credit_amount, 0) > 0 THEN credit_amount
+              WHEN transaction_type = 'adjustment' AND COALESCE(credit_amount, 0) > COALESCE(debit_amount, 0) THEN (credit_amount - debit_amount)
+              WHEN transaction_type IN ('purchase', 'purchase_shipping', 'supplier_payment', 'warehouse_payment', 'sale_return', 'sale_return_extra', 'return', 'expense', 'EXPENSE', 'salary', 'staff_advance') THEN 0
+              WHEN COALESCE(credit_amount, 0) > 0 AND COALESCE(debit_amount, 0) = 0 THEN credit_amount
+              ELSE 0
             END 
           ELSE 0 END
         ), 0) as closing_credits,
 
         COALESCE(SUM(
-          CASE WHEN transaction_date < ${closingExclusiveCutoff}::timestamp THEN 
+          CASE WHEN (COALESCE(transaction_date, created_at) AT TIME ZONE 'Asia/Kolkata')::date <= ${cleanToStr}::date THEN 
             CASE 
-              WHEN COALESCE(debit_amount, 0) > 0 THEN debit_amount 
-              WHEN transaction_type = 'purchase' THEN COALESCE(received_amount, 0)
-              WHEN transaction_type IN ('expense', 'supplier_payment', 'warehouse_payment') THEN COALESCE(amount, received_amount, 0)
-              ELSE COALESCE(debit_amount, 0)
+              WHEN (transaction_type = 'sale_shipping' OR transaction_type = 'shipping') AND description ILIKE '%collected%' THEN 0
+              WHEN transaction_type IN ('sale', 'customer_payment', 'purchase_cancel_refund', 'purchase_return') THEN 0
+              WHEN transaction_type = 'purchase' THEN 
+                CASE 
+                  WHEN LOWER(COALESCE(status, '')) = 'cancelled' THEN 0
+                  WHEN COALESCE(received_amount, 0) > 0 THEN received_amount
+                  WHEN LOWER(COALESCE(status, '')) IN ('completed', 'paid') THEN COALESCE(debit_amount, amount, 0)
+                  ELSE 0
+                END
+              WHEN transaction_type IN ('supplier_payment', 'warehouse_payment') THEN COALESCE(debit_amount, amount, received_amount, 0)
+              WHEN transaction_type IN ('sale_return', 'sale_return_extra', 'return') THEN COALESCE(debit_amount, received_amount, amount, 0)
+              WHEN transaction_type = 'purchase_shipping' THEN COALESCE(debit_amount, amount, received_amount, 0)
+              WHEN (transaction_type = 'sale_shipping' OR transaction_type = 'shipping') AND COALESCE(debit_amount, 0) > 0 THEN COALESCE(debit_amount, amount, 0)
+              WHEN transaction_type IN ('expense', 'EXPENSE', 'salary', 'staff_advance') THEN COALESCE(debit_amount, amount, received_amount, 0)
+              WHEN transaction_type = 'transfer' AND COALESCE(debit_amount, 0) > 0 THEN debit_amount
+              WHEN transaction_type = 'adjustment' AND COALESCE(debit_amount, 0) > COALESCE(credit_amount, 0) THEN (debit_amount - credit_amount)
+              WHEN COALESCE(debit_amount, 0) > 0 AND COALESCE(credit_amount, 0) = 0 THEN debit_amount
+              ELSE 0
             END 
           ELSE 0 END
         ), 0) as closing_debits
       FROM financial_transactions
       WHERE device_id = ${deviceId}
-        AND transaction_date < ${closingExclusiveCutoff}::timestamp
+        AND (COALESCE(transaction_date, created_at) AT TIME ZONE 'Asia/Kolkata')::date <= ${cleanToStr}::date
     `
 
     const row = balanceResult[0]

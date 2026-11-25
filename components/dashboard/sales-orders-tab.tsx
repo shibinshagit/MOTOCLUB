@@ -19,7 +19,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { TableRowsInput } from "@/components/ui/table-rows-input"
-import { ChevronDown, ChevronUp, MapPin, Phone, User, Calendar, Layers, Printer, Edit, Trash2, Search, PlayCircle, Eye, Plus, Loader2, FileText, ExternalLink, ShoppingCart, Clock, AlertTriangle, Info, ChevronLeft, ChevronRight } from "lucide-react"
+import { ChevronDown, ChevronUp, MapPin, Phone, User, Calendar, Layers, Printer, Edit, Trash2, Search, PlayCircle, Eye, Plus, Loader2, FileText, ExternalLink, ShoppingCart, Clock, AlertTriangle, Info, ChevronLeft, ChevronRight, RotateCcw } from "lucide-react"
 import { SalesBreakdownModal } from "@/components/shared/sales-breakdown-modal"
 import { formatPhoneNumber, parseSaleDateTime, parseSaleDate, cn } from "@/lib/utils"
 import { useToast } from "@/components/ui/use-toast"
@@ -37,6 +37,7 @@ import { printJobCard, printBatchJobCards, printSalesReceipt } from "@/lib/recei
 import { generateCourierTrackingUrl, getPublicTrackingUrl } from "@/lib/shipping/tracking-url"
 import { JobCardModal } from "@/components/shared/job-card/job-card-modal"
 import ViewSaleModal from "@/components/sales/view-sale-modal"
+import { ReturnPaymentModal } from "@/components/sales/return-payment-modal"
 import { format } from "date-fns"
 
 export default function SalesOrdersTab() {
@@ -78,6 +79,7 @@ export default function SalesOrdersTab() {
   const [viewingSaleId, setViewingSaleId] = useState<number | null>(null)
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const [isBreakdownModalOpen, setIsBreakdownModalOpen] = useState(false)
+  const [returnModalSale, setReturnModalSale] = useState<any | null>(null)
   
   const [selectedSales, setSelectedSales] = useState<number[]>([])
   const [staffList, setStaffList] = useState<any[]>([])
@@ -333,6 +335,28 @@ export default function SalesOrdersTab() {
           }}
         />
       )}
+
+      <ReturnPaymentModal
+        isOpen={Boolean(returnModalSale)}
+        onClose={() => setReturnModalSale(null)}
+        sale={returnModalSale}
+        deviceId={deviceId || returnModalSale?.device_id || 0}
+        currency={currency}
+        onSuccess={() => {
+          if (returnModalSale?.id) {
+            setSales((prev) =>
+              prev.map((s) =>
+                s.id === returnModalSale.id
+                  ? { ...s, payment_status: "Returned", status: "Returned" }
+                  : s
+              )
+            )
+          }
+          setReturnModalSale(null)
+          fetchSales()
+          fetchSummary()
+        }}
+      />
 
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
         <div>
@@ -616,9 +640,30 @@ export default function SalesOrdersTab() {
                                   Credit
                                 </Badge>
                               )}
-                              {sale.payment_status === "Pending" && (
-                                <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-slate-50 text-slate-700 border-slate-200 font-semibold">
-                                  Pending
+                              {(sale.payment_status === "Pending" || sale.payment_status?.toLowerCase() === "pending") && (
+                                (deliveryStatusLower === "returned" || saleStatusLower === "returned") ? (
+                                  <Badge 
+                                    variant="outline" 
+                                    className="text-[10px] px-1.5 py-0 bg-amber-100 hover:bg-amber-200 text-amber-900 border-amber-300 font-bold cursor-pointer transition-all hover:scale-105 flex items-center gap-1 shadow-2xs"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      setReturnModalSale(sale)
+                                    }}
+                                    title="Click to process return refund"
+                                  >
+                                    <RotateCcw className="h-2.5 w-2.5 text-amber-700" />
+                                    <span>Pending</span>
+                                  </Badge>
+                                ) : (
+                                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-slate-50 text-slate-700 border-slate-200 font-semibold">
+                                    Pending
+                                  </Badge>
+                                )
+                              )}
+                              {(sale.payment_status === "Returned" || sale.payment_status?.toLowerCase() === "returned") && (
+                                <Badge className="bg-red-100 text-red-800 border-red-300 text-[10px] px-1.5 py-0 flex items-center gap-1 font-bold">
+                                  <RotateCcw className="h-2.5 w-2.5 text-red-600" />
+                                  Returned
                                 </Badge>
                               )}
                               {(sale.payment_status === "COD" || sale.payment_status?.toUpperCase() === "COD") && (
@@ -629,11 +674,6 @@ export default function SalesOrdersTab() {
                               {sale.status === "Pending" && !sale.is_pos_updated && (
                                 <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-amber-100 text-amber-800 border-amber-300 font-semibold">
                                   Not Updated
-                                </Badge>
-                              )}
-                              {sale.status === "Returned" && (
-                                <Badge className="bg-rose-100 text-rose-800 border-rose-300 text-[10px] px-1.5 py-0 flex items-center gap-1">
-                                  Returned
                                 </Badge>
                               )}
                               {Number(sale.total_returned_qty) > 0 && sale.status !== "Returned" && (

@@ -12,6 +12,8 @@ import { getReplacementShipmentsForSale } from "./replacement-actions"
 import { syncCustomerShippingAddress } from "./customer-actions"
 import { getAuthoritativeProfitSummary, type AuthoritativeProfitSummary } from "@/lib/profit-calculation"
 import { applyStockTransition, getSaleStockLines, applyStockDelta } from "@/lib/sale-stock"
+import { allocatePurchaseCosts } from "@/lib/purchase-courier"
+import { getDeviceCompanyId } from "@/lib/device-company"
 
 function getShippingAmounts(shipping: ReturnType<typeof normalizeSaleShippingInput>) {
   if (shipping.fulfillment_type !== "ship") {
@@ -725,15 +727,39 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
 
   try {
     const result = await executeWithRetry(async () => {
+      // Auto-heal any returned sales that already have refunds in financial_transactions
+      sql`
+        UPDATE sales s
+        SET payment_status = 'Returned', status = 'Returned'
+        WHERE (s.delivery_status = 'Returned' OR s.status = 'Returned')
+          AND (s.payment_status IS NULL OR s.payment_status != 'Returned')
+          AND EXISTS (
+            SELECT 1 FROM financial_transactions ft 
+            WHERE ft.reference_type = 'sale' 
+              AND ft.reference_id = s.id 
+              AND ft.transaction_type = 'sale_return'
+          )
+      `.catch(() => {})
+
       const sales = await sql`
         SELECT 
           s.id,
+          s.device_id,
           s.is_pos_updated,
           s.is_ready_to_ship,
           COALESCE(s.sale_date, s.created_at) as sale_date,
           s.created_at,
           s.status,
-          s.payment_status,
+          CASE 
+            WHEN s.payment_status = 'Returned' OR LOWER(COALESCE(s.payment_status, '')) = 'returned' THEN 'Returned'
+            WHEN (s.delivery_status = 'Returned' OR s.status = 'Returned') AND EXISTS (
+              SELECT 1 FROM financial_transactions ft 
+              WHERE ft.reference_type = 'sale' 
+                AND ft.reference_id = s.id 
+                AND ft.transaction_type = 'sale_return'
+            ) THEN 'Returned'
+            ELSE s.payment_status
+          END as payment_status,
           s.payment_method,
           s.fulfillment_type,
           s.delivery_status,
@@ -1448,11 +1474,17 @@ export async function getSalesSummaryCards(
       const rows = await sql`
         SELECT
           COUNT(*) FILTER (
-            WHERE (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) >= ${dateFrom}::timestamp)
+            WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
+              AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
+              AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) NOT IN ('returned', 'failed')
+              AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) >= ${dateFrom}::timestamp)
               AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) < ${endExclusive}::timestamp)
           )::int as total_count,
-          COALESCE(SUM(s.total_amount) FILTER (
-            WHERE (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) >= ${dateFrom}::timestamp)
+          COALESCE(SUM(COALESCE(s.received_amount, 0)) FILTER (
+            WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
+              AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
+              AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) NOT IN ('returned', 'failed')
+              AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) >= ${dateFrom}::timestamp)
               AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) < ${endExclusive}::timestamp)
           ), 0)::numeric as total_amount,
           COUNT(*) FILTER (
@@ -1624,6 +1656,47 @@ export async function getSalesSummaryCards(
               AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) >= ${dateFrom}::timestamp)
               AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) < ${endExclusive}::timestamp)
           )::int as pending_count,
+          COALESCE(SUM(COALESCE(s.received_amount, 0)) FILTER (
+            WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
+              AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
+              AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed', 'pickup')
+              AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+              AND (
+                ${isLogistics} = false
+                OR (
+                  -- 1. Direct Order
+                  (
+                    LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                    AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+                    AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) != 'pickup'
+                  )
+                  -- 2. Only Job Card Courier Order
+                  OR (
+                    (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%' OR s.tracking_id LIKE 'DOD%')
+                    AND (
+                      LOWER(COALESCE(s.type_of_sale, '')) = 'courier'
+                      OR LOWER(COALESCE(s.fulfillment_type, '')) = 'ship'
+                      OR COALESCE(s.courier_paid_extra, 0) > 0
+                    )
+                    AND (
+                      s.is_ready_to_ship = true
+                      OR LOWER(TRIM(COALESCE(s.delivery_status, ''))) IN ('packed', 'sent', 'direct', 'shipped', 'shipping', 'delivered')
+                    )
+                  )
+                )
+              )
+              AND (${onlyPosUpdated} = false OR s.is_pos_updated = true)
+              AND (
+                ${isPurchaseManager} = false
+                OR (
+                  s.is_ready_to_ship IS NOT TRUE
+                  AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) != 'direct'
+                  AND LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+                )
+              )
+              AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) >= ${dateFrom}::timestamp)
+              AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) < ${endExclusive}::timestamp)
+          ), 0)::numeric as pending_amount,
           COUNT(*) FILTER (
             WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
               AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
@@ -1677,6 +1750,59 @@ export async function getSalesSummaryCards(
               AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) >= ${dateFrom}::timestamp)
               AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) < ${endExclusive}::timestamp)
           )::int as critical_count,
+          COALESCE(SUM(COALESCE(s.received_amount, 0)) FILTER (
+            WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
+              AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
+              AND (
+                LOWER(COALESCE(s.payment_status, '')) IN ('paid', 'completed', 'partial', 'credit', 'cod')
+                OR LOWER(COALESCE(s.status, '')) IN ('credit', 'partial')
+                OR (s.total_amount > 0 AND s.received_amount >= s.total_amount)
+              )
+              AND (
+                LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) IN ('pending', 'paid', 'packed', 'sent')
+                OR LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+              )
+              AND (${onlyPosUpdated} = false OR s.is_pos_updated = true)
+              AND (
+                ${isLogistics} = false
+                OR (
+                  COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
+                  AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
+                  AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed')
+                  AND (
+                    -- 1. Direct Order
+                    (
+                      LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                      AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+                      AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) != 'pickup'
+                    )
+                    -- 2. Only Job Card Courier Order
+                    OR (
+                      (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%' OR s.tracking_id LIKE 'DOD%')
+                      AND (
+                        LOWER(COALESCE(s.type_of_sale, '')) = 'courier'
+                        OR LOWER(COALESCE(s.fulfillment_type, '')) = 'ship'
+                        OR COALESCE(s.courier_paid_extra, 0) > 0
+                      )
+                      AND (
+                        s.is_ready_to_ship = true
+                        OR LOWER(TRIM(COALESCE(s.delivery_status, ''))) IN ('packed', 'sent', 'direct', 'shipped', 'shipping', 'delivered')
+                      )
+                    )
+                  )
+                )
+              )
+              AND (
+                ${isPurchaseManager} = false
+                OR (
+                  s.is_ready_to_ship IS NOT TRUE
+                  AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) != 'direct'
+                  AND LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+                )
+              )
+              AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) >= ${dateFrom}::timestamp)
+              AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) < ${endExclusive}::timestamp)
+          ), 0)::numeric as critical_amount,
           COUNT(*) FILTER (
             WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
               AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled'
@@ -1786,7 +1912,7 @@ export async function getSalesSummaryCards(
             OR CAST(s.total_amount AS TEXT) LIKE ${searchPattern}
           )
       `
-      return rows[0] || { total_count: 0, total_amount: 0, orders_to_check_count: 0, orders_to_check_amount: 0, ready_to_ship_count: 0, today_count: 0, pending_count: 0, critical_count: 0, direct_count: 0, direct_amount: 0 }
+      return rows[0] || { total_count: 0, total_amount: 0, orders_to_check_count: 0, orders_to_check_amount: 0, ready_to_ship_count: 0, today_count: 0, pending_count: 0, pending_amount: 0, critical_count: 0, critical_amount: 0, direct_count: 0, direct_amount: 0 }
     })
 
     return {
@@ -1799,7 +1925,9 @@ export async function getSalesSummaryCards(
         ready_to_ship: Number(cardCounts.ready_to_ship_count || 0),
         today: Number(cardCounts.today_count || 0),
         pending: Number(cardCounts.pending_count || 0),
+        pending_amount: Number(cardCounts.pending_amount || 0),
         critical: Number(cardCounts.critical_count || 0),
+        critical_amount: Number(cardCounts.critical_amount || 0),
         direct: Number(cardCounts.direct_count || 0),
         direct_amount: Number(cardCounts.direct_amount || 0),
       },
@@ -1808,7 +1936,7 @@ export async function getSalesSummaryCards(
     console.error("Get sales summary cards error:", error)
     return {
       success: false,
-      counts: { total: 0, total_amount: 0, orders_to_check: 0, orders_to_check_amount: 0, ready_to_ship: 0, today: 0, pending: 0, critical: 0, direct: 0, direct_amount: 0 },
+      counts: { total: 0, total_amount: 0, orders_to_check: 0, orders_to_check_amount: 0, ready_to_ship: 0, today: 0, pending: 0, pending_amount: 0, critical: 0, critical_amount: 0, direct: 0, direct_amount: 0 },
     }
   }
 }
@@ -2190,6 +2318,30 @@ export async function getSaleDetails(saleId: number) {
       referenceNumber: p.reference_number || undefined,
       notes: p.notes || undefined,
     }))
+
+    // If transaction_payments was empty, fallback to check split rows in financial_transactions
+    if (paymentsList.length === 0) {
+      try {
+        const ftPayments = await sql`
+          SELECT id, payment_method, received_amount, amount, notes, transaction_date
+          FROM financial_transactions
+          WHERE reference_type = 'sale' AND reference_id = ${saleId} AND transaction_type = 'sale'
+          ORDER BY id ASC
+        `
+        if (ftPayments.length > 1) {
+          for (const ft of ftPayments) {
+            paymentsList.push({
+              id: ft.id,
+              paymentMethod: ft.payment_method || "UPI",
+              amount: Number(ft.received_amount || ft.amount) || 0,
+              notes: ft.notes || undefined,
+            })
+          }
+        }
+      } catch (ftErr) {
+        console.warn("Could not fallback to financial_transactions for payments:", ftErr)
+      }
+    }
 
     // Fetch Return History
     let returnsList: any[] = []
@@ -3756,49 +3908,42 @@ export async function updateSale(saleData: any) {
           adjustmentDescription = `Sale #${saleData.id} status changed from ${changes.originalStatus} to ${changes.newStatus}`
         }
 
-        // Record accounting when cash, bill, or cost changes
+        // When edited, directly re-sync the existing transaction entries without creating extra adjustment rows
         const hasAccountingChange =
           changes.receivedDiff !== 0 ||
           changes.discountChanged ||
           changes.totalChanged ||
           changes.itemsChanged ||
-          (changes.statusChanged &&
-            changes.originalStatus.toLowerCase() === "completed" &&
-            changes.newStatus.toLowerCase() === "cancelled")
+          changes.statusChanged
 
         if (hasAccountingChange) {
-          const accountingResult = await recordSaleAdjustment({
-            saleId: saleData.id,
-            changeType: "consolidated_edit",
-            previousValues: {
-              totalAmount: changes.originalTotal,
-              receivedAmount: changes.originalReceived,
-              status: changes.originalStatus,
-              cogsAmount: originalCogs,
-              discount: changes.originalDiscount,
-            },
-            newValues: {
+          if (changes.newReceived > 0 || changes.newStatus.toLowerCase() === "cancelled") {
+            const accountingResult = await recordSaleTransaction({
+              saleId: saleData.id,
               totalAmount: changes.newTotal,
               cogsAmount: newCogs,
               receivedAmount: changes.newReceived,
               outstandingAmount: changes.outstandingAmount,
               status: changes.newStatus,
+              paymentMethod: saleData.paymentMethod || "UPI",
+              deviceId: saleData.deviceId,
+              userId: saleData.userId,
               customerId: saleData.customerId,
-              discount: changes.newDiscount,
-            },
-            deviceId: saleData.deviceId,
-            userId: saleData.userId,
-            description: adjustmentDescription,
-            adjustmentDate: new Date(),
-          })
+              saleDate: changes.newDate,
+              productCreditAmount: changes.productTotal,
+              payments: saleData.payments,
+            })
 
-          if (accountingResult.success && accountingResult.transactionId) {
-            console.log("Accounting entry created for sale update:", accountingResult.transactionId)
-          } else if (accountingResult.message) {
-            console.log("Accounting:", accountingResult.message)
+            if (accountingResult.success && accountingResult.transactionId) {
+              console.log("Accounting entry updated for sale:", saleData.id)
+            }
+          } else {
+            // If received amount was updated to 0, clean any previous transaction entry
+            await deleteSaleTransaction(saleData.id, saleData.deviceId)
+            console.log("Cleared transactions for sale #", saleData.id, "as received amount is 0")
           }
         } else {
-          console.log("No accounting changes detected, skipping accounting entry")
+          console.log("No accounting changes detected, skipping accounting sync")
         }
 
         const { courierPaidExtra, expenseCourier, expensePacking } = getShippingAmounts(shipping)
@@ -3809,6 +3954,7 @@ export async function updateSale(saleData: any) {
           saleDate: changes.newDate,
           paymentMethod: saleData.paymentMethod || "UPI",
           status: changes.newStatus,
+          paymentStatus: changes.newStatus,
           fulfillmentType: shipping.fulfillment_type,
           courierPaidExtra,
           expenseCourier,
@@ -4046,19 +4192,19 @@ export async function updateSaleDeliveryStatus(
         }
       }
 
-      // Mark sale as Cancelled and update financial fields
+      // Mark sale as Returned and update payment_status to Pending (awaiting refund) without immediate cash flow
       await sql`
         UPDATE sales
         SET delivery_status = 'Returned',
-            status = 'Cancelled',
+            status = 'Returned',
+            payment_status = 'Pending',
             updated_at = NOW()
         WHERE id = ${saleId}
-          AND device_id = ${deviceId}
       `
 
       revalidatePath("/dashboard")
       revalidatePath("/staff/dashboard")
-      return { success: true as const, message: "Order marked as Returned. Stock has been fully restored.", trackingId: rows[0].tracking_id }
+      return { success: true as const, message: "Order marked as Returned. Stock has been fully restored and payment status set to Pending.", trackingId: rows[0].tracking_id }
     }
 
     // ===== NORMAL DELIVERY STATUS TRANSITIONS =====
@@ -4507,6 +4653,19 @@ export async function deleteSale(saleId: number, deviceId?: number) {
         console.error("Error deleting remaining accounting records:", accountingError)
       }
 
+      try {
+        const { cleanupCustomerPaymentsForSale } = await import("./simplified-accounting")
+        await cleanupCustomerPaymentsForSale(saleId)
+      } catch (cpErr) {
+        console.error("Error cleaning up linked customer payments on deleteSale:", cpErr)
+      }
+
+      try {
+        await sql`DELETE FROM transaction_payments WHERE sale_id = ${saleId}`
+      } catch (tpErr) {
+        console.error("Error deleting transaction_payments on deleteSale:", tpErr)
+      }
+
       // Delete batch allocations first to avoid foreign key constraint issues
       try {
         await sql`
@@ -4525,6 +4684,29 @@ export async function deleteSale(saleId: number, deviceId?: number) {
         `
       } catch (jobCardErr) {
         console.error("Error deleting job cards:", jobCardErr)
+      }
+
+      // Delete any linked dropship purchase created for this sale/job card
+      try {
+        const linkedDropshipPurchases = await sql`
+          SELECT id, device_id 
+          FROM purchases 
+          WHERE LOWER(purchase_type) = 'dropship'
+            AND (
+              notes LIKE ${`%Job Card #${saleId}%`}
+              OR notes LIKE ${`%Order #${saleId}%`}
+              OR notes LIKE ${`%Sale #${saleId}%`}
+            )
+        `
+        if (linkedDropshipPurchases.length > 0) {
+          const { deletePurchase } = await import("./purchase-actions")
+          for (const dp of linkedDropshipPurchases) {
+            console.log(`Deleting linked dropship purchase #${dp.id} for sale #${saleId}`)
+            await deletePurchase(dp.id, dp.device_id || saleDeviceId)
+          }
+        }
+      } catch (dropshipErr) {
+        console.error("Error deleting linked dropship purchase on deleteSale:", dropshipErr)
       }
 
       // Delete product stock history entries for this sale
@@ -4887,6 +5069,7 @@ export async function moveSaleToDirectPurchase(input: MoveSaleToDirectPurchaseIn
       const discount = Math.max(0, Number(input.discount) || 0)
       const purchaseTotal = Math.max(0, Math.round((subtotal + totalTax - discount) * 100) / 100)
       const courierCharge = Math.max(0, Number(input.courierCharge) || 0)
+      const courierPct = Math.max(0, Number(input.courierChargePercentage) || 0)
 
       let status = (input.paymentStatus || "").toLowerCase() === "paid" ? "Paid" : "Credit"
       const purchaseStatus = (input.purchaseStatus || "").toLowerCase() === "delivered" ? "Delivered" : "Ordered"
@@ -4896,7 +5079,14 @@ export async function moveSaleToDirectPurchase(input: MoveSaleToDirectPurchaseIn
       }
       const internalNotes = input.notes?.trim() || `Direct dropship fulfillment for Job Card #${input.saleId}`
 
-      // 3. Create or update the Dropship Purchase (courier charge is paid after delivery and recorded as sales order expense)
+      // Calculate cost allocations across items (in dropship, courier is NOT distributed to individual items)
+      const itemsForAlloc = input.items.map((it) => ({
+        price: Number(it.unit_cost) || 0,
+        quantity: Number(it.quantity) || 0,
+      }))
+      const costAllocations = allocatePurchaseCosts(itemsForAlloc, 0, discount)
+
+      // 3. Create or update the Dropship Purchase (store courier charge so view/edit displays it properly)
       const existingPurchases = await tx`
         SELECT id FROM purchases
         WHERE purchase_type = 'Dropship'
@@ -4914,6 +5104,8 @@ export async function moveSaleToDirectPurchase(input: MoveSaleToDirectPurchaseIn
               status = ${status},
               purchase_status = ${purchaseStatus},
               received_amount = ${finalPaidAmount},
+              courier_charge = ${courierCharge},
+              courier_charge_percentage = ${courierPct},
               discount = ${discount},
               notes = ${internalNotes}
           WHERE id = ${purchaseId}
@@ -4929,14 +5121,15 @@ export async function moveSaleToDirectPurchase(input: MoveSaleToDirectPurchaseIn
           VALUES (
             ${supplier}, ${purchaseTotal}, ${status}, 'Cash', ${purchaseStatus}, 'Dropship',
             ${input.userId}, ${input.deviceId}, NOW(), ${finalPaidAmount},
-            0, 0, ${discount}, ${internalNotes}
+            ${courierCharge}, ${courierPct}, ${discount}, ${internalNotes}
           )
           RETURNING id
         `
         purchaseId = purchaseRows[0].id
       }
 
-      // 4. Insert items into purchase_items (NO product cost update, NO inventory addition)
+      // 4. Insert items into purchase_items (with courier charge and unit cost allocated)
+      let itemIndex = 0
       for (const it of input.items) {
         const qty = Number(it.quantity) || 0
         const price = Number(it.unit_cost) || 0
@@ -4944,10 +5137,11 @@ export async function moveSaleToDirectPurchase(input: MoveSaleToDirectPurchaseIn
         const taxAmt = it.tax_amount != null ? Number(it.tax_amount) : Math.round(qty * price * (taxPct / 100) * 100) / 100
         const lineTotal = it.line_total != null ? Number(it.line_total) : Math.round((qty * price + taxAmt) * 100) / 100
 
-        const itemProportion = subtotal > 0 ? (qty * price) / subtotal : (1 / input.items.length)
-        const itemDiscountAmount = Number((discount * itemProportion).toFixed(2))
-        const itemNetCost = lineTotal - itemDiscountAmount
-        const unitAcquisitionCost = qty > 0 ? Number((itemNetCost / qty).toFixed(2)) : price
+        const alloc = costAllocations[itemIndex]
+        const unitAcquisitionCost = alloc ? alloc.unitAcquisitionCost : price
+        const itemCourierCharge = alloc ? alloc.courierCharge : 0
+        const itemDiscountAmount = alloc ? alloc.discountAmount : 0
+        itemIndex++
 
         await tx`
           INSERT INTO purchase_items (
@@ -4957,12 +5151,12 @@ export async function moveSaleToDirectPurchase(input: MoveSaleToDirectPurchaseIn
           VALUES (
             ${purchaseId}, ${it.product_id}, ${it.variant_id || null}, null,
             ${qty}, ${price}, ${taxPct}, ${taxAmt},
-            ${lineTotal}, 0, ${itemDiscountAmount}, ${unitAcquisitionCost}
+            ${lineTotal}, ${itemCourierCharge}, ${itemDiscountAmount}, ${unitAcquisitionCost}
           )
         `
       }
 
-      // Record purchase in simplified accounting system
+      // Record purchase in simplified accounting system (courier charge for dropship is recorded on the sales order, not purchase)
       try {
         await recordPurchaseTransaction({
           purchaseId,
@@ -4975,6 +5169,8 @@ export async function moveSaleToDirectPurchase(input: MoveSaleToDirectPurchaseIn
           deviceId: input.deviceId,
           userId: input.userId,
           purchaseDate: new Date(),
+          courierCharge: 0,
+          purchaseType: "Dropship",
         }, tx)
       } catch (recErr) {
         console.warn("recordPurchaseTransaction error in moveSaleToDirectPurchase:", recErr)
@@ -5015,14 +5211,16 @@ export async function moveSaleToDirectPurchase(input: MoveSaleToDirectPurchaseIn
 
       // 7. Sync sale shipping transactions
       try {
+        const effectiveSaleDate = new Date(sale.sale_date || sale.created_at || new Date())
         await syncSaleShippingTransactions({
           saleId: input.saleId,
           deviceId: sale.device_id || input.deviceId,
           userId: input.userId,
-          saleDate: new Date(sale.sale_date || new Date()),
+          saleDate: effectiveSaleDate,
+          transactionDate: effectiveSaleDate,
           paymentMethod: sale.payment_method || "Cash",
           status: sale.payment_status || "Pending",
-          fulfillmentType: sale.fulfillment_type || "ship",
+          fulfillmentType: "direct",
           courierPaidExtra: Number(sale.courier_paid_extra) || 0,
           expenseCourier: courierCharge,
           expensePacking: Number(sale.expense_packing) || 0,
@@ -5052,6 +5250,122 @@ export async function moveSaleToDirectPurchase(input: MoveSaleToDirectPurchaseIn
     return {
       success: false,
       message: err instanceof Error ? err.message : "Failed to move order to Direct",
+    }
+  }
+}
+
+export async function processSaleReturnRefund(input: {
+  saleId: number
+  refundAmount: number
+  paymentMethod: string
+  deviceId?: number
+  userId?: number
+  notes?: string
+}) {
+  try {
+    const saleId = Number(input.saleId)
+    const refundAmount = Math.max(0, Number(input.refundAmount) || 0)
+
+    if (!saleId) {
+      return { success: false, message: "Sale ID is required" }
+    }
+
+    const saleRows = await sql`
+      SELECT s.*, c.name as customer_name, c.phone as customer_phone
+      FROM sales s
+      LEFT JOIN customers c ON s.customer_id = c.id
+      WHERE s.id = ${saleId}
+      LIMIT 1
+    `
+
+    if (saleRows.length === 0) {
+      return { success: false, message: `Sale #${saleId} not found` }
+    }
+
+    const sale = saleRows[0]
+
+    // 1. Restriction: If sale is already marked as Returned, block further returns
+    if (sale.payment_status === "Returned" || sale.payment_status?.toLowerCase() === "returned") {
+      return {
+        success: false,
+        message: `Sale #${saleId} has already been returned. Multiple return refunds are not allowed.`,
+      }
+    }
+
+    // 2. Restriction: Check if a sale_return financial transaction already exists for this order
+    const existingRefund = await sql`
+      SELECT id, amount, transaction_date 
+      FROM financial_transactions 
+      WHERE reference_type = 'sale' 
+        AND reference_id = ${saleId} 
+        AND transaction_type = 'sale_return'
+      LIMIT 1
+    `
+
+    if (existingRefund.length > 0) {
+      // Ensure sales payment_status and status are updated to 'Returned'
+      await sql`
+        UPDATE sales
+        SET payment_status = 'Returned',
+            status = 'Returned',
+            updated_at = NOW()
+        WHERE id = ${saleId}
+      `
+      return {
+        success: false,
+        message: `A return refund has already been processed for Sale #${saleId}. Multiple returns are restricted.`,
+      }
+    }
+
+    const actualDeviceId = Number(sale.device_id || input.deviceId || 1)
+    const companyId = await getDeviceCompanyId(actualDeviceId)
+    const customerName = sale.customer_name || sale.customer_name_override || "Customer"
+    const paymentMethod = input.paymentMethod || sale.payment_method || "Cash"
+
+    // If refund amount > 0, record Money Out in financial_transactions
+    if (refundAmount > 0) {
+      const description = `Sale #${saleId} - Return Refund - ${customerName} - ${paymentMethod}`
+      await sql`
+        INSERT INTO financial_transactions (
+          transaction_name, transaction_type, reference_type, reference_id,
+          amount, received_amount, cost_amount, debit_amount, credit_amount,
+          status, payment_method, description, notes, device_id, company_id, created_by, transaction_date
+        ) VALUES (
+          'Sale Return Refund', 'sale_return', 'sale', ${saleId},
+          ${refundAmount}, ${refundAmount}, 0, ${refundAmount}, 0,
+          'Completed', ${paymentMethod}, ${description}, ${input.notes || null},
+          ${actualDeviceId}, ${companyId}, ${input.userId || sale.created_by || 1}, NOW()
+        )
+      `
+    }
+
+    // Update payment_status to 'Returned' and ensure status is 'Returned'
+    await sql`
+      UPDATE sales
+      SET payment_status = 'Returned',
+          status = 'Returned',
+          updated_at = NOW()
+      WHERE id = ${saleId}
+    `
+
+    try {
+      revalidatePath("/dashboard")
+      revalidatePath("/staff/dashboard")
+      revalidatePath("/sales")
+      revalidatePath("/sales/list")
+      revalidatePath("/accounts")
+      revalidatePath("/transactions")
+    } catch (_) {}
+
+    return {
+      success: true,
+      message: `Return refund of ${refundAmount.toFixed(2)} processed for Sale #${saleId}. Payment status updated to Returned.`,
+    }
+  } catch (err: any) {
+    console.error("processSaleReturnRefund error:", err)
+    return {
+      success: false,
+      message: err instanceof Error ? err.message : "Failed to process return refund",
     }
   }
 }

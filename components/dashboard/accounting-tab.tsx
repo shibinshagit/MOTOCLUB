@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -35,6 +35,9 @@ import {
   ChevronLeft,
   ChevronRight,
   Info,
+  RotateCcw,
+  ArrowUp,
+  ArrowDown,
 } from "lucide-react"
 import { useAppSelector, useAppDispatch } from "@/store/hooks"
 import { useStaffRestrictions } from "@/hooks/use-staff-restrictions"
@@ -62,6 +65,9 @@ import {
   getFinancialSummary,
   recordManualTransaction,
   getAccountingBalances,
+  getPendingCourierSales,
+  getPendingCourierPurchases,
+  recordCourierExpenseFromPettyCash,
 } from "@/app/actions/simplified-accounting"
 import { deletePurchase } from "@/app/actions/purchase-actions"
 import { deleteSale } from "@/app/actions/sale-actions"
@@ -202,6 +208,25 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
   const [searchTerm, setSearchTerm] = useState("")
   const [filterType, setFilterType] = useState("all")
   const [activeTab, setActiveTab] = useState("transactions")
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc")
+
+  const handleMoneyInClick = () => {
+    setActiveTab("transactions")
+    if (activeTab === "transactions" && (filterType === "money_in" || filterType === "income")) {
+      setFilterType("all")
+    } else {
+      setFilterType("money_in")
+    }
+  }
+
+  const handleMoneyOutClick = () => {
+    setActiveTab("transactions")
+    if (activeTab === "transactions" && (filterType === "money_out" || filterType === "expense")) {
+      setFilterType("all")
+    } else {
+      setFilterType("money_out")
+    }
+  }
 
   // Date range modal state
   const [isDateModalOpen, setIsDateModalOpen] = useState(false)
@@ -288,6 +313,52 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
   const [manualDate, setManualDate] = useState<Date>(new Date())
   const [isAddingManual, setIsAddingManual] = useState(false)
   const [selectedPettyCashCategory, setSelectedPettyCashCategory] = useState<string>("all")
+
+  // Courier petty cash states
+  const [courierMode, setCourierMode] = useState<"sale" | "purchase" | "general">("sale")
+  const [pendingCourierSales, setPendingCourierSales] = useState<any[]>([])
+  const [pendingCourierPurchases, setPendingCourierPurchases] = useState<any[]>([])
+  const [selectedCourierSaleId, setSelectedCourierSaleId] = useState("")
+  const [selectedCourierPurchaseId, setSelectedCourierPurchaseId] = useState("")
+  const [isLoadingPendingCourier, setIsLoadingPendingCourier] = useState(false)
+
+  const isCourierCategory =
+    manualType === "debit" &&
+    (manualCategoryName.toLowerCase().includes("courier") ||
+      manualCategoryName.toLowerCase().includes("delivery") ||
+      manualCategoryName.toLowerCase().includes("shipping"))
+
+  useEffect(() => {
+    if (isManualDialogOpen && isCourierCategory && deviceId) {
+      setIsLoadingPendingCourier(true)
+      Promise.all([
+        getPendingCourierSales(deviceId),
+        getPendingCourierPurchases(deviceId),
+      ])
+        .then(([salesRes, purchasesRes]) => {
+          if (salesRes.success) {
+            setPendingCourierSales(salesRes.data || [])
+          }
+          if (purchasesRes.success) {
+            setPendingCourierPurchases(purchasesRes.data || [])
+          }
+        })
+        .catch((err) => {
+          console.error("Error loading pending courier data:", err)
+        })
+        .finally(() => {
+          setIsLoadingPendingCourier(false)
+        })
+    }
+  }, [isManualDialogOpen, isCourierCategory, deviceId])
+
+  const selectedCourierSale = useMemo(() => {
+    return pendingCourierSales.find((s: any) => String(s.id) === selectedCourierSaleId) || null
+  }, [pendingCourierSales, selectedCourierSaleId])
+
+  const selectedCourierPurchase = useMemo(() => {
+    return pendingCourierPurchases.find((p: any) => String(p.id) === selectedCourierPurchaseId) || null
+  }, [pendingCourierPurchases, selectedCourierPurchaseId])
 
   const device = useAppSelector(selectDevice)
   const company = useAppSelector(selectCompany)
@@ -462,45 +533,74 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
       .replace(/[A-Z]{3}\s?/, `${currency} `)
   }
 
-  // Updated formatDateTime function
-  const formatDateTime = (dateInput: string | Date) => {
-    let date: Date
+  // Updated formatDateTime function - displays Indian Standard Time (IST / Asia/Kolkata)
+  // Resolves actual time from created_at if dateInput was midnight/date-only
+  const formatDateTime = (dateInput?: string | Date, createdAtInput?: string | Date) => {
+    if (!dateInput && !createdAtInput) return { date: "Invalid Date", time: "00:00" }
 
-    if (dateInput instanceof Date) {
-      date = dateInput
-    } else if (typeof dateInput === "string") {
-      date = parseISO(dateInput)
+    const isMidnight = (d: Date | null, rawVal: any): boolean => {
+      if (!d || isNaN(d.getTime())) return true
+      if (typeof rawVal === "string") {
+        const trimmed = rawVal.trim()
+        if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return true
+        if (/(?:T|\s)00:00(?::00(?:\.000)?)?(?:Z|[+-]\d{2}:?\d{2})?$/i.test(trimmed)) return true
+      }
+      const isUtcMidnight = d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0
+      const isIstMidnight = d.getUTCHours() === 18 && d.getUTCMinutes() === 30 && d.getUTCSeconds() === 0
+      const isLocalMidnight = d.getHours() === 0 && d.getMinutes() === 0 && d.getSeconds() === 0
+      return isUtcMidnight || isIstMidnight || isLocalMidnight
+    }
+
+    const dDate = dateInput ? (typeof dateInput === "string" ? new Date(dateInput) : dateInput) : null
+    const cDate = createdAtInput ? (typeof createdAtInput === "string" ? new Date(createdAtInput) : createdAtInput) : null
+
+    let finalDate: Date
+    if (dDate && !isNaN(dDate.getTime()) && !isMidnight(dDate, dateInput)) {
+      finalDate = dDate
+    } else if (cDate && !isNaN(cDate.getTime()) && !isMidnight(cDate, createdAtInput)) {
+      if (dDate && !isNaN(dDate.getTime())) {
+        finalDate = new Date(dDate)
+        finalDate.setUTCHours(cDate.getUTCHours(), cDate.getUTCMinutes(), cDate.getUTCSeconds(), cDate.getUTCMilliseconds())
+      } else {
+        finalDate = cDate
+      }
     } else {
-      return { date: "Invalid Date", time: "00:00" }
+      finalDate = (dDate && !isNaN(dDate.getTime())) ? dDate : ((cDate && !isNaN(cDate.getTime())) ? cDate : new Date())
     }
 
-    if (!isValid(date)) {
-      return { date: "Invalid Date", time: "00:00" }
-    }
+    const dateFormatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Kolkata",
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    })
+
+    const timeFormatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Kolkata",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    })
 
     return {
-      date: format(date, "MMM d, yyyy"),
-      time: format(date, "HH:mm"),
+      date: dateFormatter.format(finalDate),
+      time: timeFormatter.format(finalDate),
     }
   }
 
-  // Updated formatDate function
+  // Updated formatDate function - displays Indian Standard Time (IST / Asia/Kolkata)
   const formatDateOnly = (dateInput: string | Date) => {
-    let date: Date
+    if (!dateInput) return "Invalid Date"
+    const d = typeof dateInput === "string" ? new Date(dateInput) : dateInput
+    if (isNaN(d.getTime())) return "Invalid Date"
 
-    if (dateInput instanceof Date) {
-      date = dateInput
-    } else if (typeof dateInput === "string") {
-      date = parseISO(dateInput)
-    } else {
-      return "Invalid Date"
-    }
-
-    if (!isValid(date)) {
-      return "Invalid Date"
-    }
-
-    return format(date, "MMM d, yyyy")
+    const dateFormatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Kolkata",
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    })
+    return dateFormatter.format(d)
   }
 
   const getStatusBadge = (status: string) => {
@@ -521,6 +621,12 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
       return (
         <Badge className="border-rose-200 bg-rose-100 text-xs text-rose-800">
           Cancelled
+        </Badge>
+      )
+    } else if (statusLower === "returned" || statusLower === "sale return") {
+      return (
+        <Badge className="border-purple-200 bg-purple-100 text-xs text-purple-800">
+          Returned
         </Badge>
       )
     } else if (statusLower === "adjustment") {
@@ -546,42 +652,133 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
 
   const handleAddManualTransaction = async () => {
     if (!manualAmount || !manualCategoryId || !manualCategoryName) {
-      notifyError(toast,"Please fill in all required fields")
+      notifyError(toast, "Please fill in all required fields")
+      return
+    }
+
+    if (isCourierCategory && courierMode === "sale" && !selectedCourierSaleId) {
+      notifyError(toast, "Please select a sale order for courier expense")
+      return
+    }
+
+    if (isCourierCategory && courierMode === "purchase" && !selectedCourierPurchaseId) {
+      notifyError(toast, "Please select a purchase for courier expense")
       return
     }
 
     setIsAddingManual(true)
 
     try {
-      const result = await recordManualTransaction({
-        amount: Number(manualAmount),
-        type: manualType,
-        description: manualDescription || `${manualType === 'credit' ? 'Income' : 'Expense'}: ${manualCategoryName}`,
-        category: manualCategoryName,
-        categoryId: Number(manualCategoryId),
-        paymentMethod: manualPaymentMethod,
-        deviceId,
-        userId,
-        transactionDate: manualDate,
-      })
+      if (isCourierCategory && courierMode === "sale" && selectedCourierSaleId) {
+        const enteredAmt = Number(manualAmount)
+        const fulfillmentAmt = Number(selectedCourierSale?.expense_courier || 0)
 
-      if (result.success) {
-        notifySuccess(toast,"Manual transaction added successfully")
-        setIsManualDialogOpen(false)
-        setActiveTab("petty-cash")
-        setManualAmount("")
-        setManualDescription("")
-        setManualCategoryId("")
-        setManualCategoryName("")
-        setManualPaymentMethod("Cash")
-        setManualDate(new Date())
-        await forceRefreshData()
+        if (fulfillmentAmt > 0 && enteredAmt !== fulfillmentAmt) {
+          const confirmed = await confirm(
+            `The entered courier charge (${currency} ${enteredAmt.toFixed(2)}) does not match the fulfillment courier expense (${currency} ${fulfillmentAmt.toFixed(2)}). Do you want to confirm and update the fulfillment courier expense in the sales order?`
+          )
+          if (!confirmed) {
+            setIsAddingManual(false)
+            return
+          }
+        }
+
+        const result = await recordCourierExpenseFromPettyCash({
+          sourceType: "sale",
+          targetId: Number(selectedCourierSaleId),
+          amount: enteredAmt,
+          paymentMethod: manualPaymentMethod,
+          category: manualCategoryName,
+          categoryId: Number(manualCategoryId) || undefined,
+          notes: manualDescription,
+          deviceId,
+          userId,
+          transactionDate: manualDate,
+          updateFulfillment: true,
+        })
+
+        if (result.success) {
+          notifySuccess(toast, "Courier expense recorded and fulfillment updated successfully")
+          setIsManualDialogOpen(false)
+          setActiveTab("petty-cash")
+          setManualAmount("")
+          setManualDescription("")
+          setManualCategoryId("")
+          setManualCategoryName("")
+          setManualPaymentMethod("Cash")
+          setManualDate(new Date())
+          setCourierMode("sale")
+          setSelectedCourierSaleId("")
+          setSelectedCourierPurchaseId("")
+          await forceRefreshData()
+        } else {
+          notifyError(toast, result.message || "Failed to record courier expense")
+        }
+      } else if (isCourierCategory && courierMode === "purchase" && selectedCourierPurchaseId) {
+        const result = await recordCourierExpenseFromPettyCash({
+          sourceType: "purchase",
+          targetId: Number(selectedCourierPurchaseId),
+          amount: Number(manualAmount),
+          paymentMethod: manualPaymentMethod,
+          category: manualCategoryName,
+          categoryId: Number(manualCategoryId) || undefined,
+          notes: manualDescription,
+          deviceId,
+          userId,
+          transactionDate: manualDate,
+        })
+
+        if (result.success) {
+          notifySuccess(toast, "Courier expense recorded and purchase details updated successfully")
+          setIsManualDialogOpen(false)
+          setActiveTab("petty-cash")
+          setManualAmount("")
+          setManualDescription("")
+          setManualCategoryId("")
+          setManualCategoryName("")
+          setManualPaymentMethod("Cash")
+          setManualDate(new Date())
+          setCourierMode("sale")
+          setSelectedCourierSaleId("")
+          setSelectedCourierPurchaseId("")
+          await forceRefreshData()
+        } else {
+          notifyError(toast, result.message || "Failed to record courier expense")
+        }
       } else {
-        notifyError(toast,"Failed to add manual transaction")
+        const result = await recordManualTransaction({
+          amount: Number(manualAmount),
+          type: manualType,
+          description: manualDescription || `${manualType === 'credit' ? 'Income' : 'Expense'}: ${manualCategoryName}`,
+          category: manualCategoryName,
+          categoryId: Number(manualCategoryId),
+          paymentMethod: manualPaymentMethod,
+          deviceId,
+          userId,
+          transactionDate: manualDate,
+        })
+
+        if (result.success) {
+          notifySuccess(toast, "Manual transaction added successfully")
+          setIsManualDialogOpen(false)
+          setActiveTab("petty-cash")
+          setManualAmount("")
+          setManualDescription("")
+          setManualCategoryId("")
+          setManualCategoryName("")
+          setManualPaymentMethod("Cash")
+          setManualDate(new Date())
+          setCourierMode("sale")
+          setSelectedCourierSaleId("")
+          setSelectedCourierPurchaseId("")
+          await forceRefreshData()
+        } else {
+          notifyError(toast, "Failed to add manual transaction")
+        }
       }
     } catch (error) {
       console.error("Error adding manual transaction:", error)
-      notifyError(toast,"An error occurred while adding the transaction")
+      notifyError(toast, "An error occurred while adding the transaction")
     } finally {
       setIsAddingManual(false)
     }
@@ -769,16 +966,12 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                   <th>Status</th>
                   <th>Transaction Amount</th>
                   <th>Money Flow</th>
-                  ${hideCogs ? "" : "<th>Product Cost (COGS)</th>"}
-                  <th>Cash Impact</th>
                 </tr>
               </thead>
               <tbody>
-                ${filteredTransactions
+                ${sortedTransactions
                   .map((t) => {
-                    const dateTime = formatDateTime(t.date)
-                    const netImpact = getCashImpact(t)
-                    const cashImpact = getCashImpact(t)
+                    const dateTime = formatDateTime(t.date, t.created_at)
                     const moneyFlow = getMoneyFlowDisplay(t)
                     return `
                     <tr>
@@ -788,11 +981,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                       <td>${t.status}</td>
                       <td>${currency} ${t.amount.toFixed(2)}</td>
                       <td style="color: ${moneyFlow.color.includes('green') ? "#059669" : moneyFlow.color.includes('red') ? "#dc2626" : "#6b7280"}">
-                        ${moneyFlow.showAmount ? (netImpact >= 0 ? "+" : "-") + currency + " " + moneyFlow.value.toFixed(2) : moneyFlow.text}
-                      </td>
-                      ${hideCogs ? "" : `<td>${currency} ${t.cost.toFixed(2)}</td>`}
-                      <td style="color: ${cashImpact > 0 ? "#059669" : cashImpact < 0 ? "#dc2626" : "#6b7280"}; font-weight: bold;">
-                        ${cashImpact > 0 ? "+" : cashImpact < 0 ? "-" : ""}${currency} ${Math.abs(cashImpact).toFixed(2)}
+                        ${moneyFlow.showAmount ? (moneyFlow.color.includes('green') ? "+" : "-") + currency + " " + moneyFlow.value.toFixed(2) : moneyFlow.text}
                       </td>
                     </tr>
                   `
@@ -867,25 +1056,445 @@ const matchesSearchAndDateRange = (transaction: any) => {
   return matchesSearch && isWithinDateRange
 }
 
-// Define filteredTransactions first with proper null checks
-const filteredTransactions =
+const isSaleAdjustment = (transaction: any) =>
+  transaction?.type?.toLowerCase() === "adjustment" &&
+  (transaction.description || "").includes("Sale")
+
+const getSaleAdjustmentNetCash = (transaction: any) => {
+  const credit = n(transaction.credit)
+  const debit = n(transaction.debit)
+  const received = n(transaction.received)
+  if (credit !== 0 || debit !== 0) return credit - debit
+  return received
+}
+
+const isSaleRefundOrDiscount = (transaction: any) => {
+  if (!isSaleAdjustment(transaction)) return false
+  const description = transaction.description || ""
+  if (description.includes("Discount change")) return true
+  return getSaleAdjustmentNetCash(transaction) < 0
+}
+
+// Get signed cash flow amount: > 0 for Money In, < 0 for Money Out, 0 for No Cash Movement
+const getMoneyFlowAmount = (transaction: any) => {
+  if (!transaction) return 0
+  
+  const type = transaction.type?.toLowerCase()
+  const statusClean = (transaction.status || "").toLowerCase()
+  const description = transaction.description || ""
+  const received = n(transaction.received)
+  const credit = n(transaction.credit)
+  const debit = n(transaction.debit)
+  const totalAmount = n(transaction.amount)
+  
+  // Sales - actual cash received
+  if (type === 'sale') {
+    if (statusClean === 'cancelled') return 0
+    if (received > 0) return received
+    if (statusClean === 'completed' || statusClean === 'paid') {
+      return credit > 0 ? credit : totalAmount
+    }
+    return 0
+  }
+
+  // Purchases - actual cash paid out
+  if (type === 'purchase') {
+    if (statusClean === 'cancelled') return 0
+    if (received > 0) return -received
+    if (statusClean === 'completed' || statusClean === 'paid') {
+      return -(debit > 0 ? debit : totalAmount)
+    }
+    return 0
+  }
+
+  // Customer payments - money received against receivables
+  if (type === 'customer_payment' || description.toLowerCase().includes('customer payment')) {
+    return Math.abs(credit || totalAmount || received)
+  }
+
+  // Supplier payments - money paid to suppliers
+  if (type === 'supplier_payment' || description.toLowerCase().includes('supplier payment')) {
+    return -Math.abs(debit || totalAmount || received)
+  }
+
+  // Warehouse payments - money paid to warehouses
+  if (type === 'warehouse_payment' || description.toLowerCase().includes('warehouse payment')) {
+    return -Math.abs(debit || totalAmount || received)
+  }
+
+  // Sale shipping
+  if (type === 'sale_shipping' || (type === 'shipping' && description.toLowerCase().includes('sale'))) {
+    if (description.toLowerCase().includes('collected') || (credit > 0 && debit === 0)) {
+      return Math.abs(credit || received || totalAmount)
+    }
+    return -Math.abs(debit || totalAmount)
+  }
+
+  // Purchase shipping
+  if (type === 'purchase_shipping' || (type === 'shipping' && description.toLowerCase().includes('purchase'))) {
+    return -Math.abs(debit || totalAmount || received)
+  }
+
+  // Sale returns - refunds paid to customers
+  if (type === 'sale_return' || type === 'sale_return_extra' || type === 'return' || description.toLowerCase().includes('sale return')) {
+    return -Math.abs(debit || totalAmount || received)
+  }
+
+  // Purchase returns & cancel refunds - refunds received from suppliers
+  if (type === 'purchase_return' || type === 'purchase_cancel_refund' || description.toLowerCase().includes('purchase return') || description.toLowerCase().includes('cancel refund')) {
+    return Math.abs(credit || received || totalAmount)
+  }
+
+  // Expenses & Salaries & Advances
+  if (type === 'expense' || type === 'salary' || type === 'staff_advance' || description.toLowerCase().includes('salary')) {
+    return -Math.abs(debit || totalAmount || received)
+  }
+
+  // Direct Income
+  if (type === 'income') {
+    return Math.abs(credit || totalAmount || received)
+  }
+
+  // Transfers between warehouses/branches
+  if (type === 'transfer') {
+    if (credit > 0) return credit
+    if (debit > 0) return -debit
+    return 0
+  }
+
+  // Sale adjustments
+  if (isSaleAdjustment(transaction)) {
+    return getSaleAdjustmentNetCash(transaction)
+  }
+
+  // Purchase adjustments
+  if (type === 'adjustment' && description.includes('Purchase')) {
+    if (credit > 0) return credit
+    if (debit > 0 || received > 0) return -Math.abs(debit || received)
+    const paymentMatch = description.match(/Payment increased by\s*([\d.]+)/i) || description.match(/paid.*?([\d.]+)/i)
+    if (paymentMatch) return -Math.abs(n(paymentMatch[1]))
+    return 0
+  }
+
+  // Manual transactions
+  if (type === 'manual' || transaction.reference_type?.toLowerCase() === 'manual') {
+    if (credit > 0) return credit
+    if (debit > 0) return -debit
+    return 0
+  }
+
+  // Default fallback
+  if (credit > 0 && debit === 0) return credit
+  if (debit > 0 && credit === 0) return -debit
+  return credit - debit
+}
+
+// Get money flow info (in/out/none, display text, color, magnitude)
+const getMoneyFlowInfo = (transaction: any) => {
+  if (!transaction) {
+    return {
+      type: 'none',
+      text: 'No Cash Flow',
+      color: 'text-muted-foreground',
+      amount: 0
+    }
+  }
+
+  const type = transaction.type?.toLowerCase()
+  const statusClean = (transaction.status || "").toLowerCase()
+  const description = transaction.description || ""
+  const flowAmount = getMoneyFlowAmount(transaction)
+  const received = n(transaction.received)
+  const totalAmount = n(transaction.amount)
+  const credit = n(transaction.credit)
+  const debit = n(transaction.debit)
+
+  // Sales
+  if (type === 'sale') {
+    if (statusClean === 'cancelled') {
+      return {
+        type: 'none',
+        text: 'Cancelled Sale',
+        color: 'text-muted-foreground',
+        amount: 0
+      }
+    }
+    const actualCash = flowAmount > 0 ? flowAmount : received
+    if (actualCash === 0) {
+      return {
+        type: 'none',
+        text: 'Credit Sale',
+        color: 'text-brand-blue',
+        amount: 0
+      }
+    }
+    if (actualCash < totalAmount && statusClean !== 'completed' && statusClean !== 'paid') {
+      return {
+        type: 'in',
+        text: 'Partial Payment',
+        color: 'text-emerald-600',
+        amount: actualCash
+      }
+    }
+    return {
+      type: 'in',
+      text: 'Full Payment',
+      color: 'text-emerald-600',
+      amount: actualCash
+    }
+  }
+
+  // Purchases
+  if (type === 'purchase') {
+    if (statusClean === 'cancelled') {
+      return {
+        type: 'none',
+        text: 'Cancelled Purchase',
+        color: 'text-muted-foreground',
+        amount: 0
+      }
+    }
+    const actualPaid = flowAmount < 0 ? Math.abs(flowAmount) : (received > 0 ? received : 0)
+    if (actualPaid === 0) {
+      return {
+        type: 'none',
+        text: 'Credit Purchase',
+        color: 'text-brand-blue',
+        amount: 0
+      }
+    }
+    if (actualPaid < totalAmount && statusClean !== 'completed' && statusClean !== 'paid') {
+      return {
+        type: 'out',
+        text: 'Partial Payment',
+        color: 'text-rose-600',
+        amount: actualPaid
+      }
+    }
+    return {
+      type: 'out',
+      text: 'Full Payment',
+      color: 'text-rose-600',
+      amount: actualPaid
+    }
+  }
+
+  // Customer payments
+  if (type === 'customer_payment' || description.toLowerCase().includes('customer payment')) {
+    return {
+      type: 'in',
+      text: 'Customer Payment',
+      color: 'text-emerald-600',
+      amount: Math.abs(flowAmount) || totalAmount
+    }
+  }
+
+  // Supplier payments
+  if (type === 'supplier_payment' || description.toLowerCase().includes('supplier payment')) {
+    return {
+      type: 'out',
+      text: 'Supplier Payment',
+      color: 'text-rose-600',
+      amount: Math.abs(flowAmount) || totalAmount
+    }
+  }
+
+  // Warehouse payments
+  if (type === 'warehouse_payment' || description.toLowerCase().includes('warehouse payment')) {
+    return {
+      type: 'out',
+      text: 'Warehouse Payment',
+      color: 'text-rose-600',
+      amount: Math.abs(flowAmount) || totalAmount
+    }
+  }
+
+  // Sale returns
+  if (type === 'sale_return' || type === 'sale_return_extra' || type === 'return' || description.toLowerCase().includes('sale return')) {
+    return {
+      type: 'out',
+      text: 'Sale Return Refund',
+      color: 'text-purple-600',
+      amount: Math.abs(flowAmount) || totalAmount
+    }
+  }
+
+  // Purchase returns & cancel refunds
+  if (type === 'purchase_return' || type === 'purchase_cancel_refund' || description.toLowerCase().includes('purchase return') || description.toLowerCase().includes('cancel refund')) {
+    return {
+      type: 'in',
+      text: type === 'purchase_cancel_refund' ? 'Purchase Cancel Refund' : 'Purchase Return Refund',
+      color: 'text-emerald-600',
+      amount: Math.abs(flowAmount) || totalAmount
+    }
+  }
+
+  // Purchase shipping
+  if (type === 'purchase_shipping' || (type === 'shipping' && description.toLowerCase().includes('purchase'))) {
+    return {
+      type: 'out',
+      text: 'Courier Charge',
+      color: 'text-rose-600',
+      amount: Math.abs(flowAmount) || totalAmount
+    }
+  }
+
+  // Sale shipping
+  if (type === 'sale_shipping' || (type === 'shipping' && description.toLowerCase().includes('sale'))) {
+    const isCollected = description.toLowerCase().includes('collected') || (credit > 0 && debit === 0)
+    if (isCollected || flowAmount > 0) {
+      return {
+        type: 'in',
+        text: 'Courier Collected',
+        color: 'text-emerald-600',
+        amount: Math.abs(flowAmount) || totalAmount
+      }
+    }
+    return {
+      type: 'out',
+      text: 'Courier Expense',
+      color: 'text-rose-600',
+      amount: Math.abs(flowAmount) || totalAmount
+    }
+  }
+
+  // Expenses & Salaries & Advances
+  if (type === 'expense' || type === 'salary' || type === 'staff_advance' || description.toLowerCase().includes('salary')) {
+    return {
+      type: 'out',
+      text: type === 'salary' || description.toLowerCase().includes('salary') ? 'Salary Payment' : (type === 'staff_advance' ? 'Staff Advance' : 'Expense'),
+      color: 'text-rose-600',
+      amount: Math.abs(flowAmount) || totalAmount
+    }
+  }
+
+  // Transfers between warehouses/branches
+  if (type === 'transfer') {
+    if (flowAmount > 0 || credit > 0) {
+      return {
+        type: 'in',
+        text: 'Transfer Received',
+        color: 'text-emerald-600',
+        amount: Math.abs(flowAmount) || credit
+      }
+    }
+    if (flowAmount < 0 || debit > 0) {
+      return {
+        type: 'out',
+        text: 'Transfer Paid',
+        color: 'text-rose-600',
+        amount: Math.abs(flowAmount) || debit
+      }
+    }
+  }
+
+  // Income
+  if (type === 'income') {
+    return {
+      type: 'in',
+      text: 'Income',
+      color: 'text-emerald-600',
+      amount: Math.abs(flowAmount) || totalAmount
+    }
+  }
+
+  // Sale adjustments
+  if (isSaleAdjustment(transaction)) {
+    if (flowAmount < 0 || isSaleRefundOrDiscount(transaction)) {
+      return {
+        type: 'out',
+        text: description.includes('Discount change') ? 'Discount Applied' : 'Refund',
+        color: 'text-rose-600',
+        amount: Math.abs(flowAmount)
+      }
+    }
+    if (flowAmount > 0) {
+      return {
+        type: 'in',
+        text: 'Additional Payment',
+        color: 'text-emerald-600',
+        amount: flowAmount
+      }
+    }
+    return {
+      type: 'none',
+      text: 'Bill Updated',
+      color: 'text-muted-foreground',
+      amount: 0
+    }
+  }
+
+  // Purchase adjustments
+  if (type === 'adjustment' && description.includes('Purchase')) {
+    if (flowAmount > 0) {
+      return {
+        type: 'in',
+        text: 'Purchase Refund',
+        color: 'text-emerald-600',
+        amount: flowAmount
+      }
+    }
+    if (flowAmount < 0) {
+      return {
+        type: 'out',
+        text: 'Additional Payment',
+        color: 'text-rose-600',
+        amount: Math.abs(flowAmount)
+      }
+    }
+    return {
+      type: 'none',
+      text: 'Bill Updated',
+      color: 'text-muted-foreground',
+      amount: 0
+    }
+  }
+
+  // Generic flow
+  if (flowAmount > 0) {
+    return {
+      type: 'in',
+      text: 'Money In',
+      color: 'text-emerald-600',
+      amount: flowAmount
+    }
+  } else if (flowAmount < 0) {
+    return {
+      type: 'out',
+      text: 'Money Out',
+      color: 'text-rose-600',
+      amount: Math.abs(flowAmount)
+    }
+  }
+
+  return {
+    type: 'none',
+    text: 'No Cash Flow',
+    color: 'text-muted-foreground',
+    amount: 0
+  }
+}
+
+// All transactions matching the selected date range and search filter (before category tab filtering)
+const dateFilteredTransactions =
   financialData?.transactions?.filter((transaction) => {
     if (!transaction) return false
+    return matchesSearchAndDateRange(transaction)
+  }) || []
 
+// Define filteredTransactions first with proper null checks
+const filteredTransactions =
+  dateFilteredTransactions.filter((transaction) => {
     const type = transaction.type?.toLowerCase()
-
-    if (!matchesSearchAndDateRange(transaction)) return false
-
     const description = transaction.description || ""
-    const received = n(transaction.received)
 
     let matchesType = true
-    if (filterType === "income") {
-      matchesType = (type === 'sale' && received > 0) || (type === 'adjustment' && received > 0)
-    } else if (filterType === "expense") {
-      matchesType = (type === 'purchase' && received > 0) ||
-                   (type === 'supplier_payment') ||
-                   (type === 'adjustment' && description.includes('Purchase') && received > 0)
+    if (filterType === "money_in" || filterType === "income") {
+      const flow = getMoneyFlowInfo(transaction)
+      matchesType = flow.type === "in"
+    } else if (filterType === "money_out" || filterType === "expense") {
+      const flow = getMoneyFlowInfo(transaction)
+      matchesType = flow.type === "out"
     } else if (filterType === "sale") {
       matchesType = type === "sale" || description.toLowerCase().startsWith("sale")
     } else if (filterType === "purchase") {
@@ -899,7 +1508,22 @@ const filteredTransactions =
     }
 
     return matchesType
-  }) || []
+  })
+
+  const sortedTransactions = useMemo(() => {
+    return [...filteredTransactions].sort((a, b) => {
+      const tA = new Date(a.date).getTime()
+      const tB = new Date(b.date).getTime()
+      const timeA = !isNaN(tA) ? tA : 0
+      const timeB = !isNaN(tB) ? tB : 0
+      if (timeA === timeB) {
+        const idA = Number(a.id) || 0
+        const idB = Number(b.id) || 0
+        return sortOrder === "desc" ? idB - idA : idA - idB
+      }
+      return sortOrder === "desc" ? timeB - timeA : timeA - timeB
+    })
+  }, [filteredTransactions, sortOrder])
 
 const getManualCategoryName = (t: any): string => {
   if (!t) return "General"
@@ -931,7 +1555,7 @@ const allPettyCashTransactions =
     if (!transaction) return false
     const typeLower = transaction.type?.toLowerCase()
     const refTypeLower = transaction.reference_type?.toLowerCase()
-    if (typeLower !== "manual" && refTypeLower !== "manual") return false
+    if (typeLower !== "manual" && refTypeLower !== "manual" && !transaction.category_name) return false
     return matchesSearchAndDateRange(transaction)
   }) || []
 
@@ -944,27 +1568,23 @@ const pettyCashTransactions =
     ? allPettyCashTransactions
     : allPettyCashTransactions.filter((t) => getManualCategoryName(t) === selectedPettyCashCategory)
 
+const sortedPettyCashTransactions = useMemo(() => {
+  return [...pettyCashTransactions].sort((a, b) => {
+    const tA = new Date(a.date).getTime()
+    const tB = new Date(b.date).getTime()
+    const timeA = !isNaN(tA) ? tA : 0
+    const timeB = !isNaN(tB) ? tB : 0
+    if (timeA === timeB) {
+      const idA = Number(a.id) || 0
+      const idB = Number(b.id) || 0
+      return sortOrder === "desc" ? idB - idA : idA - idB
+    }
+    return sortOrder === "desc" ? timeB - timeA : timeA - timeB
+  })
+}, [pettyCashTransactions, sortOrder])
+
 
 const isDataLoading = isLoading && !financialData
-
-const isSaleAdjustment = (transaction: any) =>
-  transaction?.type?.toLowerCase() === "adjustment" &&
-  (transaction.description || "").includes("Sale")
-
-const getSaleAdjustmentNetCash = (transaction: any) => {
-  const credit = n(transaction.credit)
-  const debit = n(transaction.debit)
-  const received = n(transaction.received)
-  if (credit !== 0 || debit !== 0) return credit - debit
-  return received
-}
-
-const isSaleRefundOrDiscount = (transaction: any) => {
-  if (!isSaleAdjustment(transaction)) return false
-  const description = transaction.description || ""
-  if (description.includes("Discount change")) return true
-  return getSaleAdjustmentNetCash(transaction) < 0
-}
 
 // FIXED: Profit calculation with proportional cost for partial payments
 // FIXED: Profit calculation - ONLY includes sales profit, excludes purchases
@@ -1076,6 +1696,21 @@ const getCashImpact = (transaction: any) => {
     const saleReceived = credit > 0 ? credit : received
     return saleReceived - cost
   }
+
+  // For sale shipping / courier
+  if (type === 'sale_shipping' || (type === 'shipping' && description.toLowerCase().includes('sale'))) {
+    if (description.toLowerCase().includes('collected') || credit > 0) {
+      return credit || received || n(transaction.amount)
+    }
+    if (debit > 0 || description.toLowerCase().includes('expense') || description.toLowerCase().includes('courier charge')) {
+      return -(debit || Math.abs(n(transaction.amount)))
+    }
+  }
+
+  // For purchase shipping
+  if (type === 'purchase_shipping' || (type === 'shipping' && description.toLowerCase().includes('purchase'))) {
+    return -(debit || Math.abs(n(transaction.amount)) || received)
+  }
   
   // For sale adjustments - cash impact from payments, discounts, or refunds
   if (isSaleAdjustment(transaction)) {
@@ -1170,7 +1805,37 @@ const getCashImpact = (transaction: any) => {
   
   // For supplier payments - cash impact is full amount paid out (negative)
   if (type === 'supplier_payment' || description.toLowerCase().includes('supplier payment')) {
-    return -Math.abs(debit)
+    return -(n(transaction.debit) || n(transaction.amount) || received)
+  }
+
+  // For warehouse payments
+  if (type === 'warehouse_payment' || description.toLowerCase().includes('warehouse payment')) {
+    return -(n(transaction.debit) || n(transaction.amount) || received)
+  }
+
+  // For customer payments
+  if (type === 'customer_payment' || description.toLowerCase().includes('customer payment')) {
+    return n(transaction.amount) || received || credit
+  }
+
+  // For sale returns
+  if (type === 'sale_return' || type === 'sale_return_extra' || type === 'return' || description.toLowerCase().includes('sale return')) {
+    return -(n(transaction.debit) || n(transaction.amount) || received)
+  }
+
+  // For purchase returns & cancel refunds
+  if (type === 'purchase_return' || type === 'purchase_cancel_refund' || description.toLowerCase().includes('purchase return') || description.toLowerCase().includes('cancel refund')) {
+    return credit || received || n(transaction.amount)
+  }
+
+  // For expenses & salaries
+  if (type === 'expense' || type === 'salary' || description.toLowerCase().includes('salary')) {
+    return -(n(transaction.debit) || n(transaction.amount))
+  }
+
+  // For direct income
+  if (type === 'income') {
+    return credit || n(transaction.amount) || received
   }
   
   // For manual/other transactions - cash impact = actual net money movement
@@ -1205,221 +1870,6 @@ const getTotalCashImpact = () => {
   })
 
   return totalCashImpact
-}
-
-// NEW: Get actual money in/out amounts (not profit)
-const getMoneyFlowAmount = (transaction: any) => {
-  if (!transaction) return 0
-  
-  const type = transaction.type?.toLowerCase()
-  const description = transaction.description || ""
-  const received = n(transaction.received)
-  const credit = n(transaction.credit)
-  const debit = n(transaction.debit)
-  
-  // For sales - money in is product revenue (courier charge is on sale_shipping lines)
-  if (type === 'sale') {
-    return credit > 0 ? credit : received
-  }
-
-  if (type === 'sale_shipping') {
-    return credit > 0 ? credit : -debit
-  }
-  
-  // For sale adjustments - net money movement from ledger
-  if (isSaleAdjustment(transaction)) {
-    return getSaleAdjustmentNetCash(transaction)
-  }
-  
-  // For purchases - money out is the actual paid amount
-  if (type === 'purchase') {
-    return received
-  }
-  
-  // For purchase adjustments - money out is the additional payment made
-  if (type === 'adjustment' && description.includes('Purchase')) {
-    return received || debit
-  }
-  
-  // For supplier payments - money out is the payment amount
-  if (type === 'supplier_payment' || description.toLowerCase().includes('supplier payment')) {
-    return Math.abs(debit)
-  }
-  
-  // For manual transactions - money in/out based on type
-  if (type === 'manual' || transaction.reference_type?.toLowerCase() === 'manual') {
-    return credit > 0 ? credit : -debit
-  }
-  
-  // Default for other transactions
-  return credit > 0 ? credit : -debit
-}
-
-// NEW: Get money flow type (in/out) and display text
-const getMoneyFlowInfo = (transaction: any) => {
-  if (!transaction) {
-    return {
-      type: 'none',
-      text: 'No Cash Flow',
-      color: 'text-muted-foreground',
-      amount: 0
-    }
-  }
-  
-  const type = transaction.type?.toLowerCase()
-  const description = transaction.description || ""
-  const amount = getMoneyFlowAmount(transaction)
-  const received = n(transaction.received)
-  const totalAmount = n(transaction.amount)
-  
-  // Sales - Money In
-  if (type === 'sale') {
-    if (received === 0) {
-      return {
-        type: 'none',
-        text: 'Credit Sale',
-        color: 'text-brand-blue',
-        amount: 0
-      }
-    }
-    if (received < totalAmount) {
-      return {
-        type: 'in',
-        text: 'Partial Payment',
-        color: 'text-emerald-600',
-        amount: amount
-      }
-    }
-    return {
-      type: 'in',
-      text: 'Full Payment',
-      color: 'text-emerald-600',
-      amount: amount
-    }
-  }
-  
-  // Sale adjustments - payment in, discount/refund out, or bill-only update
-  if (isSaleAdjustment(transaction)) {
-    const flowAmount = getMoneyFlowAmount(transaction)
-
-    if (flowAmount < 0 || isSaleRefundOrDiscount(transaction)) {
-      return {
-        type: "out",
-        text: description.includes("Discount change") ? "Discount Applied" : "Refund",
-        color: "text-rose-600",
-        amount: Math.abs(flowAmount),
-      }
-    }
-
-    if (flowAmount > 0) {
-      return {
-        type: "in",
-        text: "Additional Payment",
-        color: "text-emerald-600",
-        amount: flowAmount,
-      }
-    }
-
-    return {
-      type: "none",
-      text: "Bill Updated",
-      color: "text-muted-foreground",
-      amount: 0,
-    }
-  }
-  
-  // Purchases - Money Out
-  if (type === 'purchase') {
-    if (received === 0) {
-      return {
-        type: 'none',
-        text: 'Credit Purchase',
-        color: 'text-brand-blue',
-        amount: 0
-      }
-    }
-    if (received < totalAmount) {
-      return {
-        type: 'out',
-        text: 'Partial Payment',
-        color: 'text-rose-600',
-        amount: amount
-      }
-    }
-    return {
-      type: 'out',
-      text: 'Full Payment',
-      color: 'text-rose-600',
-      amount: amount
-    }
-  }
-  
-  // Purchase adjustments - Money Out
-  if (type === 'adjustment' && description.includes('Purchase')) {
-    return {
-      type: 'out',
-      text: 'Additional Payment',
-      color: 'text-rose-600',
-      amount: amount
-    }
-  }
-  
-  // Supplier payments - Money Out
-  if (type === 'supplier_payment' || description.toLowerCase().includes('supplier payment')) {
-    return {
-      type: 'out',
-      text: 'Supplier Payment',
-      color: 'text-rose-600',
-      amount: amount
-    }
-  }
-  
-  // Manual transactions
-  if (type === 'manual' || transaction.reference_type?.toLowerCase() === 'manual') {
-    const credit = n(transaction.credit)
-    const debit = n(transaction.debit)
-    
-    if (credit > 0) {
-      return {
-        type: 'in',
-        text: 'Money In',
-        color: 'text-emerald-600',
-        amount: amount
-      }
-    } else if (debit > 0) {
-      return {
-        type: 'out',
-        text: 'Money Out',
-        color: 'text-rose-600',
-        amount: amount
-      }
-    }
-  }
-  
-  // Default cases
-  const cashImpact = getCashImpact(transaction)
-  if (cashImpact > 0) {
-    return {
-      type: 'in',
-      text: 'Money In',
-      color: 'text-emerald-600',
-      amount: Math.abs(cashImpact)
-    }
-  } else if (cashImpact < 0) {
-    return {
-      type: 'out',
-      text: 'Money Out',
-      color: 'text-rose-600',
-      amount: Math.abs(cashImpact)
-    }
-  }
-  
-  return {
-    type: 'none',
-    text: 'No Cash Flow',
-    color: 'text-muted-foreground',
-    amount: 0
-  }
 }
 
 // ADDED: Get filtered COGS (Cost of Goods Sold)
@@ -1542,22 +1992,22 @@ const getRemainingAmount = (transaction: any) => {
   }
   
   // For regular credit sales, remaining = total amount - received amount
-  if (status === 'credit' && type === 'sale') {
+  if ((status === 'credit' || status === 'partial') && type === 'sale') {
     return Math.max(0, totalAmount - receivedAmount)
   }
   
   // For credit purchases, remaining = total amount - received amount
-  if (status === 'credit' && type === 'purchase') {
+  if ((status === 'credit' || status === 'partial') && type === 'purchase') {
     return Math.max(0, totalAmount - receivedAmount)
   }
   
   // For completed sales with partial payment
-  if (status === 'completed' && receivedAmount < totalAmount) {
+  if ((status === 'completed' || status === 'paid') && receivedAmount < totalAmount) {
     return Math.max(0, totalAmount - receivedAmount)
   }
   
   // For paid purchases with partial payment
-  if (status === 'paid' && receivedAmount < totalAmount) {
+  if ((status === 'paid' || status === 'completed') && receivedAmount < totalAmount) {
     return Math.max(0, totalAmount - receivedAmount)
   }
   
@@ -1565,42 +2015,20 @@ const getRemainingAmount = (transaction: any) => {
 }
 
 const getAmountReceived = () => {
-  // Use backend source-of-truth if available
+  // If date-filtered transactions are loaded, compute directly from them so the card and table are 100% consistent
+  if (dateFilteredTransactions && dateFilteredTransactions.length > 0) {
+    return dateFilteredTransactions.reduce((sum, t) => {
+      const flow = getMoneyFlowInfo(t)
+      return flow.type === "in" ? sum + flow.amount : sum
+    }, 0)
+  }
+
+  // Fallback to backend source-of-truth if transactions array is not yet loaded
   if (balances?.moneyIn !== undefined) {
     return balances.moneyIn
   }
 
-  if (!filteredTransactions) return 0
-  
-  let totalReceived = 0
-
-  filteredTransactions.forEach((t) => {
-    if (!t) return
-    
-    const type = t.type?.toLowerCase()
-    const description = t.description || ""
-    const received = n(t.received)
-    const credit = n(t.credit)
-    
-    // For sales - count full received amount
-    if (type === 'sale') {
-      totalReceived += received
-    }
-    // For sale adjustments - count full additional money received
-    else if (type === 'adjustment' && description.includes('Sale')) {
-      totalReceived += (received > 0 ? received : credit)
-    }
-    // For purchase refunds - count full refund amount
-    else if (type === 'adjustment' && description.includes('Purchase') && credit > 0) {
-      totalReceived += credit
-    }
-    // For other transactions - count credit amounts (money coming in)
-    else if (credit > 0) {
-      totalReceived += credit
-    }
-  })
-
-  return totalReceived
+  return 0
 }
 
 const getTotalReceived = () => {
@@ -1609,42 +2037,20 @@ const getTotalReceived = () => {
 
 // FIXED: Get spends (money out) - consistent with getAmountReceived logic
 const getSpends = () => {
-  // Use backend source-of-truth if available
+  // If date-filtered transactions are loaded, compute directly from them so the card and table are 100% consistent
+  if (dateFilteredTransactions && dateFilteredTransactions.length > 0) {
+    return dateFilteredTransactions.reduce((sum, t) => {
+      const flow = getMoneyFlowInfo(t)
+      return flow.type === "out" ? sum + flow.amount : sum
+    }, 0)
+  }
+
+  // Fallback to backend source-of-truth if transactions array is not yet loaded
   if (balances?.moneyOut !== undefined) {
     return balances.moneyOut
   }
 
-  if (!filteredTransactions) return 0
-  
-  let totalSpends = 0
-
-  filteredTransactions.forEach((t) => {
-    if (!t) return
-    
-    const type = t.type?.toLowerCase()
-    const description = t.description || ""
-    const received = n(t.received)
-    const debit = n(t.debit)
-    
-    // For purchases - count full amount spent
-    if (type === 'purchase') {
-      totalSpends += received
-    }
-    // For purchase adjustments (payments) - count additional payment
-    else if (type === 'adjustment' && description.includes('Purchase') && debit > 0) {
-      totalSpends += debit
-    }
-    // For supplier payments - count full amount paid
-    else if (type === 'supplier_payment' || description.toLowerCase().includes('supplier payment')) {
-      totalSpends += Math.abs(debit)
-    }
-    // For other transactions - count debit amounts (money going out)
-    else if (debit > 0) {
-      totalSpends += debit
-    }
-  })
-
-  return totalSpends
+  return 0
 }
 
 const getTotalSpends = () => {
@@ -1779,6 +2185,13 @@ const getTransactionTypeIcon = (type: string) => {
       return <ShoppingCart className="h-4 w-4" />
     case "purchase":
       return <Package className="h-4 w-4" />
+    case "sale_return":
+    case "return":
+    case "purchase_return":
+    case "purchase_cancel_refund":
+      return <RotateCcw className="h-4 w-4 text-purple-600" />
+    case "customer_payment":
+      return <Users className="h-4 w-4 text-emerald-600" />
     case "supplier_payment":
       return <CreditCard className="h-4 w-4" />
     case "manual":
@@ -1916,9 +2329,9 @@ const getEnhancedDescription = (transaction: any) => {
   
   // Purchase transactions
   if (type === 'purchase') {
-    if (status === 'credit') {
+    if (status === 'credit' || status === 'partial') {
       return `Credit Purchase #${transaction.purchase_id || 'N/A'} - ${currency} ${amount.toFixed(2)} (Pending: ${currency} ${(amount - received).toFixed(2)})`
-    } else if (status === 'paid') {
+    } else if (status === 'paid' || status === 'completed') {
       if (received < amount) {
         return `Partial Payment Purchase #${transaction.purchase_id || 'N/A'} - ${currency} ${amount.toFixed(2)} (Paid: ${currency} ${received.toFixed(2)})`
       } else {
@@ -1926,6 +2339,16 @@ const getEnhancedDescription = (transaction: any) => {
       }
     }
     return `Purchase #${transaction.purchase_id || 'N/A'} - ${currency} ${amount.toFixed(2)}`
+  }
+
+  // Purchase shipping / Courier charge
+  if (type === 'purchase_shipping') {
+    return description || `Purchase #${transaction.purchase_id || transaction.reference_id || 'N/A'} - Courier charge`
+  }
+
+  // Sale shipping / Courier charge
+  if (type === 'sale_shipping') {
+    return description || `Sale #${transaction.sale_id || transaction.reference_id || 'N/A'} - Courier charge`
   }
   
   // Adjustment transactions
@@ -1941,7 +2364,7 @@ const getEnhancedDescription = (transaction: any) => {
   
   // Supplier payments
   if (type === 'supplier_payment' || description.toLowerCase().includes('supplier payment')) {
-    return `Supplier Payment - ${currency} ${Math.abs(n(transaction.debit)).toFixed(2)}`
+    return description || `Supplier Payment - ${currency} ${Math.abs(n(transaction.debit)).toFixed(2)}`
   }
   
   // Manual transactions
@@ -1951,6 +2374,84 @@ const getEnhancedDescription = (transaction: any) => {
   
   // Fallback to original description
   return description || "Transaction"
+}
+
+interface ParsedAllocation {
+  type: "sale" | "purchase"
+  id: number
+  amount: number
+}
+
+const parseTransactionAllocations = (transaction: any): {
+  baseTitle: string
+  allocations: ParsedAllocation[]
+  userNotes?: string
+} => {
+  const fullDesc = transaction?.description || ""
+  const allocations: ParsedAllocation[] = []
+  let userNotes: string | undefined = undefined
+
+  // 1. Try parsing transaction.notes JSON
+  if (transaction?.notes) {
+    try {
+      const parsed = typeof transaction.notes === "string" ? JSON.parse(transaction.notes) : transaction.notes
+      if (parsed && typeof parsed === "object") {
+        if (parsed.userNotes) {
+          userNotes = parsed.userNotes
+        }
+        if (Array.isArray(parsed.allocations)) {
+          for (const a of parsed.allocations) {
+            const purchaseId = Number(a.purchaseId || a.purchase_id)
+            const saleId = Number(a.saleId || a.sale_id)
+            const amount = Number(a.allocatedAmount || a.amount || 0)
+            if (purchaseId > 0 && amount > 0) {
+              allocations.push({ type: "purchase", id: purchaseId, amount })
+            } else if (saleId > 0 && amount > 0) {
+              allocations.push({ type: "sale", id: saleId, amount })
+            }
+          }
+        }
+      }
+    } catch {
+      // ignore non-json
+    }
+  }
+
+  // 2. Fallback: Parse bracketed breakdown from description if allocations empty
+  if (allocations.length === 0 && fullDesc) {
+    const match = fullDesc.match(/\[(.*?)\]/)
+    if (match && match[1]) {
+      const parts = match[1].split(",")
+      for (const part of parts) {
+        const saleMatch = part.match(/Sale\s*#(\d+)(?::\s*([0-9.]+))?/i)
+        const purchaseMatch = part.match(/Purchase\s*#(\d+)(?::\s*([0-9.]+))?/i)
+        if (saleMatch) {
+          allocations.push({
+            type: "sale",
+            id: parseInt(saleMatch[1], 10),
+            amount: saleMatch[2] ? parseFloat(saleMatch[2]) : 0,
+          })
+        } else if (purchaseMatch) {
+          allocations.push({
+            type: "purchase",
+            id: parseInt(purchaseMatch[1], 10),
+            amount: purchaseMatch[2] ? parseFloat(purchaseMatch[2]) : 0,
+          })
+        }
+      }
+    }
+  }
+
+  // 3. Extract clean baseTitle (strips [ ... ] and - Notes: ...)
+  let baseTitle = fullDesc
+  if (allocations.length > 0) {
+    baseTitle = fullDesc
+      .replace(/\s*-\s*\[.*?\]/g, "")
+      .replace(/\s*-\s*Notes:.*$/i, "")
+      .trim()
+  }
+
+  return { baseTitle, allocations, userNotes }
 }
 
 const renderTransactionList = (
@@ -1979,34 +2480,45 @@ const renderTransactionList = (
     <div className="overflow-x-auto w-full">
       <div className="min-w-[850px] space-y-2">
         <div className="grid grid-cols-12 gap-4 rounded-lg bg-muted/50 px-4 py-2 text-xs font-medium text-muted-foreground">
-          <div className="col-span-3">Description</div>
+          <div className="col-span-4">Description</div>
           <div className="col-span-1 text-center">Type</div>
           <div className="col-span-1 text-center">Status</div>
           <div className="col-span-1 text-right">Total Bill</div>
-          <div className="col-span-1 text-right">Money In/Out</div>
+          <div className="col-span-2 text-right">Money In/Out</div>
           <div className="col-span-1 text-right">Remaining</div>
-          {!hideCogs && <div className="col-span-1 text-right">Product Cost</div>}
-          <div className="col-span-1 text-right">Cash Impact</div>
-          <div className="col-span-2 text-right">Date & Time</div>
+          <div
+            className="col-span-2 text-right cursor-pointer select-none hover:text-foreground flex items-center justify-end gap-1 transition-colors"
+            onClick={() => setSortOrder(prev => prev === "desc" ? "asc" : "desc")}
+            title={sortOrder === "desc" ? "Showing latest first (Newest on top). Click to show oldest first." : "Showing oldest first. Click to show newest first."}
+          >
+            <span>Date & Time</span>
+            {sortOrder === "desc" ? (
+              <ArrowDown className="h-3.5 w-3.5 text-primary" />
+            ) : (
+              <ArrowUp className="h-3.5 w-3.5 text-primary" />
+            )}
+          </div>
         </div>
 
         {transactions.map((transaction) => {
-          const dateTime = formatDateTime(transaction.date)
-          const cashImpact = getCashImpact(transaction)
-          const isPositive = cashImpact > 0
-          const isNegative = cashImpact < 0
+          const dateTime = formatDateTime(transaction.date, transaction.created_at)
           const remainingAmount = getRemainingAmount(transaction)
           const moneyFlowInfo = getMoneyFlowInfo(transaction)
           const enhancedDescription = getEnhancedDescription(transaction)
+          const { baseTitle, allocations } = parseTransactionAllocations(transaction)
+          const displayTitle = allocations.length > 0 ? baseTitle : enhancedDescription
 
-          const isSale = transaction.type === "sale" || transaction.description?.toLowerCase().startsWith("sale")
-          const isPurchase = transaction.type === "purchase" || transaction.description?.toLowerCase().startsWith("purchase")
+          const isSale = transaction.type === "sale" || transaction.type === "sale_shipping" || transaction.description?.toLowerCase().startsWith("sale")
+          const isSaleReturn = transaction.type === "sale_return" || transaction.type === "sale_return_extra" || transaction.description?.toLowerCase().includes("sale return")
+          const isPurchase = transaction.type === "purchase" || transaction.type === "purchase_shipping" || transaction.description?.toLowerCase().startsWith("purchase")
           const isManual = transaction.type === "manual" || transaction.reference_type === "manual" || transaction.description?.toLowerCase().includes("manual")
           const isSupplierPayment = transaction.type === 'supplier_payment' ||
                                    transaction.description?.toLowerCase().includes('supplier payment')
+          const isCustomerPayment = transaction.type === 'customer_payment' ||
+                                   transaction.description?.toLowerCase().includes('customer payment')
 
           const handleClick = () => {
-            if (isSale) {
+            if (isSale || isSaleReturn) {
               const saleId = transaction.sale_id ||
                             transaction.reference_id ||
                             extractIdFromDescription(transaction.description) ||
@@ -2023,6 +2535,10 @@ const renderTransactionList = (
             } else if (isSupplierPayment) {
               const paymentId = transaction.id || transaction.supplier_payment_id
               setViewSupplierPaymentId(paymentId ?? null)
+            } else if (isCustomerPayment) {
+              if (allocations.length === 1 && allocations[0].type === "sale") {
+                setViewSaleId(allocations[0].id)
+              }
             }
           }
 
@@ -2037,10 +2553,11 @@ const renderTransactionList = (
                 isSale ? "View Sale" :
                 isPurchase ? "View Purchase" :
                 isSupplierPayment ? "View Supplier Payment" :
+                isCustomerPayment ? "View Customer Payment" :
                 "View Transaction"
               }
             >
-              <div className="col-span-3 flex items-center gap-2">
+              <div className="col-span-4 flex items-center gap-2">
                 <div className="text-muted-foreground">
                   {getTransactionTypeIcon(transaction.type)}
                 </div>
@@ -2049,14 +2566,44 @@ const renderTransactionList = (
                     className="break-words text-sm font-medium leading-snug text-foreground"
                     title={transaction.description || enhancedDescription}
                   >
-                    {enhancedDescription}
+                    {displayTitle}
                   </div>
+                  {allocations.length > 0 && (
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {allocations.map((alloc, idx) => (
+                        <span
+                          key={idx}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            if (alloc.type === "sale") {
+                              setViewSaleId(alloc.id)
+                            } else {
+                              setViewPurchaseId(alloc.id)
+                            }
+                          }}
+                          className={`inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-semibold border transition-colors cursor-pointer ${
+                            alloc.type === "sale"
+                              ? "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 hover:border-blue-300"
+                              : "bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100 hover:border-amber-300"
+                          }`}
+                          title={`Click to view ${alloc.type === "sale" ? "Sale" : "Purchase"} #${alloc.id}`}
+                        >
+                          {alloc.type === "sale" ? "Sale" : "Purchase"} #{alloc.id}: {currency} {alloc.amount > 0 ? alloc.amount.toFixed(2) : "Settled"}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
 
               <div className="col-span-1 text-center">
                 <Badge variant="outline" className="text-xs capitalize">
-                  {transaction.type || "unknown"}
+                  {transaction.type === "sale_return" ? "Sale Return" :
+                   transaction.type === "purchase_return" ? "Purchase Return" :
+                   transaction.type === "purchase_cancel_refund" ? "Cancel Refund" :
+                   transaction.type === "customer_payment" ? "Customer Payment" :
+                   transaction.type === "sale_shipping" || transaction.type === "purchase_shipping" ? "Shipping" :
+                   (transaction.type || "unknown")}
                 </Badge>
               </div>
 
@@ -2070,7 +2617,7 @@ const renderTransactionList = (
                 </div>
               </div>
 
-              <div className="col-span-1 text-right">
+              <div className="col-span-2 text-right">
                 {moneyFlowInfo.type !== 'none' ? (
                   <div className={`text-sm font-medium ${moneyFlowInfo.color}`}>
                     {moneyFlowInfo.type === 'in' ? '+' : '-'}{currency} {moneyFlowInfo.amount.toFixed(2)}
@@ -2090,27 +2637,6 @@ const renderTransactionList = (
                     : "text-muted-foreground/60"
                 }`}>
                   {remainingAmount > 0 ? `${currency} ${remainingAmount.toFixed(2)}` : 'Paid'}
-                </div>
-              </div>
-
-              {!hideCogs && (
-              <div className="col-span-1 text-right">
-                <div className="text-sm font-medium text-amber-600">
-                  {currency} {n(transaction.cost).toFixed(2)}
-                </div>
-              </div>
-              )}
-
-              <div className="col-span-1 text-right">
-                <div className={`text-sm font-bold ${
-                  isPositive
-                    ? "text-emerald-600"
-                    : isNegative
-                      ? "text-rose-600"
-                      : "text-muted-foreground"
-                }`}>
-                  {isPositive ? "+" : isNegative ? "-" : ""}
-                  {currency} {Math.abs(cashImpact).toFixed(2)}
                 </div>
               </div>
 
@@ -2256,7 +2782,7 @@ const renderTransactionList = (
           </div>
 
           <Select value={filterType} onValueChange={setFilterType}>
-            <SelectTrigger className="w-[130px] bg-white/20 border-0 text-white h-9">
+            <SelectTrigger className="w-[140px] bg-white/20 border-0 text-white h-9">
               <div className="flex items-center">
                 <Filter className="h-4 w-4 mr-2" />
                 <SelectValue placeholder="All Types" />
@@ -2264,16 +2790,16 @@ const renderTransactionList = (
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Types</SelectItem>
-              <SelectItem value="income">
+              <SelectItem value="money_in">
                 <div className="flex items-center gap-2">
-                  <ArrowUpCircle className="h-4 w-4 text-emerald-600" />
-                  Income
+                  <ArrowDownCircle className="h-4 w-4 text-emerald-600" />
+                  Money In
                 </div>
               </SelectItem>
-              <SelectItem value="expense">
+              <SelectItem value="money_out">
                 <div className="flex items-center gap-2">
-                  <ArrowDownCircle className="h-4 w-4 text-rose-600" />
-                  Expense
+                  <CreditCard className="h-4 w-4 text-rose-600" />
+                  Money Out
                 </div>
               </SelectItem>
               <SelectItem value="sale">Sales</SelectItem>
@@ -2326,7 +2852,7 @@ const renderTransactionList = (
         {(filterType !== "all" || searchTerm) && (
           <div className="rounded-lg bg-violet-500/30 px-3 py-1 text-sm text-violet-50">
             📊 Showing {filteredTransactions.length} filtered transactions
-            {filterType !== "all" && ` • Filter: ${filterType}`}
+            {filterType !== "all" && ` • Filter: ${filterType === 'money_in' ? 'Money In' : filterType === 'money_out' ? 'Money Out' : filterType}`}
             {searchTerm && ` • Search: "${searchTerm}"`}
           </div>
         )}
@@ -2348,7 +2874,7 @@ const renderTransactionList = (
                   </div>
                   <div className="mt-1 text-[10px] text-emerald-600">
                     {
-                      filteredTransactions.filter(
+                      dateFilteredTransactions.filter(
                         (t) => t.type === "sale" || t.description?.toLowerCase().startsWith("sale"),
                       ).length
                     }{" "}
@@ -2367,7 +2893,7 @@ const renderTransactionList = (
                   <div className="text-lg font-bold text-amber-700">{`${currency} ${getPurchasesTotal().toFixed(2)}`}</div>
                   <div className="mt-1 text-[10px] text-amber-600">
                     {
-                      filteredTransactions.filter(
+                      dateFilteredTransactions.filter(
                         (t) => t.type === "purchase" || t.description?.toLowerCase().startsWith("purchase"),
                       ).length
                     }{" "}
@@ -2405,45 +2931,106 @@ const renderTransactionList = (
               </Card>
 
               {/* Money In */}
-              <Card className="border border-emerald-100 bg-emerald-50">
+              <Card
+                className={`cursor-pointer border transition-all hover:shadow-sm select-none ${
+                  activeTab === "transactions" && (filterType === "money_in" || filterType === "income")
+                    ? "border-emerald-500 bg-emerald-100/70 ring-2 ring-emerald-500/50"
+                    : "border-emerald-100 bg-emerald-50 hover:border-emerald-300"
+                }`}
+                onClick={handleMoneyInClick}
+                role="button"
+                tabIndex={0}
+                aria-label="Filter by Money In"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault()
+                    handleMoneyInClick()
+                  }
+                }}
+              >
                 <CardContent className="p-3">
-                  <div className="mb-1 flex items-center gap-1 text-emerald-700">
-                    <ArrowDownCircle className="h-4 w-4" />
-                    <span className="text-xs font-medium">Money In</span>
+                  <div className="mb-1 flex items-center justify-between text-emerald-700">
+                    <div className="flex items-center gap-1">
+                      <ArrowDownCircle className="h-4 w-4" />
+                      <span className="text-xs font-medium">Money In</span>
+                    </div>
+                    {activeTab === "transactions" && (filterType === "money_in" || filterType === "income") && (
+                      <span className="text-[10px] font-semibold bg-emerald-600 text-white px-1.5 py-0.5 rounded-full">
+                        Active
+                      </span>
+                    )}
                   </div>
                   <div className="text-lg font-bold text-emerald-700">{`${currency} ${getAmountReceived().toFixed(2)}`}</div>
                   <div className="mt-1 text-[10px] text-emerald-600">
-                    Inflows: {filteredTransactions.filter((t) => getCashImpact(t) > 0).length}
+                    Inflows: {dateFilteredTransactions.filter((t) => getMoneyFlowInfo(t).type === "in").length}
                   </div>
                 </CardContent>
               </Card>
 
               {/* Money Out */}
-              <Card className="border border-rose-100 bg-rose-50">
+              <Card
+                className={`cursor-pointer border transition-all hover:shadow-sm select-none ${
+                  activeTab === "transactions" && (filterType === "money_out" || filterType === "expense")
+                    ? "border-rose-500 bg-rose-100/70 ring-2 ring-rose-500/50"
+                    : "border-rose-100 bg-rose-50 hover:border-rose-300"
+                }`}
+                onClick={handleMoneyOutClick}
+                role="button"
+                tabIndex={0}
+                aria-label="Filter by Money Out"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault()
+                    handleMoneyOutClick()
+                  }
+                }}
+              >
                 <CardContent className="p-3">
                   <div className="mb-1 flex items-center justify-between text-rose-700">
                     <div className="flex items-center gap-1">
                       <CreditCard className="h-4 w-4" />
                       <span className="text-xs font-medium">Money Out</span>
                     </div>
-                    <button
-                      onClick={() => setIsExpenseModalOpen(true)}
-                      className="text-rose-500 hover:text-rose-700 transition-colors p-0.5 rounded hover:bg-rose-100"
-                      title="View Expense Breakdown"
-                      type="button"
-                    >
-                      <Info className="h-3.5 w-3.5" />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      {activeTab === "transactions" && (filterType === "money_out" || filterType === "expense") && (
+                        <span className="text-[10px] font-semibold bg-rose-600 text-white px-1.5 py-0.5 rounded-full">
+                          Active
+                        </span>
+                      )}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setIsExpenseModalOpen(true)
+                        }}
+                        className="text-rose-500 hover:text-rose-700 transition-colors p-0.5 rounded hover:bg-rose-100"
+                        title="View Expense Breakdown"
+                        type="button"
+                      >
+                        <Info className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   </div>
                   <div className="text-lg font-bold text-rose-700">{`${currency} ${getSpends().toFixed(2)}`}</div>
                   <div className="mt-1 text-[10px] text-rose-600">
-                    Operating Expenses: {currency} {(financialData?.totalExpenses ?? financialData?.operatingExpenses ?? 0).toFixed(2)}
+                    Outflows: {dateFilteredTransactions.filter((t) => getMoneyFlowInfo(t).type === "out").length} | OpEx: {currency} {(financialData?.totalExpenses ?? financialData?.operatingExpenses ?? 0).toFixed(2)}
                   </div>
                 </CardContent>
               </Card>
 
               {/* Receivables */}
-              <Card className="border border-violet-100 bg-violet-50">
+              <Card
+                className="cursor-pointer border border-violet-100 bg-violet-50 transition-all hover:border-violet-300 hover:shadow-sm select-none"
+                onClick={() => setActiveTab("receivables")}
+                role="button"
+                tabIndex={0}
+                aria-label="View receivables"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault()
+                    setActiveTab("receivables")
+                  }
+                }}
+              >
                 <CardContent className="p-3">
                   <div className="mb-1 flex items-center gap-1 text-violet-700">
                     <Users className="h-4 w-4" />
@@ -2457,7 +3044,19 @@ const renderTransactionList = (
               </Card>
 
               {/* Payables */}
-              <Card className="border border-amber-100 bg-amber-50">
+              <Card
+                className="cursor-pointer border border-amber-100 bg-amber-50 transition-all hover:border-amber-300 hover:shadow-sm select-none"
+                onClick={() => setActiveTab("payables")}
+                role="button"
+                tabIndex={0}
+                aria-label="View payables"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault()
+                    setActiveTab("payables")
+                  }
+                }}
+              >
                 <CardContent className="p-3">
                   <div className="mb-1 flex items-center gap-1 text-amber-700">
                     <Building className="h-4 w-4" />
@@ -2532,7 +3131,7 @@ const renderTransactionList = (
 
           <TabsContent value="transactions" className="p-4">
             {renderTransactionList(
-              filteredTransactions,
+              sortedTransactions,
               "No transactions found for the selected period",
             )}
           </TabsContent>
@@ -2658,7 +3257,7 @@ const renderTransactionList = (
             </div>
 
             {renderTransactionList(
-              pettyCashTransactions,
+              sortedPettyCashTransactions,
               "No petty cash entries found for the selected period",
             )}
           </TabsContent>
@@ -2700,10 +3299,17 @@ const renderTransactionList = (
                     {financialData?.receivables.map((receivable) => (
                       <tr key={receivable.id}>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-foreground">
-                          #{receivable.id}
+                          {receivable.is_transfer ? receivable.id : `#${receivable.id}`}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">
-                          {receivable.customer_name}
+                          <div className="flex items-center gap-2">
+                            <span>{receivable.customer_name}</span>
+                            {receivable.is_transfer && (
+                              <Badge variant="outline" className="border-purple-200 bg-purple-50 text-[10px] text-purple-700 font-medium">
+                                Branch Transfer
+                              </Badge>
+                            )}
+                          </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground text-right">
                           {currency} {receivable.total_amount.toFixed(2)}
@@ -2718,9 +3324,14 @@ const renderTransactionList = (
                           {formatDateOnly(receivable.due_date)}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <Badge variant={receivable.days_overdue > 30 ? "destructive" : "default"}>
-                            {receivable.days_overdue > 0 ? `${receivable.days_overdue} days old` : "Current"}
-                          </Badge>
+                          <div className="flex items-center gap-1.5">
+                            <Badge variant="outline" className="text-xs">
+                              {receivable.status || "Credit"}
+                            </Badge>
+                            <Badge variant={receivable.days_overdue > 30 ? "destructive" : "secondary"} className="text-xs">
+                              {receivable.days_overdue > 0 ? `${receivable.days_overdue}d old` : "Current"}
+                            </Badge>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -2767,10 +3378,17 @@ const renderTransactionList = (
                     {financialData?.payables.map((payable) => (
                       <tr key={payable.id}>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-foreground">
-                          #{payable.id}
+                          {payable.is_transfer ? payable.id : `#${payable.id}`}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">
-                          {payable.supplier_name}
+                          <div className="flex items-center gap-2">
+                            <span>{payable.supplier_name}</span>
+                            {payable.is_transfer && (
+                              <Badge variant="outline" className="border-purple-200 bg-purple-50 text-[10px] text-purple-700 font-medium">
+                                Branch Transfer
+                              </Badge>
+                            )}
+                          </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground text-right">
                           {currency} {payable.total_amount.toFixed(2)}
@@ -2785,9 +3403,14 @@ const renderTransactionList = (
                           {formatDateOnly(payable.due_date)}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <Badge variant={payable.days_overdue > 30 ? "destructive" : "default"}>
-                            {payable.days_overdue > 0 ? `${payable.days_overdue} days old` : "Current"}
-                          </Badge>
+                          <div className="flex items-center gap-1.5">
+                            <Badge variant="outline" className="text-xs">
+                              {payable.status || "Credit"}
+                            </Badge>
+                            <Badge variant={payable.days_overdue > 30 ? "destructive" : "secondary"} className="text-xs">
+                              {payable.days_overdue > 0 ? `${payable.days_overdue}d old` : "Current"}
+                            </Badge>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -2830,7 +3453,12 @@ const renderTransactionList = (
                       </div>
                       {filterType !== "all" && (
                         <div>
-                          <span className="font-medium">Filter:</span> {filterType}
+                          <span className="font-medium">Filter:</span>{" "}
+                          {filterType === "money_in"
+                            ? "Money In"
+                            : filterType === "money_out"
+                            ? "Money Out"
+                            : filterType}
                         </div>
                       )}
                       {searchTerm && (
@@ -2933,8 +3561,18 @@ const renderTransactionList = (
       </Dialog>
 
       {/* Manual Transaction Dialog */}
-      <Dialog open={isManualDialogOpen} onOpenChange={setIsManualDialogOpen}>
-        <DialogContent className="sm:max-w-[425px] max-h-[90dvh] overflow-hidden flex flex-col p-0 gap-0">
+      <Dialog
+        open={isManualDialogOpen}
+        onOpenChange={(open) => {
+          setIsManualDialogOpen(open)
+          if (!open) {
+            setCourierMode("sale")
+            setSelectedCourierSaleId("")
+            setSelectedCourierPurchaseId("")
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-[480px] max-h-[90dvh] overflow-hidden flex flex-col p-0 gap-0">
           <DialogHeader className="px-6 py-4 border-b shrink-0">
             <DialogTitle>Add Manual Transaction</DialogTitle>
           </DialogHeader>
@@ -2953,19 +3591,6 @@ const renderTransactionList = (
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="manual-amount">Amount ({currency})</Label>
-              <Input
-                id="manual-amount"
-                type="number"
-                step="0.01"
-                min="0"
-                value={manualAmount}
-                onChange={(e) => setManualAmount(e.target.value)}
-                placeholder="0.00"
-              />
-            </div>
-
-            <div className="grid gap-2">
               <Label htmlFor="manual-category">Category *</Label>
               <ManualCategorySelect
                 deviceId={deviceId}
@@ -2975,6 +3600,176 @@ const renderTransactionList = (
                   setManualCategoryId(id)
                   setManualCategoryName(category?.name || "")
                 }}
+              />
+            </div>
+
+            {/* Courier & Delivery toggle and order selectors */}
+            {isCourierCategory && (
+              <div className="rounded-lg border border-purple-200 bg-purple-50/60 p-3 space-y-3">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-semibold text-purple-900">Courier Expense Type</Label>
+                  <div className="flex rounded-md border border-purple-200 bg-background p-0.5 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCourierMode("sale")
+                        setSelectedCourierPurchaseId("")
+                      }}
+                      className={`px-2.5 py-1 rounded-sm font-medium transition-all ${
+                        courierMode === "sale"
+                          ? "bg-purple-600 text-white shadow-sm"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      Sale Order
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCourierMode("purchase")
+                        setSelectedCourierSaleId("")
+                      }}
+                      className={`px-2.5 py-1 rounded-sm font-medium transition-all ${
+                        courierMode === "purchase"
+                          ? "bg-purple-600 text-white shadow-sm"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      Purchase
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCourierMode("general")
+                        setSelectedCourierSaleId("")
+                        setSelectedCourierPurchaseId("")
+                      }}
+                      className={`px-2.5 py-1 rounded-sm font-medium transition-all ${
+                        courierMode === "general"
+                          ? "bg-purple-600 text-white shadow-sm"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      General
+                    </button>
+                  </div>
+                </div>
+
+                {courierMode === "sale" && (
+                  <div className="space-y-2">
+                    <Label className="text-xs font-medium text-foreground">Select Unpaid Courier Sale Order *</Label>
+                    {isLoadingPendingCourier ? (
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
+                        <Loader2 className="h-4 w-4 animate-spin text-purple-600" />
+                        Loading pending courier sales...
+                      </div>
+                    ) : pendingCourierSales.length === 0 ? (
+                      <p className="text-xs text-muted-foreground italic">No pending courier sale orders found without paid courier expense.</p>
+                    ) : (
+                      <Select
+                        value={selectedCourierSaleId}
+                        onValueChange={(val) => {
+                          setSelectedCourierSaleId(val)
+                          const s = pendingCourierSales.find((item: any) => String(item.id) === val)
+                          if (s) {
+                            if (Number(s.expense_courier) > 0) {
+                              setManualAmount(Number(s.expense_courier).toFixed(2))
+                            }
+                            setManualDescription(`Sale #${s.id} - Courier charge`)
+                          }
+                        }}
+                      >
+                        <SelectTrigger className="bg-background text-xs">
+                          <SelectValue placeholder="Select a sale order" />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-[220px]">
+                          {pendingCourierSales.map((s: any) => (
+                            <SelectItem key={s.id} value={String(s.id)} className="text-xs">
+                              Sale #{s.id} - {s.customer_name || "Customer"} ({s.delivery_status || s.fulfillment_type || "Ship"})
+                              {Number(s.expense_courier) > 0
+                                ? ` [Fulfillment: ${currency} ${Number(s.expense_courier).toFixed(2)}]`
+                                : " [No fulfillment expense]"}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+
+                    {selectedCourierSale &&
+                      Number(selectedCourierSale.expense_courier) > 0 &&
+                      Number(manualAmount) > 0 &&
+                      Number(manualAmount) !== Number(selectedCourierSale.expense_courier) && (
+                        <div className="rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800">
+                          ⚠️ <strong>Mismatch detected:</strong> Fulfillment courier expense is {currency}{" "}
+                          {Number(selectedCourierSale.expense_courier).toFixed(2)}, but you entered {currency}{" "}
+                          {Number(manualAmount).toFixed(2)}. Submitting will prompt for confirmation and update the fulfillment courier expense.
+                        </div>
+                      )}
+                  </div>
+                )}
+
+                {courierMode === "purchase" && (
+                  <div className="space-y-2">
+                    <Label className="text-xs font-medium text-foreground">Select Unpaid Courier Purchase *</Label>
+                    {isLoadingPendingCourier ? (
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
+                        <Loader2 className="h-4 w-4 animate-spin text-purple-600" />
+                        Loading pending courier purchases...
+                      </div>
+                    ) : pendingCourierPurchases.length === 0 ? (
+                      <p className="text-xs text-muted-foreground italic">No pending purchases with unpaid courier charge found.</p>
+                    ) : (
+                      <Select
+                        value={selectedCourierPurchaseId}
+                        onValueChange={(val) => {
+                          setSelectedCourierPurchaseId(val)
+                          const p = pendingCourierPurchases.find((item: any) => String(item.id) === val)
+                          if (p) {
+                            if (Number(p.courier_charge) > 0) {
+                              setManualAmount(Number(p.courier_charge).toFixed(2))
+                            }
+                            const isDropship = (p.purchase_type || "").toLowerCase() === "dropship"
+                            let linkedSaleId: string | null = null
+                            if (isDropship && p.notes) {
+                              const match = p.notes.match(/(?:Job Card|Order|Sale)\s*#(\d+)/i)
+                              if (match) linkedSaleId = match[1]
+                            }
+                            if (isDropship && linkedSaleId) {
+                              setManualDescription(`Sale #${linkedSaleId} - Courier charge`)
+                            } else {
+                              setManualDescription(`Purchase #${p.id} - Courier charge`)
+                            }
+                          }
+                        }}
+                      >
+                        <SelectTrigger className="bg-background text-xs">
+                          <SelectValue placeholder="Select a purchase" />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-[220px]">
+                          {pendingCourierPurchases.map((p: any) => (
+                            <SelectItem key={p.id} value={String(p.id)} className="text-xs">
+                              Purchase #{p.id} - {p.supplier_name || "Supplier"} ({p.purchase_type || "Stock"}) - Courier: {currency}{" "}
+                              {Number(p.courier_charge).toFixed(2)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="grid gap-2">
+              <Label htmlFor="manual-amount">Amount ({currency})</Label>
+              <Input
+                id="manual-amount"
+                type="number"
+                step="0.01"
+                min="0"
+                value={manualAmount}
+                onChange={(e) => setManualAmount(e.target.value)}
+                placeholder="0.00"
               />
             </div>
 
@@ -3021,7 +3816,13 @@ const renderTransactionList = (
             </Button>
             <Button
               onClick={handleAddManualTransaction}
-              disabled={isAddingManual || !manualCategoryId || !manualAmount}
+              disabled={
+                isAddingManual ||
+                !manualCategoryId ||
+                !manualAmount ||
+                (isCourierCategory && courierMode === "sale" && !selectedCourierSaleId) ||
+                (isCourierCategory && courierMode === "purchase" && !selectedCourierPurchaseId)
+              }
             >
               {isAddingManual ? (
                 <>

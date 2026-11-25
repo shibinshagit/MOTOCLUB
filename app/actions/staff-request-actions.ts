@@ -150,7 +150,8 @@ export async function getStaffRequests(params: {
 export async function updateStaffRequestStatus(
   requestId: number,
   status: "Approved" | "Rejected" | "Paid",
-  adminRemarks?: string
+  adminRemarks?: string,
+  paymentMethod?: string
 ) {
   await ensureSalaryTables()
   try {
@@ -170,7 +171,8 @@ export async function updateStaffRequestStatus(
         admin_remarks = ${adminRemarks || null},
         approved_by = ${approvedBy},
         approved_at = NOW(),
-        updated_at = NOW()
+        updated_at = NOW(),
+        payment_method = COALESCE(${paymentMethod || null}, payment_method)
       WHERE id = ${requestId}
     `
 
@@ -198,24 +200,34 @@ export async function updateStaffRequestStatus(
       }
     }
 
-    // If salary advance marked paid, record financial transaction
-    if (req.request_type === "salary_advance" && (status === "Paid" || status === "Approved")) {
-      const staffInfo = await sql`SELECT name FROM staff WHERE id = ${req.staff_id} LIMIT 1`
-      const staffName = staffInfo[0]?.name || "Staff Member"
-
-      await sql`
-        INSERT INTO financial_transactions (
-          transaction_date, transaction_type, transaction_name, category_name,
-          reference_type, reference_id, amount, debit_amount, status, payment_method,
-          description, notes, device_id, company_id, created_by
-        )
-        VALUES (
-          NOW(), 'expense', ${`Salary Advance Paid - ${staffName}`}, 'Salary & Wages',
-          'salary_advance', ${requestId}, ${req.amount}, ${req.amount}, 'Completed', 'Cash',
-          ${`Salary advance requested on ${new Date(req.created_at).toLocaleDateString()}`},
-          ${adminRemarks || null}, ${req.device_id}, ${req.company_id}, ${req.staff_id}
-        )
+    // If salary advance marked paid, record financial transaction (ONLY when Paid, never on Approved)
+    if (req.request_type === "salary_advance" && status === "Paid") {
+      // Check if financial transaction was already recorded for this request to prevent duplicate deductions
+      const existingTx = await sql`
+        SELECT id FROM financial_transactions
+        WHERE reference_type = 'salary_advance' AND reference_id = ${requestId}
+        LIMIT 1
       `
+
+      if (existingTx.length === 0) {
+        const staffInfo = await sql`SELECT name FROM staff WHERE id = ${req.staff_id} LIMIT 1`
+        const staffName = staffInfo[0]?.name || "Staff Member"
+        const effectivePaymentMethod = paymentMethod || req.payment_method || "Cash"
+
+        await sql`
+          INSERT INTO financial_transactions (
+            transaction_date, transaction_type, transaction_name, category_name,
+            reference_type, reference_id, amount, debit_amount, status, payment_method,
+            description, notes, device_id, company_id, created_by
+          )
+          VALUES (
+            NOW(), 'expense', ${`Salary Advance Paid - ${staffName}`}, 'Salary & Wages',
+            'salary_advance', ${requestId}, ${req.amount}, ${req.amount}, 'Completed', ${effectivePaymentMethod},
+            ${`Salary advance requested on ${new Date(req.created_at).toLocaleDateString()}`},
+            ${adminRemarks || null}, ${req.device_id}, ${req.company_id}, ${approvedBy || req.staff_id}
+          )
+        `
+      }
     }
 
     revalidatePath("/dashboard")
@@ -232,7 +244,7 @@ class RequestDeleteError extends Error {}
 /**
  * Deletes a Salary Advance request that has had no accounting effect.
  *
- * Approving or paying an advance writes an expense row to financial_transactions (reference_type
+ * Paying an advance writes an expense row to financial_transactions (reference_type
  * 'salary_advance', reference_id = request id) and counts toward salary deductions, so only requests
  * that are still Pending or Rejected AND have no such ledger row can be removed. Approved and Paid
  * requests are kept for the payroll and accounting history. Admin-level sessions only, within the

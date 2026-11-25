@@ -103,8 +103,10 @@ export default function EditPurchaseModal({
   // Total cost including courier charge (paid after delivery)
   const totalAmount = useMemo(() => Math.max(0, Math.round((purchaseTotal + Number(courierCharge)) * 100) / 100), [purchaseTotal, courierCharge])
 
+  const isDropship = (purchaseType || "").toLowerCase() === "dropship"
+
   const purchaseItemsWithAllocations = useMemo(() => {
-    const costAllocations = allocatePurchaseCosts(products, courierCharge, discountAmount)
+    const costAllocations = allocatePurchaseCosts(products, isDropship ? 0 : courierCharge, discountAmount)
     return products.map((item, idx) => {
       const allocation = costAllocations[idx]
       return {
@@ -115,7 +117,7 @@ export default function EditPurchaseModal({
         finalCost: allocation ? allocation.lineTotalCost : item.lineTotal,
       }
     })
-  }, [products, courierCharge, discountAmount, subtotal, courierChargePercentage])
+  }, [products, courierCharge, discountAmount, subtotal, courierChargePercentage, isDropship])
 
   const allocationMap = useMemo(() => {
     const map = new Map<string, { allocationPercentage: number; allocatedCourier: number; allocatedDiscount: number; finalCost: number }>()
@@ -192,14 +194,16 @@ export default function EditPurchaseModal({
 
       setDate(new Date(purchase.purchase_date))
       setSupplier(purchase.supplier || "")
-      setCourierChargePercentage(courierRateResult.status === "fulfilled" ? courierRateResult.value : 0)
+      const defaultCourierPct = courierRateResult.status === "fulfilled" ? courierRateResult.value : 0
+      const pct = Number(purchase.courier_charge_percentage) || defaultCourierPct
+      setCourierChargePercentage(pct)
 
       const lineTotalsBeforeDiscount = items.reduce(
         (sum: number, item: any) => sum + Number(item.line_total ?? (item.quantity * item.price)),
         0,
       )
       const savedDiscount = purchase.discount !== undefined && purchase.discount !== null ? Number(purchase.discount) : NaN
-      setDiscountAmount(!isNaN(savedDiscount) ? savedDiscount : Math.max(0, lineTotalsBeforeDiscount + Number(purchase.courier_charge || 0) - Number(purchase.total_amount || 0)))
+      setDiscountAmount(!isNaN(savedDiscount) ? savedDiscount : Math.max(0, lineTotalsBeforeDiscount - Number(purchase.total_amount || 0)))
 
       const statusMap: Record<string, string> = {
         "Pending": "Credit",
@@ -232,8 +236,7 @@ export default function EditPurchaseModal({
       setProducts(productRows)
 
       const initialSubtotal = productRows.reduce((sum: number, product: any) => sum + product.total, 0)
-      const calculatedPct = courierRateResult.status === "fulfilled" ? courierRateResult.value : 0
-      const calculatedAutoCourier = calculatePurchaseCourierCharge(initialSubtotal, calculatedPct)
+      const calculatedAutoCourier = calculatePurchaseCourierCharge(initialSubtotal, pct)
       const savedCourier = Number(purchase.courier_charge) || 0
       if (Math.abs(savedCourier - calculatedAutoCourier) > 0.01) {
         setCustomCourierCharge(savedCourier)
@@ -536,6 +539,7 @@ export default function EditPurchaseModal({
                           <SelectContent className="bg-white border-gray-200">
                             <SelectItem value="Credit">Credit</SelectItem>
                             <SelectItem value="Paid">Paid</SelectItem>
+                            <SelectItem value="Cancelled">Cancelled</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -551,6 +555,7 @@ export default function EditPurchaseModal({
                         <SelectContent className="bg-white border-gray-200">
                           <SelectItem value="Delivered">Delivered</SelectItem>
                           <SelectItem value="Ordered">Ordered</SelectItem>
+                          <SelectItem value="Cancelled">Cancelled</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>

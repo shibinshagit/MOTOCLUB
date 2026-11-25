@@ -125,11 +125,13 @@ export default function PayrollRequestsTab({
     request: any
     action: "Approved" | "Rejected" | "Paid"
     remarks: string
+    paymentMethod?: string
   }>({
     isOpen: false,
     request: null,
     action: "Approved",
-    remarks: ""
+    remarks: "",
+    paymentMethod: "Cash"
   })
   const [isSubmittingRequestAction, setIsSubmittingRequestAction] = useState(false)
 
@@ -356,11 +358,12 @@ export default function PayrollRequestsTab({
       const res = await updateStaffRequestStatus(
         actionModal.request.id,
         actionModal.action,
-        actionModal.remarks
+        actionModal.remarks,
+        actionModal.action === "Paid" ? (actionModal.paymentMethod || "Cash") : undefined
       )
       if (res.success) {
         notifySuccess(toast, res.message, "Success")
-        setActionModal({ isOpen: false, request: null, action: "Approved", remarks: "" })
+        setActionModal({ isOpen: false, request: null, action: "Approved", remarks: "", paymentMethod: "Cash" })
         fetchRequests()
       } else {
         notifyError(toast, res.message, "Error")
@@ -773,7 +776,7 @@ export default function PayrollRequestsTab({
                             <Button
                               size="sm"
                               className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white"
-                              onClick={() => setActionModal({ isOpen: true, request: req, action: "Paid", remarks: "" })}
+                              onClick={() => setActionModal({ isOpen: true, request: req, action: "Paid", remarks: "", paymentMethod: "Cash" })}
                             >
                               <Banknote className="h-3.5 w-3.5 mr-1" /> Mark Paid
                             </Button>
@@ -1186,6 +1189,27 @@ export default function PayrollRequestsTab({
                 </p>
               )}
             </div>
+
+            {actionModal.action === "Paid" && (
+              <div>
+                <Label className="text-xs font-semibold">Payment Method</Label>
+                <Select
+                  value={actionModal.paymentMethod || "Cash"}
+                  onValueChange={(val) => setActionModal({ ...actionModal, paymentMethod: val })}
+                >
+                  <SelectTrigger className="text-xs h-8 mt-1">
+                    <SelectValue placeholder="Select payment method" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Cash">Cash</SelectItem>
+                    <SelectItem value="Bank Transfer">Bank Transfer</SelectItem>
+                    <SelectItem value="Card">Card</SelectItem>
+                    <SelectItem value="UPI">UPI</SelectItem>
+                    <SelectItem value="Cheque">Cheque</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             <div>
               <Label className="text-xs font-semibold">Admin Remarks / Notes</Label>
