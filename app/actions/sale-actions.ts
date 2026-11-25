@@ -5109,12 +5109,13 @@ export async function moveSaleToDirectPurchase(input: MoveSaleToDirectPurchaseIn
 
       // 7. Sync sale shipping transactions
       try {
+        const effectiveSaleDate = new Date(sale.sale_date || sale.created_at || new Date())
         await syncSaleShippingTransactions({
           saleId: input.saleId,
           deviceId: sale.device_id || input.deviceId,
           userId: input.userId,
-          saleDate: new Date(sale.sale_date || new Date()),
-          transactionDate: new Date(),
+          saleDate: effectiveSaleDate,
+          transactionDate: effectiveSaleDate,
           paymentMethod: sale.payment_method || "Cash",
           status: sale.payment_status || "Pending",
           fulfillmentType: "direct",

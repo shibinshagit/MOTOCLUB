@@ -169,6 +169,15 @@ export async function paySupplierCredit(
         }
 
         // Log financial transaction for credit use (NO cash movement)
+        const creditPurchaseAllocations = allAllocations.filter((a) => Number(a.allocatedAmount) > 0)
+        const creditAllocSummary = creditPurchaseAllocations.length > 0
+          ? creditPurchaseAllocations.map((a) => `Purchase #${a.purchaseId}: ${Number(a.allocatedAmount).toFixed(2)}`).join(", ")
+          : ""
+        let creditDescription = `Supplier Credit Used - ${supplier.name}`
+        if (creditAllocSummary) {
+          creditDescription += ` - [${creditAllocSummary}]`
+        }
+
         const creditNotes = JSON.stringify({
           v: 1,
           userNotes: notes?.trim() || "",
@@ -184,7 +193,7 @@ export async function paySupplierCredit(
           ) VALUES (
             'supplier_credit_use', 'supplier', ${supplierId},
             ${actualCreditApplied}, ${actualCreditApplied}, 0, 0, 0,
-            'Completed', 'Supplier Credit', ${`Supplier Credit Used - ${supplier.name} - Applied to purchase(s)`}, ${creditNotes},
+            'Completed', 'Supplier Credit', ${creditDescription}, ${creditNotes},
             ${deviceId}, ${await getDeviceCompanyId(deviceId)}, ${userId}, ${finalPaymentDate.toISOString()}
           )
         `
@@ -264,9 +273,21 @@ export async function paySupplierCredit(
         const netCashForSupplierPayment = Math.max(0, safeCashAmount - separatedShippingAmount)
         if (netCashForSupplierPayment > 0) {
           const debitAmount = netCashForSupplierPayment
-          const description = newExtraCreditCreated > 0
-            ? `Supplier Payment - ${supplier.name} - ${paymentMethod} - Applied: ${cashApplied.toFixed(2)}, Extra Credit: ${newExtraCreditCreated.toFixed(2)}`
-            : `Supplier Payment - ${supplier.name} - ${paymentMethod}`
+          const purchaseAllocations = allAllocations.filter((a) => Number(a.allocatedAmount) > 0)
+          const allocationSummary = purchaseAllocations.length > 0
+            ? purchaseAllocations.map((a) => `Purchase #${a.purchaseId}: ${Number(a.allocatedAmount).toFixed(2)}`).join(", ")
+            : ""
+
+          let description = `Supplier Payment - ${supplier.name} - ${paymentMethod}`
+          if (allocationSummary) {
+            description += ` - [${allocationSummary}]`
+          }
+          if (newExtraCreditCreated > 0) {
+            description += ` - Extra Credit: ${newExtraCreditCreated.toFixed(2)}`
+          }
+          if (notes?.trim()) {
+            description += ` - Notes: ${notes.trim()}`
+          }
 
           const storedNotes = JSON.stringify({
             v: 1,
@@ -455,16 +476,41 @@ export async function getSupplierPaymentById(paymentId: number) {
 
     // Parse notes to separate user-entered note from internal metadata JSON
     let cleanNotes = ""
+    let allocations: Array<{ purchaseId: number; allocatedAmount: number }> = []
     if (paymentRecord.notes) {
       try {
         const parsed = JSON.parse(paymentRecord.notes)
-        if (parsed && typeof parsed === "object" && "userNotes" in parsed) {
-          cleanNotes = parsed.userNotes?.trim() || ""
+        if (parsed && typeof parsed === "object") {
+          if ("userNotes" in parsed) {
+            cleanNotes = parsed.userNotes?.trim() || ""
+          }
+          if (Array.isArray(parsed.allocations)) {
+            allocations = parsed.allocations.map((a: any) => ({
+              purchaseId: Number(a.purchaseId || a.purchase_id),
+              allocatedAmount: Number(a.allocatedAmount || a.amount || 0),
+            })).filter((a: any) => a.purchaseId > 0 && a.allocatedAmount > 0)
+          }
         } else {
           cleanNotes = String(paymentRecord.notes).trim()
         }
       } catch {
         cleanNotes = String(paymentRecord.notes).trim()
+      }
+    }
+
+    // Fallback: Parse allocations from description if notes JSON wasn't available
+    if (allocations.length === 0 && paymentRecord.description) {
+      const match = paymentRecord.description.match(/\[(.*?)\]/)
+      if (match && match[1]) {
+        for (const part of match[1].split(",")) {
+          const pMatch = part.match(/Purchase\s*#(\d+)(?::\s*([0-9.]+))?/i)
+          if (pMatch) {
+            allocations.push({
+              purchaseId: parseInt(pMatch[1]),
+              allocatedAmount: pMatch[2] ? parseFloat(pMatch[2]) : 0,
+            })
+          }
+        }
       }
     }
 
@@ -476,6 +522,7 @@ export async function getSupplierPaymentById(paymentId: number) {
       payment_method: paymentRecord.payment_method || "Cash",
       payment_date: paymentRecord.transaction_date,
       notes: cleanNotes,
+      allocations,
       description: paymentRecord.description,
       reference_number: `SP-${paymentRecord.id}`,
       affected_purchases: affectedPurchases,
@@ -515,6 +562,7 @@ export type SupplierPaymentListRow = {
   transaction_type: string
   description?: string | null
   notes: string | null
+  allocations?: Array<{ purchaseId: number; allocatedAmount: number }>
 }
 
 export interface SupplierCreditSummary {
@@ -929,15 +977,47 @@ export async function listSupplierPaymentsForSupplier(
       ORDER BY transaction_date DESC, id DESC
     `
 
-    const data: SupplierPaymentListRow[] = rows.map((r: any) => ({
-      id: r.id,
-      amount: Number(r.amount) || 0,
-      payment_method: r.payment_method || "Cash",
-      transaction_date: r.transaction_date,
-      transaction_type: r.transaction_type || "supplier_payment",
-      description: r.description ?? null,
-      notes: r.notes ?? null,
-    }))
+    const data: SupplierPaymentListRow[] = rows.map((r: any) => {
+      let allocations: Array<{ purchaseId: number; allocatedAmount: number }> = []
+      if (r.notes) {
+        try {
+          const parsed = JSON.parse(r.notes)
+          if (parsed && Array.isArray(parsed.allocations)) {
+            allocations = parsed.allocations.map((a: any) => ({
+              purchaseId: Number(a.purchaseId || a.purchase_id),
+              allocatedAmount: Number(a.allocatedAmount || a.amount || 0),
+            })).filter((a: any) => a.purchaseId > 0 && a.allocatedAmount > 0)
+          }
+        } catch {
+          // ignore
+        }
+      }
+      if (allocations.length === 0 && r.description) {
+        const match = r.description.match(/\[(.*?)\]/)
+        if (match && match[1]) {
+          for (const part of match[1].split(",")) {
+            const pMatch = part.match(/Purchase\s*#(\d+)(?::\s*([0-9.]+))?/i)
+            if (pMatch) {
+              allocations.push({
+                purchaseId: parseInt(pMatch[1], 10),
+                allocatedAmount: pMatch[2] ? parseFloat(pMatch[2]) : 0,
+              })
+            }
+          }
+        }
+      }
+
+      return {
+        id: r.id,
+        amount: Number(r.amount) || 0,
+        payment_method: r.payment_method || "Cash",
+        transaction_date: r.transaction_date,
+        transaction_type: r.transaction_type || "supplier_payment",
+        description: r.description ?? null,
+        notes: r.notes ?? null,
+        allocations,
+      }
+    })
 
     return { success: true, data }
   } catch (error) {

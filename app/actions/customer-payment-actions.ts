@@ -12,15 +12,16 @@ export interface CustomerPaymentAllocation {
   remainingBalance: number
 }
 
+export type StoredAllocation = { saleId: number; allocatedAmount: number }
+
 export type CustomerPaymentListRow = {
   id: number
   amount: number
   payment_method: string
   transaction_date: string
   user_notes: string
+  allocations?: StoredAllocation[]
 }
-
-type StoredAllocation = { saleId: number; allocatedAmount: number }
 
 type StoredPaymentNotes = {
   v: 1
@@ -323,11 +324,7 @@ export async function collectCustomerCredit(
       paymentDate: finalPaymentDate,
     })
 
-    let finalNotes = notes?.trim() || ""
-    if (saleIds && saleIds.length > 0) {
-      const tag = `[Order${saleIds.length > 1 ? "s" : ""} #${saleIds.join(", #")}]`
-      finalNotes = finalNotes ? `${tag} ${finalNotes}` : tag
-    }
+    const userNotes = notes?.trim() || ""
 
     // Deduct any courier/shipping amount that was separated into a dedicated shipping entry
     const netPaymentForProducts = Math.max(0, paymentAmount - (separatedShippingAmount || 0))
@@ -344,7 +341,7 @@ export async function collectCustomerCredit(
         deviceId,
         userId,
         paymentDate: finalPaymentDate,
-        notes: finalNotes || undefined,
+        notes: userNotes || undefined,
       })
 
       if (!transactionResult.success) {
@@ -402,12 +399,31 @@ export async function listCustomerPaymentsForCustomer(
 
     const data: CustomerPaymentListRow[] = rows.map((row: any) => {
       const stored = parseStoredPaymentNotes(row.notes)
+      let allocations: StoredAllocation[] = stored?.allocations || []
+
+      // Fallback: Parse allocations from description if notes JSON wasn't available
+      if (allocations.length === 0 && row.description) {
+        const match = row.description.match(/\[(.*?)\]/)
+        if (match && match[1]) {
+          for (const part of match[1].split(",")) {
+            const sMatch = part.match(/Sale\s*#(\d+)(?::\s*([0-9.]+))?/i)
+            if (sMatch) {
+              allocations.push({
+                saleId: parseInt(sMatch[1], 10),
+                allocatedAmount: sMatch[2] ? parseFloat(sMatch[2]) : 0,
+              })
+            }
+          }
+        }
+      }
+
       return {
         id: row.id,
         amount: Number(row.amount) || 0,
         payment_method: row.payment_method || "Cash",
         transaction_date: row.transaction_date,
         user_notes: stored?.userNotes || "",
+        allocations,
       }
     })
 

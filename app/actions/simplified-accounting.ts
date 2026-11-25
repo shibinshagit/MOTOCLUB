@@ -34,11 +34,28 @@ export async function recordSupplierPayment(paymentData: {
     const debitAmount = paymentAmount // Cash going out to pay supplier
     const creditAmount = 0 // No income from this transaction
 
-    // Create detailed description including notes
-    let description = `Supplier Payment - ${paymentData.supplierName} - ${paymentData.paymentMethod} - ${paymentData.allocations.length} purchase(s) affected`
+    // Create detailed description including allocations and notes
+    const purchaseAllocations = (paymentData.allocations || []).filter((a: any) => Number(a.allocatedAmount || a.amount || 0) > 0)
+    const allocationSummary = purchaseAllocations.length > 0
+      ? purchaseAllocations.map((a: any) => `Purchase #${a.purchaseId || a.purchase_id}: ${Number(a.allocatedAmount || a.amount || 0).toFixed(2)}`).join(", ")
+      : ""
+
+    let description = `Supplier Payment - ${paymentData.supplierName} - ${paymentData.paymentMethod}`
+    if (allocationSummary) {
+      description += ` - [${allocationSummary}]`
+    }
     if (paymentData.notes && paymentData.notes.trim()) {
       description += ` - Notes: ${paymentData.notes.trim()}`
     }
+
+    const storedNotes = JSON.stringify({
+      v: 1,
+      userNotes: paymentData.notes?.trim() || "",
+      allocations: purchaseAllocations.map((a: any) => ({
+        purchaseId: a.purchaseId || a.purchase_id,
+        allocatedAmount: Number(a.allocatedAmount || a.amount || 0),
+      })),
+    })
 
     const finalPaymentDate = ensureDateTime(paymentData.paymentDate)
 
@@ -51,7 +68,7 @@ export async function recordSupplierPayment(paymentData: {
       ) VALUES (
         'supplier_payment', 'supplier', ${paymentData.supplierId},
         ${paymentAmount}, ${paymentAmount}, 0, ${debitAmount}, ${creditAmount},
-        'Completed', ${paymentData.paymentMethod}, ${description}, ${paymentData.notes || null}, 
+        'Completed', ${paymentData.paymentMethod}, ${description}, ${storedNotes}, 
         ${paymentData.deviceId}, ${await getDeviceCompanyId(paymentData.deviceId)}, ${paymentData.userId}, ${finalPaymentDate.toISOString()}
       ) RETURNING id
     `
@@ -82,7 +99,14 @@ export async function recordCustomerPayment(paymentData: {
     const debitAmount = 0
     const creditAmount = paymentAmount
 
-    let description = `Customer Payment - ${paymentData.customerName} - ${paymentData.paymentMethod} - ${paymentData.allocations.length} sale(s) affected`
+    const allocationSummary = paymentData.allocations && paymentData.allocations.length > 0
+      ? paymentData.allocations.map((a) => `Sale #${a.saleId}: ${Number(a.allocatedAmount).toFixed(2)}`).join(", ")
+      : ""
+
+    let description = `Customer Payment - ${paymentData.customerName} - ${paymentData.paymentMethod}`
+    if (allocationSummary) {
+      description += ` - [${allocationSummary}]`
+    }
     if (paymentData.notes?.trim()) {
       description += ` - Notes: ${paymentData.notes.trim()}`
     }
@@ -1055,7 +1079,8 @@ export async function syncSaleShippingTransactions(shippingData: {
     }
 
     const transactionIds: number[] = []
-    const baseDate = ensureDateTime(shippingData.transactionDate || shippingData.saleDate)
+    const collectionDate = ensureDateTime(shippingData.saleDate || shippingData.transactionDate)
+    const expenseDate = ensureDateTime(shippingData.transactionDate || shippingData.saleDate)
 
     // 1. Courier charge collected from customer (Money In)
     if (courierCredit > 0) {
@@ -1069,7 +1094,7 @@ export async function syncSaleShippingTransactions(shippingData: {
           ${courierCredit}, ${isPaidOrCompleted ? courierCredit : 0}, 0, 0, ${courierCredit},
           ${isPaidOrCompleted ? 'Completed' : shippingData.status}, ${shippingData.paymentMethod || "Cash"},
           ${`Sale #${shippingData.saleId} - Courier charge collected`},
-          ${shippingData.deviceId}, ${companyId}, ${shippingData.userId}, ${baseDate.toISOString()}
+          ${shippingData.deviceId}, ${companyId}, ${shippingData.userId}, ${collectionDate.toISOString()}
         ) RETURNING id
       `
       transactionIds.push(Number(result[0]?.id))
@@ -1087,7 +1112,7 @@ export async function syncSaleShippingTransactions(shippingData: {
           ${expenseCourier}, ${expenseCourier}, 0, ${expenseCourier}, 0,
           'Completed', ${shippingData.paymentMethod || "Cash"},
           ${`Sale #${shippingData.saleId} - Courier charge`},
-          ${shippingData.deviceId}, ${companyId}, ${shippingData.userId}, ${baseDate.toISOString()}
+          ${shippingData.deviceId}, ${companyId}, ${shippingData.userId}, ${expenseDate.toISOString()}
         ) RETURNING id
       `
       transactionIds.push(Number(result[0]?.id))
@@ -1105,7 +1130,7 @@ export async function syncSaleShippingTransactions(shippingData: {
           ${expensePacking}, ${expensePacking}, 0, ${expensePacking}, 0,
           'Completed', ${shippingData.paymentMethod || "Cash"},
           ${`Sale #${shippingData.saleId} - Packing expense`},
-          ${shippingData.deviceId}, ${companyId}, ${shippingData.userId}, ${baseDate.toISOString()}
+          ${shippingData.deviceId}, ${companyId}, ${shippingData.userId}, ${expenseDate.toISOString()}
         ) RETURNING id
       `
       transactionIds.push(Number(result[0]?.id))
@@ -1352,8 +1377,23 @@ export async function getFinancialSummary(
           AND (reference_type = 'manual' OR transaction_type = 'manual' OR description LIKE 'Manual Entry%')
           AND (transaction_type != 'manual' OR reference_type != 'manual' OR received_amount = 0 OR transaction_date::date > created_at::date)
       `
+      // Auto-align courier collected timestamps with their parent sale transaction date so collection times match
+      await sql`
+        UPDATE financial_transactions ft
+        SET transaction_date = st.transaction_date
+        FROM financial_transactions st
+        WHERE ft.device_id = ${deviceId}
+          AND ft.transaction_type = 'sale_shipping'
+          AND ft.reference_type = 'sale'
+          AND ft.description LIKE '%Courier charge collected%'
+          AND st.device_id = ${deviceId}
+          AND st.transaction_type = 'sale'
+          AND st.reference_type = 'sale'
+          AND st.reference_id = ft.reference_id
+          AND ft.transaction_date != st.transaction_date
+      `
     } catch (repairErr) {
-      console.log("Non-fatal: manual transaction auto-repair skipped", repairErr)
+      console.log("Non-fatal: transaction auto-repair skipped", repairErr)
     }
 
     // Query transactions (fromDateStr/toDateStr are YYYY-MM-DD from the client calendar)

@@ -194,14 +194,16 @@ export default function EditPurchaseModal({
 
       setDate(new Date(purchase.purchase_date))
       setSupplier(purchase.supplier || "")
-      setCourierChargePercentage(courierRateResult.status === "fulfilled" ? courierRateResult.value : 0)
+      const defaultCourierPct = courierRateResult.status === "fulfilled" ? courierRateResult.value : 0
+      const pct = Number(purchase.courier_charge_percentage) || defaultCourierPct
+      setCourierChargePercentage(pct)
 
       const lineTotalsBeforeDiscount = items.reduce(
         (sum: number, item: any) => sum + Number(item.line_total ?? (item.quantity * item.price)),
         0,
       )
       const savedDiscount = purchase.discount !== undefined && purchase.discount !== null ? Number(purchase.discount) : NaN
-      setDiscountAmount(!isNaN(savedDiscount) ? savedDiscount : Math.max(0, lineTotalsBeforeDiscount + Number(purchase.courier_charge || 0) - Number(purchase.total_amount || 0)))
+      setDiscountAmount(!isNaN(savedDiscount) ? savedDiscount : Math.max(0, lineTotalsBeforeDiscount - Number(purchase.total_amount || 0)))
 
       const statusMap: Record<string, string> = {
         "Pending": "Credit",
@@ -234,8 +236,7 @@ export default function EditPurchaseModal({
       setProducts(productRows)
 
       const initialSubtotal = productRows.reduce((sum: number, product: any) => sum + product.total, 0)
-      const calculatedPct = courierRateResult.status === "fulfilled" ? courierRateResult.value : 0
-      const calculatedAutoCourier = calculatePurchaseCourierCharge(initialSubtotal, calculatedPct)
+      const calculatedAutoCourier = calculatePurchaseCourierCharge(initialSubtotal, pct)
       const savedCourier = Number(purchase.courier_charge) || 0
       if (Math.abs(savedCourier - calculatedAutoCourier) > 0.01) {
         setCustomCourierCharge(savedCourier)

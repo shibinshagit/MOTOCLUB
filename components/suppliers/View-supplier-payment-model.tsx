@@ -46,6 +46,7 @@ interface SupplierPayment {
   payment_date: string
   description?: string
   notes?: string
+  allocations?: Array<{ purchaseId: number; allocatedAmount: number }>
   reference_number?: string
   affected_purchases?: number
   created_at: string
@@ -672,6 +673,34 @@ export default function ViewSupplierPaymentModal({
                 </div>
               </CardContent>
             </Card>
+
+            {/* Allocated Purchases Breakdown */}
+            {payment.allocations && payment.allocations.length > 0 && (
+              <Card className="shadow-sm border-gray-200 bg-white">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-lg font-semibold text-gray-800 flex items-center">
+                    <Package className="h-5 w-5 mr-2 text-amber-600" />
+                    Allocated Purchases Breakdown ({payment.allocations.length})
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="divide-y divide-gray-100 rounded-lg border border-gray-200 overflow-hidden">
+                    <div className="grid grid-cols-2 bg-gray-50 px-4 py-2 text-xs font-semibold text-gray-600 uppercase">
+                      <div>Purchase #</div>
+                      <div className="text-right">Amount Settled</div>
+                    </div>
+                    {payment.allocations.map((alloc, idx) => (
+                      <div key={idx} className="grid grid-cols-2 px-4 py-2.5 text-sm items-center hover:bg-gray-50/50">
+                        <span className="font-bold text-amber-800">Purchase #{alloc.purchaseId}</span>
+                        <span className="text-right font-mono font-bold text-gray-900">
+                          {formatCurrency(alloc.allocatedAmount)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             {/* Notes */}
             {Boolean(getCleanUserNote(payment.notes)) && (

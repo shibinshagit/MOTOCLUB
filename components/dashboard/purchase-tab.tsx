@@ -830,7 +830,8 @@ export default function PurchaseTab({ userId, mode = "entry" }: PurchaseTabProps
           pct = Number(((Number(purchase.courier_charge) / sub) * 100).toFixed(2))
         }
         setCourierChargePercentage(pct)
-        setDiscountAmount(Math.max(0, lineTotalsBeforeDiscount + Number(purchase.courier_charge || 0) - Number(purchase.total_amount || 0)))
+        const savedDiscount = purchase.discount !== undefined && purchase.discount !== null ? Number(purchase.discount) : NaN
+        setDiscountAmount(!isNaN(savedDiscount) ? savedDiscount : Math.max(0, lineTotalsBeforeDiscount - Number(purchase.total_amount || 0)))
 
         const calculatedAutoCourier = calculatePurchaseCourierCharge(sub, pct)
         const savedCourier = Number(purchase.courier_charge) || 0

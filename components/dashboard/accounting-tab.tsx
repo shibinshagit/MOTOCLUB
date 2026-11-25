@@ -2094,6 +2094,84 @@ const getEnhancedDescription = (transaction: any) => {
   return description || "Transaction"
 }
 
+interface ParsedAllocation {
+  type: "sale" | "purchase"
+  id: number
+  amount: number
+}
+
+const parseTransactionAllocations = (transaction: any): {
+  baseTitle: string
+  allocations: ParsedAllocation[]
+  userNotes?: string
+} => {
+  const fullDesc = transaction?.description || ""
+  const allocations: ParsedAllocation[] = []
+  let userNotes: string | undefined = undefined
+
+  // 1. Try parsing transaction.notes JSON
+  if (transaction?.notes) {
+    try {
+      const parsed = typeof transaction.notes === "string" ? JSON.parse(transaction.notes) : transaction.notes
+      if (parsed && typeof parsed === "object") {
+        if (parsed.userNotes) {
+          userNotes = parsed.userNotes
+        }
+        if (Array.isArray(parsed.allocations)) {
+          for (const a of parsed.allocations) {
+            const purchaseId = Number(a.purchaseId || a.purchase_id)
+            const saleId = Number(a.saleId || a.sale_id)
+            const amount = Number(a.allocatedAmount || a.amount || 0)
+            if (purchaseId > 0 && amount > 0) {
+              allocations.push({ type: "purchase", id: purchaseId, amount })
+            } else if (saleId > 0 && amount > 0) {
+              allocations.push({ type: "sale", id: saleId, amount })
+            }
+          }
+        }
+      }
+    } catch {
+      // ignore non-json
+    }
+  }
+
+  // 2. Fallback: Parse bracketed breakdown from description if allocations empty
+  if (allocations.length === 0 && fullDesc) {
+    const match = fullDesc.match(/\[(.*?)\]/)
+    if (match && match[1]) {
+      const parts = match[1].split(",")
+      for (const part of parts) {
+        const saleMatch = part.match(/Sale\s*#(\d+)(?::\s*([0-9.]+))?/i)
+        const purchaseMatch = part.match(/Purchase\s*#(\d+)(?::\s*([0-9.]+))?/i)
+        if (saleMatch) {
+          allocations.push({
+            type: "sale",
+            id: parseInt(saleMatch[1], 10),
+            amount: saleMatch[2] ? parseFloat(saleMatch[2]) : 0,
+          })
+        } else if (purchaseMatch) {
+          allocations.push({
+            type: "purchase",
+            id: parseInt(purchaseMatch[1], 10),
+            amount: purchaseMatch[2] ? parseFloat(purchaseMatch[2]) : 0,
+          })
+        }
+      }
+    }
+  }
+
+  // 3. Extract clean baseTitle (strips [ ... ] and - Notes: ...)
+  let baseTitle = fullDesc
+  if (allocations.length > 0) {
+    baseTitle = fullDesc
+      .replace(/\s*-\s*\[.*?\]/g, "")
+      .replace(/\s*-\s*Notes:.*$/i, "")
+      .trim()
+  }
+
+  return { baseTitle, allocations, userNotes }
+}
+
 const renderTransactionList = (
   transactions: typeof filteredTransactions,
   emptyMessage: string,
@@ -2150,6 +2228,8 @@ const renderTransactionList = (
           const remainingAmount = getRemainingAmount(transaction)
           const moneyFlowInfo = getMoneyFlowInfo(transaction)
           const enhancedDescription = getEnhancedDescription(transaction)
+          const { baseTitle, allocations } = parseTransactionAllocations(transaction)
+          const displayTitle = allocations.length > 0 ? baseTitle : enhancedDescription
 
           const isSale = transaction.type === "sale" || transaction.type === "sale_shipping" || transaction.description?.toLowerCase().startsWith("sale")
           const isSaleReturn = transaction.type === "sale_return" || transaction.type === "sale_return_extra" || transaction.description?.toLowerCase().includes("sale return")
@@ -2157,6 +2237,8 @@ const renderTransactionList = (
           const isManual = transaction.type === "manual" || transaction.reference_type === "manual" || transaction.description?.toLowerCase().includes("manual")
           const isSupplierPayment = transaction.type === 'supplier_payment' ||
                                    transaction.description?.toLowerCase().includes('supplier payment')
+          const isCustomerPayment = transaction.type === 'customer_payment' ||
+                                   transaction.description?.toLowerCase().includes('customer payment')
 
           const handleClick = () => {
             if (isSale || isSaleReturn) {
@@ -2176,6 +2258,10 @@ const renderTransactionList = (
             } else if (isSupplierPayment) {
               const paymentId = transaction.id || transaction.supplier_payment_id
               setViewSupplierPaymentId(paymentId ?? null)
+            } else if (isCustomerPayment) {
+              if (allocations.length === 1 && allocations[0].type === "sale") {
+                setViewSaleId(allocations[0].id)
+              }
             }
           }
 
@@ -2190,6 +2276,7 @@ const renderTransactionList = (
                 isSale ? "View Sale" :
                 isPurchase ? "View Purchase" :
                 isSupplierPayment ? "View Supplier Payment" :
+                isCustomerPayment ? "View Customer Payment" :
                 "View Transaction"
               }
             >
@@ -2202,8 +2289,33 @@ const renderTransactionList = (
                     className="break-words text-sm font-medium leading-snug text-foreground"
                     title={transaction.description || enhancedDescription}
                   >
-                    {enhancedDescription}
+                    {displayTitle}
                   </div>
+                  {allocations.length > 0 && (
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {allocations.map((alloc, idx) => (
+                        <span
+                          key={idx}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            if (alloc.type === "sale") {
+                              setViewSaleId(alloc.id)
+                            } else {
+                              setViewPurchaseId(alloc.id)
+                            }
+                          }}
+                          className={`inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-semibold border transition-colors cursor-pointer ${
+                            alloc.type === "sale"
+                              ? "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 hover:border-blue-300"
+                              : "bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100 hover:border-amber-300"
+                          }`}
+                          title={`Click to view ${alloc.type === "sale" ? "Sale" : "Purchase"} #${alloc.id}`}
+                        >
+                          {alloc.type === "sale" ? "Sale" : "Purchase"} #{alloc.id}: {currency} {alloc.amount > 0 ? alloc.amount.toFixed(2) : "Settled"}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
 
