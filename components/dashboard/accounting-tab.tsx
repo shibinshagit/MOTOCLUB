@@ -966,16 +966,12 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                   <th>Status</th>
                   <th>Transaction Amount</th>
                   <th>Money Flow</th>
-                  ${hideCogs ? "" : "<th>Product Cost (COGS)</th>"}
-                  <th>Cash Impact</th>
                 </tr>
               </thead>
               <tbody>
                 ${sortedTransactions
                   .map((t) => {
                     const dateTime = formatDateTime(t.date, t.created_at)
-                    const netImpact = getCashImpact(t)
-                    const cashImpact = getCashImpact(t)
                     const moneyFlow = getMoneyFlowDisplay(t)
                     return `
                     <tr>
@@ -985,11 +981,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                       <td>${t.status}</td>
                       <td>${currency} ${t.amount.toFixed(2)}</td>
                       <td style="color: ${moneyFlow.color.includes('green') ? "#059669" : moneyFlow.color.includes('red') ? "#dc2626" : "#6b7280"}">
-                        ${moneyFlow.showAmount ? (netImpact >= 0 ? "+" : "-") + currency + " " + moneyFlow.value.toFixed(2) : moneyFlow.text}
-                      </td>
-                      ${hideCogs ? "" : `<td>${currency} ${t.cost.toFixed(2)}</td>`}
-                      <td style="color: ${cashImpact > 0 ? "#059669" : cashImpact < 0 ? "#dc2626" : "#6b7280"}; font-weight: bold;">
-                        ${cashImpact > 0 ? "+" : cashImpact < 0 ? "-" : ""}${currency} ${Math.abs(cashImpact).toFixed(2)}
+                        ${moneyFlow.showAmount ? (moneyFlow.color.includes('green') ? "+" : "-") + currency + " " + moneyFlow.value.toFixed(2) : moneyFlow.text}
                       </td>
                     </tr>
                   `
@@ -2488,14 +2480,12 @@ const renderTransactionList = (
     <div className="overflow-x-auto w-full">
       <div className="min-w-[850px] space-y-2">
         <div className="grid grid-cols-12 gap-4 rounded-lg bg-muted/50 px-4 py-2 text-xs font-medium text-muted-foreground">
-          <div className="col-span-3">Description</div>
+          <div className="col-span-4">Description</div>
           <div className="col-span-1 text-center">Type</div>
           <div className="col-span-1 text-center">Status</div>
           <div className="col-span-1 text-right">Total Bill</div>
-          <div className="col-span-1 text-right">Money In/Out</div>
+          <div className="col-span-2 text-right">Money In/Out</div>
           <div className="col-span-1 text-right">Remaining</div>
-          {!hideCogs && <div className="col-span-1 text-right">Product Cost</div>}
-          <div className="col-span-1 text-right">Cash Impact</div>
           <div
             className="col-span-2 text-right cursor-pointer select-none hover:text-foreground flex items-center justify-end gap-1 transition-colors"
             onClick={() => setSortOrder(prev => prev === "desc" ? "asc" : "desc")}
@@ -2512,9 +2502,6 @@ const renderTransactionList = (
 
         {transactions.map((transaction) => {
           const dateTime = formatDateTime(transaction.date, transaction.created_at)
-          const cashImpact = getCashImpact(transaction)
-          const isPositive = cashImpact > 0
-          const isNegative = cashImpact < 0
           const remainingAmount = getRemainingAmount(transaction)
           const moneyFlowInfo = getMoneyFlowInfo(transaction)
           const enhancedDescription = getEnhancedDescription(transaction)
@@ -2570,7 +2557,7 @@ const renderTransactionList = (
                 "View Transaction"
               }
             >
-              <div className="col-span-3 flex items-center gap-2">
+              <div className="col-span-4 flex items-center gap-2">
                 <div className="text-muted-foreground">
                   {getTransactionTypeIcon(transaction.type)}
                 </div>
@@ -2630,7 +2617,7 @@ const renderTransactionList = (
                 </div>
               </div>
 
-              <div className="col-span-1 text-right">
+              <div className="col-span-2 text-right">
                 {moneyFlowInfo.type !== 'none' ? (
                   <div className={`text-sm font-medium ${moneyFlowInfo.color}`}>
                     {moneyFlowInfo.type === 'in' ? '+' : '-'}{currency} {moneyFlowInfo.amount.toFixed(2)}
@@ -2650,27 +2637,6 @@ const renderTransactionList = (
                     : "text-muted-foreground/60"
                 }`}>
                   {remainingAmount > 0 ? `${currency} ${remainingAmount.toFixed(2)}` : 'Paid'}
-                </div>
-              </div>
-
-              {!hideCogs && (
-              <div className="col-span-1 text-right">
-                <div className="text-sm font-medium text-amber-600">
-                  {currency} {n(transaction.cost).toFixed(2)}
-                </div>
-              </div>
-              )}
-
-              <div className="col-span-1 text-right">
-                <div className={`text-sm font-bold ${
-                  isPositive
-                    ? "text-emerald-600"
-                    : isNegative
-                      ? "text-rose-600"
-                      : "text-muted-foreground"
-                }`}>
-                  {isPositive ? "+" : isNegative ? "-" : ""}
-                  {currency} {Math.abs(cashImpact).toFixed(2)}
                 </div>
               </div>
 
