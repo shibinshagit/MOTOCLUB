@@ -865,6 +865,19 @@ export async function createPurchase(formData: FormData) {
         }
       }
 
+      // Two-way sync: if dropship purchase has courier charge, note in sales order fulfillment
+      if (isDropship && (courierCharge || 0) > 0) {
+        const match = (notes || "").match(/(?:Job Card|Order|Sale)\s*#(\d+)/i)
+        if (match) {
+          const linkedSaleId = parseInt(match[1], 10)
+          await tx`
+            UPDATE sales
+            SET expense_courier = ${courierCharge}, updated_at = NOW()
+            WHERE id = ${linkedSaleId}
+          `
+        }
+      }
+
       // Record purchase in simplified accounting system
       await recordPurchaseTransaction({
         purchaseId,
@@ -1430,6 +1443,33 @@ export async function updatePurchase(formData: FormData) {
         `
       }
 
+      const oldCourierCharge = Number(currentPurchase[0]?.courier_charge) || 0
+      const newCourierCharge = Number(courierCharge) || 0
+      const wasPaid = oldStatus === "paid" || oldStatus === "completed" || (Number(currentPurchase[0]?.total_amount) > 0 && Number(currentPurchase[0]?.received_amount) >= Number(currentPurchase[0]?.total_amount))
+      const isNowPaid = newStatus === "paid" || newStatus === "completed" || (totalAmount > 0 && finalReceivedAmount >= totalAmount)
+
+      const isFlippedToPaid = !wasPaid && isNowPaid
+      const isCourierAddedLater = wasPaid && isNowPaid && oldCourierCharge <= 0 && newCourierCharge > 0
+
+      const effectiveCourierDate = (isFlippedToPaid || isCourierAddedLater) ? new Date() : undefined
+      const effectivePaymentDate = isFlippedToPaid ? new Date() : ensureDateTime(purchaseDate)
+
+      // Two-way sync: if dropship purchase, synchronize courier charge to sales order fulfillment
+      if (isDropship) {
+        const pNotes = notes || currentPurchase[0]?.notes || ""
+        const match = pNotes.match(/(?:Job Card|Order|Sale)\s*#(\d+)/i)
+        if (match) {
+          const linkedSaleId = parseInt(match[1], 10)
+          if (newCourierCharge >= 0) {
+            await tx`
+              UPDATE sales
+              SET expense_courier = ${newCourierCharge}, updated_at = NOW()
+              WHERE id = ${linkedSaleId}
+            `
+          }
+        }
+      }
+
       await recordPurchaseTransaction({
         purchaseId,
         totalAmount,
@@ -1440,8 +1480,9 @@ export async function updatePurchase(formData: FormData) {
         supplierName: supplier,
         deviceId,
         userId,
-        purchaseDate: ensureDateTime(purchaseDate),
-        courierCharge: courierCharge || 0,
+        purchaseDate: effectivePaymentDate,
+        courierCharge: newCourierCharge,
+        courierDate: effectiveCourierDate,
         purchaseType: purchaseType || "Stock",
         payments: paymentsList.length > 0 ? paymentsList : undefined,
       }, tx)

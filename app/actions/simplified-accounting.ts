@@ -1,6 +1,7 @@
 "use server"
 
 import { format, addDays, parseISO } from "date-fns"
+import { revalidatePath } from "next/cache"
 import { getDeviceCompanyId } from "@/lib/device-company"
 import { sql } from "@/lib/db"
 import { getAuthoritativeProfitSummary } from "@/lib/profit-calculation"
@@ -621,28 +622,69 @@ export async function recordPurchaseTransaction(purchaseData: {
   userId: number
   purchaseDate: Date
   courierCharge?: number
+  courierDate?: Date
   purchaseType?: string
   payments?: Array<{ paymentMethod: string; amount: number; referenceNumber?: string; notes?: string }>
 }, query: any = sql) {
   try {
-    // Clear existing financial_transactions for this purchase (both product and shipping lines) to avoid duplicate ledger entries
+    const isDropship = (purchaseData.purchaseType || "").toLowerCase() === "dropship"
+    const rawTotalAmount = Number(purchaseData.totalAmount) || 0
+    const rawReceivedAmount = Number(purchaseData.receivedAmount) || 0
+    const courierCharge = Number(purchaseData.courierCharge) || 0
+
+    // Look for linked sale ID if dropship
+    let linkedSaleId: number | null = null
+    if (purchaseData.purchaseId) {
+      const pRows = await query`SELECT notes FROM purchases WHERE id = ${purchaseData.purchaseId} LIMIT 1`
+      if (pRows.length > 0) {
+        const match = (pRows[0].notes || "").match(/(?:Job Card|Order|Sale)\s*#(\d+)/i)
+        if (match) linkedSaleId = parseInt(match[1], 10)
+      }
+    }
+
+    // Inspect existing transactions to preserve timestamps on separate updates
+    const existingTx = await query`
+      SELECT id, transaction_type, reference_type, reference_id, transaction_date, amount
+      FROM financial_transactions
+      WHERE device_id = ${purchaseData.deviceId}
+        AND reference_type = 'purchase'
+        AND reference_id = ${purchaseData.purchaseId}
+    `
+    const existingProductRow = existingTx.find((t: any) => t.transaction_type === 'purchase')
+    const existingStockCourierRow = existingTx.find((t: any) => t.transaction_type === 'purchase_shipping')
+
+    let existingDropshipCourierRow: any = null
+    if (isDropship && linkedSaleId) {
+      const dropTx = await query`
+        SELECT id, transaction_type, reference_type, reference_id, transaction_date, amount
+        FROM financial_transactions
+        WHERE device_id = ${purchaseData.deviceId}
+          AND reference_type = 'sale'
+          AND reference_id = ${linkedSaleId}
+          AND transaction_type = 'sale_shipping'
+          AND debit_amount > 0
+          AND description ILIKE '%Courier charge%'
+        LIMIT 1
+      `
+      if (dropTx.length > 0) existingDropshipCourierRow = dropTx[0]
+    }
+
+    // Clear existing financial_transactions for this purchase
     await query`
       DELETE FROM financial_transactions
       WHERE reference_type = 'purchase' 
         AND reference_id = ${purchaseData.purchaseId}
         AND transaction_type IN ('purchase', 'purchase_shipping')
     `
+    if (isDropship && linkedSaleId && existingDropshipCourierRow) {
+      await query`
+        DELETE FROM financial_transactions
+        WHERE id = ${existingDropshipCourierRow.id}
+      `
+    }
 
-    const isDropship = (purchaseData.purchaseType || "").toLowerCase() === "dropship"
-    const rawTotalAmount = Number(purchaseData.totalAmount) || 0
-    const rawReceivedAmount = Number(purchaseData.receivedAmount) || 0
-    const rawCourierCharge = Number(purchaseData.courierCharge) || 0
-
-    // Courier charge is recorded separately (as sale_shipping for dropship, or purchase_shipping for stock).
-    // The purchase product bill amount must exclude courier charge so courier is never double-counted in total.
-    const courierCharge = isDropship ? 0 : rawCourierCharge
-    const totalAmount = rawCourierCharge > 0 ? Math.max(0, rawTotalAmount - rawCourierCharge) : rawTotalAmount
-    const receivedAmount = isDropship && rawCourierCharge > 0 ? Math.max(0, rawReceivedAmount - rawCourierCharge) : rawReceivedAmount
+    const totalAmount = rawTotalAmount
+    const receivedAmount = rawReceivedAmount
     const statusLower = (purchaseData.status || "").toLowerCase()
     const isPaid = statusLower === "paid" || statusLower === "completed" || (rawTotalAmount > 0 && rawReceivedAmount >= rawTotalAmount)
 
@@ -650,52 +692,56 @@ export async function recordPurchaseTransaction(purchaseData: {
       ? purchaseData.payments.filter((p) => Number(p.amount) > 0)
       : []
 
-    // 1 & 2: If 0 paid amount (credit purchase, no money out), do NOT insert into financial_transactions
+    // If 0 paid amount (credit purchase, no money out), do NOT insert into financial_transactions
     if (rawReceivedAmount <= 0 && activePayments.length === 0) {
       console.log(`Purchase #${purchaseData.purchaseId} recorded with 0 paid amount: skipped financial_transactions entry (tracked under Payables)`)
       return { success: true, transactionId: null, message: "No cash paid, skipped transaction entry" }
     }
 
     const companyId = await getDeviceCompanyId(purchaseData.deviceId)
-    const effectivePurchaseDate = ensureDateTime(purchaseData.purchaseDate)
+    
+    // Preserve original product transaction date if it was already recorded and date hasn't changed
+    const effectivePurchaseDate = existingProductRow && existingProductRow.transaction_date
+      ? ensureDateTime(existingProductRow.transaction_date)
+      : ensureDateTime(purchaseData.purchaseDate)
+
+    // For courier: if already recorded earlier, preserve that date. If newly added on edit, use courierDate or NOW().
+    const existingCourierDate = isDropship
+      ? existingDropshipCourierRow?.transaction_date
+      : existingStockCourierRow?.transaction_date
+    const effectiveCourierDate = existingCourierDate
+      ? ensureDateTime(existingCourierDate)
+      : ensureDateTime(purchaseData.courierDate || new Date())
+
     const costAmount = 0
     let lastInsertedId: number | undefined
-
-    // Courier charge is recorded separately as shipping.
-    // The purchase product bill amount should exclude courier charge so courier is never double-counted in total.
     const productBillAmount = totalAmount
 
-    // 4: If payment is fully completed and courier charge > 0, separate courier charge into its own row
+    // If payment is fully completed and courier charge > 0, separate courier charge into its own row
     if (isPaid && courierCharge > 0) {
-      const productPaid = Math.max(0, receivedAmount - courierCharge)
+      const productPaid = productBillAmount
       const pm = activePayments[0]?.paymentMethod || purchaseData.paymentMethod || "Cash"
 
-      // A. Product purchase row (without courier charge)
+      // A. Product purchase row
       if (activePayments.length > 1) {
-        let remainingCourierToDeduct = courierCharge
         for (const p of activePayments) {
           const pAmt = Number(p.amount) || 0
           if (pAmt <= 0) continue
-          const courierDeductedFromThis = Math.min(remainingCourierToDeduct, pAmt)
-          remainingCourierToDeduct -= courierDeductedFromThis
-          const netProductPaid = pAmt - courierDeductedFromThis
-          if (netProductPaid > 0) {
-            const refStr = p.referenceNumber ? ` (Ref: ${p.referenceNumber})` : ""
-            const pDesc = `Purchase #${purchaseData.purchaseId} - ${purchaseData.status} - ${p.paymentMethod}${refStr} - Supplier: ${purchaseData.supplierName}`
-            const res = await query`
-              INSERT INTO financial_transactions (
-                transaction_type, reference_type, reference_id,
-                amount, received_amount, cost_amount, debit_amount, credit_amount,
-                status, payment_method, description, device_id, company_id, created_by, transaction_date
-              ) VALUES (
-                'purchase', 'purchase', ${purchaseData.purchaseId},
-                ${productBillAmount}, ${netProductPaid}, ${costAmount}, ${netProductPaid}, 0,
-                ${purchaseData.status}, ${p.paymentMethod}, ${pDesc}, 
-                ${purchaseData.deviceId}, ${companyId}, ${purchaseData.userId}, ${effectivePurchaseDate.toISOString()}
-              ) RETURNING id
-            `
-            lastInsertedId = res[0]?.id
-          }
+          const refStr = p.referenceNumber ? ` (Ref: ${p.referenceNumber})` : ""
+          const pDesc = `Purchase #${purchaseData.purchaseId} - ${purchaseData.status} - ${p.paymentMethod}${refStr} - Supplier: ${purchaseData.supplierName}`
+          const res = await query`
+            INSERT INTO financial_transactions (
+              transaction_type, reference_type, reference_id,
+              amount, received_amount, cost_amount, debit_amount, credit_amount,
+              status, payment_method, description, device_id, company_id, created_by, transaction_date
+            ) VALUES (
+              'purchase', 'purchase', ${purchaseData.purchaseId},
+              ${productBillAmount}, ${pAmt}, ${costAmount}, ${pAmt}, 0,
+              ${purchaseData.status}, ${p.paymentMethod}, ${pDesc}, 
+              ${purchaseData.deviceId}, ${companyId}, ${purchaseData.userId}, ${effectivePurchaseDate.toISOString()}
+            ) RETURNING id
+          `
+          lastInsertedId = res[0]?.id
         }
       } else if (productPaid > 0) {
         const pDesc = `Purchase #${purchaseData.purchaseId} - ${purchaseData.status} - ${pm} - Supplier: ${purchaseData.supplierName}`
@@ -715,27 +761,55 @@ export async function recordPurchaseTransaction(purchaseData: {
       }
 
       // B. Courier charge separate row
-      const courierDesc = `Purchase #${purchaseData.purchaseId} - Courier charge`
-      const shipRes = await query`
-        INSERT INTO financial_transactions (
-          transaction_type, reference_type, reference_id,
-          amount, received_amount, cost_amount, debit_amount, credit_amount,
-          status, payment_method, description, device_id, company_id, created_by, transaction_date
-        ) VALUES (
-          'purchase_shipping', 'purchase', ${purchaseData.purchaseId},
-          ${courierCharge}, ${courierCharge}, 0, ${courierCharge}, 0,
-          'Completed', ${pm}, ${courierDesc}, 
-          ${purchaseData.deviceId}, ${companyId}, ${purchaseData.userId}, ${effectivePurchaseDate.toISOString()}
-        ) RETURNING id
-      `
-      if (!lastInsertedId) {
-        lastInsertedId = shipRes[0]?.id
+      if (isDropship && linkedSaleId) {
+        // Dropship: Deduct as Sale Order courier charge and sync fulfillment
+        const courierDesc = `Sale #${linkedSaleId} - Courier charge`
+        const shipRes = await query`
+          INSERT INTO financial_transactions (
+            transaction_type, reference_type, reference_id,
+            amount, received_amount, cost_amount, debit_amount, credit_amount,
+            status, payment_method, description, device_id, company_id, created_by, transaction_date
+          ) VALUES (
+            'sale_shipping', 'sale', ${linkedSaleId},
+            ${courierCharge}, ${courierCharge}, 0, ${courierCharge}, 0,
+            'Completed', ${pm}, ${courierDesc}, 
+            ${purchaseData.deviceId}, ${companyId}, ${purchaseData.userId}, ${effectiveCourierDate.toISOString()}
+          ) RETURNING id
+        `
+        if (!lastInsertedId) {
+          lastInsertedId = shipRes[0]?.id
+        }
+
+        // Note in sales order fulfillment
+        await query`
+          UPDATE sales
+          SET expense_courier = ${courierCharge}, updated_at = NOW()
+          WHERE id = ${linkedSaleId}
+        `
+      } else {
+        // Stock purchase: Deduct as Purchase courier charge
+        const courierDesc = `Purchase #${purchaseData.purchaseId} - Courier charge`
+        const shipRes = await query`
+          INSERT INTO financial_transactions (
+            transaction_type, reference_type, reference_id,
+            amount, received_amount, cost_amount, debit_amount, credit_amount,
+            status, payment_method, description, device_id, company_id, created_by, transaction_date
+          ) VALUES (
+            'purchase_shipping', 'purchase', ${purchaseData.purchaseId},
+            ${courierCharge}, ${courierCharge}, 0, ${courierCharge}, 0,
+            'Completed', ${pm}, ${courierDesc}, 
+            ${purchaseData.deviceId}, ${companyId}, ${purchaseData.userId}, ${effectiveCourierDate.toISOString()}
+          ) RETURNING id
+        `
+        if (!lastInsertedId) {
+          lastInsertedId = shipRes[0]?.id
+        }
       }
 
       return { success: true, transactionId: lastInsertedId }
     }
 
-    // Otherwise: partial payment or no courier charge
+    // Otherwise: product payment only (no courier charge or courier unpaid)
     if (activePayments.length > 1) {
       for (const p of activePayments) {
         const pAmt = Number(p.amount) || 0
@@ -990,6 +1064,264 @@ export async function recordManualTransaction(transactionData: {
   } catch (error) {
     console.error("Error recording manual transaction:", error)
     return { success: false, error: error instanceof Error ? error.message : "Unknown error" }
+  }
+}
+
+export async function getPendingCourierSales(deviceId: number) {
+  try {
+    const sales = await sql`
+      SELECT 
+        s.id,
+        COALESCE(s.tracking_id, s.job_card_number, s.id::text) as invoice_number,
+        s.total_amount,
+        COALESCE(s.expense_courier, 0) as expense_courier,
+        COALESCE(s.courier_paid_extra, 0) as courier_paid_extra,
+        s.delivery_status,
+        s.fulfillment_type,
+        s.type_of_sale,
+        s.created_at,
+        COALESCE(NULLIF(s.customer_name_override, ''), c.name, 'Customer') as customer_name,
+        COALESCE(NULLIF(s.customer_phone_override, ''), c.phone, '') as customer_phone
+      FROM sales s
+      LEFT JOIN customers c ON s.customer_id = c.id
+      WHERE s.device_id = ${deviceId}
+        AND COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
+        AND (
+          LOWER(COALESCE(s.type_of_sale, '')) = 'courier'
+          OR LOWER(COALESCE(s.fulfillment_type, '')) = 'ship'
+          OR LOWER(TRIM(COALESCE(s.delivery_status, ''))) IN ('direct', 'shipped', 'shipping', 'sent', 'packed', 'courier')
+          OR COALESCE(s.courier_paid_extra, 0) > 0
+          OR COALESCE(s.expense_courier, 0) > 0
+          OR s.tracking_id IS NOT NULL
+        )
+        AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+        AND NOT EXISTS (
+          SELECT 1 FROM financial_transactions ft
+          WHERE ft.device_id = s.device_id
+            AND ft.reference_type = 'sale'
+            AND ft.reference_id = s.id
+            AND ft.transaction_type = 'sale_shipping'
+            AND ft.debit_amount > 0
+            AND ft.description ILIKE '%Courier charge%'
+        )
+      ORDER BY s.id DESC
+      LIMIT 100
+    `
+    return { success: true, data: sales }
+  } catch (error) {
+    console.error("Error fetching pending courier sales:", error)
+    return { success: false, error: error instanceof Error ? error.message : "Unknown error", data: [] }
+  }
+}
+
+export async function getPendingCourierPurchases(deviceId: number) {
+  try {
+    const purchases = await sql`
+      SELECT 
+        p.id,
+        p.invoice_number,
+        COALESCE(p.supplier, 'Supplier') as supplier_name,
+        p.total_amount,
+        COALESCE(p.courier_charge, 0) as courier_charge,
+        p.purchase_type,
+        p.status,
+        p.purchase_date,
+        p.notes
+      FROM purchases p
+      WHERE p.device_id = ${deviceId}
+        AND COALESCE(p.status, '') != 'cancelled'
+        AND COALESCE(p.courier_charge, 0) > 0
+        AND NOT EXISTS (
+          SELECT 1 FROM financial_transactions ft
+          WHERE ft.device_id = p.device_id
+            AND ft.reference_type = 'purchase'
+            AND ft.reference_id = p.id
+            AND ft.transaction_type = 'purchase_shipping'
+            AND ft.debit_amount > 0
+            AND ft.description ILIKE '%Courier charge%'
+        )
+      ORDER BY p.id DESC
+      LIMIT 100
+    `
+
+    // Check for dropship purchases: if linked sale already has courier charge deducted in accounts, filter it out
+    const filteredPurchases = []
+    for (const p of purchases) {
+      const isDropship = (p.purchase_type || "").toLowerCase() === "dropship"
+      if (isDropship && p.notes) {
+        const match = (p.notes || "").match(/(?:Job Card|Order|Sale)\s*#(\d+)/i)
+        if (match) {
+          const linkedSaleId = parseInt(match[1], 10)
+          const existing = await sql`
+            SELECT 1 FROM financial_transactions
+            WHERE device_id = ${deviceId}
+              AND reference_type = 'sale'
+              AND reference_id = ${linkedSaleId}
+              AND transaction_type = 'sale_shipping'
+              AND debit_amount > 0
+              AND description ILIKE '%Courier charge%'
+            LIMIT 1
+          `
+          if (existing.length > 0) {
+            // Already paid & deducted
+            continue
+          }
+        }
+      }
+      filteredPurchases.push(p)
+    }
+
+    return { success: true, data: filteredPurchases }
+  } catch (error) {
+    console.error("Error fetching pending courier purchases:", error)
+    return { success: false, error: error instanceof Error ? error.message : "Unknown error", data: [] }
+  }
+}
+
+export interface RecordCourierExpenseFromPettyCashInput {
+  sourceType: "sale" | "purchase"
+  targetId: number // saleId or purchaseId
+  amount: number
+  paymentMethod: string
+  category?: string
+  categoryId?: number
+  notes?: string
+  deviceId: number
+  userId: number
+  transactionDate?: Date | string
+  updateFulfillment?: boolean
+}
+
+export async function recordCourierExpenseFromPettyCash(input: RecordCourierExpenseFromPettyCashInput) {
+  try {
+    const amount = Number(input.amount) || 0
+    if (amount <= 0) {
+      return { success: false, message: "Invalid courier expense amount" }
+    }
+
+    const companyId = await getDeviceCompanyId(input.deviceId)
+    const categoryName = input.category?.trim() || "Courier & Delivery"
+    const txDate = input.transactionDate ? new Date(input.transactionDate) : new Date()
+    const formattedTxDate = format(txDate, "yyyy-MM-dd HH:mm:ss")
+    const pm = input.paymentMethod || "Cash"
+
+    let lastInsertedId: number | undefined
+
+    if (input.sourceType === "sale") {
+      const saleId = input.targetId
+      const userDesc = (input.notes || "").trim()
+      const desc = userDesc || `Sale #${saleId} - Courier charge`
+
+      const res = await sql`
+        INSERT INTO financial_transactions (
+          transaction_type, reference_type, reference_id,
+          amount, received_amount, cost_amount, debit_amount, credit_amount,
+          status, payment_method, description, category_name, device_id, company_id, created_by, transaction_date
+        ) VALUES (
+          'sale_shipping', 'sale', ${saleId},
+          ${amount}, ${amount}, 0, ${amount}, 0,
+          'Completed', ${pm}, ${desc}, ${categoryName},
+          ${input.deviceId}, ${companyId}, ${input.userId}, ${formattedTxDate}
+        ) RETURNING id
+      `
+      lastInsertedId = res[0]?.id
+
+      // Update sales fulfillment expense_courier
+      await sql`
+        UPDATE sales
+        SET expense_courier = ${amount}, updated_at = NOW()
+        WHERE id = ${saleId}
+      `
+    } else {
+      // purchase
+      const purchaseId = input.targetId
+      const pRows = await sql`
+        SELECT id, purchase_type, notes, COALESCE(supplier, 'Supplier') as supplier_name, courier_charge
+        FROM purchases
+        WHERE id = ${purchaseId}
+        LIMIT 1
+      `
+      if (pRows.length === 0) {
+        return { success: false, message: `Purchase #${purchaseId} not found` }
+      }
+
+      const p = pRows[0]
+      const isDropship = (p.purchase_type || "").toLowerCase() === "dropship"
+      let linkedSaleId: number | null = null
+      if (isDropship && p.notes) {
+        const match = (p.notes || "").match(/(?:Job Card|Order|Sale)\s*#(\d+)/i)
+        if (match) linkedSaleId = parseInt(match[1], 10)
+      }
+
+      if (isDropship && linkedSaleId) {
+        const userDesc = (input.notes || "").trim()
+        const desc = userDesc || `Sale #${linkedSaleId} - Courier charge`
+        const res = await sql`
+          INSERT INTO financial_transactions (
+            transaction_type, reference_type, reference_id,
+            amount, received_amount, cost_amount, debit_amount, credit_amount,
+            status, payment_method, description, category_name, device_id, company_id, created_by, transaction_date
+          ) VALUES (
+            'sale_shipping', 'sale', ${linkedSaleId},
+            ${amount}, ${amount}, 0, ${amount}, 0,
+            'Completed', ${pm}, ${desc}, ${categoryName},
+            ${input.deviceId}, ${companyId}, ${input.userId}, ${formattedTxDate}
+          ) RETURNING id
+        `
+        lastInsertedId = res[0]?.id
+
+        // Two-way sync: update sale fulfillment and purchase details
+        await sql`
+          UPDATE sales
+          SET expense_courier = ${amount}, updated_at = NOW()
+          WHERE id = ${linkedSaleId}
+        `
+        await sql`
+          UPDATE purchases
+          SET courier_charge = ${amount}, updated_at = NOW()
+          WHERE id = ${purchaseId}
+        `
+      } else {
+        // Stock purchase
+        const userDesc = (input.notes || "").trim()
+        const desc = userDesc || `Purchase #${purchaseId} - Courier charge`
+        const res = await sql`
+          INSERT INTO financial_transactions (
+            transaction_type, reference_type, reference_id,
+            amount, received_amount, cost_amount, debit_amount, credit_amount,
+            status, payment_method, description, category_name, device_id, company_id, created_by, transaction_date
+          ) VALUES (
+            'purchase_shipping', 'purchase', ${purchaseId},
+            ${amount}, ${amount}, 0, ${amount}, 0,
+            'Completed', ${pm}, ${desc}, ${categoryName},
+            ${input.deviceId}, ${companyId}, ${input.userId}, ${formattedTxDate}
+          ) RETURNING id
+        `
+        lastInsertedId = res[0]?.id
+
+        await sql`
+          UPDATE purchases
+          SET courier_charge = ${amount}, updated_at = NOW()
+          WHERE id = ${purchaseId}
+        `
+      }
+    }
+
+    try {
+      revalidatePath("/dashboard", "layout")
+    } catch (_) {}
+
+    return {
+      success: true,
+      transactionId: lastInsertedId,
+      message: "Courier expense recorded successfully",
+    }
+  } catch (error) {
+    console.error("Error recording courier expense from petty cash:", error)
+    return {
+      success: false,
+      message: error instanceof Error ? error.message : "Unknown error",
+    }
   }
 }
 

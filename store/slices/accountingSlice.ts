@@ -18,6 +18,9 @@ interface Transaction {
   paymentMethod: string
   account: string
   reference?: string
+  category_name?: string
+  category?: string
+  notes?: string
   sale_id?: number
   purchase_id?: number
   supplier_payment_id?: number

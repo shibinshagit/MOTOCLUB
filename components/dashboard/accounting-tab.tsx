@@ -65,6 +65,9 @@ import {
   getFinancialSummary,
   recordManualTransaction,
   getAccountingBalances,
+  getPendingCourierSales,
+  getPendingCourierPurchases,
+  recordCourierExpenseFromPettyCash,
 } from "@/app/actions/simplified-accounting"
 import { deletePurchase } from "@/app/actions/purchase-actions"
 import { deleteSale } from "@/app/actions/sale-actions"
@@ -292,6 +295,52 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
   const [manualDate, setManualDate] = useState<Date>(new Date())
   const [isAddingManual, setIsAddingManual] = useState(false)
   const [selectedPettyCashCategory, setSelectedPettyCashCategory] = useState<string>("all")
+
+  // Courier petty cash states
+  const [courierMode, setCourierMode] = useState<"sale" | "purchase" | "general">("sale")
+  const [pendingCourierSales, setPendingCourierSales] = useState<any[]>([])
+  const [pendingCourierPurchases, setPendingCourierPurchases] = useState<any[]>([])
+  const [selectedCourierSaleId, setSelectedCourierSaleId] = useState("")
+  const [selectedCourierPurchaseId, setSelectedCourierPurchaseId] = useState("")
+  const [isLoadingPendingCourier, setIsLoadingPendingCourier] = useState(false)
+
+  const isCourierCategory =
+    manualType === "debit" &&
+    (manualCategoryName.toLowerCase().includes("courier") ||
+      manualCategoryName.toLowerCase().includes("delivery") ||
+      manualCategoryName.toLowerCase().includes("shipping"))
+
+  useEffect(() => {
+    if (isManualDialogOpen && isCourierCategory && deviceId) {
+      setIsLoadingPendingCourier(true)
+      Promise.all([
+        getPendingCourierSales(deviceId),
+        getPendingCourierPurchases(deviceId),
+      ])
+        .then(([salesRes, purchasesRes]) => {
+          if (salesRes.success) {
+            setPendingCourierSales(salesRes.data || [])
+          }
+          if (purchasesRes.success) {
+            setPendingCourierPurchases(purchasesRes.data || [])
+          }
+        })
+        .catch((err) => {
+          console.error("Error loading pending courier data:", err)
+        })
+        .finally(() => {
+          setIsLoadingPendingCourier(false)
+        })
+    }
+  }, [isManualDialogOpen, isCourierCategory, deviceId])
+
+  const selectedCourierSale = useMemo(() => {
+    return pendingCourierSales.find((s: any) => String(s.id) === selectedCourierSaleId) || null
+  }, [pendingCourierSales, selectedCourierSaleId])
+
+  const selectedCourierPurchase = useMemo(() => {
+    return pendingCourierPurchases.find((p: any) => String(p.id) === selectedCourierPurchaseId) || null
+  }, [pendingCourierPurchases, selectedCourierPurchaseId])
 
   const device = useAppSelector(selectDevice)
   const company = useAppSelector(selectCompany)
@@ -585,42 +634,133 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
 
   const handleAddManualTransaction = async () => {
     if (!manualAmount || !manualCategoryId || !manualCategoryName) {
-      notifyError(toast,"Please fill in all required fields")
+      notifyError(toast, "Please fill in all required fields")
+      return
+    }
+
+    if (isCourierCategory && courierMode === "sale" && !selectedCourierSaleId) {
+      notifyError(toast, "Please select a sale order for courier expense")
+      return
+    }
+
+    if (isCourierCategory && courierMode === "purchase" && !selectedCourierPurchaseId) {
+      notifyError(toast, "Please select a purchase for courier expense")
       return
     }
 
     setIsAddingManual(true)
 
     try {
-      const result = await recordManualTransaction({
-        amount: Number(manualAmount),
-        type: manualType,
-        description: manualDescription || `${manualType === 'credit' ? 'Income' : 'Expense'}: ${manualCategoryName}`,
-        category: manualCategoryName,
-        categoryId: Number(manualCategoryId),
-        paymentMethod: manualPaymentMethod,
-        deviceId,
-        userId,
-        transactionDate: manualDate,
-      })
+      if (isCourierCategory && courierMode === "sale" && selectedCourierSaleId) {
+        const enteredAmt = Number(manualAmount)
+        const fulfillmentAmt = Number(selectedCourierSale?.expense_courier || 0)
 
-      if (result.success) {
-        notifySuccess(toast,"Manual transaction added successfully")
-        setIsManualDialogOpen(false)
-        setActiveTab("petty-cash")
-        setManualAmount("")
-        setManualDescription("")
-        setManualCategoryId("")
-        setManualCategoryName("")
-        setManualPaymentMethod("Cash")
-        setManualDate(new Date())
-        await forceRefreshData()
+        if (fulfillmentAmt > 0 && enteredAmt !== fulfillmentAmt) {
+          const confirmed = await confirm(
+            `The entered courier charge (${currency} ${enteredAmt.toFixed(2)}) does not match the fulfillment courier expense (${currency} ${fulfillmentAmt.toFixed(2)}). Do you want to confirm and update the fulfillment courier expense in the sales order?`
+          )
+          if (!confirmed) {
+            setIsAddingManual(false)
+            return
+          }
+        }
+
+        const result = await recordCourierExpenseFromPettyCash({
+          sourceType: "sale",
+          targetId: Number(selectedCourierSaleId),
+          amount: enteredAmt,
+          paymentMethod: manualPaymentMethod,
+          category: manualCategoryName,
+          categoryId: Number(manualCategoryId) || undefined,
+          notes: manualDescription,
+          deviceId,
+          userId,
+          transactionDate: manualDate,
+          updateFulfillment: true,
+        })
+
+        if (result.success) {
+          notifySuccess(toast, "Courier expense recorded and fulfillment updated successfully")
+          setIsManualDialogOpen(false)
+          setActiveTab("petty-cash")
+          setManualAmount("")
+          setManualDescription("")
+          setManualCategoryId("")
+          setManualCategoryName("")
+          setManualPaymentMethod("Cash")
+          setManualDate(new Date())
+          setCourierMode("sale")
+          setSelectedCourierSaleId("")
+          setSelectedCourierPurchaseId("")
+          await forceRefreshData()
+        } else {
+          notifyError(toast, result.message || "Failed to record courier expense")
+        }
+      } else if (isCourierCategory && courierMode === "purchase" && selectedCourierPurchaseId) {
+        const result = await recordCourierExpenseFromPettyCash({
+          sourceType: "purchase",
+          targetId: Number(selectedCourierPurchaseId),
+          amount: Number(manualAmount),
+          paymentMethod: manualPaymentMethod,
+          category: manualCategoryName,
+          categoryId: Number(manualCategoryId) || undefined,
+          notes: manualDescription,
+          deviceId,
+          userId,
+          transactionDate: manualDate,
+        })
+
+        if (result.success) {
+          notifySuccess(toast, "Courier expense recorded and purchase details updated successfully")
+          setIsManualDialogOpen(false)
+          setActiveTab("petty-cash")
+          setManualAmount("")
+          setManualDescription("")
+          setManualCategoryId("")
+          setManualCategoryName("")
+          setManualPaymentMethod("Cash")
+          setManualDate(new Date())
+          setCourierMode("sale")
+          setSelectedCourierSaleId("")
+          setSelectedCourierPurchaseId("")
+          await forceRefreshData()
+        } else {
+          notifyError(toast, result.message || "Failed to record courier expense")
+        }
       } else {
-        notifyError(toast,"Failed to add manual transaction")
+        const result = await recordManualTransaction({
+          amount: Number(manualAmount),
+          type: manualType,
+          description: manualDescription || `${manualType === 'credit' ? 'Income' : 'Expense'}: ${manualCategoryName}`,
+          category: manualCategoryName,
+          categoryId: Number(manualCategoryId),
+          paymentMethod: manualPaymentMethod,
+          deviceId,
+          userId,
+          transactionDate: manualDate,
+        })
+
+        if (result.success) {
+          notifySuccess(toast, "Manual transaction added successfully")
+          setIsManualDialogOpen(false)
+          setActiveTab("petty-cash")
+          setManualAmount("")
+          setManualDescription("")
+          setManualCategoryId("")
+          setManualCategoryName("")
+          setManualPaymentMethod("Cash")
+          setManualDate(new Date())
+          setCourierMode("sale")
+          setSelectedCourierSaleId("")
+          setSelectedCourierPurchaseId("")
+          await forceRefreshData()
+        } else {
+          notifyError(toast, "Failed to add manual transaction")
+        }
       }
     } catch (error) {
       console.error("Error adding manual transaction:", error)
-      notifyError(toast,"An error occurred while adding the transaction")
+      notifyError(toast, "An error occurred while adding the transaction")
     } finally {
       setIsAddingManual(false)
     }
@@ -985,7 +1125,7 @@ const allPettyCashTransactions =
     if (!transaction) return false
     const typeLower = transaction.type?.toLowerCase()
     const refTypeLower = transaction.reference_type?.toLowerCase()
-    if (typeLower !== "manual" && refTypeLower !== "manual") return false
+    if (typeLower !== "manual" && refTypeLower !== "manual" && !transaction.category_name) return false
     return matchesSearchAndDateRange(transaction)
   }) || []
 
@@ -3201,8 +3341,18 @@ const renderTransactionList = (
       </Dialog>
 
       {/* Manual Transaction Dialog */}
-      <Dialog open={isManualDialogOpen} onOpenChange={setIsManualDialogOpen}>
-        <DialogContent className="sm:max-w-[425px] max-h-[90dvh] overflow-hidden flex flex-col p-0 gap-0">
+      <Dialog
+        open={isManualDialogOpen}
+        onOpenChange={(open) => {
+          setIsManualDialogOpen(open)
+          if (!open) {
+            setCourierMode("sale")
+            setSelectedCourierSaleId("")
+            setSelectedCourierPurchaseId("")
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-[480px] max-h-[90dvh] overflow-hidden flex flex-col p-0 gap-0">
           <DialogHeader className="px-6 py-4 border-b shrink-0">
             <DialogTitle>Add Manual Transaction</DialogTitle>
           </DialogHeader>
@@ -3221,19 +3371,6 @@ const renderTransactionList = (
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="manual-amount">Amount ({currency})</Label>
-              <Input
-                id="manual-amount"
-                type="number"
-                step="0.01"
-                min="0"
-                value={manualAmount}
-                onChange={(e) => setManualAmount(e.target.value)}
-                placeholder="0.00"
-              />
-            </div>
-
-            <div className="grid gap-2">
               <Label htmlFor="manual-category">Category *</Label>
               <ManualCategorySelect
                 deviceId={deviceId}
@@ -3243,6 +3380,176 @@ const renderTransactionList = (
                   setManualCategoryId(id)
                   setManualCategoryName(category?.name || "")
                 }}
+              />
+            </div>
+
+            {/* Courier & Delivery toggle and order selectors */}
+            {isCourierCategory && (
+              <div className="rounded-lg border border-purple-200 bg-purple-50/60 p-3 space-y-3">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-semibold text-purple-900">Courier Expense Type</Label>
+                  <div className="flex rounded-md border border-purple-200 bg-background p-0.5 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCourierMode("sale")
+                        setSelectedCourierPurchaseId("")
+                      }}
+                      className={`px-2.5 py-1 rounded-sm font-medium transition-all ${
+                        courierMode === "sale"
+                          ? "bg-purple-600 text-white shadow-sm"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      Sale Order
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCourierMode("purchase")
+                        setSelectedCourierSaleId("")
+                      }}
+                      className={`px-2.5 py-1 rounded-sm font-medium transition-all ${
+                        courierMode === "purchase"
+                          ? "bg-purple-600 text-white shadow-sm"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      Purchase
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCourierMode("general")
+                        setSelectedCourierSaleId("")
+                        setSelectedCourierPurchaseId("")
+                      }}
+                      className={`px-2.5 py-1 rounded-sm font-medium transition-all ${
+                        courierMode === "general"
+                          ? "bg-purple-600 text-white shadow-sm"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      General
+                    </button>
+                  </div>
+                </div>
+
+                {courierMode === "sale" && (
+                  <div className="space-y-2">
+                    <Label className="text-xs font-medium text-foreground">Select Unpaid Courier Sale Order *</Label>
+                    {isLoadingPendingCourier ? (
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
+                        <Loader2 className="h-4 w-4 animate-spin text-purple-600" />
+                        Loading pending courier sales...
+                      </div>
+                    ) : pendingCourierSales.length === 0 ? (
+                      <p className="text-xs text-muted-foreground italic">No pending courier sale orders found without paid courier expense.</p>
+                    ) : (
+                      <Select
+                        value={selectedCourierSaleId}
+                        onValueChange={(val) => {
+                          setSelectedCourierSaleId(val)
+                          const s = pendingCourierSales.find((item: any) => String(item.id) === val)
+                          if (s) {
+                            if (Number(s.expense_courier) > 0) {
+                              setManualAmount(Number(s.expense_courier).toFixed(2))
+                            }
+                            setManualDescription(`Sale #${s.id} - Courier charge`)
+                          }
+                        }}
+                      >
+                        <SelectTrigger className="bg-background text-xs">
+                          <SelectValue placeholder="Select a sale order" />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-[220px]">
+                          {pendingCourierSales.map((s: any) => (
+                            <SelectItem key={s.id} value={String(s.id)} className="text-xs">
+                              Sale #{s.id} - {s.customer_name || "Customer"} ({s.delivery_status || s.fulfillment_type || "Ship"})
+                              {Number(s.expense_courier) > 0
+                                ? ` [Fulfillment: ${currency} ${Number(s.expense_courier).toFixed(2)}]`
+                                : " [No fulfillment expense]"}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+
+                    {selectedCourierSale &&
+                      Number(selectedCourierSale.expense_courier) > 0 &&
+                      Number(manualAmount) > 0 &&
+                      Number(manualAmount) !== Number(selectedCourierSale.expense_courier) && (
+                        <div className="rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800">
+                          ⚠️ <strong>Mismatch detected:</strong> Fulfillment courier expense is {currency}{" "}
+                          {Number(selectedCourierSale.expense_courier).toFixed(2)}, but you entered {currency}{" "}
+                          {Number(manualAmount).toFixed(2)}. Submitting will prompt for confirmation and update the fulfillment courier expense.
+                        </div>
+                      )}
+                  </div>
+                )}
+
+                {courierMode === "purchase" && (
+                  <div className="space-y-2">
+                    <Label className="text-xs font-medium text-foreground">Select Unpaid Courier Purchase *</Label>
+                    {isLoadingPendingCourier ? (
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
+                        <Loader2 className="h-4 w-4 animate-spin text-purple-600" />
+                        Loading pending courier purchases...
+                      </div>
+                    ) : pendingCourierPurchases.length === 0 ? (
+                      <p className="text-xs text-muted-foreground italic">No pending purchases with unpaid courier charge found.</p>
+                    ) : (
+                      <Select
+                        value={selectedCourierPurchaseId}
+                        onValueChange={(val) => {
+                          setSelectedCourierPurchaseId(val)
+                          const p = pendingCourierPurchases.find((item: any) => String(item.id) === val)
+                          if (p) {
+                            if (Number(p.courier_charge) > 0) {
+                              setManualAmount(Number(p.courier_charge).toFixed(2))
+                            }
+                            const isDropship = (p.purchase_type || "").toLowerCase() === "dropship"
+                            let linkedSaleId: string | null = null
+                            if (isDropship && p.notes) {
+                              const match = p.notes.match(/(?:Job Card|Order|Sale)\s*#(\d+)/i)
+                              if (match) linkedSaleId = match[1]
+                            }
+                            if (isDropship && linkedSaleId) {
+                              setManualDescription(`Sale #${linkedSaleId} - Courier charge`)
+                            } else {
+                              setManualDescription(`Purchase #${p.id} - Courier charge`)
+                            }
+                          }
+                        }}
+                      >
+                        <SelectTrigger className="bg-background text-xs">
+                          <SelectValue placeholder="Select a purchase" />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-[220px]">
+                          {pendingCourierPurchases.map((p: any) => (
+                            <SelectItem key={p.id} value={String(p.id)} className="text-xs">
+                              Purchase #{p.id} - {p.supplier_name || "Supplier"} ({p.purchase_type || "Stock"}) - Courier: {currency}{" "}
+                              {Number(p.courier_charge).toFixed(2)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="grid gap-2">
+              <Label htmlFor="manual-amount">Amount ({currency})</Label>
+              <Input
+                id="manual-amount"
+                type="number"
+                step="0.01"
+                min="0"
+                value={manualAmount}
+                onChange={(e) => setManualAmount(e.target.value)}
+                placeholder="0.00"
               />
             </div>
 
@@ -3289,7 +3596,13 @@ const renderTransactionList = (
             </Button>
             <Button
               onClick={handleAddManualTransaction}
-              disabled={isAddingManual || !manualCategoryId || !manualAmount}
+              disabled={
+                isAddingManual ||
+                !manualCategoryId ||
+                !manualAmount ||
+                (isCourierCategory && courierMode === "sale" && !selectedCourierSaleId) ||
+                (isCourierCategory && courierMode === "purchase" && !selectedCourierPurchaseId)
+              }
             >
               {isAddingManual ? (
                 <>
