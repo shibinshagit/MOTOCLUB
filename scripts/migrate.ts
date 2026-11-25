@@ -1399,6 +1399,39 @@ async function upgradeLegacyColumns() {
       }
     }
   })
+
+  await runSafe("product_batches.adj_zero_cost_backfill", () => sql`
+    UPDATE product_batches pb
+    SET
+      cost_price = COALESCE(
+        NULLIF(pv.cost_price, 0),
+        NULLIF(pv.wholesale_price, 0),
+        NULLIF(p.wholesale_price, 0),
+        0
+      ),
+      selling_price = COALESCE(
+        NULLIF(pv.price, 0),
+        NULLIF(pv.msp, 0),
+        NULLIF(p.price, 0),
+        0
+      ),
+      updated_at = NOW()
+    FROM products p
+    LEFT JOIN product_variants pv ON pv.id = pb.product_variant_id
+    WHERE pb.product_id = p.id
+      AND pb.batch_no LIKE 'ADJ-%'
+      AND COALESCE(pb.cost_price, 0) = 0
+  `)
+
+  await runSafe("sale_batch_allocations.adj_zero_cost_backfill", () => sql`
+    UPDATE sale_batch_allocations sba
+    SET cost_price = pb.cost_price
+    FROM product_batches pb
+    WHERE pb.id = sba.batch_id
+      AND pb.batch_no LIKE 'ADJ-%'
+      AND COALESCE(sba.cost_price, 0) = 0
+      AND pb.cost_price > 0
+  `)
 }
 
 async function addForeignKeys() {
