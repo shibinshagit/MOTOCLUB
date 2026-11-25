@@ -1016,7 +1016,12 @@ export function ProductDetailPanel({
                           item.notes,
                           item.quantity,
                         )
-                        const isDecrease = item.quantity < 0
+                        const isDecrease =
+                          item.quantity < 0 ||
+                          (item.type === "adjustment" &&
+                            typeof item.notes === "string" &&
+                            /\b(decrease|decreased|reduction|deduct)\b/i.test(item.notes))
+                        const displayQty = Math.abs(item.quantity)
 
                         return (
                           <tr
@@ -1032,7 +1037,7 @@ export function ProductDetailPanel({
                             <td className="px-4 py-2.5 align-top">
                               <span
                                 className={cn(
-                                  "inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium",
+                                   "inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium",
                                   privacyMode ? "bg-slate-100 text-slate-500" : typeInfo.color,
                                 )}
                               >
@@ -1047,8 +1052,8 @@ export function ProductDetailPanel({
                                 <span className="text-slate-400">***</span>
                               ) : (
                                 <span className={isDecrease ? "text-rose-600" : "text-emerald-700"}>
-                                  {isDecrease ? "" : "+"}
-                                  {item.quantity}
+                                  {isDecrease ? "-" : "+"}
+                                  {displayQty}
                                 </span>
                               )}
                             </td>
