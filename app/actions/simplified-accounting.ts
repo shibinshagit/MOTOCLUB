@@ -1145,31 +1145,40 @@ export async function getPendingCourierPurchases(deviceId: number) {
     `
 
     // Check for dropship purchases: if linked sale already has courier charge deducted in accounts, filter it out
-    const filteredPurchases = []
+    const linkedSaleIds: number[] = []
+    const dropshipMap = new Map<number, number>()
     for (const p of purchases) {
       const isDropship = (p.purchase_type || "").toLowerCase() === "dropship"
       if (isDropship && p.notes) {
         const match = (p.notes || "").match(/(?:Job Card|Order|Sale)\s*#(\d+)/i)
         if (match) {
-          const linkedSaleId = parseInt(match[1], 10)
-          const existing = await sql`
-            SELECT 1 FROM financial_transactions
-            WHERE device_id = ${deviceId}
-              AND reference_type = 'sale'
-              AND reference_id = ${linkedSaleId}
-              AND transaction_type = 'sale_shipping'
-              AND debit_amount > 0
-              AND description ILIKE '%Courier charge%'
-            LIMIT 1
-          `
-          if (existing.length > 0) {
-            // Already paid & deducted
-            continue
-          }
+          const sId = parseInt(match[1], 10)
+          linkedSaleIds.push(sId)
+          dropshipMap.set(p.id, sId)
         }
       }
-      filteredPurchases.push(p)
     }
+
+    const deductedSaleIds = new Set<number>()
+    if (linkedSaleIds.length > 0) {
+      const existing = await sql`
+        SELECT reference_id FROM financial_transactions
+        WHERE device_id = ${deviceId}
+          AND reference_type = 'sale'
+          AND reference_id IN ${sql(linkedSaleIds)}
+          AND transaction_type = 'sale_shipping'
+          AND debit_amount > 0
+          AND description ILIKE '%Courier charge%'
+      `
+      for (const row of existing) {
+        deductedSaleIds.add(Number(row.reference_id))
+      }
+    }
+
+    const filteredPurchases = purchases.filter((p: any) => {
+      const linked = dropshipMap.get(p.id)
+      return !(linked && deductedSaleIds.has(linked))
+    })
 
     return { success: true, data: filteredPurchases }
   } catch (error) {
@@ -1696,87 +1705,32 @@ export async function getFinancialSummary(
   try {
     console.log("Getting financial summary for device:", deviceId, "date range:", fromDateStr, "to", toDateStr)
 
-    // Auto-repair any previous manual entries whose transaction_type, reference_type, or date was improperly overwritten
-    try {
-      await sql`
-        UPDATE financial_transactions 
-        SET 
-          transaction_type = 'manual', 
-          reference_type = 'manual',
-          received_amount = amount,
-          transaction_date = created_at
-        WHERE device_id = ${deviceId} 
-          AND (reference_type = 'manual' OR transaction_type = 'manual' OR description LIKE 'Manual Entry%')
-          AND (transaction_type != 'manual' OR reference_type != 'manual' OR received_amount = 0 OR transaction_date::date > created_at::date)
-      `
-      // Auto-align courier collected timestamps with their parent sale transaction date so collection times match
-      await sql`
-        UPDATE financial_transactions ft
-        SET transaction_date = st.transaction_date
-        FROM financial_transactions st
-        WHERE ft.device_id = ${deviceId}
-          AND ft.transaction_type = 'sale_shipping'
-          AND ft.reference_type = 'sale'
-          AND ft.description LIKE '%Courier charge collected%'
-          AND st.device_id = ${deviceId}
-          AND st.transaction_type = 'sale'
-          AND st.reference_type = 'sale'
-          AND st.reference_id = ft.reference_id
-          AND ft.transaction_date != st.transaction_date
-      `
-    } catch (repairErr) {
-      console.log("Non-fatal: transaction auto-repair skipped", repairErr)
-    }
+    // Execute all independent read queries in parallel to minimize network latency
+    const transactionsPromise = (fromDateStr && toDateStr)
+      ? sql`
+          SELECT * FROM financial_transactions 
+          WHERE device_id = ${deviceId} 
+            AND NOT (transaction_type = 'purchase' AND debit_amount = 0 AND received_amount = 0)
+            AND (
+              (transaction_date AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${fromDateStr}::date AND ${toDateStr}::date
+              OR (created_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${fromDateStr}::date AND ${toDateStr}::date
+              OR transaction_date::date BETWEEN ${fromDateStr}::date AND ${toDateStr}::date
+            )
+          ORDER BY transaction_date DESC, id DESC
+        `
+      : sql`
+          SELECT * FROM financial_transactions 
+          WHERE device_id = ${deviceId}
+            AND NOT (transaction_type = 'purchase' AND debit_amount = 0 AND received_amount = 0)
+          ORDER BY transaction_date DESC, id DESC
+        `
 
-    // Query transactions (fromDateStr/toDateStr are YYYY-MM-DD from the client calendar)
-    let transactions
-    if (fromDateStr && toDateStr) {
-      console.log("Querying with date range:", fromDateStr, "to", toDateStr)
-      transactions = await sql`
-        SELECT * FROM financial_transactions 
-        WHERE device_id = ${deviceId} 
-          AND NOT (transaction_type = 'purchase' AND debit_amount = 0 AND received_amount = 0)
-          AND (
-            (transaction_date AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${fromDateStr}::date AND ${toDateStr}::date
-            OR (created_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${fromDateStr}::date AND ${toDateStr}::date
-            OR transaction_date::date BETWEEN ${fromDateStr}::date AND ${toDateStr}::date
-          )
-        ORDER BY transaction_date DESC, id DESC
-      `
-    } else {
-      console.log("Querying all transactions for device:", deviceId)
-      transactions = await sql`
-        SELECT * FROM financial_transactions 
-        WHERE device_id = ${deviceId}
-          AND NOT (transaction_type = 'purchase' AND debit_amount = 0 AND received_amount = 0)
-        ORDER BY transaction_date DESC, id DESC
-      `
-    }
-
-    console.log(`Found ${transactions.length} transactions for device ${deviceId}`)
-
-    // Fetch Authoritative Sales, COGS & Profit from single backend source of truth
-    const authoritativeProfit = await getAuthoritativeProfitSummary(deviceId, {
+    const authoritativeProfitPromise = getAuthoritativeProfitSummary(deviceId, {
       dateFrom: fromDateStr,
       dateTo: toDateStr,
     })
 
-    let cashBalance = 0
-    transactions.forEach((tx: any) => {
-      const creditAmount = Number(tx.credit_amount) || 0
-      const debitAmount = Number(tx.debit_amount) || 0
-      cashBalance += (creditAmount - debitAmount)
-    })
-
-    const totalIncome = authoritativeProfit.salesRevenue + authoritativeProfit.otherIncome
-    const totalCogs = authoritativeProfit.salesCogs
-    const totalProfit = authoritativeProfit.grossProfit
-    const grossProfit = authoritativeProfit.grossProfit
-    const totalExpenses = authoritativeProfit.operatingExpenses
-    const netProfit = authoritativeProfit.netProfit
-
-    // Get receivables (sales with outstanding amounts)
-    const receivablesQuery = await sql`
+    const receivablesPromise = sql`
       SELECT 
         s.id,
         s.total_amount,
@@ -1793,8 +1747,7 @@ export async function getFinancialSummary(
       ORDER BY s.sale_date DESC
     `
 
-    // Get payables (purchases with outstanding amounts)
-    const payablesQuery = await sql`
+    const payablesPromise = sql`
       SELECT 
         p.id,
         p.total_amount,
@@ -1810,47 +1763,69 @@ export async function getFinancialSummary(
       ORDER BY p.purchase_date DESC
     `
 
-    // Transfer receivables: this device SENT goods and is owed money by the receiving warehouse
-    let transferReceivablesQuery: any[] = []
-    let transferPayablesQuery: any[] = []
-    try {
-      transferReceivablesQuery = await sql`
-        SELECT
-          t.id,
-          COALESCE(t.total_amount, 0) AS total_amount,
-          COALESCE(t.paid_amount, 0) AS received_amount,
-          COALESCE(t.transfer_date, t.created_at) AS due_date,
-          t.payment_status AS status,
-          dt.name AS counterpart_name,
-          (COALESCE(t.total_amount, 0) - COALESCE(t.paid_amount, 0)) AS outstanding_amount
-        FROM stock_transfers t
-        JOIN devices dt ON dt.id = t.to_device_id
-        WHERE t.from_device_id = ${deviceId}
-          AND LOWER(COALESCE(t.status, '')) = 'completed'
-          AND (COALESCE(t.total_amount, 0) - COALESCE(t.paid_amount, 0)) > 0
-        ORDER BY COALESCE(t.transfer_date, t.created_at) DESC
-      `
+    const transferReceivablesPromise = sql`
+      SELECT
+        t.id,
+        COALESCE(t.total_amount, 0) AS total_amount,
+        COALESCE(t.paid_amount, 0) AS received_amount,
+        COALESCE(t.transfer_date, t.created_at) AS due_date,
+        t.payment_status AS status,
+        dt.name AS counterpart_name,
+        (COALESCE(t.total_amount, 0) - COALESCE(t.paid_amount, 0)) AS outstanding_amount
+      FROM stock_transfers t
+      JOIN devices dt ON dt.id = t.to_device_id
+      WHERE t.from_device_id = ${deviceId}
+        AND LOWER(COALESCE(t.status, '')) = 'completed'
+        AND (COALESCE(t.total_amount, 0) - COALESCE(t.paid_amount, 0)) > 0
+      ORDER BY COALESCE(t.transfer_date, t.created_at) DESC
+    `.catch(() => [])
 
-      // Transfer payables: this device RECEIVED goods and owes money to the sending warehouse
-      transferPayablesQuery = await sql`
-        SELECT
-          t.id,
-          COALESCE(t.total_amount, 0) AS total_amount,
-          COALESCE(t.paid_amount, 0) AS received_amount,
-          COALESCE(t.transfer_date, t.created_at) AS due_date,
-          t.payment_status AS status,
-          df.name AS counterpart_name,
-          (COALESCE(t.total_amount, 0) - COALESCE(t.paid_amount, 0)) AS outstanding_amount
-        FROM stock_transfers t
-        JOIN devices df ON df.id = t.from_device_id
-        WHERE t.to_device_id = ${deviceId}
-          AND LOWER(COALESCE(t.status, '')) = 'completed'
-          AND (COALESCE(t.total_amount, 0) - COALESCE(t.paid_amount, 0)) > 0
-        ORDER BY COALESCE(t.transfer_date, t.created_at) DESC
-      `
-    } catch (transferErr) {
-      console.error("Error loading transfer dues (non-fatal):", transferErr)
-    }
+    const transferPayablesPromise = sql`
+      SELECT
+        t.id,
+        COALESCE(t.total_amount, 0) AS total_amount,
+        COALESCE(t.paid_amount, 0) AS received_amount,
+        COALESCE(t.transfer_date, t.created_at) AS due_date,
+        t.payment_status AS status,
+        df.name AS counterpart_name,
+        (COALESCE(t.total_amount, 0) - COALESCE(t.paid_amount, 0)) AS outstanding_amount
+      FROM stock_transfers t
+      JOIN devices df ON df.id = t.from_device_id
+      WHERE t.to_device_id = ${deviceId}
+        AND LOWER(COALESCE(t.status, '')) = 'completed'
+        AND (COALESCE(t.total_amount, 0) - COALESCE(t.paid_amount, 0)) > 0
+      ORDER BY COALESCE(t.transfer_date, t.created_at) DESC
+    `.catch(() => [])
+
+    const [
+      transactions,
+      authoritativeProfit,
+      receivablesQuery,
+      payablesQuery,
+      transferReceivablesQuery,
+      transferPayablesQuery,
+    ] = await Promise.all([
+      transactionsPromise,
+      authoritativeProfitPromise,
+      receivablesPromise,
+      payablesPromise,
+      transferReceivablesPromise,
+      transferPayablesPromise,
+    ])
+
+    let cashBalance = 0
+    transactions.forEach((tx: any) => {
+      const creditAmount = Number(tx.credit_amount) || 0
+      const debitAmount = Number(tx.debit_amount) || 0
+      cashBalance += (creditAmount - debitAmount)
+    })
+
+    const totalIncome = authoritativeProfit.salesRevenue + authoritativeProfit.otherIncome
+    const totalCogs = authoritativeProfit.salesCogs
+    const totalProfit = authoritativeProfit.grossProfit
+    const grossProfit = authoritativeProfit.grossProfit
+    const totalExpenses = authoritativeProfit.operatingExpenses
+    const netProfit = authoritativeProfit.netProfit
 
     const accountsReceivable =
       receivablesQuery.reduce((sum: number, r: any) => sum + Number(r.outstanding_amount), 0) +
