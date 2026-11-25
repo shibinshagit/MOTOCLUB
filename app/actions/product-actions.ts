@@ -3736,23 +3736,60 @@ export async function adjustProductStock(formData: FormData) {
     }
 
     await sql.begin(async (tx: any) => {
+      let affectedBatchId: number | null = null
+
       if (type === "increase") {
+        // Resolve cost price and selling price for this product / variant
+        const variantRows = await tx`
+          SELECT cost_price, wholesale_price, price, msp, mrp
+          FROM product_variants
+          WHERE id = ${variantId}
+        `
+        const variantRow = variantRows[0] || {}
+
+        // Fetch latest active batch with cost_price > 0 for this variant
+        const latestBatches = await tx`
+          SELECT cost_price, selling_price
+          FROM product_batches
+          WHERE product_variant_id = ${variantId} AND cost_price > 0
+          ORDER BY created_at DESC
+          LIMIT 1
+        `
+        const latestBatch = latestBatches[0]
+
+        const costPrice = Number(
+          latestBatch?.cost_price ??
+          variantRow.cost_price ??
+          variantRow.wholesale_price ??
+          product[0].wholesale_price ??
+          0
+        )
+        const sellingPrice = Number(
+          latestBatch?.selling_price ??
+          variantRow.price ??
+          variantRow.msp ??
+          product[0].price ??
+          0
+        )
+
         const adjBatchNo = `ADJ-${productId}-${Date.now().toString().slice(-6)}`
         const adjBatch = await tx`
           INSERT INTO product_batches (
             product_id, product_variant_id, batch_no, cost_price, selling_price,
             quantity_purchased, remaining_quantity, status
           ) VALUES (
-            ${productId}, ${variantId}, ${adjBatchNo}, 0, 0,
+            ${productId}, ${variantId}, ${adjBatchNo}, ${costPrice}, ${sellingPrice},
             ${quantity}, ${quantity}, 'active'
           ) RETURNING id
         `
         const adjBatchId = adjBatch[0].id
+        affectedBatchId = adjBatchId
+
         await tx`
           INSERT INTO product_batch_device_stock (batch_id, device_id, stock, updated_at)
           VALUES (${adjBatchId}, ${userId}, ${quantity}, NOW())
           ON CONFLICT (batch_id, device_id)
-          DO UPDATE SET stock = ${quantity}, updated_at = NOW()
+          DO UPDATE SET stock = product_batch_device_stock.stock + ${quantity}, updated_at = NOW()
         `
       } else {
         // FIFO deduction across batches for THIS variant only
@@ -3766,6 +3803,7 @@ export async function adjustProductStock(formData: FormData) {
         let remaining = quantity
         for (const batch of availableBatches) {
           if (remaining <= 0) break
+          if (!affectedBatchId) affectedBatchId = batch.batch_id
           const take = Math.min(remaining, Number(batch.stock))
           const nextStock = Number(batch.stock) - take
           await tx`
@@ -3777,18 +3815,32 @@ export async function adjustProductStock(formData: FormData) {
         }
       }
 
-      // Add stock history record
+      // Add stock history record with proper signed quantity (- for decrease, + for increase)
+      const historyQuantity = type === "decrease" ? -Math.abs(quantity) : Math.abs(quantity)
+      const defaultNotes = type === "increase" ? "Manual stock adjustment (Increase)" : "Manual stock adjustment (Decrease)"
+      const historyNotes = notes?.trim() ? notes.trim() : defaultNotes
+
       try {
         await tx`
           INSERT INTO product_stock_history (
-            product_id, product_variant_id, quantity, type, reference_type, notes, created_by, device_id
+            product_id, product_variant_id, batch_id, quantity, type, reference_type, notes, created_by, device_id
           ) VALUES (
-            ${productId}, ${variantId}, ${quantity}, ${type === "increase" ? "adjustment" : "adjustment"}, 'manual', ${notes || "Manual stock adjustment"}, ${userId}, ${userId}
+            ${productId}, ${variantId}, ${affectedBatchId}, ${historyQuantity}, 'adjustment', 'manual', ${historyNotes}, ${userId}, ${userId}
           )
         `
       } catch (error) {
-        console.error("Stock history table might not exist:", error)
-        // Continue execution even if this fails
+        console.error("Stock history insert with batch_id error, falling back:", error)
+        try {
+          await tx`
+            INSERT INTO product_stock_history (
+              product_id, product_variant_id, quantity, type, reference_type, notes, created_by, device_id
+            ) VALUES (
+              ${productId}, ${variantId}, ${historyQuantity}, 'adjustment', 'manual', ${historyNotes}, ${userId}, ${userId}
+            )
+          `
+        } catch (fbError) {
+          console.error("Stock history table might not exist:", fbError)
+        }
       }
     })
 

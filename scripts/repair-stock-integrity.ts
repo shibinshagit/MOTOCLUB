@@ -51,9 +51,33 @@ async function run() {
         WHERE pbds.batch_id = pb.id
       ), 0), updated_at = NOW();
     `)
+
+    // Backfill 0-cost adjustment batches with variant/product wholesale price & selling price
+    await tx.unsafe(`
+      UPDATE product_batches pb
+      SET
+        cost_price = COALESCE(
+          NULLIF(pv.cost_price, 0),
+          NULLIF(pv.wholesale_price, 0),
+          NULLIF(p.wholesale_price, 0),
+          0
+        ),
+        selling_price = COALESCE(
+          NULLIF(pv.price, 0),
+          NULLIF(pv.msp, 0),
+          NULLIF(p.price, 0),
+          0
+        ),
+        updated_at = NOW()
+      FROM products p
+      LEFT JOIN product_variants pv ON pv.id = pb.product_variant_id
+      WHERE pb.product_id = p.id
+        AND pb.batch_no LIKE 'ADJ-%'
+        AND COALESCE(pb.cost_price, 0) = 0;
+    `)
   })
 
-  console.log("Rebuilt all derived batch quantities and installed the ledger synchronization trigger.")
+  console.log("Rebuilt all derived batch quantities, backfilled 0-cost adjustment batches, and installed the ledger synchronization trigger.")
 }
 
 run()
