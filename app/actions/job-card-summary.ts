@@ -40,6 +40,8 @@ export async function getJobCardsSummary(
           s.payment_status,
           s.delivery_status,
           s.received_amount,
+          s.balance_amount,
+          s.discount,
           s.sale_type,
           s.tracking_id,
           s.fulfillment_type
@@ -76,6 +78,8 @@ export async function getJobCardsSummary(
           s.payment_status,
           s.delivery_status,
           s.received_amount,
+          s.balance_amount,
+          s.discount,
           s.sale_type,
           s.tracking_id,
           s.fulfillment_type
@@ -103,16 +107,30 @@ export async function getJobCardsSummary(
       `
     }
 
-    const totalCount = sales.length
-    const totalSalesAmount = sales.reduce((sum: number, sale: any) => sum + Number(sale.total_amount || 0), 0)
+    const validSales = sales.filter((s: any) => {
+      const status = (s.status || "").toLowerCase()
+      const paymentStatus = (s.payment_status || "").toLowerCase()
+      const deliveryStatus = (s.delivery_status || "").toLowerCase()
+      return (
+        status !== "cancelled" &&
+        status !== "returned" &&
+        paymentStatus !== "cancelled" &&
+        paymentStatus !== "returned" &&
+        deliveryStatus !== "returned" &&
+        deliveryStatus !== "failed"
+      )
+    })
+
+    const totalCount = validSales.length
+    const totalSalesAmount = validSales.reduce((sum: number, sale: any) => sum + Number(sale.received_amount || 0), 0)
 
     const pendingSalesList = sales.filter(isPendingSale)
     const pendingCount = pendingSalesList.length
-    const pendingSalesAmount = pendingSalesList.reduce((sum: number, sale: any) => sum + Number(sale.total_amount || 0), 0)
+    const pendingSalesAmount = pendingSalesList.reduce((sum: number, sale: any) => sum + Number(sale.received_amount || 0), 0)
 
     const criticalSalesList = sales.filter(isCriticalSale)
     const criticalCount = criticalSalesList.length
-    const criticalSalesAmount = criticalSalesList.reduce((sum: number, sale: any) => sum + Number(sale.total_amount || 0), 0)
+    const criticalSalesAmount = criticalSalesList.reduce((sum: number, sale: any) => sum + Number(sale.received_amount || 0), 0)
 
     return {
       success: true,

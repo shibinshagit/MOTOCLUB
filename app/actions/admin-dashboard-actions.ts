@@ -427,7 +427,7 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
     // -------------------------------------------------------------------------
     const currentSalesAgg = await sql`
       WITH filtered_sales AS (
-        SELECT s.id, s.total_amount, COALESCE(s.sale_date, s.created_at) as sale_date
+        SELECT s.id, s.total_amount, COALESCE(s.received_amount, 0) as received_amount, COALESCE(s.sale_date, s.created_at) as sale_date
         FROM sales s
         WHERE s.total_amount != 'NaN'::numeric
           AND COALESCE(s.sale_date, s.created_at) >= ${currStartStr}::timestamp
@@ -435,7 +435,11 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
           AND (${effectiveDeviceId === 0} OR s.device_id = ${effectiveDeviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
           AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
           AND (
-            (${statusFilter === null} AND LOWER(TRIM(s.status)) != 'cancelled' AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) != 'returned')
+            (${statusFilter === null}
+              AND LOWER(TRIM(COALESCE(s.status, ''))) NOT IN ('cancelled', 'returned')
+              AND LOWER(TRIM(COALESCE(s.payment_status, ''))) NOT IN ('cancelled', 'returned')
+              AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) NOT IN ('returned', 'failed')
+            )
             OR (${statusFilter !== null} AND LOWER(TRIM(s.status)) = LOWER(${statusFilter}))
           )
           AND (${staffFilter === null} OR s.staff_id = ${staffFilter})
@@ -459,7 +463,7 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
       )
       SELECT 
         COALESCE(COUNT(fs.id), 0)::int AS order_count,
-        COALESCE(SUM(fs.total_amount), 0)::numeric AS total_sales,
+        COALESCE(SUM(fs.received_amount), 0)::numeric AS total_sales,
         (SELECT total_quantity FROM items_agg)::int AS total_quantity,
         (SELECT total_cogs FROM items_agg)::numeric AS total_cogs
       FROM filtered_sales fs
@@ -470,7 +474,7 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
     // -------------------------------------------------------------------------
     const previousSalesAgg = await sql`
       WITH filtered_sales AS (
-        SELECT s.id, s.total_amount, COALESCE(s.sale_date, s.created_at) as sale_date
+        SELECT s.id, s.total_amount, COALESCE(s.received_amount, 0) as received_amount, COALESCE(s.sale_date, s.created_at) as sale_date
         FROM sales s
         WHERE s.total_amount != 'NaN'::numeric
           AND COALESCE(s.sale_date, s.created_at) >= ${prevStartStr}::timestamp
@@ -478,7 +482,11 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
           AND (${effectiveDeviceId === 0} OR s.device_id = ${effectiveDeviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
           AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
           AND (
-            (${statusFilter === null} AND LOWER(TRIM(s.status)) != 'cancelled' AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) != 'returned')
+            (${statusFilter === null}
+              AND LOWER(TRIM(COALESCE(s.status, ''))) NOT IN ('cancelled', 'returned')
+              AND LOWER(TRIM(COALESCE(s.payment_status, ''))) NOT IN ('cancelled', 'returned')
+              AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) NOT IN ('returned', 'failed')
+            )
             OR (${statusFilter !== null} AND LOWER(TRIM(s.status)) = LOWER(${statusFilter}))
           )
           AND (${staffFilter === null} OR s.staff_id = ${staffFilter})
@@ -502,7 +510,7 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
       )
       SELECT 
         COALESCE(COUNT(fs.id), 0)::int AS order_count,
-        COALESCE(SUM(fs.total_amount), 0)::numeric AS total_sales,
+        COALESCE(SUM(fs.received_amount), 0)::numeric AS total_sales,
         (SELECT total_quantity FROM items_agg)::int AS total_quantity,
         (SELECT total_cogs FROM items_agg)::numeric AS total_cogs
       FROM filtered_sales fs
@@ -585,7 +593,7 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
         isHourly
           ? sql`
               WITH filtered_sales AS (
-                SELECT s.id, s.total_amount, COALESCE(s.sale_date, s.created_at) as sale_date, EXTRACT(HOUR FROM COALESCE(s.sale_date, s.created_at))::int as hour_val
+                SELECT s.id, s.total_amount, COALESCE(s.received_amount, 0) as received_amount, COALESCE(s.sale_date, s.created_at) as sale_date, EXTRACT(HOUR FROM COALESCE(s.sale_date, s.created_at))::int as hour_val
                 FROM sales s
                 WHERE s.total_amount != 'NaN'::numeric
                   AND COALESCE(s.sale_date, s.created_at) >= ${currStartStr}::timestamp
@@ -593,7 +601,11 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
                   AND (${effectiveDeviceId === 0} OR s.device_id = ${effectiveDeviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
                   AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
                   AND (
-                    (${statusFilter === null} AND LOWER(TRIM(s.status)) != 'cancelled' AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) != 'returned')
+                    (${statusFilter === null}
+                      AND LOWER(TRIM(COALESCE(s.status, ''))) NOT IN ('cancelled', 'returned')
+                      AND LOWER(TRIM(COALESCE(s.payment_status, ''))) NOT IN ('cancelled', 'returned')
+                      AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) NOT IN ('returned', 'failed')
+                    )
                     OR (${statusFilter !== null} AND LOWER(TRIM(s.status)) = LOWER(${statusFilter}))
                   )
                   AND (${staffFilter === null} OR s.staff_id = ${staffFilter})
@@ -605,7 +617,7 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
                 SELECT 
                   hour_val,
                   COUNT(id)::int as order_count,
-                  COALESCE(SUM(total_amount), 0)::numeric as total_sales
+                  COALESCE(SUM(received_amount), 0)::numeric as total_sales
                 FROM filtered_sales
                 GROUP BY hour_val
               ),
@@ -637,7 +649,7 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
             `
           : sql`
               WITH filtered_sales AS (
-                SELECT s.id, s.total_amount, COALESCE(s.sale_date, s.created_at) as sale_date, DATE(COALESCE(s.sale_date, s.created_at)) as day_date
+                SELECT s.id, s.total_amount, COALESCE(s.received_amount, 0) as received_amount, COALESCE(s.sale_date, s.created_at) as sale_date, DATE(COALESCE(s.sale_date, s.created_at)) as day_date
                 FROM sales s
                 WHERE s.total_amount != 'NaN'::numeric
                   AND COALESCE(s.sale_date, s.created_at) >= ${currStartStr}::timestamp
@@ -645,7 +657,11 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
                   AND (${effectiveDeviceId === 0} OR s.device_id = ${effectiveDeviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
                   AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
                   AND (
-                    (${statusFilter === null} AND LOWER(TRIM(s.status)) != 'cancelled' AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) != 'returned')
+                    (${statusFilter === null}
+                      AND LOWER(TRIM(COALESCE(s.status, ''))) NOT IN ('cancelled', 'returned')
+                      AND LOWER(TRIM(COALESCE(s.payment_status, ''))) NOT IN ('cancelled', 'returned')
+                      AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) NOT IN ('returned', 'failed')
+                    )
                     OR (${statusFilter !== null} AND LOWER(TRIM(s.status)) = LOWER(${statusFilter}))
                   )
                   AND (${staffFilter === null} OR s.staff_id = ${staffFilter})
@@ -657,7 +673,7 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
                 SELECT 
                   day_date,
                   COUNT(id)::int as order_count,
-                  COALESCE(SUM(total_amount), 0)::numeric as total_sales
+                  COALESCE(SUM(received_amount), 0)::numeric as total_sales
                 FROM filtered_sales
                 GROUP BY day_date
               ),
@@ -690,7 +706,7 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
         isHourly
           ? sql`
               WITH filtered_sales AS (
-                SELECT s.id, s.total_amount, COALESCE(s.sale_date, s.created_at) as sale_date, EXTRACT(HOUR FROM COALESCE(s.sale_date, s.created_at))::int as hour_val
+                SELECT s.id, s.total_amount, COALESCE(s.received_amount, 0) as received_amount, COALESCE(s.sale_date, s.created_at) as sale_date, EXTRACT(HOUR FROM COALESCE(s.sale_date, s.created_at))::int as hour_val
                 FROM sales s
                 WHERE s.total_amount != 'NaN'::numeric
                   AND COALESCE(s.sale_date, s.created_at) >= ${prevStartStr}::timestamp
@@ -698,7 +714,11 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
                   AND (${effectiveDeviceId === 0} OR s.device_id = ${effectiveDeviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
                   AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
                   AND (
-                    (${statusFilter === null} AND LOWER(TRIM(s.status)) != 'cancelled' AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) != 'returned')
+                    (${statusFilter === null}
+                      AND LOWER(TRIM(COALESCE(s.status, ''))) NOT IN ('cancelled', 'returned')
+                      AND LOWER(TRIM(COALESCE(s.payment_status, ''))) NOT IN ('cancelled', 'returned')
+                      AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) NOT IN ('returned', 'failed')
+                    )
                     OR (${statusFilter !== null} AND LOWER(TRIM(s.status)) = LOWER(${statusFilter}))
                   )
                   AND (${staffFilter === null} OR s.staff_id = ${staffFilter})
@@ -710,7 +730,7 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
                 SELECT 
                   hour_val,
                   COUNT(id)::int as order_count,
-                  COALESCE(SUM(total_amount), 0)::numeric as total_sales
+                  COALESCE(SUM(received_amount), 0)::numeric as total_sales
                 FROM filtered_sales
                 GROUP BY hour_val
               ),
@@ -742,7 +762,7 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
             `
           : sql`
               WITH filtered_sales AS (
-                SELECT s.id, s.total_amount, COALESCE(s.sale_date, s.created_at) as sale_date, DATE(COALESCE(s.sale_date, s.created_at)) as day_date
+                SELECT s.id, s.total_amount, COALESCE(s.received_amount, 0) as received_amount, COALESCE(s.sale_date, s.created_at) as sale_date, DATE(COALESCE(s.sale_date, s.created_at)) as day_date
                 FROM sales s
                 WHERE s.total_amount != 'NaN'::numeric
                   AND COALESCE(s.sale_date, s.created_at) >= ${prevStartStr}::timestamp
@@ -750,7 +770,11 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
                   AND (${effectiveDeviceId === 0} OR s.device_id = ${effectiveDeviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
                   AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
                   AND (
-                    (${statusFilter === null} AND LOWER(TRIM(s.status)) != 'cancelled' AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) != 'returned')
+                    (${statusFilter === null}
+                      AND LOWER(TRIM(COALESCE(s.status, ''))) NOT IN ('cancelled', 'returned')
+                      AND LOWER(TRIM(COALESCE(s.payment_status, ''))) NOT IN ('cancelled', 'returned')
+                      AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) NOT IN ('returned', 'failed')
+                    )
                     OR (${statusFilter !== null} AND LOWER(TRIM(s.status)) = LOWER(${statusFilter}))
                   )
                   AND (${staffFilter === null} OR s.staff_id = ${staffFilter})
@@ -762,7 +786,7 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
                 SELECT 
                   day_date,
                   COUNT(id)::int as order_count,
-                  COALESCE(SUM(total_amount), 0)::numeric as total_sales
+                  COALESCE(SUM(received_amount), 0)::numeric as total_sales
                 FROM filtered_sales
                 GROUP BY day_date
               ),

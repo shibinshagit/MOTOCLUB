@@ -1474,11 +1474,17 @@ export async function getSalesSummaryCards(
       const rows = await sql`
         SELECT
           COUNT(*) FILTER (
-            WHERE (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) >= ${dateFrom}::timestamp)
+            WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
+              AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
+              AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) NOT IN ('returned', 'failed')
+              AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) >= ${dateFrom}::timestamp)
               AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) < ${endExclusive}::timestamp)
           )::int as total_count,
-          COALESCE(SUM(s.total_amount) FILTER (
-            WHERE (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) >= ${dateFrom}::timestamp)
+          COALESCE(SUM(COALESCE(s.received_amount, 0)) FILTER (
+            WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
+              AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
+              AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) NOT IN ('returned', 'failed')
+              AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) >= ${dateFrom}::timestamp)
               AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) < ${endExclusive}::timestamp)
           ), 0)::numeric as total_amount,
           COUNT(*) FILTER (
@@ -1650,6 +1656,47 @@ export async function getSalesSummaryCards(
               AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) >= ${dateFrom}::timestamp)
               AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) < ${endExclusive}::timestamp)
           )::int as pending_count,
+          COALESCE(SUM(COALESCE(s.received_amount, 0)) FILTER (
+            WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
+              AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
+              AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed', 'pickup')
+              AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+              AND (
+                ${isLogistics} = false
+                OR (
+                  -- 1. Direct Order
+                  (
+                    LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                    AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+                    AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) != 'pickup'
+                  )
+                  -- 2. Only Job Card Courier Order
+                  OR (
+                    (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%' OR s.tracking_id LIKE 'DOD%')
+                    AND (
+                      LOWER(COALESCE(s.type_of_sale, '')) = 'courier'
+                      OR LOWER(COALESCE(s.fulfillment_type, '')) = 'ship'
+                      OR COALESCE(s.courier_paid_extra, 0) > 0
+                    )
+                    AND (
+                      s.is_ready_to_ship = true
+                      OR LOWER(TRIM(COALESCE(s.delivery_status, ''))) IN ('packed', 'sent', 'direct', 'shipped', 'shipping', 'delivered')
+                    )
+                  )
+                )
+              )
+              AND (${onlyPosUpdated} = false OR s.is_pos_updated = true)
+              AND (
+                ${isPurchaseManager} = false
+                OR (
+                  s.is_ready_to_ship IS NOT TRUE
+                  AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) != 'direct'
+                  AND LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+                )
+              )
+              AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) >= ${dateFrom}::timestamp)
+              AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) < ${endExclusive}::timestamp)
+          ), 0)::numeric as pending_amount,
           COUNT(*) FILTER (
             WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
               AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
@@ -1703,6 +1750,59 @@ export async function getSalesSummaryCards(
               AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) >= ${dateFrom}::timestamp)
               AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) < ${endExclusive}::timestamp)
           )::int as critical_count,
+          COALESCE(SUM(COALESCE(s.received_amount, 0)) FILTER (
+            WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
+              AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
+              AND (
+                LOWER(COALESCE(s.payment_status, '')) IN ('paid', 'completed', 'partial', 'credit', 'cod')
+                OR LOWER(COALESCE(s.status, '')) IN ('credit', 'partial')
+                OR (s.total_amount > 0 AND s.received_amount >= s.total_amount)
+              )
+              AND (
+                LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) IN ('pending', 'paid', 'packed', 'sent')
+                OR LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+              )
+              AND (${onlyPosUpdated} = false OR s.is_pos_updated = true)
+              AND (
+                ${isLogistics} = false
+                OR (
+                  COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
+                  AND LOWER(COALESCE(s.payment_status, '')) NOT IN ('cancelled', 'returned')
+                  AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) NOT IN ('delivered', 'returned', 'failed')
+                  AND (
+                    -- 1. Direct Order
+                    (
+                      LOWER(TRIM(COALESCE(s.delivery_status, ''))) = 'direct'
+                      AND LOWER(COALESCE(s.fulfillment_type, '')) != 'pickup'
+                      AND LOWER(TRIM(COALESCE(s.delivery_status, 'pending'))) != 'pickup'
+                    )
+                    -- 2. Only Job Card Courier Order
+                    OR (
+                      (s.sale_type = 'job_card' OR s.tracking_id LIKE 'JC-%' OR s.tracking_id LIKE 'DOD%')
+                      AND (
+                        LOWER(COALESCE(s.type_of_sale, '')) = 'courier'
+                        OR LOWER(COALESCE(s.fulfillment_type, '')) = 'ship'
+                        OR COALESCE(s.courier_paid_extra, 0) > 0
+                      )
+                      AND (
+                        s.is_ready_to_ship = true
+                        OR LOWER(TRIM(COALESCE(s.delivery_status, ''))) IN ('packed', 'sent', 'direct', 'shipped', 'shipping', 'delivered')
+                      )
+                    )
+                  )
+                )
+              )
+              AND (
+                ${isPurchaseManager} = false
+                OR (
+                  s.is_ready_to_ship IS NOT TRUE
+                  AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) != 'direct'
+                  AND LOWER(TRIM(COALESCE(NULLIF(s.delivery_status, ''), 'pending'))) IN ('pending', 'paid')
+                )
+              )
+              AND (${dateFrom}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) >= ${dateFrom}::timestamp)
+              AND (${endExclusive}::timestamp IS NULL OR COALESCE(s.sale_date, (s.created_at AT TIME ZONE 'UTC')) < ${endExclusive}::timestamp)
+          ), 0)::numeric as critical_amount,
           COUNT(*) FILTER (
             WHERE COALESCE(s.status, '') NOT IN ('Cancelled', 'Returned')
               AND LOWER(COALESCE(s.payment_status, '')) != 'cancelled'
@@ -1812,7 +1912,7 @@ export async function getSalesSummaryCards(
             OR CAST(s.total_amount AS TEXT) LIKE ${searchPattern}
           )
       `
-      return rows[0] || { total_count: 0, total_amount: 0, orders_to_check_count: 0, orders_to_check_amount: 0, ready_to_ship_count: 0, today_count: 0, pending_count: 0, critical_count: 0, direct_count: 0, direct_amount: 0 }
+      return rows[0] || { total_count: 0, total_amount: 0, orders_to_check_count: 0, orders_to_check_amount: 0, ready_to_ship_count: 0, today_count: 0, pending_count: 0, pending_amount: 0, critical_count: 0, critical_amount: 0, direct_count: 0, direct_amount: 0 }
     })
 
     return {
@@ -1825,7 +1925,9 @@ export async function getSalesSummaryCards(
         ready_to_ship: Number(cardCounts.ready_to_ship_count || 0),
         today: Number(cardCounts.today_count || 0),
         pending: Number(cardCounts.pending_count || 0),
+        pending_amount: Number(cardCounts.pending_amount || 0),
         critical: Number(cardCounts.critical_count || 0),
+        critical_amount: Number(cardCounts.critical_amount || 0),
         direct: Number(cardCounts.direct_count || 0),
         direct_amount: Number(cardCounts.direct_amount || 0),
       },
@@ -1834,7 +1936,7 @@ export async function getSalesSummaryCards(
     console.error("Get sales summary cards error:", error)
     return {
       success: false,
-      counts: { total: 0, total_amount: 0, orders_to_check: 0, orders_to_check_amount: 0, ready_to_ship: 0, today: 0, pending: 0, critical: 0, direct: 0, direct_amount: 0 },
+      counts: { total: 0, total_amount: 0, orders_to_check: 0, orders_to_check_amount: 0, ready_to_ship: 0, today: 0, pending: 0, pending_amount: 0, critical: 0, critical_amount: 0, direct: 0, direct_amount: 0 },
     }
   }
 }

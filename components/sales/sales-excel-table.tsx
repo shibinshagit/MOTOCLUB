@@ -435,7 +435,9 @@ export default function SalesExcelTable({
     total: number
     today?: number
     pending: number
+    pending_amount?: number
     critical: number
+    critical_amount?: number
     total_amount?: number
     direct?: number
     direct_amount?: number
@@ -866,7 +868,23 @@ export default function SalesExcelTable({
   const pendingSalesCount = pendingCount
 
   const totalSalesAmount = useMemo(
-    () => serverCardCounts?.total_amount ?? displaySales.reduce((sum, sale) => sum + Number(sale.total_amount || 0), 0),
+    () =>
+      serverCardCounts?.total_amount ??
+      displaySales
+        .filter((sale) => {
+          const status = (sale.status || "").toLowerCase()
+          const paymentStatus = (sale.payment_status || "").toLowerCase()
+          const deliveryStatus = (sale.delivery_status || "").toLowerCase()
+          return (
+            status !== "cancelled" &&
+            status !== "returned" &&
+            paymentStatus !== "cancelled" &&
+            paymentStatus !== "returned" &&
+            deliveryStatus !== "returned" &&
+            deliveryStatus !== "failed"
+          )
+        })
+        .reduce((sum, sale) => sum + Number(sale.received_amount || 0), 0),
     [serverCardCounts?.total_amount, displaySales],
   )
   const todaySalesAmount = useMemo(
@@ -876,13 +894,15 @@ export default function SalesExcelTable({
   )
   const pendingSalesAmount = useMemo(
     () =>
-      displaySales.filter(isPendingSale).reduce((sum, sale) => sum + Number(sale.total_amount || 0), 0),
-    [displaySales],
+      serverCardCounts?.pending_amount ??
+      displaySales.filter(isPendingSale).reduce((sum, sale) => sum + Number(sale.received_amount || 0), 0),
+    [serverCardCounts?.pending_amount, displaySales],
   )
   const criticalSalesAmount = useMemo(
     () =>
-      displaySales.filter(isCriticalSale).reduce((sum, sale) => sum + Number(sale.total_amount || 0), 0),
-    [displaySales],
+      serverCardCounts?.critical_amount ??
+      displaySales.filter(isCriticalSale).reduce((sum, sale) => sum + Number(sale.received_amount || 0), 0),
+    [serverCardCounts?.critical_amount, displaySales],
   )
 
   const activeFilterCount = hasFetchedServer
