@@ -2069,73 +2069,151 @@ export async function getAccountingBalances(deviceId: number, fromDateStr: strin
     const balanceResult = await sql`
       SELECT 
         COALESCE(SUM(
-          CASE WHEN transaction_date < ${openingCutoff}::timestamp THEN 
+          CASE WHEN (COALESCE(transaction_date, created_at) AT TIME ZONE 'Asia/Kolkata')::date < ${cleanFromStr}::date THEN 
             CASE 
-              WHEN COALESCE(credit_amount, 0) > 0 THEN credit_amount 
-              WHEN transaction_type = 'sale' THEN COALESCE(received_amount, 0)
-              WHEN transaction_type = 'customer_payment' THEN COALESCE(received_amount, amount, 0)
-              ELSE COALESCE(credit_amount, 0)
+              WHEN transaction_type = 'sale' THEN 
+                CASE 
+                  WHEN LOWER(COALESCE(status, '')) = 'cancelled' THEN 0
+                  WHEN COALESCE(received_amount, 0) > 0 THEN received_amount
+                  WHEN LOWER(COALESCE(status, '')) IN ('completed', 'paid') THEN COALESCE(credit_amount, amount, 0)
+                  ELSE 0
+                END
+              WHEN transaction_type = 'customer_payment' THEN COALESCE(credit_amount, amount, received_amount, 0)
+              WHEN (transaction_type = 'sale_shipping' OR transaction_type = 'shipping') AND (description ILIKE '%collected%' OR (COALESCE(credit_amount, 0) > 0 AND COALESCE(debit_amount, 0) = 0)) THEN COALESCE(credit_amount, received_amount, amount, 0)
+              WHEN transaction_type IN ('purchase_cancel_refund', 'purchase_return') THEN COALESCE(credit_amount, received_amount, amount, 0)
+              WHEN transaction_type IN ('income', 'INCOME') THEN COALESCE(credit_amount, amount, received_amount, 0)
+              WHEN transaction_type = 'transfer' AND COALESCE(credit_amount, 0) > 0 THEN credit_amount
+              WHEN transaction_type = 'adjustment' AND COALESCE(credit_amount, 0) > COALESCE(debit_amount, 0) THEN (credit_amount - debit_amount)
+              WHEN transaction_type IN ('purchase', 'purchase_shipping', 'supplier_payment', 'warehouse_payment', 'sale_return', 'sale_return_extra', 'return', 'expense', 'EXPENSE', 'salary', 'staff_advance') THEN 0
+              WHEN COALESCE(credit_amount, 0) > 0 AND COALESCE(debit_amount, 0) = 0 THEN credit_amount
+              ELSE 0
             END 
           ELSE 0 END
         ), 0) as opening_credits,
 
         COALESCE(SUM(
-          CASE WHEN transaction_date < ${openingCutoff}::timestamp THEN 
+          CASE WHEN (COALESCE(transaction_date, created_at) AT TIME ZONE 'Asia/Kolkata')::date < ${cleanFromStr}::date THEN 
             CASE 
-              WHEN COALESCE(debit_amount, 0) > 0 THEN debit_amount 
-              WHEN transaction_type = 'purchase' THEN COALESCE(received_amount, 0)
-              WHEN transaction_type IN ('expense', 'supplier_payment', 'warehouse_payment') THEN COALESCE(amount, received_amount, 0)
-              ELSE COALESCE(debit_amount, 0)
+              WHEN (transaction_type = 'sale_shipping' OR transaction_type = 'shipping') AND description ILIKE '%collected%' THEN 0
+              WHEN transaction_type IN ('sale', 'customer_payment', 'purchase_cancel_refund', 'purchase_return') THEN 0
+              WHEN transaction_type = 'purchase' THEN 
+                CASE 
+                  WHEN LOWER(COALESCE(status, '')) = 'cancelled' THEN 0
+                  WHEN COALESCE(received_amount, 0) > 0 THEN received_amount
+                  WHEN LOWER(COALESCE(status, '')) IN ('completed', 'paid') THEN COALESCE(debit_amount, amount, 0)
+                  ELSE 0
+                END
+              WHEN transaction_type IN ('supplier_payment', 'warehouse_payment') THEN COALESCE(debit_amount, amount, received_amount, 0)
+              WHEN transaction_type IN ('sale_return', 'sale_return_extra', 'return') THEN COALESCE(debit_amount, received_amount, amount, 0)
+              WHEN transaction_type = 'purchase_shipping' THEN COALESCE(debit_amount, amount, received_amount, 0)
+              WHEN (transaction_type = 'sale_shipping' OR transaction_type = 'shipping') AND COALESCE(debit_amount, 0) > 0 THEN COALESCE(debit_amount, amount, 0)
+              WHEN transaction_type IN ('expense', 'EXPENSE', 'salary', 'staff_advance') THEN COALESCE(debit_amount, amount, received_amount, 0)
+              WHEN transaction_type = 'transfer' AND COALESCE(debit_amount, 0) > 0 THEN debit_amount
+              WHEN transaction_type = 'adjustment' AND COALESCE(debit_amount, 0) > COALESCE(credit_amount, 0) THEN (debit_amount - credit_amount)
+              WHEN COALESCE(debit_amount, 0) > 0 AND COALESCE(credit_amount, 0) = 0 THEN debit_amount
+              ELSE 0
             END 
           ELSE 0 END
         ), 0) as opening_debits,
 
         COALESCE(SUM(
-          CASE WHEN transaction_date >= ${openingCutoff}::timestamp AND transaction_date < ${closingExclusiveCutoff}::timestamp THEN 
+          CASE WHEN (COALESCE(transaction_date, created_at) AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${cleanFromStr}::date AND ${cleanToStr}::date THEN 
             CASE 
-              WHEN COALESCE(credit_amount, 0) > 0 THEN credit_amount 
-              WHEN transaction_type = 'sale' THEN COALESCE(received_amount, 0)
-              WHEN transaction_type = 'customer_payment' THEN COALESCE(received_amount, amount, 0)
-              ELSE COALESCE(credit_amount, 0)
+              WHEN transaction_type = 'sale' THEN 
+                CASE 
+                  WHEN LOWER(COALESCE(status, '')) = 'cancelled' THEN 0
+                  WHEN COALESCE(received_amount, 0) > 0 THEN received_amount
+                  WHEN LOWER(COALESCE(status, '')) IN ('completed', 'paid') THEN COALESCE(credit_amount, amount, 0)
+                  ELSE 0
+                END
+              WHEN transaction_type = 'customer_payment' THEN COALESCE(credit_amount, amount, received_amount, 0)
+              WHEN (transaction_type = 'sale_shipping' OR transaction_type = 'shipping') AND (description ILIKE '%collected%' OR (COALESCE(credit_amount, 0) > 0 AND COALESCE(debit_amount, 0) = 0)) THEN COALESCE(credit_amount, received_amount, amount, 0)
+              WHEN transaction_type IN ('purchase_cancel_refund', 'purchase_return') THEN COALESCE(credit_amount, received_amount, amount, 0)
+              WHEN transaction_type IN ('income', 'INCOME') THEN COALESCE(credit_amount, amount, received_amount, 0)
+              WHEN transaction_type = 'transfer' AND COALESCE(credit_amount, 0) > 0 THEN credit_amount
+              WHEN transaction_type = 'adjustment' AND COALESCE(credit_amount, 0) > COALESCE(debit_amount, 0) THEN (credit_amount - debit_amount)
+              WHEN transaction_type IN ('purchase', 'purchase_shipping', 'supplier_payment', 'warehouse_payment', 'sale_return', 'sale_return_extra', 'return', 'expense', 'EXPENSE', 'salary', 'staff_advance') THEN 0
+              WHEN COALESCE(credit_amount, 0) > 0 AND COALESCE(debit_amount, 0) = 0 THEN credit_amount
+              ELSE 0
             END 
           ELSE 0 END
         ), 0) as period_credits,
 
         COALESCE(SUM(
-          CASE WHEN transaction_date >= ${openingCutoff}::timestamp AND transaction_date < ${closingExclusiveCutoff}::timestamp THEN 
+          CASE WHEN (COALESCE(transaction_date, created_at) AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${cleanFromStr}::date AND ${cleanToStr}::date THEN 
             CASE 
-              WHEN COALESCE(debit_amount, 0) > 0 THEN debit_amount 
-              WHEN transaction_type = 'purchase' THEN COALESCE(received_amount, 0)
-              WHEN transaction_type IN ('expense', 'supplier_payment', 'warehouse_payment') THEN COALESCE(amount, received_amount, 0)
-              ELSE COALESCE(debit_amount, 0)
+              WHEN (transaction_type = 'sale_shipping' OR transaction_type = 'shipping') AND description ILIKE '%collected%' THEN 0
+              WHEN transaction_type IN ('sale', 'customer_payment', 'purchase_cancel_refund', 'purchase_return') THEN 0
+              WHEN transaction_type = 'purchase' THEN 
+                CASE 
+                  WHEN LOWER(COALESCE(status, '')) = 'cancelled' THEN 0
+                  WHEN COALESCE(received_amount, 0) > 0 THEN received_amount
+                  WHEN LOWER(COALESCE(status, '')) IN ('completed', 'paid') THEN COALESCE(debit_amount, amount, 0)
+                  ELSE 0
+                END
+              WHEN transaction_type IN ('supplier_payment', 'warehouse_payment') THEN COALESCE(debit_amount, amount, received_amount, 0)
+              WHEN transaction_type IN ('sale_return', 'sale_return_extra', 'return') THEN COALESCE(debit_amount, received_amount, amount, 0)
+              WHEN transaction_type = 'purchase_shipping' THEN COALESCE(debit_amount, amount, received_amount, 0)
+              WHEN (transaction_type = 'sale_shipping' OR transaction_type = 'shipping') AND COALESCE(debit_amount, 0) > 0 THEN COALESCE(debit_amount, amount, 0)
+              WHEN transaction_type IN ('expense', 'EXPENSE', 'salary', 'staff_advance') THEN COALESCE(debit_amount, amount, received_amount, 0)
+              WHEN transaction_type = 'transfer' AND COALESCE(debit_amount, 0) > 0 THEN debit_amount
+              WHEN transaction_type = 'adjustment' AND COALESCE(debit_amount, 0) > COALESCE(credit_amount, 0) THEN (debit_amount - credit_amount)
+              WHEN COALESCE(debit_amount, 0) > 0 AND COALESCE(credit_amount, 0) = 0 THEN debit_amount
+              ELSE 0
             END 
           ELSE 0 END
         ), 0) as period_debits,
 
         COALESCE(SUM(
-          CASE WHEN transaction_date < ${closingExclusiveCutoff}::timestamp THEN 
+          CASE WHEN (COALESCE(transaction_date, created_at) AT TIME ZONE 'Asia/Kolkata')::date <= ${cleanToStr}::date THEN 
             CASE 
-              WHEN COALESCE(credit_amount, 0) > 0 THEN credit_amount 
-              WHEN transaction_type = 'sale' THEN COALESCE(received_amount, 0)
-              WHEN transaction_type = 'customer_payment' THEN COALESCE(received_amount, amount, 0)
-              ELSE COALESCE(credit_amount, 0)
+              WHEN transaction_type = 'sale' THEN 
+                CASE 
+                  WHEN LOWER(COALESCE(status, '')) = 'cancelled' THEN 0
+                  WHEN COALESCE(received_amount, 0) > 0 THEN received_amount
+                  WHEN LOWER(COALESCE(status, '')) IN ('completed', 'paid') THEN COALESCE(credit_amount, amount, 0)
+                  ELSE 0
+                END
+              WHEN transaction_type = 'customer_payment' THEN COALESCE(credit_amount, amount, received_amount, 0)
+              WHEN (transaction_type = 'sale_shipping' OR transaction_type = 'shipping') AND (description ILIKE '%collected%' OR (COALESCE(credit_amount, 0) > 0 AND COALESCE(debit_amount, 0) = 0)) THEN COALESCE(credit_amount, received_amount, amount, 0)
+              WHEN transaction_type IN ('purchase_cancel_refund', 'purchase_return') THEN COALESCE(credit_amount, received_amount, amount, 0)
+              WHEN transaction_type IN ('income', 'INCOME') THEN COALESCE(credit_amount, amount, received_amount, 0)
+              WHEN transaction_type = 'transfer' AND COALESCE(credit_amount, 0) > 0 THEN credit_amount
+              WHEN transaction_type = 'adjustment' AND COALESCE(credit_amount, 0) > COALESCE(debit_amount, 0) THEN (credit_amount - debit_amount)
+              WHEN transaction_type IN ('purchase', 'purchase_shipping', 'supplier_payment', 'warehouse_payment', 'sale_return', 'sale_return_extra', 'return', 'expense', 'EXPENSE', 'salary', 'staff_advance') THEN 0
+              WHEN COALESCE(credit_amount, 0) > 0 AND COALESCE(debit_amount, 0) = 0 THEN credit_amount
+              ELSE 0
             END 
           ELSE 0 END
         ), 0) as closing_credits,
 
         COALESCE(SUM(
-          CASE WHEN transaction_date < ${closingExclusiveCutoff}::timestamp THEN 
+          CASE WHEN (COALESCE(transaction_date, created_at) AT TIME ZONE 'Asia/Kolkata')::date <= ${cleanToStr}::date THEN 
             CASE 
-              WHEN COALESCE(debit_amount, 0) > 0 THEN debit_amount 
-              WHEN transaction_type = 'purchase' THEN COALESCE(received_amount, 0)
-              WHEN transaction_type IN ('expense', 'supplier_payment', 'warehouse_payment') THEN COALESCE(amount, received_amount, 0)
-              ELSE COALESCE(debit_amount, 0)
+              WHEN (transaction_type = 'sale_shipping' OR transaction_type = 'shipping') AND description ILIKE '%collected%' THEN 0
+              WHEN transaction_type IN ('sale', 'customer_payment', 'purchase_cancel_refund', 'purchase_return') THEN 0
+              WHEN transaction_type = 'purchase' THEN 
+                CASE 
+                  WHEN LOWER(COALESCE(status, '')) = 'cancelled' THEN 0
+                  WHEN COALESCE(received_amount, 0) > 0 THEN received_amount
+                  WHEN LOWER(COALESCE(status, '')) IN ('completed', 'paid') THEN COALESCE(debit_amount, amount, 0)
+                  ELSE 0
+                END
+              WHEN transaction_type IN ('supplier_payment', 'warehouse_payment') THEN COALESCE(debit_amount, amount, received_amount, 0)
+              WHEN transaction_type IN ('sale_return', 'sale_return_extra', 'return') THEN COALESCE(debit_amount, received_amount, amount, 0)
+              WHEN transaction_type = 'purchase_shipping' THEN COALESCE(debit_amount, amount, received_amount, 0)
+              WHEN (transaction_type = 'sale_shipping' OR transaction_type = 'shipping') AND COALESCE(debit_amount, 0) > 0 THEN COALESCE(debit_amount, amount, 0)
+              WHEN transaction_type IN ('expense', 'EXPENSE', 'salary', 'staff_advance') THEN COALESCE(debit_amount, amount, received_amount, 0)
+              WHEN transaction_type = 'transfer' AND COALESCE(debit_amount, 0) > 0 THEN debit_amount
+              WHEN transaction_type = 'adjustment' AND COALESCE(debit_amount, 0) > COALESCE(credit_amount, 0) THEN (debit_amount - credit_amount)
+              WHEN COALESCE(debit_amount, 0) > 0 AND COALESCE(credit_amount, 0) = 0 THEN debit_amount
+              ELSE 0
             END 
           ELSE 0 END
         ), 0) as closing_debits
       FROM financial_transactions
       WHERE device_id = ${deviceId}
-        AND transaction_date < ${closingExclusiveCutoff}::timestamp
+        AND (COALESCE(transaction_date, created_at) AT TIME ZONE 'Asia/Kolkata')::date <= ${cleanToStr}::date
     `
 
     const row = balanceResult[0]

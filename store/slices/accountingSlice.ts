@@ -233,6 +233,79 @@ export const getMoneyFlowDisplay = (transaction: Transaction) => {
       showAmount: true,
       color: 'text-orange-600'
     };
+  } else if (type === 'sale_shipping' || type === 'shipping') {
+    const isCollected = (transaction.description || "").toLowerCase().includes('collected');
+    const debit = Number(transaction.debit) || 0;
+    if (isCollected || credit > 0) {
+      return {
+        text: 'Courier Collected',
+        value: credit || amount,
+        showAmount: true,
+        color: 'text-green-600'
+      };
+    }
+    return {
+      text: 'Courier Expense',
+      value: debit || amount,
+      showAmount: true,
+      color: 'text-red-600'
+    };
+  } else if (type === 'purchase_shipping') {
+    return {
+      text: 'Courier Expense',
+      value: Number(transaction.debit) || amount,
+      showAmount: true,
+      color: 'text-red-600'
+    };
+  } else if (type === 'customer_payment') {
+    return {
+      text: 'Customer Payment',
+      value: Number(transaction.received) || credit || amount,
+      showAmount: true,
+      color: 'text-green-600'
+    };
+  } else if (type === 'supplier_payment') {
+    return {
+      text: 'Supplier Payment',
+      value: Number(transaction.debit) || amount || received,
+      showAmount: true,
+      color: 'text-red-600'
+    };
+  } else if (type === 'warehouse_payment') {
+    return {
+      text: 'Warehouse Payment',
+      value: Number(transaction.debit) || amount || received,
+      showAmount: true,
+      color: 'text-red-600'
+    };
+  } else if (type === 'sale_return' || type === 'sale_return_extra' || type === 'return') {
+    return {
+      text: 'Sale Return Refund',
+      value: Number(transaction.debit) || amount || received,
+      showAmount: true,
+      color: 'text-purple-600'
+    };
+  } else if (type === 'purchase_return' || type === 'purchase_cancel_refund') {
+    return {
+      text: type === 'purchase_cancel_refund' ? 'Purchase Cancel Refund' : 'Purchase Return Refund',
+      value: credit || received || amount,
+      showAmount: true,
+      color: 'text-green-600'
+    };
+  } else if (type === 'expense' || type === 'salary') {
+    return {
+      text: type === 'salary' ? 'Salary Payment' : 'Expense',
+      value: Number(transaction.debit) || amount,
+      showAmount: true,
+      color: 'text-red-600'
+    };
+  } else if (type === 'income') {
+    return {
+      text: 'Income',
+      value: credit || amount || received,
+      showAmount: true,
+      color: 'text-green-600'
+    };
   } else if (type === 'manual') {
     const netAmount = credit - (Number(transaction.debit) || 0);
     return {

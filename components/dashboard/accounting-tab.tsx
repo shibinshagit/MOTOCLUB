@@ -210,6 +210,24 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
   const [activeTab, setActiveTab] = useState("transactions")
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc")
 
+  const handleMoneyInClick = () => {
+    setActiveTab("transactions")
+    if (activeTab === "transactions" && (filterType === "money_in" || filterType === "income")) {
+      setFilterType("all")
+    } else {
+      setFilterType("money_in")
+    }
+  }
+
+  const handleMoneyOutClick = () => {
+    setActiveTab("transactions")
+    if (activeTab === "transactions" && (filterType === "money_out" || filterType === "expense")) {
+      setFilterType("all")
+    } else {
+      setFilterType("money_out")
+    }
+  }
+
   // Date range modal state
   const [isDateModalOpen, setIsDateModalOpen] = useState(false)
   const [isProfitModalOpen, setIsProfitModalOpen] = useState(false)
@@ -1046,25 +1064,445 @@ const matchesSearchAndDateRange = (transaction: any) => {
   return matchesSearch && isWithinDateRange
 }
 
-// Define filteredTransactions first with proper null checks
-const filteredTransactions =
+const isSaleAdjustment = (transaction: any) =>
+  transaction?.type?.toLowerCase() === "adjustment" &&
+  (transaction.description || "").includes("Sale")
+
+const getSaleAdjustmentNetCash = (transaction: any) => {
+  const credit = n(transaction.credit)
+  const debit = n(transaction.debit)
+  const received = n(transaction.received)
+  if (credit !== 0 || debit !== 0) return credit - debit
+  return received
+}
+
+const isSaleRefundOrDiscount = (transaction: any) => {
+  if (!isSaleAdjustment(transaction)) return false
+  const description = transaction.description || ""
+  if (description.includes("Discount change")) return true
+  return getSaleAdjustmentNetCash(transaction) < 0
+}
+
+// Get signed cash flow amount: > 0 for Money In, < 0 for Money Out, 0 for No Cash Movement
+const getMoneyFlowAmount = (transaction: any) => {
+  if (!transaction) return 0
+  
+  const type = transaction.type?.toLowerCase()
+  const statusClean = (transaction.status || "").toLowerCase()
+  const description = transaction.description || ""
+  const received = n(transaction.received)
+  const credit = n(transaction.credit)
+  const debit = n(transaction.debit)
+  const totalAmount = n(transaction.amount)
+  
+  // Sales - actual cash received
+  if (type === 'sale') {
+    if (statusClean === 'cancelled') return 0
+    if (received > 0) return received
+    if (statusClean === 'completed' || statusClean === 'paid') {
+      return credit > 0 ? credit : totalAmount
+    }
+    return 0
+  }
+
+  // Purchases - actual cash paid out
+  if (type === 'purchase') {
+    if (statusClean === 'cancelled') return 0
+    if (received > 0) return -received
+    if (statusClean === 'completed' || statusClean === 'paid') {
+      return -(debit > 0 ? debit : totalAmount)
+    }
+    return 0
+  }
+
+  // Customer payments - money received against receivables
+  if (type === 'customer_payment' || description.toLowerCase().includes('customer payment')) {
+    return Math.abs(credit || totalAmount || received)
+  }
+
+  // Supplier payments - money paid to suppliers
+  if (type === 'supplier_payment' || description.toLowerCase().includes('supplier payment')) {
+    return -Math.abs(debit || totalAmount || received)
+  }
+
+  // Warehouse payments - money paid to warehouses
+  if (type === 'warehouse_payment' || description.toLowerCase().includes('warehouse payment')) {
+    return -Math.abs(debit || totalAmount || received)
+  }
+
+  // Sale shipping
+  if (type === 'sale_shipping' || (type === 'shipping' && description.toLowerCase().includes('sale'))) {
+    if (description.toLowerCase().includes('collected') || (credit > 0 && debit === 0)) {
+      return Math.abs(credit || received || totalAmount)
+    }
+    return -Math.abs(debit || totalAmount)
+  }
+
+  // Purchase shipping
+  if (type === 'purchase_shipping' || (type === 'shipping' && description.toLowerCase().includes('purchase'))) {
+    return -Math.abs(debit || totalAmount || received)
+  }
+
+  // Sale returns - refunds paid to customers
+  if (type === 'sale_return' || type === 'sale_return_extra' || type === 'return' || description.toLowerCase().includes('sale return')) {
+    return -Math.abs(debit || totalAmount || received)
+  }
+
+  // Purchase returns & cancel refunds - refunds received from suppliers
+  if (type === 'purchase_return' || type === 'purchase_cancel_refund' || description.toLowerCase().includes('purchase return') || description.toLowerCase().includes('cancel refund')) {
+    return Math.abs(credit || received || totalAmount)
+  }
+
+  // Expenses & Salaries & Advances
+  if (type === 'expense' || type === 'salary' || type === 'staff_advance' || description.toLowerCase().includes('salary')) {
+    return -Math.abs(debit || totalAmount || received)
+  }
+
+  // Direct Income
+  if (type === 'income') {
+    return Math.abs(credit || totalAmount || received)
+  }
+
+  // Transfers between warehouses/branches
+  if (type === 'transfer') {
+    if (credit > 0) return credit
+    if (debit > 0) return -debit
+    return 0
+  }
+
+  // Sale adjustments
+  if (isSaleAdjustment(transaction)) {
+    return getSaleAdjustmentNetCash(transaction)
+  }
+
+  // Purchase adjustments
+  if (type === 'adjustment' && description.includes('Purchase')) {
+    if (credit > 0) return credit
+    if (debit > 0 || received > 0) return -Math.abs(debit || received)
+    const paymentMatch = description.match(/Payment increased by\s*([\d.]+)/i) || description.match(/paid.*?([\d.]+)/i)
+    if (paymentMatch) return -Math.abs(n(paymentMatch[1]))
+    return 0
+  }
+
+  // Manual transactions
+  if (type === 'manual' || transaction.reference_type?.toLowerCase() === 'manual') {
+    if (credit > 0) return credit
+    if (debit > 0) return -debit
+    return 0
+  }
+
+  // Default fallback
+  if (credit > 0 && debit === 0) return credit
+  if (debit > 0 && credit === 0) return -debit
+  return credit - debit
+}
+
+// Get money flow info (in/out/none, display text, color, magnitude)
+const getMoneyFlowInfo = (transaction: any) => {
+  if (!transaction) {
+    return {
+      type: 'none',
+      text: 'No Cash Flow',
+      color: 'text-muted-foreground',
+      amount: 0
+    }
+  }
+
+  const type = transaction.type?.toLowerCase()
+  const statusClean = (transaction.status || "").toLowerCase()
+  const description = transaction.description || ""
+  const flowAmount = getMoneyFlowAmount(transaction)
+  const received = n(transaction.received)
+  const totalAmount = n(transaction.amount)
+  const credit = n(transaction.credit)
+  const debit = n(transaction.debit)
+
+  // Sales
+  if (type === 'sale') {
+    if (statusClean === 'cancelled') {
+      return {
+        type: 'none',
+        text: 'Cancelled Sale',
+        color: 'text-muted-foreground',
+        amount: 0
+      }
+    }
+    const actualCash = flowAmount > 0 ? flowAmount : received
+    if (actualCash === 0) {
+      return {
+        type: 'none',
+        text: 'Credit Sale',
+        color: 'text-brand-blue',
+        amount: 0
+      }
+    }
+    if (actualCash < totalAmount && statusClean !== 'completed' && statusClean !== 'paid') {
+      return {
+        type: 'in',
+        text: 'Partial Payment',
+        color: 'text-emerald-600',
+        amount: actualCash
+      }
+    }
+    return {
+      type: 'in',
+      text: 'Full Payment',
+      color: 'text-emerald-600',
+      amount: actualCash
+    }
+  }
+
+  // Purchases
+  if (type === 'purchase') {
+    if (statusClean === 'cancelled') {
+      return {
+        type: 'none',
+        text: 'Cancelled Purchase',
+        color: 'text-muted-foreground',
+        amount: 0
+      }
+    }
+    const actualPaid = flowAmount < 0 ? Math.abs(flowAmount) : (received > 0 ? received : 0)
+    if (actualPaid === 0) {
+      return {
+        type: 'none',
+        text: 'Credit Purchase',
+        color: 'text-brand-blue',
+        amount: 0
+      }
+    }
+    if (actualPaid < totalAmount && statusClean !== 'completed' && statusClean !== 'paid') {
+      return {
+        type: 'out',
+        text: 'Partial Payment',
+        color: 'text-rose-600',
+        amount: actualPaid
+      }
+    }
+    return {
+      type: 'out',
+      text: 'Full Payment',
+      color: 'text-rose-600',
+      amount: actualPaid
+    }
+  }
+
+  // Customer payments
+  if (type === 'customer_payment' || description.toLowerCase().includes('customer payment')) {
+    return {
+      type: 'in',
+      text: 'Customer Payment',
+      color: 'text-emerald-600',
+      amount: Math.abs(flowAmount) || totalAmount
+    }
+  }
+
+  // Supplier payments
+  if (type === 'supplier_payment' || description.toLowerCase().includes('supplier payment')) {
+    return {
+      type: 'out',
+      text: 'Supplier Payment',
+      color: 'text-rose-600',
+      amount: Math.abs(flowAmount) || totalAmount
+    }
+  }
+
+  // Warehouse payments
+  if (type === 'warehouse_payment' || description.toLowerCase().includes('warehouse payment')) {
+    return {
+      type: 'out',
+      text: 'Warehouse Payment',
+      color: 'text-rose-600',
+      amount: Math.abs(flowAmount) || totalAmount
+    }
+  }
+
+  // Sale returns
+  if (type === 'sale_return' || type === 'sale_return_extra' || type === 'return' || description.toLowerCase().includes('sale return')) {
+    return {
+      type: 'out',
+      text: 'Sale Return Refund',
+      color: 'text-purple-600',
+      amount: Math.abs(flowAmount) || totalAmount
+    }
+  }
+
+  // Purchase returns & cancel refunds
+  if (type === 'purchase_return' || type === 'purchase_cancel_refund' || description.toLowerCase().includes('purchase return') || description.toLowerCase().includes('cancel refund')) {
+    return {
+      type: 'in',
+      text: type === 'purchase_cancel_refund' ? 'Purchase Cancel Refund' : 'Purchase Return Refund',
+      color: 'text-emerald-600',
+      amount: Math.abs(flowAmount) || totalAmount
+    }
+  }
+
+  // Purchase shipping
+  if (type === 'purchase_shipping' || (type === 'shipping' && description.toLowerCase().includes('purchase'))) {
+    return {
+      type: 'out',
+      text: 'Courier Charge',
+      color: 'text-rose-600',
+      amount: Math.abs(flowAmount) || totalAmount
+    }
+  }
+
+  // Sale shipping
+  if (type === 'sale_shipping' || (type === 'shipping' && description.toLowerCase().includes('sale'))) {
+    const isCollected = description.toLowerCase().includes('collected') || (credit > 0 && debit === 0)
+    if (isCollected || flowAmount > 0) {
+      return {
+        type: 'in',
+        text: 'Courier Collected',
+        color: 'text-emerald-600',
+        amount: Math.abs(flowAmount) || totalAmount
+      }
+    }
+    return {
+      type: 'out',
+      text: 'Courier Expense',
+      color: 'text-rose-600',
+      amount: Math.abs(flowAmount) || totalAmount
+    }
+  }
+
+  // Expenses & Salaries & Advances
+  if (type === 'expense' || type === 'salary' || type === 'staff_advance' || description.toLowerCase().includes('salary')) {
+    return {
+      type: 'out',
+      text: type === 'salary' || description.toLowerCase().includes('salary') ? 'Salary Payment' : (type === 'staff_advance' ? 'Staff Advance' : 'Expense'),
+      color: 'text-rose-600',
+      amount: Math.abs(flowAmount) || totalAmount
+    }
+  }
+
+  // Transfers between warehouses/branches
+  if (type === 'transfer') {
+    if (flowAmount > 0 || credit > 0) {
+      return {
+        type: 'in',
+        text: 'Transfer Received',
+        color: 'text-emerald-600',
+        amount: Math.abs(flowAmount) || credit
+      }
+    }
+    if (flowAmount < 0 || debit > 0) {
+      return {
+        type: 'out',
+        text: 'Transfer Paid',
+        color: 'text-rose-600',
+        amount: Math.abs(flowAmount) || debit
+      }
+    }
+  }
+
+  // Income
+  if (type === 'income') {
+    return {
+      type: 'in',
+      text: 'Income',
+      color: 'text-emerald-600',
+      amount: Math.abs(flowAmount) || totalAmount
+    }
+  }
+
+  // Sale adjustments
+  if (isSaleAdjustment(transaction)) {
+    if (flowAmount < 0 || isSaleRefundOrDiscount(transaction)) {
+      return {
+        type: 'out',
+        text: description.includes('Discount change') ? 'Discount Applied' : 'Refund',
+        color: 'text-rose-600',
+        amount: Math.abs(flowAmount)
+      }
+    }
+    if (flowAmount > 0) {
+      return {
+        type: 'in',
+        text: 'Additional Payment',
+        color: 'text-emerald-600',
+        amount: flowAmount
+      }
+    }
+    return {
+      type: 'none',
+      text: 'Bill Updated',
+      color: 'text-muted-foreground',
+      amount: 0
+    }
+  }
+
+  // Purchase adjustments
+  if (type === 'adjustment' && description.includes('Purchase')) {
+    if (flowAmount > 0) {
+      return {
+        type: 'in',
+        text: 'Purchase Refund',
+        color: 'text-emerald-600',
+        amount: flowAmount
+      }
+    }
+    if (flowAmount < 0) {
+      return {
+        type: 'out',
+        text: 'Additional Payment',
+        color: 'text-rose-600',
+        amount: Math.abs(flowAmount)
+      }
+    }
+    return {
+      type: 'none',
+      text: 'Bill Updated',
+      color: 'text-muted-foreground',
+      amount: 0
+    }
+  }
+
+  // Generic flow
+  if (flowAmount > 0) {
+    return {
+      type: 'in',
+      text: 'Money In',
+      color: 'text-emerald-600',
+      amount: flowAmount
+    }
+  } else if (flowAmount < 0) {
+    return {
+      type: 'out',
+      text: 'Money Out',
+      color: 'text-rose-600',
+      amount: Math.abs(flowAmount)
+    }
+  }
+
+  return {
+    type: 'none',
+    text: 'No Cash Flow',
+    color: 'text-muted-foreground',
+    amount: 0
+  }
+}
+
+// All transactions matching the selected date range and search filter (before category tab filtering)
+const dateFilteredTransactions =
   financialData?.transactions?.filter((transaction) => {
     if (!transaction) return false
+    return matchesSearchAndDateRange(transaction)
+  }) || []
 
+// Define filteredTransactions first with proper null checks
+const filteredTransactions =
+  dateFilteredTransactions.filter((transaction) => {
     const type = transaction.type?.toLowerCase()
-
-    if (!matchesSearchAndDateRange(transaction)) return false
-
     const description = transaction.description || ""
-    const received = n(transaction.received)
 
     let matchesType = true
-    if (filterType === "income") {
-      matchesType = (type === 'sale' && received > 0) || (type === 'adjustment' && received > 0)
-    } else if (filterType === "expense") {
-      matchesType = (type === 'purchase' && received > 0) ||
-                   (type === 'supplier_payment') ||
-                   (type === 'adjustment' && description.includes('Purchase') && received > 0)
+    if (filterType === "money_in" || filterType === "income") {
+      const flow = getMoneyFlowInfo(transaction)
+      matchesType = flow.type === "in"
+    } else if (filterType === "money_out" || filterType === "expense") {
+      const flow = getMoneyFlowInfo(transaction)
+      matchesType = flow.type === "out"
     } else if (filterType === "sale") {
       matchesType = type === "sale" || description.toLowerCase().startsWith("sale")
     } else if (filterType === "purchase") {
@@ -1078,7 +1516,7 @@ const filteredTransactions =
     }
 
     return matchesType
-  }) || []
+  })
 
   const sortedTransactions = useMemo(() => {
     return [...filteredTransactions].sort((a, b) => {
@@ -1155,25 +1593,6 @@ const sortedPettyCashTransactions = useMemo(() => {
 
 
 const isDataLoading = isLoading && !financialData
-
-const isSaleAdjustment = (transaction: any) =>
-  transaction?.type?.toLowerCase() === "adjustment" &&
-  (transaction.description || "").includes("Sale")
-
-const getSaleAdjustmentNetCash = (transaction: any) => {
-  const credit = n(transaction.credit)
-  const debit = n(transaction.debit)
-  const received = n(transaction.received)
-  if (credit !== 0 || debit !== 0) return credit - debit
-  return received
-}
-
-const isSaleRefundOrDiscount = (transaction: any) => {
-  if (!isSaleAdjustment(transaction)) return false
-  const description = transaction.description || ""
-  if (description.includes("Discount change")) return true
-  return getSaleAdjustmentNetCash(transaction) < 0
-}
 
 // FIXED: Profit calculation with proportional cost for partial payments
 // FIXED: Profit calculation - ONLY includes sales profit, excludes purchases
@@ -1285,6 +1704,21 @@ const getCashImpact = (transaction: any) => {
     const saleReceived = credit > 0 ? credit : received
     return saleReceived - cost
   }
+
+  // For sale shipping / courier
+  if (type === 'sale_shipping' || (type === 'shipping' && description.toLowerCase().includes('sale'))) {
+    if (description.toLowerCase().includes('collected') || credit > 0) {
+      return credit || received || n(transaction.amount)
+    }
+    if (debit > 0 || description.toLowerCase().includes('expense') || description.toLowerCase().includes('courier charge')) {
+      return -(debit || Math.abs(n(transaction.amount)))
+    }
+  }
+
+  // For purchase shipping
+  if (type === 'purchase_shipping' || (type === 'shipping' && description.toLowerCase().includes('purchase'))) {
+    return -(debit || Math.abs(n(transaction.amount)) || received)
+  }
   
   // For sale adjustments - cash impact from payments, discounts, or refunds
   if (isSaleAdjustment(transaction)) {
@@ -1379,7 +1813,37 @@ const getCashImpact = (transaction: any) => {
   
   // For supplier payments - cash impact is full amount paid out (negative)
   if (type === 'supplier_payment' || description.toLowerCase().includes('supplier payment')) {
-    return -Math.abs(debit)
+    return -(n(transaction.debit) || n(transaction.amount) || received)
+  }
+
+  // For warehouse payments
+  if (type === 'warehouse_payment' || description.toLowerCase().includes('warehouse payment')) {
+    return -(n(transaction.debit) || n(transaction.amount) || received)
+  }
+
+  // For customer payments
+  if (type === 'customer_payment' || description.toLowerCase().includes('customer payment')) {
+    return n(transaction.amount) || received || credit
+  }
+
+  // For sale returns
+  if (type === 'sale_return' || type === 'sale_return_extra' || type === 'return' || description.toLowerCase().includes('sale return')) {
+    return -(n(transaction.debit) || n(transaction.amount) || received)
+  }
+
+  // For purchase returns & cancel refunds
+  if (type === 'purchase_return' || type === 'purchase_cancel_refund' || description.toLowerCase().includes('purchase return') || description.toLowerCase().includes('cancel refund')) {
+    return credit || received || n(transaction.amount)
+  }
+
+  // For expenses & salaries
+  if (type === 'expense' || type === 'salary' || description.toLowerCase().includes('salary')) {
+    return -(n(transaction.debit) || n(transaction.amount))
+  }
+
+  // For direct income
+  if (type === 'income') {
+    return credit || n(transaction.amount) || received
   }
   
   // For manual/other transactions - cash impact = actual net money movement
@@ -1414,288 +1878,6 @@ const getTotalCashImpact = () => {
   })
 
   return totalCashImpact
-}
-
-// NEW: Get actual money in/out amounts (not profit)
-const getMoneyFlowAmount = (transaction: any) => {
-  if (!transaction) return 0
-  
-  const type = transaction.type?.toLowerCase()
-  const description = transaction.description || ""
-  const received = n(transaction.received)
-  const credit = n(transaction.credit)
-  const debit = n(transaction.debit)
-  
-  // For sales - money in is product revenue (courier charge is on sale_shipping lines)
-  if (type === 'sale') {
-    return credit > 0 ? credit : received
-  }
-
-  if (type === 'sale_shipping') {
-    return credit > 0 ? credit : -debit
-  }
-
-  if (type === 'purchase_shipping') {
-    return credit > 0 ? credit : -debit
-  }
-  
-  // For sale adjustments - net money movement from ledger
-  if (isSaleAdjustment(transaction)) {
-    return getSaleAdjustmentNetCash(transaction)
-  }
-  
-  // For purchases - money out is the actual paid amount
-  if (type === 'purchase') {
-    return received
-  }
-  
-  // For purchase adjustments - money out is the additional payment made
-  if (type === 'adjustment' && description.includes('Purchase')) {
-    return received || debit
-  }
-  
-  // For supplier payments - money out is the payment amount
-  if (type === 'supplier_payment' || description.toLowerCase().includes('supplier payment')) {
-    return Math.abs(debit)
-  }
-  
-  // For manual transactions - money in/out based on type
-  if (type === 'manual' || transaction.reference_type?.toLowerCase() === 'manual') {
-    return credit > 0 ? credit : -debit
-  }
-  
-  // Default for other transactions
-  return credit > 0 ? credit : -debit
-}
-
-// NEW: Get money flow type (in/out) and display text
-const getMoneyFlowInfo = (transaction: any) => {
-  if (!transaction) {
-    return {
-      type: 'none',
-      text: 'No Cash Flow',
-      color: 'text-muted-foreground',
-      amount: 0
-    }
-  }
-  
-  const type = transaction.type?.toLowerCase()
-  const description = transaction.description || ""
-  const amount = getMoneyFlowAmount(transaction)
-  const received = n(transaction.received)
-  const totalAmount = n(transaction.amount)
-  
-  // Sales - Money In
-  if (type === 'sale') {
-    if (received === 0) {
-      return {
-        type: 'none',
-        text: 'Credit Sale',
-        color: 'text-brand-blue',
-        amount: 0
-      }
-    }
-    if (received < totalAmount) {
-      return {
-        type: 'in',
-        text: 'Partial Payment',
-        color: 'text-emerald-600',
-        amount: amount
-      }
-    }
-    return {
-      type: 'in',
-      text: 'Full Payment',
-      color: 'text-emerald-600',
-      amount: amount
-    }
-  }
-
-  // Sale Returns - Money Out / Refund
-  if (type === 'sale_return' || type === 'sale_return_extra' || type === 'return') {
-    const refundAmt = Math.abs(amount) || n(transaction.debit) || n(transaction.amount)
-    return {
-      type: 'out',
-      text: 'Sale Return Refund',
-      color: 'text-purple-600',
-      amount: refundAmt
-    }
-  }
-
-  // Purchase Return & Purchase Cancel Refund - Money In
-  if (type === 'purchase_return' || type === 'purchase_cancel_refund') {
-    return {
-      type: 'in',
-      text: type === 'purchase_cancel_refund' ? 'Purchase Cancel Refund' : 'Purchase Return Refund',
-      color: 'text-emerald-600',
-      amount: n(transaction.credit) || n(transaction.received) || amount
-    }
-  }
-
-  // Customer Payments - Money In
-  if (type === 'customer_payment') {
-    return {
-      type: 'in',
-      text: 'Customer Payment',
-      color: 'text-emerald-600',
-      amount: amount || n(transaction.received) || n(transaction.credit)
-    }
-  }
-  
-  // Sale adjustments - payment in, discount/refund out, or bill-only update
-  if (isSaleAdjustment(transaction)) {
-    const flowAmount = getMoneyFlowAmount(transaction)
-
-    if (flowAmount < 0 || isSaleRefundOrDiscount(transaction)) {
-      return {
-        type: "out",
-        text: description.includes("Discount change") ? "Discount Applied" : "Refund",
-        color: "text-rose-600",
-        amount: Math.abs(flowAmount),
-      }
-    }
-
-    if (flowAmount > 0) {
-      return {
-        type: "in",
-        text: "Additional Payment",
-        color: "text-emerald-600",
-        amount: flowAmount,
-      }
-    }
-
-    return {
-      type: "none",
-      text: "Bill Updated",
-      color: "text-muted-foreground",
-      amount: 0,
-    }
-  }
-  
-  // Purchases - Money Out
-  if (type === 'purchase') {
-    if (received === 0) {
-      return {
-        type: 'none',
-        text: 'Credit Purchase',
-        color: 'text-brand-blue',
-        amount: 0
-      }
-    }
-    if (received < totalAmount) {
-      return {
-        type: 'out',
-        text: 'Partial Payment',
-        color: 'text-rose-600',
-        amount: amount
-      }
-    }
-    return {
-      type: 'out',
-      text: 'Full Payment',
-      color: 'text-rose-600',
-      amount: amount
-    }
-  }
-  
-  // Purchase adjustments - Money Out
-  if (type === 'adjustment' && description.includes('Purchase')) {
-    return {
-      type: 'out',
-      text: 'Additional Payment',
-      color: 'text-rose-600',
-      amount: amount
-    }
-  }
-  
-  // Supplier payments - Money Out
-  if (type === 'supplier_payment' || description.toLowerCase().includes('supplier payment')) {
-    return {
-      type: 'out',
-      text: 'Supplier Payment',
-      color: 'text-rose-600',
-      amount: amount
-    }
-  }
-
-  // Purchase shipping / Courier charge - Money Out
-  if (type === 'purchase_shipping' || (type === 'shipping' && description.toLowerCase().includes('purchase'))) {
-    return {
-      type: 'out',
-      text: 'Courier Charge',
-      color: 'text-rose-600',
-      amount: Math.abs(amount) || n(transaction.debit) || n(transaction.amount)
-    }
-  }
-
-  // Sale shipping / Courier charge
-  if (type === 'sale_shipping' || (type === 'shipping' && description.toLowerCase().includes('sale'))) {
-    const debit = n(transaction.debit)
-    const credit = n(transaction.credit)
-    if (debit > 0) {
-      return {
-        type: 'out',
-        text: 'Courier Expense',
-        color: 'text-rose-600',
-        amount: debit || Math.abs(amount) || n(transaction.amount)
-      }
-    }
-    if (credit > 0) {
-      return {
-        type: 'in',
-        text: 'Courier Collected',
-        color: 'text-emerald-600',
-        amount: credit || amount
-      }
-    }
-  }
-  
-  // Manual transactions
-  if (type === 'manual' || transaction.reference_type?.toLowerCase() === 'manual') {
-    const credit = n(transaction.credit)
-    const debit = n(transaction.debit)
-    
-    if (credit > 0) {
-      return {
-        type: 'in',
-        text: 'Money In',
-        color: 'text-emerald-600',
-        amount: amount
-      }
-    } else if (debit > 0) {
-      return {
-        type: 'out',
-        text: 'Money Out',
-        color: 'text-rose-600',
-        amount: amount
-      }
-    }
-  }
-  
-  // Default cases
-  const cashImpact = getCashImpact(transaction)
-  if (cashImpact > 0) {
-    return {
-      type: 'in',
-      text: 'Money In',
-      color: 'text-emerald-600',
-      amount: Math.abs(cashImpact)
-    }
-  } else if (cashImpact < 0) {
-    return {
-      type: 'out',
-      text: 'Money Out',
-      color: 'text-rose-600',
-      amount: Math.abs(cashImpact)
-    }
-  }
-  
-  return {
-    type: 'none',
-    text: 'No Cash Flow',
-    color: 'text-muted-foreground',
-    amount: 0
-  }
 }
 
 // ADDED: Get filtered COGS (Cost of Goods Sold)
@@ -1841,42 +2023,20 @@ const getRemainingAmount = (transaction: any) => {
 }
 
 const getAmountReceived = () => {
-  // Use backend source-of-truth if available
+  // If date-filtered transactions are loaded, compute directly from them so the card and table are 100% consistent
+  if (dateFilteredTransactions && dateFilteredTransactions.length > 0) {
+    return dateFilteredTransactions.reduce((sum, t) => {
+      const flow = getMoneyFlowInfo(t)
+      return flow.type === "in" ? sum + flow.amount : sum
+    }, 0)
+  }
+
+  // Fallback to backend source-of-truth if transactions array is not yet loaded
   if (balances?.moneyIn !== undefined) {
     return balances.moneyIn
   }
 
-  if (!filteredTransactions) return 0
-  
-  let totalReceived = 0
-
-  filteredTransactions.forEach((t) => {
-    if (!t) return
-    
-    const type = t.type?.toLowerCase()
-    const description = t.description || ""
-    const received = n(t.received)
-    const credit = n(t.credit)
-    
-    // For sales - count full received amount
-    if (type === 'sale') {
-      totalReceived += received
-    }
-    // For sale adjustments - count full additional money received
-    else if (type === 'adjustment' && description.includes('Sale')) {
-      totalReceived += (received > 0 ? received : credit)
-    }
-    // For purchase refunds - count full refund amount
-    else if (type === 'adjustment' && description.includes('Purchase') && credit > 0) {
-      totalReceived += credit
-    }
-    // For other transactions - count credit amounts (money coming in)
-    else if (credit > 0) {
-      totalReceived += credit
-    }
-  })
-
-  return totalReceived
+  return 0
 }
 
 const getTotalReceived = () => {
@@ -1885,42 +2045,20 @@ const getTotalReceived = () => {
 
 // FIXED: Get spends (money out) - consistent with getAmountReceived logic
 const getSpends = () => {
-  // Use backend source-of-truth if available
+  // If date-filtered transactions are loaded, compute directly from them so the card and table are 100% consistent
+  if (dateFilteredTransactions && dateFilteredTransactions.length > 0) {
+    return dateFilteredTransactions.reduce((sum, t) => {
+      const flow = getMoneyFlowInfo(t)
+      return flow.type === "out" ? sum + flow.amount : sum
+    }, 0)
+  }
+
+  // Fallback to backend source-of-truth if transactions array is not yet loaded
   if (balances?.moneyOut !== undefined) {
     return balances.moneyOut
   }
 
-  if (!filteredTransactions) return 0
-  
-  let totalSpends = 0
-
-  filteredTransactions.forEach((t) => {
-    if (!t) return
-    
-    const type = t.type?.toLowerCase()
-    const description = t.description || ""
-    const received = n(t.received)
-    const debit = n(t.debit)
-    
-    // For purchases - count full amount spent
-    if (type === 'purchase') {
-      totalSpends += received
-    }
-    // For purchase adjustments (payments) - count additional payment
-    else if (type === 'adjustment' && description.includes('Purchase') && debit > 0) {
-      totalSpends += debit
-    }
-    // For supplier payments - count full amount paid
-    else if (type === 'supplier_payment' || description.toLowerCase().includes('supplier payment')) {
-      totalSpends += Math.abs(debit)
-    }
-    // For other transactions - count debit amounts (money going out)
-    else if (debit > 0) {
-      totalSpends += debit
-    }
-  })
-
-  return totalSpends
+  return 0
 }
 
 const getTotalSpends = () => {
@@ -2678,7 +2816,7 @@ const renderTransactionList = (
           </div>
 
           <Select value={filterType} onValueChange={setFilterType}>
-            <SelectTrigger className="w-[130px] bg-white/20 border-0 text-white h-9">
+            <SelectTrigger className="w-[140px] bg-white/20 border-0 text-white h-9">
               <div className="flex items-center">
                 <Filter className="h-4 w-4 mr-2" />
                 <SelectValue placeholder="All Types" />
@@ -2686,16 +2824,16 @@ const renderTransactionList = (
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Types</SelectItem>
-              <SelectItem value="income">
+              <SelectItem value="money_in">
                 <div className="flex items-center gap-2">
-                  <ArrowUpCircle className="h-4 w-4 text-emerald-600" />
-                  Income
+                  <ArrowDownCircle className="h-4 w-4 text-emerald-600" />
+                  Money In
                 </div>
               </SelectItem>
-              <SelectItem value="expense">
+              <SelectItem value="money_out">
                 <div className="flex items-center gap-2">
-                  <ArrowDownCircle className="h-4 w-4 text-rose-600" />
-                  Expense
+                  <CreditCard className="h-4 w-4 text-rose-600" />
+                  Money Out
                 </div>
               </SelectItem>
               <SelectItem value="sale">Sales</SelectItem>
@@ -2748,7 +2886,7 @@ const renderTransactionList = (
         {(filterType !== "all" || searchTerm) && (
           <div className="rounded-lg bg-violet-500/30 px-3 py-1 text-sm text-violet-50">
             📊 Showing {filteredTransactions.length} filtered transactions
-            {filterType !== "all" && ` • Filter: ${filterType}`}
+            {filterType !== "all" && ` • Filter: ${filterType === 'money_in' ? 'Money In' : filterType === 'money_out' ? 'Money Out' : filterType}`}
             {searchTerm && ` • Search: "${searchTerm}"`}
           </div>
         )}
@@ -2770,7 +2908,7 @@ const renderTransactionList = (
                   </div>
                   <div className="mt-1 text-[10px] text-emerald-600">
                     {
-                      filteredTransactions.filter(
+                      dateFilteredTransactions.filter(
                         (t) => t.type === "sale" || t.description?.toLowerCase().startsWith("sale"),
                       ).length
                     }{" "}
@@ -2789,7 +2927,7 @@ const renderTransactionList = (
                   <div className="text-lg font-bold text-amber-700">{`${currency} ${getPurchasesTotal().toFixed(2)}`}</div>
                   <div className="mt-1 text-[10px] text-amber-600">
                     {
-                      filteredTransactions.filter(
+                      dateFilteredTransactions.filter(
                         (t) => t.type === "purchase" || t.description?.toLowerCase().startsWith("purchase"),
                       ).length
                     }{" "}
@@ -2827,45 +2965,106 @@ const renderTransactionList = (
               </Card>
 
               {/* Money In */}
-              <Card className="border border-emerald-100 bg-emerald-50">
+              <Card
+                className={`cursor-pointer border transition-all hover:shadow-sm select-none ${
+                  activeTab === "transactions" && (filterType === "money_in" || filterType === "income")
+                    ? "border-emerald-500 bg-emerald-100/70 ring-2 ring-emerald-500/50"
+                    : "border-emerald-100 bg-emerald-50 hover:border-emerald-300"
+                }`}
+                onClick={handleMoneyInClick}
+                role="button"
+                tabIndex={0}
+                aria-label="Filter by Money In"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault()
+                    handleMoneyInClick()
+                  }
+                }}
+              >
                 <CardContent className="p-3">
-                  <div className="mb-1 flex items-center gap-1 text-emerald-700">
-                    <ArrowDownCircle className="h-4 w-4" />
-                    <span className="text-xs font-medium">Money In</span>
+                  <div className="mb-1 flex items-center justify-between text-emerald-700">
+                    <div className="flex items-center gap-1">
+                      <ArrowDownCircle className="h-4 w-4" />
+                      <span className="text-xs font-medium">Money In</span>
+                    </div>
+                    {activeTab === "transactions" && (filterType === "money_in" || filterType === "income") && (
+                      <span className="text-[10px] font-semibold bg-emerald-600 text-white px-1.5 py-0.5 rounded-full">
+                        Active
+                      </span>
+                    )}
                   </div>
                   <div className="text-lg font-bold text-emerald-700">{`${currency} ${getAmountReceived().toFixed(2)}`}</div>
                   <div className="mt-1 text-[10px] text-emerald-600">
-                    Inflows: {filteredTransactions.filter((t) => getCashImpact(t) > 0).length}
+                    Inflows: {dateFilteredTransactions.filter((t) => getMoneyFlowInfo(t).type === "in").length}
                   </div>
                 </CardContent>
               </Card>
 
               {/* Money Out */}
-              <Card className="border border-rose-100 bg-rose-50">
+              <Card
+                className={`cursor-pointer border transition-all hover:shadow-sm select-none ${
+                  activeTab === "transactions" && (filterType === "money_out" || filterType === "expense")
+                    ? "border-rose-500 bg-rose-100/70 ring-2 ring-rose-500/50"
+                    : "border-rose-100 bg-rose-50 hover:border-rose-300"
+                }`}
+                onClick={handleMoneyOutClick}
+                role="button"
+                tabIndex={0}
+                aria-label="Filter by Money Out"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault()
+                    handleMoneyOutClick()
+                  }
+                }}
+              >
                 <CardContent className="p-3">
                   <div className="mb-1 flex items-center justify-between text-rose-700">
                     <div className="flex items-center gap-1">
                       <CreditCard className="h-4 w-4" />
                       <span className="text-xs font-medium">Money Out</span>
                     </div>
-                    <button
-                      onClick={() => setIsExpenseModalOpen(true)}
-                      className="text-rose-500 hover:text-rose-700 transition-colors p-0.5 rounded hover:bg-rose-100"
-                      title="View Expense Breakdown"
-                      type="button"
-                    >
-                      <Info className="h-3.5 w-3.5" />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      {activeTab === "transactions" && (filterType === "money_out" || filterType === "expense") && (
+                        <span className="text-[10px] font-semibold bg-rose-600 text-white px-1.5 py-0.5 rounded-full">
+                          Active
+                        </span>
+                      )}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setIsExpenseModalOpen(true)
+                        }}
+                        className="text-rose-500 hover:text-rose-700 transition-colors p-0.5 rounded hover:bg-rose-100"
+                        title="View Expense Breakdown"
+                        type="button"
+                      >
+                        <Info className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   </div>
                   <div className="text-lg font-bold text-rose-700">{`${currency} ${getSpends().toFixed(2)}`}</div>
                   <div className="mt-1 text-[10px] text-rose-600">
-                    Operating Expenses: {currency} {(financialData?.totalExpenses ?? financialData?.operatingExpenses ?? 0).toFixed(2)}
+                    Outflows: {dateFilteredTransactions.filter((t) => getMoneyFlowInfo(t).type === "out").length} | OpEx: {currency} {(financialData?.totalExpenses ?? financialData?.operatingExpenses ?? 0).toFixed(2)}
                   </div>
                 </CardContent>
               </Card>
 
               {/* Receivables */}
-              <Card className="border border-violet-100 bg-violet-50">
+              <Card
+                className="cursor-pointer border border-violet-100 bg-violet-50 transition-all hover:border-violet-300 hover:shadow-sm select-none"
+                onClick={() => setActiveTab("receivables")}
+                role="button"
+                tabIndex={0}
+                aria-label="View receivables"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault()
+                    setActiveTab("receivables")
+                  }
+                }}
+              >
                 <CardContent className="p-3">
                   <div className="mb-1 flex items-center gap-1 text-violet-700">
                     <Users className="h-4 w-4" />
@@ -2879,7 +3078,19 @@ const renderTransactionList = (
               </Card>
 
               {/* Payables */}
-              <Card className="border border-amber-100 bg-amber-50">
+              <Card
+                className="cursor-pointer border border-amber-100 bg-amber-50 transition-all hover:border-amber-300 hover:shadow-sm select-none"
+                onClick={() => setActiveTab("payables")}
+                role="button"
+                tabIndex={0}
+                aria-label="View payables"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault()
+                    setActiveTab("payables")
+                  }
+                }}
+              >
                 <CardContent className="p-3">
                   <div className="mb-1 flex items-center gap-1 text-amber-700">
                     <Building className="h-4 w-4" />
@@ -3276,7 +3487,12 @@ const renderTransactionList = (
                       </div>
                       {filterType !== "all" && (
                         <div>
-                          <span className="font-medium">Filter:</span> {filterType}
+                          <span className="font-medium">Filter:</span>{" "}
+                          {filterType === "money_in"
+                            ? "Money In"
+                            : filterType === "money_out"
+                            ? "Money Out"
+                            : filterType}
                         </div>
                       )}
                       {searchTerm && (
