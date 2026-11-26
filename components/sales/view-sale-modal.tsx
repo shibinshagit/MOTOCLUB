@@ -279,8 +279,16 @@ export default function ViewSaleModal({
   }
 
   const getPaymentMethodDisplay = (paymentMethod: any) => {
-    if (saleData && Array.isArray(saleData.payments) && saleData.payments.length > 1) {
-      return saleData.payments.map((p: any) => `${p.paymentMethod} (${formatCurrency(p.amount)})`).join(" + ")
+    if (saleData && Array.isArray(saleData.payments) && saleData.payments.length > 0) {
+      const activePayments = saleData.payments.filter((p: any) => Number(p.amount) > 0)
+      const listToDisplay = activePayments.length > 0 ? activePayments : saleData.payments
+      const methods = Array.from(new Set(listToDisplay.map((p: any) => p.paymentMethod).filter(Boolean)))
+      if (methods.length > 1) {
+        return methods.join(" + ")
+      }
+      if (methods.length === 1) {
+        return methods[0]
+      }
     }
     if (!paymentMethod) return "Cash"
     return paymentMethod
