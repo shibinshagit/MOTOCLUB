@@ -34,6 +34,7 @@ import { selectDateRange } from "@/store/slices/dateRangeSlice"
 import { SalesBreakdownModal } from "@/components/shared/sales-breakdown-modal"
 import ProfitBreakdownModal from "@/components/shared/profit-breakdown-modal"
 import ExpenseBreakdownModal from "@/components/shared/expense-breakdown-modal"
+import AdminDashboardFilteredOrdersModal from "./admin-dashboard-filtered-orders-modal"
 
 interface AdminDashboardViewProps {
   deviceId?: number
@@ -55,6 +56,7 @@ export default function AdminDashboardView({
   const [isBreakdownModalOpen, setIsBreakdownModalOpen] = useState(false)
   const [isProfitModalOpen, setIsProfitModalOpen] = useState(false)
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false)
+  const [isFilteredOrdersModalOpen, setIsFilteredOrdersModalOpen] = useState(false)
   const [activeMetric, setActiveMetric] = useState<DashboardMetric>("sales")
 
   const [filters, setFilters] = useState<AdminDashboardQuery>(() => ({
@@ -394,6 +396,7 @@ export default function AdminDashboardView({
                 onOpenBreakdown={() => setIsBreakdownModalOpen(true)}
                 onOpenProfitBreakdown={() => setIsProfitModalOpen(true)}
                 onOpenExpenseBreakdown={() => setIsExpenseModalOpen(true)}
+                onOpenFilteredOrders={() => setIsFilteredOrdersModalOpen(true)}
               />
 
               {/* Main Dual-Series Comparison Graph */}
@@ -408,12 +411,21 @@ export default function AdminDashboardView({
               {/* Staff Activity Section */}
               <AdminDashboardStaffSection data={dashboardData.staffSummary} />
 
+              {/* Filtered Orders Modal (when clicking Total Orders) */}
+              <AdminDashboardFilteredOrdersModal
+                isOpen={isFilteredOrdersModalOpen}
+                onClose={() => setIsFilteredOrdersModalOpen(false)}
+                query={filters}
+                periodLabel={dashboardData.periodLabel}
+                currency={dashboardData.currency}
+              />
+
               {/* Sales Breakdown Modal */}
               <SalesBreakdownModal
                 isOpen={isBreakdownModalOpen}
                 onClose={() => setIsBreakdownModalOpen(false)}
                 deviceId={deviceId}
-                dateRange={{ from: filters.customFrom, to: filters.customTo }}
+                dateRange={{ from: dashboardData.periodStart, to: dashboardData.periodEnd }}
                 periodLabel={dashboardData.periodLabel}
                 currency={dashboardData.currency}
                 filters={{
@@ -430,7 +442,7 @@ export default function AdminDashboardView({
                 isOpen={isProfitModalOpen}
                 onClose={() => setIsProfitModalOpen(false)}
                 deviceId={deviceId}
-                dateRange={{ from: filters.customFrom, to: filters.customTo }}
+                dateRange={{ from: dashboardData.periodStart, to: dashboardData.periodEnd }}
                 periodLabel={dashboardData.periodLabel}
                 currency={dashboardData.currency}
                 filters={{
@@ -447,7 +459,7 @@ export default function AdminDashboardView({
                 isOpen={isExpenseModalOpen}
                 onClose={() => setIsExpenseModalOpen(false)}
                 deviceId={deviceId}
-                dateRange={{ from: filters.customFrom, to: filters.customTo }}
+                dateRange={{ from: dashboardData.periodStart, to: dashboardData.periodEnd }}
                 periodLabel={dashboardData.periodLabel}
                 currency={dashboardData.currency}
                 filters={{

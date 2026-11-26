@@ -25,7 +25,7 @@ import {
 
 export type DatePreset = "today" | "last_7_days" | "this_month" | "last_month" | "custom"
 export type ComparisonType = "previous_period" | "previous_month" | "previous_year"
-export type DashboardMetric = "sales" | "profit" | "expenses" | "cogs" | "quantity" | "orders"
+export type DashboardMetric = "sales" | "balanceToReceive" | "profit" | "expenses" | "cogs" | "quantity" | "orders"
 
 export interface AdminDashboardQuery {
   deviceId?: number
@@ -72,10 +72,13 @@ export interface StaffSummaryData {
 
 export interface AdminDashboardData {
   currency: string
+  periodStart: string
+  periodEnd: string
   periodLabel: string
   comparisonLabel: string
   cards: {
     totalSales: MetricCardValue
+    balanceToReceive: MetricCardValue
     totalProfit: MetricCardValue & {
       currentGross: number
       currentNet: number
@@ -92,6 +95,21 @@ export interface AdminDashboardData {
   }
   chartData: Record<DashboardMetric, ChartDataPoint[]>
   staffSummary: StaffSummaryData
+}
+
+export interface AdminDashboardFilteredOrder {
+  id: number
+  sale_date: string
+  customer_name: string
+  staff_name: string
+  status: string
+  payment_status: string
+  delivery_status: string
+  payment_method: string
+  total_amount: number
+  discount: number
+  received_amount: number
+  balance_due: number
 }
 
 // ---------------------------------------------------------------------------
@@ -193,8 +211,8 @@ export async function getAdminDashboardFilterOptions(deviceId?: number) {
 
     const effectiveDeviceId = deviceId || actor.deviceId || 0
 
-    // Run parallel option queries
-    const [staffRows, courierRows, paymentRows, statusRows] = await Promise.all([
+    // Run all option queries in parallel
+    const [staffRows, courierRows, paymentRows, statusRows, partnerRows] = await Promise.all([
       effectiveDeviceId > 0
         ? sql`SELECT id, name, role FROM staff WHERE device_id = ${effectiveDeviceId} ORDER BY name ASC`
         : sql`SELECT id, name, role FROM staff ORDER BY name ASC`,
@@ -244,22 +262,21 @@ export async function getAdminDashboardFilterOptions(deviceId?: number) {
             WHERE status IS NOT NULL AND status != ''
             ORDER BY name ASC
           `,
-    ])
 
-    // Courier partners from staff/master_data
-    const partnerRows = effectiveDeviceId > 0
-      ? await sql`
-          SELECT id, name FROM staff WHERE role = 'partner' AND device_id = ${effectiveDeviceId}
-          UNION
-          SELECT id, name FROM master_data WHERE category = 'courier' AND (device_id = ${effectiveDeviceId} OR device_id = 0)
-          ORDER BY name ASC
-        `
-      : await sql`
-          SELECT id, name FROM staff WHERE role = 'partner'
-          UNION
-          SELECT id, name FROM master_data WHERE category = 'courier'
-          ORDER BY name ASC
-        `
+      effectiveDeviceId > 0
+        ? sql`
+            SELECT id, name FROM staff WHERE role = 'partner' AND device_id = ${effectiveDeviceId}
+            UNION
+            SELECT id, name FROM master_data WHERE category = 'courier' AND (device_id = ${effectiveDeviceId} OR device_id = 0)
+            ORDER BY name ASC
+          `
+        : sql`
+            SELECT id, name FROM staff WHERE role = 'partner'
+            UNION
+            SELECT id, name FROM master_data WHERE category = 'courier'
+            ORDER BY name ASC
+          `,
+    ])
 
     return {
       success: true,
@@ -372,8 +389,11 @@ function resolveDateRanges(query: AdminDashboardQuery) {
 
 export async function getAdminDashboardData(query: AdminDashboardQuery) {
   try {
-    // Security check 1: Admin authorization
-    const actor = await getAdminActor()
+    // Security checks in parallel
+    const [actor, isUnlocked] = await Promise.all([
+      getAdminActor(),
+      isDashboardUnlockedSession(),
+    ])
     if (!actor.isAuthorized) {
       return {
         success: false,
@@ -383,8 +403,6 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
       }
     }
 
-    // Security check 2: Dashboard unlock state
-    const isUnlocked = await isDashboardUnlockedSession()
     if (!isUnlocked) {
       return {
         success: false,
@@ -403,15 +421,6 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
     const prevStartStr = format(prevStart, "yyyy-MM-dd HH:mm:ss")
     const prevEndStr = format(prevEnd, "yyyy-MM-dd HH:mm:ss")
 
-    // Device currency
-    let currency = "INR"
-    if (effectiveDeviceId > 0) {
-      try {
-        const deviceRes = await sql`SELECT currency FROM devices WHERE id = ${effectiveDeviceId} LIMIT 1`
-        if (deviceRes[0]?.currency) currency = deviceRes[0].currency
-      } catch {}
-    }
-
     // Dynamic Filter Clauses
     const staffFilter = query.staffId && query.staffId !== "all" ? Number(query.staffId) : null
     const courierPartnerFilter =
@@ -422,150 +431,6 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
       query.paymentMethod && query.paymentMethod !== "all" ? query.paymentMethod.trim() : null
     const statusFilter = query.status && query.status !== "all" ? query.status.trim() : null
 
-    // -------------------------------------------------------------------------
-    // Query 1: Sales, Orders, Quantity, COGS for Current Period
-    // -------------------------------------------------------------------------
-    const currentSalesAgg = await sql`
-      WITH filtered_sales AS (
-        SELECT s.id, s.total_amount, COALESCE(s.received_amount, 0) as received_amount, COALESCE(s.sale_date, s.created_at) as sale_date
-        FROM sales s
-        WHERE s.total_amount != 'NaN'::numeric
-          AND COALESCE(s.sale_date, s.created_at) >= ${currStartStr}::timestamp
-          AND COALESCE(s.sale_date, s.created_at) <= ${currEndStr}::timestamp
-          AND (${effectiveDeviceId === 0} OR s.device_id = ${effectiveDeviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
-          AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
-          AND (
-            (${statusFilter === null}
-              AND LOWER(TRIM(COALESCE(s.status, ''))) NOT IN ('cancelled', 'returned')
-              AND LOWER(TRIM(COALESCE(s.payment_status, ''))) NOT IN ('cancelled', 'returned')
-              AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) NOT IN ('returned', 'failed')
-            )
-            OR (${statusFilter !== null} AND LOWER(TRIM(s.status)) = LOWER(${statusFilter}))
-          )
-          AND (${staffFilter === null} OR s.staff_id = ${staffFilter})
-          AND (${courierPartnerFilter === null} OR s.courier_partner_id = ${courierPartnerFilter})
-          AND (${courierServiceFilter === null} OR LOWER(TRIM(COALESCE(s.courier_service_name, ''))) = LOWER(${courierServiceFilter}))
-          AND (${paymentMethodFilter === null} OR LOWER(TRIM(COALESCE(s.payment_method, ''))) = LOWER(${paymentMethodFilter}))
-      ),
-      items_agg AS (
-        SELECT 
-          COALESCE(SUM(si.quantity), 0) AS total_quantity,
-          COALESCE(SUM(
-            COALESCE(
-              (SELECT SUM(sba.quantity * sba.cost_price) FROM sale_batch_allocations sba WHERE sba.sale_item_id = si.id),
-              si.quantity * COALESCE(si.cost, pv.wholesale_price, p.wholesale_price, 0)
-            )
-          ), 0) AS total_cogs
-        FROM sale_items si
-        JOIN filtered_sales fs ON si.sale_id = fs.id
-        LEFT JOIN products p ON si.product_id = p.id
-        LEFT JOIN product_variants pv ON si.product_variant_id = pv.id
-      )
-      SELECT 
-        COALESCE(COUNT(fs.id), 0)::int AS order_count,
-        COALESCE(SUM(fs.received_amount), 0)::numeric AS total_sales,
-        (SELECT total_quantity FROM items_agg)::int AS total_quantity,
-        (SELECT total_cogs FROM items_agg)::numeric AS total_cogs
-      FROM filtered_sales fs
-    `
-
-    // -------------------------------------------------------------------------
-    // Query 2: Sales, Orders, Quantity, COGS for Previous Period
-    // -------------------------------------------------------------------------
-    const previousSalesAgg = await sql`
-      WITH filtered_sales AS (
-        SELECT s.id, s.total_amount, COALESCE(s.received_amount, 0) as received_amount, COALESCE(s.sale_date, s.created_at) as sale_date
-        FROM sales s
-        WHERE s.total_amount != 'NaN'::numeric
-          AND COALESCE(s.sale_date, s.created_at) >= ${prevStartStr}::timestamp
-          AND COALESCE(s.sale_date, s.created_at) <= ${prevEndStr}::timestamp
-          AND (${effectiveDeviceId === 0} OR s.device_id = ${effectiveDeviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
-          AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
-          AND (
-            (${statusFilter === null}
-              AND LOWER(TRIM(COALESCE(s.status, ''))) NOT IN ('cancelled', 'returned')
-              AND LOWER(TRIM(COALESCE(s.payment_status, ''))) NOT IN ('cancelled', 'returned')
-              AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) NOT IN ('returned', 'failed')
-            )
-            OR (${statusFilter !== null} AND LOWER(TRIM(s.status)) = LOWER(${statusFilter}))
-          )
-          AND (${staffFilter === null} OR s.staff_id = ${staffFilter})
-          AND (${courierPartnerFilter === null} OR s.courier_partner_id = ${courierPartnerFilter})
-          AND (${courierServiceFilter === null} OR LOWER(TRIM(COALESCE(s.courier_service_name, ''))) = LOWER(${courierServiceFilter}))
-          AND (${paymentMethodFilter === null} OR LOWER(TRIM(COALESCE(s.payment_method, ''))) = LOWER(${paymentMethodFilter}))
-      ),
-      items_agg AS (
-        SELECT 
-          COALESCE(SUM(si.quantity), 0) AS total_quantity,
-          COALESCE(SUM(
-            COALESCE(
-              (SELECT SUM(sba.quantity * sba.cost_price) FROM sale_batch_allocations sba WHERE sba.sale_item_id = si.id),
-              si.quantity * COALESCE(si.cost, pv.wholesale_price, p.wholesale_price, 0)
-            )
-          ), 0) AS total_cogs
-        FROM sale_items si
-        JOIN filtered_sales fs ON si.sale_id = fs.id
-        LEFT JOIN products p ON si.product_id = p.id
-        LEFT JOIN product_variants pv ON si.product_variant_id = pv.id
-      )
-      SELECT 
-        COALESCE(COUNT(fs.id), 0)::int AS order_count,
-        COALESCE(SUM(fs.received_amount), 0)::numeric AS total_sales,
-        (SELECT total_quantity FROM items_agg)::int AS total_quantity,
-        (SELECT total_cogs FROM items_agg)::numeric AS total_cogs
-      FROM filtered_sales fs
-    `
-
-    // -------------------------------------------------------------------------
-    // Query 3: Operating Expenses for Current and Previous Period
-    // -------------------------------------------------------------------------
-    const [currentExpensesAgg, previousExpensesAgg] = await Promise.all([
-      sql`
-        SELECT COALESCE(SUM(debit_amount), 0)::numeric AS total_expenses
-        FROM financial_transactions
-        WHERE transaction_date >= ${currStartStr}::timestamp
-          AND transaction_date <= ${currEndStr}::timestamp
-          AND (${effectiveDeviceId === 0} OR device_id = ${effectiveDeviceId})
-          AND (
-            (transaction_type = 'manual' AND debit_amount > 0)
-          )
-      `,
-      sql`
-        SELECT COALESCE(SUM(debit_amount), 0)::numeric AS total_expenses
-        FROM financial_transactions
-        WHERE transaction_date >= ${prevStartStr}::timestamp
-          AND transaction_date <= ${prevEndStr}::timestamp
-          AND (${effectiveDeviceId === 0} OR device_id = ${effectiveDeviceId})
-          AND (
-            (transaction_type = 'manual' AND debit_amount > 0)
-          )
-      `,
-    ])
-
-    // Safe Numeric Parser
-    const toNum = (val: any) => {
-      const n = Number(val)
-      return Number.isFinite(n) ? n : 0
-    }
-
-    // Current Values
-    const currSales = toNum(currentSalesAgg[0]?.total_sales)
-    const currOrders = toNum(currentSalesAgg[0]?.order_count)
-    const currQuantity = toNum(currentSalesAgg[0]?.total_quantity)
-    const currCogs = toNum(currentSalesAgg[0]?.total_cogs)
-    const currExpenses = toNum(currentExpensesAgg[0]?.total_expenses)
-    const currGrossProfit = currSales - currCogs
-    const currNetProfit = currGrossProfit - currExpenses
-
-    // Previous Values
-    const prevSales = toNum(previousSalesAgg[0]?.total_sales)
-    const prevOrders = toNum(previousSalesAgg[0]?.order_count)
-    const prevQuantity = toNum(previousSalesAgg[0]?.total_quantity)
-    const prevCogs = toNum(previousSalesAgg[0]?.total_cogs)
-    const prevExpenses = toNum(previousExpensesAgg[0]?.total_expenses)
-    const prevGrossProfit = prevSales - prevCogs
-    const prevNetProfit = prevGrossProfit - prevExpenses
-
     const hasSalesFilter = Boolean(
       staffFilter !== null ||
       courierPartnerFilter !== null ||
@@ -574,307 +439,436 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
       statusFilter !== null
     )
 
+    const isHourly = durationDays <= 1
+
+    // Run all dashboard queries in a single parallel batch
+    const [
+      deviceRes,
+      currentDailyRows,
+      previousDailyRows,
+      currentDailyExpenses,
+      previousDailyExpenses,
+      staffStats,
+      staffActivityRows,
+    ] = await Promise.all([
+      effectiveDeviceId > 0
+        ? sql`SELECT currency FROM devices WHERE id = ${effectiveDeviceId} LIMIT 1`.catch(() => [])
+        : Promise.resolve([]),
+      isHourly
+        ? sql`
+            WITH filtered_sales AS (
+              SELECT
+                s.id,
+                s.total_amount,
+                COALESCE(s.received_amount, 0) as received_amount,
+                COALESCE(
+                  NULLIF(s.balance_amount, 0),
+                  GREATEST(0, COALESCE(s.total_amount, 0) - COALESCE(s.discount, 0) - COALESCE(s.received_amount, 0))
+                ) as balance_due,
+                COALESCE(s.sale_date, s.created_at) as sale_date,
+                EXTRACT(HOUR FROM COALESCE(s.sale_date, s.created_at))::int as hour_val
+              FROM sales s
+              WHERE s.total_amount != 'NaN'::numeric
+                AND COALESCE(s.sale_date, s.created_at) >= ${currStartStr}::timestamp
+                AND COALESCE(s.sale_date, s.created_at) <= ${currEndStr}::timestamp
+                AND (${effectiveDeviceId === 0} OR s.device_id = ${effectiveDeviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
+                AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
+                AND (
+                  (${statusFilter === null}
+                    AND LOWER(TRIM(COALESCE(s.status, ''))) NOT IN ('cancelled', 'returned')
+                    AND LOWER(TRIM(COALESCE(s.payment_status, ''))) NOT IN ('cancelled', 'returned')
+                    AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) NOT IN ('returned', 'failed')
+                  )
+                  OR (${statusFilter !== null} AND LOWER(TRIM(s.status)) = LOWER(${statusFilter}))
+                )
+                AND (${staffFilter === null} OR s.staff_id = ${staffFilter})
+                AND (${courierPartnerFilter === null} OR s.courier_partner_id = ${courierPartnerFilter})
+                AND (${courierServiceFilter === null} OR LOWER(TRIM(COALESCE(s.courier_service_name, ''))) = LOWER(${courierServiceFilter}))
+                AND (${paymentMethodFilter === null} OR LOWER(TRIM(COALESCE(s.payment_method, ''))) = LOWER(${paymentMethodFilter}))
+            ),
+            sales_agg AS (
+              SELECT 
+                hour_val,
+                COUNT(id)::int as order_count,
+                COALESCE(SUM(received_amount), 0)::numeric as total_sales,
+                COALESCE(SUM(balance_due), 0)::numeric as balance_to_receive
+              FROM filtered_sales
+              GROUP BY hour_val
+            ),
+            batch_costs AS (
+              SELECT sba.sale_item_id, SUM(sba.quantity * sba.cost_price) as alloc_cost
+              FROM sale_batch_allocations sba
+              JOIN sale_items si ON si.id = sba.sale_item_id
+              JOIN filtered_sales fs ON fs.id = si.sale_id
+              GROUP BY sba.sale_item_id
+            ),
+            items_agg AS (
+              SELECT 
+                fs.hour_val,
+                COALESCE(SUM(si.quantity), 0)::int as total_quantity,
+                COALESCE(SUM(
+                  COALESCE(bc.alloc_cost, si.quantity * COALESCE(si.cost, pv.wholesale_price, p.wholesale_price, 0))
+                ), 0)::numeric as total_cogs
+              FROM sale_items si
+              JOIN filtered_sales fs ON si.sale_id = fs.id
+              LEFT JOIN batch_costs bc ON bc.sale_item_id = si.id
+              LEFT JOIN products p ON si.product_id = p.id
+              LEFT JOIN product_variants pv ON si.product_variant_id = pv.id
+              GROUP BY fs.hour_val
+            )
+            SELECT 
+              sa.hour_val,
+              sa.order_count,
+              sa.total_sales,
+              sa.balance_to_receive,
+              COALESCE(ia.total_quantity, 0)::int as total_quantity,
+              COALESCE(ia.total_cogs, 0)::numeric as total_cogs
+            FROM sales_agg sa
+            LEFT JOIN items_agg ia ON sa.hour_val = ia.hour_val
+            ORDER BY sa.hour_val ASC
+          `
+        : sql`
+            WITH filtered_sales AS (
+              SELECT
+                s.id,
+                s.total_amount,
+                COALESCE(s.received_amount, 0) as received_amount,
+                COALESCE(
+                  NULLIF(s.balance_amount, 0),
+                  GREATEST(0, COALESCE(s.total_amount, 0) - COALESCE(s.discount, 0) - COALESCE(s.received_amount, 0))
+                ) as balance_due,
+                COALESCE(s.sale_date, s.created_at) as sale_date,
+                DATE(COALESCE(s.sale_date, s.created_at)) as day_date
+              FROM sales s
+              WHERE s.total_amount != 'NaN'::numeric
+                AND COALESCE(s.sale_date, s.created_at) >= ${currStartStr}::timestamp
+                AND COALESCE(s.sale_date, s.created_at) <= ${currEndStr}::timestamp
+                AND (${effectiveDeviceId === 0} OR s.device_id = ${effectiveDeviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
+                AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
+                AND (
+                  (${statusFilter === null}
+                    AND LOWER(TRIM(COALESCE(s.status, ''))) NOT IN ('cancelled', 'returned')
+                    AND LOWER(TRIM(COALESCE(s.payment_status, ''))) NOT IN ('cancelled', 'returned')
+                    AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) NOT IN ('returned', 'failed')
+                  )
+                  OR (${statusFilter !== null} AND LOWER(TRIM(s.status)) = LOWER(${statusFilter}))
+                )
+                AND (${staffFilter === null} OR s.staff_id = ${staffFilter})
+                AND (${courierPartnerFilter === null} OR s.courier_partner_id = ${courierPartnerFilter})
+                AND (${courierServiceFilter === null} OR LOWER(TRIM(COALESCE(s.courier_service_name, ''))) = LOWER(${courierServiceFilter}))
+                AND (${paymentMethodFilter === null} OR LOWER(TRIM(COALESCE(s.payment_method, ''))) = LOWER(${paymentMethodFilter}))
+            ),
+            sales_agg AS (
+              SELECT 
+                day_date,
+                COUNT(id)::int as order_count,
+                COALESCE(SUM(received_amount), 0)::numeric as total_sales,
+                COALESCE(SUM(balance_due), 0)::numeric as balance_to_receive
+              FROM filtered_sales
+              GROUP BY day_date
+            ),
+            batch_costs AS (
+              SELECT sba.sale_item_id, SUM(sba.quantity * sba.cost_price) as alloc_cost
+              FROM sale_batch_allocations sba
+              JOIN sale_items si ON si.id = sba.sale_item_id
+              JOIN filtered_sales fs ON fs.id = si.sale_id
+              GROUP BY sba.sale_item_id
+            ),
+            items_agg AS (
+              SELECT 
+                fs.day_date,
+                COALESCE(SUM(si.quantity), 0)::int as total_quantity,
+                COALESCE(SUM(
+                  COALESCE(bc.alloc_cost, si.quantity * COALESCE(si.cost, pv.wholesale_price, p.wholesale_price, 0))
+                ), 0)::numeric as total_cogs
+              FROM sale_items si
+              JOIN filtered_sales fs ON si.sale_id = fs.id
+              LEFT JOIN batch_costs bc ON bc.sale_item_id = si.id
+              LEFT JOIN products p ON si.product_id = p.id
+              LEFT JOIN product_variants pv ON si.product_variant_id = pv.id
+              GROUP BY fs.day_date
+            )
+            SELECT 
+              sa.day_date,
+              sa.order_count,
+              sa.total_sales,
+              sa.balance_to_receive,
+              COALESCE(ia.total_quantity, 0)::int as total_quantity,
+              COALESCE(ia.total_cogs, 0)::numeric as total_cogs
+            FROM sales_agg sa
+            LEFT JOIN items_agg ia ON sa.day_date = ia.day_date
+            ORDER BY sa.day_date ASC
+          `,
+      isHourly
+        ? sql`
+            WITH filtered_sales AS (
+              SELECT
+                s.id,
+                s.total_amount,
+                COALESCE(s.received_amount, 0) as received_amount,
+                COALESCE(
+                  NULLIF(s.balance_amount, 0),
+                  GREATEST(0, COALESCE(s.total_amount, 0) - COALESCE(s.discount, 0) - COALESCE(s.received_amount, 0))
+                ) as balance_due,
+                COALESCE(s.sale_date, s.created_at) as sale_date,
+                EXTRACT(HOUR FROM COALESCE(s.sale_date, s.created_at))::int as hour_val
+              FROM sales s
+              WHERE s.total_amount != 'NaN'::numeric
+                AND COALESCE(s.sale_date, s.created_at) >= ${prevStartStr}::timestamp
+                AND COALESCE(s.sale_date, s.created_at) <= ${prevEndStr}::timestamp
+                AND (${effectiveDeviceId === 0} OR s.device_id = ${effectiveDeviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
+                AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
+                AND (
+                  (${statusFilter === null}
+                    AND LOWER(TRIM(COALESCE(s.status, ''))) NOT IN ('cancelled', 'returned')
+                    AND LOWER(TRIM(COALESCE(s.payment_status, ''))) NOT IN ('cancelled', 'returned')
+                    AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) NOT IN ('returned', 'failed')
+                  )
+                  OR (${statusFilter !== null} AND LOWER(TRIM(s.status)) = LOWER(${statusFilter}))
+                )
+                AND (${staffFilter === null} OR s.staff_id = ${staffFilter})
+                AND (${courierPartnerFilter === null} OR s.courier_partner_id = ${courierPartnerFilter})
+                AND (${courierServiceFilter === null} OR LOWER(TRIM(COALESCE(s.courier_service_name, ''))) = LOWER(${courierServiceFilter}))
+                AND (${paymentMethodFilter === null} OR LOWER(TRIM(COALESCE(s.payment_method, ''))) = LOWER(${paymentMethodFilter}))
+            ),
+            sales_agg AS (
+              SELECT 
+                hour_val,
+                COUNT(id)::int as order_count,
+                COALESCE(SUM(received_amount), 0)::numeric as total_sales,
+                COALESCE(SUM(balance_due), 0)::numeric as balance_to_receive
+              FROM filtered_sales
+              GROUP BY hour_val
+            ),
+            batch_costs AS (
+              SELECT sba.sale_item_id, SUM(sba.quantity * sba.cost_price) as alloc_cost
+              FROM sale_batch_allocations sba
+              JOIN sale_items si ON si.id = sba.sale_item_id
+              JOIN filtered_sales fs ON fs.id = si.sale_id
+              GROUP BY sba.sale_item_id
+            ),
+            items_agg AS (
+              SELECT 
+                fs.hour_val,
+                COALESCE(SUM(si.quantity), 0)::int as total_quantity,
+                COALESCE(SUM(
+                  COALESCE(bc.alloc_cost, si.quantity * COALESCE(si.cost, pv.wholesale_price, p.wholesale_price, 0))
+                ), 0)::numeric as total_cogs
+              FROM sale_items si
+              JOIN filtered_sales fs ON si.sale_id = fs.id
+              LEFT JOIN batch_costs bc ON bc.sale_item_id = si.id
+              LEFT JOIN products p ON si.product_id = p.id
+              LEFT JOIN product_variants pv ON si.product_variant_id = pv.id
+              GROUP BY fs.hour_val
+            )
+            SELECT 
+              sa.hour_val,
+              sa.order_count,
+              sa.total_sales,
+              sa.balance_to_receive,
+              COALESCE(ia.total_quantity, 0)::int as total_quantity,
+              COALESCE(ia.total_cogs, 0)::numeric as total_cogs
+            FROM sales_agg sa
+            LEFT JOIN items_agg ia ON sa.hour_val = ia.hour_val
+            ORDER BY sa.hour_val ASC
+          `
+        : sql`
+            WITH filtered_sales AS (
+              SELECT
+                s.id,
+                s.total_amount,
+                COALESCE(s.received_amount, 0) as received_amount,
+                COALESCE(
+                  NULLIF(s.balance_amount, 0),
+                  GREATEST(0, COALESCE(s.total_amount, 0) - COALESCE(s.discount, 0) - COALESCE(s.received_amount, 0))
+                ) as balance_due,
+                COALESCE(s.sale_date, s.created_at) as sale_date,
+                DATE(COALESCE(s.sale_date, s.created_at)) as day_date
+              FROM sales s
+              WHERE s.total_amount != 'NaN'::numeric
+                AND COALESCE(s.sale_date, s.created_at) >= ${prevStartStr}::timestamp
+                AND COALESCE(s.sale_date, s.created_at) <= ${prevEndStr}::timestamp
+                AND (${effectiveDeviceId === 0} OR s.device_id = ${effectiveDeviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
+                AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
+                AND (
+                  (${statusFilter === null}
+                    AND LOWER(TRIM(COALESCE(s.status, ''))) NOT IN ('cancelled', 'returned')
+                    AND LOWER(TRIM(COALESCE(s.payment_status, ''))) NOT IN ('cancelled', 'returned')
+                    AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) NOT IN ('returned', 'failed')
+                  )
+                  OR (${statusFilter !== null} AND LOWER(TRIM(s.status)) = LOWER(${statusFilter}))
+                )
+                AND (${staffFilter === null} OR s.staff_id = ${staffFilter})
+                AND (${courierPartnerFilter === null} OR s.courier_partner_id = ${courierPartnerFilter})
+                AND (${courierServiceFilter === null} OR LOWER(TRIM(COALESCE(s.courier_service_name, ''))) = LOWER(${courierServiceFilter}))
+                AND (${paymentMethodFilter === null} OR LOWER(TRIM(COALESCE(s.payment_method, ''))) = LOWER(${paymentMethodFilter}))
+            ),
+            sales_agg AS (
+              SELECT 
+                day_date,
+                COUNT(id)::int as order_count,
+                COALESCE(SUM(received_amount), 0)::numeric as total_sales,
+                COALESCE(SUM(balance_due), 0)::numeric as balance_to_receive
+              FROM filtered_sales
+              GROUP BY day_date
+            ),
+            batch_costs AS (
+              SELECT sba.sale_item_id, SUM(sba.quantity * sba.cost_price) as alloc_cost
+              FROM sale_batch_allocations sba
+              JOIN sale_items si ON si.id = sba.sale_item_id
+              JOIN filtered_sales fs ON fs.id = si.sale_id
+              GROUP BY sba.sale_item_id
+            ),
+            items_agg AS (
+              SELECT 
+                fs.day_date,
+                COALESCE(SUM(si.quantity), 0)::int as total_quantity,
+                COALESCE(SUM(
+                  COALESCE(bc.alloc_cost, si.quantity * COALESCE(si.cost, pv.wholesale_price, p.wholesale_price, 0))
+                ), 0)::numeric as total_cogs
+              FROM sale_items si
+              JOIN filtered_sales fs ON si.sale_id = fs.id
+              LEFT JOIN batch_costs bc ON bc.sale_item_id = si.id
+              LEFT JOIN products p ON si.product_id = p.id
+              LEFT JOIN product_variants pv ON si.product_variant_id = pv.id
+              GROUP BY fs.day_date
+            )
+            SELECT 
+              sa.day_date,
+              sa.order_count,
+              sa.total_sales,
+              sa.balance_to_receive,
+              COALESCE(ia.total_quantity, 0)::int as total_quantity,
+              COALESCE(ia.total_cogs, 0)::numeric as total_cogs
+            FROM sales_agg sa
+            LEFT JOIN items_agg ia ON sa.day_date = ia.day_date
+            ORDER BY sa.day_date ASC
+          `,
+      isHourly
+        ? sql`
+            SELECT 
+              EXTRACT(HOUR FROM transaction_date)::int as hour_val,
+              COALESCE(SUM(debit_amount), 0)::numeric as total_expenses
+            FROM financial_transactions
+            WHERE transaction_date >= ${currStartStr}::timestamp
+              AND transaction_date <= ${currEndStr}::timestamp
+              AND (${effectiveDeviceId === 0} OR device_id = ${effectiveDeviceId})
+              AND (
+                (transaction_type = 'manual' AND debit_amount > 0)
+              )
+            GROUP BY EXTRACT(HOUR FROM transaction_date)::int
+            ORDER BY hour_val ASC
+          `
+        : sql`
+            SELECT 
+              DATE(transaction_date) as day_date,
+              COALESCE(SUM(debit_amount), 0)::numeric as total_expenses
+            FROM financial_transactions
+            WHERE transaction_date >= ${currStartStr}::timestamp
+              AND transaction_date <= ${currEndStr}::timestamp
+              AND (${effectiveDeviceId === 0} OR device_id = ${effectiveDeviceId})
+              AND (
+                (transaction_type = 'manual' AND debit_amount > 0)
+              )
+            GROUP BY DATE(transaction_date)
+            ORDER BY day_date ASC
+          `,
+      isHourly
+        ? sql`
+            SELECT 
+              EXTRACT(HOUR FROM transaction_date)::int as hour_val,
+              COALESCE(SUM(debit_amount), 0)::numeric as total_expenses
+            FROM financial_transactions
+            WHERE transaction_date >= ${prevStartStr}::timestamp
+              AND transaction_date <= ${prevEndStr}::timestamp
+              AND (${effectiveDeviceId === 0} OR device_id = ${effectiveDeviceId})
+              AND (
+                (transaction_type = 'manual' AND debit_amount > 0)
+              )
+            GROUP BY EXTRACT(HOUR FROM transaction_date)::int
+            ORDER BY hour_val ASC
+          `
+        : sql`
+            SELECT 
+              DATE(transaction_date) as day_date,
+              COALESCE(SUM(debit_amount), 0)::numeric as total_expenses
+            FROM financial_transactions
+            WHERE transaction_date >= ${prevStartStr}::timestamp
+              AND transaction_date <= ${prevEndStr}::timestamp
+              AND (${effectiveDeviceId === 0} OR device_id = ${effectiveDeviceId})
+              AND (
+                (transaction_type = 'manual' AND debit_amount > 0)
+              )
+            GROUP BY DATE(transaction_date)
+            ORDER BY day_date ASC
+          `,
+      sql`
+        SELECT 
+          COUNT(*)::int as total_staff,
+          COALESCE(SUM(CASE WHEN is_active = true THEN 1 ELSE 0 END), 0)::int as active_staff,
+          (
+            SELECT COUNT(DISTINCT staff_id)::int
+            FROM staff_attendance
+            WHERE date = CURRENT_DATE
+              AND (${effectiveDeviceId === 0} OR device_id = ${effectiveDeviceId})
+          ) as today_logins
+        FROM staff
+        WHERE (${effectiveDeviceId === 0} OR device_id = ${effectiveDeviceId})
+      `,
+      sql`
+        SELECT 
+          s.id,
+          s.name,
+          s.role,
+          s.position,
+          s.is_active,
+          COALESCE(
+            (SELECT MAX(sa.check_in) FROM staff_attendance sa WHERE sa.staff_id = s.id),
+            s.updated_at
+          ) as last_login
+        FROM staff s
+        WHERE (${effectiveDeviceId === 0} OR s.device_id = ${effectiveDeviceId})
+        ORDER BY last_login DESC NULLS LAST, s.name ASC
+        LIMIT 10
+      `,
+    ])
+
+    const currency = deviceRes[0]?.currency || "INR"
+
+    // Safe Numeric Parser
+    const toNum = (val: any) => {
+      const n = Number(val)
+      return Number.isFinite(n) ? n : 0
+    }
+
+    // Derive period card totals directly from full daily/hourly query results
+    const currSales = currentDailyRows.reduce((sum: number, r: any) => sum + toNum(r.total_sales), 0)
+    const currBalanceToReceive = currentDailyRows.reduce((sum: number, r: any) => sum + toNum(r.balance_to_receive), 0)
+    const currOrders = currentDailyRows.reduce((sum: number, r: any) => sum + toNum(r.order_count), 0)
+    const currQuantity = currentDailyRows.reduce((sum: number, r: any) => sum + toNum(r.total_quantity), 0)
+    const currCogs = currentDailyRows.reduce((sum: number, r: any) => sum + toNum(r.total_cogs), 0)
+    const currExpenses = currentDailyExpenses.reduce((sum: number, r: any) => sum + toNum(r.total_expenses), 0)
+    const currGrossProfit = currSales - currCogs
+    const currNetProfit = currGrossProfit - currExpenses
+
+    const prevSales = previousDailyRows.reduce((sum: number, r: any) => sum + toNum(r.total_sales), 0)
+    const prevBalanceToReceive = previousDailyRows.reduce((sum: number, r: any) => sum + toNum(r.balance_to_receive), 0)
+    const prevOrders = previousDailyRows.reduce((sum: number, r: any) => sum + toNum(r.order_count), 0)
+    const prevQuantity = previousDailyRows.reduce((sum: number, r: any) => sum + toNum(r.total_quantity), 0)
+    const prevCogs = previousDailyRows.reduce((sum: number, r: any) => sum + toNum(r.total_cogs), 0)
+    const prevExpenses = previousDailyExpenses.reduce((sum: number, r: any) => sum + toNum(r.total_expenses), 0)
+    const prevGrossProfit = prevSales - prevCogs
+    const prevNetProfit = prevGrossProfit - prevExpenses
+
     // Differences
     const salesDiff = calculatePercentageDiff(currSales, prevSales)
+    const balanceToReceiveDiff = calculatePercentageDiff(currBalanceToReceive, prevBalanceToReceive)
     const profitDiff = calculatePercentageDiff(currGrossProfit, prevGrossProfit)
     const netProfitDiff = calculatePercentageDiff(currNetProfit, prevNetProfit)
     const expensesDiff = calculatePercentageDiff(currExpenses, prevExpenses)
     const cogsDiff = calculatePercentageDiff(currCogs, prevCogs)
     const quantityDiff = calculatePercentageDiff(currQuantity, prevQuantity)
     const ordersDiff = calculatePercentageDiff(currOrders, prevOrders)
-
-    // -------------------------------------------------------------------------
-    // Query 4: Breakdown for Current and Previous Period (Chart Data)
-    // -------------------------------------------------------------------------
-    const isHourly = durationDays <= 1
-
-    const [currentDailyRows, previousDailyRows, currentDailyExpenses, previousDailyExpenses] =
-      await Promise.all([
-        isHourly
-          ? sql`
-              WITH filtered_sales AS (
-                SELECT s.id, s.total_amount, COALESCE(s.received_amount, 0) as received_amount, COALESCE(s.sale_date, s.created_at) as sale_date, EXTRACT(HOUR FROM COALESCE(s.sale_date, s.created_at))::int as hour_val
-                FROM sales s
-                WHERE s.total_amount != 'NaN'::numeric
-                  AND COALESCE(s.sale_date, s.created_at) >= ${currStartStr}::timestamp
-                  AND COALESCE(s.sale_date, s.created_at) <= ${currEndStr}::timestamp
-                  AND (${effectiveDeviceId === 0} OR s.device_id = ${effectiveDeviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
-                  AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
-                  AND (
-                    (${statusFilter === null}
-                      AND LOWER(TRIM(COALESCE(s.status, ''))) NOT IN ('cancelled', 'returned')
-                      AND LOWER(TRIM(COALESCE(s.payment_status, ''))) NOT IN ('cancelled', 'returned')
-                      AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) NOT IN ('returned', 'failed')
-                    )
-                    OR (${statusFilter !== null} AND LOWER(TRIM(s.status)) = LOWER(${statusFilter}))
-                  )
-                  AND (${staffFilter === null} OR s.staff_id = ${staffFilter})
-                  AND (${courierPartnerFilter === null} OR s.courier_partner_id = ${courierPartnerFilter})
-                  AND (${courierServiceFilter === null} OR LOWER(TRIM(COALESCE(s.courier_service_name, ''))) = LOWER(${courierServiceFilter}))
-                  AND (${paymentMethodFilter === null} OR LOWER(TRIM(COALESCE(s.payment_method, ''))) = LOWER(${paymentMethodFilter}))
-              ),
-              sales_agg AS (
-                SELECT 
-                  hour_val,
-                  COUNT(id)::int as order_count,
-                  COALESCE(SUM(received_amount), 0)::numeric as total_sales
-                FROM filtered_sales
-                GROUP BY hour_val
-              ),
-              items_agg AS (
-                SELECT 
-                  fs.hour_val,
-                  COALESCE(SUM(si.quantity), 0)::int as total_quantity,
-                  COALESCE(SUM(
-                    COALESCE(
-                      (SELECT SUM(sba.quantity * sba.cost_price) FROM sale_batch_allocations sba WHERE sba.sale_item_id = si.id),
-                      si.quantity * COALESCE(si.cost, pv.wholesale_price, p.wholesale_price, 0)
-                    )
-                  ), 0)::numeric as total_cogs
-                FROM sale_items si
-                JOIN filtered_sales fs ON si.sale_id = fs.id
-                LEFT JOIN products p ON si.product_id = p.id
-                LEFT JOIN product_variants pv ON si.product_variant_id = pv.id
-                GROUP BY fs.hour_val
-              )
-              SELECT 
-                sa.hour_val,
-                sa.order_count,
-                sa.total_sales,
-                COALESCE(ia.total_quantity, 0)::int as total_quantity,
-                COALESCE(ia.total_cogs, 0)::numeric as total_cogs
-              FROM sales_agg sa
-              LEFT JOIN items_agg ia ON sa.hour_val = ia.hour_val
-              ORDER BY sa.hour_val ASC
-            `
-          : sql`
-              WITH filtered_sales AS (
-                SELECT s.id, s.total_amount, COALESCE(s.received_amount, 0) as received_amount, COALESCE(s.sale_date, s.created_at) as sale_date, DATE(COALESCE(s.sale_date, s.created_at)) as day_date
-                FROM sales s
-                WHERE s.total_amount != 'NaN'::numeric
-                  AND COALESCE(s.sale_date, s.created_at) >= ${currStartStr}::timestamp
-                  AND COALESCE(s.sale_date, s.created_at) <= ${currEndStr}::timestamp
-                  AND (${effectiveDeviceId === 0} OR s.device_id = ${effectiveDeviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
-                  AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
-                  AND (
-                    (${statusFilter === null}
-                      AND LOWER(TRIM(COALESCE(s.status, ''))) NOT IN ('cancelled', 'returned')
-                      AND LOWER(TRIM(COALESCE(s.payment_status, ''))) NOT IN ('cancelled', 'returned')
-                      AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) NOT IN ('returned', 'failed')
-                    )
-                    OR (${statusFilter !== null} AND LOWER(TRIM(s.status)) = LOWER(${statusFilter}))
-                  )
-                  AND (${staffFilter === null} OR s.staff_id = ${staffFilter})
-                  AND (${courierPartnerFilter === null} OR s.courier_partner_id = ${courierPartnerFilter})
-                  AND (${courierServiceFilter === null} OR LOWER(TRIM(COALESCE(s.courier_service_name, ''))) = LOWER(${courierServiceFilter}))
-                  AND (${paymentMethodFilter === null} OR LOWER(TRIM(COALESCE(s.payment_method, ''))) = LOWER(${paymentMethodFilter}))
-              ),
-              sales_agg AS (
-                SELECT 
-                  day_date,
-                  COUNT(id)::int as order_count,
-                  COALESCE(SUM(received_amount), 0)::numeric as total_sales
-                FROM filtered_sales
-                GROUP BY day_date
-              ),
-              items_agg AS (
-                SELECT 
-                  fs.day_date,
-                  COALESCE(SUM(si.quantity), 0)::int as total_quantity,
-                  COALESCE(SUM(
-                    COALESCE(
-                      (SELECT SUM(sba.quantity * sba.cost_price) FROM sale_batch_allocations sba WHERE sba.sale_item_id = si.id),
-                      si.quantity * COALESCE(si.cost, pv.wholesale_price, p.wholesale_price, 0)
-                    )
-                  ), 0)::numeric as total_cogs
-                FROM sale_items si
-                JOIN filtered_sales fs ON si.sale_id = fs.id
-                LEFT JOIN products p ON si.product_id = p.id
-                LEFT JOIN product_variants pv ON si.product_variant_id = pv.id
-                GROUP BY fs.day_date
-              )
-              SELECT 
-                sa.day_date,
-                sa.order_count,
-                sa.total_sales,
-                COALESCE(ia.total_quantity, 0)::int as total_quantity,
-                COALESCE(ia.total_cogs, 0)::numeric as total_cogs
-              FROM sales_agg sa
-              LEFT JOIN items_agg ia ON sa.day_date = ia.day_date
-              ORDER BY sa.day_date ASC
-            `,
-        isHourly
-          ? sql`
-              WITH filtered_sales AS (
-                SELECT s.id, s.total_amount, COALESCE(s.received_amount, 0) as received_amount, COALESCE(s.sale_date, s.created_at) as sale_date, EXTRACT(HOUR FROM COALESCE(s.sale_date, s.created_at))::int as hour_val
-                FROM sales s
-                WHERE s.total_amount != 'NaN'::numeric
-                  AND COALESCE(s.sale_date, s.created_at) >= ${prevStartStr}::timestamp
-                  AND COALESCE(s.sale_date, s.created_at) <= ${prevEndStr}::timestamp
-                  AND (${effectiveDeviceId === 0} OR s.device_id = ${effectiveDeviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
-                  AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
-                  AND (
-                    (${statusFilter === null}
-                      AND LOWER(TRIM(COALESCE(s.status, ''))) NOT IN ('cancelled', 'returned')
-                      AND LOWER(TRIM(COALESCE(s.payment_status, ''))) NOT IN ('cancelled', 'returned')
-                      AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) NOT IN ('returned', 'failed')
-                    )
-                    OR (${statusFilter !== null} AND LOWER(TRIM(s.status)) = LOWER(${statusFilter}))
-                  )
-                  AND (${staffFilter === null} OR s.staff_id = ${staffFilter})
-                  AND (${courierPartnerFilter === null} OR s.courier_partner_id = ${courierPartnerFilter})
-                  AND (${courierServiceFilter === null} OR LOWER(TRIM(COALESCE(s.courier_service_name, ''))) = LOWER(${courierServiceFilter}))
-                  AND (${paymentMethodFilter === null} OR LOWER(TRIM(COALESCE(s.payment_method, ''))) = LOWER(${paymentMethodFilter}))
-              ),
-              sales_agg AS (
-                SELECT 
-                  hour_val,
-                  COUNT(id)::int as order_count,
-                  COALESCE(SUM(received_amount), 0)::numeric as total_sales
-                FROM filtered_sales
-                GROUP BY hour_val
-              ),
-              items_agg AS (
-                SELECT 
-                  fs.hour_val,
-                  COALESCE(SUM(si.quantity), 0)::int as total_quantity,
-                  COALESCE(SUM(
-                    COALESCE(
-                      (SELECT SUM(sba.quantity * sba.cost_price) FROM sale_batch_allocations sba WHERE sba.sale_item_id = si.id),
-                      si.quantity * COALESCE(si.cost, pv.wholesale_price, p.wholesale_price, 0)
-                    )
-                  ), 0)::numeric as total_cogs
-                FROM sale_items si
-                JOIN filtered_sales fs ON si.sale_id = fs.id
-                LEFT JOIN products p ON si.product_id = p.id
-                LEFT JOIN product_variants pv ON si.product_variant_id = pv.id
-                GROUP BY fs.hour_val
-              )
-              SELECT 
-                sa.hour_val,
-                sa.order_count,
-                sa.total_sales,
-                COALESCE(ia.total_quantity, 0)::int as total_quantity,
-                COALESCE(ia.total_cogs, 0)::numeric as total_cogs
-              FROM sales_agg sa
-              LEFT JOIN items_agg ia ON sa.hour_val = ia.hour_val
-              ORDER BY sa.hour_val ASC
-            `
-          : sql`
-              WITH filtered_sales AS (
-                SELECT s.id, s.total_amount, COALESCE(s.received_amount, 0) as received_amount, COALESCE(s.sale_date, s.created_at) as sale_date, DATE(COALESCE(s.sale_date, s.created_at)) as day_date
-                FROM sales s
-                WHERE s.total_amount != 'NaN'::numeric
-                  AND COALESCE(s.sale_date, s.created_at) >= ${prevStartStr}::timestamp
-                  AND COALESCE(s.sale_date, s.created_at) <= ${prevEndStr}::timestamp
-                  AND (${effectiveDeviceId === 0} OR s.device_id = ${effectiveDeviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
-                  AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
-                  AND (
-                    (${statusFilter === null}
-                      AND LOWER(TRIM(COALESCE(s.status, ''))) NOT IN ('cancelled', 'returned')
-                      AND LOWER(TRIM(COALESCE(s.payment_status, ''))) NOT IN ('cancelled', 'returned')
-                      AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) NOT IN ('returned', 'failed')
-                    )
-                    OR (${statusFilter !== null} AND LOWER(TRIM(s.status)) = LOWER(${statusFilter}))
-                  )
-                  AND (${staffFilter === null} OR s.staff_id = ${staffFilter})
-                  AND (${courierPartnerFilter === null} OR s.courier_partner_id = ${courierPartnerFilter})
-                  AND (${courierServiceFilter === null} OR LOWER(TRIM(COALESCE(s.courier_service_name, ''))) = LOWER(${courierServiceFilter}))
-                  AND (${paymentMethodFilter === null} OR LOWER(TRIM(COALESCE(s.payment_method, ''))) = LOWER(${paymentMethodFilter}))
-              ),
-              sales_agg AS (
-                SELECT 
-                  day_date,
-                  COUNT(id)::int as order_count,
-                  COALESCE(SUM(received_amount), 0)::numeric as total_sales
-                FROM filtered_sales
-                GROUP BY day_date
-              ),
-              items_agg AS (
-                SELECT 
-                  fs.day_date,
-                  COALESCE(SUM(si.quantity), 0)::int as total_quantity,
-                  COALESCE(SUM(
-                    COALESCE(
-                      (SELECT SUM(sba.quantity * sba.cost_price) FROM sale_batch_allocations sba WHERE sba.sale_item_id = si.id),
-                      si.quantity * COALESCE(si.cost, pv.wholesale_price, p.wholesale_price, 0)
-                    )
-                  ), 0)::numeric as total_cogs
-                FROM sale_items si
-                JOIN filtered_sales fs ON si.sale_id = fs.id
-                LEFT JOIN products p ON si.product_id = p.id
-                LEFT JOIN product_variants pv ON si.product_variant_id = pv.id
-                GROUP BY fs.day_date
-              )
-              SELECT 
-                sa.day_date,
-                sa.order_count,
-                sa.total_sales,
-                COALESCE(ia.total_quantity, 0)::int as total_quantity,
-                COALESCE(ia.total_cogs, 0)::numeric as total_cogs
-              FROM sales_agg sa
-              LEFT JOIN items_agg ia ON sa.day_date = ia.day_date
-              ORDER BY sa.day_date ASC
-            `,
-        isHourly
-          ? sql`
-              SELECT 
-                EXTRACT(HOUR FROM transaction_date)::int as hour_val,
-                COALESCE(SUM(debit_amount), 0)::numeric as total_expenses
-              FROM financial_transactions
-              WHERE transaction_date >= ${currStartStr}::timestamp
-                AND transaction_date <= ${currEndStr}::timestamp
-                AND (${effectiveDeviceId === 0} OR device_id = ${effectiveDeviceId})
-                AND (
-                  (transaction_type = 'manual' AND debit_amount > 0)
-                )
-              GROUP BY EXTRACT(HOUR FROM transaction_date)::int
-              ORDER BY hour_val ASC
-            `
-          : sql`
-              SELECT 
-                DATE(transaction_date) as day_date,
-                COALESCE(SUM(debit_amount), 0)::numeric as total_expenses
-              FROM financial_transactions
-              WHERE transaction_date >= ${currStartStr}::timestamp
-                AND transaction_date <= ${currEndStr}::timestamp
-                AND (${effectiveDeviceId === 0} OR device_id = ${effectiveDeviceId})
-                AND (
-                  (transaction_type = 'manual' AND debit_amount > 0)
-                )
-              GROUP BY DATE(transaction_date)
-              ORDER BY day_date ASC
-            `,
-        isHourly
-          ? sql`
-              SELECT 
-                EXTRACT(HOUR FROM transaction_date)::int as hour_val,
-                COALESCE(SUM(debit_amount), 0)::numeric as total_expenses
-              FROM financial_transactions
-              WHERE transaction_date >= ${prevStartStr}::timestamp
-                AND transaction_date <= ${prevEndStr}::timestamp
-                AND (${effectiveDeviceId === 0} OR device_id = ${effectiveDeviceId})
-                AND (
-                  (transaction_type = 'manual' AND debit_amount > 0)
-                )
-              GROUP BY EXTRACT(HOUR FROM transaction_date)::int
-              ORDER BY hour_val ASC
-            `
-          : sql`
-              SELECT 
-                DATE(transaction_date) as day_date,
-                COALESCE(SUM(debit_amount), 0)::numeric as total_expenses
-              FROM financial_transactions
-              WHERE transaction_date >= ${prevStartStr}::timestamp
-                AND transaction_date <= ${prevEndStr}::timestamp
-                AND (${effectiveDeviceId === 0} OR device_id = ${effectiveDeviceId})
-                AND (
-                  (transaction_type = 'manual' AND debit_amount > 0)
-                )
-              GROUP BY DATE(transaction_date)
-              ORDER BY day_date ASC
-            `,
-      ])
 
     // Map data by key (hour number or date string YYYY-MM-DD)
     const currSalesMap = new Map<number | string, any>()
@@ -903,6 +897,7 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
 
     // Build timeline points
     const salesChart: ChartDataPoint[] = []
+    const balanceToReceiveChart: ChartDataPoint[] = []
     const profitChart: ChartDataPoint[] = []
     const expensesChart: ChartDataPoint[] = []
     const cogsChart: ChartDataPoint[] = []
@@ -915,11 +910,14 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
         const currKey = `${format(currentStart, "yyyy-MM-dd")} ${hourLabel}`
         const prevKey = `${format(prevStart, "yyyy-MM-dd")} ${hourLabel}`
 
-        const currData = currSalesMap.get(h) || { total_sales: 0, order_count: 0, total_quantity: 0, total_cogs: 0 }
-        const prevData = prevSalesMap.get(h) || { total_sales: 0, order_count: 0, total_quantity: 0, total_cogs: 0 }
+        const currData = currSalesMap.get(h) || { total_sales: 0, balance_to_receive: 0, order_count: 0, total_quantity: 0, total_cogs: 0 }
+        const prevData = prevSalesMap.get(h) || { total_sales: 0, balance_to_receive: 0, order_count: 0, total_quantity: 0, total_cogs: 0 }
 
         const currDaySales = Number(currData.total_sales || 0)
         const prevDaySales = Number(prevData.total_sales || 0)
+
+        const currDayBal = Number(currData.balance_to_receive || 0)
+        const prevDayBal = Number(prevData.balance_to_receive || 0)
 
         const currDayOrders = Number(currData.order_count || 0)
         const prevDayOrders = Number(prevData.order_count || 0)
@@ -942,6 +940,14 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
           previousDate: prevKey,
           currentVal: currDaySales,
           previousVal: prevDaySales,
+        })
+
+        balanceToReceiveChart.push({
+          label: hourLabel,
+          currentDate: currKey,
+          previousDate: prevKey,
+          currentVal: currDayBal,
+          previousVal: prevDayBal,
         })
 
         profitChart.push({
@@ -992,11 +998,14 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
         const currKey = format(currDay, "yyyy-MM-dd")
         const prevKey = format(prevDay, "yyyy-MM-dd")
 
-        const currData = currSalesMap.get(currKey) || { total_sales: 0, order_count: 0, total_quantity: 0, total_cogs: 0 }
-        const prevData = prevSalesMap.get(prevKey) || { total_sales: 0, order_count: 0, total_quantity: 0, total_cogs: 0 }
+        const currData = currSalesMap.get(currKey) || { total_sales: 0, balance_to_receive: 0, order_count: 0, total_quantity: 0, total_cogs: 0 }
+        const prevData = prevSalesMap.get(prevKey) || { total_sales: 0, balance_to_receive: 0, order_count: 0, total_quantity: 0, total_cogs: 0 }
 
         const currDaySales = Number(currData.total_sales || 0)
         const prevDaySales = Number(prevData.total_sales || 0)
+
+        const currDayBal = Number(currData.balance_to_receive || 0)
+        const prevDayBal = Number(prevData.balance_to_receive || 0)
 
         const currDayOrders = Number(currData.order_count || 0)
         const prevDayOrders = Number(prevData.order_count || 0)
@@ -1021,6 +1030,14 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
           previousDate: prevKey,
           currentVal: currDaySales,
           previousVal: prevDaySales,
+        })
+
+        balanceToReceiveChart.push({
+          label,
+          currentDate: currKey,
+          previousDate: prevKey,
+          currentVal: currDayBal,
+          previousVal: prevDayBal,
         })
 
         profitChart.push({
@@ -1065,40 +1082,7 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
       }
     }
 
-    // -------------------------------------------------------------------------
-    // Query 5: Staff Statistics & Activity List
-    // -------------------------------------------------------------------------
-    const [staffStats, staffActivityRows] = await Promise.all([
-      sql`
-        SELECT 
-          COUNT(*)::int as total_staff,
-          COALESCE(SUM(CASE WHEN is_active = true THEN 1 ELSE 0 END), 0)::int as active_staff,
-          (
-            SELECT COUNT(DISTINCT staff_id)::int
-            FROM staff_attendance
-            WHERE date = CURRENT_DATE
-              AND (${effectiveDeviceId === 0} OR device_id = ${effectiveDeviceId})
-          ) as today_logins
-        FROM staff
-        WHERE (${effectiveDeviceId === 0} OR device_id = ${effectiveDeviceId})
-      `,
-      sql`
-        SELECT 
-          s.id,
-          s.name,
-          s.role,
-          s.position,
-          s.is_active,
-          COALESCE(
-            (SELECT MAX(sa.check_in) FROM staff_attendance sa WHERE sa.staff_id = s.id),
-            s.updated_at
-          ) as last_login
-        FROM staff s
-        WHERE (${effectiveDeviceId === 0} OR s.device_id = ${effectiveDeviceId})
-        ORDER BY last_login DESC NULLS LAST, s.name ASC
-        LIMIT 10
-      `,
-    ])
+    // Staff Statistics & Activity List already fetched in the parallel batch above
 
     const totalStaff = Number(staffStats[0]?.total_staff || 0)
     const activeStaff = Number(staffStats[0]?.active_staff || 0)
@@ -1114,11 +1098,15 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
     }))
 
     // Period Labels
+    const periodStart = format(currentStart, "yyyy-MM-dd")
+    const periodEnd = format(currentEnd, "yyyy-MM-dd")
     const periodLabel = `${format(currentStart, "dd MMM yyyy")} - ${format(currentEnd, "dd MMM yyyy")}`
     const comparisonLabel = `${format(prevStart, "dd MMM yyyy")} - ${format(prevEnd, "dd MMM yyyy")}`
 
     const payload: AdminDashboardData = {
       currency,
+      periodStart,
+      periodEnd,
       periodLabel,
       comparisonLabel,
       cards: {
@@ -1128,6 +1116,13 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
           diffPercent: salesDiff.diff,
           isIncrease: salesDiff.isIncrease,
           isPositiveDirection: true,
+        },
+        balanceToReceive: {
+          current: currBalanceToReceive,
+          previous: prevBalanceToReceive,
+          diffPercent: balanceToReceiveDiff.diff,
+          isIncrease: balanceToReceiveDiff.isIncrease,
+          isPositiveDirection: false,
         },
         totalProfit: {
           current: currGrossProfit,
@@ -1174,6 +1169,7 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
       },
       chartData: {
         sales: salesChart,
+        balanceToReceive: balanceToReceiveChart,
         profit: profitChart,
         expenses: expensesChart,
         cogs: cogsChart,
@@ -1198,6 +1194,106 @@ export async function getAdminDashboardData(query: AdminDashboardQuery) {
       success: false,
       message: "An unexpected error occurred while calculating dashboard metrics.",
       data: null,
+    }
+  }
+}
+
+export async function getAdminDashboardFilteredOrders(query: AdminDashboardQuery): Promise<{
+  success: boolean
+  message?: string
+  data: AdminDashboardFilteredOrder[]
+}> {
+  try {
+    const actor = await getAdminActor()
+    if (!actor.isAuthorized) {
+      return { success: false, message: "Unauthorized", data: [] }
+    }
+
+    const unlocked = await isDashboardUnlockedSession()
+    if (!unlocked) {
+      return { success: false, message: "Dashboard is locked.", data: [] }
+    }
+
+    const effectiveDeviceId = query.deviceId ? Number(query.deviceId) : 0
+    const allowEcom = effectiveDeviceId === 0 || isEcomAllowedDevice(effectiveDeviceId)
+
+    const { currentStart, currentEnd } = resolveDateRanges(query)
+    const currStartStr = format(currentStart, "yyyy-MM-dd HH:mm:ss")
+    const currEndStr = format(currentEnd, "yyyy-MM-dd HH:mm:ss")
+
+    const staffFilter = query.staffId && query.staffId !== "all" ? Number(query.staffId) : null
+    const courierPartnerFilter =
+      query.courierPartnerId && query.courierPartnerId !== "all" ? Number(query.courierPartnerId) : null
+    const courierServiceFilter =
+      query.courierServiceName && query.courierServiceName !== "all" ? query.courierServiceName.trim() : null
+    const paymentMethodFilter =
+      query.paymentMethod && query.paymentMethod !== "all" ? query.paymentMethod.trim() : null
+    const statusFilter = query.status && query.status !== "all" ? query.status.trim() : null
+
+    const rows = await sql`
+      SELECT
+        s.id,
+        COALESCE(s.sale_date, s.created_at) as sale_date,
+        COALESCE(NULLIF(TRIM(s.customer_name_override), ''), c.name, 'Walk-in Customer') as customer_name,
+        COALESCE(st.name, 'Store / Admin') as staff_name,
+        COALESCE(s.status, 'Completed') as status,
+        COALESCE(s.payment_status, '') as payment_status,
+        COALESCE(s.delivery_status, '') as delivery_status,
+        COALESCE(s.payment_method, 'Cash') as payment_method,
+        COALESCE(s.total_amount, 0)::numeric as total_amount,
+        COALESCE(s.discount, 0)::numeric as discount,
+        COALESCE(s.received_amount, 0)::numeric as received_amount,
+        COALESCE(
+          NULLIF(s.balance_amount, 0),
+          GREATEST(0, COALESCE(s.total_amount, 0) - COALESCE(s.discount, 0) - COALESCE(s.received_amount, 0))
+        )::numeric as balance_due
+      FROM sales s
+      LEFT JOIN customers c ON s.customer_id = c.id
+      LEFT JOIN staff st ON s.staff_id = st.id
+      WHERE s.total_amount != 'NaN'::numeric
+        AND COALESCE(s.sale_date, s.created_at) >= ${currStartStr}::timestamp
+        AND COALESCE(s.sale_date, s.created_at) <= ${currEndStr}::timestamp
+        AND (${effectiveDeviceId === 0} OR s.device_id = ${effectiveDeviceId} OR (${allowEcom} = true AND s.source = 'ECOMMERCE'))
+        AND (${allowEcom} = true OR s.source IS NULL OR s.source != 'ECOMMERCE')
+        AND (
+          (${statusFilter === null}
+            AND LOWER(TRIM(COALESCE(s.status, ''))) NOT IN ('cancelled', 'returned')
+            AND LOWER(TRIM(COALESCE(s.payment_status, ''))) NOT IN ('cancelled', 'returned')
+            AND LOWER(TRIM(COALESCE(s.delivery_status, ''))) NOT IN ('returned', 'failed')
+          )
+          OR (${statusFilter !== null} AND LOWER(TRIM(s.status)) = LOWER(${statusFilter}))
+        )
+        AND (${staffFilter === null} OR s.staff_id = ${staffFilter})
+        AND (${courierPartnerFilter === null} OR s.courier_partner_id = ${courierPartnerFilter})
+        AND (${courierServiceFilter === null} OR LOWER(TRIM(COALESCE(s.courier_service_name, ''))) = LOWER(${courierServiceFilter}))
+        AND (${paymentMethodFilter === null} OR LOWER(TRIM(COALESCE(s.payment_method, ''))) = LOWER(${paymentMethodFilter}))
+      ORDER BY COALESCE(s.sale_date, s.created_at) DESC, s.id DESC
+      LIMIT 500
+    `
+
+    return {
+      success: true,
+      data: rows.map((r: any) => ({
+        id: Number(r.id),
+        sale_date: r.sale_date ? new Date(r.sale_date).toISOString() : "",
+        customer_name: String(r.customer_name || "Walk-in Customer"),
+        staff_name: String(r.staff_name || "Store / Admin"),
+        status: String(r.status || ""),
+        payment_status: String(r.payment_status || ""),
+        delivery_status: String(r.delivery_status || ""),
+        payment_method: String(r.payment_method || ""),
+        total_amount: Number(r.total_amount || 0),
+        discount: Number(r.discount || 0),
+        received_amount: Number(r.received_amount || 0),
+        balance_due: Number(r.balance_due || 0),
+      })),
+    }
+  } catch (error) {
+    console.error("getAdminDashboardFilteredOrders error:", error)
+    return {
+      success: false,
+      message: "Failed to load filtered orders.",
+      data: [],
     }
   }
 }
