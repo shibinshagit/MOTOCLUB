@@ -25,7 +25,12 @@ interface AdminDashboardChartProps {
 const METRIC_LABELS: Record<DashboardMetric, { title: string; description: string; yAxisType: "currency" | "number" }> = {
   sales: {
     title: "Sales Comparison",
-    description: "Valid sales comparison between current and previous period",
+    description: "Valid sales received comparison between current and previous period",
+    yAxisType: "currency",
+  },
+  balanceToReceive: {
+    title: "Balance to Receive Comparison",
+    description: "Pending customer balance comparison between current and previous period",
     yAxisType: "currency",
   },
   profit: {

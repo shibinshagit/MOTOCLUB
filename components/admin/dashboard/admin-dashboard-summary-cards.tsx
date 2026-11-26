@@ -12,6 +12,7 @@ import {
   ArrowDownRight,
   PackageCheck,
   Info,
+  Clock,
 } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -21,6 +22,7 @@ import type { DashboardMetric, MetricCardValue } from "@/app/actions/admin-dashb
 interface AdminDashboardSummaryCardsProps {
   cards: {
     totalSales: MetricCardValue
+    balanceToReceive: MetricCardValue
     totalProfit: MetricCardValue & { currentGross: number; currentNet: number }
     totalExpenses: MetricCardValue
     totalCogs: MetricCardValue
@@ -33,6 +35,7 @@ interface AdminDashboardSummaryCardsProps {
   onOpenBreakdown?: () => void
   onOpenProfitBreakdown?: () => void
   onOpenExpenseBreakdown?: () => void
+  onOpenFilteredOrders?: () => void
 }
 
 function formatAmount(value: number, currency: string): string {
@@ -62,6 +65,7 @@ export default function AdminDashboardSummaryCards({
   onOpenBreakdown,
   onOpenProfitBreakdown,
   onOpenExpenseBreakdown,
+  onOpenFilteredOrders,
 }: AdminDashboardSummaryCardsProps) {
   const isFiltered = (cards.totalProfit as any).isFiltered
 
@@ -82,7 +86,18 @@ export default function AdminDashboardSummaryCards({
       prevValue: formatAmount(cards.totalSales.previous, currency),
       metric: cards.totalSales,
       icon: CircleDollarSign,
+      subLabel: "Received amount",
       color: "text-blue-600 bg-blue-50 border-blue-200",
+    },
+    {
+      id: "balanceToReceive",
+      label: "Balance to Receive",
+      value: formatAmount(cards.balanceToReceive.current, currency),
+      prevValue: formatAmount(cards.balanceToReceive.previous, currency),
+      metric: cards.balanceToReceive,
+      icon: Clock,
+      subLabel: "Pending customer balance",
+      color: "text-orange-600 bg-orange-50 border-orange-200",
     },
     {
       id: "profit",
@@ -139,7 +154,7 @@ export default function AdminDashboardSummaryCards({
   ]
 
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
       {cardItems.map((item) => {
         const isActive = activeMetric === item.id
         const Icon = item.icon
@@ -150,7 +165,12 @@ export default function AdminDashboardSummaryCards({
         return (
           <Card
             key={item.id}
-            onClick={() => onSelectMetric(item.id)}
+            onClick={() => {
+              onSelectMetric(item.id)
+              if (item.id === "orders" && onOpenFilteredOrders) {
+                onOpenFilteredOrders()
+              }
+            }}
             className={cn(
               "cursor-pointer transition-all duration-200 hover:shadow-md border bg-white relative overflow-hidden group",
               isActive
