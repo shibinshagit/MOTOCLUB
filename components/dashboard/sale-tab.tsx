@@ -1756,8 +1756,16 @@ export default function SaleTab({
 
   // Get payment method display value
   const getPaymentMethodDisplay = (sale: any) => {
-    if (Array.isArray(sale.payments) && sale.payments.length > 1) {
-      return sale.payments.map((p: any) => `${p.paymentMethod} (₹${Number(p.amount).toLocaleString()})`).join(" + ")
+    if (Array.isArray(sale.payments) && sale.payments.length > 0) {
+      const activePayments = sale.payments.filter((p: any) => Number(p.amount) > 0)
+      const listToDisplay = activePayments.length > 0 ? activePayments : sale.payments
+      const methods = Array.from(new Set(listToDisplay.map((p: any) => p.paymentMethod).filter(Boolean)))
+      if (methods.length > 1) {
+        return methods.join(" + ")
+      }
+      if (methods.length === 1) {
+        return methods[0]
+      }
     }
     if (sale.payment_method === undefined || sale.payment_method === null) {
       return "Cash"

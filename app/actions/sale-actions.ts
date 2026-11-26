@@ -620,6 +620,86 @@ export async function syncSalesReadSideEffects(deviceId: number) {
   return { success: true, changed }
 }
 
+async function attachPaymentsToSales(sales: any[]) {
+  if (!Array.isArray(sales) || sales.length === 0) return sales
+
+  const saleIds = sales.map((s: any) => Number(s.id)).filter((id: number) => !isNaN(id) && id > 0)
+  if (saleIds.length === 0) return sales
+
+  try {
+    const tpRows = await sql`
+      SELECT id, sale_id, payment_method, amount, reference_number, notes
+      FROM transaction_payments
+      WHERE sale_id = ANY(${saleIds})
+      ORDER BY id ASC
+    `
+    const tpMap = new Map<number, any[]>()
+    for (const row of tpRows) {
+      const list = tpMap.get(row.sale_id) || []
+      list.push({
+        id: row.id,
+        paymentMethod: row.payment_method,
+        amount: Number(row.amount) || 0,
+        referenceNumber: row.reference_number || undefined,
+        notes: row.notes || undefined,
+      })
+      tpMap.set(row.sale_id, list)
+    }
+
+    // Check financial_transactions fallback for sales that don't have multiple entries in transaction_payments
+    const missingFtIds = saleIds.filter((id) => !tpMap.has(id) || tpMap.get(id)!.length <= 1)
+    if (missingFtIds.length > 0) {
+      try {
+        const ftRows = await sql`
+          SELECT id, reference_id as sale_id, payment_method, received_amount, amount, notes
+          FROM financial_transactions
+          WHERE reference_type = 'sale' 
+            AND reference_id = ANY(${missingFtIds}) 
+            AND transaction_type = 'sale'
+          ORDER BY id ASC
+        `
+        const ftMap = new Map<number, any[]>()
+        for (const row of ftRows) {
+          const list = ftMap.get(row.sale_id) || []
+          list.push({
+            id: row.id,
+            paymentMethod: row.payment_method || "UPI",
+            amount: Number(row.received_amount || row.amount) || 0,
+            notes: row.notes || undefined,
+          })
+          ftMap.set(row.sale_id, list)
+        }
+        for (const id of missingFtIds) {
+          const ftList = ftMap.get(id)
+          if (ftList && ftList.length > 1) {
+            tpMap.set(id, ftList)
+          }
+        }
+      } catch (ftErr) {
+        console.warn("Could not query financial_transactions fallback for sales:", ftErr)
+      }
+    }
+
+    for (const sale of sales) {
+      const plist = tpMap.get(sale.id)
+      if (plist && plist.length > 0) {
+        sale.payments = plist
+      } else {
+        sale.payments = [
+          {
+            paymentMethod: sale.payment_method || "UPI",
+            amount: Number(sale.received_amount) || 0,
+          },
+        ]
+      }
+    }
+  } catch (e) {
+    console.warn("Could not attach payments to sales:", e)
+  }
+
+  return sales
+}
+
 export async function getUserSales(deviceId: number, options: GetUserSalesOptions = {}) {
   if (!deviceId) {
     return { success: false, message: "Device ID is required", data: [] }
@@ -633,42 +713,7 @@ export async function getUserSales(deviceId: number, options: GetUserSalesOption
     const sales = await executeWithRetry(async () => queryDeviceSales(deviceId, options))
 
     if (Array.isArray(sales) && sales.length > 0) {
-      const saleIds = sales.map((s: any) => s.id)
-      try {
-        const tpRows = await sql`
-          SELECT id, sale_id, payment_method, amount, reference_number, notes
-          FROM transaction_payments
-          WHERE sale_id = ANY(${saleIds})
-          ORDER BY id ASC
-        `
-        const tpMap = new Map<number, any[]>()
-        for (const row of tpRows) {
-          const list = tpMap.get(row.sale_id) || []
-          list.push({
-            id: row.id,
-            paymentMethod: row.payment_method,
-            amount: Number(row.amount) || 0,
-            referenceNumber: row.reference_number || undefined,
-            notes: row.notes || undefined,
-          })
-          tpMap.set(row.sale_id, list)
-        }
-        for (const sale of sales) {
-          const plist = tpMap.get(sale.id)
-          if (plist && plist.length > 0) {
-            sale.payments = plist
-          } else {
-            sale.payments = [
-              {
-                paymentMethod: sale.payment_method || "UPI",
-                amount: Number(sale.received_amount) || 0,
-              },
-            ]
-          }
-        }
-      } catch (e) {
-        console.warn("Could not query transaction_payments for sales:", e)
-      }
+      await attachPaymentsToSales(sales)
     }
 
     return { success: true, data: await filterSalesForStaff(sales, deviceId) }
@@ -1248,6 +1293,7 @@ export async function getPaginatedUserSales(deviceId: number, options: GetPagina
     })
 
     const filteredSales = await filterSalesForStaff(result.sales, deviceId)
+    await attachPaymentsToSales(filteredSales)
 
     return {
       success: true,
@@ -1429,6 +1475,7 @@ export async function getSalesByIds(deviceId: number, saleIds: number[]) {
     })
 
     const filteredSales = await filterSalesForStaff(sales, deviceId)
+    await attachPaymentsToSales(filteredSales)
     return { success: true, data: filteredSales }
   } catch (error) {
     console.error("Get sales by ids error:", error)
